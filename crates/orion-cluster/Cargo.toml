@@ -1,0 +1,20 @@
+[package]
+name = "orion-cluster"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Cluster coordination primitives for Orion."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+orion-control-plane.workspace = true
+orion-core.workspace = true
+orion-data-plane.workspace = true
+serde.workspace = true

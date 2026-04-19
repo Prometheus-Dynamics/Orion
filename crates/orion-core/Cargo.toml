@@ -1,0 +1,19 @@
+[package]
+name = "orion-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Core identities, types, and shared errors for Orion."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rkyv.workspace = true
+serde.workspace = true
+thiserror.workspace = true

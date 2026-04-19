@@ -1,0 +1,39 @@
+[package]
+name = "orion-transport-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "HTTP transport adapter for Orion control-plane traffic."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+orion-auth.workspace = true
+orion-control-plane.workspace = true
+orion-core.workspace = true
+orion-transport-common.workspace = true
+axum.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+rkyv.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
+tokio-rustls.workspace = true
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
+rcgen.workspace = true
+
+[[bench]]
+name = "http_latency"
+harness = false

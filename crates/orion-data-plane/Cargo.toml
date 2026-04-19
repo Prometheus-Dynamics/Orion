@@ -1,0 +1,20 @@
+[package]
+name = "orion-data-plane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Data-plane link and binding contracts for Orion."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+orion-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+rkyv.workspace = true

@@ -1,0 +1,40 @@
+{
+  "idle_cpu_percent": {
+    "warn": 2.0,
+    "fail": 5.0
+  },
+  "local_persistence_replay_ms": {
+    "10": { "warn": 1.0, "fail": 2.0 },
+    "100": { "warn": 3.0, "fail": 5.0 },
+    "500": { "warn": 6.0, "fail": 9.0 }
+  },
+  "release_memory_baseline_bytes": {
+    "0": { "warn": 8388608, "fail": 12582912 },
+    "50": { "warn": 9437184, "fail": 13631488 },
+    "250": { "warn": 12582912, "fail": 16777216 },
+    "1000": { "warn": 16777216, "fail": 25165824 }
+  },
+  "release_cold_replay_ms": {
+    "current_snapshot": {
+      "10": { "warn": 4.0, "fail": 6.0 },
+      "100": { "warn": 4.5, "fail": 6.5 },
+      "500": { "warn": 5.5, "fail": 8.0 }
+    },
+    "stale_snapshot_history_tail": {
+      "10": { "warn": 4.0, "fail": 6.0 },
+      "100": { "warn": 4.5, "fail": 6.5 },
+      "500": { "warn": 5.5, "fail": 8.0 }
+    },
+    "compacted_history_only": {
+      "10": { "warn": 4.0, "fail": 6.0 },
+      "100": { "warn": 4.5, "fail": 6.5 },
+      "500": { "warn": 5.0, "fail": 7.5 }
+    }
+  },
+  "cluster_sync_avg_ms": {
+    "3": { "warn": 125.0, "fail": 150.0 },
+    "5": { "warn": 130.0, "fail": 160.0 },
+    "7": { "warn": 135.0, "fail": 170.0 }
+  }
+}
+

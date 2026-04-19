@@ -1,0 +1,58 @@
+name: ci-perf
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * *"
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build cached Orion test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: testing/docker/orion-node.Dockerfile
+          load: true
+          tags: orion-node-test:ci
+          cache-from: type=gha,scope=orion-node-test
+          cache-to: type=gha,mode=max,scope=orion-node-test
+
+      - name: Run local perf harness
+        run: set -o pipefail && cargo test -p orion-node --test perf_baselines -- --include-ignored --nocapture | tee perf_baselines.log
+
+      - name: Run release perf harness
+        run: set -o pipefail && cargo test -p orion-node --test perf_release -- --include-ignored --nocapture | tee perf_release.log
+
+      - name: Run Docker perf harness
+        env:
+          ORION_SKIP_DOCKER_BUILD: "1"
+          ORION_TEST_IMAGE: orion-node-test:ci
+          RUST_TEST_THREADS: "1"
+        run: set -o pipefail && cargo test -p orion-node --test docker_cluster_perf -- --ignored --nocapture | tee docker_cluster_perf.log
+
+      - name: Check perf thresholds
+        run: cargo run -p orion-perf-check -- --config testing/ci/perf-baselines.json perf_baselines.log perf_release.log docker_cluster_perf.log
+
+      - name: Upload perf logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-logs
+          path: |
+            perf_baselines.log
+            perf_release.log
+            docker_cluster_perf.log

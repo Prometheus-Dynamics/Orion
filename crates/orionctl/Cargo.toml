@@ -1,0 +1,28 @@
+[package]
+name = "orionctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Operator CLI for the Orion daemon."
+readme = "README.md"
+
+[[bin]]
+name = "orionctl"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+orion-client.workspace = true
+orion-control-plane.workspace = true
+orion-core.workspace = true
+orion-transport-http.workspace = true
+orion-transport-ipc.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+orion = { workspace = true, features = ["client", "control-plane", "core", "transport-http", "transport-ipc"] }
+orion-node.workspace = true

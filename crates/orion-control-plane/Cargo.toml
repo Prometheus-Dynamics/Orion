@@ -1,0 +1,27 @@
+[package]
+name = "orion-control-plane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Canonical control-plane contracts for Orion."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+orion-core.workspace = true
+rkyv.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "mutation_apply"
+harness = false

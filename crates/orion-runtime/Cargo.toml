@@ -1,0 +1,26 @@
+[package]
+name = "orion-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Local reconciliation engine for Orion."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+orion-control-plane.workspace = true
+orion-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "reconcile"
+harness = false

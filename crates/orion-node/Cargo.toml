@@ -1,0 +1,63 @@
+[package]
+name = "orion-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Thin Orion node binary."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "orion-node"
+path = "src/main.rs"
+
+[features]
+# Release binaries keep the HTTP control plane always on and enable both data-plane transports by
+# default. Downstream builds can opt out of either transport with `--no-default-features` plus the
+# specific transport feature they want to retain.
+default = ["transport-tcp", "transport-quic"]
+transport-tcp = ["dep:orion-transport-tcp"]
+transport-quic = ["dep:orion-transport-quic"]
+
+[dependencies]
+ed25519-dalek.workspace = true
+libc.workspace = true
+orion-auth.workspace = true
+orion-control-plane.workspace = true
+orion-core.workspace = true
+orion-data-plane.workspace = true
+orion-runtime.workspace = true
+orion-service.workspace = true
+orion-transport-common.workspace = true
+orion-transport-http.workspace = true
+orion-transport-ipc.workspace = true
+orion-transport-quic = { workspace = true, optional = true }
+orion-transport-tcp = { workspace = true, optional = true }
+rand_core.workspace = true
+rcgen.workspace = true
+rkyv.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time", "sync", "signal", "io-util", "fs"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
+orion = { workspace = true, features = ["auth", "runtime", "transport-http", "transport-tcp", "transport-quic", "transport-ipc"] }
+reqwest.workspace = true
+
+[[bench]]
+name = "persistence_replay"
+harness = false
+
+[[bench]]
+name = "state_snapshot"
+harness = false

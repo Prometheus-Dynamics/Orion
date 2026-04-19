@@ -1,0 +1,57 @@
+[package]
+name = "orion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Facade crate for the Orion distributed node substrate."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# The facade crate defaults to core/control/runtime layers only; transport crates remain opt-in so
+# embedding libraries do not pull in HTTP/TCP/QUIC/IPC surfaces unless explicitly requested.
+default = [
+    "core",
+    "auth",
+    "control-plane",
+    "data-plane",
+    "runtime",
+]
+auth = ["dep:orion-auth", "control-plane", "core"]
+core = ["dep:orion-core"]
+service = ["dep:orion-service"]
+macros = ["dep:orion-macros", "core"]
+control-plane = ["dep:orion-control-plane", "core"]
+data-plane = ["dep:orion-data-plane", "core"]
+cluster = ["dep:orion-cluster", "control-plane", "core"]
+runtime = ["dep:orion-runtime", "control-plane", "core"]
+transport-http = ["dep:orion-transport-http", "control-plane"]
+transport-tcp = ["dep:orion-transport-tcp", "data-plane"]
+transport-quic = ["dep:orion-transport-quic", "data-plane"]
+transport-ipc = ["dep:orion-transport-ipc", "control-plane", "data-plane"]
+client = [
+    "dep:orion-client",
+    "runtime",
+    "orion-client/ipc",
+]
+
+[dependencies]
+orion-auth = { workspace = true, optional = true }
+orion-core = { workspace = true, optional = true }
+orion-service = { workspace = true, optional = true }
+orion-macros = { workspace = true, optional = true }
+orion-control-plane = { workspace = true, optional = true }
+orion-data-plane = { workspace = true, optional = true }
+orion-cluster = { workspace = true, optional = true }
+orion-runtime = { workspace = true, optional = true }
+orion-client = { workspace = true, optional = true }
+orion-transport-http = { workspace = true, optional = true }
+orion-transport-tcp = { workspace = true, optional = true }
+orion-transport-quic = { workspace = true, optional = true }
+orion-transport-ipc = { workspace = true, optional = true }

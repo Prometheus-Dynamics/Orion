@@ -1,0 +1,20 @@
+[package]
+name = "orion-transport-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Internal shared transport helpers for Orion transport crates."
+readme = "README.md"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rustls = { workspace = true, features = ["ring"] }
+rustls-pemfile.workspace = true
+tokio = { workspace = true, features = ["rt"] }

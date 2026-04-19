@@ -1,0 +1,21 @@
+[package]
+name = "orion-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Authentication protocol contracts for Orion."
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+orion-control-plane.workspace = true
+orion-core.workspace = true
+rkyv.workspace = true
+serde.workspace = true
+thiserror.workspace = true

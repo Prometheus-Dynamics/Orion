@@ -1,0 +1,41 @@
+name: ci-soak
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * *"
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build cached Orion test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: testing/docker/orion-node.Dockerfile
+          load: true
+          tags: orion-node-test:ci
+          cache-from: type=gha,scope=orion-node-test
+          cache-to: type=gha,mode=max,scope=orion-node-test
+
+      - name: Run soak suite
+        env:
+          ORION_SKIP_DOCKER_BUILD: "1"
+          ORION_TEST_IMAGE: orion-node-test:ci
+          RUST_TEST_THREADS: "1"
+        run: cargo test -p orion-node --test docker_cluster_soak -- --ignored --nocapture
+

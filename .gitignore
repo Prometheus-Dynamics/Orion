@@ -1,0 +1,11 @@
+target/
+
+# Python cache artifacts
+**/__pycache__/
+*.py[cod]
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

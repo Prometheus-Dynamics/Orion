@@ -1,0 +1,20 @@
+[package]
+name = "orion-perf-check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Perf log threshold checker for Orion CI."
+readme = "README.md"
+publish = false
+
+[[bin]]
+name = "orion-perf-check"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
