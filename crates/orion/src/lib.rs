@@ -11,6 +11,9 @@
 //! - `service`, `macros`, and `cluster` are ergonomic opt-ins rather than default dependencies.
 //! - `service` is ergonomic rather than strictly zero-cost because it uses dynamic dispatch.
 
+#[doc(hidden)]
+pub extern crate self as orion;
+
 #[cfg(feature = "auth")]
 pub mod auth {
     pub use orion_auth::{

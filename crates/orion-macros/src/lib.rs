@@ -63,14 +63,14 @@ fn expand_struct(item: &ItemStruct, type_literal: &LitStr, kind: TypeKind) -> To
     let ident = &item.ident;
     let (trait_path, constructor_name, constructor_type) = match kind {
         TypeKind::Runtime => (
-            quote!(::orion_core::RuntimeTypeDef),
+            quote!(::orion::RuntimeTypeDef),
             quote!(runtime_type),
-            quote!(::orion_core::RuntimeType),
+            quote!(::orion::RuntimeType),
         ),
         TypeKind::Resource => (
-            quote!(::orion_core::ResourceTypeDef),
+            quote!(::orion::ResourceTypeDef),
             quote!(resource_type),
-            quote!(::orion_core::ResourceType),
+            quote!(::orion::ResourceType),
         ),
     };
 
@@ -94,14 +94,14 @@ fn expand_enum(item: &ItemEnum, type_literal: &LitStr, kind: TypeKind) -> TokenS
     let ident = &item.ident;
     let (trait_path, constructor_name, constructor_type) = match kind {
         TypeKind::Runtime => (
-            quote!(::orion_core::RuntimeTypeDef),
+            quote!(::orion::RuntimeTypeDef),
             quote!(runtime_type),
-            quote!(::orion_core::RuntimeType),
+            quote!(::orion::RuntimeType),
         ),
         TypeKind::Resource => (
-            quote!(::orion_core::ResourceTypeDef),
+            quote!(::orion::ResourceTypeDef),
             quote!(resource_type),
-            quote!(::orion_core::ResourceType),
+            quote!(::orion::ResourceType),
         ),
     };
 
@@ -248,11 +248,11 @@ fn expand_orion_descriptor(input: &DeriveInput, kind: DescriptorKind) -> TokenSt
         DescriptorKind::Executor => {
             let runtime_types = type_literals
                 .iter()
-                .map(|lit| quote!(::orion_core::RuntimeType::new(#lit)));
+                .map(|lit| quote!(::orion::RuntimeType::new(#lit)));
             quote! {
-                impl ::orion_runtime::ExecutorDescriptor for #ident {
-                    fn executor_record(&self) -> ::orion_control_plane::ExecutorRecord {
-                        ::orion_control_plane::ExecutorRecord::builder(#id_literal, self.node_id.clone())
+                impl ::orion::runtime::ExecutorDescriptor for #ident {
+                    fn executor_record(&self) -> ::orion::control_plane::ExecutorRecord {
+                        ::orion::control_plane::ExecutorRecord::builder(#id_literal, self.node_id.clone())
                             #(.runtime_type(#runtime_types))*
                             .build()
                     }
@@ -262,11 +262,11 @@ fn expand_orion_descriptor(input: &DeriveInput, kind: DescriptorKind) -> TokenSt
         DescriptorKind::Provider => {
             let resource_types = type_literals
                 .iter()
-                .map(|lit| quote!(::orion_core::ResourceType::new(#lit)));
+                .map(|lit| quote!(::orion::ResourceType::new(#lit)));
             quote! {
-                impl ::orion_runtime::ProviderDescriptor for #ident {
-                    fn provider_record(&self) -> ::orion_control_plane::ProviderRecord {
-                        ::orion_control_plane::ProviderRecord::builder(#id_literal, self.node_id.clone())
+                impl ::orion::runtime::ProviderDescriptor for #ident {
+                    fn provider_record(&self) -> ::orion::control_plane::ProviderRecord {
+                        ::orion::control_plane::ProviderRecord::builder(#id_literal, self.node_id.clone())
                             #(.resource_type(#resource_types))*
                             .build()
                     }
