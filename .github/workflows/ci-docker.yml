@@ -23,7 +23,7 @@ jobs:
           - docker_client_examples
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,10 +32,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build cached Orion test image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: testing/docker/orion-node.Dockerfile
@@ -50,4 +50,3 @@ jobs:
           ORION_TEST_IMAGE: orion-node-test:ci
           RUST_TEST_THREADS: "1"
         run: cargo test -p orion-node --test ${{ matrix.suite }} -- --ignored --nocapture
-
