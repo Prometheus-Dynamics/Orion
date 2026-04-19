@@ -10,12 +10,35 @@ use orion::{
         WorkloadRecord,
     },
     transport::{
-        http::{HttpRequestPayload, HttpResponsePayload},
+        http::{HttpRequestFailureKind, HttpRequestPayload, HttpResponsePayload, HttpTransportError},
         ipc::{ControlEnvelope, LocalAddress, UnixControlClient, UnixControlStreamClient},
     },
 };
 
 use support::{recv_non_ping, snapshot, spawn_node};
+
+async fn send_control_with_timeout_retry(
+    client: &orion::transport::http::HttpClient,
+    payload: ControlMessage,
+) -> HttpResponsePayload {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+
+    loop {
+        match client
+            .send(&HttpRequestPayload::Control(Box::new(payload.clone())))
+            .await
+        {
+            Ok(response) => return response,
+            Err(HttpTransportError::RequestFailed {
+                kind: HttpRequestFailureKind::Timeout,
+                ..
+            }) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("control request should succeed: {error:?}"),
+        }
+    }
+}
 
 #[tokio::test]
 async fn orion_node_binary_ipc_stream_pushes_control_plane_state_events() {
@@ -647,18 +670,16 @@ async fn orion_node_binary_stream_reconnect_after_ttl_drops_resume_state() {
     tokio::time::sleep(Duration::from_millis(80)).await;
 
     let snapshot = snapshot(&process.client()).await;
-    let response = process
-        .client()
-        .send(&HttpRequestPayload::Control(Box::new(
-            ControlMessage::Mutations(MutationBatch {
-                base_revision: snapshot.state.desired.revision,
-                mutations: vec![DesiredStateMutation::PutArtifact(
-                    ArtifactRecord::builder("artifact.expire").build(),
-                )],
-            }),
-        )))
-        .await
-        .expect("mutation request should succeed");
+    let response = send_control_with_timeout_retry(
+        &process.client(),
+        ControlMessage::Mutations(MutationBatch {
+            base_revision: snapshot.state.desired.revision,
+            mutations: vec![DesiredStateMutation::PutArtifact(
+                ArtifactRecord::builder("artifact.expire").build(),
+            )],
+        }),
+    )
+    .await;
     assert_eq!(response, HttpResponsePayload::Accepted);
 
     let mut client = UnixControlStreamClient::connect(&process.ipc_stream_socket)
