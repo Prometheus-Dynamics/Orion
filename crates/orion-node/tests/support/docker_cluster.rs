@@ -12,10 +12,10 @@ use orion::{
     ArtifactId, NodeId, Revision, RuntimeType, WorkloadId,
     control_plane::{
         ArtifactRecord, ControlMessage, DesiredState, DesiredStateMutation, MutationBatch,
-        PeerHello, StateSnapshot, WorkloadRecord,
+        StateSnapshot, WorkloadRecord,
     },
     transport::http::{
-        HttpClient, HttpCodec, HttpRequestPayload, HttpResponse, HttpResponsePayload,
+        ControlRoute, HttpClient, HttpCodec, HttpRequestPayload, HttpResponse, HttpResponsePayload,
     },
 };
 
@@ -113,33 +113,9 @@ impl DockerCluster {
         let client = self.client(node);
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
-            let response = client
-                .send(&HttpRequestPayload::Control(Box::new(
-                    ControlMessage::Hello(PeerHello {
-                        node_id: NodeId::new("test.peer"),
-                        desired_revision: Revision::ZERO,
-                        desired_fingerprint: 0,
-                        desired_section_fingerprints:
-                            orion::control_plane::DesiredStateSectionFingerprints {
-                                nodes: 0,
-                                artifacts: 0,
-                                workloads: 0,
-                                resources: 0,
-                                providers: 0,
-                                executors: 0,
-                                leases: 0,
-                            },
-                        observed_revision: Revision::ZERO,
-                        applied_revision: Revision::ZERO,
-                        transport_binding_version: None,
-                        transport_binding_public_key: None,
-                        transport_tls_cert_pem: None,
-                        transport_binding_signature: None,
-                    }),
-                )))
-                .await;
+            let response = client.get_route(ControlRoute::Health).await;
 
-            if matches!(response, Ok(HttpResponsePayload::Hello(_))) {
+            if matches!(response, Ok(HttpResponsePayload::Health(_))) {
                 return;
             }
 
@@ -608,21 +584,15 @@ fn ensure_test_image(repo_root: &Path) -> String {
         std::env::var("ORION_SKIP_DOCKER_BUILD").as_deref(),
         Ok("1") | Ok("true") | Ok("yes")
     );
-    let force_build = matches!(
-        std::env::var("ORION_FORCE_DOCKER_BUILD").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes")
-    );
-
-    if !force_build && docker_image_exists(&tag) {
+    if skip_build {
+        if !docker_image_exists(&tag) {
+            panic!(
+                "ORION_SKIP_DOCKER_BUILD is set but docker image '{}' does not exist",
+                tag
+            );
+        }
         let _ = IMAGE.set(tag.clone());
         return tag;
-    }
-
-    if skip_build {
-        panic!(
-            "ORION_SKIP_DOCKER_BUILD is set but docker image '{}' does not exist",
-            tag
-        );
     }
 
     let dockerfile = repo_root.join("testing/docker/orion-node.Dockerfile");

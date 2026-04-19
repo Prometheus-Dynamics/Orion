@@ -9,7 +9,6 @@ rust-version.workspace = true
 authors.workspace = true
 description = "Internal shared transport helpers for Orion transport crates."
 readme = "README.md"
-publish = false
 
 [lib]
 path = "src/lib.rs"

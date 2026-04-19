@@ -256,6 +256,21 @@ mod tests {
         )
         .expect("second audit enqueue should not fail even when dropped");
 
+        for index in 3..=16 {
+            sink.enqueue_test_record(
+                index,
+                "node.audit.drop",
+                AuditEventKind::TransportSecurityFailure,
+                Some(format!("subject-{index}")),
+                "message-extra",
+            )
+            .expect("extra audit enqueue should not fail even when dropped");
+
+            if sink.dropped_records() > 0 {
+                break;
+            }
+        }
+
         clear_test_audit_append_delay();
         assert!(sink.dropped_records() > 0);
         drop(sink);

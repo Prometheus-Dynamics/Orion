@@ -7,7 +7,7 @@ use orion_control_plane::{
     NodeHealthSnapshot, NodeHealthStatus, NodeReadinessSnapshot, NodeReadinessStatus,
     ObservedClusterState, ObservedStateUpdate, PeerHello, StateSnapshot,
 };
-use orion_core::{NodeId, Revision};
+use orion_core::{NodeId, Revision, encode_to_vec};
 use rcgen::generate_simple_self_signed;
 use std::{fs, path::PathBuf, time::SystemTime};
 use tokio::{
@@ -139,6 +139,22 @@ fn codec_maps_observed_updates_to_observed_route() {
 }
 
 #[test]
+fn codec_rejects_control_payload_sent_to_observed_route() {
+    let codec = HttpCodec;
+    let body = encode_to_vec(&hello_message()).expect("hello request should encode");
+
+    let err = codec
+        .decode_request(&HttpRequest {
+            method: HttpMethod::Post,
+            path: "/v1/control/observed".to_owned(),
+            body,
+        })
+        .expect_err("control payload on observed route should be rejected");
+
+    assert!(matches!(err, HttpTransportError::DecodeRequest(_)));
+}
+
+#[test]
 fn codec_roundtrips_authenticated_peer_requests() {
     let codec = HttpCodec;
     let authenticated = authenticated_hello_request();
@@ -167,7 +183,7 @@ fn codec_rejects_unknown_paths_and_methods() {
         .decode_request(&HttpRequest {
             method: HttpMethod::Post,
             path: "/v1/control/unknown".to_owned(),
-            body: Vec::new(),
+            body: vec![1],
         })
         .expect_err("unknown path should be rejected");
     assert!(matches!(err, HttpTransportError::UnsupportedPath(_)));
@@ -176,7 +192,7 @@ fn codec_rejects_unknown_paths_and_methods() {
         .decode_request(&HttpRequest {
             method: HttpMethod::Get,
             path: "/v1/control/hello".to_owned(),
-            body: Vec::new(),
+            body: vec![1],
         })
         .expect_err("wrong method should be rejected");
     assert!(matches!(err, HttpTransportError::UnsupportedMethod(_)));
