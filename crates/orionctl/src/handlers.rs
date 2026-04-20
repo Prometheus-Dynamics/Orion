@@ -2,11 +2,12 @@ use clap::Parser;
 use orion_client::ControlPlaneEventStream;
 use orion_control_plane::{
     ArtifactRecord, ControlMessage, DesiredStateMutation, MutationBatch, PeerEnrollment,
-    PeerIdentityUpdate, WorkloadRecord, WorkloadRequirement,
+    PeerIdentityUpdate, TypedConfigValue, WorkloadConfig, WorkloadRecord, WorkloadRequirement,
 };
-use orion_core::{ArtifactId, NodeId, Revision, RuntimeType, WorkloadId};
+use orion_core::{ArtifactId, ConfigSchemaId, NodeId, Revision, RuntimeType, WorkloadId};
 use orion_transport_http::{ControlRoute, HttpResponsePayload};
 use serde_json::json;
+use std::collections::BTreeMap;
 
 use crate::{
     cli::{
@@ -24,7 +25,7 @@ pub(crate) async fn run() -> Result<(), String> {
     match cli.command {
         Command::Get { command } => run_get(command).await,
         Command::Watch { command } => run_watch(command).await,
-        Command::Apply { command } => run_apply(command).await,
+        Command::Apply { command } => run_apply(*command).await,
         Command::Delete { command } => run_delete(command).await,
         Command::Peers { command } => run_peers(command).await,
     }
@@ -77,38 +78,46 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
             other => Err(format!("expected readiness response, got {other:?}")),
         },
         GetCommand::Observability(args) => {
-            match args
-                .send_control(ControlMessage::QueryObservability)
-                .await?
-            {
-                HttpResponsePayload::Observability(snapshot) => match args.output {
-                    OutputFormat::Summary => {
-                        println!(
-                            "observability node={} desired_rev={} observed_rev={} applied_rev={} replay_success={} replay_failures={} sync_success={} sync_failures={} reconcile_success={} reconcile_failures={} mutation_success={} mutation_failures={} peers_configured={} peers_ready={} peers_degraded={} clients_registered={} clients_live={} recent_events={}",
-                            snapshot.node_id,
-                            snapshot.desired_revision,
-                            snapshot.observed_revision,
-                            snapshot.applied_revision,
-                            snapshot.replay.success_count,
-                            snapshot.replay.failure_count,
-                            snapshot.peer_sync.success_count,
-                            snapshot.peer_sync.failure_count,
-                            snapshot.reconcile.success_count,
-                            snapshot.reconcile.failure_count,
-                            snapshot.mutation_apply.success_count,
-                            snapshot.mutation_apply.failure_count,
-                            snapshot.configured_peer_count,
-                            snapshot.ready_peer_count,
-                            snapshot.degraded_peer_count,
-                            snapshot.client_sessions.registered_clients,
-                            snapshot.client_sessions.live_stream_clients,
-                            snapshot.recent_events.len(),
-                        );
-                        Ok(())
-                    }
-                    OutputFormat::Json => print_json(snapshot.as_ref()),
-                },
-                other => Err(format!("expected observability response, got {other:?}")),
+            let snapshot = if let Some(http_target) = args.http_target()? {
+                match http_target
+                    .send_control(ControlMessage::QueryObservability)
+                    .await?
+                {
+                    HttpResponsePayload::Observability(snapshot) => *snapshot,
+                    other => return Err(format!("expected observability response, got {other:?}")),
+                }
+            } else {
+                args.local_client()?
+                    .query_observability()
+                    .await
+                    .map_err(|error| error.to_string())?
+            };
+            match args.output {
+                OutputFormat::Summary => {
+                    println!(
+                        "observability node={} desired_rev={} observed_rev={} applied_rev={} replay_success={} replay_failures={} sync_success={} sync_failures={} reconcile_success={} reconcile_failures={} mutation_success={} mutation_failures={} peers_configured={} peers_ready={} peers_degraded={} clients_registered={} clients_live={} recent_events={}",
+                        snapshot.node_id,
+                        snapshot.desired_revision,
+                        snapshot.observed_revision,
+                        snapshot.applied_revision,
+                        snapshot.replay.success_count,
+                        snapshot.replay.failure_count,
+                        snapshot.peer_sync.success_count,
+                        snapshot.peer_sync.failure_count,
+                        snapshot.reconcile.success_count,
+                        snapshot.reconcile.failure_count,
+                        snapshot.mutation_apply.success_count,
+                        snapshot.mutation_apply.failure_count,
+                        snapshot.configured_peer_count,
+                        snapshot.ready_peer_count,
+                        snapshot.degraded_peer_count,
+                        snapshot.client_sessions.registered_clients,
+                        snapshot.client_sessions.live_stream_clients,
+                        snapshot.recent_events.len(),
+                    );
+                    Ok(())
+                }
+                OutputFormat::Json => print_json(&snapshot),
             }
         }
         GetCommand::Snapshot(args) => {
@@ -356,30 +365,12 @@ async fn run_apply(command: ApplyCommand) -> Result<(), String> {
         }
         ApplyCommand::Workload(args) => {
             let client = args.local.client()?;
+            let output = args.local.output;
             let snapshot = client
                 .fetch_state_snapshot()
                 .await
                 .map_err(|error| error.to_string())?;
-            let mut builder = WorkloadRecord::builder(
-                args.workload_id.clone(),
-                RuntimeType::new(args.runtime_type),
-                ArtifactId::new(args.artifact_id),
-            )
-            .desired_state(args.desired_state.into())
-            .restart_policy(args.restart_policy.into());
-            if let Some(node_id) = args.assigned_node {
-                builder = builder.assigned_to(node_id);
-            }
-            for requirement in args.requirements {
-                builder = builder.require_claim(WorkloadRequirement::new(
-                    requirement.resource_type,
-                    requirement.count,
-                ));
-            }
-            for binding in args.bindings {
-                builder = builder.bind_resource(binding.resource_id, binding.node_id);
-            }
-            let workload = builder.build();
+            let workload = workload_from_apply_args(*args)?;
             client
                 .apply_mutations(MutationBatch {
                     base_revision: snapshot.state.desired.revision,
@@ -387,13 +378,122 @@ async fn run_apply(command: ApplyCommand) -> Result<(), String> {
                 })
                 .await
                 .map_err(|error| error.to_string())?;
-            match args.local.output {
+            match output {
                 OutputFormat::Summary => {
                     println!("apply workload accepted id={}", workload.workload_id);
                     Ok(())
                 }
                 OutputFormat::Json => print_json(&workload),
             }
+        }
+    }
+}
+
+fn workload_from_apply_args(args: crate::cli::ApplyWorkloadArgs) -> Result<WorkloadRecord, String> {
+    if let Some(spec_path) = args.spec.as_ref() {
+        reject_inline_workload_spec_conflicts(&args)?;
+        let bytes = std::fs::read(spec_path).map_err(|error| {
+            format!(
+                "failed to read workload spec {}: {error}",
+                spec_path.display()
+            )
+        })?;
+        return serde_json::from_slice(&bytes).map_err(|error| {
+            format!(
+                "failed to parse workload spec {}: {error}",
+                spec_path.display()
+            )
+        });
+    }
+
+    let config = workload_config_from_apply_args(&args)?;
+    let workload_id = args
+        .workload_id
+        .ok_or_else(|| "--workload-id is required when --spec is not used".to_owned())?;
+    let runtime_type = args
+        .runtime_type
+        .ok_or_else(|| "--runtime-type is required when --spec is not used".to_owned())?;
+    let artifact_id = args
+        .artifact_id
+        .ok_or_else(|| "--artifact-id is required when --spec is not used".to_owned())?;
+
+    let mut builder = WorkloadRecord::builder(
+        workload_id,
+        RuntimeType::new(runtime_type),
+        ArtifactId::new(artifact_id),
+    )
+    .desired_state(args.desired_state.into())
+    .restart_policy(args.restart_policy.into());
+    if let Some(node_id) = args.assigned_node {
+        builder = builder.assigned_to(node_id);
+    }
+    for requirement in args.requirements {
+        builder = builder.require_claim(WorkloadRequirement::new(
+            requirement.resource_type,
+            requirement.count,
+        ));
+    }
+    for binding in args.bindings {
+        builder = builder.bind_resource(binding.resource_id, binding.node_id);
+    }
+    if let Some(config) = config {
+        builder = builder.config(config);
+    }
+    Ok(builder.build())
+}
+
+fn reject_inline_workload_spec_conflicts(
+    args: &crate::cli::ApplyWorkloadArgs,
+) -> Result<(), String> {
+    let has_inline_fields = args.workload_id.is_some()
+        || args.runtime_type.is_some()
+        || args.artifact_id.is_some()
+        || args.assigned_node.is_some()
+        || !args.requirements.is_empty()
+        || !args.bindings.is_empty()
+        || args.config_schema.is_some()
+        || !args.config_bools.is_empty()
+        || !args.config_ints.is_empty()
+        || !args.config_uints.is_empty()
+        || !args.config_strings.is_empty()
+        || !args.config_bytes_hex.is_empty();
+    if has_inline_fields {
+        return Err(
+            "--spec cannot be combined with workload field/config flags; provide either a full spec or inline flags"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn workload_config_from_apply_args(
+    args: &crate::cli::ApplyWorkloadArgs,
+) -> Result<Option<WorkloadConfig>, String> {
+    let mut payload = BTreeMap::<String, TypedConfigValue>::new();
+    for field in args
+        .config_bools
+        .iter()
+        .chain(args.config_ints.iter())
+        .chain(args.config_uints.iter())
+        .chain(args.config_strings.iter())
+        .chain(args.config_bytes_hex.iter())
+    {
+        if payload
+            .insert(field.key.clone(), field.value.clone())
+            .is_some()
+        {
+            return Err(format!("duplicate config key `{}`", field.key));
+        }
+    }
+
+    match (args.config_schema.as_ref(), payload.is_empty()) {
+        (None, true) => Ok(None),
+        (Some(schema_id), _) => Ok(Some(WorkloadConfig {
+            schema_id: ConfigSchemaId::new(schema_id.clone()),
+            payload,
+        })),
+        (None, false) => {
+            Err("--config-schema is required when any --config-* flags are used".to_owned())
         }
     }
 }

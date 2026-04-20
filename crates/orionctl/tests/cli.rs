@@ -4,13 +4,14 @@ use orion::{
     ArtifactId, NodeId, WorkloadId,
     control_plane::{
         ArtifactRecord, ControlMessage, DesiredStateMutation, ExecutorRecord, MutationBatch,
-        SyncRequest,
+        SyncRequest, TypedConfigValue, WorkloadConfig, WorkloadRecord,
     },
     transport::{
         http::{HttpClient, HttpRequestPayload, HttpResponsePayload},
         ipc::UnixControlStreamClient,
     },
 };
+use orion_core::{ConfigSchemaId, RuntimeType};
 use orion_node::{NodeApp, NodeConfig};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -148,6 +149,134 @@ async fn orionctl_apply_delete_and_get_workloads_use_local_ipc() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn orionctl_apply_workload_accepts_typed_config_flags() {
+    let harness = TestHarness::start("node.orionctl.config").await;
+    let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_executor(
+        ExecutorRecord::builder("executor.config", "node.orionctl.config")
+            .runtime_type("graph.exec.v1")
+            .build(),
+    );
+    harness._app.replace_desired(desired);
+
+    let put_workload = run_orionctl([
+        "apply",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--workload-id",
+        "workload.config",
+        "--runtime-type",
+        "graph.exec.v1",
+        "--artifact-id",
+        "artifact.config",
+        "--config-schema",
+        "graph.workload.config.v1",
+        "--config-string",
+        "graph.kind=inline",
+        "--config-string",
+        "graph.inline=demo",
+        "--config-bool",
+        "plugin.enabled=true",
+        "--config-uint",
+        "binding.count=3",
+    ]);
+    assert!(
+        put_workload.status.success(),
+        "{}",
+        output_text(&put_workload)
+    );
+
+    let snapshot = harness.snapshot().await;
+    let workload = snapshot
+        .state
+        .desired
+        .workloads
+        .get(&WorkloadId::new("workload.config"))
+        .expect("configured workload should exist");
+    let config = workload.config.as_ref().expect("config should be stored");
+    assert_eq!(
+        config.schema_id,
+        ConfigSchemaId::new("graph.workload.config.v1")
+    );
+    assert_eq!(
+        config.payload.get("graph.kind"),
+        Some(&TypedConfigValue::String("inline".to_owned()))
+    );
+    assert_eq!(
+        config.payload.get("graph.inline"),
+        Some(&TypedConfigValue::String("demo".to_owned()))
+    );
+    assert_eq!(
+        config.payload.get("plugin.enabled"),
+        Some(&TypedConfigValue::Bool(true))
+    );
+    assert_eq!(
+        config.payload.get("binding.count"),
+        Some(&TypedConfigValue::UInt(3))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn orionctl_apply_workload_accepts_json_spec_file() {
+    let harness = TestHarness::start("node.orionctl.spec").await;
+    let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_executor(
+        ExecutorRecord::builder("executor.spec", "node.orionctl.spec")
+            .runtime_type("graph.exec.v1")
+            .build(),
+    );
+    harness._app.replace_desired(desired);
+
+    let spec = WorkloadRecord::builder(
+        WorkloadId::new("workload.spec"),
+        RuntimeType::new("graph.exec.v1"),
+        ArtifactId::new("artifact.spec"),
+    )
+    .assigned_to(NodeId::new("node.orionctl.spec"))
+    .config(
+        WorkloadConfig::new(ConfigSchemaId::new("graph.workload.config.v1"))
+            .field("graph.kind", TypedConfigValue::String("inline".to_owned()))
+            .field(
+                "graph.inline",
+                TypedConfigValue::String("{\"nodes\":[]}".to_owned()),
+            ),
+    )
+    .build();
+    let spec_path = temp_spec_path("orionctl-workload-spec.json");
+    std::fs::write(
+        &spec_path,
+        serde_json::to_vec(&spec).expect("spec should serialize"),
+    )
+    .expect("spec file should write");
+
+    let put_workload = run_orionctl([
+        "apply",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--spec",
+        &spec_path.to_string_lossy(),
+    ]);
+    assert!(
+        put_workload.status.success(),
+        "{}",
+        output_text(&put_workload)
+    );
+
+    let snapshot = harness.snapshot().await;
+    let stored = snapshot
+        .state
+        .desired
+        .workloads
+        .get(&WorkloadId::new("workload.spec"))
+        .expect("spec workload should exist");
+    assert_eq!(stored, &spec);
+
+    let _ = std::fs::remove_file(spec_path);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn orionctl_watch_state_and_peers_list_use_local_admin_paths() {
     let harness = TestHarness::start("node.orionctl.watch").await;
 
@@ -207,6 +336,43 @@ async fn orionctl_watch_state_and_peers_list_use_local_admin_paths() {
     assert!(output.status.success(), "{}", output_text(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("state seq="), "unexpected stdout: {stdout}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn orionctl_local_commands_default_to_ipc_when_http_is_omitted() {
+    let harness = TestHarness::start("node.orionctl.defaults").await;
+
+    let observability = run_orionctl_with_env(
+        ["get", "observability"],
+        &[
+            (
+                "ORION_NODE_IPC_SOCKET",
+                harness.ipc_socket.to_string_lossy().as_ref(),
+            ),
+            (
+                "ORION_NODE_IPC_STREAM_SOCKET",
+                harness.ipc_stream_socket.to_string_lossy().as_ref(),
+            ),
+        ],
+    );
+    assert!(
+        observability.status.success(),
+        "{}",
+        output_text(&observability)
+    );
+    assert!(String::from_utf8_lossy(&observability.stdout).contains("mutation_success="));
+
+    let peers = run_orionctl_with_env(
+        ["peers", "list", "-o", "json"],
+        &[(
+            "ORION_NODE_IPC_SOCKET",
+            harness.ipc_socket.to_string_lossy().as_ref(),
+        )],
+    );
+    assert!(peers.status.success(), "{}", output_text(&peers));
+    let peers_json: serde_json::Value =
+        serde_json::from_slice(&peers.stdout).expect("json output should parse");
+    assert!(peers_json.get("http_mutual_tls_mode").is_some());
 }
 
 #[test]
@@ -339,8 +505,28 @@ fn run_orionctl<const N: usize>(args: [&str; N]) -> std::process::Output {
         .expect("orionctl should run")
 }
 
+fn run_orionctl_with_env<const N: usize>(
+    args: [&str; N],
+    envs: &[(&str, &str)],
+) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_orionctl"));
+    command.args(args);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command.output().expect("orionctl should run")
+}
+
 fn output_text(output: &std::process::Output) -> String {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     format!("stdout:\n{stdout}\nstderr:\n{stderr}")
+}
+
+fn temp_spec_path(name: &str) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("{stamp}-{name}"))
 }

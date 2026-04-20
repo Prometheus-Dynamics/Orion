@@ -1,6 +1,7 @@
 use orion_control_plane::{
-    ClientEvent, ClientEventPoll, ClientRole, ControlMessage, MutationBatch, PeerEnrollment,
-    PeerIdentityUpdate, PeerTrustSnapshot, StateSnapshot, StateWatch,
+    ClientEvent, ClientEventPoll, ClientRole, ControlMessage, MutationBatch,
+    NodeObservabilitySnapshot, PeerEnrollment, PeerIdentityUpdate, PeerTrustSnapshot,
+    StateSnapshot, StateWatch,
 };
 use orion_core::{NodeId, Revision};
 use orion_transport_ipc::LocalControlTransport;
@@ -292,6 +293,17 @@ impl LocalControlPlaneClient {
     pub async fn query_peer_trust(&self) -> Result<PeerTrustSnapshot, ClientError> {
         match self.send_request(ControlMessage::QueryPeerTrust).await? {
             ControlMessage::PeerTrust(snapshot) => Ok(snapshot),
+            ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
+            _ => Err(ClientError::NoMessageAvailable),
+        }
+    }
+
+    pub async fn query_observability(&self) -> Result<NodeObservabilitySnapshot, ClientError> {
+        match self
+            .send_request(ControlMessage::QueryObservability)
+            .await?
+        {
+            ControlMessage::Observability(snapshot) => Ok(*snapshot),
             ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
             _ => Err(ClientError::NoMessageAvailable),
         }

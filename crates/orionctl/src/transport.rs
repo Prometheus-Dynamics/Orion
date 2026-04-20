@@ -1,11 +1,13 @@
-use orion_client::{LocalControlPlaneClient, default_ipc_socket_path};
+use orion_client::LocalControlPlaneClient;
 use orion_control_plane::{ControlMessage, StateSnapshot, SyncRequest};
 use orion_core::{NodeId, Revision};
 use orion_transport_http::{
     ControlRoute, HttpClient, HttpClientTlsConfig, HttpRequestPayload, HttpResponsePayload,
 };
 
-use crate::cli::{HttpTargetArgs, HttpTargetScheme, LocalControlArgs, StateQueryArgs};
+use crate::cli::{
+    HttpTargetArgs, HttpTargetScheme, LocalControlArgs, StateQueryArgs, preferred_ipc_socket_path,
+};
 
 pub(crate) trait HttpTargetExt {
     fn client(&self) -> Result<HttpClient, String>;
@@ -159,8 +161,8 @@ impl HttpTargetArgs {
 
 impl StateQueryArgs {
     pub(crate) async fn fetch_snapshot(&self) -> Result<StateSnapshot, String> {
-        if self.http.is_some() {
-            return self.http_target()?.fetch_snapshot().await;
+        if let Some(http_target) = self.http_target()? {
+            return http_target.fetch_snapshot().await;
         }
         self.local_client()?
             .fetch_state_snapshot()
@@ -168,25 +170,24 @@ impl StateQueryArgs {
             .map_err(|error| error.to_string())
     }
 
-    fn http_target(&self) -> Result<HttpTargetArgs, String> {
-        let http = self
-            .http
-            .clone()
-            .ok_or_else(|| "HTTP target was not configured".to_owned())?;
-        if self.socket.is_some() {
+    pub(crate) fn http_target(&self) -> Result<Option<HttpTargetArgs>, String> {
+        if self.socket.is_some() && self.http.is_some() {
             return Err("choose either --http or --socket, not both".to_owned());
         }
-        Ok(HttpTargetArgs {
+        let Some(http) = self.http.clone() else {
+            return Ok(None);
+        };
+        Ok(Some(HttpTargetArgs {
             http,
             ca_cert: self.ca_cert.clone(),
             client_cert: self.client_cert.clone(),
             client_key: self.client_key.clone(),
             client_name: self.client_name.clone(),
             output: self.output,
-        })
+        }))
     }
 
-    fn local_client(&self) -> Result<LocalControlPlaneClient, String> {
+    pub(crate) fn local_client(&self) -> Result<LocalControlPlaneClient, String> {
         if self.http.is_some() && self.socket.is_some() {
             return Err("choose either --http or --socket, not both".to_owned());
         }
@@ -195,7 +196,10 @@ impl StateQueryArgs {
         {
             return Err("--ca-cert/--client-cert/--client-key require --http".to_owned());
         }
-        let socket_path = self.socket.clone().unwrap_or_else(default_ipc_socket_path);
+        let socket_path = self
+            .socket
+            .clone()
+            .unwrap_or_else(preferred_ipc_socket_path);
         LocalControlPlaneClient::connect_at(&socket_path, self.client_name.clone())
             .map_err(|error| error.to_string())
     }

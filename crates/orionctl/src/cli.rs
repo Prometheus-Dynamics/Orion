@@ -2,8 +2,11 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use orion_client::{default_ipc_socket_path, default_ipc_stream_socket_path};
-use orion_control_plane::{DesiredState, RestartPolicy};
+use orion_control_plane::{DesiredState, RestartPolicy, TypedConfigValue};
 use orion_core::{NodeId, ResourceId, ResourceType};
+
+const RUNTIME_IPC_SOCKET_PATH: &str = "/run/orion/control.sock";
+const RUNTIME_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.sock";
 
 #[derive(Parser, Debug)]
 #[command(name = "orionctl")]
@@ -25,7 +28,7 @@ pub(crate) enum Command {
     },
     Apply {
         #[command(subcommand)]
-        command: ApplyCommand,
+        command: Box<ApplyCommand>,
     },
     Delete {
         #[command(subcommand)]
@@ -42,7 +45,7 @@ pub(crate) enum Command {
 pub(crate) enum GetCommand {
     Health(HttpTargetArgs),
     Readiness(HttpTargetArgs),
-    Observability(HttpTargetArgs),
+    Observability(StateQueryArgs),
     Snapshot(StateQueryArgs),
     Workloads(ListArgs),
     Resources(ListArgs),
@@ -59,7 +62,7 @@ pub(crate) enum WatchCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum ApplyCommand {
     Artifact(ApplyArtifactArgs),
-    Workload(ApplyWorkloadArgs),
+    Workload(Box<ApplyWorkloadArgs>),
 }
 
 #[derive(Subcommand, Debug)]
@@ -173,7 +176,7 @@ pub(crate) struct ListArgs {
 
 #[derive(Args, Clone, Debug)]
 pub(crate) struct LocalControlArgs {
-    #[arg(long, default_value_os_t = default_ipc_socket_path())]
+    #[arg(long, default_value_os_t = preferred_ipc_socket_path())]
     pub(crate) socket: PathBuf,
     #[arg(long, default_value = "orionctl")]
     pub(crate) client_name: String,
@@ -183,7 +186,7 @@ pub(crate) struct LocalControlArgs {
 
 #[derive(Args, Clone, Debug)]
 pub(crate) struct WatchStateArgs {
-    #[arg(long, default_value_os_t = default_ipc_stream_socket_path())]
+    #[arg(long, default_value_os_t = preferred_ipc_stream_socket_path())]
     pub(crate) stream_socket: PathBuf,
     #[arg(long, default_value = "orionctl.watch")]
     pub(crate) client_name: String,
@@ -219,16 +222,24 @@ pub(crate) struct BindingSpec {
     pub(crate) node_id: NodeId,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ConfigFieldSpec {
+    pub(crate) key: String,
+    pub(crate) value: TypedConfigValue,
+}
+
 #[derive(Args, Clone, Debug)]
 pub(crate) struct ApplyWorkloadArgs {
     #[command(flatten)]
     pub(crate) local: LocalControlArgs,
     #[arg(long)]
-    pub(crate) workload_id: String,
+    pub(crate) spec: Option<PathBuf>,
     #[arg(long)]
-    pub(crate) runtime_type: String,
+    pub(crate) workload_id: Option<String>,
     #[arg(long)]
-    pub(crate) artifact_id: String,
+    pub(crate) runtime_type: Option<String>,
+    #[arg(long)]
+    pub(crate) artifact_id: Option<String>,
     #[arg(long)]
     pub(crate) assigned_node: Option<String>,
     #[arg(long, value_enum, default_value_t = CliDesiredState::Stopped)]
@@ -239,6 +250,18 @@ pub(crate) struct ApplyWorkloadArgs {
     pub(crate) requirements: Vec<RequirementSpec>,
     #[arg(long = "bind", value_parser = parse_binding)]
     pub(crate) bindings: Vec<BindingSpec>,
+    #[arg(long)]
+    pub(crate) config_schema: Option<String>,
+    #[arg(long = "config-bool", value_parser = parse_bool_config)]
+    pub(crate) config_bools: Vec<ConfigFieldSpec>,
+    #[arg(long = "config-int", value_parser = parse_int_config)]
+    pub(crate) config_ints: Vec<ConfigFieldSpec>,
+    #[arg(long = "config-uint", value_parser = parse_uint_config)]
+    pub(crate) config_uints: Vec<ConfigFieldSpec>,
+    #[arg(long = "config-string", value_parser = parse_string_config)]
+    pub(crate) config_strings: Vec<ConfigFieldSpec>,
+    #[arg(long = "config-bytes-hex", value_parser = parse_bytes_hex_config)]
+    pub(crate) config_bytes_hex: Vec<ConfigFieldSpec>,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -324,9 +347,114 @@ pub(crate) fn parse_binding(input: &str) -> Result<BindingSpec, String> {
     })
 }
 
+fn parse_bool_config(input: &str) -> Result<ConfigFieldSpec, String> {
+    parse_config_field(input, |value| match value {
+        "true" => Ok(TypedConfigValue::Bool(true)),
+        "false" => Ok(TypedConfigValue::Bool(false)),
+        _ => Err(format!(
+            "invalid bool config value `{value}`: expected true or false"
+        )),
+    })
+}
+
+fn parse_int_config(input: &str) -> Result<ConfigFieldSpec, String> {
+    parse_config_field(input, |value| {
+        value
+            .parse::<i64>()
+            .map(TypedConfigValue::Int)
+            .map_err(|error| format!("invalid int config value `{value}`: {error}"))
+    })
+}
+
+fn parse_uint_config(input: &str) -> Result<ConfigFieldSpec, String> {
+    parse_config_field(input, |value| {
+        value
+            .parse::<u64>()
+            .map(TypedConfigValue::UInt)
+            .map_err(|error| format!("invalid uint config value `{value}`: {error}"))
+    })
+}
+
+fn parse_string_config(input: &str) -> Result<ConfigFieldSpec, String> {
+    parse_config_field(input, |value| {
+        Ok(TypedConfigValue::String(value.to_owned()))
+    })
+}
+
+fn parse_bytes_hex_config(input: &str) -> Result<ConfigFieldSpec, String> {
+    parse_config_field(input, |value| {
+        decode_hex(value).map(TypedConfigValue::Bytes)
+    })
+}
+
+fn parse_config_field(
+    input: &str,
+    value_parser: impl FnOnce(&str) -> Result<TypedConfigValue, String>,
+) -> Result<ConfigFieldSpec, String> {
+    let Some((key, value)) = input.split_once('=') else {
+        return Err("expected KEY=VALUE".to_owned());
+    };
+    if key.is_empty() {
+        return Err("config key must not be empty".to_owned());
+    }
+    Ok(ConfigFieldSpec {
+        key: key.to_owned(),
+        value: value_parser(value)?,
+    })
+}
+
+fn decode_hex(input: &str) -> Result<Vec<u8>, String> {
+    if !input.len().is_multiple_of(2) {
+        return Err("hex input must have an even number of characters".to_owned());
+    }
+    let mut bytes = Vec::with_capacity(input.len() / 2);
+    let mut chars = input.chars();
+    while let (Some(high), Some(low)) = (chars.next(), chars.next()) {
+        let high = high
+            .to_digit(16)
+            .ok_or_else(|| format!("invalid hex character `{high}`"))?;
+        let low = low
+            .to_digit(16)
+            .ok_or_else(|| format!("invalid hex character `{low}`"))?;
+        bytes.push(((high << 4) | low) as u8);
+    }
+    Ok(bytes)
+}
+
+pub(crate) fn preferred_ipc_socket_path() -> PathBuf {
+    preferred_runtime_path(
+        PathBuf::from(RUNTIME_IPC_SOCKET_PATH),
+        default_ipc_socket_path,
+    )
+}
+
+pub(crate) fn preferred_ipc_stream_socket_path() -> PathBuf {
+    preferred_runtime_path(
+        PathBuf::from(RUNTIME_IPC_STREAM_SOCKET_PATH),
+        default_ipc_stream_socket_path,
+    )
+}
+
+fn preferred_runtime_path(runtime_path: PathBuf, fallback: impl FnOnce() -> PathBuf) -> PathBuf {
+    if runtime_path.exists() {
+        runtime_path
+    } else {
+        fallback()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{HttpTargetArgs, HttpTargetScheme, OutputFormat, parse_binding, parse_requirement};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{
+        HttpTargetArgs, HttpTargetScheme, OutputFormat, TypedConfigValue, parse_binding,
+        parse_bool_config, parse_bytes_hex_config, parse_requirement, parse_string_config,
+        parse_uint_config, preferred_runtime_path,
+    };
     use crate::transport::HttpTargetExt;
 
     fn target(http: &str) -> HttpTargetArgs {
@@ -372,5 +500,54 @@ mod tests {
         let binding = parse_binding("resource.front@node-a").expect("binding should parse");
         assert_eq!(binding.resource_id.to_string(), "resource.front");
         assert_eq!(binding.node_id.to_string(), "node-a");
+    }
+
+    #[test]
+    fn parse_typed_config_fields_accept_expected_shapes() {
+        let enabled = parse_bool_config("enabled=true").expect("bool config should parse");
+        assert_eq!(enabled.key, "enabled");
+        assert_eq!(enabled.value, TypedConfigValue::Bool(true));
+
+        let count = parse_uint_config("count=42").expect("uint config should parse");
+        assert_eq!(count.key, "count");
+        assert_eq!(count.value, TypedConfigValue::UInt(42));
+
+        let label = parse_string_config("graph.kind=inline").expect("string config should parse");
+        assert_eq!(label.key, "graph.kind");
+        assert_eq!(label.value, TypedConfigValue::String("inline".to_owned()));
+
+        let bytes = parse_bytes_hex_config("payload=6869").expect("hex config should parse");
+        assert_eq!(bytes.key, "payload");
+        assert_eq!(bytes.value, TypedConfigValue::Bytes(vec![0x68, 0x69]));
+    }
+
+    #[test]
+    fn preferred_runtime_path_uses_runtime_socket_when_present() {
+        let runtime = unique_test_path("runtime.sock");
+        fs::write(&runtime, b"socket").expect("test runtime socket placeholder should write");
+
+        let selected =
+            preferred_runtime_path(runtime.clone(), || unique_test_path("fallback.sock"));
+
+        assert_eq!(selected, runtime);
+        let _ = fs::remove_file(selected);
+    }
+
+    #[test]
+    fn preferred_runtime_path_falls_back_when_runtime_socket_is_missing() {
+        let runtime = unique_test_path("missing.sock");
+        let fallback = unique_test_path("fallback.sock");
+
+        let selected = preferred_runtime_path(runtime, || fallback.clone());
+
+        assert_eq!(selected, fallback);
+    }
+
+    fn unique_test_path(name: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("orionctl-{stamp}-{name}"))
     }
 }
