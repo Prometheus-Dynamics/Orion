@@ -96,7 +96,7 @@ async fn docker_cluster_returns_error_for_valid_json_with_invalid_mutation_seman
     let response = cluster
         .raw_post("node-a", "/v1/control/mutations", &valid_but_invalid)
         .await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     cluster.wait_for_http("node-a").await;
 }
@@ -298,7 +298,7 @@ async fn docker_cluster_impossible_mutation_revision_is_rejected_without_breakin
     let response = cluster
         .raw_post("node-a", "/v1/control/mutations", &impossible_revision)
         .await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     cluster.wait_for_http("node-a").await;
 }

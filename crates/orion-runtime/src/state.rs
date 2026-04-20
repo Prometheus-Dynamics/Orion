@@ -225,7 +225,8 @@ impl LocalRuntimeStore {
             .map(|executor| executor.executor_id.clone())
             .collect();
 
-        self.observed
+        let mut resources = self
+            .desired
             .resources
             .values()
             .filter(|resource| {
@@ -235,7 +236,20 @@ impl LocalRuntimeStore {
                         .as_ref()
                         .is_some_and(|executor_id| local_executor_ids.contains(executor_id))
             })
-            .collect()
+            .map(|resource| (&resource.resource_id, resource))
+            .collect::<BTreeMap<_, _>>();
+
+        for resource in self.observed.resources.values().filter(|resource| {
+            provider_ids.contains(&resource.provider_id)
+                || resource
+                    .realized_by_executor_id
+                    .as_ref()
+                    .is_some_and(|executor_id| local_executor_ids.contains(executor_id))
+        }) {
+            resources.insert(&resource.resource_id, resource);
+        }
+
+        resources.into_values().collect()
     }
 
     pub fn local_desired_workloads(&self) -> Vec<WorkloadRecord> {

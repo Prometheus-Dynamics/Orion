@@ -7,7 +7,7 @@ use orion::{
         HealthState, LeaseRecord, LeaseState, MutationBatch, ProviderRecord, ResourceRecord,
         WorkloadRecord,
     },
-    transport::http::{HttpRequestPayload, HttpResponsePayload},
+    transport::http::{HttpCodec, HttpRequestPayload, HttpResponse, HttpResponsePayload},
 };
 
 use super::wait_for_snapshot_condition;
@@ -229,13 +229,35 @@ async fn docker_cluster_workload_move_updates_assignment_and_resource_binding() 
         ],
     };
     let response = cluster
-        .client("node-a")
-        .send(&HttpRequestPayload::Control(Box::new(
-            ControlMessage::Mutations(initial),
-        )))
+        .raw_post(
+            "node-a",
+            "/v1/control/mutations",
+            &HttpCodec
+                .encode_request(&HttpRequestPayload::Control(Box::new(
+                    ControlMessage::Mutations(initial),
+                )))
+                .expect("initial move setup should encode")
+                .body,
+        )
+        .await;
+    let status = response.status().as_u16();
+    let body = response
+        .bytes()
         .await
-        .expect("initial move setup should apply");
-    assert_eq!(response, HttpResponsePayload::Accepted);
+        .expect("initial move setup response body should be readable")
+        .to_vec();
+    let decoded = HttpCodec.decode_response(&HttpResponse {
+        status,
+        body: body.clone(),
+    });
+    match decoded {
+        Ok(HttpResponsePayload::Accepted) => {}
+        Ok(other) => panic!("initial move setup returned unexpected response: {other:?}"),
+        Err(err) => panic!(
+            "initial move setup should apply: {err:?}; raw_body={}",
+            String::from_utf8_lossy(&body)
+        ),
+    }
 
     for node in ["node-a", "node-b", "node-c"] {
         wait_for_snapshot_condition(&cluster, node, Duration::from_secs(20), |snapshot| {

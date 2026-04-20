@@ -200,6 +200,116 @@ fn node_validation_accepts_required_resource_capability() {
 }
 
 #[test]
+fn node_validation_accepts_explicit_bound_resource_for_matching_requirement() {
+    let app = NodeApp::builder()
+        .config(test_node_config_with_auth(
+            "node-a",
+            "node-test",
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .try_build()
+        .expect("node app should build");
+    app.register_executor(ValidatingExecutor)
+        .expect("executor registration should succeed");
+
+    let mut desired = DesiredClusterState::default();
+    desired.put_provider(
+        ProviderRecord::builder("provider.camera", "node-a")
+            .resource_type("camera.device")
+            .build(),
+    );
+    desired.put_executor(
+        ExecutorRecord::builder("executor.camera", "node-a")
+            .runtime_type("camera.controller.v1")
+            .build(),
+    );
+    desired.put_resource(
+        orion::control_plane::ResourceRecord::builder(
+            "resource.camera.raw.front",
+            "camera.device",
+            "provider.camera",
+        )
+        .health(orion::control_plane::HealthState::Healthy)
+        .availability(orion::control_plane::AvailabilityState::Available)
+        .build(),
+    );
+    desired.put_workload(
+        WorkloadRecord::builder("workload.camera", "camera.controller.v1", "artifact.camera")
+            .config(
+                WorkloadConfig::of::<CameraControllerConfigV1>()
+                    .field("width", TypedConfigValue::UInt(1280)),
+            )
+            .desired_state(DesiredState::Running)
+            .assigned_to("node-a")
+            .require_resource("camera.device", 1)
+            .bind_resource("resource.camera.raw.front", "node-a")
+            .build(),
+    );
+
+    app.validate_desired_state_for_test(&desired)
+        .expect("matching explicit resource binding should satisfy requirement validation");
+}
+
+#[test]
+fn node_tick_plans_running_workload_from_desired_only_bound_resource() {
+    let app = NodeApp::builder()
+        .config(test_node_config_with_auth(
+            "node-a",
+            "node-test",
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .try_build()
+        .expect("node app should build");
+
+    let executor = TestExecutor::new();
+    let command_log = executor.commands.clone();
+    app.register_executor(executor)
+        .expect("executor registration should succeed");
+
+    let mut desired = DesiredClusterState::default();
+    desired.put_provider(
+        ProviderRecord::builder("provider.camera", "node-a")
+            .resource_type("camera.device")
+            .build(),
+    );
+    desired.put_executor(
+        ExecutorRecord::builder("executor.local", "node-a")
+            .runtime_type("graph.exec.v1")
+            .build(),
+    );
+    desired.put_resource(
+        orion::control_plane::ResourceRecord::builder(
+            "resource.camera.raw.front",
+            "camera.device",
+            "provider.camera",
+        )
+        .health(orion::control_plane::HealthState::Healthy)
+        .availability(orion::control_plane::AvailabilityState::Available)
+        .build(),
+    );
+    desired.put_workload(
+        WorkloadRecord::builder("workload.pose", "graph.exec.v1", "artifact.pose")
+            .desired_state(DesiredState::Running)
+            .assigned_to("node-a")
+            .require_resource("camera.device", 1)
+            .bind_resource("resource.camera.raw.front", "node-a")
+            .build(),
+    );
+    app.replace_desired(desired);
+
+    let report = app.tick().expect("tick should reconcile successfully");
+
+    assert_eq!(report.commands.len(), 1);
+    assert_eq!(
+        command_log
+            .lock()
+            .expect("test executor command log should not be poisoned")
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn node_app_registration_and_tick_drive_executor_commands() {
     let app = NodeApp::builder()
         .config(test_node_config_with_auth(

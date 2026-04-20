@@ -430,16 +430,79 @@ impl NodeApp {
             .collect::<BTreeMap<_, _>>()
             .into_values()
             .collect::<Vec<_>>();
+        let desired_local_resources = desired
+            .resources
+            .values()
+            .filter(|resource| {
+                desired
+                    .providers
+                    .get(&resource.provider_id)
+                    .map(|provider| provider.node_id == self.config.node_id)
+                    .unwrap_or(false)
+                    || resource
+                        .realized_by_executor_id
+                        .as_ref()
+                        .and_then(|executor_id| desired.executors.get(executor_id))
+                        .map(|executor| executor.node_id == self.config.node_id)
+                        .unwrap_or(false)
+            })
+            .map(|resource| (resource.resource_id.clone(), resource.clone()))
+            .collect::<BTreeMap<_, _>>();
         let mut claim_counts = BTreeMap::<ResourceId, u32>::new();
 
         for workload in desired.workloads.values().filter(|workload| {
             workload.desired_state == orion::control_plane::DesiredState::Running
                 && workload.assigned_node_id.as_ref() == Some(&self.config.node_id)
         }) {
+            let mut available_resources = desired_local_resources.clone();
+            for resource in &local_resources {
+                available_resources.insert(resource.resource_id.clone(), resource.clone());
+            }
+            let mut remaining_bindings = workload.resource_bindings.clone();
             for requirement in &workload.requirements {
                 for _ in 0..requirement.count {
                     let mut validation_error = None;
                     let mut selected_resource_id = None;
+
+                    if let Some(binding_index) = remaining_bindings.iter().position(|binding| {
+                        binding.node_id == self.config.node_id
+                            && available_resources
+                                .get(&binding.resource_id)
+                                .map(|resource| resource.resource_type == requirement.resource_type)
+                                .unwrap_or(false)
+                    }) {
+                        let binding = remaining_bindings.remove(binding_index);
+                        let resource = available_resources
+                            .get(&binding.resource_id)
+                            .expect("binding resource existence checked above");
+                        let existing_claims = claim_counts
+                            .get(&resource.resource_id)
+                            .copied()
+                            .unwrap_or(0);
+                        let validation = match provider_snapshots.get(&resource.provider_id) {
+                            Some((provider, _)) => provider.validate_resource_claim(
+                                resource,
+                                &workload.workload_id,
+                                requirement,
+                                existing_claims,
+                            ),
+                            None => orion::runtime::validate_requirement_against_resource(
+                                resource,
+                                requirement,
+                                existing_claims,
+                            ),
+                        };
+
+                        match validation {
+                            Ok(()) => {
+                                *claim_counts
+                                    .entry(resource.resource_id.clone())
+                                    .or_default() += 1;
+                                continue;
+                            }
+                            Err(err) => return Err(err.into()),
+                        }
+                    }
 
                     for resource in &local_resources {
                         if resource.resource_type != requirement.resource_type {
