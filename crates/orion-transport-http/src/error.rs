@@ -9,6 +9,8 @@ pub enum HttpRequestFailureKind {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum HttpTransportError {
+    #[error("invalid HTTP base URL: {0}")]
+    InvalidBaseUrl(String),
     #[error("unsupported HTTP method {0}")]
     UnsupportedMethod(String),
     #[error("unsupported HTTP path {0}")]

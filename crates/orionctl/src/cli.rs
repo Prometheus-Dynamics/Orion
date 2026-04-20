@@ -10,6 +10,12 @@ use orion_transport_http::{
     ControlRoute, HttpClient, HttpClientTlsConfig, HttpRequestPayload, HttpResponsePayload,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HttpTargetScheme {
+    Http,
+    Https,
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "orionctl")]
 #[command(about = "Operator CLI for the Orion daemon.")]
@@ -188,36 +194,31 @@ pub(crate) struct TrustReplaceKeyArgs {
 
 impl HttpTargetArgs {
     pub(crate) fn client(&self) -> Result<HttpClient, String> {
-        match (
-            self.ca_cert.as_deref(),
-            self.client_cert.as_deref(),
-            self.client_key.as_deref(),
-        ) {
-            (None, None, None) => HttpClient::try_new(self.http.clone()).map_err(|error| error.to_string()),
-            (Some(ca_cert), client_cert, client_key) => {
-                let client_identity = match (client_cert, client_key) {
-                    (Some(client_cert), Some(client_key)) => Some((
-                        std::fs::read(client_cert).map_err(|error| {
-                            format!(
-                                "failed to read client cert {}: {error}",
-                                client_cert.display()
-                            )
-                        })?,
-                        std::fs::read(client_key).map_err(|error| {
-                            format!(
-                                "failed to read client key {}: {error}",
-                                client_key.display()
-                            )
-                        })?,
-                    )),
-                    (None, None) => None,
-                    _ => {
-                        return Err(
-                            "HTTP client TLS requires both --client-cert and --client-key"
-                                .to_owned(),
-                        )
-                    }
-                };
+        let scheme = self.scheme()?;
+        self.validate_tls_args(scheme)?;
+        match self.ca_cert.as_deref() {
+            None => HttpClient::try_new(self.http.clone())
+                .map_err(|error| self.map_client_construction_error(scheme, &error.to_string())),
+            Some(ca_cert) => {
+                let client_identity =
+                    match (self.client_cert.as_deref(), self.client_key.as_deref()) {
+                        (Some(client_cert), Some(client_key)) => Some((
+                            std::fs::read(client_cert).map_err(|error| {
+                                format!(
+                                    "failed to read client cert {}: {error}",
+                                    client_cert.display()
+                                )
+                            })?,
+                            std::fs::read(client_key).map_err(|error| {
+                                format!(
+                                    "failed to read client key {}: {error}",
+                                    client_key.display()
+                                )
+                            })?,
+                        )),
+                        (None, None) => None,
+                        _ => unreachable!("validate_tls_args enforces paired client identity"),
+                    };
 
                 HttpClient::with_tls(
                     self.http.clone(),
@@ -229,12 +230,8 @@ impl HttpTargetArgs {
                         client_key_pem: client_identity.map(|(_, key)| key),
                     },
                 )
-                .map_err(|error| error.to_string())
+                .map_err(|error| self.map_client_construction_error(scheme, &error.to_string()))
             }
-            (None, _, _) => Err(
-                "HTTPS trust material requires --ca-cert; client auth does not replace server trust"
-                    .to_owned(),
-            ),
         }
     }
 
@@ -279,7 +276,7 @@ impl HttpTargetArgs {
         match self.send_control(ControlMessage::Mutations(batch)).await.map_err(|error| {
             if error.contains("authenticated peer identity is required") {
                 format!(
-                    "{error}\nHTTP desired-state mutations require authenticated peer credentials; on-device admin writes should use local IPC."
+                    "{error}\nDesired-state mutations over HTTP require an authenticated peer identity. This request was sent without one; if you are on-device, use local IPC instead."
                 )
             } else {
                 error
@@ -314,5 +311,110 @@ impl HttpTargetArgs {
             transport_binding_signature: None,
         }))
         .await
+    }
+
+    fn scheme(&self) -> Result<HttpTargetScheme, String> {
+        let Some((scheme, _rest)) = self.http.split_once("://") else {
+            return Err(format!(
+                "invalid --http URL `{}`; expected http:// or https://",
+                self.http
+            ));
+        };
+        match scheme {
+            "http" => Ok(HttpTargetScheme::Http),
+            "https" => Ok(HttpTargetScheme::Https),
+            other => Err(format!(
+                "unsupported --http URL scheme `{other}`; expected http:// or https://"
+            )),
+        }
+    }
+
+    fn validate_tls_args(&self, scheme: HttpTargetScheme) -> Result<(), String> {
+        if self.client_cert.is_some() ^ self.client_key.is_some() {
+            return Err("HTTP client TLS requires both --client-cert and --client-key".to_owned());
+        }
+
+        if scheme == HttpTargetScheme::Http {
+            if self.ca_cert.is_some() || self.client_cert.is_some() || self.client_key.is_some() {
+                return Err(
+                    "plain http:// targets do not use TLS material; remove --ca-cert/--client-cert/--client-key or switch to https://"
+                        .to_owned(),
+                );
+            }
+            return Ok(());
+        }
+
+        if self.ca_cert.is_none() && (self.client_cert.is_some() || self.client_key.is_some()) {
+            return Err(
+                "HTTPS trust material requires --ca-cert; client auth does not replace server trust"
+                    .to_owned(),
+            );
+        }
+
+        Ok(())
+    }
+
+    fn map_client_construction_error(&self, scheme: HttpTargetScheme, error: &str) -> String {
+        if scheme == HttpTargetScheme::Https
+            && self.ca_cert.is_none()
+            && error == "failed to configure HTTP TLS: builder error"
+        {
+            return "failed to initialize HTTPS trust verification from the system trust store; this image may be missing CA roots. Provide --ca-cert for the Orion server CA, or install a system CA bundle."
+                .to_owned();
+        }
+
+        if scheme == HttpTargetScheme::Http
+            && error == "failed to configure HTTP TLS: builder error"
+        {
+            return "failed to initialize a plain HTTP client; this indicates a runtime/build issue, not missing TLS credentials."
+                .to_owned();
+        }
+
+        error.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HttpTargetArgs, HttpTargetScheme};
+
+    fn target(http: &str) -> HttpTargetArgs {
+        HttpTargetArgs {
+            http: http.to_owned(),
+            ca_cert: None,
+            client_cert: None,
+            client_key: None,
+        }
+    }
+
+    #[test]
+    fn plain_http_targets_reject_tls_material_early() {
+        let mut args = target("http://127.0.0.1:9100");
+        args.ca_cert = Some("ca.pem".into());
+        let error = args
+            .validate_tls_args(HttpTargetScheme::Http)
+            .expect_err("plain HTTP should reject TLS material");
+        assert!(error.contains("plain http:// targets do not use TLS material"));
+    }
+
+    #[test]
+    fn client_identity_requires_matching_key() {
+        let mut args = target("https://127.0.0.1:9100");
+        args.client_cert = Some("client-cert.pem".into());
+        let error = args
+            .validate_tls_args(HttpTargetScheme::Https)
+            .expect_err("partial client identity should fail");
+        assert!(error.contains("requires both --client-cert and --client-key"));
+    }
+
+    #[test]
+    fn https_builder_error_without_ca_cert_becomes_trust_guidance() {
+        let args = target("https://127.0.0.1:9100");
+        let error = args.map_client_construction_error(
+            HttpTargetScheme::Https,
+            "failed to configure HTTP TLS: builder error",
+        );
+        assert!(error.contains("missing CA roots"));
+        assert!(error.contains("--ca-cert"));
     }
 }

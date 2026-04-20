@@ -206,6 +206,48 @@ async fn orionctl_rejects_invalid_desired_state() {
     );
 }
 
+#[test]
+fn orionctl_rejects_tls_material_for_plain_http_targets() {
+    let output = run_orionctl([
+        "health",
+        "--http",
+        "http://127.0.0.1:9100",
+        "--ca-cert",
+        "/tmp/unused.pem",
+    ]);
+    assert!(
+        !output.status.success(),
+        "plain HTTP with TLS material should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("plain http:// targets do not use TLS material"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn orionctl_requires_https_ca_when_client_identity_is_provided() {
+    let output = run_orionctl([
+        "health",
+        "--http",
+        "https://127.0.0.1:9100",
+        "--client-cert",
+        "/tmp/client-cert.pem",
+        "--client-key",
+        "/tmp/client-key.pem",
+    ]);
+    assert!(
+        !output.status.success(),
+        "client identity without CA should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("HTTPS trust material requires --ca-cert"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn orionctl_snapshot_displays_schema_and_resource_provenance() {
     let harness = TestHarness::start("node.orionctl.snapshot.detail").await;

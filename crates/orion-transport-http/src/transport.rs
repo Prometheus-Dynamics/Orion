@@ -82,6 +82,12 @@ pub struct HttpClient {
     codec: HttpCodec,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BaseUrlScheme {
+    Http,
+    Https,
+}
+
 impl HttpClient {
     /// Builds an HTTP client without panicking on TLS/client-builder failures.
     pub fn try_new(base_url: impl Into<String>) -> Result<Self, HttpTransportError> {
@@ -113,7 +119,20 @@ impl HttpClient {
         tls: Option<HttpClientTlsConfig>,
     ) -> Result<Self, HttpTransportError> {
         install_crypto_provider();
+        let (base_url, scheme) = normalize_base_url(base_url.into())?;
         let mut builder = default_http_client_builder();
+        if scheme == BaseUrlScheme::Http {
+            if tls.is_some() {
+                return Err(HttpTransportError::Tls(
+                    "plain HTTP targets do not use TLS configuration; remove TLS material or switch to https://"
+                        .into(),
+                ));
+            }
+            // Reqwest initializes its TLS verifier at client-build time even for plain-HTTP
+            // clients. Disable certificate verification for fixed http:// clients so images
+            // without a system trust store can still talk to local control surfaces.
+            builder = builder.danger_accept_invalid_certs(true);
+        }
         if let Some(tls) = tls {
             let cert = reqwest::Certificate::from_pem(&tls.root_cert_pem)
                 .map_err(|err| HttpTransportError::Tls(err.to_string()))?;
@@ -133,7 +152,7 @@ impl HttpClient {
         }
 
         Ok(Self {
-            base_url: base_url.into().trim_end_matches('/').to_owned(),
+            base_url,
             client: builder
                 .build()
                 .map_err(|err| HttpTransportError::Tls(err.to_string()))?,
@@ -205,6 +224,21 @@ fn default_http_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .connect_timeout(DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT)
         .timeout(DEFAULT_HTTP_CLIENT_REQUEST_TIMEOUT)
+}
+
+fn normalize_base_url(base_url: String) -> Result<(String, BaseUrlScheme), HttpTransportError> {
+    let parsed = reqwest::Url::parse(&base_url)
+        .map_err(|err| HttpTransportError::InvalidBaseUrl(err.to_string()))?;
+    let scheme = match parsed.scheme() {
+        "http" => BaseUrlScheme::Http,
+        "https" => BaseUrlScheme::Https,
+        other => {
+            return Err(HttpTransportError::InvalidBaseUrl(format!(
+                "unsupported scheme `{other}`; expected http:// or https://"
+            )));
+        }
+    };
+    Ok((parsed.as_str().trim_end_matches('/').to_owned(), scheme))
 }
 
 #[derive(Clone)]

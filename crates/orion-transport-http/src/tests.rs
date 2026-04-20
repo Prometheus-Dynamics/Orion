@@ -316,6 +316,37 @@ async fn client_and_server_roundtrip_over_real_http() {
     server_task.abort();
 }
 
+#[test]
+fn plain_http_client_rejects_tls_configuration() {
+    let error = HttpClient::with_tls(
+        "http://127.0.0.1:9100",
+        HttpClientTlsConfig {
+            root_cert_pem: b"pem".to_vec(),
+            client_cert_pem: None,
+            client_key_pem: None,
+        },
+    )
+    .expect_err("plain HTTP should reject TLS configuration");
+    assert!(
+        error
+            .to_string()
+            .contains("plain HTTP targets do not use TLS configuration"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn client_rejects_invalid_base_url_scheme() {
+    let error = HttpClient::try_new("ftp://127.0.0.1:9100")
+        .expect_err("unsupported URL scheme should fail");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported scheme `ftp`; expected http:// or https://"),
+        "unexpected error: {error}"
+    );
+}
+
 #[tokio::test]
 async fn client_and_server_roundtrip_over_real_https() {
     let service = std::sync::Arc::new(NetworkLoopbackService);

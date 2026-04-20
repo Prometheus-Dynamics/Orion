@@ -107,7 +107,8 @@ fn classify_http_transport_error_for_peer_sync(error: &HttpTransportError) -> Pe
             // Untyped request failures are another boundary case where upstream transport
             // errors do not preserve enough structure for category mapping.
         } => classify_peer_sync_message_fallback(message),
-        HttpTransportError::UnsupportedMethod(_)
+        HttpTransportError::InvalidBaseUrl(_)
+        | HttpTransportError::UnsupportedMethod(_)
         | HttpTransportError::UnsupportedPath(_)
         | HttpTransportError::UnsupportedControlMessage
         | HttpTransportError::DecodeRequest(_)
