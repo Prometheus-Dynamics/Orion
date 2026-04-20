@@ -12,6 +12,13 @@ The command surface is organized around operator intent instead of transport det
 
 Local admin workflows default to IPC. Remote read workflows use `--http`.
 
+Structured file/config support:
+
+- `orionctl apply workload --spec` accepts `.json`, `.yaml`/`.yml`, and `.toml`
+- `--spec-format json|yaml|toml` overrides extension inference
+- structured output supports `-o json`, `-o yaml`, and `-o toml`
+  - TOML output is wrapped under a top-level `value` key so list-shaped responses remain valid TOML
+
 Workload apply supports both direct flags and full specs:
 
 - Typed config flags:

@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     env, fs,
@@ -6,13 +6,13 @@ use std::{
     process::ExitCode,
 };
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 struct Threshold<T> {
     warn: T,
     fail: T,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 struct PerfConfig {
     idle_cpu_percent: Threshold<f64>,
     local_persistence_replay_ms: BTreeMap<String, Threshold<f64>>,
@@ -36,7 +36,15 @@ struct Issue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Args {
     config: PathBuf,
+    config_format: Option<StructuredFormat>,
     logs: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StructuredFormat {
+    Json,
+    Yaml,
+    Toml,
 }
 
 fn main() -> ExitCode {
@@ -51,7 +59,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let args = parse_args(env::args().skip(1))?;
-    let config = load_config(&args.config)?;
+    let config = load_config(&args.config, args.config_format)?;
     let issues = collect_issues(&config, &args.logs)?;
     let summary = render_summary(&issues);
 
@@ -81,24 +89,74 @@ where
     let Some(config) = args.next() else {
         return Err(usage());
     };
-    let logs = args.map(PathBuf::from).collect::<Vec<_>>();
+    let mut config_format = None;
+    let mut logs = Vec::new();
+    while let Some(arg) = args.next() {
+        if arg == "--config-format" {
+            let Some(value) = args.next() else {
+                return Err(usage());
+            };
+            config_format = Some(parse_structured_format(&value)?);
+            continue;
+        }
+        logs.push(PathBuf::from(arg));
+    }
     if logs.is_empty() {
         return Err(usage());
     }
 
     Ok(Args {
         config: PathBuf::from(config),
+        config_format,
         logs,
     })
 }
 
 fn usage() -> String {
-    "usage: orion-perf-check --config <path> <log>...".to_owned()
+    "usage: orion-perf-check --config <path> [--config-format json|yaml|toml] <log>...".to_owned()
 }
 
-fn load_config(path: &Path) -> Result<PerfConfig, String> {
+fn load_config(
+    path: &Path,
+    explicit_format: Option<StructuredFormat>,
+) -> Result<PerfConfig, String> {
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&text).map_err(|error| error.to_string())
+    let format = match explicit_format {
+        Some(format) => format,
+        None => infer_structured_format(path)?,
+    };
+    match format {
+        StructuredFormat::Json => serde_json::from_str(&text).map_err(|error| error.to_string()),
+        StructuredFormat::Yaml => serde_yaml::from_str(&text).map_err(|error| error.to_string()),
+        StructuredFormat::Toml => toml::from_str(&text).map_err(|error| error.to_string()),
+    }
+}
+
+fn parse_structured_format(value: &str) -> Result<StructuredFormat, String> {
+    match value {
+        "json" => Ok(StructuredFormat::Json),
+        "yaml" => Ok(StructuredFormat::Yaml),
+        "toml" => Ok(StructuredFormat::Toml),
+        other => Err(format!(
+            "unsupported config format `{other}`; expected json, yaml, or toml"
+        )),
+    }
+}
+
+fn infer_structured_format(path: &Path) -> Result<StructuredFormat, String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| format!("could not infer config format for {}", path.display()))?;
+    match extension {
+        "json" => Ok(StructuredFormat::Json),
+        "yaml" | "yml" => Ok(StructuredFormat::Yaml),
+        "toml" => Ok(StructuredFormat::Toml),
+        other => Err(format!(
+            "unsupported config extension `.{other}` for {}",
+            path.display()
+        )),
+    }
 }
 
 fn collect_issues(config: &PerfConfig, logs: &[PathBuf]) -> Result<Vec<Issue>, String> {
@@ -299,27 +357,80 @@ fn render_summary(issues: &[Issue]) -> String {
 mod tests {
     use super::*;
 
+    fn sample_config_json() -> &'static str {
+        r#"{
+          "idle_cpu_percent": { "warn": 2.0, "fail": 5.0 },
+          "local_persistence_replay_ms": {
+            "10": { "warn": 1.0, "fail": 2.0 }
+          },
+          "release_memory_baseline_bytes": {
+            "50": { "warn": 10, "fail": 20 }
+          },
+          "release_cold_replay_ms": {
+            "current_snapshot": {
+              "100": { "warn": 4.5, "fail": 6.5 }
+            }
+          },
+          "cluster_sync_avg_ms": {
+            "3": { "warn": 125.0, "fail": 150.0 }
+          }
+        }"#
+    }
+
     fn sample_config() -> PerfConfig {
-        serde_json::from_str(
-            r#"{
-              "idle_cpu_percent": { "warn": 2.0, "fail": 5.0 },
-              "local_persistence_replay_ms": {
-                "10": { "warn": 1.0, "fail": 2.0 }
-              },
-              "release_memory_baseline_bytes": {
-                "50": { "warn": 10, "fail": 20 }
-              },
-              "release_cold_replay_ms": {
-                "current_snapshot": {
-                  "100": { "warn": 4.5, "fail": 6.5 }
-                }
-              },
-              "cluster_sync_avg_ms": {
-                "3": { "warn": 125.0, "fail": 150.0 }
-              }
-            }"#,
+        serde_json::from_str(sample_config_json()).expect("sample config should parse")
+    }
+
+    #[test]
+    fn load_config_supports_json_yaml_and_toml() {
+        let dir = env::temp_dir().join(format!("orion-perf-check-load-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let json_path = dir.join("config.json");
+        let yaml_path = dir.join("config.yaml");
+        let toml_path = dir.join("config.toml");
+
+        fs::write(&json_path, sample_config_json()).expect("json config should write");
+        fs::write(
+            &yaml_path,
+            serde_yaml::to_string(&sample_config()).expect("yaml config should serialize"),
         )
-        .expect("sample config should parse")
+        .expect("yaml config should write");
+        fs::write(
+            &toml_path,
+            toml::to_string_pretty(&sample_config()).expect("toml config should serialize"),
+        )
+        .expect("toml config should write");
+
+        assert_eq!(
+            load_config(&json_path, None).expect("json config should load"),
+            sample_config()
+        );
+        assert_eq!(
+            load_config(&yaml_path, None).expect("yaml config should load"),
+            sample_config()
+        );
+        assert_eq!(
+            load_config(&toml_path, None).expect("toml config should load"),
+            sample_config()
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_args_accepts_explicit_config_format() {
+        let args = parse_args(
+            [
+                "--config".to_owned(),
+                "config".to_owned(),
+                "--config-format".to_owned(),
+                "yaml".to_owned(),
+                "perf.log".to_owned(),
+            ]
+            .into_iter(),
+        )
+        .expect("args should parse");
+        assert_eq!(args.config_format, Some(StructuredFormat::Yaml));
     }
 
     #[test]

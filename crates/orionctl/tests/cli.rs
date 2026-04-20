@@ -277,6 +277,118 @@ async fn orionctl_apply_workload_accepts_json_spec_file() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn orionctl_apply_workload_accepts_yaml_spec_file() {
+    let harness = TestHarness::start("node.orionctl.spec.yaml").await;
+    let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_executor(
+        ExecutorRecord::builder("executor.spec.yaml", "node.orionctl.spec.yaml")
+            .runtime_type("graph.exec.v1")
+            .build(),
+    );
+    harness._app.replace_desired(desired);
+
+    let spec = WorkloadRecord::builder(
+        WorkloadId::new("workload.spec.yaml"),
+        RuntimeType::new("graph.exec.v1"),
+        ArtifactId::new("artifact.spec.yaml"),
+    )
+    .assigned_to(NodeId::new("node.orionctl.spec.yaml"))
+    .config(
+        WorkloadConfig::new(ConfigSchemaId::new("graph.workload.config.v1"))
+            .field("graph.kind", TypedConfigValue::String("inline".to_owned()))
+            .field("graph.inline", TypedConfigValue::String("yaml".to_owned())),
+    )
+    .build();
+    let spec_path = temp_spec_path("orionctl-workload-spec.yaml");
+    std::fs::write(
+        &spec_path,
+        serde_yaml::to_string(&spec).expect("yaml spec should serialize"),
+    )
+    .expect("yaml spec file should write");
+
+    let put_workload = run_orionctl([
+        "apply",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--spec",
+        &spec_path.to_string_lossy(),
+    ]);
+    assert!(
+        put_workload.status.success(),
+        "{}",
+        output_text(&put_workload)
+    );
+
+    let snapshot = harness.snapshot().await;
+    let stored = snapshot
+        .state
+        .desired
+        .workloads
+        .get(&WorkloadId::new("workload.spec.yaml"))
+        .expect("yaml spec workload should exist");
+    assert_eq!(stored, &spec);
+
+    let _ = std::fs::remove_file(spec_path);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn orionctl_apply_workload_accepts_toml_spec_file() {
+    let harness = TestHarness::start("node.orionctl.spec.toml").await;
+    let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_executor(
+        ExecutorRecord::builder("executor.spec.toml", "node.orionctl.spec.toml")
+            .runtime_type("graph.exec.v1")
+            .build(),
+    );
+    harness._app.replace_desired(desired);
+
+    let spec = WorkloadRecord::builder(
+        WorkloadId::new("workload.spec.toml"),
+        RuntimeType::new("graph.exec.v1"),
+        ArtifactId::new("artifact.spec.toml"),
+    )
+    .assigned_to(NodeId::new("node.orionctl.spec.toml"))
+    .config(
+        WorkloadConfig::new(ConfigSchemaId::new("graph.workload.config.v1"))
+            .field("graph.kind", TypedConfigValue::String("inline".to_owned()))
+            .field("graph.inline", TypedConfigValue::String("toml".to_owned())),
+    )
+    .build();
+    let spec_path = temp_spec_path("orionctl-workload-spec.toml");
+    std::fs::write(
+        &spec_path,
+        toml::to_string_pretty(&spec).expect("toml spec should serialize"),
+    )
+    .expect("toml spec file should write");
+
+    let put_workload = run_orionctl([
+        "apply",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--spec",
+        &spec_path.to_string_lossy(),
+    ]);
+    assert!(
+        put_workload.status.success(),
+        "{}",
+        output_text(&put_workload)
+    );
+
+    let snapshot = harness.snapshot().await;
+    let stored = snapshot
+        .state
+        .desired
+        .workloads
+        .get(&WorkloadId::new("workload.spec.toml"))
+        .expect("toml spec workload should exist");
+    assert_eq!(stored, &spec);
+
+    let _ = std::fs::remove_file(spec_path);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn orionctl_watch_state_and_peers_list_use_local_admin_paths() {
     let harness = TestHarness::start("node.orionctl.watch").await;
 
@@ -373,6 +485,45 @@ async fn orionctl_local_commands_default_to_ipc_when_http_is_omitted() {
     let peers_json: serde_json::Value =
         serde_json::from_slice(&peers.stdout).expect("json output should parse");
     assert!(peers_json.get("http_mutual_tls_mode").is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn orionctl_supports_yaml_and_toml_structured_output() {
+    let harness = TestHarness::start("node.orionctl.output").await;
+
+    let yaml_output = run_orionctl([
+        "get",
+        "snapshot",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "yaml",
+    ]);
+    assert!(
+        yaml_output.status.success(),
+        "{}",
+        output_text(&yaml_output)
+    );
+    let yaml: serde_yaml::Value =
+        serde_yaml::from_slice(&yaml_output.stdout).expect("yaml output should parse");
+    assert!(yaml.get("state").is_some());
+
+    let toml_output = run_orionctl([
+        "peers",
+        "list",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "toml",
+    ]);
+    assert!(
+        toml_output.status.success(),
+        "{}",
+        output_text(&toml_output)
+    );
+    let toml: toml::Value = toml::from_str(&String::from_utf8_lossy(&toml_output.stdout))
+        .expect("toml output should parse");
+    assert!(toml.get("value").is_some());
 }
 
 #[test]

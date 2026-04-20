@@ -84,6 +84,8 @@ pub(crate) enum PeerCommand {
 pub(crate) enum OutputFormat {
     Summary,
     Json,
+    Yaml,
+    Toml,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -91,6 +93,25 @@ impl std::fmt::Display for OutputFormat {
         match self {
             Self::Summary => f.write_str("summary"),
             Self::Json => f.write_str("json"),
+            Self::Yaml => f.write_str("yaml"),
+            Self::Toml => f.write_str("toml"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum StructuredFormat {
+    Json,
+    Yaml,
+    Toml,
+}
+
+impl std::fmt::Display for StructuredFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Json => f.write_str("json"),
+            Self::Yaml => f.write_str("yaml"),
+            Self::Toml => f.write_str("toml"),
         }
     }
 }
@@ -234,6 +255,8 @@ pub(crate) struct ApplyWorkloadArgs {
     pub(crate) local: LocalControlArgs,
     #[arg(long)]
     pub(crate) spec: Option<PathBuf>,
+    #[arg(long, value_enum)]
+    pub(crate) spec_format: Option<StructuredFormat>,
     #[arg(long)]
     pub(crate) workload_id: Option<String>,
     #[arg(long)]
@@ -451,9 +474,9 @@ mod tests {
     };
 
     use super::{
-        HttpTargetArgs, HttpTargetScheme, OutputFormat, TypedConfigValue, parse_binding,
-        parse_bool_config, parse_bytes_hex_config, parse_requirement, parse_string_config,
-        parse_uint_config, preferred_runtime_path,
+        HttpTargetArgs, HttpTargetScheme, OutputFormat, StructuredFormat, TypedConfigValue,
+        parse_binding, parse_bool_config, parse_bytes_hex_config, parse_requirement,
+        parse_string_config, parse_uint_config, preferred_runtime_path,
     };
     use crate::transport::HttpTargetExt;
 
@@ -519,6 +542,13 @@ mod tests {
         let bytes = parse_bytes_hex_config("payload=6869").expect("hex config should parse");
         assert_eq!(bytes.key, "payload");
         assert_eq!(bytes.value, TypedConfigValue::Bytes(vec![0x68, 0x69]));
+    }
+
+    #[test]
+    fn structured_format_display_matches_cli_values() {
+        assert_eq!(StructuredFormat::Json.to_string(), "json");
+        assert_eq!(StructuredFormat::Yaml.to_string(), "yaml");
+        assert_eq!(StructuredFormat::Toml.to_string(), "toml");
     }
 
     #[test]

@@ -12,11 +12,11 @@ use std::collections::BTreeMap;
 use crate::{
     cli::{
         ApplyCommand, Cli, Command, DeleteCommand, GetCommand, OutputFormat, PeerCommand,
-        WatchCommand,
+        StructuredFormat, WatchCommand,
     },
     render::{
-        join_display, join_or_dash, print_event_summary, print_json, print_peer_summary,
-        print_snapshot_summary,
+        join_display, join_or_dash, print_event_summary, print_peer_summary,
+        print_snapshot_summary, print_structured,
     },
 };
 
@@ -51,7 +51,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     );
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&snapshot),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&snapshot, args.output)
+                }
             },
             other => Err(format!("expected health response, got {other:?}")),
         },
@@ -73,7 +75,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     );
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&snapshot),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&snapshot, args.output)
+                }
             },
             other => Err(format!("expected readiness response, got {other:?}")),
         },
@@ -117,7 +121,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     );
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&snapshot),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&snapshot, args.output)
+                }
             }
         }
         GetCommand::Snapshot(args) => {
@@ -127,7 +133,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     print_snapshot_summary(&snapshot);
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&snapshot),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&snapshot, args.output)
+                }
             }
         }
         GetCommand::Workloads(args) => {
@@ -162,7 +170,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&workloads),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&workloads, args.source.output)
+                }
             }
         }
         GetCommand::Resources(args) => {
@@ -211,7 +221,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&resources),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&resources, args.source.output)
+                }
             }
         }
         GetCommand::Providers(args) => {
@@ -236,7 +248,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&providers),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&providers, args.source.output)
+                }
             }
         }
         GetCommand::Executors(args) => {
@@ -261,7 +275,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&executors),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&executors, args.source.output)
+                }
             }
         }
         GetCommand::Leases(args) => {
@@ -295,7 +311,9 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&leases),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&leases, args.source.output)
+                }
             }
         }
     }
@@ -323,7 +341,9 @@ async fn run_watch(command: WatchCommand) -> Result<(), String> {
                 for event in events {
                     match args.output {
                         OutputFormat::Summary => print_event_summary(&event),
-                        OutputFormat::Json => print_json(&event)?,
+                        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                            print_structured(&event, args.output)?
+                        }
                     }
                 }
             }
@@ -360,7 +380,9 @@ async fn run_apply(command: ApplyCommand) -> Result<(), String> {
                     println!("apply artifact accepted id={}", artifact.artifact_id);
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&artifact),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&artifact, args.local.output)
+                }
             }
         }
         ApplyCommand::Workload(args) => {
@@ -383,7 +405,9 @@ async fn run_apply(command: ApplyCommand) -> Result<(), String> {
                     println!("apply workload accepted id={}", workload.workload_id);
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&workload),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&workload, output)
+                }
             }
         }
     }
@@ -392,18 +416,10 @@ async fn run_apply(command: ApplyCommand) -> Result<(), String> {
 fn workload_from_apply_args(args: crate::cli::ApplyWorkloadArgs) -> Result<WorkloadRecord, String> {
     if let Some(spec_path) = args.spec.as_ref() {
         reject_inline_workload_spec_conflicts(&args)?;
-        let bytes = std::fs::read(spec_path).map_err(|error| {
-            format!(
-                "failed to read workload spec {}: {error}",
-                spec_path.display()
-            )
-        })?;
-        return serde_json::from_slice(&bytes).map_err(|error| {
-            format!(
-                "failed to parse workload spec {}: {error}",
-                spec_path.display()
-            )
-        });
+        return load_structured_file(spec_path, args.spec_format, "workload spec");
+    }
+    if args.spec_format.is_some() {
+        return Err("--spec-format requires --spec".to_owned());
     }
 
     let config = workload_config_from_apply_args(&args)?;
@@ -452,6 +468,7 @@ fn reject_inline_workload_spec_conflicts(
         || !args.requirements.is_empty()
         || !args.bindings.is_empty()
         || args.config_schema.is_some()
+        || args.spec_format.is_some()
         || !args.config_bools.is_empty()
         || !args.config_ints.is_empty()
         || !args.config_uints.is_empty()
@@ -464,6 +481,68 @@ fn reject_inline_workload_spec_conflicts(
         );
     }
     Ok(())
+}
+
+fn load_structured_file<T: serde::de::DeserializeOwned>(
+    path: &std::path::Path,
+    explicit_format: Option<StructuredFormat>,
+    label: &str,
+) -> Result<T, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("failed to read {label} {}: {error}", path.display()))?;
+    let format = match explicit_format {
+        Some(format) => format,
+        None => infer_structured_format(path)?,
+    };
+    match format {
+        StructuredFormat::Json => serde_json::from_slice(&bytes).map_err(|error| {
+            format!(
+                "failed to parse {label} {} as JSON: {error}",
+                path.display()
+            )
+        }),
+        StructuredFormat::Yaml => serde_yaml::from_slice(&bytes).map_err(|error| {
+            format!(
+                "failed to parse {label} {} as YAML: {error}",
+                path.display()
+            )
+        }),
+        StructuredFormat::Toml => {
+            let text = std::str::from_utf8(&bytes).map_err(|error| {
+                format!(
+                    "failed to decode {label} {} as UTF-8: {error}",
+                    path.display()
+                )
+            })?;
+            toml::from_str(text).map_err(|error| {
+                format!(
+                    "failed to parse {label} {} as TOML: {error}",
+                    path.display()
+                )
+            })
+        }
+    }
+}
+
+fn infer_structured_format(path: &std::path::Path) -> Result<StructuredFormat, String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            format!(
+                "could not infer file format for {}; use --spec-format json|yaml|toml",
+                path.display()
+            )
+        })?;
+    match extension {
+        "json" => Ok(StructuredFormat::Json),
+        "yaml" | "yml" => Ok(StructuredFormat::Yaml),
+        "toml" => Ok(StructuredFormat::Toml),
+        other => Err(format!(
+            "unsupported file extension `.{other}` for {}; use --spec-format json|yaml|toml",
+            path.display()
+        )),
+    }
 }
 
 fn workload_config_from_apply_args(
@@ -519,7 +598,9 @@ async fn run_delete(command: DeleteCommand) -> Result<(), String> {
                     println!("delete artifact accepted id={artifact_id}");
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&json!({ "artifact_id": artifact_id })),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&json!({ "artifact_id": artifact_id }), args.local.output)
+                }
             }
         }
         DeleteCommand::Workload(args) => {
@@ -541,7 +622,9 @@ async fn run_delete(command: DeleteCommand) -> Result<(), String> {
                     println!("delete workload accepted id={workload_id}");
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&json!({ "workload_id": workload_id })),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&json!({ "workload_id": workload_id }), args.local.output)
+                }
             }
         }
     }
@@ -561,7 +644,9 @@ async fn run_peers(command: PeerCommand) -> Result<(), String> {
                     print_peer_summary(&snapshot);
                     Ok(())
                 }
-                OutputFormat::Json => print_json(&snapshot),
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&snapshot, args.local.output)
+                }
             }
         }
         PeerCommand::Enroll(args) => {

@@ -1,5 +1,7 @@
 use orion_control_plane::{ClientEvent, ClientEventKind, PeerTrustSnapshot, StateSnapshot};
 
+use crate::cli::OutputFormat;
+
 pub(crate) fn print_snapshot_summary(snapshot: &StateSnapshot) {
     println!(
         "snapshot desired_rev={} observed_rev={} applied_rev={} nodes={} artifacts={} workloads={} resources={} providers={} executors={} leases={}",
@@ -96,8 +98,27 @@ pub(crate) fn print_event_summary(event: &ClientEvent) {
     }
 }
 
-pub(crate) fn print_json<T: serde::Serialize>(value: &T) -> Result<(), String> {
-    let rendered = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
+#[derive(serde::Serialize)]
+struct TomlEnvelope<'a, T> {
+    value: &'a T,
+}
+
+pub(crate) fn print_structured<T: serde::Serialize>(
+    value: &T,
+    format: OutputFormat,
+) -> Result<(), String> {
+    let rendered = match format {
+        OutputFormat::Summary => {
+            return Err("summary output is not a structured serialization format".to_owned());
+        }
+        OutputFormat::Json => {
+            serde_json::to_string_pretty(value).map_err(|error| error.to_string())?
+        }
+        OutputFormat::Yaml => serde_yaml::to_string(value).map_err(|error| error.to_string())?,
+        OutputFormat::Toml => {
+            toml::to_string_pretty(&TomlEnvelope { value }).map_err(|error| error.to_string())?
+        }
+    };
     println!("{rendered}");
     Ok(())
 }
