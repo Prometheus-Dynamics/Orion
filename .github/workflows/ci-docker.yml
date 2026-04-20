@@ -21,6 +21,7 @@ jobs:
           - docker_cluster_adversarial
           - docker_cluster_scale
           - docker_client_examples
+          - docker_client_orionctl_examples
     steps:
       - name: Checkout
         uses: actions/checkout@v5
