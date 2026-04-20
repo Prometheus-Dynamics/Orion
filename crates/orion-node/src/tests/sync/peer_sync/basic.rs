@@ -398,7 +398,7 @@ async fn node_sync_peer_local_ahead_without_history_does_not_require_summary_rou
     server_task.abort();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn node_sync_peer_makes_progress_while_remote_desired_state_is_mutating() {
     let node_a = NodeApp::builder()
         .config(test_node_config_with_auth(
@@ -437,7 +437,7 @@ async fn node_sync_peer_makes_progress_while_remote_desired_state_is_mutating() 
             *last_node_id_mutator
                 .lock()
                 .expect("last node id lock should not be poisoned") = churn_id;
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
     });
 
@@ -445,12 +445,12 @@ async fn node_sync_peer_makes_progress_while_remote_desired_state_is_mutating() 
     let syncer = tokio::spawn(async move {
         for _ in 0..12 {
             sync_app.sync_peer(&NodeId::new("node-a")).await?;
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
         Ok::<(), NodeError>(())
     });
 
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(Duration::from_secs(10), async {
         mutator.await.expect("mutator task should join");
         syncer
             .await

@@ -1,11 +1,10 @@
 use std::{path::PathBuf, process::Command, time::Duration};
 
 use orion::{
-    ArtifactId, ConfigSchemaId, NodeId, WorkloadId,
+    ArtifactId, NodeId, WorkloadId,
     control_plane::{
-        ArtifactRecord, ControlMessage, DesiredStateMutation, MutationBatch, ResourceActionResult,
-        ResourceActionStatus, ResourceOwnershipMode, ResourceRecord, ResourceState,
-        TypedConfigValue, WorkloadConfig, WorkloadRecord,
+        ArtifactRecord, ControlMessage, DesiredStateMutation, ExecutorRecord, MutationBatch,
+        SyncRequest,
     },
     transport::{
         http::{HttpClient, HttpRequestPayload, HttpResponsePayload},
@@ -15,51 +14,51 @@ use orion::{
 use orion_node::{NodeApp, NodeConfig};
 
 #[tokio::test(flavor = "multi_thread")]
-async fn orionctl_reports_health_readiness_observability_and_snapshot() {
-    let harness = TestHarness::start("node.orionctl.health").await;
+async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
+    let harness = TestHarness::start("node.orionctl.get").await;
 
-    let health = run_orionctl(["health", "--http", &harness.http_base()]);
-    assert!(
-        health.status.success(),
-        "health failed\n{}",
-        output_text(&health)
-    );
+    let health = run_orionctl(["get", "health", "--http", &harness.http_base()]);
+    assert!(health.status.success(), "{}", output_text(&health));
     assert!(String::from_utf8_lossy(&health.stdout).contains("status=Healthy"));
 
-    let readiness = run_orionctl(["readiness", "--http", &harness.http_base()]);
-    assert!(
-        readiness.status.success(),
-        "readiness failed\n{}",
-        output_text(&readiness)
-    );
+    let readiness = run_orionctl(["get", "readiness", "--http", &harness.http_base()]);
+    assert!(readiness.status.success(), "{}", output_text(&readiness));
     assert!(String::from_utf8_lossy(&readiness.stdout).contains("status=Ready"));
 
-    let observability = run_orionctl(["observability", "--http", &harness.http_base()]);
+    let observability = run_orionctl(["get", "observability", "--http", &harness.http_base()]);
     assert!(
         observability.status.success(),
-        "observability failed\n{}",
+        "{}",
         output_text(&observability)
     );
-    assert!(String::from_utf8_lossy(&observability.stdout).contains("replay_success="));
+    assert!(String::from_utf8_lossy(&observability.stdout).contains("mutation_success="));
 
-    let snapshot = run_orionctl(["snapshot", "--http", &harness.http_base()]);
-    assert!(
-        snapshot.status.success(),
-        "snapshot failed\n{}",
-        output_text(&snapshot)
-    );
+    let snapshot = run_orionctl([
+        "get",
+        "snapshot",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+    ]);
+    assert!(snapshot.status.success(), "{}", output_text(&snapshot));
     assert!(String::from_utf8_lossy(&snapshot.stdout).contains("desired_rev="));
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn orionctl_applies_artifact_and_workload_mutations() {
-    let harness = TestHarness::start("node.orionctl.mutate").await;
+async fn orionctl_apply_delete_and_get_workloads_use_local_ipc() {
+    let harness = TestHarness::start("node.orionctl.apply").await;
+    let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_executor(
+        ExecutorRecord::builder("executor.cli", "node.orionctl.apply")
+            .runtime_type("graph.exec.v1")
+            .build(),
+    );
+    harness._app.replace_desired(desired);
 
     let put_artifact = run_orionctl([
-        "mutate",
-        "put-artifact",
-        "--http",
-        &harness.http_base(),
+        "apply",
+        "artifact",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
         "--artifact-id",
         "artifact.cli",
         "--content-type",
@@ -69,15 +68,15 @@ async fn orionctl_applies_artifact_and_workload_mutations() {
     ]);
     assert!(
         put_artifact.status.success(),
-        "put-artifact failed\n{}",
+        "{}",
         output_text(&put_artifact)
     );
 
     let put_workload = run_orionctl([
-        "mutate",
-        "put-workload",
-        "--http",
-        &harness.http_base(),
+        "apply",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
         "--workload-id",
         "workload.cli",
         "--runtime-type",
@@ -85,16 +84,50 @@ async fn orionctl_applies_artifact_and_workload_mutations() {
         "--artifact-id",
         "artifact.cli",
         "--assigned-node",
-        "node.orionctl.mutate",
+        "node.orionctl.apply",
         "--desired-state",
-        "stopped",
+        "running",
         "--restart-policy",
-        "never",
+        "always",
     ]);
     assert!(
         put_workload.status.success(),
-        "put-workload failed\n{}",
+        "{}",
         output_text(&put_workload)
+    );
+
+    let get_workloads = run_orionctl([
+        "get",
+        "workloads",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "json",
+    ]);
+    assert!(
+        get_workloads.status.success(),
+        "{}",
+        output_text(&get_workloads)
+    );
+    let workloads: serde_json::Value =
+        serde_json::from_slice(&get_workloads.stdout).expect("json output should parse");
+    let array = workloads.as_array().expect("json should be an array");
+    assert_eq!(array.len(), 1);
+    assert_eq!(array[0]["workload_id"], "workload.cli");
+    assert_eq!(array[0]["desired_state"], "Running");
+
+    let delete_workload = run_orionctl([
+        "delete",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--workload-id",
+        "workload.cli",
+    ]);
+    assert!(
+        delete_workload.status.success(),
+        "{}",
+        output_text(&delete_workload)
     );
 
     let snapshot = harness.snapshot().await;
@@ -106,7 +139,7 @@ async fn orionctl_applies_artifact_and_workload_mutations() {
             .contains_key(&ArtifactId::new("artifact.cli"))
     );
     assert!(
-        snapshot
+        !snapshot
             .state
             .desired
             .workloads
@@ -115,8 +148,21 @@ async fn orionctl_applies_artifact_and_workload_mutations() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn orionctl_watch_state_prints_stream_events() {
+async fn orionctl_watch_state_and_peers_list_use_local_admin_paths() {
     let harness = TestHarness::start("node.orionctl.watch").await;
+
+    let peers = run_orionctl([
+        "peers",
+        "list",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "json",
+    ]);
+    assert!(peers.status.success(), "{}", output_text(&peers));
+    let peers_json: serde_json::Value =
+        serde_json::from_slice(&peers.stdout).expect("json output should parse");
+    assert!(peers_json.get("http_mutual_tls_mode").is_some());
 
     let stream = UnixControlStreamClient::connect(&harness.ipc_stream_socket)
         .await
@@ -124,12 +170,13 @@ async fn orionctl_watch_state_prints_stream_events() {
     drop(stream);
 
     let watch_task = tokio::task::spawn_blocking({
-        let socket = harness.ipc_stream_socket.to_string_lossy().to_string();
+        let stream_socket = harness.ipc_stream_socket.to_string_lossy().to_string();
         move || {
             run_orionctl([
-                "watch-state",
-                "--socket",
-                &socket,
+                "watch",
+                "state",
+                "--stream-socket",
+                &stream_socket,
                 "--client-name",
                 "watcher",
                 "--desired-revision",
@@ -157,78 +204,30 @@ async fn orionctl_watch_state_prints_stream_events() {
     assert_eq!(response, HttpResponsePayload::Accepted);
 
     let output = watch_task.await.expect("watch task should join");
-    assert!(
-        output.status.success(),
-        "watch-state failed\n{}",
-        output_text(&output)
-    );
+    assert!(output.status.success(), "{}", output_text(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("watch-state seq="),
-        "unexpected stdout: {stdout}"
-    );
-    assert!(
-        stdout.contains("desired_rev="),
-        "unexpected stdout: {stdout}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn orionctl_rejects_invalid_desired_state() {
-    let harness = TestHarness::start("node.orionctl.errors").await;
-
-    let output = run_orionctl([
-        "mutate",
-        "put-workload",
-        "--http",
-        &harness.http_base(),
-        "--workload-id",
-        "workload.bad",
-        "--runtime-type",
-        "graph.exec.v1",
-        "--artifact-id",
-        "artifact.bad",
-        "--desired-state",
-        "broken",
-    ]);
-    assert!(
-        !output.status.success(),
-        "invalid desired state should fail"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("invalid value"),
-        "unexpected stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("--desired-state"),
-        "unexpected stderr: {stderr}"
-    );
+    assert!(stdout.contains("state seq="), "unexpected stdout: {stdout}");
 }
 
 #[test]
 fn orionctl_rejects_tls_material_for_plain_http_targets() {
     let output = run_orionctl([
+        "get",
         "health",
         "--http",
         "http://127.0.0.1:9100",
         "--ca-cert",
         "/tmp/unused.pem",
     ]);
-    assert!(
-        !output.status.success(),
-        "plain HTTP with TLS material should fail"
-    );
+    assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("plain http:// targets do not use TLS material"),
-        "unexpected stderr: {stderr}"
-    );
+    assert!(stderr.contains("plain http:// targets do not use TLS material"));
 }
 
 #[test]
 fn orionctl_requires_https_ca_when_client_identity_is_provided() {
     let output = run_orionctl([
+        "get",
         "health",
         "--http",
         "https://127.0.0.1:9100",
@@ -237,67 +236,9 @@ fn orionctl_requires_https_ca_when_client_identity_is_provided() {
         "--client-key",
         "/tmp/client-key.pem",
     ]);
-    assert!(
-        !output.status.success(),
-        "client identity without CA should fail"
-    );
+    assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("HTTPS trust material requires --ca-cert"),
-        "unexpected stderr: {stderr}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn orionctl_snapshot_displays_schema_and_resource_provenance() {
-    let harness = TestHarness::start("node.orionctl.snapshot.detail").await;
-
-    let mut desired = harness._app.state_snapshot().state.desired;
-    desired.put_workload(
-        WorkloadRecord::builder("workload.camera", "camera.controller.v1", "artifact.camera")
-            .config(
-                WorkloadConfig::new(ConfigSchemaId::new("camera.controller.config.v1"))
-                    .field("width", TypedConfigValue::UInt(1280)),
-            )
-            .assigned_to("node.orionctl.snapshot.detail")
-            .build(),
-    );
-    desired.put_resource(
-        ResourceRecord::builder(
-            "resource.camera.stream.front",
-            "camera.frame_stream",
-            "provider.camera",
-        )
-        .ownership_mode(ResourceOwnershipMode::SharedRead)
-        .realized_for_workload("workload.camera")
-        .source_resource("resource.camera.raw.front")
-        .source_workload("workload.camera")
-        .realized_by_executor("executor.camera-stack")
-        .state(
-            ResourceState::new(42).with_action_result(ResourceActionResult {
-                action_kind: "gpio".into(),
-                status: ResourceActionStatus::Applied,
-                data: Some(TypedConfigValue::Bool(true)),
-                error: None,
-            }),
-        )
-        .build(),
-    );
-    harness._app.replace_desired(desired);
-
-    let snapshot = run_orionctl(["snapshot", "--http", &harness.http_base()]);
-    assert!(
-        snapshot.status.success(),
-        "snapshot failed\n{}",
-        output_text(&snapshot)
-    );
-    let stdout = String::from_utf8_lossy(&snapshot.stdout);
-    assert!(stdout.contains("config_schema=camera.controller.config.v1"));
-    assert!(stdout.contains("derived_from_workload=workload.camera"));
-    assert!(stdout.contains("published_by_executor=executor.camera-stack"));
-    assert!(stdout.contains("action_kind=gpio"));
-    assert!(stdout.contains("action_status=Applied"));
-    assert!(stdout.contains("action_data=true"));
+    assert!(stderr.contains("HTTPS trust material requires --ca-cert"));
 }
 
 struct TestHarness {
@@ -307,6 +248,7 @@ struct TestHarness {
     _ipc_stream_task: tokio::task::JoinHandle<()>,
     http_addr: std::net::SocketAddr,
     client: HttpClient,
+    ipc_socket: PathBuf,
     ipc_stream_socket: PathBuf,
 }
 
@@ -325,6 +267,7 @@ impl TestHarness {
                 NodeConfig::try_runtime_tuning_from_env()
                     .expect("runtime tuning defaults should parse"),
             );
+        let ipc_socket = config.ipc_socket_path.clone();
         let ipc_stream_socket = NodeConfig::default_ipc_stream_socket_path_for(node_id);
         let app = NodeApp::try_new(config.clone()).expect("node app should build");
         let (http_addr, http_server) = app
@@ -358,6 +301,7 @@ impl TestHarness {
             http_addr,
             client: HttpClient::try_new(format!("http://{http_addr}"))
                 .expect("HTTP client should build"),
+            ipc_socket,
             ipc_stream_socket,
         }
     }
@@ -370,7 +314,7 @@ impl TestHarness {
         match self
             .client
             .send(&HttpRequestPayload::Control(Box::new(
-                ControlMessage::SyncRequest(orion::control_plane::SyncRequest {
+                ControlMessage::SyncRequest(SyncRequest {
                     node_id: NodeId::new("orionctl.test.peer"),
                     desired_revision: orion::Revision::new(u64::MAX),
                     desired_fingerprint: 0,

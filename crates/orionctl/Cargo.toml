@@ -21,6 +21,8 @@ orion-control-plane.workspace = true
 orion-core.workspace = true
 orion-transport-http.workspace = true
 orion-transport-ipc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]

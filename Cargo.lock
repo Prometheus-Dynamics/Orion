@@ -1485,6 +1485,8 @@ dependencies = [
  "orion-node",
  "orion-transport-http",
  "orion-transport-ipc",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
