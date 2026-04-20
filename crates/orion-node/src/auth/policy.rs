@@ -254,9 +254,10 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::Health
                 | ControlOperation::Readiness,
             ) => Ok(()),
-            (_, ControlOperation::Snapshot | ControlOperation::Mutations) => {
-                self.authorize_authenticated_peer_write(request)
-            }
+            (
+                ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
+                ControlOperation::Snapshot | ControlOperation::Mutations,
+            ) => self.authorize_authenticated_peer_write(request),
             (ControlPrincipal::Peer(peer), ControlOperation::ObservedUpdate) => {
                 self.authorize_authenticated_peer_write(request)?;
                 let crate::service::ControlRequestBody::ObservedUpdate(update) = &request.body
@@ -295,7 +296,8 @@ impl Authorizer for NodeSecurityAuthorizer {
             ) => self.authorize_local_role(source, ClientRole::Executor),
             (
                 ControlPrincipal::Local { source, .. },
-                ControlOperation::WatchState
+                ControlOperation::Mutations
+                | ControlOperation::WatchState
                 | ControlOperation::PollClientEvents
                 | ControlOperation::EnrollPeer
                 | ControlOperation::RevokePeer

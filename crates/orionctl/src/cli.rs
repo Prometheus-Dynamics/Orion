@@ -57,6 +57,10 @@ pub(crate) struct HttpTargetArgs {
     pub(crate) http: String,
     #[arg(long)]
     pub(crate) ca_cert: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) client_cert: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) client_key: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -184,19 +188,53 @@ pub(crate) struct TrustReplaceKeyArgs {
 
 impl HttpTargetArgs {
     pub(crate) fn client(&self) -> Result<HttpClient, String> {
-        match self.ca_cert.as_deref() {
-            Some(ca_cert) => HttpClient::with_tls(
-                self.http.clone(),
-                HttpClientTlsConfig {
-                    root_cert_pem: std::fs::read(ca_cert).map_err(|error| {
-                        format!("failed to read CA cert {}: {error}", ca_cert.display())
-                    })?,
-                    client_cert_pem: None,
-                    client_key_pem: None,
-                },
-            )
-            .map_err(|error| error.to_string()),
-            None => HttpClient::try_new(self.http.clone()).map_err(|error| error.to_string()),
+        match (
+            self.ca_cert.as_deref(),
+            self.client_cert.as_deref(),
+            self.client_key.as_deref(),
+        ) {
+            (None, None, None) => HttpClient::try_new(self.http.clone()).map_err(|error| error.to_string()),
+            (Some(ca_cert), client_cert, client_key) => {
+                let client_identity = match (client_cert, client_key) {
+                    (Some(client_cert), Some(client_key)) => Some((
+                        std::fs::read(client_cert).map_err(|error| {
+                            format!(
+                                "failed to read client cert {}: {error}",
+                                client_cert.display()
+                            )
+                        })?,
+                        std::fs::read(client_key).map_err(|error| {
+                            format!(
+                                "failed to read client key {}: {error}",
+                                client_key.display()
+                            )
+                        })?,
+                    )),
+                    (None, None) => None,
+                    _ => {
+                        return Err(
+                            "HTTP client TLS requires both --client-cert and --client-key"
+                                .to_owned(),
+                        )
+                    }
+                };
+
+                HttpClient::with_tls(
+                    self.http.clone(),
+                    HttpClientTlsConfig {
+                        root_cert_pem: std::fs::read(ca_cert).map_err(|error| {
+                            format!("failed to read CA cert {}: {error}", ca_cert.display())
+                        })?,
+                        client_cert_pem: client_identity.as_ref().map(|(cert, _)| cert.clone()),
+                        client_key_pem: client_identity.map(|(_, key)| key),
+                    },
+                )
+                .map_err(|error| error.to_string())
+            }
+            (None, _, _) => Err(
+                "HTTPS trust material requires --ca-cert; client auth does not replace server trust"
+                    .to_owned(),
+            ),
         }
     }
 
@@ -238,7 +276,15 @@ impl HttpTargetArgs {
     }
 
     pub(crate) async fn apply_batch(&self, batch: MutationBatch) -> Result<(), String> {
-        match self.send_control(ControlMessage::Mutations(batch)).await? {
+        match self.send_control(ControlMessage::Mutations(batch)).await.map_err(|error| {
+            if error.contains("authenticated peer identity is required") {
+                format!(
+                    "{error}\nHTTP desired-state mutations require authenticated peer credentials; on-device admin writes should use local IPC."
+                )
+            } else {
+                error
+            }
+        })? {
             HttpResponsePayload::Accepted | HttpResponsePayload::Mutations(_) => Ok(()),
             other => Err(format!(
                 "expected accepted mutation response, got {other:?}"

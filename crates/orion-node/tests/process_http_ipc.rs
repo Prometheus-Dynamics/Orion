@@ -10,7 +10,9 @@ use orion::{
         WorkloadRecord,
     },
     transport::{
-        http::{HttpRequestFailureKind, HttpRequestPayload, HttpResponsePayload, HttpTransportError},
+        http::{
+            HttpRequestFailureKind, HttpRequestPayload, HttpResponsePayload, HttpTransportError,
+        },
         ipc::{ControlEnvelope, LocalAddress, UnixControlClient, UnixControlStreamClient},
     },
 };
@@ -357,7 +359,59 @@ async fn orion_node_binary_ipc_unary_rejects_role_invalid_requests() {
             }),
         })
         .await;
-    assert!(response.is_err(), "role-invalid unary request should fail");
+    match response.expect("role-invalid unary request should roundtrip") {
+        ControlEnvelope {
+            message: ControlMessage::Rejected(reason),
+            ..
+        } => {
+            assert!(reason.contains("role mismatch") || reason.contains("not allowed"));
+        }
+        other => panic!("expected unary rejection, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn orion_node_binary_ipc_unary_accepts_control_plane_mutations() {
+    let process = spawn_node("node.ipc.local-mutate", None, &[]);
+    let client = UnixControlClient::new(&process.ipc_socket);
+
+    let hello = client
+        .send(ControlEnvelope {
+            source: LocalAddress::new("cli-local-mutate"),
+            destination: LocalAddress::new("orion"),
+            message: ControlMessage::ClientHello(ClientHello {
+                client_name: "cli-local-mutate".into(),
+                role: ClientRole::ControlPlane,
+            }),
+        })
+        .await
+        .expect("client hello should roundtrip");
+    assert!(matches!(hello.message, ControlMessage::ClientWelcome(_)));
+
+    let initial_snapshot = snapshot(&process.client()).await;
+    let response = client
+        .send(ControlEnvelope {
+            source: LocalAddress::new("cli-local-mutate"),
+            destination: LocalAddress::new("orion"),
+            message: ControlMessage::Mutations(MutationBatch {
+                base_revision: initial_snapshot.state.desired.revision,
+                mutations: vec![DesiredStateMutation::PutArtifact(
+                    ArtifactRecord::builder("artifact.ipc.local-mutate").build(),
+                )],
+            }),
+        })
+        .await
+        .expect("local mutation should roundtrip");
+    assert!(matches!(response.message, ControlMessage::Accepted));
+
+    let updated = snapshot(&process.client()).await;
+    assert!(
+        updated
+            .state
+            .desired
+            .artifacts
+            .contains_key(&ArtifactId::new("artifact.ipc.local-mutate"))
+    );
 }
 
 #[tokio::test]

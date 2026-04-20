@@ -563,10 +563,7 @@ impl NodeApp {
     ) -> Result<ControlMessage, IpcTransportError> {
         match self.execute_control_request(request) {
             Ok(response) => response.into_local(),
-            Err(err @ NodeError::RateLimitedClient { .. }) => {
-                Ok(ControlMessage::Rejected(err.to_string()))
-            }
-            Err(err) => Err(IpcTransportError::WriteFailed(err.to_string())),
+            Err(err) => Ok(ControlMessage::Rejected(err.to_string())),
         }
     }
 
