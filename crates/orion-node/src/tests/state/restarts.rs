@@ -1,4 +1,5 @@
 use super::*;
+use orion::control_plane::{MaintenanceAction, MaintenanceCommand, MaintenanceMode};
 
 #[test]
 fn provider_registration_flapping_across_restarts_keeps_single_provider_identity() {
@@ -220,6 +221,69 @@ async fn restart_during_reconcile_recovers_latest_desired_state() {
             .lock()
             .expect("reconcile command log should not be poisoned")
             .is_empty()
+    );
+
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn maintenance_state_persists_across_restart() {
+    let state_dir = temp_state_dir("maintenance-persist");
+
+    let app = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node-a"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: Some(state_dir.clone()),
+            peers: Vec::new(),
+            peer_authentication: crate::PeerAuthenticationMode::Disabled,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .try_build()
+        .expect("node app should build");
+
+    app.update_maintenance(MaintenanceCommand {
+        action: MaintenanceAction::Enter,
+        allow_runtime_types: vec![RuntimeType::new("helios.updater.v1")],
+        allow_workload_ids: vec![WorkloadId::new("workload.updater")],
+    })
+    .expect("maintenance update should succeed");
+
+    let replayed = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node-a"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: Some(state_dir.clone()),
+            peers: Vec::new(),
+            peer_authentication: crate::PeerAuthenticationMode::Disabled,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .try_build()
+        .expect("node app should build");
+
+    let status = replayed.maintenance_status();
+    assert_eq!(status.state.mode, MaintenanceMode::Maintenance);
+    assert_eq!(
+        status.state.allow_runtime_types,
+        vec![RuntimeType::new("helios.updater.v1")]
+    );
+    assert_eq!(
+        status.state.allow_workload_ids,
+        vec![WorkloadId::new("workload.updater")]
     );
 
     let _ = fs::remove_dir_all(state_dir);

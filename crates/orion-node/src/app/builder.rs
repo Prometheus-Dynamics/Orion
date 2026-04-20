@@ -18,7 +18,9 @@ use orion::transport::quic::QuicTransport;
 #[cfg(feature = "transport-tcp")]
 use orion::transport::tcp::TcpTransport;
 use orion::{
-    control_plane::{AppliedClusterState, DesiredClusterState, ObservedClusterState},
+    control_plane::{
+        AppliedClusterState, DesiredClusterState, MaintenanceState, ObservedClusterState,
+    },
     runtime::{LocalRuntimeStore, Runtime},
     transport::{http::HttpTransport, ipc::IpcTransport},
 };
@@ -273,6 +275,13 @@ impl NodeAppBuilder {
         store.observed = self.observed.unwrap_or_default();
         store.applied = self.applied.unwrap_or_default();
         let storage = config.state_dir.clone().map(NodeStorage::new);
+        let maintenance_state = storage
+            .as_ref()
+            .map(NodeStorage::load_maintenance_state)
+            .transpose()?
+            .flatten()
+            .unwrap_or_else(MaintenanceState::normal);
+        store.set_maintenance(maintenance_state.clone());
         let (http_tls_cert_path, http_tls_key_path) = resolve_http_server_tls_paths(
             self.http_tls_cert_path,
             self.http_tls_key_path,
@@ -328,6 +337,7 @@ impl NodeAppBuilder {
                 store: RwLock::new(store),
                 mutation_history: RwLock::new(Vec::new()),
                 mutation_history_baseline: RwLock::new(DesiredClusterState::default()),
+                maintenance_state: RwLock::new(maintenance_state),
                 desired_metadata_cache: RwLock::new(None),
                 desired_summary_cache: RwLock::new(None),
             },

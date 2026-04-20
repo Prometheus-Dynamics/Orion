@@ -3,6 +3,7 @@ use super::client::{
     ExecutorWorkloadQuery, PeerEnrollment, PeerIdentityUpdate, ProviderLeaseQuery,
     ProviderStateUpdate, StateWatch,
 };
+use super::maintenance::{MaintenanceCommand, MaintenanceStatus};
 use super::metrics::{NodeObservabilitySnapshot, PeerTrustSnapshot};
 use super::mutations::MutationBatch;
 use super::sync::{PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest, SyncSummaryRequest};
@@ -38,6 +39,9 @@ pub enum ControlMessage {
     RevokePeer(NodeId),
     ReplacePeerIdentity(PeerIdentityUpdate),
     RotateHttpTlsIdentity,
+    QueryMaintenance,
+    UpdateMaintenance(MaintenanceCommand),
+    MaintenanceStatus(MaintenanceStatus),
     QueryObservability,
     Observability(Box<NodeObservabilitySnapshot>),
     WatchState(StateWatch),

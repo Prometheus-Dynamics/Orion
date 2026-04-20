@@ -4,7 +4,7 @@ use orion::{
     ArtifactId, Revision,
     control_plane::{
         AppliedClusterState, ArtifactRecord, ClusterStateEnvelope, DesiredClusterState,
-        DesiredStateSectionFingerprints, MutationBatch, ObservedClusterState,
+        DesiredStateSectionFingerprints, MaintenanceState, MutationBatch, ObservedClusterState,
     },
 };
 use rkyv::{
@@ -22,6 +22,7 @@ const SNAPSHOT_OBSERVED_FILE: &str = "snapshot-observed.rkyv";
 const SNAPSHOT_APPLIED_FILE: &str = "snapshot-applied.rkyv";
 const MUTATION_HISTORY_FILE: &str = "mutation-history.rkyv";
 const MUTATION_HISTORY_BASELINE_FILE: &str = "mutation-history-baseline.rkyv";
+const MAINTENANCE_STATE_FILE: &str = "maintenance-state.rkyv";
 const ARTIFACT_METADATA_FILE: &str = "metadata.rkyv";
 const ARTIFACT_PAYLOAD_FILE: &str = "payload.bin";
 const SNAPSHOT_FORMAT_VERSION: u32 = 3;
@@ -106,6 +107,10 @@ impl NodeStorage {
 
     pub fn mutation_history_baseline_path(&self) -> PathBuf {
         self.root.join(MUTATION_HISTORY_BASELINE_FILE)
+    }
+
+    pub fn maintenance_state_path(&self) -> PathBuf {
+        self.root.join(MAINTENANCE_STATE_FILE)
     }
 
     pub fn ensure_layout(&self) -> Result<(), NodeError> {
@@ -271,6 +276,21 @@ impl NodeStorage {
         }
         let bytes = encode_to_vec(baseline)?;
         self.atomic_write(&path, &bytes)
+    }
+
+    pub fn load_maintenance_state(&self) -> Result<Option<MaintenanceState>, NodeError> {
+        let path = self.maintenance_state_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = std::fs::read(&path).map_err(|err| NodeError::Storage(err.to_string()))?;
+        decode_from_slice(&bytes).map(Some)
+    }
+
+    pub fn save_maintenance_state(&self, state: &MaintenanceState) -> Result<(), NodeError> {
+        self.ensure_layout()?;
+        let bytes = encode_to_vec(state)?;
+        self.atomic_write(&self.maintenance_state_path(), &bytes)
     }
 
     pub(crate) fn save_mutation_history_baseline_bytes(

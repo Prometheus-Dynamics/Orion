@@ -1,5 +1,6 @@
 mod client;
 mod control;
+mod maintenance;
 mod metrics;
 mod mutations;
 mod sync;
@@ -10,6 +11,9 @@ pub use client::{
     PeerIdentityUpdate, ProviderLeaseQuery, ProviderStateUpdate, StateWatch,
 };
 pub use control::ControlMessage;
+pub use maintenance::{
+    MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
+};
 pub use metrics::{
     AuditLogBackpressureMode, ClientSessionMetricsSnapshot, HttpMutualTlsMode, NodeHealthSnapshot,
     NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,

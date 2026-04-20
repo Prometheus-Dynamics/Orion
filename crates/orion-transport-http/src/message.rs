@@ -76,6 +76,9 @@ impl HttpRequestPayload {
                 | ControlMessage::RevokePeer(_)
                 | ControlMessage::ReplacePeerIdentity(_)
                 | ControlMessage::RotateHttpTlsIdentity
+                | ControlMessage::QueryMaintenance
+                | ControlMessage::UpdateMaintenance(_)
+                | ControlMessage::MaintenanceStatus(_)
                 | ControlMessage::Observability(_)
                 | ControlMessage::WatchState(_)
                 | ControlMessage::PollClientEvents(_)

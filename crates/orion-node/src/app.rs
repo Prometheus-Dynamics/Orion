@@ -3,6 +3,7 @@ mod desired_state;
 mod desired_sync;
 mod local_clients;
 mod local_control;
+mod maintenance_admin;
 mod observability;
 mod peer_sync;
 mod peer_sync_client;

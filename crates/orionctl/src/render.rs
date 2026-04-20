@@ -1,4 +1,6 @@
-use orion_control_plane::{ClientEvent, ClientEventKind, PeerTrustSnapshot, StateSnapshot};
+use orion_control_plane::{
+    ClientEvent, ClientEventKind, MaintenanceStatus, PeerTrustSnapshot, StateSnapshot,
+};
 
 use crate::cli::OutputFormat;
 
@@ -96,6 +98,17 @@ pub(crate) fn print_event_summary(event: &ClientEvent) {
             );
         }
     }
+}
+
+pub(crate) fn print_maintenance_summary(status: &MaintenanceStatus) {
+    println!(
+        "maintenance mode={} peer_sync_paused={} remote_desired_state_blocked={} allow_runtimes={} allow_workloads={}",
+        status.state.mode,
+        status.peer_sync_paused,
+        status.remote_desired_state_blocked,
+        join_display(&status.state.allow_runtime_types),
+        join_display(&status.state.allow_workload_ids),
+    );
 }
 
 #[derive(serde::Serialize)]

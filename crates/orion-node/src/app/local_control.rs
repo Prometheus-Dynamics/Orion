@@ -110,6 +110,12 @@ impl NodeApp {
                 self.rotate_http_tls_identity()?;
                 Ok(ControlMessage::Accepted)
             }
+            ControlMessage::QueryMaintenance => {
+                Ok(ControlMessage::MaintenanceStatus(self.maintenance_status()))
+            }
+            ControlMessage::UpdateMaintenance(command) => Ok(ControlMessage::MaintenanceStatus(
+                self.update_maintenance(command)?,
+            )),
             ControlMessage::WatchProviderLeases(query) => {
                 self.subscribe_provider_watch(source, query)?;
                 Ok(ControlMessage::Accepted)
@@ -178,6 +184,7 @@ impl NodeApp {
             | ControlMessage::ExecutorWorkloads(_)
             | ControlMessage::ProviderLeases(_)
             | ControlMessage::PeerTrust(_)
+            | ControlMessage::MaintenanceStatus(_)
             | ControlMessage::Observability(_)
             | ControlMessage::ClientEvents(_)
             | ControlMessage::Accepted

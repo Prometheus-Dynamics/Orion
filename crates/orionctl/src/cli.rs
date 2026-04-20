@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use orion_client::{default_ipc_socket_path, default_ipc_stream_socket_path};
 use orion_control_plane::{DesiredState, RestartPolicy, TypedConfigValue};
-use orion_core::{NodeId, ResourceId, ResourceType};
+use orion_core::{NodeId, ResourceId, ResourceType, RuntimeType, WorkloadId};
 
 const RUNTIME_IPC_SOCKET_PATH: &str = "/run/orion/control.sock";
 const RUNTIME_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.sock";
@@ -38,6 +38,10 @@ pub(crate) enum Command {
     Peers {
         #[command(subcommand)]
         command: PeerCommand,
+    },
+    Maintenance {
+        #[command(subcommand)]
+        command: MaintenanceCommand,
     },
 }
 
@@ -78,6 +82,16 @@ pub(crate) enum PeerCommand {
     Revoke(PeerNodeArgs),
     ReplaceKey(PeerReplaceKeyArgs),
     RotateHttpTls(LocalControlArgs),
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum MaintenanceCommand {
+    Status(LocalControlArgs),
+    Cordon(LocalControlArgs),
+    Drain(LocalControlArgs),
+    Enter(MaintenanceEnterArgs),
+    Isolate(MaintenanceEnterArgs),
+    Exit(LocalControlArgs),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -339,6 +353,32 @@ pub(crate) struct PeerReplaceKeyArgs {
     pub(crate) node_id: String,
     #[arg(long)]
     pub(crate) public_key: String,
+}
+
+#[derive(Args, Clone, Debug)]
+pub(crate) struct MaintenanceEnterArgs {
+    #[command(flatten)]
+    pub(crate) local: LocalControlArgs,
+    #[arg(long = "allow-runtime")]
+    pub(crate) allow_runtime_types: Vec<String>,
+    #[arg(long = "allow-workload")]
+    pub(crate) allow_workload_ids: Vec<String>,
+}
+
+impl MaintenanceEnterArgs {
+    pub(crate) fn runtime_types(&self) -> Vec<RuntimeType> {
+        self.allow_runtime_types
+            .iter()
+            .map(RuntimeType::new)
+            .collect()
+    }
+
+    pub(crate) fn workload_ids(&self) -> Vec<WorkloadId> {
+        self.allow_workload_ids
+            .iter()
+            .map(WorkloadId::new)
+            .collect()
+    }
 }
 
 pub(crate) fn parse_requirement(input: &str) -> Result<RequirementSpec, String> {

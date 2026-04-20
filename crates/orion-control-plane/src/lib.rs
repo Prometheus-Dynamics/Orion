@@ -10,6 +10,7 @@ pub use messages::{
     ClientRole, ClientSession, ClientSessionMetricsSnapshot, ControlMessage, DesiredStateMutation,
     DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,
     DesiredStateSummary, ExecutorStateUpdate, ExecutorWorkloadQuery, HttpMutualTlsMode,
+    MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
     MutationApplyError, MutationBatch, NodeHealthSnapshot, NodeHealthStatus,
     NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus, ObservabilityEvent,
     ObservabilityEventKind, ObservedStateUpdate, OperationFailureCategory,
@@ -230,6 +231,9 @@ mod tests {
             | ControlMessage::RevokePeer(_)
             | ControlMessage::ReplacePeerIdentity(_)
             | ControlMessage::RotateHttpTlsIdentity
+            | ControlMessage::QueryMaintenance
+            | ControlMessage::UpdateMaintenance(_)
+            | ControlMessage::MaintenanceStatus(_)
             | ControlMessage::Rejected(_) => {
                 panic!("unexpected control message")
             }

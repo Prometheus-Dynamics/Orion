@@ -302,11 +302,14 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::EnrollPeer
                 | ControlOperation::RevokePeer
                 | ControlOperation::ReplacePeerIdentity
-                | ControlOperation::RotateHttpTlsIdentity,
+                | ControlOperation::RotateHttpTlsIdentity
+                | ControlOperation::QueryMaintenance
+                | ControlOperation::UpdateMaintenance,
             ) => self.authorize_local_role(source, ClientRole::ControlPlane),
-            (ControlPrincipal::Local { source, .. }, ControlOperation::PeerTrust) => {
-                self.authorize_local_role(source, ClientRole::ControlPlane)
-            }
+            (
+                ControlPrincipal::Local { source, .. },
+                ControlOperation::PeerTrust | ControlOperation::MaintenanceStatus,
+            ) => self.authorize_local_role(source, ClientRole::ControlPlane),
             (principal, operation) => Err(NodeError::Authorization(format!(
                 "principal {:?} is not allowed to perform {:?}",
                 principal, operation

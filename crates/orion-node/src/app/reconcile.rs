@@ -122,6 +122,12 @@ impl NodeApp {
         &self,
         snapshot: StateSnapshot,
     ) -> Result<(), NodeError> {
+        if self.remote_desired_state_blocked() {
+            return Err(NodeError::Authorization(
+                "remote desired state adoption is blocked while maintenance isolation is active"
+                    .into(),
+            ));
+        }
         let previous_revision = self.current_desired_revision();
         let remote_desired = snapshot.state.desired.clone();
         self.validate_desired_state(&remote_desired)?;
@@ -161,6 +167,12 @@ impl NodeApp {
     }
 
     pub(super) fn adopt_remote_snapshot(&self, snapshot: StateSnapshot) -> Result<(), NodeError> {
+        if self.remote_desired_state_blocked() {
+            return Err(NodeError::Authorization(
+                "remote desired state adoption is blocked while maintenance isolation is active"
+                    .into(),
+            ));
+        }
         let previous_revision = self.current_desired_revision();
         let remote_desired = snapshot.state.desired.clone();
         self.validate_desired_state(&remote_desired)?;
@@ -202,6 +214,12 @@ impl NodeApp {
         &self,
         batch: &MutationBatch,
     ) -> Result<(), NodeError> {
+        if self.remote_desired_state_blocked() {
+            return Err(NodeError::Authorization(
+                "remote desired state mutations are blocked while maintenance isolation is active"
+                    .into(),
+            ));
+        }
         let started = std::time::Instant::now();
         let commit_result = {
             let _span = info_span!("mutation_apply", node = %self.config.node_id).entered();
@@ -231,6 +249,12 @@ impl NodeApp {
     }
 
     pub(super) fn apply_remote_mutations(&self, batch: &MutationBatch) -> Result<(), NodeError> {
+        if self.remote_desired_state_blocked() {
+            return Err(NodeError::Authorization(
+                "remote desired state mutations are blocked while maintenance isolation is active"
+                    .into(),
+            ));
+        }
         let _span = info_span!("mutation_apply", node = %self.config.node_id).entered();
         let started = std::time::Instant::now();
         let previous_revision = self.current_desired_revision();
@@ -295,6 +319,9 @@ impl NodeApp {
             | ControlMessage::RevokePeer(_)
             | ControlMessage::ReplacePeerIdentity(_)
             | ControlMessage::RotateHttpTlsIdentity
+            | ControlMessage::QueryMaintenance
+            | ControlMessage::UpdateMaintenance(_)
+            | ControlMessage::MaintenanceStatus(_)
             | ControlMessage::Observability(_)
             | ControlMessage::WatchState(_)
             | ControlMessage::PollClientEvents(_)
@@ -367,7 +394,11 @@ impl NodeApp {
         let local_workloads = desired
             .workloads
             .values()
-            .filter(|workload| workload.assigned_node_id.as_ref() == Some(&self.config.node_id));
+            .filter(|workload| workload.assigned_node_id.as_ref() == Some(&self.config.node_id))
+            .filter(|workload| {
+                let store = self.store_read();
+                store.allows_local_workload(workload)
+            });
 
         for workload in local_workloads {
             for executor in executors.values() {
@@ -453,6 +484,10 @@ impl NodeApp {
         for workload in desired.workloads.values().filter(|workload| {
             workload.desired_state == orion::control_plane::DesiredState::Running
                 && workload.assigned_node_id.as_ref() == Some(&self.config.node_id)
+                && {
+                    let store = self.store_read();
+                    store.allows_local_workload(workload)
+                }
         }) {
             let mut available_resources = desired_local_resources.clone();
             for resource in &local_resources {

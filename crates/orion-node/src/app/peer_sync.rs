@@ -569,6 +569,9 @@ impl NodeApp {
     }
 
     pub async fn sync_peer(&self, node_id: &NodeId) -> Result<(), NodeError> {
+        if self.peer_sync_paused() {
+            return Ok(());
+        }
         let started = std::time::Instant::now();
         let Some(start) = self.prepare_peer_sync_start(node_id)? else {
             return Ok(());

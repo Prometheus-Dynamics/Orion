@@ -1,4 +1,5 @@
 use super::*;
+use orion::control_plane::{DesiredStateMutation, MaintenanceAction, MaintenanceCommand};
 
 #[tokio::test(flavor = "current_thread")]
 async fn async_snapshot_adoption_does_not_block_the_runtime_thread() {
@@ -191,5 +192,113 @@ async fn tick_async_makes_progress_under_concurrent_mutation_load() {
     assert!(
         app.state_snapshot().state.desired.revision > Revision::ZERO,
         "concurrent mutation load should advance desired revision"
+    );
+}
+
+#[test]
+fn maintenance_enter_filters_local_workloads_from_reconcile_until_allowed() {
+    let app = NodeApp::builder()
+        .config(test_node_config_with_auth(
+            "node-a",
+            "maintenance-runtime-filter",
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .try_build()
+        .expect("node app should build");
+    let executor = TestExecutor::new();
+    let commands = executor.commands.clone();
+    app.register_executor(executor)
+        .expect("executor registration should succeed");
+
+    let mut desired = app.state_snapshot().state.desired;
+    desired.put_workload(
+        WorkloadRecord::builder(
+            "workload.maintenance",
+            "graph.exec.v1",
+            "artifact.maintenance",
+        )
+        .desired_state(DesiredState::Running)
+        .assigned_to("node-a")
+        .build(),
+    );
+    app.replace_desired(desired);
+
+    let initial = app.tick().expect("initial tick should succeed");
+    assert!(
+        matches!(
+            initial.commands.first(),
+            Some(ExecutorCommand::Start(plan)) if plan.workload.workload_id == WorkloadId::new("workload.maintenance")
+        ),
+        "expected workload to be runnable before maintenance"
+    );
+
+    app.update_maintenance(MaintenanceCommand {
+        action: MaintenanceAction::Enter,
+        allow_runtime_types: Vec::new(),
+        allow_workload_ids: Vec::new(),
+    })
+    .expect("enter maintenance should succeed");
+
+    let blocked = app.tick().expect("maintenance tick should succeed");
+    assert!(
+        blocked.commands.is_empty(),
+        "maintenance without allowlist should suppress local starts"
+    );
+
+    app.update_maintenance(MaintenanceCommand {
+        action: MaintenanceAction::Enter,
+        allow_runtime_types: vec![RuntimeType::new("graph.exec.v1")],
+        allow_workload_ids: Vec::new(),
+    })
+    .expect("maintenance allowlist update should succeed");
+
+    let allowed = app
+        .tick()
+        .expect("allowlisted maintenance tick should succeed");
+    assert!(
+        matches!(
+            allowed.commands.first(),
+            Some(ExecutorCommand::Start(plan)) if plan.workload.workload_id == WorkloadId::new("workload.maintenance")
+        ),
+        "allowlisted runtime should be runnable during maintenance"
+    );
+
+    assert!(
+        !commands.lock().expect("command log should lock").is_empty(),
+        "executor should have received commands during the test"
+    );
+}
+
+#[test]
+fn maintenance_isolation_blocks_remote_desired_state_mutations() {
+    let app = NodeApp::builder()
+        .config(test_node_config_with_auth(
+            "node-a",
+            "maintenance-isolation-blocks-remote",
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .try_build()
+        .expect("node app should build");
+
+    app.update_maintenance(MaintenanceCommand {
+        action: MaintenanceAction::Isolate,
+        allow_runtime_types: Vec::new(),
+        allow_workload_ids: Vec::new(),
+    })
+    .expect("isolation should succeed");
+
+    let err = app
+        .apply_control_message(ControlMessage::Mutations(MutationBatch {
+            base_revision: Revision::ZERO,
+            mutations: vec![DesiredStateMutation::PutArtifact(
+                ArtifactRecord::builder("artifact.remote.blocked").build(),
+            )],
+        }))
+        .expect_err("remote mutation should be blocked while isolated");
+
+    assert!(
+        err.to_string()
+            .contains("blocked while maintenance isolation is active"),
+        "unexpected error: {err}"
     );
 }

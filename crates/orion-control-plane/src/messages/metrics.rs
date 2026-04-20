@@ -1,3 +1,4 @@
+use super::maintenance::MaintenanceState;
 use orion_core::{NodeId, PeerBaseUrl, PublicKeyHex, Revision};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -311,6 +312,9 @@ pub struct NodeObservabilitySnapshot {
     pub desired_revision: Revision,
     pub observed_revision: Revision,
     pub applied_revision: Revision,
+    pub maintenance: MaintenanceState,
+    pub peer_sync_paused: bool,
+    pub remote_desired_state_blocked: bool,
     pub configured_peer_count: u64,
     pub ready_peer_count: u64,
     pub pending_peer_count: u64,

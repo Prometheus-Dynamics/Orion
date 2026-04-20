@@ -1,7 +1,7 @@
 use crate::{ExecutorSnapshot, ProviderSnapshot, RuntimeError};
 use orion_control_plane::{
-    AppliedClusterState, DesiredClusterState, ExecutorRecord, ObservedClusterState, ProviderRecord,
-    ResourceRecord, WorkloadRecord,
+    AppliedClusterState, DesiredClusterState, ExecutorRecord, MaintenanceMode, MaintenanceState,
+    ObservedClusterState, ProviderRecord, ResourceRecord, WorkloadRecord,
 };
 use orion_core::{ExecutorId, NodeId, ProviderId, Revision, WorkloadId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,6 +25,7 @@ pub struct LocalRuntimeStore {
     pub desired: DesiredClusterState,
     pub observed: ObservedClusterState,
     pub applied: AppliedClusterState,
+    maintenance: MaintenanceState,
     provider_sync_revisions: BTreeMap<ProviderId, Revision>,
     executor_sync_revisions: BTreeMap<ExecutorId, Revision>,
 }
@@ -36,8 +37,33 @@ impl LocalRuntimeStore {
             desired: DesiredClusterState::default(),
             observed: ObservedClusterState::default(),
             applied: AppliedClusterState::default(),
+            maintenance: MaintenanceState::default(),
             provider_sync_revisions: BTreeMap::new(),
             executor_sync_revisions: BTreeMap::new(),
+        }
+    }
+
+    pub fn maintenance(&self) -> &MaintenanceState {
+        &self.maintenance
+    }
+
+    pub fn set_maintenance(&mut self, maintenance: MaintenanceState) {
+        self.maintenance = maintenance;
+    }
+
+    pub fn allows_local_workload(&self, workload: &WorkloadRecord) -> bool {
+        match self.maintenance.mode {
+            MaintenanceMode::Normal => true,
+            MaintenanceMode::Cordoned | MaintenanceMode::Draining => false,
+            MaintenanceMode::Maintenance | MaintenanceMode::Isolated => {
+                self.maintenance
+                    .allow_workload_ids
+                    .contains(&workload.workload_id)
+                    || self
+                        .maintenance
+                        .allow_runtime_types
+                        .contains(&workload.runtime_type)
+            }
         }
     }
 
@@ -261,6 +287,7 @@ impl LocalRuntimeStore {
             .workloads
             .values()
             .filter(|workload| workload.assigned_node_id.as_ref() == Some(&self.local_node_id))
+            .filter(|workload| self.allows_local_workload(workload))
     }
 
     pub fn local_observed_workloads(&self) -> Vec<WorkloadRecord> {

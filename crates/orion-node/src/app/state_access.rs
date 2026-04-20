@@ -8,7 +8,9 @@ use crate::auth::{LocalSessionLookup, PeerObservedScope, PeerPolicyLookup};
 use crate::lock::{read_rwlock, write_rwlock};
 use orion::{
     NodeId,
-    control_plane::{ClientSession, DesiredClusterState as ControlDesiredClusterState},
+    control_plane::{
+        ClientSession, DesiredClusterState as ControlDesiredClusterState, MaintenanceState,
+    },
     runtime::LocalRuntimeStore,
     transport::ipc::LocalAddress,
 };
@@ -294,6 +296,20 @@ impl NodeApp {
         )
     }
 
+    pub(super) fn maintenance_state_read(&self) -> RwLockReadGuard<'_, MaintenanceState> {
+        read_rwlock(
+            self.state.persisted.maintenance_state.read(),
+            "node maintenance state",
+        )
+    }
+
+    pub(super) fn maintenance_state_lock(&self) -> RwLockWriteGuard<'_, MaintenanceState> {
+        write_rwlock(
+            self.state.persisted.maintenance_state.write(),
+            "node maintenance state",
+        )
+    }
+
     pub(super) fn with_persisted_state_read<T>(
         &self,
         read: impl FnOnce(&LocalRuntimeStore, &Vec<MutationBatch>, &ControlDesiredClusterState) -> T,
@@ -345,6 +361,7 @@ pub(super) struct PersistedState {
     pub(super) store: std::sync::RwLock<LocalRuntimeStore>,
     pub(super) mutation_history: std::sync::RwLock<Vec<MutationBatch>>,
     pub(super) mutation_history_baseline: std::sync::RwLock<DesiredClusterState>,
+    pub(super) maintenance_state: std::sync::RwLock<MaintenanceState>,
     pub(super) desired_metadata_cache: std::sync::RwLock<Option<DesiredStateMetadataCache>>,
     pub(super) desired_summary_cache: std::sync::RwLock<Option<DesiredStateSummaryCache>>,
 }

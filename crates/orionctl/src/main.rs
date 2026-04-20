@@ -1,5 +1,6 @@
 mod cli;
 mod handlers;
+mod maintenance;
 mod render;
 mod transport;
 

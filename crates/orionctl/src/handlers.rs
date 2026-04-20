@@ -14,6 +14,7 @@ use crate::{
         ApplyCommand, Cli, Command, DeleteCommand, GetCommand, OutputFormat, PeerCommand,
         StructuredFormat, WatchCommand,
     },
+    maintenance::run_maintenance,
     render::{
         join_display, join_or_dash, print_event_summary, print_peer_summary,
         print_snapshot_summary, print_structured,
@@ -28,6 +29,7 @@ pub(crate) async fn run() -> Result<(), String> {
         Command::Apply { command } => run_apply(*command).await,
         Command::Delete { command } => run_delete(command).await,
         Command::Peers { command } => run_peers(command).await,
+        Command::Maintenance { command } => run_maintenance(command).await,
     }
 }
 
@@ -99,11 +101,14 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
             match args.output {
                 OutputFormat::Summary => {
                     println!(
-                        "observability node={} desired_rev={} observed_rev={} applied_rev={} replay_success={} replay_failures={} sync_success={} sync_failures={} reconcile_success={} reconcile_failures={} mutation_success={} mutation_failures={} peers_configured={} peers_ready={} peers_degraded={} clients_registered={} clients_live={} recent_events={}",
+                        "observability node={} desired_rev={} observed_rev={} applied_rev={} maintenance_mode={} peer_sync_paused={} remote_blocked={} replay_success={} replay_failures={} sync_success={} sync_failures={} reconcile_success={} reconcile_failures={} mutation_success={} mutation_failures={} peers_configured={} peers_ready={} peers_degraded={} clients_registered={} clients_live={} recent_events={}",
                         snapshot.node_id,
                         snapshot.desired_revision,
                         snapshot.observed_revision,
                         snapshot.applied_revision,
+                        snapshot.maintenance.mode,
+                        snapshot.peer_sync_paused,
+                        snapshot.remote_desired_state_blocked,
                         snapshot.replay.success_count,
                         snapshot.replay.failure_count,
                         snapshot.peer_sync.success_count,

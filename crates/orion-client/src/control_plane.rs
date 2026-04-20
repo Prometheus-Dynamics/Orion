@@ -1,7 +1,7 @@
 use orion_control_plane::{
-    ClientEvent, ClientEventPoll, ClientRole, ControlMessage, MutationBatch,
-    NodeObservabilitySnapshot, PeerEnrollment, PeerIdentityUpdate, PeerTrustSnapshot,
-    StateSnapshot, StateWatch,
+    ClientEvent, ClientEventPoll, ClientRole, ControlMessage, MaintenanceCommand,
+    MaintenanceStatus, MutationBatch, NodeObservabilitySnapshot, PeerEnrollment,
+    PeerIdentityUpdate, PeerTrustSnapshot, StateSnapshot, StateWatch,
 };
 use orion_core::{NodeId, Revision};
 use orion_transport_ipc::LocalControlTransport;
@@ -121,6 +121,29 @@ where
     pub fn rotate_http_tls_identity(&self) -> Result<(), ClientError> {
         self.session
             .send_control_and_expect_accepted(ControlMessage::RotateHttpTlsIdentity)
+    }
+
+    pub fn query_maintenance(&self) -> Result<MaintenanceStatus, ClientError> {
+        self.session
+            .request_control_with(ControlMessage::QueryMaintenance, |message| match message {
+                ControlMessage::MaintenanceStatus(status) => Ok(status),
+                ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
+                _ => Err(ClientError::NoMessageAvailable),
+            })
+    }
+
+    pub fn update_maintenance(
+        &self,
+        command: MaintenanceCommand,
+    ) -> Result<MaintenanceStatus, ClientError> {
+        self.session
+            .request_control_with(ControlMessage::UpdateMaintenance(command), |message| {
+                match message {
+                    ControlMessage::MaintenanceStatus(status) => Ok(status),
+                    ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
+                    _ => Err(ClientError::NoMessageAvailable),
+                }
+            })
     }
 }
 
@@ -340,6 +363,28 @@ impl LocalControlPlaneClient {
             .await?
         {
             ControlMessage::Accepted => Ok(()),
+            ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
+            _ => Err(ClientError::NoMessageAvailable),
+        }
+    }
+
+    pub async fn query_maintenance(&self) -> Result<MaintenanceStatus, ClientError> {
+        match self.send_request(ControlMessage::QueryMaintenance).await? {
+            ControlMessage::MaintenanceStatus(status) => Ok(status),
+            ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
+            _ => Err(ClientError::NoMessageAvailable),
+        }
+    }
+
+    pub async fn update_maintenance(
+        &self,
+        command: MaintenanceCommand,
+    ) -> Result<MaintenanceStatus, ClientError> {
+        match self
+            .send_request(ControlMessage::UpdateMaintenance(command))
+            .await?
+        {
+            ControlMessage::MaintenanceStatus(status) => Ok(status),
             ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
             _ => Err(ClientError::NoMessageAvailable),
         }
