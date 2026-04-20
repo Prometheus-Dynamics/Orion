@@ -50,3 +50,19 @@ jobs:
           ORION_TEST_IMAGE: orion-node-test:ci
           RUST_TEST_THREADS: "1"
         run: cargo test -p orion-node --test ${{ matrix.suite }} -- --ignored --nocapture
+
+  orionctl-minimal-rootfs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Verify orionctl on minimal rootfs
+        run: ./testing/ci/test-orionctl-minimal-rootfs.sh

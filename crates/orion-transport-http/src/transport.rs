@@ -128,15 +128,18 @@ impl HttpClient {
                         .into(),
                 ));
             }
-            // Reqwest initializes its TLS verifier at client-build time even for plain-HTTP
-            // clients. Disable certificate verification for fixed http:// clients so images
-            // without a system trust store can still talk to local control surfaces.
-            builder = builder.danger_accept_invalid_certs(true);
+            // Reqwest initializes the rustls platform verifier at client-build time even for
+            // plain-HTTP clients unless the client is configured to use only explicit roots.
+            // Give the builder an empty explicit root set so stripped rootfs images do not need
+            // a system trust store just to construct an http:// client.
+            builder = builder.tls_certs_only(Vec::<reqwest::Certificate>::new());
         }
         if let Some(tls) = tls {
             let cert = reqwest::Certificate::from_pem(&tls.root_cert_pem)
                 .map_err(|err| HttpTransportError::Tls(err.to_string()))?;
-            builder = builder.add_root_certificate(cert);
+            // Use only the caller-provided roots instead of treating them as "extra" roots.
+            // On minimal images this avoids reqwest's platform-verifier initialization path.
+            builder = builder.tls_certs_only([cert]);
             if let (Some(client_cert_pem), Some(client_key_pem)) =
                 (tls.client_cert_pem, tls.client_key_pem)
             {
