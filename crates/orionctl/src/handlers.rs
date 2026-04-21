@@ -21,6 +21,34 @@ use crate::{
     },
 };
 
+fn effective_workloads(snapshot: &orion_control_plane::StateSnapshot) -> Vec<WorkloadRecord> {
+    let observed_by_id: BTreeMap<_, _> = snapshot
+        .state
+        .observed
+        .workloads
+        .iter()
+        .map(|(workload_id, workload)| (workload_id, workload))
+        .collect();
+
+    snapshot
+        .state
+        .desired
+        .workloads
+        .values()
+        .cloned()
+        .map(|mut workload| {
+            if let Some(observed) = observed_by_id.get(&workload.workload_id) {
+                workload.observed_state = observed.observed_state;
+                workload.resource_bindings = observed.resource_bindings.clone();
+                if observed.assigned_node_id.is_some() {
+                    workload.assigned_node_id = observed.assigned_node_id.clone();
+                }
+            }
+            workload
+        })
+        .collect()
+}
+
 pub(crate) async fn run() -> Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
@@ -145,13 +173,7 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
         }
         GetCommand::Workloads(args) => {
             let snapshot = args.source.fetch_snapshot().await?;
-            let workloads = snapshot
-                .state
-                .desired
-                .workloads
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
+            let workloads = effective_workloads(&snapshot);
             match args.source.output {
                 OutputFormat::Summary => {
                     println!("workloads count={}", workloads.len());
@@ -184,7 +206,7 @@ async fn run_get(command: GetCommand) -> Result<(), String> {
             let snapshot = args.source.fetch_snapshot().await?;
             let resources = snapshot
                 .state
-                .desired
+                .observed
                 .resources
                 .values()
                 .cloned()

@@ -6,17 +6,21 @@ use crate::cli::OutputFormat;
 
 pub(crate) fn print_snapshot_summary(snapshot: &StateSnapshot) {
     println!(
-        "snapshot desired_rev={} observed_rev={} applied_rev={} nodes={} artifacts={} workloads={} resources={} providers={} executors={} leases={}",
+        "snapshot desired_rev={} observed_rev={} applied_rev={} desired_nodes={} observed_nodes={} desired_artifacts={} desired_workloads={} observed_workloads={} desired_resources={} observed_resources={} desired_providers={} desired_executors={} desired_leases={} observed_leases={}",
         snapshot.state.desired.revision,
         snapshot.state.observed.revision,
         snapshot.state.applied.revision,
         snapshot.state.desired.nodes.len(),
+        snapshot.state.observed.nodes.len(),
         snapshot.state.desired.artifacts.len(),
         snapshot.state.desired.workloads.len(),
+        snapshot.state.observed.workloads.len(),
         snapshot.state.desired.resources.len(),
+        snapshot.state.observed.resources.len(),
         snapshot.state.desired.providers.len(),
         snapshot.state.desired.executors.len(),
         snapshot.state.desired.leases.len(),
+        snapshot.state.observed.leases.len(),
     );
 }
 
@@ -65,14 +69,18 @@ pub(crate) fn print_event_summary(event: &ClientEvent) {
     match &event.event {
         ClientEventKind::StateSnapshot(snapshot) => {
             println!(
-                "state seq={} desired_rev={} observed_rev={} workloads={} providers={} executors={} leases={}",
+                "state seq={} desired_rev={} observed_rev={} desired_workloads={} observed_workloads={} desired_resources={} observed_resources={} desired_providers={} desired_executors={} desired_leases={} observed_leases={}",
                 event.sequence,
                 snapshot.state.desired.revision,
                 snapshot.state.observed.revision,
                 snapshot.state.desired.workloads.len(),
+                snapshot.state.observed.workloads.len(),
+                snapshot.state.desired.resources.len(),
+                snapshot.state.observed.resources.len(),
                 snapshot.state.desired.providers.len(),
                 snapshot.state.desired.executors.len(),
                 snapshot.state.desired.leases.len(),
+                snapshot.state.observed.leases.len(),
             );
         }
         ClientEventKind::ExecutorWorkloads {

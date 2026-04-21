@@ -2,9 +2,12 @@ use std::{path::PathBuf, process::Command, time::Duration};
 
 use orion::{
     ArtifactId, NodeId, WorkloadId,
+    client::LocalNodeRuntime,
     control_plane::{
-        ArtifactRecord, ControlMessage, DesiredStateMutation, ExecutorRecord, MutationBatch,
-        SyncRequest, TypedConfigValue, WorkloadConfig, WorkloadRecord,
+        ArtifactRecord, AvailabilityState, ControlMessage, DesiredState, DesiredStateMutation,
+        ExecutorRecord, HealthState, LeaseState, MutationBatch, ProviderRecord, ResourceRecord,
+        ResourceOwnershipMode, SyncRequest, TypedConfigValue, WorkloadConfig,
+        WorkloadObservedState, WorkloadRecord,
     },
     transport::{
         http::{HttpClient, HttpRequestPayload, HttpResponsePayload},
@@ -387,6 +390,112 @@ async fn orionctl_apply_workload_accepts_toml_spec_file() {
     assert_eq!(stored, &spec);
 
     let _ = std::fs::remove_file(spec_path);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn orionctl_get_workloads_and_resources_report_observed_state() {
+    let harness = TestHarness::start("node.orionctl.observed").await;
+    publish_observed_updater_state(&harness).await;
+
+    let get_workloads = run_orionctl([
+        "get",
+        "workloads",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "json",
+    ]);
+    assert!(get_workloads.status.success(), "{}", output_text(&get_workloads));
+    let workloads: serde_json::Value =
+        serde_json::from_slice(&get_workloads.stdout).expect("json output should parse");
+    let array = workloads.as_array().expect("json should be an array");
+    assert_eq!(array.len(), 1);
+    assert_eq!(array[0]["workload_id"], "workload.update");
+    assert_eq!(array[0]["desired_state"], "Running");
+    assert_eq!(array[0]["observed_state"], "Running");
+
+    let get_resources = run_orionctl([
+        "get",
+        "resources",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "json",
+    ]);
+    assert!(get_resources.status.success(), "{}", output_text(&get_resources));
+    let resources: serde_json::Value =
+        serde_json::from_slice(&get_resources.stdout).expect("json output should parse");
+    let array = resources.as_array().expect("json should be an array");
+    assert_eq!(array.len(), 2);
+    assert!(
+        array.iter()
+            .any(|resource| resource["resource_id"] == "resource.updater.runtime")
+    );
+    assert!(
+        array.iter()
+            .any(|resource| resource["resource_id"] == "resource.update.execution")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn orionctl_snapshot_and_watch_summaries_include_desired_and_observed_counts() {
+    let harness = TestHarness::start("node.orionctl.summary").await;
+    publish_observed_updater_state(&harness).await;
+
+    let snapshot = run_orionctl([
+        "get",
+        "snapshot",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+    ]);
+    assert!(snapshot.status.success(), "{}", output_text(&snapshot));
+    let snapshot_stdout = String::from_utf8_lossy(&snapshot.stdout);
+    assert!(snapshot_stdout.contains("desired_workloads=1"));
+    assert!(snapshot_stdout.contains("observed_workloads=1"));
+    assert!(snapshot_stdout.contains("desired_resources=0"));
+    assert!(snapshot_stdout.contains("observed_resources=2"));
+
+    let watch_task = tokio::task::spawn_blocking({
+        let stream_socket = harness.ipc_stream_socket.to_string_lossy().to_string();
+        move || {
+            run_orionctl([
+                "watch",
+                "state",
+                "--stream-socket",
+                &stream_socket,
+                "--client-name",
+                "summary-watcher",
+                "--desired-revision",
+                "0",
+                "--batches",
+                "1",
+            ])
+        }
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let snapshot = harness.snapshot().await;
+    let response = harness
+        .client
+        .send(&HttpRequestPayload::Control(Box::new(
+            ControlMessage::Mutations(MutationBatch {
+                base_revision: snapshot.state.desired.revision,
+                mutations: vec![DesiredStateMutation::PutArtifact(
+                    ArtifactRecord::builder("artifact.summary").build(),
+                )],
+            }),
+        )))
+        .await
+        .expect("mutation should succeed");
+    assert_eq!(response, HttpResponsePayload::Accepted);
+
+    let output = watch_task.await.expect("watch task should join");
+    assert!(output.status.success(), "{}", output_text(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("desired_workloads=1"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("observed_workloads=1"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("desired_resources=0"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("observed_resources=2"), "unexpected stdout: {stdout}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -773,4 +882,89 @@ fn temp_spec_path(name: &str) -> PathBuf {
         .expect("system time should be after unix epoch")
         .as_nanos();
     std::env::temp_dir().join(format!("{stamp}-{name}"))
+}
+
+async fn publish_observed_updater_state(harness: &TestHarness) {
+    let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_provider(
+        ProviderRecord::builder("provider.observed", harness._app.config.node_id.clone())
+            .resource_type("helios.updater.runtime.v1")
+            .build(),
+    );
+    desired.put_executor(
+        ExecutorRecord::builder("executor.observed", harness._app.config.node_id.clone())
+            .runtime_type("helios.updater.v1")
+            .build(),
+    );
+    desired.put_workload(
+        WorkloadRecord::builder(
+            WorkloadId::new("workload.update"),
+            "helios.updater.v1",
+            ArtifactId::new("artifact.update"),
+        )
+        .assigned_to(harness._app.config.node_id.clone())
+        .desired_state(DesiredState::Running)
+        .observed_state(WorkloadObservedState::Pending)
+        .build(),
+    );
+    harness._app.replace_desired(desired);
+
+    let runtime = LocalNodeRuntime::new(&harness.ipc_socket, &harness.ipc_stream_socket);
+    runtime
+        .provider(
+            "orionctl.test.provider",
+            ProviderRecord::builder("provider.observed", harness._app.config.node_id.clone())
+                .resource_type("helios.updater.runtime.v1")
+                .build(),
+        )
+        .expect("provider client should connect")
+        .publish_resources(vec![ResourceRecord::builder(
+            "resource.updater.runtime",
+            "helios.updater.runtime.v1",
+            "provider.observed",
+        )
+        .ownership_mode(ResourceOwnershipMode::Exclusive)
+        .health(HealthState::Healthy)
+        .availability(AvailabilityState::Available)
+        .lease_state(LeaseState::Unleased)
+        .build()])
+        .await
+        .expect("provider snapshot should publish");
+
+    runtime
+        .executor(
+            "orionctl.test.executor",
+            ExecutorRecord::builder("executor.observed", harness._app.config.node_id.clone())
+                .runtime_type("helios.updater.v1")
+                .build(),
+        )
+        .expect("executor client should connect")
+        .publish_snapshot(
+            vec![
+                WorkloadRecord::builder(
+                    WorkloadId::new("workload.update"),
+                    "helios.updater.v1",
+                    ArtifactId::new("artifact.update"),
+                )
+                .assigned_to(harness._app.config.node_id.clone())
+                .desired_state(DesiredState::Running)
+                .observed_state(WorkloadObservedState::Running)
+                .build(),
+            ],
+            vec![ResourceRecord::builder(
+                "resource.update.execution",
+                "helios.updater.execution.v1",
+                "provider.observed",
+            )
+            .realized_by_executor("executor.observed")
+            .realized_for_workload("workload.update")
+            .source_workload("workload.update")
+            .ownership_mode(ResourceOwnershipMode::Exclusive)
+            .health(HealthState::Healthy)
+            .availability(AvailabilityState::Available)
+            .lease_state(LeaseState::Unleased)
+            .build()],
+        )
+        .await
+        .expect("executor snapshot should publish");
 }
