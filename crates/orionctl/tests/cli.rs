@@ -5,8 +5,8 @@ use orion::{
     client::LocalNodeRuntime,
     control_plane::{
         ArtifactRecord, AvailabilityState, ControlMessage, DesiredState, DesiredStateMutation,
-        ExecutorRecord, HealthState, LeaseState, MutationBatch, ProviderRecord, ResourceRecord,
-        ResourceOwnershipMode, SyncRequest, TypedConfigValue, WorkloadConfig,
+        ExecutorRecord, HealthState, LeaseState, MutationBatch, ProviderRecord,
+        ResourceOwnershipMode, ResourceRecord, SyncRequest, TypedConfigValue, WorkloadConfig,
         WorkloadObservedState, WorkloadRecord,
     },
     transport::{
@@ -405,7 +405,11 @@ async fn orionctl_get_workloads_and_resources_report_observed_state() {
         "-o",
         "json",
     ]);
-    assert!(get_workloads.status.success(), "{}", output_text(&get_workloads));
+    assert!(
+        get_workloads.status.success(),
+        "{}",
+        output_text(&get_workloads)
+    );
     let workloads: serde_json::Value =
         serde_json::from_slice(&get_workloads.stdout).expect("json output should parse");
     let array = workloads.as_array().expect("json should be an array");
@@ -422,17 +426,23 @@ async fn orionctl_get_workloads_and_resources_report_observed_state() {
         "-o",
         "json",
     ]);
-    assert!(get_resources.status.success(), "{}", output_text(&get_resources));
+    assert!(
+        get_resources.status.success(),
+        "{}",
+        output_text(&get_resources)
+    );
     let resources: serde_json::Value =
         serde_json::from_slice(&get_resources.stdout).expect("json output should parse");
     let array = resources.as_array().expect("json should be an array");
     assert_eq!(array.len(), 2);
     assert!(
-        array.iter()
+        array
+            .iter()
             .any(|resource| resource["resource_id"] == "resource.updater.runtime")
     );
     assert!(
-        array.iter()
+        array
+            .iter()
             .any(|resource| resource["resource_id"] == "resource.update.execution")
     );
 }
@@ -492,10 +502,22 @@ async fn orionctl_snapshot_and_watch_summaries_include_desired_and_observed_coun
     let output = watch_task.await.expect("watch task should join");
     assert!(output.status.success(), "{}", output_text(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("desired_workloads=1"), "unexpected stdout: {stdout}");
-    assert!(stdout.contains("observed_workloads=1"), "unexpected stdout: {stdout}");
-    assert!(stdout.contains("desired_resources=0"), "unexpected stdout: {stdout}");
-    assert!(stdout.contains("observed_resources=2"), "unexpected stdout: {stdout}");
+    assert!(
+        stdout.contains("desired_workloads=1"),
+        "unexpected stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("observed_workloads=1"),
+        "unexpected stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("desired_resources=0"),
+        "unexpected stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("observed_resources=2"),
+        "unexpected stdout: {stdout}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -918,16 +940,18 @@ async fn publish_observed_updater_state(harness: &TestHarness) {
                 .build(),
         )
         .expect("provider client should connect")
-        .publish_resources(vec![ResourceRecord::builder(
-            "resource.updater.runtime",
-            "helios.updater.runtime.v1",
-            "provider.observed",
-        )
-        .ownership_mode(ResourceOwnershipMode::Exclusive)
-        .health(HealthState::Healthy)
-        .availability(AvailabilityState::Available)
-        .lease_state(LeaseState::Unleased)
-        .build()])
+        .publish_resources(vec![
+            ResourceRecord::builder(
+                "resource.updater.runtime",
+                "helios.updater.runtime.v1",
+                "provider.observed",
+            )
+            .ownership_mode(ResourceOwnershipMode::Exclusive)
+            .health(HealthState::Healthy)
+            .availability(AvailabilityState::Available)
+            .lease_state(LeaseState::Unleased)
+            .build(),
+        ])
         .await
         .expect("provider snapshot should publish");
 
@@ -951,19 +975,21 @@ async fn publish_observed_updater_state(harness: &TestHarness) {
                 .observed_state(WorkloadObservedState::Running)
                 .build(),
             ],
-            vec![ResourceRecord::builder(
-                "resource.update.execution",
-                "helios.updater.execution.v1",
-                "provider.observed",
-            )
-            .realized_by_executor("executor.observed")
-            .realized_for_workload("workload.update")
-            .source_workload("workload.update")
-            .ownership_mode(ResourceOwnershipMode::Exclusive)
-            .health(HealthState::Healthy)
-            .availability(AvailabilityState::Available)
-            .lease_state(LeaseState::Unleased)
-            .build()],
+            vec![
+                ResourceRecord::builder(
+                    "resource.update.execution",
+                    "helios.updater.execution.v1",
+                    "provider.observed",
+                )
+                .realized_by_executor("executor.observed")
+                .realized_for_workload("workload.update")
+                .source_workload("workload.update")
+                .ownership_mode(ResourceOwnershipMode::Exclusive)
+                .health(HealthState::Healthy)
+                .availability(AvailabilityState::Available)
+                .lease_state(LeaseState::Unleased)
+                .build(),
+            ],
         )
         .await
         .expect("executor snapshot should publish");

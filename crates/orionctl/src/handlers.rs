@@ -22,13 +22,7 @@ use crate::{
 };
 
 fn effective_workloads(snapshot: &orion_control_plane::StateSnapshot) -> Vec<WorkloadRecord> {
-    let observed_by_id: BTreeMap<_, _> = snapshot
-        .state
-        .observed
-        .workloads
-        .iter()
-        .map(|(workload_id, workload)| (workload_id, workload))
-        .collect();
+    let observed_by_id: BTreeMap<_, _> = snapshot.state.observed.workloads.iter().collect();
 
     snapshot
         .state
