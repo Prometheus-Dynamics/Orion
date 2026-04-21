@@ -11,6 +11,8 @@
 //! - `service`, `macros`, and `cluster` are ergonomic opt-ins rather than default dependencies.
 //! - `service` is ergonomic rather than strictly zero-cost because it uses dynamic dispatch.
 
+pub mod build_info;
+
 #[doc(hidden)]
 pub extern crate self as orion;
 
@@ -205,6 +207,10 @@ pub use orion_macros::{OrionExecutor, OrionProvider, orion_resource_type, orion_
 pub use runtime::{LocalRuntimeStore, Runtime};
 #[cfg(feature = "service")]
 pub use service::{MiddlewareNext, MiddlewareStack, RequestMiddleware, RequestService};
+
+pub use build_info::{
+    BUILD_COMMIT, BUILD_VERSION, PKG_VERSION, build_commit, build_version, pkg_version,
+};
 
 #[cfg(all(
     test,

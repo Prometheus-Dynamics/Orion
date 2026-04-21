@@ -5,12 +5,16 @@ use orion_client::{default_ipc_socket_path, default_ipc_stream_socket_path};
 use orion_control_plane::{DesiredState, RestartPolicy, TypedConfigValue};
 use orion_core::{NodeId, ResourceId, ResourceType, RuntimeType, WorkloadId};
 
+use crate::build_info;
+
 const RUNTIME_IPC_SOCKET_PATH: &str = "/run/orion/control.sock";
 const RUNTIME_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.sock";
 
 #[derive(Parser, Debug)]
 #[command(name = "orionctl")]
 #[command(about = "Operator CLI for the Orion daemon.")]
+#[command(version = build_info::PKG_VERSION)]
+#[command(long_version = build_info::BUILD_VERSION)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
@@ -518,6 +522,7 @@ mod tests {
         parse_binding, parse_bool_config, parse_bytes_hex_config, parse_requirement,
         parse_string_config, parse_uint_config, preferred_runtime_path,
     };
+    use crate::build_info;
     use crate::transport::HttpTargetExt;
 
     fn target(http: &str) -> HttpTargetArgs {
@@ -611,6 +616,17 @@ mod tests {
         let selected = preferred_runtime_path(runtime, || fallback.clone());
 
         assert_eq!(selected, fallback);
+    }
+
+    #[test]
+    fn clap_version_strings_include_build_metadata() {
+        use clap::CommandFactory;
+
+        let command = super::Cli::command();
+        assert_eq!(command.get_version(), Some(build_info::PKG_VERSION));
+        assert_eq!(command.get_long_version(), Some(build_info::BUILD_VERSION));
+        assert!(build_info::BUILD_VERSION.contains(build_info::PKG_VERSION));
+        assert!(build_info::BUILD_VERSION.contains(env!("ORION_BUILD_COMMIT")));
     }
 
     fn unique_test_path(name: &str) -> std::path::PathBuf {

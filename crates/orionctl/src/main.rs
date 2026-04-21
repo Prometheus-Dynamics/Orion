@@ -1,3 +1,4 @@
+mod build_info;
 mod cli;
 mod handlers;
 mod maintenance;
