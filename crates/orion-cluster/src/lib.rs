@@ -112,6 +112,7 @@ mod tests {
             NodeRecord {
                 node_id: NodeId::new("node-a"),
                 health: HealthState::Healthy,
+                schedulable: true,
                 labels: Vec::new(),
             },
         );

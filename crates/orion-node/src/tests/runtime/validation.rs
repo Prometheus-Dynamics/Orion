@@ -279,3 +279,41 @@ fn node_validation_rejects_shared_limited_claim_above_limit() {
         .expect_err("shared-limited over-claim should be rejected");
     assert!(err.to_string().contains("shared consumer limit 1"));
 }
+
+#[test]
+fn node_validation_rejects_workload_assigned_to_unschedulable_node() {
+    let app = NodeApp::builder()
+        .config(test_node_config_with_auth(
+            "node-a",
+            "node-test",
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .try_build()
+        .expect("node app should build");
+    app.register_executor(TestExecutor::new())
+        .expect("executor registration should succeed");
+
+    let mut desired = app.state_snapshot().state.desired;
+    desired.put_artifact(ArtifactRecord::builder("artifact.unschedulable").build());
+    desired.put_node(
+        orion::control_plane::NodeRecord::builder("node-b")
+            .schedulable(false)
+            .health(orion::control_plane::HealthState::Healthy)
+            .build(),
+    );
+    desired.put_workload(
+        WorkloadRecord::builder(
+            "workload.unschedulable",
+            "graph.exec.v1",
+            "artifact.unschedulable",
+        )
+        .desired_state(DesiredState::Running)
+        .assigned_to("node-b")
+        .build(),
+    );
+
+    let err = app
+        .validate_desired_state_for_test(&desired)
+        .expect_err("unschedulable assigned node should be rejected");
+    assert!(err.to_string().contains("unschedulable node node-b"));
+}

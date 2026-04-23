@@ -9,6 +9,12 @@ use crate::build_info;
 
 const RUNTIME_IPC_SOCKET_PATH: &str = "/run/orion/control.sock";
 const RUNTIME_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.sock";
+const GET_AFTER_HELP: &str = "Examples:\n  orionctl get workloads --socket /run/orion/control.sock\n  orionctl get workloads --http http://127.0.0.1:9100 --node node-a\n  orionctl get workload workload.camera --socket /run/orion/control.sock\n  orionctl get events --http http://127.0.0.1:9100 --kind mutation -o json";
+const DESCRIBE_AFTER_HELP: &str = "Examples:\n  orionctl describe workload workload.camera --socket /run/orion/control.sock\n  orionctl describe node node-a --http http://127.0.0.1:9100\n  orionctl describe resource resource.camera.front -o json";
+const APPLY_WORKLOAD_AFTER_HELP: &str = "Examples:\n  orionctl apply workload --socket /run/orion/control.sock --workload-id workload.demo --runtime-type graph.exec.v1 --artifact-id artifact.demo --assigned-node node-a --desired-state running\n  orionctl apply workload --socket /run/orion/control.sock --spec workload.yaml\n  orionctl apply workload --socket /run/orion/control.sock --spec workload.yaml --dry-run";
+const APPLY_ARTIFACT_AFTER_HELP: &str = "Examples:\n  orionctl apply artifact --socket /run/orion/control.sock --artifact-id artifact.demo --content-type application/octet-stream --size-bytes 128\n  orionctl apply artifact --socket /run/orion/control.sock --artifact-id artifact.demo --dry-run";
+const DELETE_AFTER_HELP: &str = "Examples:\n  orionctl delete workload --socket /run/orion/control.sock --workload-id workload.demo\n  orionctl delete workload --socket /run/orion/control.sock --workload-id workload.demo --dry-run";
+const MAINTENANCE_AFTER_HELP: &str = "Examples:\n  orionctl maintenance cordon --socket /run/orion/control.sock\n  orionctl maintenance enter --socket /run/orion/control.sock --allow-runtime helios.updater.v1\n  orionctl maintenance isolate --socket /run/orion/control.sock\n  orionctl maintenance status --socket /run/orion/control.sock -o json";
 
 #[derive(Parser, Debug)]
 #[command(name = "orionctl")]
@@ -25,6 +31,10 @@ pub(crate) enum Command {
     Get {
         #[command(subcommand)]
         command: GetCommand,
+    },
+    Describe {
+        #[command(subcommand)]
+        command: DescribeCommand,
     },
     Watch {
         #[command(subcommand)]
@@ -50,16 +60,32 @@ pub(crate) enum Command {
 }
 
 #[derive(Subcommand, Debug)]
+#[command(after_help = GET_AFTER_HELP)]
 pub(crate) enum GetCommand {
     Health(HttpTargetArgs),
     Readiness(HttpTargetArgs),
     Observability(StateQueryArgs),
     Snapshot(StateQueryArgs),
+    Node(DescribeObjectArgs),
+    Artifact(DescribeObjectArgs),
+    Workload(DescribeObjectArgs),
+    Nodes(ListArgs),
+    Artifacts(ListArgs),
     Workloads(ListArgs),
     Resources(ListArgs),
     Providers(ListArgs),
     Executors(ListArgs),
     Leases(ListArgs),
+    Events(ListArgs),
+}
+
+#[derive(Subcommand, Debug)]
+#[command(after_help = DESCRIBE_AFTER_HELP)]
+pub(crate) enum DescribeCommand {
+    Workload(DescribeObjectArgs),
+    Node(DescribeObjectArgs),
+    Artifact(DescribeObjectArgs),
+    Resource(DescribeObjectArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -89,6 +115,7 @@ pub(crate) enum PeerCommand {
 }
 
 #[derive(Subcommand, Debug)]
+#[command(after_help = MAINTENANCE_AFTER_HELP)]
 pub(crate) enum MaintenanceCommand {
     Status(LocalControlArgs),
     Cordon(LocalControlArgs),
@@ -211,6 +238,32 @@ pub(crate) struct StateQueryArgs {
 pub(crate) struct ListArgs {
     #[command(flatten)]
     pub(crate) source: StateQueryArgs,
+    #[arg(long)]
+    pub(crate) node: Option<String>,
+    #[arg(long)]
+    pub(crate) label: Option<String>,
+    #[arg(long)]
+    pub(crate) runtime: Option<String>,
+    #[arg(long)]
+    pub(crate) artifact: Option<String>,
+    #[arg(long = "type")]
+    pub(crate) resource_type: Option<String>,
+    #[arg(long)]
+    pub(crate) provider: Option<String>,
+    #[arg(long)]
+    pub(crate) kind: Option<String>,
+    #[arg(long)]
+    pub(crate) subject: Option<String>,
+    #[arg(long)]
+    pub(crate) failed: bool,
+}
+
+#[derive(Args, Clone, Debug)]
+pub(crate) struct DescribeObjectArgs {
+    #[command(flatten)]
+    pub(crate) source: StateQueryArgs,
+    #[arg()]
+    pub(crate) id: String,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -238,6 +291,7 @@ pub(crate) struct WatchStateArgs {
 }
 
 #[derive(Args, Clone, Debug)]
+#[command(after_help = APPLY_ARTIFACT_AFTER_HELP)]
 pub(crate) struct ApplyArtifactArgs {
     #[command(flatten)]
     pub(crate) local: LocalControlArgs,
@@ -247,6 +301,8 @@ pub(crate) struct ApplyArtifactArgs {
     pub(crate) content_type: Option<String>,
     #[arg(long)]
     pub(crate) size_bytes: Option<u64>,
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -268,6 +324,7 @@ pub(crate) struct ConfigFieldSpec {
 }
 
 #[derive(Args, Clone, Debug)]
+#[command(after_help = APPLY_WORKLOAD_AFTER_HELP)]
 pub(crate) struct ApplyWorkloadArgs {
     #[command(flatten)]
     pub(crate) local: LocalControlArgs,
@@ -303,22 +360,30 @@ pub(crate) struct ApplyWorkloadArgs {
     pub(crate) config_strings: Vec<ConfigFieldSpec>,
     #[arg(long = "config-bytes-hex", value_parser = parse_bytes_hex_config)]
     pub(crate) config_bytes_hex: Vec<ConfigFieldSpec>,
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Args, Clone, Debug)]
+#[command(after_help = DELETE_AFTER_HELP)]
 pub(crate) struct DeleteArtifactArgs {
     #[command(flatten)]
     pub(crate) local: LocalControlArgs,
     #[arg(long)]
     pub(crate) artifact_id: String,
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Args, Clone, Debug)]
+#[command(after_help = DELETE_AFTER_HELP)]
 pub(crate) struct DeleteWorkloadArgs {
     #[command(flatten)]
     pub(crate) local: LocalControlArgs,
     #[arg(long)]
     pub(crate) workload_id: String,
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Args, Clone, Debug)]

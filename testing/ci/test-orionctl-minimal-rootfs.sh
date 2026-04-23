@@ -53,17 +53,16 @@ run_expect_runtime_request_error() {
 
 run_expect_runtime_request_error \
   "plain-http-health" \
-  health \
+  get health \
   --http http://127.0.0.1:9100
 
 run_expect_runtime_request_error \
   "plain-http-snapshot" \
-  snapshot \
-  --http http://127.0.0.1:9100 \
-  --peer-node-id node-local
+  get snapshot \
+  --http http://127.0.0.1:9100
 
 run_expect_runtime_request_error \
   "https-health-with-explicit-ca" \
-  health \
+  get health \
   --http https://127.0.0.1:9100 \
   --ca-cert /etc/orion/test-root-ca.pem

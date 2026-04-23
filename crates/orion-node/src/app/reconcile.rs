@@ -230,6 +230,10 @@ impl NodeApp {
                 self.record_mutation_apply_failure(started.elapsed(), &error);
                 return Err(error);
             }
+            if let Err(err) = self.validate_remote_mutation_candidate(&candidate) {
+                self.record_mutation_apply_failure(started.elapsed(), &err);
+                return Err(err);
+            }
             if let Err(err) = self.validate_desired_state(&candidate) {
                 self.record_mutation_apply_failure(started.elapsed(), &err);
                 return Err(err);
@@ -263,6 +267,10 @@ impl NodeApp {
             let error = NodeError::from(err);
             self.record_mutation_apply_failure(started.elapsed(), &error);
             return Err(error);
+        }
+        if let Err(err) = self.validate_remote_mutation_candidate(&candidate) {
+            self.record_mutation_apply_failure(started.elapsed(), &err);
+            return Err(err);
         }
         if let Err(err) = self.validate_desired_state(&candidate) {
             self.record_mutation_apply_failure(started.elapsed(), &err);
@@ -390,6 +398,23 @@ impl NodeApp {
     }
 
     fn validate_desired_state(&self, desired: &DesiredClusterState) -> Result<(), NodeError> {
+        for workload in desired.workloads.values().filter(|workload| {
+            workload.desired_state == orion::control_plane::DesiredState::Running
+        }) {
+            let Some(node_id) = workload.assigned_node_id.as_ref() else {
+                continue;
+            };
+
+            if let Some(node) = desired.nodes.get(node_id)
+                && !node.schedulable
+            {
+                return Err(NodeError::Config(format!(
+                    "workload {} is assigned to unschedulable node {}",
+                    workload.workload_id, node_id
+                )));
+            }
+        }
+
         let executors = self.executors_read();
         let local_workloads = desired
             .workloads
@@ -590,6 +615,14 @@ impl NodeApp {
             }
         }
 
+        Ok(())
+    }
+
+    fn validate_remote_mutation_candidate(
+        &self,
+        desired: &DesiredClusterState,
+    ) -> Result<(), NodeError> {
+        let _ = desired;
         Ok(())
     }
 

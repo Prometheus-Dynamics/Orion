@@ -403,3 +403,215 @@ async fn restart_during_mutation_apply_recovers_latest_mutation() {
 
     let _ = fs::remove_dir_all(state_dir);
 }
+
+#[tokio::test]
+async fn maintenance_isolation_persists_across_restart_and_blocks_remote_mutations_until_exit() {
+    let state_dir = temp_state_dir("maintenance-isolation-restart");
+
+    let app = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node-a"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: Some(state_dir.clone()),
+            peers: Vec::new(),
+            peer_authentication: crate::PeerAuthenticationMode::Disabled,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .try_build()
+        .expect("node app should build");
+
+    app.update_maintenance(MaintenanceCommand {
+        action: MaintenanceAction::Isolate,
+        allow_runtime_types: Vec::new(),
+        allow_workload_ids: Vec::new(),
+    })
+    .expect("maintenance isolation should succeed");
+
+    let replayed = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node-a"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: Some(state_dir.clone()),
+            peers: Vec::new(),
+            peer_authentication: crate::PeerAuthenticationMode::Disabled,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .try_build()
+        .expect("node app should build");
+
+    let status = replayed.maintenance_status();
+    assert_eq!(status.state.mode, MaintenanceMode::Isolated);
+    assert!(status.peer_sync_paused);
+    assert!(status.remote_desired_state_blocked);
+
+    let blocked = replayed.http_control_handler().handle_payload(
+        replayed
+            .security
+            .wrap_http_payload(HttpRequestPayload::Control(Box::new(
+                orion::control_plane::ControlMessage::Mutations(
+                    orion::control_plane::MutationBatch {
+                        base_revision: replayed.snapshot().desired_revision,
+                        mutations: vec![orion::control_plane::DesiredStateMutation::PutArtifact(
+                            orion::control_plane::ArtifactRecord::builder("artifact.blocked")
+                                .build(),
+                        )],
+                    },
+                ),
+            )))
+            .expect("mutation request should be signed"),
+    );
+    let err = blocked.expect_err("isolated node should reject remote mutations after restart");
+    assert!(
+        err.to_string()
+            .contains("blocked while maintenance isolation is active"),
+        "unexpected error: {err}"
+    );
+
+    replayed
+        .update_maintenance(MaintenanceCommand {
+            action: MaintenanceAction::Exit,
+            allow_runtime_types: Vec::new(),
+            allow_workload_ids: Vec::new(),
+        })
+        .expect("maintenance exit should succeed");
+
+    let accepted = replayed
+        .http_control_handler()
+        .handle_payload(
+            replayed
+                .security
+                .wrap_http_payload(HttpRequestPayload::Control(Box::new(
+                    orion::control_plane::ControlMessage::Mutations(
+                        orion::control_plane::MutationBatch {
+                            base_revision: replayed.snapshot().desired_revision,
+                            mutations: vec![
+                                orion::control_plane::DesiredStateMutation::PutArtifact(
+                                    orion::control_plane::ArtifactRecord::builder(
+                                        "artifact.allowed",
+                                    )
+                                    .build(),
+                                ),
+                            ],
+                        },
+                    ),
+                )))
+                .expect("mutation request should be signed"),
+        )
+        .expect("remote mutation should succeed after exit");
+    assert_eq!(accepted, HttpResponsePayload::Accepted);
+    assert!(
+        replayed
+            .state_snapshot()
+            .state
+            .desired
+            .artifacts
+            .contains_key(&ArtifactId::new("artifact.allowed"))
+    );
+
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[tokio::test]
+async fn unschedulable_node_persists_across_restart_and_rejects_remote_assignment() {
+    let state_dir = temp_state_dir("unschedulable-restart");
+
+    let app = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node-a"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: Some(state_dir.clone()),
+            peers: Vec::new(),
+            peer_authentication: crate::PeerAuthenticationMode::Disabled,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .try_build()
+        .expect("node app should build");
+
+    let mut desired = app.state_snapshot().state.desired;
+    desired.put_node(
+        orion::control_plane::NodeRecord::builder("node-b")
+            .health(HealthState::Healthy)
+            .schedulable(false)
+            .build(),
+    );
+    desired.put_artifact(orion::control_plane::ArtifactRecord::builder("artifact.unsched").build());
+    desired.put_executor(
+        ExecutorRecord::builder("executor.remote", "node-b")
+            .runtime_type("graph.exec.v1")
+            .build(),
+    );
+    app.replace_desired(desired);
+
+    let replayed = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node-a"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: Some(state_dir.clone()),
+            peers: Vec::new(),
+            peer_authentication: crate::PeerAuthenticationMode::Disabled,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .try_build()
+        .expect("node app should build");
+
+    let snapshot = replayed.state_snapshot();
+    assert!(!snapshot.state.desired.nodes[&NodeId::new("node-b")].schedulable);
+
+    let rejected = replayed.http_control_handler().handle_payload(
+        replayed
+            .security
+            .wrap_http_payload(HttpRequestPayload::Control(Box::new(
+                orion::control_plane::ControlMessage::Mutations(
+                    orion::control_plane::MutationBatch {
+                        base_revision: replayed.snapshot().desired_revision,
+                        mutations: vec![orion::control_plane::DesiredStateMutation::PutWorkload(
+                            WorkloadRecord::builder(
+                                WorkloadId::new("workload.unsched"),
+                                RuntimeType::new("graph.exec.v1"),
+                                ArtifactId::new("artifact.unsched"),
+                            )
+                            .desired_state(DesiredState::Running)
+                            .assigned_to(NodeId::new("node-b"))
+                            .build(),
+                        )],
+                    },
+                ),
+            )))
+            .expect("mutation request should be signed"),
+    );
+    let err = rejected.expect_err("unschedulable node assignment should be rejected after restart");
+    assert!(
+        err.to_string().contains("unschedulable node node-b"),
+        "unexpected error: {err}"
+    );
+
+    let _ = fs::remove_dir_all(state_dir);
+}

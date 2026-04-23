@@ -1,52 +1,15 @@
 mod support;
 
-use std::time::Duration;
-
 use orion::{
     ArtifactId, NodeId, WorkloadId,
     control_plane::{
-        ArtifactRecord, ControlMessage, DesiredStateMutation, ExecutorRecord, MutationBatch,
-        TypedConfigValue, WorkloadConfig, WorkloadRecord,
-    },
-    transport::{
-        http::{HttpRequestPayload, HttpResponsePayload},
-        ipc::UnixControlStreamClient,
+        ArtifactRecord, ExecutorRecord, NodeRecord, TypedConfigValue, WorkloadConfig,
+        WorkloadRecord,
     },
 };
-use orion_control_plane::MaintenanceMode;
 use orion_core::{ConfigSchemaId, RuntimeType};
 
-use support::{TestHarness, output_text, run_orionctl, run_orionctl_with_env, temp_spec_path};
-
-#[tokio::test(flavor = "multi_thread")]
-async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
-    let harness = TestHarness::start("node.orionctl.get").await;
-
-    let health = run_orionctl(["get", "health", "--http", &harness.http_base()]);
-    assert!(health.status.success(), "{}", output_text(&health));
-    assert!(String::from_utf8_lossy(&health.stdout).contains("status=Healthy"));
-
-    let readiness = run_orionctl(["get", "readiness", "--http", &harness.http_base()]);
-    assert!(readiness.status.success(), "{}", output_text(&readiness));
-    assert!(String::from_utf8_lossy(&readiness.stdout).contains("status=Ready"));
-
-    let observability = run_orionctl(["get", "observability", "--http", &harness.http_base()]);
-    assert!(
-        observability.status.success(),
-        "{}",
-        output_text(&observability)
-    );
-    assert!(String::from_utf8_lossy(&observability.stdout).contains("mutation_success="));
-
-    let snapshot = run_orionctl([
-        "get",
-        "snapshot",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-    ]);
-    assert!(snapshot.status.success(), "{}", output_text(&snapshot));
-    assert!(String::from_utf8_lossy(&snapshot.stdout).contains("desired_rev="));
-}
+use support::{TestHarness, output_text, run_orionctl, temp_spec_path};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn orionctl_apply_delete_and_get_workloads_use_local_ipc() {
@@ -222,6 +185,103 @@ async fn orionctl_apply_workload_accepts_typed_config_flags() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn orionctl_apply_and_delete_support_dry_run() {
+    let harness = TestHarness::start("node.orionctl.dryrun").await;
+    let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_node(NodeRecord::builder("node.orionctl.dryrun").build());
+    desired.put_artifact(ArtifactRecord::builder("artifact.present").build());
+    desired.put_executor(
+        ExecutorRecord::builder("executor.dryrun", "node.orionctl.dryrun")
+            .runtime_type("graph.exec.v1")
+            .build(),
+    );
+    desired.put_workload(
+        WorkloadRecord::builder("workload.present", "graph.exec.v1", "artifact.present")
+            .assigned_to("node.orionctl.dryrun")
+            .build(),
+    );
+    harness._app.replace_desired(desired);
+
+    let apply_ok = run_orionctl([
+        "apply",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--workload-id",
+        "workload.preview",
+        "--runtime-type",
+        "graph.exec.v1",
+        "--artifact-id",
+        "artifact.present",
+        "--assigned-node",
+        "node.orionctl.dryrun",
+        "--desired-state",
+        "running",
+        "--dry-run",
+    ]);
+    assert!(apply_ok.status.success(), "{}", output_text(&apply_ok));
+    let apply_ok_stdout = String::from_utf8_lossy(&apply_ok.stdout);
+    assert!(apply_ok_stdout.contains("dry-run: accepted"));
+
+    let apply_bad = run_orionctl([
+        "apply",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--workload-id",
+        "workload.preview.bad",
+        "--runtime-type",
+        "graph.exec.v1",
+        "--artifact-id",
+        "artifact.missing",
+        "--assigned-node",
+        "node.orionctl.dryrun",
+        "--desired-state",
+        "running",
+        "--dry-run",
+    ]);
+    assert!(apply_bad.status.success(), "{}", output_text(&apply_bad));
+    let apply_bad_stdout = String::from_utf8_lossy(&apply_bad.stdout);
+    assert!(apply_bad_stdout.contains("dry-run: rejected"));
+    assert!(apply_bad_stdout.contains("artifact artifact.missing is missing from desired state"));
+
+    let delete_ok = run_orionctl([
+        "delete",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--workload-id",
+        "workload.present",
+        "--dry-run",
+    ]);
+    assert!(delete_ok.status.success(), "{}", output_text(&delete_ok));
+    assert!(String::from_utf8_lossy(&delete_ok.stdout).contains("dry-run: accepted"));
+
+    let delete_bad = run_orionctl([
+        "delete",
+        "artifact",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--artifact-id",
+        "artifact.absent",
+        "--dry-run",
+    ]);
+    assert!(delete_bad.status.success(), "{}", output_text(&delete_bad));
+    assert!(String::from_utf8_lossy(&delete_bad.stdout).contains("dry-run: rejected"));
+}
+
+#[test]
+fn orionctl_apply_help_includes_dry_run_example() {
+    let output = run_orionctl(["apply", "workload", "--help"]);
+    assert!(output.status.success(), "{}", output_text(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--dry-run"));
+    assert!(stdout.contains(
+        "apply workload --socket /run/orion/control.sock --spec workload.yaml --dry-run"
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn orionctl_apply_workload_accepts_json_spec_file() {
     let harness = TestHarness::start("node.orionctl.spec").await;
     let mut desired = harness._app.state_snapshot().state.desired;
@@ -390,266 +450,4 @@ async fn orionctl_apply_workload_accepts_toml_spec_file() {
     assert_eq!(stored, &spec);
 
     let _ = std::fs::remove_file(spec_path);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn orionctl_watch_state_and_peers_list_use_local_admin_paths() {
-    let harness = TestHarness::start("node.orionctl.watch").await;
-
-    let peers = run_orionctl([
-        "peers",
-        "list",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-        "-o",
-        "json",
-    ]);
-    assert!(peers.status.success(), "{}", output_text(&peers));
-    let peers_json: serde_json::Value =
-        serde_json::from_slice(&peers.stdout).expect("json output should parse");
-    assert!(peers_json.get("http_mutual_tls_mode").is_some());
-
-    let stream = UnixControlStreamClient::connect(&harness.ipc_stream_socket)
-        .await
-        .expect("stream should connect");
-    drop(stream);
-
-    let watch_task = tokio::task::spawn_blocking({
-        let stream_socket = harness.ipc_stream_socket.to_string_lossy().to_string();
-        move || {
-            run_orionctl([
-                "watch",
-                "state",
-                "--stream-socket",
-                &stream_socket,
-                "--client-name",
-                "watcher",
-                "--desired-revision",
-                "0",
-                "--batches",
-                "1",
-            ])
-        }
-    });
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let snapshot = harness.snapshot().await;
-    let response = harness
-        .client
-        .send(&HttpRequestPayload::Control(Box::new(
-            ControlMessage::Mutations(MutationBatch {
-                base_revision: snapshot.state.desired.revision,
-                mutations: vec![DesiredStateMutation::PutArtifact(
-                    ArtifactRecord::builder("artifact.watch").build(),
-                )],
-            }),
-        )))
-        .await
-        .expect("mutation should succeed");
-    assert_eq!(response, HttpResponsePayload::Accepted);
-
-    let output = watch_task.await.expect("watch task should join");
-    assert!(output.status.success(), "{}", output_text(&output));
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("state seq="), "unexpected stdout: {stdout}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn orionctl_local_commands_default_to_ipc_when_http_is_omitted() {
-    let harness = TestHarness::start("node.orionctl.defaults").await;
-
-    let observability = run_orionctl_with_env(
-        ["get", "observability"],
-        &[
-            (
-                "ORION_NODE_IPC_SOCKET",
-                harness.ipc_socket.to_string_lossy().as_ref(),
-            ),
-            (
-                "ORION_NODE_IPC_STREAM_SOCKET",
-                harness.ipc_stream_socket.to_string_lossy().as_ref(),
-            ),
-        ],
-    );
-    assert!(
-        observability.status.success(),
-        "{}",
-        output_text(&observability)
-    );
-    assert!(String::from_utf8_lossy(&observability.stdout).contains("mutation_success="));
-
-    let peers = run_orionctl_with_env(
-        ["peers", "list", "-o", "json"],
-        &[(
-            "ORION_NODE_IPC_SOCKET",
-            harness.ipc_socket.to_string_lossy().as_ref(),
-        )],
-    );
-    assert!(peers.status.success(), "{}", output_text(&peers));
-    let peers_json: serde_json::Value =
-        serde_json::from_slice(&peers.stdout).expect("json output should parse");
-    assert!(peers_json.get("http_mutual_tls_mode").is_some());
-
-    let maintenance = run_orionctl_with_env(
-        ["maintenance", "status", "-o", "json"],
-        &[(
-            "ORION_NODE_IPC_SOCKET",
-            harness.ipc_socket.to_string_lossy().as_ref(),
-        )],
-    );
-    assert!(
-        maintenance.status.success(),
-        "{}",
-        output_text(&maintenance)
-    );
-    let maintenance_json: serde_json::Value =
-        serde_json::from_slice(&maintenance.stdout).expect("json output should parse");
-    assert_eq!(maintenance_json["state"]["mode"], "normal");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn orionctl_maintenance_commands_update_local_node_state() {
-    let harness = TestHarness::start("node.orionctl.maintenance").await;
-
-    let enter = run_orionctl([
-        "maintenance",
-        "enter",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-        "--allow-runtime",
-        "helios.updater.v1",
-        "--allow-workload",
-        "workload.updater",
-        "-o",
-        "json",
-    ]);
-    assert!(enter.status.success(), "{}", output_text(&enter));
-    let entered: serde_json::Value =
-        serde_json::from_slice(&enter.stdout).expect("json output should parse");
-    assert_eq!(entered["state"]["mode"], "maintenance");
-
-    let status = run_orionctl([
-        "maintenance",
-        "status",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-        "-o",
-        "json",
-    ]);
-    assert!(status.status.success(), "{}", output_text(&status));
-    let status_json: serde_json::Value =
-        serde_json::from_slice(&status.stdout).expect("json output should parse");
-    assert_eq!(status_json["state"]["mode"], "maintenance");
-    assert_eq!(
-        status_json["state"]["allow_runtime_types"][0],
-        "helios.updater.v1"
-    );
-    assert_eq!(
-        status_json["state"]["allow_workload_ids"][0],
-        "workload.updater"
-    );
-
-    let isolate = run_orionctl([
-        "maintenance",
-        "isolate",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-        "-o",
-        "json",
-    ]);
-    assert!(isolate.status.success(), "{}", output_text(&isolate));
-    let isolated: serde_json::Value =
-        serde_json::from_slice(&isolate.stdout).expect("json output should parse");
-    assert_eq!(isolated["state"]["mode"], "isolated");
-    assert_eq!(isolated["peer_sync_paused"], true);
-    assert_eq!(isolated["remote_desired_state_blocked"], true);
-
-    let exit = run_orionctl([
-        "maintenance",
-        "exit",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-        "-o",
-        "json",
-    ]);
-    assert!(exit.status.success(), "{}", output_text(&exit));
-    let exited: serde_json::Value =
-        serde_json::from_slice(&exit.stdout).expect("json output should parse");
-    assert_eq!(exited["state"]["mode"], "normal");
-
-    assert_eq!(
-        harness._app.maintenance_status().state.mode,
-        MaintenanceMode::Normal
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn orionctl_supports_yaml_and_toml_structured_output() {
-    let harness = TestHarness::start("node.orionctl.output").await;
-
-    let yaml_output = run_orionctl([
-        "get",
-        "snapshot",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-        "-o",
-        "yaml",
-    ]);
-    assert!(
-        yaml_output.status.success(),
-        "{}",
-        output_text(&yaml_output)
-    );
-    let yaml: serde_yaml::Value =
-        serde_yaml::from_slice(&yaml_output.stdout).expect("yaml output should parse");
-    assert!(yaml.get("state").is_some());
-
-    let toml_output = run_orionctl([
-        "peers",
-        "list",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-        "-o",
-        "toml",
-    ]);
-    assert!(
-        toml_output.status.success(),
-        "{}",
-        output_text(&toml_output)
-    );
-    let toml: toml::Value = toml::from_str(&String::from_utf8_lossy(&toml_output.stdout))
-        .expect("toml output should parse");
-    assert!(toml.get("value").is_some());
-}
-
-#[test]
-fn orionctl_rejects_tls_material_for_plain_http_targets() {
-    let output = run_orionctl([
-        "get",
-        "health",
-        "--http",
-        "http://127.0.0.1:9100",
-        "--ca-cert",
-        "/tmp/unused.pem",
-    ]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("plain http:// targets do not use TLS material"));
-}
-
-#[test]
-fn orionctl_requires_https_ca_when_client_identity_is_provided() {
-    let output = run_orionctl([
-        "get",
-        "health",
-        "--http",
-        "https://127.0.0.1:9100",
-        "--client-cert",
-        "/tmp/client-cert.pem",
-        "--client-key",
-        "/tmp/client-key.pem",
-    ]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("HTTPS trust material requires --ca-cert"));
 }

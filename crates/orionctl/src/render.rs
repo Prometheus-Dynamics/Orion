@@ -1,5 +1,7 @@
 use orion_control_plane::{
-    ClientEvent, ClientEventKind, MaintenanceStatus, PeerTrustSnapshot, StateSnapshot,
+    AvailabilityState, ClientEvent, ClientEventKind, DesiredState, HealthState, LeaseState,
+    MaintenanceStatus, ObservabilityEvent, ObservabilityEventKind, PeerTrustSnapshot,
+    RestartPolicy, StateSnapshot, WorkloadObservedState,
 };
 
 use crate::cli::OutputFormat;
@@ -119,6 +121,23 @@ pub(crate) fn print_maintenance_summary(status: &MaintenanceStatus) {
     );
 }
 
+pub(crate) fn print_observability_event_summary(event: &ObservabilityEvent) {
+    println!(
+        "event seq={} ts_ms={} kind={} status={} duration_ms={} subject={} correlation_id={} detail={}",
+        event.sequence,
+        event.timestamp_ms,
+        render_observability_event_kind(&event.kind),
+        if event.success { "success" } else { "failed" },
+        event
+            .duration_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_owned()),
+        event.subject.as_deref().unwrap_or("-"),
+        event.correlation_id.as_deref().unwrap_or("-"),
+        event.detail,
+    );
+}
+
 #[derive(serde::Serialize)]
 struct TomlEnvelope<'a, T> {
     value: &'a T,
@@ -161,5 +180,74 @@ pub(crate) fn join_display<T: std::fmt::Display>(values: &[T]) -> String {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(",")
+    }
+}
+
+pub(crate) fn render_desired_state(state: DesiredState) -> &'static str {
+    match state {
+        DesiredState::Running => "running",
+        DesiredState::Stopped => "stopped",
+    }
+}
+
+pub(crate) fn render_observed_state(state: WorkloadObservedState) -> &'static str {
+    match state {
+        WorkloadObservedState::Pending => "pending",
+        WorkloadObservedState::Assigned => "assigned",
+        WorkloadObservedState::Starting => "starting",
+        WorkloadObservedState::Running => "running",
+        WorkloadObservedState::Stopped => "stopped",
+        WorkloadObservedState::Completed => "completed",
+        WorkloadObservedState::Failed => "failed",
+    }
+}
+
+pub(crate) fn render_restart_policy(policy: RestartPolicy) -> &'static str {
+    match policy {
+        RestartPolicy::Never => "never",
+        RestartPolicy::OnFailure => "on_failure",
+        RestartPolicy::Always => "always",
+    }
+}
+
+pub(crate) fn render_health_state(state: HealthState) -> &'static str {
+    match state {
+        HealthState::Healthy => "healthy",
+        HealthState::Degraded => "degraded",
+        HealthState::Failed => "failed",
+        HealthState::Unknown => "unknown",
+    }
+}
+
+pub(crate) fn render_observability_event_kind(kind: &ObservabilityEventKind) -> &'static str {
+    match kind {
+        ObservabilityEventKind::Replay => "replay",
+        ObservabilityEventKind::PeerSync => "peer_sync",
+        ObservabilityEventKind::Reconcile => "reconcile",
+        ObservabilityEventKind::MutationApply => "mutation_apply",
+        ObservabilityEventKind::Persistence => "persistence",
+        ObservabilityEventKind::TransportSecurity => "transport_security",
+        ObservabilityEventKind::ClientRegistration => "client_registration",
+        ObservabilityEventKind::ClientStreamAttach => "client_stream_attach",
+        ObservabilityEventKind::ClientStreamDetach => "client_stream_detach",
+        ObservabilityEventKind::ClientStaleEviction => "client_stale_eviction",
+        ObservabilityEventKind::ClientRateLimited => "client_rate_limited",
+    }
+}
+
+pub(crate) fn render_availability_state(state: AvailabilityState) -> &'static str {
+    match state {
+        AvailabilityState::Available => "available",
+        AvailabilityState::Busy => "busy",
+        AvailabilityState::Unavailable => "unavailable",
+        AvailabilityState::Unknown => "unknown",
+    }
+}
+
+pub(crate) fn render_lease_state(state: LeaseState) -> &'static str {
+    match state {
+        LeaseState::Unleased => "unleased",
+        LeaseState::Leased => "leased",
+        LeaseState::Contended => "contended",
     }
 }

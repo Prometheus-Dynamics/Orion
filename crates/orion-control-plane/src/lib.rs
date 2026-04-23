@@ -372,6 +372,7 @@ mod tests {
         desired.put_node(NodeRecord {
             node_id: NodeId::new("node-a"),
             health: HealthState::Healthy,
+            schedulable: true,
             labels: Vec::new(),
         });
 
@@ -397,6 +398,7 @@ mod tests {
         observed.put_node(NodeRecord {
             node_id: NodeId::new("node-a"),
             health: HealthState::Healthy,
+            schedulable: true,
             labels: Vec::new(),
         });
 

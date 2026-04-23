@@ -6,9 +6,9 @@ use orion::{
     ArtifactId, NodeId, WorkloadId,
     client::LocalNodeRuntime,
     control_plane::{
-        AvailabilityState, ControlMessage, DesiredState, ExecutorRecord, HealthState, LeaseState,
-        ProviderRecord, ResourceOwnershipMode, ResourceRecord, SyncRequest, WorkloadObservedState,
-        WorkloadRecord,
+        ArtifactRecord, AvailabilityState, ControlMessage, DesiredState, ExecutorRecord,
+        HealthState, LeaseState, ProviderRecord, ResourceOwnershipMode, ResourceRecord,
+        SyncRequest, WorkloadObservedState, WorkloadRecord,
     },
     transport::http::{HttpClient, HttpRequestPayload, HttpResponsePayload},
 };
@@ -140,6 +140,7 @@ pub(crate) fn temp_spec_path(name: &str) -> PathBuf {
 
 pub(crate) async fn publish_observed_updater_state(harness: &TestHarness) {
     let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_artifact(ArtifactRecord::builder("artifact.update").build());
     desired.put_provider(
         ProviderRecord::builder("provider.observed", harness._app.config.node_id.clone())
             .resource_type("helios.updater.runtime.v1")

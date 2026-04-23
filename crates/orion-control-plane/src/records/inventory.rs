@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 pub struct NodeRecord {
     pub node_id: NodeId,
     pub health: HealthState,
+    pub schedulable: bool,
     pub labels: Vec<String>,
 }
 
@@ -20,6 +21,7 @@ impl NodeRecord {
         NodeRecordBuilder {
             node_id: node_id.into(),
             health: HealthState::Unknown,
+            schedulable: true,
             labels: Vec::new(),
         }
     }
@@ -94,12 +96,18 @@ impl ExecutorRecord {
 pub struct NodeRecordBuilder {
     node_id: NodeId,
     health: HealthState,
+    schedulable: bool,
     labels: Vec<String>,
 }
 
 impl NodeRecordBuilder {
     pub fn health(mut self, health: HealthState) -> Self {
         self.health = health;
+        self
+    }
+
+    pub fn schedulable(mut self, schedulable: bool) -> Self {
+        self.schedulable = schedulable;
         self
     }
 
@@ -112,6 +120,7 @@ impl NodeRecordBuilder {
         NodeRecord {
             node_id: self.node_id,
             health: self.health,
+            schedulable: self.schedulable,
             labels: self.labels,
         }
     }
