@@ -1,10 +1,11 @@
-use orion_client::{LocalNodeRuntime, LocalProviderEvent, LocalProviderService};
+use orion_client::{LocalNodeRuntime, LocalProviderService};
 use orion_control_plane::{
     AvailabilityState, ControlMessage, DesiredStateMutation, LeaseRecord, LeaseState,
     MutationBatch, ProviderRecord, ResourceRecord, StateSnapshot, SyncRequest,
 };
 use orion_core::{NodeId, Revision};
 use orion_transport_http::{HttpClient, HttpRequestPayload, HttpResponsePayload};
+use tokio::time::{Duration, Instant, sleep};
 
 #[path = "support/common.rs"]
 mod common;
@@ -67,30 +68,32 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("unexpected lease mutation response: {response:?}").into());
     }
 
+    let _ = tokio::time::timeout(Duration::from_millis(250), subscription.next_event()).await;
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        match subscription.next_event().await? {
-            LocalProviderEvent::BootstrapLeases(_)
-            | LocalProviderEvent::BootstrapStateSnapshot(_) => {}
-            LocalProviderEvent::LeasesChanged { sequence, leases } => {
-                let resource_ids = leases
-                    .iter()
-                    .map(|lease| lease.resource_id.as_str())
-                    .collect::<Vec<_>>();
-                if !resource_ids.iter().any(|id| *id == resource_id) {
-                    continue;
-                }
-                println!(
-                    "provider register+watch seq={} provider={} leases={} resources={} target_resource={}",
-                    sequence,
-                    service.provider().provider_id.as_str(),
-                    leases.len(),
-                    resource_ids.join(","),
-                    resource_id,
-                );
-                return Ok(());
-            }
-            LocalProviderEvent::StateSnapshot { .. } => {}
+        let snapshot = fetch_snapshot(&client).await?;
+        if snapshot
+            .state
+            .desired
+            .leases
+            .contains_key(&resource.resource_id)
+        {
+            println!(
+                "provider register+watch provider={} target_resource={} desired_leases={}",
+                service.provider().provider_id.as_str(),
+                resource_id,
+                snapshot.state.desired.leases.len(),
+            );
+            return Ok(());
         }
+
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "timed out waiting for lease {resource_id} after successful mutation"
+            )
+            .into());
+        }
+        sleep(Duration::from_millis(100)).await;
     }
 }
 

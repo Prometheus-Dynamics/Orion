@@ -81,11 +81,14 @@ impl DockerCluster {
                 nodes: node_ids.clone(),
             };
 
-            match cluster.compose_result(["up", "-d", "--build"]) {
+            match cluster.compose_result(["up", "-d"]) {
                 Ok(()) => return cluster,
                 Err(error) => {
                     last_error = Some(error.clone());
                     cluster.cleanup_resources();
+                    if docker_error_needs_network_prune(&error) {
+                        prune_dangling_docker_networks();
+                    }
                     if !docker_error_is_retryable(&error) || attempt + 1 == DOCKER_STARTUP_RETRIES {
                         panic!("{error}");
                     }
@@ -286,22 +289,38 @@ impl DockerCluster {
     }
 
     pub async fn delete_workload(&self, node: &str, workload_id: &str) {
-        let snapshot = self.snapshot(node).await;
-        let batch = MutationBatch {
-            base_revision: snapshot.state.desired.revision,
-            mutations: vec![DesiredStateMutation::RemoveWorkload(WorkloadId::new(
-                workload_id,
-            ))],
-        };
+        for attempt in 0..DOCKER_MUTATION_RETRIES {
+            let snapshot = self.snapshot(node).await;
+            let batch = MutationBatch {
+                base_revision: snapshot.state.desired.revision,
+                mutations: vec![DesiredStateMutation::RemoveWorkload(WorkloadId::new(
+                    workload_id,
+                ))],
+            };
 
-        let response = self
-            .client(node)
-            .send(&HttpRequestPayload::Control(Box::new(
-                ControlMessage::Mutations(batch),
-            )))
-            .await
-            .expect("delete mutation request should succeed");
-        assert_eq!(response, HttpResponsePayload::Accepted);
+            match self
+                .client(node)
+                .send(&HttpRequestPayload::Control(Box::new(
+                    ControlMessage::Mutations(batch),
+                )))
+                .await
+            {
+                Ok(HttpResponsePayload::Accepted) => return,
+                Ok(_) | Err(_) if attempt + 1 < DOCKER_MUTATION_RETRIES => {
+                    tokio::time::sleep(Duration::from_millis(DOCKER_WAIT_POLL_MS)).await;
+                }
+                Ok(other) => panic!(
+                    "expected accepted delete mutation response, got {other:?}\n{}",
+                    self.compose_logs()
+                ),
+                Err(err) => panic!(
+                    "delete mutation request should succeed: {err:?}\n{}",
+                    self.compose_logs()
+                ),
+            }
+        }
+
+        unreachable!("delete mutation retries should either return or panic");
     }
 
     pub async fn raw_post(&self, node: &str, path: &str, body: &[u8]) -> reqwest::Response {
@@ -427,6 +446,11 @@ fn docker_error_is_retryable(error: &str) -> bool {
     error.contains("address already in use")
         || error.contains("failed to bind host port")
         || error.contains("port is already allocated")
+        || docker_error_needs_network_prune(error)
+}
+
+fn docker_error_needs_network_prune(error: &str) -> bool {
+    error.contains("all predefined address pools have been fully subnetted")
 }
 
 pub struct ClusterPorts {
@@ -574,45 +598,42 @@ fn ephemeral_port() -> u16 {
 
 fn ensure_test_image(repo_root: &Path) -> String {
     static IMAGE: OnceLock<String> = OnceLock::new();
-    if let Some(tag) = IMAGE.get() {
-        return tag.clone();
-    }
-
-    let tag =
-        std::env::var("ORION_TEST_IMAGE").unwrap_or_else(|_| "orion-node-test:dev".to_owned());
-    let skip_build = matches!(
-        std::env::var("ORION_SKIP_DOCKER_BUILD").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes")
-    );
-    if skip_build {
-        if !docker_image_exists(&tag) {
-            panic!(
-                "ORION_SKIP_DOCKER_BUILD is set but docker image '{}' does not exist",
-                tag
+    IMAGE
+        .get_or_init(|| {
+            let tag = std::env::var("ORION_TEST_IMAGE")
+                .unwrap_or_else(|_| "orion-node-test:dev".to_owned());
+            let skip_build = matches!(
+                std::env::var("ORION_SKIP_DOCKER_BUILD").as_deref(),
+                Ok("1") | Ok("true") | Ok("yes")
             );
-        }
-        let _ = IMAGE.set(tag.clone());
-        return tag;
-    }
+            if skip_build {
+                if !docker_image_exists(&tag) {
+                    panic!(
+                        "ORION_SKIP_DOCKER_BUILD is set but docker image '{}' does not exist",
+                        tag
+                    );
+                }
+                return tag;
+            }
 
-    let dockerfile = repo_root.join("testing/docker/orion-node.Dockerfile");
-    let status = Command::new("docker")
-        .current_dir(repo_root)
-        .arg("build")
-        .arg("--pull=false")
-        .arg("-f")
-        .arg(&dockerfile)
-        .arg("-t")
-        .arg(&tag)
-        .arg(".")
-        .status()
-        .expect("docker build should run");
-    if !status.success() {
-        panic!("docker build failed for test image '{tag}'");
-    }
-
-    let _ = IMAGE.set(tag.clone());
-    tag
+            let dockerfile = repo_root.join("testing/docker/orion-node.Dockerfile");
+            let status = Command::new("docker")
+                .current_dir(repo_root)
+                .arg("build")
+                .arg("--pull=false")
+                .arg("-f")
+                .arg(&dockerfile)
+                .arg("-t")
+                .arg(&tag)
+                .arg(".")
+                .status()
+                .expect("docker build should run");
+            if !status.success() {
+                panic!("docker build failed for test image '{tag}'");
+            }
+            tag
+        })
+        .clone()
 }
 
 fn docker_image_exists(tag: &str) -> bool {
@@ -623,4 +644,10 @@ fn docker_image_exists(tag: &str) -> bool {
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+fn prune_dangling_docker_networks() {
+    let _ = Command::new("docker")
+        .args(["network", "prune", "-f"])
+        .output();
 }

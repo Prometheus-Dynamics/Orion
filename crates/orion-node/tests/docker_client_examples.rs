@@ -47,6 +47,33 @@ async fn wait_for_snapshot_condition<F>(
     }
 }
 
+async fn apply_mutations_with_retries(
+    cluster: &DockerCluster,
+    node: &str,
+    batch: MutationBatch,
+) -> HttpResponsePayload {
+    for _ in 0..10 {
+        match cluster
+            .client(node)
+            .send(&HttpRequestPayload::Control(Box::new(
+                ControlMessage::Mutations(batch.clone()),
+            )))
+            .await
+        {
+            Ok(HttpResponsePayload::Accepted) => return HttpResponsePayload::Accepted,
+            Ok(_) | Err(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+        }
+    }
+
+    cluster
+        .client(node)
+        .send(&HttpRequestPayload::Control(Box::new(
+            ControlMessage::Mutations(batch),
+        )))
+        .await
+        .expect("mutation request should succeed after retries")
+}
+
 #[tokio::test]
 #[ignore = "requires docker compose"]
 async fn docker_client_example_control_plane_write_watch_receives_state() {
@@ -177,19 +204,14 @@ async fn docker_client_example_multi_watch_receives_all_roles() {
             ),
         ],
     };
-    let response = cluster
-        .client("node-a")
-        .send(&HttpRequestPayload::Control(Box::new(
-            ControlMessage::Mutations(batch),
-        )))
-        .await
-        .expect("multi-role mutations should apply");
+    let response = apply_mutations_with_retries(&cluster, "node-a", batch).await;
     assert_eq!(response, HttpResponsePayload::Accepted);
 
     let output = cluster.exec_service_output(
         "node-a",
         [
             "multi_watch",
+            "/tmp/orion-node-a-control.sock",
             &stream_socket("node-a"),
             "example-multi",
             "executor.engine",

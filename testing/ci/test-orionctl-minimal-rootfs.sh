@@ -6,13 +6,52 @@ cd "$root_dir"
 
 image_tag="${ORION_MINIMAL_ROOTFS_IMAGE:-orionctl-minimal-rootfs:ci}"
 platform="${ORION_MINIMAL_ROOTFS_PLATFORM:-linux/arm64}"
+host_arch="$(uname -m)"
 
-docker buildx build \
-  --load \
-  --platform "$platform" \
-  -t "$image_tag" \
-  -f testing/docker/orionctl-minimal-rootfs.Dockerfile \
-  .
+platform_arch="${platform##*/}"
+case "$host_arch" in
+  x86_64) host_platform_arch="amd64" ;;
+  aarch64|arm64) host_platform_arch="arm64" ;;
+  *) host_platform_arch="$host_arch" ;;
+esac
+
+if [[ "$platform_arch" == "$host_platform_arch" ]]; then
+  cargo build --release -p orionctl --bin orionctl
+
+  build_context="$(mktemp -d)"
+  trap 'rm -rf "$build_context"' EXIT
+
+  cp target/release/orionctl "$build_context/orionctl"
+  cp testing/docker/test-root-ca.pem "$build_context/test-root-ca.pem"
+  cat >"$build_context/Dockerfile" <<'EOF'
+FROM debian:bookworm-slim
+WORKDIR /opt/orion
+
+RUN mkdir -p /etc/ssl/certs /etc/ssl/misc /etc/ssl/private \
+    && touch /etc/ssl/ct_log_list.cnf \
+    && touch /etc/ssl/ct_log_list.cnf.dist \
+    && touch /etc/ssl/openssl.cnf \
+    && touch /etc/ssl/openssl.cnf.dist
+
+COPY orionctl /usr/local/bin/orionctl
+COPY test-root-ca.pem /etc/orion/test-root-ca.pem
+
+ENTRYPOINT ["/usr/local/bin/orionctl"]
+EOF
+
+  docker buildx build \
+    --load \
+    --platform "$platform" \
+    -t "$image_tag" \
+    "$build_context"
+else
+  docker buildx build \
+    --load \
+    --platform "$platform" \
+    -f testing/docker/orionctl-minimal-rootfs.Dockerfile \
+    -t "$image_tag" \
+    .
+fi
 
 run_expect_runtime_request_error() {
   local name="$1"
