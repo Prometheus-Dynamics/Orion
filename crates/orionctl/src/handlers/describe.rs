@@ -1,9 +1,8 @@
 use orion_control_plane::{
     ArtifactRecord, MaintenanceMode, NodeRecord, ResourceRecord, StateSnapshot,
-    WorkloadObservedState, WorkloadRecord,
+    WorkloadObservedState, WorkloadRecord, deserialize_config,
 };
 use orion_core::{ArtifactId, NodeId, ResourceId, WorkloadId};
-use orion_macros::OrionConfigDecode;
 
 use crate::{
     cli::{DescribeCommand, OutputFormat},
@@ -48,44 +47,51 @@ struct ResourceDescribeReport {
     lease_holder_workload: Option<String>,
 }
 
-#[derive(OrionConfigDecode)]
-struct GraphWorkloadScalarConfig {
-    #[orion(path = "graph.kind")]
-    graph_kind: String,
-    #[orion(path = "binding.count")]
-    binding_count: Option<u64>,
-}
-
-#[derive(OrionConfigDecode)]
-#[orion(tag = "graph.kind")]
-enum GraphWorkloadGraphConfig {
-    #[orion(tag = "artifact")]
-    Artifact {
-        #[orion(path = "graph.artifact_id")]
-        artifact_id: Option<String>,
-    },
-    #[orion(tag = "resource")]
-    Resource {
-        #[orion(path = "graph.resource_id")]
-        resource_id: String,
-    },
-    #[orion(tag = "inline")]
-    Inline {
-        #[orion(path = "graph.inline")]
-        inline: String,
-    },
-}
-
-#[derive(OrionConfigDecode)]
+#[derive(serde::Deserialize)]
 struct GraphPluginConfig {
     name: String,
+    #[serde(default)]
     version: Option<String>,
 }
 
-#[derive(OrionConfigDecode)]
-struct GraphWorkloadPluginListConfig {
-    #[orion(prefix = "plugin")]
-    plugins: Vec<GraphPluginConfig>,
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct GraphWorkloadConfigSummary {
+    #[serde(default)]
+    graph: GraphWorkloadGraphConfig,
+    #[serde(default)]
+    binding: GraphWorkloadBindingConfig,
+    #[serde(default)]
+    plugin: Vec<GraphPluginConfig>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct GraphWorkloadBindingConfig {
+    #[serde(default)]
+    count: Option<u64>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct GraphWorkloadGraphConfig {
+    #[serde(default)]
+    kind: GraphWorkloadGraphKind,
+    #[serde(default)]
+    artifact_id: Option<String>,
+    #[serde(default)]
+    resource_id: Option<String>,
+    #[serde(default)]
+    inline: Option<String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+enum GraphWorkloadGraphKind {
+    #[default]
+    Artifact,
+    Resource,
+    Inline,
 }
 
 pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
@@ -423,30 +429,39 @@ fn typed_workload_config_summary(workload: &WorkloadRecord) -> Option<String> {
         return None;
     }
 
-    let scalar = GraphWorkloadScalarConfig::try_from(config).ok()?;
-    let graph = GraphWorkloadGraphConfig::try_from(config).ok()?;
-    let plugins = GraphWorkloadPluginListConfig::try_from(config)
-        .map(|decoded| decoded.plugins)
-        .unwrap_or_default();
+    let decoded: GraphWorkloadConfigSummary = deserialize_config(&config.payload).ok()?;
 
-    let mut parts = vec![format!("graph_kind={}", scalar.graph_kind)];
-    match graph {
-        GraphWorkloadGraphConfig::Artifact { artifact_id } => {
-            let artifact_id = artifact_id.unwrap_or_else(|| workload.artifact_id.to_string());
+    let mut parts = vec![format!(
+        "graph_kind={}",
+        match decoded.graph.kind {
+            GraphWorkloadGraphKind::Artifact => "artifact",
+            GraphWorkloadGraphKind::Resource => "resource",
+            GraphWorkloadGraphKind::Inline => "inline",
+        }
+    )];
+    match decoded.graph.kind {
+        GraphWorkloadGraphKind::Artifact => {
+            let artifact_id = decoded
+                .graph
+                .artifact_id
+                .unwrap_or_else(|| workload.artifact_id.to_string());
             parts.push(format!("graph_ref=artifact:{artifact_id}"));
         }
-        GraphWorkloadGraphConfig::Resource { resource_id } => {
+        GraphWorkloadGraphKind::Resource => {
+            let resource_id = decoded.graph.resource_id?;
             parts.push(format!("graph_ref=resource:{resource_id}"));
         }
-        GraphWorkloadGraphConfig::Inline { inline } => {
+        GraphWorkloadGraphKind::Inline => {
+            let inline = decoded.graph.inline?;
             parts.push(format!("graph_inline_bytes={}", inline.len()));
         }
     }
-    if let Some(binding_count) = scalar.binding_count {
+    if let Some(binding_count) = decoded.binding.count {
         parts.push(format!("binding_count={binding_count}"));
     }
-    if !plugins.is_empty() {
-        let plugins = plugins
+    if !decoded.plugin.is_empty() {
+        let plugins = decoded
+            .plugin
             .into_iter()
             .map(|plugin| match plugin.version {
                 Some(version) => format!("{}@{}", plugin.name, version),
