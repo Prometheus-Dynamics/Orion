@@ -1,9 +1,9 @@
-use orion::OrionConfigDecode;
 use orion_control_plane::{
     ArtifactRecord, MaintenanceMode, NodeRecord, ResourceRecord, StateSnapshot,
     WorkloadObservedState, WorkloadRecord,
 };
 use orion_core::{ArtifactId, NodeId, ResourceId, WorkloadId};
+use orion_macros::OrionConfigDecode;
 
 use crate::{
     cli::{DescribeCommand, OutputFormat},
