@@ -37,6 +37,7 @@ use orion::{
 };
 #[cfg(any(feature = "transport-tcp", feature = "transport-quic"))]
 use orion::{ProtocolVersion, ResourceId};
+use orion_macros::OrionConfigDecode;
 use rcgen::generate_simple_self_signed;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -46,6 +47,11 @@ use std::{fs, path::PathBuf};
 
 #[derive(Clone)]
 struct TestProvider;
+
+#[derive(OrionConfigDecode)]
+struct CameraControllerWorkloadConfig {
+    width: u64,
+}
 
 fn desired_fingerprint(desired: &orion::control_plane::DesiredClusterState) -> u64 {
     let section_fingerprints = orion::control_plane::DesiredStateSectionFingerprints {
@@ -512,9 +518,12 @@ impl ExecutorIntegration for ValidatingExecutor {
                 },
             );
         }
-        match config.uint("width") {
-            Some(_) => Ok(()),
-            _ => Err(orion::runtime::RuntimeError::InvalidWorkloadConfig {
+        match CameraControllerWorkloadConfig::try_from(config) {
+            Ok(decoded) => {
+                let _ = decoded.width;
+                Ok(())
+            }
+            Err(_) => Err(orion::runtime::RuntimeError::InvalidWorkloadConfig {
                 workload_id: workload.workload_id.clone(),
                 reason: "missing width".into(),
             }),

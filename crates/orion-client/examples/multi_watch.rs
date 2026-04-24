@@ -1,11 +1,9 @@
 use orion_client::{
-    ClientIdentity, ClientRole, ControlPlaneEventStream, ExecutorEventStream, ProviderEventStream,
-    SessionConfig,
+    LocalExecutorEvent, LocalExecutorService, LocalNodeRuntime, LocalProviderEvent,
+    LocalProviderService,
 };
-use orion_control_plane::{ClientEvent, ClientEventKind, ExecutorRecord, ProviderRecord};
-use orion_core::{NodeId, ProviderId, ResourceType, Revision, RuntimeType};
-use orion_transport_ipc::LocalAddress;
-use std::path::PathBuf;
+use orion_control_plane::{ExecutorRecord, ProviderRecord};
+use orion_core::{ResourceType, Revision, RuntimeType};
 
 #[path = "support/common.rs"]
 mod common;
@@ -25,68 +23,55 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         runtime_type,
         resource_type,
     ] = common::read_exact_args::<7>()?;
-    let socket_path = PathBuf::from(socket_path);
-    let executor = ExecutorRecord::builder(executor_id, NodeId::new(node_id.clone()))
+    let runtime = LocalNodeRuntime::new(&socket_path, &socket_path);
+    let executor = ExecutorRecord::builder(executor_id, node_id.clone())
         .runtime_type(RuntimeType::new(runtime_type))
         .build();
     let provider = ProviderRecord {
-        provider_id: ProviderId::new(provider_id),
-        node_id: NodeId::new(node_id),
+        provider_id: provider_id.into(),
+        node_id: node_id.into(),
         resource_types: vec![ResourceType::new(resource_type)],
     };
 
-    let mut control = ControlPlaneEventStream::connect(
-        &socket_path,
-        ClientIdentity::new(format!("{base_name}-control"), ClientRole::ControlPlane),
-        SessionConfig::new(LocalAddress::new(format!("{base_name}.control"))),
-    )
-    .await?;
-    control.subscribe_state(Revision::ZERO).await?;
+    let executor_service =
+        LocalExecutorService::new(runtime.clone(), format!("{base_name}-executor"), executor);
+    let provider_service =
+        LocalProviderService::new(runtime, format!("{base_name}-provider"), provider);
 
-    let mut executor_stream = ExecutorEventStream::connect(
-        &socket_path,
-        ClientIdentity::new(format!("{base_name}-executor"), ClientRole::Executor),
-        SessionConfig::new(LocalAddress::new(format!("{base_name}.executor"))),
-    )
-    .await?;
-    executor_stream.subscribe_workloads(&executor).await?;
+    let mut executor_subscription = executor_service.subscribe_workloads().await?;
+    let mut provider_subscription = provider_service.subscribe(Revision::ZERO).await?;
 
-    let mut provider_stream = ProviderEventStream::connect(
-        &socket_path,
-        ClientIdentity::new(format!("{base_name}-provider"), ClientRole::Provider),
-        SessionConfig::new(LocalAddress::new(format!("{base_name}.provider"))),
-    )
-    .await?;
-    provider_stream.subscribe_leases(&provider).await?;
+    let executor_summary = describe_executor(&executor_subscription.next_event().await?);
+    let provider_summary = describe_provider(&provider_subscription.next_event().await?);
 
-    let control_events = control.next_events().await?;
-    let executor_events = executor_stream.next_events().await?;
-    let provider_events = provider_stream.next_events().await?;
-
-    let control_summary = describe(control_events.first().ok_or("missing control event")?);
-    let executor_summary = describe(executor_events.first().ok_or("missing executor event")?);
-    let provider_summary = describe(provider_events.first().ok_or("missing provider event")?);
-
-    println!("multi-watch {control_summary} | {executor_summary} | {provider_summary}");
+    println!("multi-watch {executor_summary} | {provider_summary}");
     Ok(())
 }
 
-fn describe(event: &ClientEvent) -> String {
-    match &event.event {
-        ClientEventKind::StateSnapshot(snapshot) => format!(
+fn describe_executor(event: &LocalExecutorEvent) -> String {
+    match event {
+        LocalExecutorEvent::Bootstrap(workloads) => {
+            format!("executor:bootstrap count={}", workloads.len())
+        }
+        LocalExecutorEvent::WorkloadsChanged { workloads, .. } => {
+            format!("executor:update count={}", workloads.len())
+        }
+    }
+}
+
+fn describe_provider(event: &LocalProviderEvent) -> String {
+    match event {
+        LocalProviderEvent::BootstrapLeases(leases) => {
+            format!("provider:leases count={}", leases.len())
+        }
+        LocalProviderEvent::BootstrapStateSnapshot(snapshot)
+        | LocalProviderEvent::StateSnapshot { snapshot, .. } => format!(
             "state:rev={} workloads={}",
             snapshot.state.desired.revision,
             snapshot.state.desired.workloads.len()
         ),
-        ClientEventKind::ExecutorWorkloads {
-            executor_id,
-            workloads,
-        } => format!("executor:{executor_id} count={}", workloads.len()),
-        ClientEventKind::ProviderLeases {
-            provider_id,
-            leases,
-        } => {
-            format!("provider:{provider_id} count={}", leases.len())
+        LocalProviderEvent::LeasesChanged { leases, .. } => {
+            format!("provider:leases count={}", leases.len())
         }
     }
 }

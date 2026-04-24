@@ -4,7 +4,7 @@ use orion::{
     WorkloadId,
     control_plane::{
         ArtifactRecord, DesiredState, ExecutorRecord, NodeRecord, ProviderRecord, ResourceRecord,
-        WorkloadRecord,
+        TypedConfigValue, WorkloadConfig, WorkloadRecord,
     },
 };
 
@@ -182,4 +182,49 @@ async fn orionctl_describe_reports_maintenance_blockers() {
     ]);
     assert!(node.status.success(), "{}", output_text(&node));
     assert!(String::from_utf8_lossy(&node.stdout).contains("maintenance_mode: maintenance"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn orionctl_describe_workload_renders_typed_graph_config_summary() {
+    let harness = TestHarness::start("node.orionctl.config-summary").await;
+    let mut desired = harness._app.state_snapshot().state.desired;
+    desired.put_node(NodeRecord::builder("node.orionctl.config-summary").build());
+    desired.put_artifact(ArtifactRecord::builder("artifact.config-summary").build());
+    desired.put_workload(
+        WorkloadRecord::builder(
+            "workload.config-summary",
+            "graph.exec.v1",
+            "artifact.config-summary",
+        )
+        .desired_state(DesiredState::Running)
+        .config(
+            WorkloadConfig::new("graph.workload.config.v1")
+                .field("graph.kind", TypedConfigValue::String("inline".into()))
+                .field(
+                    "graph.inline",
+                    TypedConfigValue::String("{\"nodes\":[]}".into()),
+                )
+                .field("binding.count", TypedConfigValue::UInt(3))
+                .field("plugin.0.name", TypedConfigValue::String("cv".into()))
+                .field("plugin.1.name", TypedConfigValue::String("slam".into()))
+                .field("plugin.1.version", TypedConfigValue::String("1.0.0".into())),
+        )
+        .build(),
+    );
+    harness._app.replace_desired(desired);
+
+    let workload = run_orionctl([
+        "describe",
+        "workload",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "workload.config-summary",
+    ]);
+    assert!(workload.status.success(), "{}", output_text(&workload));
+    let stdout = String::from_utf8_lossy(&workload.stdout);
+    assert!(stdout.contains("config_schema: graph.workload.config.v1"));
+    assert!(stdout.contains("config_summary: graph_kind=inline"));
+    assert!(stdout.contains("graph_inline_bytes=12"));
+    assert!(stdout.contains("binding_count=3"));
+    assert!(stdout.contains("plugins=cv,slam@1.0.0"));
 }

@@ -21,11 +21,13 @@ pub use messages::{
 };
 pub use records::{
     AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, ClusterStateEnvelope,
-    DesiredClusterState, ExecutorRecord, ExecutorRecordBuilder, LeaseRecord, LeaseRecordBuilder,
-    NodeRecord, NodeRecordBuilder, ObservedClusterState, ProviderRecord, ProviderRecordBuilder,
-    ResourceActionResult, ResourceActionStatus, ResourceBinding, ResourceCapability,
-    ResourceConfigState, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
-    ResourceState, TypedConfigValue, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder,
+    ConfigDecodeError, ConfigMapRef, DesiredClusterState, ExecutorRecord, ExecutorRecordBuilder,
+    HttpEndpoint, IpcEndpoint, LeaseRecord, LeaseRecordBuilder, NodeRecord, NodeRecordBuilder,
+    ObservedClusterState, ProviderRecord, ProviderRecordBuilder, ResourceActionResult,
+    ResourceActionStatus, ResourceBinding, ResourceCapability, ResourceConfigState,
+    ResourceEndpoint, ResourceEndpointError, ResourceOwnershipMode, ResourceRecord,
+    ResourceRecordBuilder, ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue,
+    TypedResourceEndpoint, UnixEndpoint, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder,
     WorkloadRequirement,
 };
 pub use state::{

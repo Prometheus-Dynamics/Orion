@@ -1348,6 +1348,7 @@ dependencies = [
  "orion-control-plane",
  "orion-core",
  "orion-data-plane",
+ "orion-macros",
  "orion-runtime",
  "orion-service",
  "orion-transport-common",

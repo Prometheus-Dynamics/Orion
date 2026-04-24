@@ -1,6 +1,6 @@
-use orion_client::ProviderEventStream;
-use orion_control_plane::{ClientEventKind, ProviderRecord};
-use orion_core::{NodeId, ProviderId, ResourceType};
+use orion_client::{LocalNodeRuntime, LocalProviderEvent, LocalProviderService};
+use orion_control_plane::ProviderRecord;
+use orion_core::{ResourceType, Revision};
 
 #[path = "support/common.rs"]
 mod common;
@@ -19,39 +19,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         resource_type,
     ] = common::read_exact_args::<5>()?;
     let provider = ProviderRecord {
-        provider_id: ProviderId::new(provider_id),
-        node_id: NodeId::new(node_id),
+        provider_id: provider_id.into(),
+        node_id: node_id.into(),
         resource_types: vec![ResourceType::new(resource_type)],
     };
-    let mut stream = ProviderEventStream::connect_at_with_local_address(
-        &socket_path,
-        client_name.clone(),
-        format!("{client_name}.provider"),
-    )
-    .await?;
-    stream.subscribe_leases(&provider).await?;
-    let events = stream.next_events().await?;
-    let Some(event) = events.first() else {
-        return Err("no provider events received".into());
-    };
-    match &event.event {
-        ClientEventKind::ProviderLeases {
-            provider_id,
-            leases,
-        } => {
-            println!(
-                "provider leases seq={} provider={} count={} resources={}",
-                event.sequence,
-                provider_id,
-                leases.len(),
-                leases
-                    .iter()
-                    .map(|lease| lease.resource_id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            Ok(())
+
+    let runtime = LocalNodeRuntime::new(&socket_path, &socket_path);
+    let service = LocalProviderService::new(runtime, client_name, provider);
+    let mut subscription = service.subscribe(Revision::ZERO).await?;
+
+    loop {
+        match subscription.next_event().await? {
+            LocalProviderEvent::BootstrapLeases(leases)
+            | LocalProviderEvent::LeasesChanged { leases, .. } => {
+                let provider_id = service.provider().provider_id.as_str();
+                println!(
+                    "provider leases provider={} count={} resources={}",
+                    provider_id,
+                    leases.len(),
+                    leases
+                        .iter()
+                        .map(|lease| lease.resource_id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                return Ok(());
+            }
+            LocalProviderEvent::BootstrapStateSnapshot(_)
+            | LocalProviderEvent::StateSnapshot { .. } => {}
         }
-        other => Err(format!("unexpected provider event: {other:?}").into()),
     }
 }

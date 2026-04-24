@@ -14,6 +14,7 @@ mod control_plane;
 mod error;
 #[cfg(feature = "ipc")]
 mod executor;
+mod graph;
 #[cfg(feature = "ipc")]
 mod provider;
 mod resource;
@@ -24,14 +25,20 @@ mod stream;
 
 #[cfg(feature = "ipc")]
 pub use app::{
-    ExecutorApp, LocalExecutorApp, LocalExecutorClient, LocalNodeRuntime, LocalProviderApp,
-    LocalProviderClient, ProviderApp,
+    ExecutorApp, LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent, LocalExecutorService,
+    LocalExecutorSubscription, LocalNodeRuntime, LocalProviderApp, LocalProviderClient,
+    LocalProviderEvent, LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
+    LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp,
 };
 #[cfg(feature = "ipc")]
 pub use control_plane::{ControlPlaneClient, ControlPlaneEventStream, LocalControlPlaneClient};
 pub use error::ClientError;
 #[cfg(feature = "ipc")]
 pub use executor::{ExecutorClient, ExecutorEventStream};
+pub use graph::{
+    GraphPayload, GraphPayloadSource, GraphReference, GraphResolutionError, ResolvedGraphPayload,
+    graph_reference_for_workload, resolve_graph_reference, resolve_workload_graph,
+};
 pub use orion_control_plane::ClientRole;
 #[cfg(feature = "ipc")]
 pub use provider::{ProviderClient, ProviderEventStream};

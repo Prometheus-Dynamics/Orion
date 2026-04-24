@@ -1,14 +1,10 @@
-use std::path::PathBuf;
-
-use orion_client::{ClientIdentity, ClientRole, ProviderEventStream, SessionConfig};
+use orion_client::{LocalNodeRuntime, LocalProviderEvent, LocalProviderService};
 use orion_control_plane::{
-    AvailabilityState, ClientEventKind, ClientHello, ControlMessage, DesiredStateMutation,
-    LeaseRecord, LeaseState, MutationBatch, ProviderRecord, ProviderStateUpdate, ResourceRecord,
-    StateSnapshot, SyncRequest,
+    AvailabilityState, ControlMessage, DesiredStateMutation, LeaseRecord, LeaseState,
+    MutationBatch, ProviderRecord, ResourceRecord, StateSnapshot, SyncRequest,
 };
 use orion_core::{NodeId, Revision};
 use orion_transport_http::{HttpClient, HttpRequestPayload, HttpResponsePayload};
-use orion_transport_ipc::{ControlEnvelope, LocalAddress, UnixControlClient};
 
 #[path = "support/common.rs"]
 mod common;
@@ -40,46 +36,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .availability(AvailabilityState::Available)
     .lease_state(LeaseState::Leased)
     .build();
-    let unary = UnixControlClient::new(&ipc_socket);
-    let source = LocalAddress::new(format!("{client_name}.provider"));
-
-    let response = unary
-        .send(ControlEnvelope {
-            source: source.clone(),
-            destination: LocalAddress::new("orion"),
-            message: ControlMessage::ClientHello(ClientHello {
-                client_name: client_name.clone().into(),
-                role: ClientRole::Provider,
-            }),
-        })
+    let runtime = LocalNodeRuntime::new(ipc_socket, stream_socket);
+    let service = LocalProviderService::new(runtime.clone(), client_name, provider);
+    service.register().await?;
+    runtime
+        .provider(
+            service.client_name().to_string(),
+            service.provider().clone(),
+        )?
+        .publish_resources(vec![resource.clone()])
         .await?;
-    match response.message {
-        ControlMessage::ClientWelcome(_) => {}
-        other => return Err(format!("expected provider welcome, got {other:?}").into()),
-    }
-
-    let response = unary
-        .send(ControlEnvelope {
-            source: source.clone(),
-            destination: LocalAddress::new("orion"),
-            message: ControlMessage::ProviderState(ProviderStateUpdate {
-                provider: provider.clone(),
-                resources: vec![resource.clone()],
-            }),
-        })
-        .await?;
-    match response.message {
-        ControlMessage::Accepted => {}
-        other => return Err(format!("expected provider accepted, got {other:?}").into()),
-    }
-
-    let mut stream = ProviderEventStream::connect(
-        PathBuf::from(&stream_socket),
-        ClientIdentity::new(client_name.clone(), ClientRole::Provider),
-        SessionConfig::new(LocalAddress::new(format!("{client_name}.provider-stream"))),
-    )
-    .await?;
-    stream.subscribe_leases(&provider).await?;
+    let mut subscription = service.subscribe(Revision::ZERO).await?;
 
     let client = HttpClient::try_new(http_base)?;
     let snapshot = fetch_snapshot(&client).await?;
@@ -100,30 +67,30 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("unexpected lease mutation response: {response:?}").into());
     }
 
-    let events = stream.next_events().await?;
-    let Some(event) = events.first() else {
-        return Err("no provider events received".into());
-    };
-    match &event.event {
-        ClientEventKind::ProviderLeases {
-            provider_id,
-            leases,
-        } => {
-            println!(
-                "provider register+watch seq={} provider={} leases={} resources={} target_resource={}",
-                event.sequence,
-                provider_id,
-                leases.len(),
-                leases
+    loop {
+        match subscription.next_event().await? {
+            LocalProviderEvent::BootstrapLeases(_)
+            | LocalProviderEvent::BootstrapStateSnapshot(_) => {}
+            LocalProviderEvent::LeasesChanged { sequence, leases } => {
+                let resource_ids = leases
                     .iter()
                     .map(|lease| lease.resource_id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(","),
-                resource_id,
-            );
-            Ok(())
+                    .collect::<Vec<_>>();
+                if !resource_ids.iter().any(|id| *id == resource_id) {
+                    continue;
+                }
+                println!(
+                    "provider register+watch seq={} provider={} leases={} resources={} target_resource={}",
+                    sequence,
+                    service.provider().provider_id.as_str(),
+                    leases.len(),
+                    resource_ids.join(","),
+                    resource_id,
+                );
+                return Ok(());
+            }
+            LocalProviderEvent::StateSnapshot { .. } => {}
         }
-        other => Err(format!("unexpected provider event: {other:?}").into()),
     }
 }
 

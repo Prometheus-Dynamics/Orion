@@ -23,7 +23,7 @@ orion-control-plane.workspace = true
 orion-runtime.workspace = true
 orion-transport-ipc = { workspace = true, optional = true }
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "fs", "sync"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "fs", "sync", "time"] }
 
 [dev-dependencies]
 orion-transport-http.workspace = true

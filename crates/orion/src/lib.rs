@@ -39,10 +39,15 @@ pub mod client {
     pub use orion_client::{
         ClientError, ClientIdentity, ClientRole, ClientSession, ControlPlaneClient,
         ControlPlaneEventStream, DEFAULT_DAEMON_ADDRESS, DerivedResource, ExecutorApp,
-        ExecutorClient, ExecutorEventStream, LocalControlPlaneClient, LocalExecutorApp,
-        LocalExecutorClient, LocalNodeRuntime, LocalProviderApp, LocalProviderClient, ProviderApp,
-        ProviderClient, ProviderEventStream, ProviderResource, ResourceClaim, SessionConfig,
-        default_ipc_socket_path, default_ipc_stream_socket_path,
+        ExecutorClient, ExecutorEventStream, GraphPayload, GraphPayloadSource, GraphReference,
+        GraphResolutionError, LocalControlPlaneClient, LocalExecutorApp, LocalExecutorClient,
+        LocalExecutorEvent, LocalExecutorService, LocalExecutorSubscription, LocalNodeRuntime,
+        LocalProviderApp, LocalProviderClient, LocalProviderEvent, LocalProviderService,
+        LocalProviderSubscription, LocalRuntimePublisher, LocalRuntimePublisherBuilder,
+        LocalServiceRetryPolicy, ProviderApp, ProviderClient, ProviderEventStream,
+        ProviderResource, ResolvedGraphPayload, ResourceClaim, SessionConfig,
+        default_ipc_socket_path, default_ipc_stream_socket_path, graph_reference_for_workload,
+        resolve_graph_reference, resolve_workload_graph,
     };
 }
 
@@ -51,21 +56,23 @@ pub mod control_plane {
     pub use orion_control_plane::{
         AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, AvailabilityState, ClientEvent,
         ClientEventKind, ClientEventPoll, ClientHello, ClientRole, ClientSession,
-        ClientSessionMetricsSnapshot, ClusterStateEnvelope, ControlMessage, DesiredClusterState,
-        DesiredState, DesiredStateMutation, DesiredStateObjectSelector, DesiredStateSection,
-        DesiredStateSectionFingerprints, DesiredStateSummary, ExecutorRecord,
-        ExecutorRecordBuilder, ExecutorStateUpdate, ExecutorWorkloadQuery, HealthState,
-        LeaseRecord, LeaseRecordBuilder, LeaseState, MutationApplyError, MutationBatch,
-        NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot,
-        NodeReadinessStatus, NodeRecord, NodeRecordBuilder, ObservabilityEvent,
-        ObservabilityEventKind, ObservedClusterState, ObservedStateUpdate,
-        OperationFailureCategory, OperationMetricsSnapshot, PeerEnrollment, PeerHello,
-        PeerIdentityUpdate, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
-        ProviderLeaseQuery, ProviderRecord, ProviderRecordBuilder, ProviderStateUpdate,
-        ResourceActionResult, ResourceActionStatus, ResourceBinding, ResourceCapability,
-        ResourceConfigState, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
-        ResourceState, RestartPolicy, StateSnapshot, StateWatch, SyncDiffRequest, SyncRequest,
-        SyncSummaryRequest, TransportMetricsSnapshot, TypedConfigValue, WorkloadConfig,
+        ClientSessionMetricsSnapshot, ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef,
+        ControlMessage, DesiredClusterState, DesiredState, DesiredStateMutation,
+        DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,
+        DesiredStateSummary, ExecutorRecord, ExecutorRecordBuilder, ExecutorStateUpdate,
+        ExecutorWorkloadQuery, HealthState, HttpEndpoint, IpcEndpoint, LeaseRecord,
+        LeaseRecordBuilder, LeaseState, MutationApplyError, MutationBatch, NodeHealthSnapshot,
+        NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,
+        NodeRecord, NodeRecordBuilder, ObservabilityEvent, ObservabilityEventKind,
+        ObservedClusterState, ObservedStateUpdate, OperationFailureCategory,
+        OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerTrustRecord,
+        PeerTrustSnapshot, PersistenceMetricsSnapshot, ProviderLeaseQuery, ProviderRecord,
+        ProviderRecordBuilder, ProviderStateUpdate, ResourceActionResult, ResourceActionStatus,
+        ResourceBinding, ResourceCapability, ResourceConfigState, ResourceEndpoint,
+        ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
+        ResourceState, RestartPolicy, SharedMemoryEndpoint, StateSnapshot, StateWatch,
+        SyncDiffRequest, SyncRequest, SyncSummaryRequest, TcpEndpoint, TransportMetricsSnapshot,
+        TypedConfigValue, TypedResourceEndpoint, UnixEndpoint, WorkloadConfig,
         WorkloadObservedState, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
     };
 }
@@ -158,16 +165,23 @@ pub mod transport {
 pub mod prelude {
     pub use crate::client::{
         ClientIdentity, ClientRole, ClientSession, ControlPlaneClient, ControlPlaneEventStream,
-        DerivedResource, ExecutorApp, ExecutorClient, ExecutorEventStream, LocalControlPlaneClient,
-        LocalExecutorApp, LocalExecutorClient, LocalNodeRuntime, LocalProviderApp,
-        LocalProviderClient, ProviderApp, ProviderClient, ProviderEventStream, ProviderResource,
-        ResourceClaim, SessionConfig, default_ipc_socket_path, default_ipc_stream_socket_path,
+        DerivedResource, ExecutorApp, ExecutorClient, ExecutorEventStream, GraphPayload,
+        GraphPayloadSource, GraphReference, GraphResolutionError, LocalControlPlaneClient,
+        LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent, LocalExecutorService,
+        LocalExecutorSubscription, LocalNodeRuntime, LocalProviderApp, LocalProviderClient,
+        LocalProviderEvent, LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
+        LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp, ProviderClient,
+        ProviderEventStream, ProviderResource, ResolvedGraphPayload, ResourceClaim, SessionConfig,
+        default_ipc_socket_path, default_ipc_stream_socket_path, graph_reference_for_workload,
+        resolve_graph_reference, resolve_workload_graph,
     };
     pub use crate::cluster::ClusterCoordinator;
     pub use crate::control_plane::{
-        DesiredClusterState, DesiredState, ExecutorRecord, ExecutorRecordBuilder, ProviderRecord,
-        ProviderRecordBuilder, ResourceBinding, ResourceRecord, ResourceRecordBuilder,
-        WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
+        ConfigDecodeError, ConfigMapRef, DesiredClusterState, DesiredState, ExecutorRecord,
+        ExecutorRecordBuilder, HttpEndpoint, IpcEndpoint, ProviderRecord, ProviderRecordBuilder,
+        ResourceBinding, ResourceEndpoint, ResourceEndpointError, ResourceRecord,
+        ResourceRecordBuilder, SharedMemoryEndpoint, TcpEndpoint, TypedResourceEndpoint,
+        UnixEndpoint, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
     };
     pub use crate::core::{
         ArtifactId, NodeId, ProviderId, ResourceId, ResourceType, ResourceTypeDef, RuntimeType,
@@ -175,7 +189,9 @@ pub mod prelude {
     };
     pub use crate::data_plane::{LinkType, PeerLink, RemoteBinding, TransportType};
     pub use crate::runtime::{LocalRuntimeStore, Runtime};
-    pub use orion_macros::{OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type};
+    pub use orion_macros::{
+        OrionConfigDecode, OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type,
+    };
 }
 
 #[cfg(feature = "auth")]
@@ -187,10 +203,14 @@ pub use auth::{
 pub use client::{
     ClientError, ClientIdentity, ClientRole, ClientSession, ControlPlaneClient,
     ControlPlaneEventStream, DEFAULT_DAEMON_ADDRESS, DerivedResource, ExecutorApp, ExecutorClient,
-    ExecutorEventStream, LocalControlPlaneClient, LocalExecutorApp, LocalExecutorClient,
-    LocalNodeRuntime, LocalProviderApp, LocalProviderClient, ProviderApp, ProviderClient,
-    ProviderEventStream, ProviderResource, ResourceClaim, SessionConfig, default_ipc_socket_path,
-    default_ipc_stream_socket_path,
+    ExecutorEventStream, GraphPayload, GraphPayloadSource, GraphReference, GraphResolutionError,
+    LocalControlPlaneClient, LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent,
+    LocalExecutorService, LocalExecutorSubscription, LocalNodeRuntime, LocalProviderApp,
+    LocalProviderClient, LocalProviderEvent, LocalProviderService, LocalProviderSubscription,
+    LocalRuntimePublisher, LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp,
+    ProviderClient, ProviderEventStream, ProviderResource, ResolvedGraphPayload, ResourceClaim,
+    SessionConfig, default_ipc_socket_path, default_ipc_stream_socket_path,
+    graph_reference_for_workload, resolve_graph_reference, resolve_workload_graph,
 };
 #[cfg(feature = "cluster")]
 pub use cluster::ClusterCoordinator;
@@ -202,7 +222,9 @@ pub use core::{
     decode_from_slice, encode_to_vec,
 };
 #[cfg(feature = "macros")]
-pub use orion_macros::{OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type};
+pub use orion_macros::{
+    OrionConfigDecode, OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type,
+};
 #[cfg(feature = "runtime")]
 pub use runtime::{LocalRuntimeStore, Runtime};
 #[cfg(feature = "service")]

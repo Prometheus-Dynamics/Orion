@@ -5,8 +5,10 @@ use orion_core::{
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fs, io, path::PathBuf};
+use thiserror::Error;
 
+use super::config_decode::ConfigMapRef;
 use super::workloads::TypedConfigValue;
 
 #[derive(
@@ -88,6 +90,10 @@ impl ResourceConfigState {
         self.payload.insert(key.into(), value);
         self
     }
+
+    pub fn view(&self) -> ConfigMapRef<'_> {
+        ConfigMapRef::new(&self.payload)
+    }
 }
 
 #[derive(
@@ -116,6 +122,207 @@ impl ResourceState {
     pub fn with_config(mut self, config: ResourceConfigState) -> Self {
         self.config = Some(config);
         self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedMemoryEndpoint {
+    pub name: String,
+}
+
+impl SharedMemoryEndpoint {
+    pub fn path(&self) -> PathBuf {
+        self.path_in(Self::default_root())
+    }
+
+    pub fn path_in(&self, root: impl Into<PathBuf>) -> PathBuf {
+        root.into().join(&self.name)
+    }
+
+    pub fn read_bytes(&self) -> Result<Vec<u8>, io::Error> {
+        self.read_bytes_from(Self::default_root())
+    }
+
+    pub fn read_bytes_from(&self, root: impl Into<PathBuf>) -> Result<Vec<u8>, io::Error> {
+        fs::read(self.path_in(root))
+    }
+
+    pub fn read_string(&self) -> Result<String, io::Error> {
+        self.read_string_from(Self::default_root())
+    }
+
+    pub fn read_string_from(&self, root: impl Into<PathBuf>) -> Result<String, io::Error> {
+        fs::read_to_string(self.path_in(root))
+    }
+
+    fn default_root() -> PathBuf {
+        std::env::var_os("ORION_SHM_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/dev/shm"))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IpcEndpoint {
+    pub address: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnixEndpoint {
+    pub path: String,
+}
+
+impl UnixEndpoint {
+    pub fn path_buf(&self) -> PathBuf {
+        PathBuf::from(&self.path)
+    }
+
+    pub fn read_bytes(&self) -> Result<Vec<u8>, io::Error> {
+        fs::read(self.path_buf())
+    }
+
+    pub fn read_string(&self) -> Result<String, io::Error> {
+        fs::read_to_string(self.path_buf())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TcpEndpoint {
+    pub address: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HttpEndpoint {
+    pub url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResourceEndpoint {
+    SharedMemory(SharedMemoryEndpoint),
+    Ipc(IpcEndpoint),
+    Unix(UnixEndpoint),
+    Tcp(TcpEndpoint),
+    Http(HttpEndpoint),
+    Https(HttpEndpoint),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum ResourceEndpointError {
+    #[error("resource endpoint `{endpoint}` is missing a scheme")]
+    MissingScheme { endpoint: String },
+    #[error("resource endpoint `{endpoint}` has an empty payload")]
+    EmptyPayload { endpoint: String },
+    #[error("resource endpoint `{endpoint}` uses unsupported scheme `{scheme}`")]
+    UnsupportedScheme { endpoint: String, scheme: String },
+    #[error("resource `{resource_id}` has no {endpoint_type} endpoint")]
+    EndpointTypeNotFound {
+        resource_id: ResourceId,
+        endpoint_type: &'static str,
+    },
+}
+
+pub trait TypedResourceEndpoint: Sized {
+    const TYPE_NAME: &'static str;
+
+    fn from_endpoint(endpoint: &ResourceEndpoint) -> Option<Self>;
+}
+
+impl ResourceEndpoint {
+    pub fn parse(endpoint: impl AsRef<str>) -> Result<Self, ResourceEndpointError> {
+        let endpoint = endpoint.as_ref();
+        let (scheme, payload) =
+            endpoint
+                .split_once("://")
+                .ok_or_else(|| ResourceEndpointError::MissingScheme {
+                    endpoint: endpoint.to_owned(),
+                })?;
+        if payload.is_empty() {
+            return Err(ResourceEndpointError::EmptyPayload {
+                endpoint: endpoint.to_owned(),
+            });
+        }
+
+        match scheme {
+            "shm" => Ok(Self::SharedMemory(SharedMemoryEndpoint {
+                name: payload.to_owned(),
+            })),
+            "ipc" => Ok(Self::Ipc(IpcEndpoint {
+                address: payload.to_owned(),
+            })),
+            "unix" => Ok(Self::Unix(UnixEndpoint {
+                path: payload.to_owned(),
+            })),
+            "tcp" => Ok(Self::Tcp(TcpEndpoint {
+                address: payload.to_owned(),
+            })),
+            "http" => Ok(Self::Http(HttpEndpoint {
+                url: endpoint.to_owned(),
+            })),
+            "https" => Ok(Self::Https(HttpEndpoint {
+                url: endpoint.to_owned(),
+            })),
+            _ => Err(ResourceEndpointError::UnsupportedScheme {
+                endpoint: endpoint.to_owned(),
+                scheme: scheme.to_owned(),
+            }),
+        }
+    }
+}
+
+impl TypedResourceEndpoint for SharedMemoryEndpoint {
+    const TYPE_NAME: &'static str = "shared memory";
+
+    fn from_endpoint(endpoint: &ResourceEndpoint) -> Option<Self> {
+        match endpoint {
+            ResourceEndpoint::SharedMemory(endpoint) => Some(endpoint.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl TypedResourceEndpoint for IpcEndpoint {
+    const TYPE_NAME: &'static str = "ipc";
+
+    fn from_endpoint(endpoint: &ResourceEndpoint) -> Option<Self> {
+        match endpoint {
+            ResourceEndpoint::Ipc(endpoint) => Some(endpoint.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl TypedResourceEndpoint for UnixEndpoint {
+    const TYPE_NAME: &'static str = "unix";
+
+    fn from_endpoint(endpoint: &ResourceEndpoint) -> Option<Self> {
+        match endpoint {
+            ResourceEndpoint::Unix(endpoint) => Some(endpoint.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl TypedResourceEndpoint for TcpEndpoint {
+    const TYPE_NAME: &'static str = "tcp";
+
+    fn from_endpoint(endpoint: &ResourceEndpoint) -> Option<Self> {
+        match endpoint {
+            ResourceEndpoint::Tcp(endpoint) => Some(endpoint.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl TypedResourceEndpoint for HttpEndpoint {
+    const TYPE_NAME: &'static str = "http/https";
+
+    fn from_endpoint(endpoint: &ResourceEndpoint) -> Option<Self> {
+        match endpoint {
+            ResourceEndpoint::Http(endpoint) | ResourceEndpoint::Https(endpoint) => {
+                Some(endpoint.clone())
+            }
+            _ => None,
+        }
     }
 }
 
@@ -163,6 +370,26 @@ impl ResourceRecord {
             endpoints: Vec::new(),
             state: None,
         }
+    }
+
+    pub fn parsed_endpoints(&self) -> Result<Vec<ResourceEndpoint>, ResourceEndpointError> {
+        self.endpoints
+            .iter()
+            .map(ResourceEndpoint::parse)
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    pub fn endpoint<T>(&self) -> Result<T, ResourceEndpointError>
+    where
+        T: TypedResourceEndpoint,
+    {
+        let endpoints = self.parsed_endpoints()?;
+        endpoints.iter().find_map(T::from_endpoint).ok_or_else(|| {
+            ResourceEndpointError::EndpointTypeNotFound {
+                resource_id: self.resource_id.clone(),
+                endpoint_type: T::TYPE_NAME,
+            }
+        })
     }
 }
 
@@ -335,5 +562,111 @@ impl LeaseRecordBuilder {
             holder_node_id: self.holder_node_id,
             holder_workload_id: self.holder_workload_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_record_parses_typed_endpoints() {
+        let resource = ResourceRecord::builder(
+            ResourceId::new("resource.graph"),
+            ResourceType::new("graph.payload"),
+            ProviderId::new("provider.graph"),
+        )
+        .endpoint("shm://vision-graph")
+        .endpoint("ipc://graph-control")
+        .build();
+
+        let shm = resource
+            .endpoint::<SharedMemoryEndpoint>()
+            .expect("shared memory endpoint should parse");
+        let ipc = resource
+            .endpoint::<IpcEndpoint>()
+            .expect("ipc endpoint should parse");
+
+        assert_eq!(shm.name, "vision-graph");
+        assert_eq!(ipc.address, "graph-control");
+    }
+
+    #[test]
+    fn resource_record_reports_missing_typed_endpoint() {
+        let resource = ResourceRecord::builder(
+            ResourceId::new("resource.graph"),
+            ResourceType::new("graph.payload"),
+            ProviderId::new("provider.graph"),
+        )
+        .endpoint("shm://vision-graph")
+        .build();
+
+        let error = resource
+            .endpoint::<UnixEndpoint>()
+            .expect_err("unix endpoint should be absent");
+        assert!(matches!(
+            error,
+            ResourceEndpointError::EndpointTypeNotFound {
+                endpoint_type: "unix",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn resource_record_rejects_unsupported_endpoint_scheme() {
+        let resource = ResourceRecord::builder(
+            ResourceId::new("resource.graph"),
+            ResourceType::new("graph.payload"),
+            ProviderId::new("provider.graph"),
+        )
+        .endpoint("serial://ttyUSB0")
+        .build();
+
+        let error = resource
+            .parsed_endpoints()
+            .expect_err("unsupported scheme should fail");
+        assert!(matches!(
+            error,
+            ResourceEndpointError::UnsupportedScheme { scheme, .. } if scheme == "serial"
+        ));
+    }
+
+    #[test]
+    fn shared_memory_endpoint_reads_from_custom_root() {
+        let root = std::env::temp_dir().join(format!("orion-shm-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("temp root should be creatable");
+        let endpoint = SharedMemoryEndpoint {
+            name: "graph-payload".to_owned(),
+        };
+        let path = endpoint.path_in(&root);
+        std::fs::write(&path, b"{\"graph\":3}").expect("payload should be writable");
+
+        let content = endpoint
+            .read_string_from(&root)
+            .expect("payload should be readable");
+        assert_eq!(content, "{\"graph\":3}");
+
+        std::fs::remove_file(&path).expect("payload should be removable");
+        std::fs::remove_dir(&root).expect("temp root should be removable");
+    }
+
+    #[test]
+    fn unix_endpoint_reads_file_payload() {
+        let path = std::env::temp_dir().join(format!(
+            "orion-unix-endpoint-test-{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"unix-endpoint-payload").expect("payload should be writable");
+
+        let endpoint = UnixEndpoint {
+            path: path.display().to_string(),
+        };
+        let content = endpoint
+            .read_string()
+            .expect("payload should be readable through unix endpoint");
+        assert_eq!(content, "unix-endpoint-payload");
+
+        std::fs::remove_file(&path).expect("payload should be removable");
     }
 }

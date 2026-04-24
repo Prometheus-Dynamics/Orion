@@ -1,4 +1,4 @@
-use orion_client::{LocalProviderApp, ProviderResource};
+use orion_client::{LocalNodeRuntime, LocalRuntimePublisher, ProviderResource};
 use orion_control_plane::{
     AvailabilityState, HealthState, LeaseState, ProviderRecord, ResourceOwnershipMode,
 };
@@ -33,15 +33,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .lease_state(LeaseState::Unleased)
     .build();
 
-    // This example accepts an explicit socket path so it can be wired into custom demos and tests.
-    // For the default daemon layout, prefer `LocalProviderApp::connect_default(...)`.
-    let app = LocalProviderApp::connect_at_with_local_address(
-        &ipc_socket,
-        client_name,
-        format!("{provider_id}.camera-provider"),
-        provider.clone(),
-    )?;
-    app.publish_resource(resource.clone()).await?;
+    let runtime = LocalNodeRuntime::new(&ipc_socket, &ipc_socket);
+    let publisher = LocalRuntimePublisher::builder(runtime, client_name)
+        .provider(provider.clone())
+        .build();
+    publisher
+        .publish_provider_resources(vec![resource.clone()])
+        .await?;
 
     println!(
         "camera-provider provider={} resource={} ownership={:?}",

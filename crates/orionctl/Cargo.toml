@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+orion = { workspace = true, features = ["control-plane", "core", "macros"] }
 orion-client.workspace = true
 orion-control-plane.workspace = true
 orion-core.workspace = true

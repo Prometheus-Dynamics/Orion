@@ -11,6 +11,7 @@ use orion_core::{
 use orion_transport_ipc::{ControlEnvelope, IpcTransport, LocalAddress, LocalControlTransport};
 
 mod local_defaults;
+mod local_services;
 
 fn setup_transport() -> IpcTransport {
     let transport = IpcTransport::new();

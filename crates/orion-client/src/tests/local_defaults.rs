@@ -1,4 +1,5 @@
 use super::*;
+use orion_control_plane::ControlMessage;
 use orion_transport_ipc::{read_control_frame, write_control_frame};
 use std::sync::Arc;
 use std::{

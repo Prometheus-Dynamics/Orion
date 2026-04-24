@@ -7,6 +7,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use super::config_decode::ConfigMapRef;
 use super::resources::ResourceOwnershipMode;
 
 #[derive(
@@ -78,6 +79,16 @@ pub enum TypedConfigValue {
 }
 
 impl TypedConfigValue {
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::UInt(_) => "uint",
+            Self::String(_) => "string",
+            Self::Bytes(_) => "bytes",
+        }
+    }
+
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(value) => Some(*value),
@@ -161,6 +172,10 @@ impl WorkloadConfig {
 
     pub fn bytes(&self, key: &str) -> Option<&[u8]> {
         self.value(key).and_then(TypedConfigValue::as_bytes)
+    }
+
+    pub fn view(&self) -> ConfigMapRef<'_> {
+        ConfigMapRef::new(&self.payload)
     }
 }
 

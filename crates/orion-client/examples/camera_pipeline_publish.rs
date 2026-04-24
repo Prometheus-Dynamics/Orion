@@ -1,4 +1,4 @@
-use orion_client::{DerivedResource, LocalExecutorApp, ResourceClaim};
+use orion_client::{DerivedResource, LocalNodeRuntime, LocalRuntimePublisher, ResourceClaim};
 use orion_control_plane::{
     AvailabilityState, DesiredState, ExecutorRecord, HealthState, ResourceOwnershipMode,
     WorkloadObservedState, WorkloadRecord,
@@ -68,15 +68,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .availability(AvailabilityState::Available)
     .label(format!("mode.width={}", width.parse::<u32>()?))
     .build();
-    // This example accepts an explicit socket path so it can target non-default layouts.
-    // For the default daemon layout, prefer `LocalExecutorApp::connect_default(...)`.
-    let app = LocalExecutorApp::connect_at_with_local_address(
-        &ipc_socket,
-        client_name,
-        format!("{executor_id}.camera-pipeline"),
-        executor.clone(),
-    )?;
-    app.publish_snapshot(vec![controller.clone()], vec![stream.clone()])
+    let runtime = LocalNodeRuntime::new(&ipc_socket, &ipc_socket);
+    let publisher = LocalRuntimePublisher::builder(runtime, client_name)
+        .executor(executor.clone())
+        .build();
+    publisher
+        .publish_executor_snapshot(vec![controller.clone()], vec![stream.clone()])
         .await?;
 
     println!(

@@ -1,3 +1,4 @@
+use orion::OrionConfigDecode;
 use orion_control_plane::{
     ArtifactRecord, MaintenanceMode, NodeRecord, ResourceRecord, StateSnapshot,
     WorkloadObservedState, WorkloadRecord,
@@ -45,6 +46,46 @@ struct ResourceDescribeReport {
     resource: ResourceRecord,
     lease_holder_node: Option<String>,
     lease_holder_workload: Option<String>,
+}
+
+#[derive(OrionConfigDecode)]
+struct GraphWorkloadScalarConfig {
+    #[orion(path = "graph.kind")]
+    graph_kind: String,
+    #[orion(path = "binding.count")]
+    binding_count: Option<u64>,
+}
+
+#[derive(OrionConfigDecode)]
+#[orion(tag = "graph.kind")]
+enum GraphWorkloadGraphConfig {
+    #[orion(tag = "artifact")]
+    Artifact {
+        #[orion(path = "graph.artifact_id")]
+        artifact_id: Option<String>,
+    },
+    #[orion(tag = "resource")]
+    Resource {
+        #[orion(path = "graph.resource_id")]
+        resource_id: String,
+    },
+    #[orion(tag = "inline")]
+    Inline {
+        #[orion(path = "graph.inline")]
+        inline: String,
+    },
+}
+
+#[derive(OrionConfigDecode)]
+struct GraphPluginConfig {
+    name: String,
+    version: Option<String>,
+}
+
+#[derive(OrionConfigDecode)]
+struct GraphWorkloadPluginListConfig {
+    #[orion(prefix = "plugin")]
+    plugins: Vec<GraphPluginConfig>,
 }
 
 pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
@@ -352,6 +393,9 @@ fn print_workload_describe_summary(workload: &WorkloadRecord, blockers: &[String
     println!("bindings: {}", workload.resource_bindings.len());
     if let Some(config) = workload.config.as_ref() {
         println!("config_schema: {}", config.schema_id);
+        if let Some(summary) = typed_workload_config_summary(workload) {
+            println!("config_summary: {summary}");
+        }
         if config.payload.is_empty() {
             println!("config_fields: -");
         } else {
@@ -371,6 +415,49 @@ fn print_workload_describe_summary(workload: &WorkloadRecord, blockers: &[String
             println!("  - {blocker}");
         }
     }
+}
+
+fn typed_workload_config_summary(workload: &WorkloadRecord) -> Option<String> {
+    let config = workload.config.as_ref()?;
+    if config.schema_id.as_str() != "graph.workload.config.v1" {
+        return None;
+    }
+
+    let scalar = GraphWorkloadScalarConfig::try_from(config).ok()?;
+    let graph = GraphWorkloadGraphConfig::try_from(config).ok()?;
+    let plugins = GraphWorkloadPluginListConfig::try_from(config)
+        .map(|decoded| decoded.plugins)
+        .unwrap_or_default();
+
+    let mut parts = vec![format!("graph_kind={}", scalar.graph_kind)];
+    match graph {
+        GraphWorkloadGraphConfig::Artifact { artifact_id } => {
+            let artifact_id = artifact_id.unwrap_or_else(|| workload.artifact_id.to_string());
+            parts.push(format!("graph_ref=artifact:{artifact_id}"));
+        }
+        GraphWorkloadGraphConfig::Resource { resource_id } => {
+            parts.push(format!("graph_ref=resource:{resource_id}"));
+        }
+        GraphWorkloadGraphConfig::Inline { inline } => {
+            parts.push(format!("graph_inline_bytes={}", inline.len()));
+        }
+    }
+    if let Some(binding_count) = scalar.binding_count {
+        parts.push(format!("binding_count={binding_count}"));
+    }
+    if !plugins.is_empty() {
+        let plugins = plugins
+            .into_iter()
+            .map(|plugin| match plugin.version {
+                Some(version) => format!("{}@{}", plugin.name, version),
+                None => plugin.name,
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        parts.push(format!("plugins={plugins}"));
+    }
+
+    Some(parts.join(" "))
 }
 
 fn print_node_describe_summary(report: &NodeDescribeReport) {
