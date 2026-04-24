@@ -1261,6 +1261,7 @@ dependencies = [
  "orion-transport-ipc",
  "orion-transport-quic",
  "orion-transport-tcp",
+ "serde",
 ]
 
 [[package]]
@@ -1305,6 +1306,8 @@ dependencies = [
  "orion-core",
  "rkyv",
  "serde",
+ "serde_json",
+ "serde_path_to_error",
  "thiserror 2.0.18",
 ]
 

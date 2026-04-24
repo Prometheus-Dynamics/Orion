@@ -28,7 +28,7 @@ pub use records::{
     ResourceEndpoint, ResourceEndpointError, ResourceOwnershipMode, ResourceRecord,
     ResourceRecordBuilder, ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue,
     TypedResourceEndpoint, UnixEndpoint, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder,
-    WorkloadRequirement,
+    WorkloadRequirement, config_json_value, deserialize_config,
 };
 pub use state::{
     AvailabilityState, DesiredState, HealthState, LeaseState, RestartPolicy, WorkloadObservedState,

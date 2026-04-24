@@ -74,6 +74,7 @@ pub mod control_plane {
         SyncDiffRequest, SyncRequest, SyncSummaryRequest, TcpEndpoint, TransportMetricsSnapshot,
         TypedConfigValue, TypedResourceEndpoint, UnixEndpoint, WorkloadConfig,
         WorkloadObservedState, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
+        config_json_value, deserialize_config,
     };
 }
 
@@ -182,6 +183,7 @@ pub mod prelude {
         ResourceBinding, ResourceEndpoint, ResourceEndpointError, ResourceRecord,
         ResourceRecordBuilder, SharedMemoryEndpoint, TcpEndpoint, TypedResourceEndpoint,
         UnixEndpoint, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
+        config_json_value, deserialize_config,
     };
     pub use crate::core::{
         ArtifactId, NodeId, ProviderId, ResourceId, ResourceType, ResourceTypeDef, RuntimeType,
@@ -189,9 +191,7 @@ pub mod prelude {
     };
     pub use crate::data_plane::{LinkType, PeerLink, RemoteBinding, TransportType};
     pub use crate::runtime::{LocalRuntimeStore, Runtime};
-    pub use orion_macros::{
-        OrionConfigDecode, OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type,
-    };
+    pub use orion_macros::{OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type};
 }
 
 #[cfg(feature = "auth")]
@@ -222,9 +222,7 @@ pub use core::{
     decode_from_slice, encode_to_vec,
 };
 #[cfg(feature = "macros")]
-pub use orion_macros::{
-    OrionConfigDecode, OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type,
-};
+pub use orion_macros::{OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type};
 #[cfg(feature = "runtime")]
 pub use runtime::{LocalRuntimeStore, Runtime};
 #[cfg(feature = "service")]

@@ -1,11 +1,12 @@
 #![cfg(all(feature = "macros", feature = "runtime", feature = "control-plane"))]
 
 use orion::{
-    NodeId, OrionConfigDecode, OrionExecutor, OrionProvider, RuntimeType,
+    NodeId, OrionExecutor, OrionProvider, RuntimeType,
     control_plane::{ConfigDecodeError, ConfigMapRef, TypedConfigValue, WorkloadConfig},
     orion_resource_type, orion_runtime_type,
     runtime::{ExecutorDescriptor, ProviderDescriptor},
 };
+use serde::Deserialize;
 use std::collections::BTreeMap;
 
 #[orion_runtime_type("graph.exec.v1")]
@@ -26,36 +27,69 @@ struct DerivedProvider {
     node_id: NodeId,
 }
 
-#[derive(OrionConfigDecode, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+struct DerivedGraphConfig {
+    inline: String,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
 struct DerivedConfig {
     width: u64,
     enabled: Option<bool>,
-    #[orion(path = "graph.inline")]
-    graph_inline: String,
+    graph: DerivedGraphConfig,
 }
 
-#[derive(OrionConfigDecode, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Debug, PartialEq, Eq)]
 struct DerivedPluginConfig {
     name: String,
     version: Option<String>,
 }
 
-#[derive(OrionConfigDecode, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Debug, PartialEq, Eq)]
 struct DerivedPluginListConfig {
-    #[orion(prefix = "plugin")]
-    plugins: Vec<DerivedPluginConfig>,
+    plugin: Vec<DerivedPluginConfig>,
 }
 
-#[derive(OrionConfigDecode, Debug, PartialEq, Eq)]
-#[orion(tag = "action.kind")]
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+struct DerivedBindingConfig {
+    resource_id: String,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+struct DerivedBindingMapConfig {
+    binding: BTreeMap<String, DerivedBindingConfig>,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+struct DerivedDefaultsConfig {
+    #[serde(default = "default_tick_ms")]
+    tick_ms: u64,
+    #[serde(default)]
+    enabled: bool,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct DerivedStrictConfig {
+    width: u64,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[serde(tag = "kind")]
 enum DerivedActionConfig {
-    #[orion(tag = "gpio.read")]
+    #[serde(rename = "gpio.read")]
     GpioRead,
-    #[orion(tag = "gpio.write")]
-    GpioWrite {
-        #[orion(path = "arg.high")]
-        high: bool,
-    },
+    #[serde(rename = "gpio.write")]
+    GpioWrite { high: bool },
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+struct DerivedActionRoot {
+    action: DerivedActionConfig,
+}
+
+fn default_tick_ms() -> u64 {
+    1000
 }
 
 #[test]
@@ -86,13 +120,16 @@ fn facade_config_decode_macro_decodes_workload_config() {
             TypedConfigValue::String("{\"nodes\":[]}".into()),
         );
 
-    let decoded = DerivedConfig::try_from(&config).expect("config should decode");
+    let decoded: DerivedConfig =
+        orion::control_plane::deserialize_config(&config.payload).expect("config should decode");
     assert_eq!(
         decoded,
         DerivedConfig {
             width: 1280,
             enabled: Some(true),
-            graph_inline: "{\"nodes\":[]}".into(),
+            graph: DerivedGraphConfig {
+                inline: "{\"nodes\":[]}".into(),
+            },
         }
     );
 }
@@ -100,14 +137,14 @@ fn facade_config_decode_macro_decodes_workload_config() {
 #[test]
 fn facade_config_decode_macro_surfaces_field_errors() {
     let payload = BTreeMap::from([("width".to_string(), TypedConfigValue::String("wide".into()))]);
-    let error = DerivedConfig::try_from(&payload).expect_err("type mismatch should fail");
+    let error = orion::control_plane::deserialize_config::<DerivedConfig>(&payload)
+        .expect_err("type mismatch should fail");
 
     assert_eq!(
         error,
-        ConfigDecodeError::InvalidType {
+        ConfigDecodeError::Deserialize {
             field: "width".into(),
-            expected: "uint",
-            actual: "string",
+            message: "invalid type: string \"wide\", expected u64".into(),
         }
     );
 
@@ -122,10 +159,16 @@ fn facade_config_decode_macro_surfaces_field_errors() {
 fn facade_config_decode_macro_decodes_tagged_enum() {
     let config = WorkloadConfig::new("resource.action.config.v1")
         .field("action.kind", TypedConfigValue::String("gpio.write".into()))
-        .field("arg.high", TypedConfigValue::Bool(true));
+        .field("action.high", TypedConfigValue::Bool(true));
 
-    let decoded = DerivedActionConfig::try_from(&config).expect("enum config should decode");
-    assert_eq!(decoded, DerivedActionConfig::GpioWrite { high: true });
+    let decoded: DerivedActionRoot = orion::control_plane::deserialize_config(&config.payload)
+        .expect("enum config should decode");
+    assert_eq!(
+        decoded,
+        DerivedActionRoot {
+            action: DerivedActionConfig::GpioWrite { high: true }
+        }
+    );
 }
 
 #[test]
@@ -133,14 +176,12 @@ fn facade_config_decode_macro_reports_unknown_enum_tag() {
     let config = WorkloadConfig::new("resource.action.config.v1")
         .field("action.kind", TypedConfigValue::String("gpio.flip".into()));
 
-    let error = DerivedActionConfig::try_from(&config).expect_err("unknown tag should fail");
-    assert_eq!(
+    let error = orion::control_plane::deserialize_config::<DerivedActionRoot>(&config.payload)
+        .expect_err("unknown tag should fail");
+    assert!(matches!(
         error,
-        ConfigDecodeError::InvalidValue {
-            field: "action.kind".into(),
-            message: "unsupported tag 'gpio.flip'".into(),
-        }
-    );
+        ConfigDecodeError::Deserialize { field, .. } if field == "action.kind"
+    ));
 }
 
 #[test]
@@ -150,11 +191,13 @@ fn facade_config_decode_macro_decodes_indexed_groups() {
         .field("plugin.1.name", TypedConfigValue::String("slam".into()))
         .field("plugin.1.version", TypedConfigValue::String("1.0.0".into()));
 
-    let decoded = DerivedPluginListConfig::try_from(&config).expect("indexed groups should decode");
+    let decoded: DerivedPluginListConfig =
+        orion::control_plane::deserialize_config(&config.payload)
+            .expect("indexed groups should decode");
     assert_eq!(
         decoded,
         DerivedPluginListConfig {
-            plugins: vec![
+            plugin: vec![
                 DerivedPluginConfig {
                     name: "cv".into(),
                     version: None,
@@ -166,4 +209,69 @@ fn facade_config_decode_macro_decodes_indexed_groups() {
             ],
         }
     );
+}
+
+#[test]
+fn facade_config_decode_macro_decodes_named_groups() {
+    let config = WorkloadConfig::new("graph.workload.config.v1")
+        .field(
+            "binding.camera.resource_id",
+            TypedConfigValue::String("resource.camera".into()),
+        )
+        .field(
+            "binding.depth.resource_id",
+            TypedConfigValue::String("resource.depth".into()),
+        );
+
+    let decoded: DerivedBindingMapConfig =
+        orion::control_plane::deserialize_config(&config.payload)
+            .expect("named groups should decode");
+    assert_eq!(
+        decoded,
+        DerivedBindingMapConfig {
+            binding: BTreeMap::from([
+                (
+                    "camera".into(),
+                    DerivedBindingConfig {
+                        resource_id: "resource.camera".into(),
+                    },
+                ),
+                (
+                    "depth".into(),
+                    DerivedBindingConfig {
+                        resource_id: "resource.depth".into(),
+                    },
+                ),
+            ]),
+        }
+    );
+}
+
+#[test]
+fn facade_config_decode_macro_uses_serde_defaults() {
+    let config = WorkloadConfig::new("runtime.tuning.v1");
+
+    let decoded: DerivedDefaultsConfig =
+        orion::control_plane::deserialize_config(&config.payload).expect("defaults should decode");
+    assert_eq!(
+        decoded,
+        DerivedDefaultsConfig {
+            tick_ms: 1000,
+            enabled: false,
+        }
+    );
+}
+
+#[test]
+fn facade_config_decode_macro_respects_serde_deny_unknown_fields() {
+    let config = WorkloadConfig::new("strict.config.v1")
+        .field("width", TypedConfigValue::UInt(1280))
+        .field("extra", TypedConfigValue::Bool(true));
+
+    let error = orion::control_plane::deserialize_config::<DerivedStrictConfig>(&config.payload)
+        .expect_err("unknown fields should fail");
+    assert!(matches!(
+        error,
+        ConfigDecodeError::Deserialize { field, .. } if field == "extra"
+    ));
 }

@@ -55,3 +55,6 @@ orion-transport-http = { workspace = true, optional = true }
 orion-transport-tcp = { workspace = true, optional = true }
 orion-transport-quic = { workspace = true, optional = true }
 orion-transport-ipc = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde.workspace = true

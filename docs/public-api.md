@@ -24,3 +24,25 @@ Examples:
   `NodeConfig::default_ipc_stream_socket_path_for(...)`
 - use documented `ORION_NODE_*` env vars instead of internal `*_from_env()` helper methods
 - use health/readiness/observability endpoints and docs rather than internal status helper methods
+
+## Config Decode
+
+Prefer the explicit free function:
+
+```rust
+use orion::control_plane::deserialize_config;
+
+let decoded: MyConfig = deserialize_config(&config.payload)?;
+```
+
+with plain Serde models:
+
+```rust
+#[derive(serde::Deserialize)]
+struct MyConfig {
+    graph: GraphConfig,
+}
+```
+
+For lower-level manual access, use `ConfigMapRef`. Avoid introducing per-record decode helper methods
+unless there is a concrete need they satisfy better than `deserialize_config(...)`.
