@@ -68,7 +68,10 @@ async fn node_sync_peer_phase_cached_fast_path_skips_hello() {
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -169,7 +172,10 @@ async fn node_sync_peer_phase_hello_then_remote_ahead_exchange() {
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -238,7 +244,10 @@ async fn node_sync_peer_phase_local_ahead_replays_mutations_after_hello() {
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -332,7 +341,10 @@ async fn node_sync_peer_phase_equal_revision_conflict_requests_snapshot_reconcil
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),

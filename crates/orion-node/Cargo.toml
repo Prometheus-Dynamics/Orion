@@ -10,6 +10,9 @@ authors.workspace = true
 description = "Thin Orion node binary."
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [lib]
 path = "src/lib.rs"
 

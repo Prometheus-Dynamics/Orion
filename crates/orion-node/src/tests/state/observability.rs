@@ -254,10 +254,12 @@ async fn observability_tracks_persistence_latency_and_worker_backpressure() {
             .is_some()
     );
     assert_eq!(snapshot.persistence.worker_queue_capacity, 1);
+    assert!(snapshot.persistence.worker_operation_count >= 6);
+    assert!(snapshot.persistence.worker_reply_wait_count > 0);
+    assert!(snapshot.persistence.worker_reply_wait_ms_total > 0);
+    assert!(snapshot.persistence.worker_operation_ms_total > 0);
+    assert!(snapshot.persistence.worker_operation_ms_max > 0);
     assert!(snapshot.persistence.worker_enqueue_count >= 6);
-    assert!(snapshot.persistence.worker_enqueue_wait_count > 0);
-    assert!(snapshot.persistence.worker_enqueue_wait_ms_total > 0);
-    assert!(snapshot.persistence.worker_enqueue_wait_ms_max > 0);
     assert!(snapshot.recent_events.iter().any(|event| {
         matches!(
             event.kind,
@@ -314,8 +316,8 @@ async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
         tokio::spawn(async move {
             for idx in 0..8 {
                 app.enroll_peer(PeerConfig::new(
-                    format!("peer-pressure-{idx}"),
-                    format!("http://127.0.0.1:{}", 4100 + idx),
+                    orion::NodeId::new(format!("peer-pressure-{idx}")),
+                    orion_core::PeerBaseUrl::new(format!("http://127.0.0.1:{}", 4100 + idx)),
                 ))
                 .expect("peer enrollment should succeed");
             }
@@ -369,7 +371,8 @@ async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
     clear_test_audit_append_delay();
 
     let snapshot = app.observability_snapshot();
-    assert!(snapshot.persistence.worker_enqueue_wait_count > 0);
+    assert!(snapshot.persistence.worker_reply_wait_count > 0);
+    assert!(snapshot.persistence.worker_operation_ms_total > 0);
     assert!(snapshot.audit_log_dropped_records > 0);
 
     let _ = fs::remove_dir_all(state_dir);
@@ -470,8 +473,8 @@ async fn concurrent_peer_sync_persistence_and_local_control_activity_remains_res
     let snapshot = app.observability_snapshot();
     assert!(snapshot.peer_sync.failure_count >= 1);
     assert_eq!(snapshot.persistence.worker_queue_capacity, 1);
-    assert!(snapshot.persistence.worker_enqueue_wait_count > 0);
-    assert!(snapshot.persistence.worker_enqueue_wait_ms_total > 0);
+    assert!(snapshot.persistence.worker_reply_wait_count > 0);
+    assert!(snapshot.persistence.worker_operation_ms_total > 0);
     assert!(snapshot.persistence.state_persist.success_count >= 4);
 
     let _ = fs::remove_dir_all(state_dir);
@@ -493,7 +496,7 @@ async fn saturated_persistence_queue_exposes_backpressure_metrics_with_bounded_c
 
     let artifacts = (0..8)
         .map(|idx| {
-            ArtifactRecord::builder(format!("artifact.saturation.{idx}"))
+            ArtifactRecord::builder(orion::ArtifactId::new(format!("artifact.saturation.{idx}")))
                 .content_type("application/octet-stream")
                 .size_bytes(1)
                 .build()
@@ -529,6 +532,18 @@ async fn saturated_persistence_queue_exposes_backpressure_metrics_with_bounded_c
     assert_eq!(snapshot.persistence.worker_queue_capacity, 1);
     assert_eq!(snapshot.persistence.artifact_write.success_count, 8);
     assert!(snapshot.persistence.state_persist.success_count >= 8);
+    assert!(snapshot.persistence.worker_operation_count >= 16);
+    assert!(snapshot.persistence.worker_queue_wait_count >= 7);
+    assert!(snapshot.persistence.worker_queue_wait_ms_total > 0);
+    assert!(snapshot.persistence.worker_queue_wait_ms_max > 0);
+    assert!(snapshot.persistence.worker_reply_wait_count > 0);
+    assert!(snapshot.persistence.worker_reply_wait_ms_total > 0);
+    assert!(snapshot.persistence.worker_operation_ms_total > 0);
+    assert!(snapshot.persistence.worker_operation_ms_max > 0);
+    assert!(
+        snapshot.persistence.worker_queue_wait_count < snapshot.persistence.worker_operation_count,
+        "queue wait should only count saturated sends, not every persistence operation"
+    );
     assert!(snapshot.persistence.worker_enqueue_count >= 16);
     assert!(snapshot.persistence.worker_enqueue_wait_count >= 7);
     assert!(snapshot.persistence.worker_enqueue_wait_ms_total > 0);

@@ -43,11 +43,19 @@ use desired_sync::{
     empty_summary_for_sections,
 };
 use local_clients::{ClientRegistryTxn, LocalClientState};
+#[cfg(feature = "transport-quic")]
+pub(crate) use observability::classify_quic_communication_failure;
+#[cfg(feature = "transport-tcp")]
+pub(crate) use observability::classify_tcp_communication_failure;
 use observability::{
     AuditEventKind, AuditLogSink, LifecycleSnapshot, LifecycleState, ObservabilityState,
     ObservabilityTxn, classify_node_error, classify_peer_sync_error, classify_peer_sync_error_kind,
     is_client_auth_tls_error, peer_sync_troubleshooting_hint, push_observability_event,
     write_audit_record,
+};
+pub(crate) use observability::{
+    CommunicationEndpointRuntime, CommunicationMetrics, CommunicationStageDurations,
+    classify_http_communication_failure,
 };
 #[cfg(feature = "transport-quic")]
 use orion::transport::quic::{QuicClientTlsConfig, QuicServerTlsConfig, QuicTransport};

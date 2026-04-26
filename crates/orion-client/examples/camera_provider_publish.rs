@@ -2,6 +2,7 @@ use orion_client::{LocalNodeRuntime, LocalRuntimePublisher, ProviderResource};
 use orion_control_plane::{
     AvailabilityState, HealthState, LeaseState, ProviderRecord, ResourceOwnershipMode,
 };
+use orion_core::{NodeId, ProviderId, ResourceId, ResourceType};
 
 #[path = "support/common.rs"]
 mod common;
@@ -19,13 +20,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         node_id,
         raw_resource_id,
     ] = common::read_exact_args::<5>()?;
-    let provider = ProviderRecord::builder(provider_id.as_str(), node_id.as_str())
-        .resource_type("camera.device")
-        .build();
+    let provider = ProviderRecord::builder(
+        ProviderId::new(provider_id.clone()),
+        NodeId::new(node_id.clone()),
+    )
+    .resource_type(ResourceType::new("camera.device"))
+    .build();
     let resource = ProviderResource::new(
-        raw_resource_id.as_str(),
-        "camera.device",
-        provider_id.as_str(),
+        ResourceId::new(raw_resource_id.clone()),
+        ResourceType::new("camera.device"),
+        ProviderId::new(provider_id.clone()),
     )
     .ownership_mode(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
     .health(HealthState::Healthy)

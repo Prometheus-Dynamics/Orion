@@ -10,8 +10,11 @@ use std::{
 use tokio::task::JoinSet;
 
 pub const DEFAULT_TRANSPORT_SERVER_NAME: &str = "localhost";
+pub const DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 pub const DEFAULT_HTTP_CLIENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+pub const DEFAULT_TRANSPORT_IO_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS: usize = 1024;
 pub const DEFAULT_QUIC_INSECURE_SELF_SIGNED_SAN_HOSTS: &[&str] =
     &[DEFAULT_TRANSPORT_SERVER_NAME, "node-b.local"];
 

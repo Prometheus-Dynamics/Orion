@@ -48,7 +48,10 @@ async fn node_sync_peer_resolves_equal_revision_conflict_deterministically() {
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-b", format!("http://{}", addr_b))],
+            peers: vec![PeerConfig::new(
+                "node-b",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr_b)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -229,7 +232,10 @@ async fn node_sync_peer_propagates_workload_tombstone_over_existing_record() {
         .expect("node A server should start");
 
     node_b
-        .register_peer(PeerConfig::new("node-a", format!("http://{}", addr_a)))
+        .register_peer(PeerConfig::new(
+            "node-a",
+            orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+        ))
         .expect("peer registration should succeed");
     node_b
         .sync_peer(&NodeId::new("node-a"))
@@ -306,7 +312,10 @@ async fn node_sync_peer_higher_revision_readd_overrides_tombstone() {
         .expect("node B server should start");
 
     node_a
-        .register_peer(PeerConfig::new("node-b", format!("http://{}", addr_b)))
+        .register_peer(PeerConfig::new(
+            "node-b",
+            orion_core::PeerBaseUrl::new(format!("http://{}", addr_b)),
+        ))
         .expect("peer registration should succeed");
     node_a
         .sync_peer(&NodeId::new("node-b"))

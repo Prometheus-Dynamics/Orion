@@ -1,6 +1,6 @@
 use orion_client::ExecutorEventStream;
 use orion_control_plane::{ClientEventKind, ExecutorRecord};
-use orion_core::{NodeId, RuntimeType};
+use orion_core::{ExecutorId, NodeId, RuntimeType};
 
 #[path = "support/common.rs"]
 mod common;
@@ -13,7 +13,7 @@ async fn main() {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let [socket_path, client_name, executor_id, node_id, runtime_type] =
         common::read_exact_args::<5>()?;
-    let executor = ExecutorRecord::builder(executor_id.clone(), NodeId::new(node_id))
+    let executor = ExecutorRecord::builder(ExecutorId::new(executor_id), NodeId::new(node_id))
         .runtime_type(RuntimeType::new(runtime_type))
         .build();
     let mut stream = ExecutorEventStream::connect_at_with_local_address(

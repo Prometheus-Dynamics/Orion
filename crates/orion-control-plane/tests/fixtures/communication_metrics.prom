@@ -1,0 +1,58 @@
+# HELP orion_communication_messages_sent_total Messages sent by communication endpoint.
+# TYPE orion_communication_messages_sent_total counter
+# HELP orion_communication_messages_received_total Messages received by communication endpoint.
+# TYPE orion_communication_messages_received_total counter
+# HELP orion_communication_bytes_sent_total Serialized Orion payload bytes sent by communication endpoint.
+# TYPE orion_communication_bytes_sent_total counter
+# HELP orion_communication_bytes_received_total Serialized Orion payload bytes received by communication endpoint.
+# TYPE orion_communication_bytes_received_total counter
+# HELP orion_communication_estimated_wire_bytes_sent_total Estimated transport bytes sent by communication endpoint, including Orion payload plus local framing estimate.
+# TYPE orion_communication_estimated_wire_bytes_sent_total counter
+# HELP orion_communication_estimated_wire_bytes_received_total Estimated transport bytes received by communication endpoint, including Orion payload plus local framing estimate.
+# TYPE orion_communication_estimated_wire_bytes_received_total counter
+# HELP orion_communication_failures_total Failures observed by communication endpoint.
+# TYPE orion_communication_failures_total counter
+# HELP orion_communication_failures_by_kind_total Failures observed by communication endpoint and normalized failure kind.
+# TYPE orion_communication_failures_by_kind_total counter
+# HELP orion_communication_reconnects_total Reconnects observed by communication endpoint.
+# TYPE orion_communication_reconnects_total counter
+# HELP orion_communication_connected Communication endpoint connected state, where 1 means connected.
+# TYPE orion_communication_connected gauge
+# HELP orion_communication_queued Queued items reported by communication endpoint when available.
+# TYPE orion_communication_queued gauge
+# HELP orion_communication_latency_ms Communication endpoint latency in milliseconds.
+# TYPE orion_communication_latency_ms histogram
+# HELP orion_communication_stage_latency_ms Communication endpoint stage latency in milliseconds.
+# TYPE orion_communication_stage_latency_ms histogram
+# HELP orion_communication_recent_failures_total Failures observed by communication endpoint in the recent rolling window.
+# TYPE orion_communication_recent_failures_total counter
+# HELP orion_communication_recent_successes_total Successes observed by communication endpoint in the recent rolling window.
+# TYPE orion_communication_recent_successes_total counter
+# HELP orion_communication_recent_avg_latency_ms Average communication latency in the recent rolling window.
+# TYPE orion_communication_recent_avg_latency_ms gauge
+# HELP orion_communication_export_dropped_endpoints Communication endpoints omitted from metrics export because of exporter cardinality limits.
+# TYPE orion_communication_export_dropped_endpoints gauge
+orion_communication_export_dropped_endpoints{node_id="node-a"} 0
+orion_communication_messages_sent_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 2
+orion_communication_messages_received_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 3
+orion_communication_bytes_sent_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 20
+orion_communication_bytes_received_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 30
+orion_communication_estimated_wire_bytes_sent_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 84
+orion_communication_estimated_wire_bytes_received_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 94
+orion_communication_failures_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 1
+orion_communication_failures_by_kind_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a",kind="timeout"} 1
+orion_communication_reconnects_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 0
+orion_communication_connected{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 1
+orion_communication_queued{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 2
+orion_communication_latency_ms_bucket{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a",le="1"} 1
+orion_communication_latency_ms_bucket{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a",le="5"} 2
+orion_communication_latency_ms_bucket{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a",le="10"} 2
+orion_communication_latency_ms_bucket{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a",le="50"} 2
+orion_communication_latency_ms_bucket{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a",le="100"} 2
+orion_communication_latency_ms_bucket{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a",le="500"} 2
+orion_communication_latency_ms_bucket{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a",le="+Inf"} 3
+orion_communication_latency_ms_count{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 3
+orion_communication_latency_ms_sum{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 507
+orion_communication_recent_successes_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 2
+orion_communication_recent_failures_total{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 1
+orion_communication_recent_avg_latency_ms{node_id="node-a",id="ipc/local-unary/client-a",transport="ipc",scope="local_unary",client_name="client-a"} 169

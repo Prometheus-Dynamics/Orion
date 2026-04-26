@@ -1,6 +1,6 @@
 use orion_client::{LocalNodeRuntime, LocalProviderEvent, LocalProviderService};
 use orion_control_plane::ProviderRecord;
-use orion_core::{ResourceType, Revision};
+use orion_core::{NodeId, ProviderId, ResourceType, Revision};
 
 #[path = "support/common.rs"]
 mod common;
@@ -19,8 +19,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         resource_type,
     ] = common::read_exact_args::<5>()?;
     let provider = ProviderRecord {
-        provider_id: provider_id.into(),
-        node_id: node_id.into(),
+        provider_id: ProviderId::new(provider_id),
+        node_id: NodeId::new(node_id),
         resource_types: vec![ResourceType::new(resource_type)],
     };
 

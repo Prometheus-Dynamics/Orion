@@ -172,9 +172,17 @@ mod tests {
             }
         }
 
-        let (server, endpoint) = QuicFrameServer::bind(
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(vec!["node-b.local".to_owned()])
+                .expect("test QUIC certificate should generate");
+        let server_tls = QuicServerTlsConfig::new(
+            cert.pem().into_bytes(),
+            signing_key.serialize_pem().into_bytes(),
+        );
+        let (server, endpoint) = QuicFrameServer::bind_secure(
             QuicEndpoint::new("127.0.0.1", 0).with_server_name("node-b.local"),
             Arc::new(EchoHandler),
+            server_tls,
         )
         .await
         .expect("QUIC server should bind");

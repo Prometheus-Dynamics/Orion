@@ -187,6 +187,11 @@ impl NodeAppBuilder {
         self
     }
 
+    pub fn with_transport_max_payload_bytes(mut self, max_payload_bytes: usize) -> Self {
+        self.runtime_tuning_mut().transport_max_payload_bytes = max_payload_bytes;
+        self
+    }
+
     pub fn with_persistence_worker_queue_capacity(mut self, capacity: usize) -> Self {
         self.runtime_tuning_mut().persistence_worker_queue_capacity = capacity;
         self

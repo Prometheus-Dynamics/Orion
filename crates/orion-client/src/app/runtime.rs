@@ -154,7 +154,15 @@ impl LocalNodeRuntime {
         &self,
         name: impl Into<String>,
     ) -> Result<LocalControlPlaneClient, ClientError> {
-        LocalControlPlaneClient::connect_at(&self.ipc_socket_path, name)
+        let identity = crate::session::local_identity_for_role(
+            name,
+            orion_control_plane::ClientRole::ControlPlane,
+        );
+        LocalControlPlaneClient::connect_stream(
+            &self.ipc_stream_socket_path,
+            identity.clone(),
+            crate::session::local_session_config_for_role(&identity),
+        )
     }
 
     pub fn provider(

@@ -9,6 +9,7 @@ Orion splits validation into default workspace checks, Docker-backed cluster cov
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo test --workspace --all-features`
 - `cargo doc --workspace --no-deps`
+- `cargo audit`
 
 ## Docker Surface
 
@@ -24,4 +25,5 @@ The main containerized suites exercise the node and cluster behavior inside `tes
 
 - Perf thresholds and baselines live in `testing/ci/perf-baselines.json`
 - Perf and soak suites stay separate from the default local loop
+- Dependency vulnerability checks run in CI with `cargo audit`
 - File-size linting is warning-only, supports `FILE_SIZE_EXCLUDE_DIRS=path1:path2`, and tracks current exceptions through `testing/ci/file-size-baseline.txt`

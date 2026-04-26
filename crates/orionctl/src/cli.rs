@@ -64,7 +64,9 @@ pub(crate) enum Command {
 pub(crate) enum GetCommand {
     Health(HttpTargetArgs),
     Readiness(HttpTargetArgs),
+    Host(StateQueryArgs),
     Observability(StateQueryArgs),
+    Communication(CommunicationArgs),
     Snapshot(StateQueryArgs),
     Node(DescribeObjectArgs),
     Artifact(DescribeObjectArgs),
@@ -131,6 +133,22 @@ pub(crate) enum OutputFormat {
     Json,
     Yaml,
     Toml,
+    Metrics,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CommunicationSort {
+    Id,
+    Slowest,
+    Failures,
+    FailureRate,
+    Bytes,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CommunicationView {
+    Endpoints,
+    Peers,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -140,6 +158,7 @@ impl std::fmt::Display for OutputFormat {
             Self::Json => f.write_str("json"),
             Self::Yaml => f.write_str("yaml"),
             Self::Toml => f.write_str("toml"),
+            Self::Metrics => f.write_str("metrics"),
         }
     }
 }
@@ -159,6 +178,34 @@ impl std::fmt::Display for StructuredFormat {
             Self::Toml => f.write_str("toml"),
         }
     }
+}
+
+#[derive(Args, Clone, Debug)]
+pub(crate) struct CommunicationArgs {
+    #[command(flatten)]
+    pub(crate) source: StateQueryArgs,
+    #[arg(long)]
+    pub(crate) id: Option<String>,
+    #[arg(long)]
+    pub(crate) transport: Option<String>,
+    #[arg(long)]
+    pub(crate) scope: Option<String>,
+    #[arg(long)]
+    pub(crate) peer: Option<String>,
+    #[arg(long = "label")]
+    pub(crate) labels: Vec<String>,
+    #[arg(long)]
+    pub(crate) connected: bool,
+    #[arg(long)]
+    pub(crate) disconnected: bool,
+    #[arg(long)]
+    pub(crate) failed: bool,
+    #[arg(long, value_enum, default_value_t = CommunicationSort::Id)]
+    pub(crate) sort: CommunicationSort,
+    #[arg(long, value_enum, default_value_t = CommunicationView::Endpoints)]
+    pub(crate) view: CommunicationView,
+    #[arg(long)]
+    pub(crate) limit: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -232,6 +279,10 @@ pub(crate) struct StateQueryArgs {
     pub(crate) client_name: String,
     #[arg(short = 'o', long, default_value_t = OutputFormat::Summary)]
     pub(crate) output: OutputFormat,
+    #[arg(long)]
+    pub(crate) metrics_max_communication_endpoints: Option<usize>,
+    #[arg(long)]
+    pub(crate) metrics_max_label_value_len: Option<usize>,
 }
 
 #[derive(Args, Clone, Debug)]

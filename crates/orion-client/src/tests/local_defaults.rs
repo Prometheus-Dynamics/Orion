@@ -1,5 +1,6 @@
 use super::*;
 use orion_control_plane::ControlMessage;
+use orion_core::SessionId;
 use orion_transport_ipc::{read_control_frame, write_control_frame};
 use std::sync::Arc;
 use std::{
@@ -242,7 +243,7 @@ async fn serve_stream_accepting_requests(
             source: LocalAddress::new("orion"),
             destination: hello.source,
             message: ControlMessage::ClientWelcome(orion_control_plane::ClientSession {
-                session_id: format!("node-a:{client_name}").into(),
+                session_id: SessionId::new(format!("node-a:{client_name}")),
                 role,
                 node_id: NodeId::new("node-a"),
                 source: client_name.to_string(),

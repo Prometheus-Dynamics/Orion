@@ -377,14 +377,14 @@ mod tests {
         workload.observed_state = WorkloadObservedState::Running;
 
         let derived_resource = ResourceRecord::builder(
-            "resource.camera.stream.front",
-            "camera.frame_stream",
-            "provider.local",
+            ResourceId::new("resource.camera.stream.front"),
+            ResourceType::new("camera.frame_stream"),
+            ProviderId::new("provider.local"),
         )
-        .realized_by_executor("executor.local")
+        .realized_by_executor(ExecutorId::new("executor.local"))
         .ownership_mode(ResourceOwnershipMode::SharedRead)
         .realized_for_workload(workload.workload_id.clone())
-        .source_resource("resource.imu-1")
+        .source_resource(ResourceId::new("resource.imu-1"))
         .source_workload(workload.workload_id.clone())
         .availability(AvailabilityState::Available)
         .build();
@@ -420,9 +420,9 @@ mod tests {
                 workloads: vec![workload],
                 resources: vec![
                     ResourceRecord::builder(
-                        "resource.camera.stream.front",
-                        "camera.frame_stream",
-                        "provider.local",
+                        ResourceId::new("resource.camera.stream.front"),
+                        ResourceType::new("camera.frame_stream"),
+                        ProviderId::new("provider.local"),
                     )
                     .ownership_mode(ResourceOwnershipMode::SharedRead)
                     .availability(AvailabilityState::Available)
@@ -455,15 +455,15 @@ mod tests {
         observed.put_resource(raw);
         observed.put_resource(
             ResourceRecord::builder(
-                "resource.camera.stream.front",
-                "camera.frame_stream",
-                "provider.local",
+                ResourceId::new("resource.camera.stream.front"),
+                ResourceType::new("camera.frame_stream"),
+                ProviderId::new("provider.local"),
             )
-            .realized_by_executor("executor.local")
+            .realized_by_executor(ExecutorId::new("executor.local"))
             .ownership_mode(ResourceOwnershipMode::SharedRead)
-            .realized_for_workload("workload.camera-controller")
-            .source_resource("resource.camera.raw.front")
-            .source_workload("workload.camera-controller")
+            .realized_for_workload(WorkloadId::new("workload.camera-controller"))
+            .source_resource(ResourceId::new("resource.camera.raw.front"))
+            .source_workload(WorkloadId::new("workload.camera-controller"))
             .availability(AvailabilityState::Available)
             .build(),
         );
@@ -474,14 +474,14 @@ mod tests {
 
         store.desired.put_workload(
             WorkloadRecord::builder(
-                "workload.camera-controller",
-                "camera.controller.v1",
-                "artifact.camera",
+                WorkloadId::new("workload.camera-controller"),
+                RuntimeType::new("camera.controller.v1"),
+                ArtifactId::new("artifact.camera"),
             )
             .desired_state(DesiredState::Running)
-            .assigned_to("node-a")
+            .assigned_to(NodeId::new("node-a"))
             .require_resource_with_ownership(
-                "camera.device",
+                ResourceType::new("camera.device"),
                 1,
                 ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
             )
@@ -489,14 +489,14 @@ mod tests {
         );
         store.desired.put_workload(
             WorkloadRecord::builder(
-                "workload.vision-a",
-                "vision.consumer.v1",
-                "artifact.vision-a",
+                WorkloadId::new("workload.vision-a"),
+                RuntimeType::new("vision.consumer.v1"),
+                ArtifactId::new("artifact.vision-a"),
             )
             .desired_state(DesiredState::Running)
-            .assigned_to("node-a")
+            .assigned_to(NodeId::new("node-a"))
             .require_resource_with_ownership(
-                "camera.frame_stream",
+                ResourceType::new("camera.frame_stream"),
                 1,
                 ResourceOwnershipMode::SharedRead,
             )
@@ -504,14 +504,14 @@ mod tests {
         );
         store.desired.put_workload(
             WorkloadRecord::builder(
-                "workload.vision-b",
-                "vision.consumer.v1",
-                "artifact.vision-b",
+                WorkloadId::new("workload.vision-b"),
+                RuntimeType::new("vision.consumer.v1"),
+                ArtifactId::new("artifact.vision-b"),
             )
             .desired_state(DesiredState::Running)
-            .assigned_to("node-a")
+            .assigned_to(NodeId::new("node-a"))
             .require_resource_with_ownership(
-                "camera.frame_stream",
+                ResourceType::new("camera.frame_stream"),
                 1,
                 ResourceOwnershipMode::SharedRead,
             )

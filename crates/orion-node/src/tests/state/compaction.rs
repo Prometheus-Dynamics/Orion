@@ -27,7 +27,10 @@ fn persistence_compacts_mutation_history_to_configured_bound() {
     for cycle in 0..8 {
         let artifact_id = format!("artifact.bound.{cycle}");
         app.put_artifact_content(
-            &orion::control_plane::ArtifactRecord::builder(artifact_id.as_str()).build(),
+            &orion::control_plane::ArtifactRecord::builder(orion::ArtifactId::new(
+                artifact_id.clone(),
+            ))
+            .build(),
             &[cycle as u8],
         )
         .expect("artifact should persist");
@@ -127,10 +130,12 @@ fn persistence_compacts_mutation_history_to_configured_byte_budget() {
     for cycle in 0..24 {
         let artifact_id = format!("artifact.bound.bytes.{cycle}");
         app.put_artifact_content(
-            &orion::control_plane::ArtifactRecord::builder(artifact_id.as_str())
-                .content_type("application/octet-stream")
-                .size_bytes(512)
-                .build(),
+            &orion::control_plane::ArtifactRecord::builder(orion::ArtifactId::new(
+                artifact_id.clone(),
+            ))
+            .content_type("application/octet-stream")
+            .size_bytes(512)
+            .build(),
             &[cycle as u8; 512],
         )
         .expect("artifact should persist");

@@ -11,6 +11,9 @@ description = "Perf log threshold checker for Orion CI."
 readme = "README.md"
 publish = false
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "orion-perf-check"
 path = "src/main.rs"

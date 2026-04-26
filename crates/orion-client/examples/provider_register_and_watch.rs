@@ -3,7 +3,7 @@ use orion_control_plane::{
     AvailabilityState, ControlMessage, DesiredStateMutation, LeaseRecord, LeaseState,
     MutationBatch, ProviderRecord, ResourceRecord, StateSnapshot, SyncRequest,
 };
-use orion_core::{NodeId, Revision};
+use orion_core::{NodeId, ProviderId, ResourceId, ResourceType, Revision};
 use orion_transport_http::{HttpClient, HttpRequestPayload, HttpResponsePayload};
 use tokio::time::{Duration, Instant, sleep};
 
@@ -26,13 +26,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         resource_type,
         resource_id,
     ] = common::read_exact_args::<8>()?;
-    let provider = ProviderRecord::builder(provider_id.as_str(), node_id.as_str())
-        .resource_type(resource_type.as_str())
-        .build();
+    let provider = ProviderRecord::builder(
+        ProviderId::new(provider_id.clone()),
+        NodeId::new(node_id.clone()),
+    )
+    .resource_type(ResourceType::new(resource_type.clone()))
+    .build();
     let resource = ResourceRecord::builder(
-        resource_id.as_str(),
-        resource_type.as_str(),
-        provider_id.as_str(),
+        ResourceId::new(resource_id.clone()),
+        ResourceType::new(resource_type.clone()),
+        ProviderId::new(provider_id.clone()),
     )
     .availability(AvailabilityState::Available)
     .lease_state(LeaseState::Leased)
@@ -58,7 +61,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 mutations: vec![DesiredStateMutation::PutLease(
                     LeaseRecord::builder(resource.resource_id.clone())
                         .lease_state(LeaseState::Leased)
-                        .holder_node(NodeId::new(node_id))
+                        .holder_node(NodeId::new(node_id.clone()))
                         .build(),
                 )],
             }),

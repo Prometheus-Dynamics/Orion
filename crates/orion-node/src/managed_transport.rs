@@ -4,10 +4,20 @@ use crate::{
 };
 use orion::transport::http::{HttpControlHandler, HttpServer};
 #[cfg(feature = "transport-quic")]
-use orion::transport::quic::{QuicEndpoint, QuicFrameHandler, QuicFrameServer};
+use orion::transport::quic::{
+    QuicEndpoint, QuicFrame, QuicFrameClient, QuicFrameHandler, QuicFrameServer, QuicTransportError,
+};
 #[cfg(feature = "transport-tcp")]
-use orion::transport::tcp::{TcpFrameHandler, TcpFrameServer};
-use std::{net::SocketAddr, sync::Arc};
+use orion::transport::tcp::{
+    TcpFrame, TcpFrameClient, TcpFrameHandler, TcpFrameServer, TcpTransportError,
+};
+#[cfg(any(feature = "transport-tcp", feature = "transport-quic"))]
+use orion_data_plane::RemoteBinding;
+#[cfg(feature = "transport-quic")]
+use orion_transport_quic::QuicCodec;
+#[cfg(feature = "transport-tcp")]
+use orion_transport_tcp::TcpCodec;
+use std::{collections::BTreeMap, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 
 #[derive(Clone)]
@@ -113,6 +123,104 @@ pub(crate) enum ManagedTransportBinding {
     Socket(SocketAddr),
     #[cfg(feature = "transport-quic")]
     Quic(QuicEndpoint),
+}
+
+impl NodeApp {
+    #[cfg(feature = "transport-tcp")]
+    pub async fn send_tcp_data_frame_metered(
+        &self,
+        client: &TcpFrameClient,
+        frame: TcpFrame,
+    ) -> Result<TcpFrame, TcpTransportError> {
+        let started = Instant::now();
+        let encode_started = Instant::now();
+        let bytes_sent = TcpCodec
+            .encode_frame(&frame)
+            .map(|bytes| bytes.len().min(u64::MAX as usize) as u64)
+            .unwrap_or(0);
+        let encode_duration = encode_started.elapsed();
+        let endpoint = tcp_outbound_data_endpoint(&frame);
+        match client.send(frame).await {
+            Ok(response) => {
+                let decode_started = Instant::now();
+                let bytes_received = TcpCodec
+                    .encode_frame(&response)
+                    .map(|bytes| bytes.len().min(u64::MAX as usize) as u64)
+                    .unwrap_or(0);
+                let decode_duration = decode_started.elapsed();
+                self.record_communication_endpoint_exchange_with_stages(
+                    endpoint,
+                    bytes_received,
+                    bytes_sent,
+                    started.elapsed(),
+                    crate::app::CommunicationStageDurations {
+                        encode: Some(encode_duration),
+                        decode: Some(decode_duration),
+                        socket_write: Some(started.elapsed()),
+                        ..Default::default()
+                    },
+                );
+                Ok(response)
+            }
+            Err(err) => {
+                self.record_communication_endpoint_failure_kind(
+                    endpoint,
+                    Some(started.elapsed()),
+                    crate::app::classify_tcp_communication_failure(&err),
+                    err.to_string(),
+                );
+                Err(err)
+            }
+        }
+    }
+
+    #[cfg(feature = "transport-quic")]
+    pub async fn send_quic_data_frame_metered(
+        &self,
+        client: &QuicFrameClient,
+        frame: QuicFrame,
+    ) -> Result<QuicFrame, QuicTransportError> {
+        let started = Instant::now();
+        let encode_started = Instant::now();
+        let bytes_sent = QuicCodec
+            .encode_frame(&frame)
+            .map(|bytes| bytes.len().min(u64::MAX as usize) as u64)
+            .unwrap_or(0);
+        let encode_duration = encode_started.elapsed();
+        let endpoint = quic_outbound_data_endpoint(&frame);
+        match client.send(frame).await {
+            Ok(response) => {
+                let decode_started = Instant::now();
+                let bytes_received = QuicCodec
+                    .encode_frame(&response)
+                    .map(|bytes| bytes.len().min(u64::MAX as usize) as u64)
+                    .unwrap_or(0);
+                let decode_duration = decode_started.elapsed();
+                self.record_communication_endpoint_exchange_with_stages(
+                    endpoint,
+                    bytes_received,
+                    bytes_sent,
+                    started.elapsed(),
+                    crate::app::CommunicationStageDurations {
+                        encode: Some(encode_duration),
+                        decode: Some(decode_duration),
+                        socket_write: Some(started.elapsed()),
+                        ..Default::default()
+                    },
+                );
+                Ok(response)
+            }
+            Err(err) => {
+                self.record_communication_endpoint_failure_kind(
+                    endpoint,
+                    Some(started.elapsed()),
+                    crate::app::classify_quic_communication_failure(&err),
+                    err.to_string(),
+                );
+                Err(err)
+            }
+        }
+    }
 }
 
 #[cfg(any(test, feature = "transport-tcp", feature = "transport-quic"))]
@@ -276,6 +384,14 @@ async fn start_http_surface(
     } else {
         HttpServer::bind(addr, handler).await?
     };
+    let server = server
+        .with_max_body_bytes(app.config.runtime_tuning.transport_max_payload_bytes)
+        .with_io_timeout(app.config.runtime_tuning.transport_io_timeout)
+        .with_max_connections(
+            app.config
+                .runtime_tuning
+                .transport_max_concurrent_connections,
+        );
     let tls = resolve_http_tls(&app, surface)?;
     Ok(launch_socket_surface(addr, async move {
         let result = match tls {
@@ -298,6 +414,14 @@ async fn start_http_surface_with_shutdown(
     } else {
         HttpServer::bind(addr, handler).await?
     };
+    let server = server
+        .with_max_body_bytes(app.config.runtime_tuning.transport_max_payload_bytes)
+        .with_io_timeout(app.config.runtime_tuning.transport_io_timeout)
+        .with_max_connections(
+            app.config
+                .runtime_tuning
+                .transport_max_concurrent_connections,
+        );
     let tls = resolve_http_tls(&app, surface)?;
     Ok(launch_socket_surface_with_shutdown(
         addr,
@@ -336,6 +460,10 @@ async fn start_tcp_surface(
     ),
     NodeError,
 > {
+    let handler: Arc<dyn TcpFrameHandler> = Arc::new(MeteredTcpFrameHandler {
+        app: app.clone(),
+        inner: handler,
+    });
     let (addr, server, listener) = match surface {
         ManagedNodeTransportSurface::PeerTcpData => TcpFrameServer::bind(addr, handler).await?,
         _ => {
@@ -344,6 +472,14 @@ async fn start_tcp_surface(
             ));
         }
     };
+    let server = server
+        .with_max_payload_bytes(app.config.runtime_tuning.transport_max_payload_bytes)
+        .with_io_timeout(app.config.runtime_tuning.transport_io_timeout)
+        .with_max_connections(
+            app.config
+                .runtime_tuning
+                .transport_max_concurrent_connections,
+        );
     let tls = resolve_tcp_tls(&app, surface)?;
     Ok(launch_socket_surface(addr, async move {
         let result = match tls {
@@ -361,6 +497,10 @@ async fn start_tcp_surface_with_shutdown(
     addr: SocketAddr,
     handler: Arc<dyn TcpFrameHandler>,
 ) -> Result<(ManagedTransportBinding, GracefulTaskHandle<NodeError>), NodeError> {
+    let handler: Arc<dyn TcpFrameHandler> = Arc::new(MeteredTcpFrameHandler {
+        app: app.clone(),
+        inner: handler,
+    });
     let (addr, server, listener) = match surface {
         ManagedNodeTransportSurface::PeerTcpData => TcpFrameServer::bind(addr, handler).await?,
         _ => {
@@ -369,6 +509,14 @@ async fn start_tcp_surface_with_shutdown(
             ));
         }
     };
+    let server = server
+        .with_max_payload_bytes(app.config.runtime_tuning.transport_max_payload_bytes)
+        .with_io_timeout(app.config.runtime_tuning.transport_io_timeout)
+        .with_max_connections(
+            app.config
+                .runtime_tuning
+                .transport_max_concurrent_connections,
+        );
     let tls = resolve_tcp_tls(&app, surface)?;
     Ok(launch_socket_surface_with_shutdown(
         addr,
@@ -410,11 +558,27 @@ async fn start_quic_surface(
 > {
     let endpoint = peer_quic_endpoint(surface, addr, server_name)?;
     let tls = resolve_quic_tls(&app, surface)?;
+    let handler: Arc<dyn QuicFrameHandler> = Arc::new(MeteredQuicFrameHandler {
+        app: app.clone(),
+        inner: handler,
+    });
 
     let (server, local_endpoint) = match tls {
         Some(tls) => QuicFrameServer::bind_secure(endpoint, handler, tls).await?,
-        None => QuicFrameServer::bind(endpoint, handler).await?,
+        None => {
+            return Err(NodeError::Storage(
+                "managed QUIC surface requires explicit TLS configuration".into(),
+            ));
+        }
     };
+    let server = server
+        .with_max_payload_bytes(app.config.runtime_tuning.transport_max_payload_bytes)
+        .with_io_timeout(app.config.runtime_tuning.transport_io_timeout)
+        .with_max_connections(
+            app.config
+                .runtime_tuning
+                .transport_max_concurrent_connections,
+        );
     Ok(launch_quic_surface(local_endpoint, async move {
         server.serve().await.map_err(NodeError::from)
     }))
@@ -430,11 +594,27 @@ async fn start_quic_surface_with_shutdown(
 ) -> Result<(ManagedTransportBinding, GracefulTaskHandle<NodeError>), NodeError> {
     let endpoint = peer_quic_endpoint(surface, addr, server_name)?;
     let tls = resolve_quic_tls(&app, surface)?;
+    let handler: Arc<dyn QuicFrameHandler> = Arc::new(MeteredQuicFrameHandler {
+        app: app.clone(),
+        inner: handler,
+    });
 
     let (server, local_endpoint) = match tls {
         Some(tls) => QuicFrameServer::bind_secure(endpoint, handler, tls).await?,
-        None => QuicFrameServer::bind(endpoint, handler).await?,
+        None => {
+            return Err(NodeError::Storage(
+                "managed QUIC surface requires explicit TLS configuration".into(),
+            ));
+        }
     };
+    let server = server
+        .with_max_payload_bytes(app.config.runtime_tuning.transport_max_payload_bytes)
+        .with_io_timeout(app.config.runtime_tuning.transport_io_timeout)
+        .with_max_connections(
+            app.config
+                .runtime_tuning
+                .transport_max_concurrent_connections,
+        );
     Ok(launch_quic_surface_with_shutdown(
         local_endpoint,
         move |shutdown_rx| async move {
@@ -446,4 +626,181 @@ async fn start_quic_surface_with_shutdown(
                 .map_err(NodeError::from)
         },
     ))
+}
+
+#[cfg(feature = "transport-tcp")]
+struct MeteredTcpFrameHandler {
+    app: NodeApp,
+    inner: Arc<dyn TcpFrameHandler>,
+}
+
+#[cfg(feature = "transport-tcp")]
+impl TcpFrameHandler for MeteredTcpFrameHandler {
+    fn handle_frame(&self, frame: TcpFrame) -> Result<TcpFrame, TcpTransportError> {
+        let started = Instant::now();
+        let decode_started = Instant::now();
+        let bytes_received = TcpCodec
+            .encode_frame(&frame)
+            .map(|bytes| bytes.len().min(u64::MAX as usize) as u64)
+            .unwrap_or(0);
+        let decode_duration = decode_started.elapsed();
+        let endpoint = tcp_inbound_data_endpoint(&frame);
+        let response = self.inner.handle_frame(frame);
+        match response {
+            Ok(response) => {
+                let encode_started = Instant::now();
+                let bytes_sent = TcpCodec
+                    .encode_frame(&response)
+                    .map(|bytes| bytes.len().min(u64::MAX as usize) as u64)
+                    .unwrap_or(0);
+                let encode_duration = encode_started.elapsed();
+                self.app.record_communication_endpoint_exchange_with_stages(
+                    endpoint,
+                    bytes_received,
+                    bytes_sent,
+                    started.elapsed(),
+                    crate::app::CommunicationStageDurations {
+                        encode: Some(encode_duration),
+                        decode: Some(decode_duration),
+                        socket_read: Some(started.elapsed()),
+                        ..Default::default()
+                    },
+                );
+                Ok(response)
+            }
+            Err(err) => {
+                self.app.record_communication_endpoint_failure_kind(
+                    endpoint,
+                    Some(started.elapsed()),
+                    crate::app::classify_tcp_communication_failure(&err),
+                    err.to_string(),
+                );
+                Err(err)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "transport-quic")]
+struct MeteredQuicFrameHandler {
+    app: NodeApp,
+    inner: Arc<dyn QuicFrameHandler>,
+}
+
+#[cfg(feature = "transport-quic")]
+impl QuicFrameHandler for MeteredQuicFrameHandler {
+    fn handle_frame(&self, frame: QuicFrame) -> Result<QuicFrame, QuicTransportError> {
+        let started = Instant::now();
+        let decode_started = Instant::now();
+        let bytes_received = QuicCodec
+            .encode_frame(&frame)
+            .map(|bytes| bytes.len().min(u64::MAX as usize) as u64)
+            .unwrap_or(0);
+        let decode_duration = decode_started.elapsed();
+        let endpoint = quic_inbound_data_endpoint(&frame);
+        let response = self.inner.handle_frame(frame);
+        match response {
+            Ok(response) => {
+                let encode_started = Instant::now();
+                let bytes_sent = QuicCodec
+                    .encode_frame(&response)
+                    .map(|bytes| bytes.len().min(u64::MAX as usize) as u64)
+                    .unwrap_or(0);
+                let encode_duration = encode_started.elapsed();
+                self.app.record_communication_endpoint_exchange_with_stages(
+                    endpoint,
+                    bytes_received,
+                    bytes_sent,
+                    started.elapsed(),
+                    crate::app::CommunicationStageDurations {
+                        encode: Some(encode_duration),
+                        decode: Some(decode_duration),
+                        socket_read: Some(started.elapsed()),
+                        ..Default::default()
+                    },
+                );
+                Ok(response)
+            }
+            Err(err) => {
+                self.app.record_communication_endpoint_failure_kind(
+                    endpoint,
+                    Some(started.elapsed()),
+                    crate::app::classify_quic_communication_failure(&err),
+                    err.to_string(),
+                );
+                Err(err)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "transport-tcp")]
+fn tcp_inbound_data_endpoint(frame: &TcpFrame) -> crate::app::CommunicationEndpointRuntime {
+    data_endpoint(
+        "tcp",
+        &format!("{}:{}", frame.destination.host, frame.destination.port),
+        &format!("{}:{}", frame.source.host, frame.source.port),
+        frame.link.remote_node_id.as_ref(),
+        &frame.binding,
+    )
+}
+
+#[cfg(feature = "transport-tcp")]
+fn tcp_outbound_data_endpoint(frame: &TcpFrame) -> crate::app::CommunicationEndpointRuntime {
+    data_endpoint(
+        "tcp",
+        &format!("{}:{}", frame.source.host, frame.source.port),
+        &format!("{}:{}", frame.destination.host, frame.destination.port),
+        frame.link.remote_node_id.as_ref(),
+        &frame.binding,
+    )
+}
+
+#[cfg(feature = "transport-quic")]
+fn quic_inbound_data_endpoint(frame: &QuicFrame) -> crate::app::CommunicationEndpointRuntime {
+    data_endpoint(
+        "quic",
+        &format!("{}:{}", frame.destination.host, frame.destination.port),
+        &format!("{}:{}", frame.source.host, frame.source.port),
+        frame.link.remote_node_id.as_ref(),
+        &frame.binding,
+    )
+}
+
+#[cfg(feature = "transport-quic")]
+fn quic_outbound_data_endpoint(frame: &QuicFrame) -> crate::app::CommunicationEndpointRuntime {
+    data_endpoint(
+        "quic",
+        &format!("{}:{}", frame.source.host, frame.source.port),
+        &format!("{}:{}", frame.destination.host, frame.destination.port),
+        frame.link.remote_node_id.as_ref(),
+        &frame.binding,
+    )
+}
+
+#[cfg(any(feature = "transport-tcp", feature = "transport-quic"))]
+fn data_endpoint(
+    transport: &str,
+    local: &str,
+    remote: &str,
+    peer_node_id: &str,
+    binding: &RemoteBinding,
+) -> crate::app::CommunicationEndpointRuntime {
+    let (resource_id, binding_kind) = match binding {
+        RemoteBinding::Channel(binding) => (binding.resource_id.to_string(), "channel"),
+        RemoteBinding::Proxy(binding) => (binding.resource_id.to_string(), "proxy"),
+    };
+    let mut endpoint = crate::app::CommunicationEndpointRuntime::new(
+        format!("{transport}/data-plane/{peer_node_id}/{resource_id}"),
+        transport,
+        "data_plane",
+    );
+    endpoint.local = Some(local.to_owned());
+    endpoint.remote = Some(remote.to_owned());
+    endpoint.labels = BTreeMap::from([
+        ("peer_node_id".to_owned(), peer_node_id.to_owned()),
+        ("resource_id".to_owned(), resource_id),
+        ("binding".to_owned(), binding_kind.to_owned()),
+    ]);
+    endpoint
 }

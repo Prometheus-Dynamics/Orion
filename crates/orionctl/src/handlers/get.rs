@@ -1,8 +1,12 @@
-use orion_control_plane::{ControlMessage, NodeObservabilitySnapshot};
+use orion_control_plane::{
+    ControlMessage, MetricsExportConfig, NodeObservabilitySnapshot,
+    render_communication_metrics_with_config, render_host_metrics,
+    render_observability_metrics_with_config,
+};
 use orion_transport_http::{ControlRoute, HttpResponsePayload};
 
 use crate::{
-    cli::{GetCommand, ListArgs, OutputFormat, StateQueryArgs},
+    cli::{CommunicationView, GetCommand, ListArgs, OutputFormat, StateQueryArgs},
     render::{
         join_display, join_or_dash, print_observability_event_summary, print_snapshot_summary,
         print_structured, render_availability_state, render_health_state, render_lease_state,
@@ -10,7 +14,11 @@ use crate::{
     },
 };
 
-use super::effective_workloads;
+use super::{
+    effective_workloads,
+    get_communication::{communication_peer_summaries, print_peer_communication_summary},
+    get_communication::{filtered_communication, print_communication_summary},
+};
 
 pub(super) async fn run(command: GetCommand) -> Result<(), String> {
     match command {
@@ -32,9 +40,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     );
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&snapshot, args.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&snapshot, args.output),
             },
             other => Err(format!("expected health response, got {other:?}")),
         },
@@ -56,18 +65,79 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     );
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&snapshot, args.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&snapshot, args.output),
             },
             other => Err(format!("expected readiness response, got {other:?}")),
         },
+        GetCommand::Host(args) => {
+            let snapshot = fetch_observability_snapshot(&args).await?;
+            match args.output {
+                OutputFormat::Summary => {
+                    print_host_summary(&snapshot);
+                    Ok(())
+                }
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&snapshot.host, args.output)
+                }
+                OutputFormat::Metrics => {
+                    print!("{}", render_host_metrics(&snapshot.node_id, &snapshot.host));
+                    Ok(())
+                }
+            }
+        }
         GetCommand::Observability(args) => {
             let snapshot = fetch_observability_snapshot(&args).await?;
             match args.output {
                 OutputFormat::Summary => print_observability_summary(&snapshot),
                 OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
                     print_structured(&snapshot, args.output)
+                }
+                OutputFormat::Metrics => {
+                    let config = metrics_export_config(&args)?;
+                    print!(
+                        "{}",
+                        render_observability_metrics_with_config(&snapshot, &config)
+                    );
+                    Ok(())
+                }
+            }
+        }
+        GetCommand::Communication(args) => {
+            let snapshot = fetch_observability_snapshot(&args.source).await?;
+            let communication = filtered_communication(&snapshot, &args)?;
+            match args.source.output {
+                OutputFormat::Summary => {
+                    match args.view {
+                        CommunicationView::Endpoints => print_communication_summary(&communication),
+                        CommunicationView::Peers => print_peer_communication_summary(
+                            &communication_peer_summaries(&communication, args.sort, args.limit),
+                        ),
+                    }
+                    Ok(())
+                }
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => match args.view {
+                    CommunicationView::Endpoints => {
+                        print_structured(&communication, args.source.output)
+                    }
+                    CommunicationView::Peers => print_structured(
+                        &communication_peer_summaries(&communication, args.sort, args.limit),
+                        args.source.output,
+                    ),
+                },
+                OutputFormat::Metrics => {
+                    let config = metrics_export_config(&args.source)?;
+                    print!(
+                        "{}",
+                        render_communication_metrics_with_config(
+                            &snapshot.node_id,
+                            &communication,
+                            &config
+                        )
+                    );
+                    Ok(())
                 }
             }
         }
@@ -78,9 +148,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     print_snapshot_summary(&snapshot);
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&snapshot, args.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&snapshot, args.output),
             }
         }
         GetCommand::Node(args) => {
@@ -103,9 +174,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     );
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&node, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&node, args.source.output),
             }
         }
         GetCommand::Artifact(args) => {
@@ -131,9 +203,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     );
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&artifact, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&artifact, args.source.output),
             }
         }
         GetCommand::Workload(args) => {
@@ -162,9 +235,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     );
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&workload, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&workload, args.source.output),
             }
         }
         GetCommand::Nodes(args) => {
@@ -191,9 +265,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&nodes, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&nodes, args.source.output),
             }
         }
         GetCommand::Artifacts(args) => {
@@ -230,9 +305,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&artifacts, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&artifacts, args.source.output),
             }
         }
         GetCommand::Workloads(args) => {
@@ -280,9 +356,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&workloads, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&workloads, args.source.output),
             }
         }
         GetCommand::Resources(args) => {
@@ -350,9 +427,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&resources, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&resources, args.source.output),
             }
         }
         GetCommand::Providers(args) => {
@@ -390,9 +468,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&providers, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&providers, args.source.output),
             }
         }
         GetCommand::Executors(args) => {
@@ -430,9 +509,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&executors, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&executors, args.source.output),
             }
         }
         GetCommand::Leases(args) => {
@@ -473,9 +553,10 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&leases, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&leases, args.source.output),
             }
         }
         GetCommand::Events(args) => {
@@ -515,12 +596,24 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     }
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&events, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&events, args.source.output),
             }
         }
     }
+}
+
+fn metrics_export_config(args: &StateQueryArgs) -> Result<MetricsExportConfig, String> {
+    let mut config = MetricsExportConfig::try_from_env()?;
+    if let Some(value) = args.metrics_max_communication_endpoints {
+        config.max_communication_endpoints = value;
+    }
+    if let Some(value) = args.metrics_max_label_value_len {
+        config.max_label_value_len = value.max(24);
+    }
+    Ok(config)
 }
 
 fn match_list_filters(args: &ListArgs, node: Option<String>, labels: &[String]) -> bool {
@@ -535,9 +628,38 @@ fn match_list_filters(args: &ListArgs, node: Option<String>, labels: &[String]) 
             .unwrap_or(true)
 }
 
+fn print_host_summary(snapshot: &NodeObservabilitySnapshot) {
+    let host = &snapshot.host;
+    println!(
+        "host node={} hostname={} os={} os_version={} kernel={} arch={} uptime_seconds={} load_1_milli={} load_5_milli={} load_15_milli={} memory_total_bytes={} memory_available_bytes={} swap_total_bytes={} swap_free_bytes={} process_id={} process_rss_bytes={}",
+        snapshot.node_id,
+        host.hostname.as_deref().unwrap_or("-"),
+        host.os_name,
+        host.os_version.as_deref().unwrap_or("-"),
+        host.kernel_version.as_deref().unwrap_or("-"),
+        host.architecture,
+        option_u64(host.uptime_seconds),
+        option_u64(host.load_1_milli),
+        option_u64(host.load_5_milli),
+        option_u64(host.load_15_milli),
+        option_u64(host.memory_total_bytes),
+        option_u64(host.memory_available_bytes),
+        option_u64(host.swap_total_bytes),
+        option_u64(host.swap_free_bytes),
+        host.process_id,
+        option_u64(host.process_rss_bytes),
+    );
+}
+
+fn option_u64(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_owned())
+}
+
 fn print_observability_summary(snapshot: &NodeObservabilitySnapshot) -> Result<(), String> {
     println!(
-        "observability node={} desired_rev={} observed_rev={} applied_rev={} maintenance_mode={} peer_sync_paused={} remote_blocked={} replay_success={} replay_failures={} sync_success={} sync_failures={} reconcile_success={} reconcile_failures={} mutation_success={} mutation_failures={} peers_configured={} peers_ready={} peers_degraded={} clients_registered={} clients_live={} recent_events={}",
+        "observability node={} desired_rev={} observed_rev={} applied_rev={} maintenance_mode={} peer_sync_paused={} remote_blocked={} replay_success={} replay_failures={} sync_success={} sync_failures={} reconcile_success={} reconcile_failures={} mutation_success={} mutation_failures={} peers_configured={} peers_ready={} peers_degraded={} clients_registered={} clients_live={} communication_endpoints={} recent_events={}",
         snapshot.node_id,
         snapshot.desired_revision,
         snapshot.observed_revision,
@@ -558,6 +680,7 @@ fn print_observability_summary(snapshot: &NodeObservabilitySnapshot) -> Result<(
         snapshot.degraded_peer_count,
         snapshot.client_sessions.registered_clients,
         snapshot.client_sessions.live_stream_clients,
+        snapshot.communication.len(),
         snapshot.recent_events.len(),
     );
     Ok(())

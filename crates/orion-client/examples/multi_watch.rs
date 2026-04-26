@@ -3,7 +3,7 @@ use orion_client::{
     LocalProviderService,
 };
 use orion_control_plane::{ExecutorRecord, ProviderRecord};
-use orion_core::{ResourceType, Revision, RuntimeType};
+use orion_core::{ExecutorId, NodeId, ProviderId, ResourceType, Revision, RuntimeType};
 
 #[path = "support/common.rs"]
 mod common;
@@ -25,12 +25,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         resource_type,
     ] = common::read_exact_args::<8>()?;
     let runtime = LocalNodeRuntime::new(ipc_socket, stream_socket);
-    let executor = ExecutorRecord::builder(executor_id, node_id.clone())
-        .runtime_type(RuntimeType::new(runtime_type))
-        .build();
+    let executor =
+        ExecutorRecord::builder(ExecutorId::new(executor_id), NodeId::new(node_id.clone()))
+            .runtime_type(RuntimeType::new(runtime_type))
+            .build();
     let provider = ProviderRecord {
-        provider_id: provider_id.into(),
-        node_id: node_id.into(),
+        provider_id: ProviderId::new(provider_id),
+        node_id: NodeId::new(node_id),
         resource_types: vec![ResourceType::new(resource_type)],
     };
 

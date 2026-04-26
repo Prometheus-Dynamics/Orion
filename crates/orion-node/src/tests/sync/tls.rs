@@ -134,8 +134,11 @@ async fn two_nodes_can_exchange_snapshots_over_https_with_identity_bootstrap() {
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: Some(state_dir_b.clone()),
             peers: vec![
-                PeerConfig::new("node-a", format!("https://localhost:{}", addr_a.port()))
-                    .with_trusted_public_key_hex(node_a.security.public_key_hex()),
+                PeerConfig::new(
+                    "node-a",
+                    orion_core::PeerBaseUrl::new(format!("https://localhost:{}", addr_a.port())),
+                )
+                .with_trusted_public_key_hex(node_a.security.public_key_hex()),
             ],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
@@ -223,8 +226,11 @@ async fn optional_mtls_peer_rebinds_after_remote_http_tls_rotation() {
             reconcile_interval: Duration::from_millis(50),
             state_dir: Some(state_dir_b.clone()),
             peers: vec![
-                PeerConfig::new("node-a", format!("https://localhost:{}", addr_a.port()))
-                    .with_trusted_public_key_hex(node_a.security.public_key_hex()),
+                PeerConfig::new(
+                    "node-a",
+                    orion_core::PeerBaseUrl::new(format!("https://localhost:{}", addr_a.port())),
+                )
+                .with_trusted_public_key_hex(node_a.security.public_key_hex()),
             ],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
@@ -369,8 +375,11 @@ async fn two_nodes_can_exchange_snapshots_over_https_with_required_mtls() {
         .expect("node A required mTLS server should start");
     node_b
         .enroll_peer(
-            PeerConfig::new("node-a", format!("https://localhost:{}", addr_a.port()))
-                .with_trusted_public_key_hex(node_a.security.public_key_hex()),
+            PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("https://localhost:{}", addr_a.port())),
+            )
+            .with_trusted_public_key_hex(node_a.security.public_key_hex()),
         )
         .expect("node B should update node A endpoint");
 

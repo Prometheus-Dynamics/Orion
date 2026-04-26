@@ -12,7 +12,8 @@ pub use error::IpcTransportError;
 pub use memory::IpcTransport;
 pub use unix::{
     UnixControlClient, UnixControlHandler, UnixControlServer, UnixControlStreamClient,
-    read_control_frame, write_control_frame,
+    read_control_frame, read_control_frame_with_limit, read_control_frame_with_limit_metered,
+    write_control_frame, write_control_frame_with_limit, write_control_frame_with_limit_metered,
 };
 
 #[cfg(test)]
@@ -115,6 +116,26 @@ mod tests {
             .expect("data message should be delivered");
         assert_eq!(envelope.payload, vec![1, 2, 3, 4]);
         assert_eq!(envelope.link.compatibility, CompatibilityState::Preferred);
+    }
+
+    #[tokio::test]
+    async fn control_stream_rejects_oversized_frame_before_allocation() {
+        use orion_transport_common::DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES;
+        use tokio::io::AsyncWriteExt;
+
+        let (mut client, mut server) = tokio::io::duplex(16);
+        let writer = tokio::spawn(async move {
+            client
+                .write_u32_le((DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES + 1) as u32)
+                .await
+                .expect("oversized frame length should write");
+        });
+
+        let err = read_control_frame(&mut server)
+            .await
+            .expect_err("oversized frame should be rejected");
+        assert!(matches!(err, IpcTransportError::DecodeFailed(_)));
+        writer.await.expect("writer should join");
     }
 
     #[test]

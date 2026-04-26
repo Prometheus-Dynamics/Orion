@@ -8,12 +8,15 @@ use orion_control_plane::{
     ObservedClusterState, ObservedStateUpdate, PeerHello, StateSnapshot,
 };
 use orion_core::{NodeId, Revision, encode_to_vec};
+use orion_transport_common::DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES;
 use rcgen::generate_simple_self_signed;
 use std::{fs, path::PathBuf, time::SystemTime};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
+
+mod probe_metrics;
 
 #[derive(Default)]
 struct LoopbackService;
@@ -292,6 +295,10 @@ impl HttpControlHandler for NetworkLoopbackService {
             reasons: Vec::new(),
         }))
     }
+
+    fn handle_metrics(&self) -> Result<String, HttpTransportError> {
+        Ok("# TYPE test_metric counter\ntest_metric 1\n".to_owned())
+    }
 }
 
 #[tokio::test]
@@ -384,6 +391,57 @@ async fn client_and_server_roundtrip_over_real_https() {
 
     assert!(matches!(response, HttpResponsePayload::Hello(_)));
 
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn https_server_times_out_stalled_tls_handshakes_and_releases_capacity() {
+    let service = std::sync::Arc::new(NetworkLoopbackService);
+    let (addr, server, listener) = HttpServer::bind(
+        "127.0.0.1:0".parse().expect("address should parse"),
+        service,
+    )
+    .await
+    .expect("listener should bind");
+    let rcgen::CertifiedKey { cert, signing_key } =
+        generate_simple_self_signed(vec!["localhost".to_owned()])
+            .expect("TLS test certificate should generate");
+    let tls = HttpServerTlsConfig {
+        cert_pem: cert.pem().into_bytes(),
+        key_pem: signing_key.serialize_pem().into_bytes(),
+        cert_path: None,
+        key_path: None,
+        client_auth: HttpServerClientAuth::Disabled,
+    };
+    let server_task = tokio::spawn(
+        server
+            .with_io_timeout(std::time::Duration::from_millis(20))
+            .with_max_connections(1)
+            .serve_tls(listener, tls),
+    );
+
+    let stalled = TcpStream::connect(addr)
+        .await
+        .expect("stalled TCP client should connect");
+    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+
+    let client = HttpClient::with_tls(
+        format!("https://localhost:{}", addr.port()),
+        HttpClientTlsConfig {
+            root_cert_pem: cert.pem().into_bytes(),
+            client_cert_pem: None,
+            client_key_pem: None,
+        },
+    )
+    .expect("HTTPS client should build");
+    let response = client
+        .send(&HttpRequestPayload::Control(Box::new(hello_message())))
+        .await
+        .expect("valid HTTPS client should acquire capacity after stalled handshake times out");
+
+    assert!(matches!(response, HttpResponsePayload::Hello(_)));
+
+    drop(stalled);
     server_task.abort();
 }
 
@@ -669,6 +727,53 @@ async fn http_server_accepts_partial_writes_and_survives_interrupted_clients() {
         .await
         .expect("HTTP server should remain healthy after interrupted client");
     assert!(matches!(response, HttpResponsePayload::Hello(_)));
+
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn http_server_rejects_oversized_request_body() {
+    let service = std::sync::Arc::new(NetworkLoopbackService);
+    let (addr, server, listener) = HttpServer::bind(
+        "127.0.0.1:0".parse().expect("address should parse"),
+        service,
+    )
+    .await
+    .expect("listener should bind");
+    let server_task = tokio::spawn(server.serve(listener));
+
+    let mut stream = TcpStream::connect(addr)
+        .await
+        .expect("oversized HTTP client should connect");
+    let oversized_len = DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES + 1;
+    let headers = format!(
+        "POST /v1/control/hello HTTP/1.1\r\nHost: localhost\r\nContent-Length: {oversized_len}\r\n\r\n"
+    );
+    stream
+        .write_all(headers.as_bytes())
+        .await
+        .expect("oversized HTTP headers should send");
+    stream
+        .write_all(&vec![0_u8; oversized_len])
+        .await
+        .expect("oversized HTTP body should send");
+    stream
+        .shutdown()
+        .await
+        .expect("oversized HTTP client should shutdown write side");
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .expect("oversized HTTP client should read response");
+    assert!(
+        response.is_empty()
+            || response.starts_with(b"HTTP/1.1 400 Bad Request")
+            || response.starts_with(b"HTTP/1.1 413 Payload Too Large"),
+        "expected request rejection or connection close, got {:?}",
+        &response[..response.len().min(64)]
+    );
 
     server_task.abort();
 }

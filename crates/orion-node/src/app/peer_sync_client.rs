@@ -10,8 +10,9 @@ use crate::storage_io::blocking_read_file;
 use orion::{
     NodeId,
     control_plane::{ControlMessage, PeerHello},
-    transport::http::{HttpRequestPayload, HttpResponsePayload, HttpTransportError},
+    transport::http::{HttpCodec, HttpRequestPayload, HttpResponsePayload, HttpTransportError},
 };
+use std::time::{Duration, Instant};
 
 fn read_file_bytes(path: &std::path::Path) -> Result<Vec<u8>, NodeError> {
     blocking_read_file(path, "failed to read file")
@@ -69,15 +70,33 @@ impl NodeApp {
 
     pub(super) async fn send_peer_http_request(
         &self,
+        node_id: &NodeId,
         client: &orion::transport::http::HttpClient,
         payload: HttpRequestPayload,
     ) -> Result<HttpResponsePayload, HttpTransportError> {
+        let started = Instant::now();
         let payload = self
             .security
             .wrap_http_payload_async(payload)
             .await
             .map_err(|err| HttpTransportError::request_failed(err.to_string()))?;
-        client.send(&payload).await
+        let bytes_sent = encoded_http_request_len(&payload);
+        self.record_peer_http_sent(node_id, bytes_sent);
+        let response = client.send(&payload).await;
+        match response {
+            Ok(response) => {
+                self.record_peer_http_success(
+                    node_id,
+                    encoded_http_response_len(&response),
+                    started.elapsed(),
+                );
+                Ok(response)
+            }
+            Err(err) => {
+                self.record_peer_http_failure(node_id, started.elapsed(), &err);
+                Err(err)
+            }
+        }
     }
 
     pub(super) fn is_https_peer(peer: &PeerState) -> bool {
@@ -144,6 +163,7 @@ impl NodeApp {
     ) -> Result<PeerHello, NodeError> {
         let response = self
             .send_peer_http_request(
+                node_id,
                 client,
                 HttpRequestPayload::Control(Box::new(ControlMessage::Hello(request_hello.clone()))),
             )
@@ -207,6 +227,7 @@ impl NodeApp {
             )?;
             if let Ok(HttpResponsePayload::Hello(hello)) = self
                 .send_peer_http_request(
+                    node_id,
                     &client,
                     HttpRequestPayload::Control(Box::new(ControlMessage::Hello(
                         request_hello.clone(),
@@ -222,6 +243,7 @@ impl NodeApp {
             let client = build_bootstrap_peer_http_client(&peer.base_url)?;
             if let Ok(HttpResponsePayload::Hello(hello)) = self
                 .send_peer_http_request(
+                    node_id,
                     &client,
                     HttpRequestPayload::Control(Box::new(ControlMessage::Hello(
                         request_hello.clone(),
@@ -270,4 +292,62 @@ impl NodeApp {
             transport_binding_signature,
         })
     }
+
+    fn record_peer_http_sent(&self, node_id: &NodeId, bytes_sent: u64) {
+        self.with_observability_txn(|txn| {
+            txn.state_mut()
+                .peer_http_communication
+                .entry(node_id.clone())
+                .or_default()
+                .record_sent(bytes_sent);
+        });
+    }
+
+    fn record_peer_http_success(&self, node_id: &NodeId, bytes_received: u64, duration: Duration) {
+        let now_ms = Self::current_time_ms();
+        self.with_observability_txn(|txn| {
+            let metrics = txn
+                .state_mut()
+                .peer_http_communication
+                .entry(node_id.clone())
+                .or_default();
+            metrics.record_received(bytes_received);
+            metrics.record_success_exchange(now_ms, duration, 0, bytes_received);
+        });
+    }
+
+    fn record_peer_http_failure(
+        &self,
+        node_id: &NodeId,
+        duration: Duration,
+        error: &HttpTransportError,
+    ) {
+        let now_ms = Self::current_time_ms();
+        self.with_observability_txn(|txn| {
+            txn.state_mut()
+                .peer_http_communication
+                .entry(node_id.clone())
+                .or_default()
+                .record_failure_kind(
+                    now_ms,
+                    Some(duration),
+                    super::classify_http_communication_failure(error),
+                    error.to_string(),
+                );
+        });
+    }
+}
+
+fn encoded_http_request_len(payload: &HttpRequestPayload) -> u64 {
+    HttpCodec
+        .encode_request(payload)
+        .map(|request| request.body.len().min(u64::MAX as usize) as u64)
+        .unwrap_or(0)
+}
+
+fn encoded_http_response_len(payload: &HttpResponsePayload) -> u64 {
+    HttpCodec
+        .encode_response(payload)
+        .map(|response| response.body.len().min(u64::MAX as usize) as u64)
+        .unwrap_or(0)
 }

@@ -3,7 +3,7 @@ use orion_control_plane::{
     AppliedClusterState, DesiredClusterState, ExecutorRecord, MaintenanceMode, MaintenanceState,
     ObservedClusterState, ProviderRecord, ResourceRecord, WorkloadRecord,
 };
-use orion_core::{ExecutorId, NodeId, ProviderId, Revision, WorkloadId};
+use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,11 +90,7 @@ impl LocalRuntimeStore {
         snapshot.validate()?;
 
         let provider_id = snapshot.provider.provider_id.clone();
-        if !self
-            .local_providers()
-            .into_iter()
-            .any(|provider| provider.provider_id == provider_id)
-        {
+        if !self.local_provider_exists(&provider_id) {
             return Err(RuntimeError::UnknownProvider(provider_id));
         }
 
@@ -124,12 +120,7 @@ impl LocalRuntimeStore {
             });
         }
 
-        let local_executor_ids: BTreeSet<_> = self
-            .local_executors()
-            .iter()
-            .map(|executor| executor.executor_id.clone())
-            .collect();
-        if !local_executor_ids.contains(&snapshot.executor.executor_id) {
+        if !self.local_executor_exists(&snapshot.executor.executor_id) {
             return Err(RuntimeError::UnknownExecutor(snapshot.executor.executor_id));
         }
 
@@ -242,40 +233,76 @@ impl LocalRuntimeStore {
     }
 
     pub fn local_resource_refs(&self) -> Vec<&ResourceRecord> {
-        let provider_ids: BTreeSet<ProviderId> = self
-            .local_providers_iter()
-            .map(|provider| provider.provider_id.clone())
-            .collect();
-        let local_executor_ids: BTreeSet<ExecutorId> = self
-            .local_executors_iter()
-            .map(|executor| executor.executor_id.clone())
-            .collect();
+        let selectors = self.local_resource_selectors();
+        let mut resources = Vec::new();
+        self.extend_local_resource_refs(&selectors, &mut resources);
+        resources
+    }
 
-        let mut resources = self
+    fn extend_local_resource_refs<'a>(
+        &'a self,
+        selectors: &LocalResourceSelectors,
+        resources: &mut Vec<&'a ResourceRecord>,
+    ) {
+        let mut observed_ids = BTreeSet::<ResourceId>::new();
+        for resource in self
+            .observed
+            .resources
+            .values()
+            .filter(|resource| selectors.includes(resource))
+        {
+            observed_ids.insert(resource.resource_id.clone());
+            resources.push(resource);
+        }
+        resources.extend(self.desired.resources.values().filter(|resource| {
+            selectors.includes(resource) && !observed_ids.contains(&resource.resource_id)
+        }));
+    }
+
+    fn local_resource_count(&self) -> usize {
+        let selectors = self.local_resource_selectors();
+        let mut observed_ids = BTreeSet::<ResourceId>::new();
+        let observed_count = self
+            .observed
+            .resources
+            .values()
+            .filter(|resource| selectors.includes(resource))
+            .inspect(|resource| {
+                observed_ids.insert(resource.resource_id.clone());
+            })
+            .count();
+        let desired_count = self
             .desired
             .resources
             .values()
             .filter(|resource| {
-                provider_ids.contains(&resource.provider_id)
-                    || resource
-                        .realized_by_executor_id
-                        .as_ref()
-                        .is_some_and(|executor_id| local_executor_ids.contains(executor_id))
+                selectors.includes(resource) && !observed_ids.contains(&resource.resource_id)
             })
-            .map(|resource| (&resource.resource_id, resource))
-            .collect::<BTreeMap<_, _>>();
+            .count();
+        observed_count + desired_count
+    }
 
-        for resource in self.observed.resources.values().filter(|resource| {
-            provider_ids.contains(&resource.provider_id)
-                || resource
-                    .realized_by_executor_id
-                    .as_ref()
-                    .is_some_and(|executor_id| local_executor_ids.contains(executor_id))
-        }) {
-            resources.insert(&resource.resource_id, resource);
+    fn local_resource_selectors(&self) -> LocalResourceSelectors {
+        LocalResourceSelectors {
+            provider_ids: self
+                .local_providers_iter()
+                .map(|provider| provider.provider_id.clone())
+                .collect(),
+            executor_ids: self
+                .local_executors_iter()
+                .map(|executor| executor.executor_id.clone())
+                .collect(),
         }
+    }
 
-        resources.into_values().collect()
+    fn local_provider_exists(&self, provider_id: &ProviderId) -> bool {
+        self.local_providers_iter()
+            .any(|provider| &provider.provider_id == provider_id)
+    }
+
+    fn local_executor_exists(&self, executor_id: &ExecutorId) -> bool {
+        self.local_executors_iter()
+            .any(|executor| &executor.executor_id == executor_id)
     }
 
     pub fn local_desired_workloads(&self) -> Vec<WorkloadRecord> {
@@ -313,9 +340,25 @@ impl LocalRuntimeStore {
             applied_revision: self.applied.revision,
             local_desired_workloads: self.local_desired_workloads_iter().count(),
             local_observed_workloads: self.local_observed_workloads_iter().count(),
-            local_resources: self.local_resource_refs().len(),
+            local_resources: self.local_resource_count(),
             local_providers: self.local_providers_iter().count(),
             local_executors: self.local_executors_iter().count(),
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct LocalResourceSelectors {
+    provider_ids: BTreeSet<ProviderId>,
+    executor_ids: BTreeSet<ExecutorId>,
+}
+
+impl LocalResourceSelectors {
+    fn includes(&self, resource: &ResourceRecord) -> bool {
+        self.provider_ids.contains(&resource.provider_id)
+            || resource
+                .realized_by_executor_id
+                .as_ref()
+                .is_some_and(|executor_id| self.executor_ids.contains(executor_id))
     }
 }

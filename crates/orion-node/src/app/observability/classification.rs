@@ -1,6 +1,10 @@
 use crate::{ControlOperation, NodeError};
-use orion::control_plane::{OperationFailureCategory, PeerSyncErrorKind};
+use orion::control_plane::{CommunicationFailureKind, OperationFailureCategory, PeerSyncErrorKind};
 use orion_transport_http::{HttpRequestFailureKind, HttpTransportError};
+#[cfg(feature = "transport-quic")]
+use orion_transport_quic::QuicTransportError;
+#[cfg(feature = "transport-tcp")]
+use orion_transport_tcp::TcpTransportError;
 
 pub(crate) fn classify_node_error(error: &NodeError) -> OperationFailureCategory {
     match error {
@@ -175,6 +179,69 @@ pub(crate) fn classify_peer_sync_error(error: &NodeError) -> PeerSyncErrorKind {
         NodeError::TcpTransport(_) => PeerSyncErrorKind::PeerSync,
         #[cfg(feature = "transport-quic")]
         NodeError::QuicTransport(_) => PeerSyncErrorKind::PeerSync,
+    }
+}
+
+pub(crate) fn classify_http_communication_failure(
+    error: &HttpTransportError,
+) -> CommunicationFailureKind {
+    match error {
+        HttpTransportError::RequestFailed {
+            kind: HttpRequestFailureKind::Timeout,
+            ..
+        } => CommunicationFailureKind::Timeout,
+        HttpTransportError::RequestFailed {
+            kind: HttpRequestFailureKind::Connectivity,
+            ..
+        } => CommunicationFailureKind::Transport,
+        HttpTransportError::Tls(_) => CommunicationFailureKind::Tls,
+        HttpTransportError::DecodeRequest(_) | HttpTransportError::DecodeResponse(_) => {
+            CommunicationFailureKind::Decode
+        }
+        HttpTransportError::EncodeRequest(_)
+        | HttpTransportError::EncodeResponse(_)
+        | HttpTransportError::UnsupportedControlMessage
+        | HttpTransportError::UnsupportedMethod(_)
+        | HttpTransportError::UnsupportedPath(_)
+        | HttpTransportError::UnexpectedStatus(_) => CommunicationFailureKind::Protocol,
+        HttpTransportError::InvalidBaseUrl(_)
+        | HttpTransportError::BindFailed(_)
+        | HttpTransportError::ServeFailed(_)
+        | HttpTransportError::RequestFailed {
+            kind: HttpRequestFailureKind::Other,
+            ..
+        } => CommunicationFailureKind::Transport,
+    }
+}
+
+#[cfg(feature = "transport-tcp")]
+pub(crate) fn classify_tcp_communication_failure(
+    error: &TcpTransportError,
+) -> CommunicationFailureKind {
+    match error {
+        TcpTransportError::Tls(_) => CommunicationFailureKind::Tls,
+        TcpTransportError::Codec(_) => CommunicationFailureKind::Decode,
+        TcpTransportError::BindFailed(_)
+        | TcpTransportError::AcceptFailed(_)
+        | TcpTransportError::ConnectFailed(_)
+        | TcpTransportError::ReadFailed(_)
+        | TcpTransportError::WriteFailed(_) => CommunicationFailureKind::Transport,
+    }
+}
+
+#[cfg(feature = "transport-quic")]
+pub(crate) fn classify_quic_communication_failure(
+    error: &QuicTransportError,
+) -> CommunicationFailureKind {
+    match error {
+        QuicTransportError::Codec(_) => CommunicationFailureKind::Decode,
+        QuicTransportError::Certificate(_) => CommunicationFailureKind::Tls,
+        QuicTransportError::BindFailed(_)
+        | QuicTransportError::AcceptFailed(_)
+        | QuicTransportError::ConnectFailed(_)
+        | QuicTransportError::OpenStreamFailed(_)
+        | QuicTransportError::ReadFailed(_)
+        | QuicTransportError::WriteFailed(_) => CommunicationFailureKind::Transport,
     }
 }
 

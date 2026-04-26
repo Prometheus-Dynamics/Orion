@@ -10,6 +10,7 @@ use orion_control_plane::{
     ExecutorWorkloadQuery, LeaseRecord, ProviderLeaseQuery, ProviderRecord, ProviderStateUpdate,
     ResourceRecord, WorkloadRecord,
 };
+use orion_core::ClientName;
 use orion_transport_ipc::{
     ControlEnvelope, LocalAddress, UnixControlClient, UnixControlStreamClient,
 };
@@ -184,7 +185,7 @@ where
                 source: self.config.local_address.clone(),
                 destination: self.config.daemon_address.clone(),
                 message: ControlMessage::ClientHello(ClientHello {
-                    client_name: self.identity.name.clone().into(),
+                    client_name: ClientName::new(self.identity.name.clone()),
                     role: Role::ROLE,
                 }),
             })
@@ -256,7 +257,7 @@ where
                 source: self.config.local_address.clone(),
                 destination: self.config.daemon_address.clone(),
                 message: ControlMessage::ClientHello(ClientHello {
-                    client_name: self.identity.name.clone().into(),
+                    client_name: ClientName::new(self.identity.name.clone()),
                     role: Role::ROLE,
                 }),
             })

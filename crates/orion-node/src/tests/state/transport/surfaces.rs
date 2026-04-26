@@ -185,6 +185,85 @@ async fn managed_surface_launcher_starts_named_http_probe_surface() {
     handle.abort();
 }
 
+#[tokio::test]
+async fn managed_http_probe_surface_exposes_metrics_without_control_routes() {
+    let app = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node.surface.metrics"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node.surface.metrics"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: None,
+            peers: Vec::new(),
+            peer_authentication: PeerAuthenticationMode::Optional,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .try_build()
+        .expect("node app should build");
+
+    let (binding, handle) = app
+        .start_managed_surface(ManagedSurfaceLaunchRequest::HttpProbe {
+            addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            handler: Arc::new(app.http_probe_handler()),
+        })
+        .await
+        .expect("managed probe metrics surface should start");
+
+    #[cfg(not(feature = "transport-quic"))]
+    let ManagedTransportBinding::Socket(addr) = binding;
+    #[cfg(feature = "transport-quic")]
+    let addr = match binding {
+        ManagedTransportBinding::Socket(addr) => addr,
+        ManagedTransportBinding::Quic(_) => panic!("expected socket binding for probe surface"),
+    };
+
+    let metrics = reqwest::get(format!("http://{addr}/metrics"))
+        .await
+        .expect("probe metrics request should send");
+    assert_eq!(metrics.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        metrics
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/plain; version=0.0.4; charset=utf-8")
+    );
+    let body = metrics.text().await.expect("metrics body should read");
+    assert!(body.contains("orion_peer_count"));
+    assert!(body.contains("orion_communication_messages_sent_total"));
+
+    let control = reqwest::Client::new()
+        .post(format!(
+            "http://{addr}{}",
+            ControlRoute::Observability.path()
+        ))
+        .body(Vec::new())
+        .send()
+        .await
+        .expect("probe control request should send");
+    assert_eq!(control.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let snapshot = app.observability_snapshot();
+    let endpoint = snapshot
+        .communication
+        .iter()
+        .find(|endpoint| endpoint.id == "http/metrics")
+        .expect("metrics endpoint communication should be recorded");
+    assert_eq!(endpoint.transport, "http");
+    assert_eq!(endpoint.scope, "metrics");
+    assert_eq!(endpoint.metrics.messages_sent_total, 1);
+    assert_eq!(endpoint.metrics.messages_received_total, 1);
+    assert!(endpoint.metrics.bytes_sent_total > 0);
+
+    handle.abort();
+}
+
 #[cfg(feature = "transport-tcp")]
 #[tokio::test]
 async fn managed_surface_launcher_starts_named_tcp_surface() {
@@ -432,13 +511,34 @@ async fn managed_tcp_transport_adapter_starts_secure_data_surface() {
     };
 
     let client = TcpFrameClient::with_tls(addr, tls);
-    let response = client
-        .send(tcp_test_frame())
+    let response = app
+        .send_tcp_data_frame_metered(&client, tcp_test_frame())
         .await
         .expect("managed TCP frame should roundtrip");
 
     assert_eq!(response.payload, vec![1, 2, 3, 4]);
     assert_eq!(response.source, TcpEndpoint::new("127.0.0.1", 4200));
+
+    let snapshot = app.observability_snapshot();
+    let endpoint = snapshot
+        .communication
+        .iter()
+        .find(|endpoint| endpoint.id == "tcp/data-plane/node-b/resource.camera")
+        .expect("managed TCP data-plane communication endpoint should be reported");
+    assert_eq!(endpoint.transport, "tcp");
+    assert_eq!(endpoint.scope, "data_plane");
+    assert_eq!(
+        endpoint.labels.get("peer_node_id").map(String::as_str),
+        Some("node-b")
+    );
+    assert_eq!(
+        endpoint.labels.get("resource_id").map(String::as_str),
+        Some("resource.camera")
+    );
+    assert!(endpoint.metrics.messages_received_total >= 2);
+    assert!(endpoint.metrics.messages_sent_total >= 2);
+    assert!(endpoint.metrics.bytes_received_total > 0);
+    assert!(endpoint.metrics.bytes_sent_total > 0);
 
     handle.abort();
     let _ = fs::remove_dir_all(state_dir);
@@ -516,14 +616,35 @@ async fn managed_quic_transport_adapter_starts_secure_data_surface() {
 
     let client =
         QuicFrameClient::with_tls(endpoint, &tls).expect("managed QUIC client should build");
-    let response = client
-        .send(quic_test_frame())
+    let response = app
+        .send_quic_data_frame_metered(&client, quic_test_frame())
         .await
         .expect("managed QUIC frame should roundtrip");
 
     assert_eq!(response.payload, vec![1, 2, 3, 4]);
     assert_eq!(response.source.host, "127.0.0.1");
     assert_eq!(response.source.port, 5200);
+
+    let snapshot = app.observability_snapshot();
+    let endpoint = snapshot
+        .communication
+        .iter()
+        .find(|endpoint| endpoint.id == "quic/data-plane/node-b/resource.video")
+        .expect("managed QUIC data-plane communication endpoint should be reported");
+    assert_eq!(endpoint.transport, "quic");
+    assert_eq!(endpoint.scope, "data_plane");
+    assert_eq!(
+        endpoint.labels.get("peer_node_id").map(String::as_str),
+        Some("node-b")
+    );
+    assert_eq!(
+        endpoint.labels.get("resource_id").map(String::as_str),
+        Some("resource.video")
+    );
+    assert!(endpoint.metrics.messages_received_total >= 2);
+    assert!(endpoint.metrics.messages_sent_total >= 2);
+    assert!(endpoint.metrics.bytes_received_total > 0);
+    assert!(endpoint.metrics.bytes_sent_total > 0);
 
     handle.abort();
     let _ = fs::remove_dir_all(state_dir);

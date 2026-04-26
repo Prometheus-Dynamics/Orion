@@ -1,4 +1,4 @@
-use super::NodeError;
+use super::{CommunicationMetrics, NodeError};
 use orion::{
     ExecutorId, ProviderId,
     control_plane::{
@@ -27,6 +27,11 @@ pub(super) struct LocalClientState {
     max_queued_events: usize,
     pub(super) queued_events: VecDeque<ClientEvent>,
     pub(super) stream_sender: Option<tokio::sync::mpsc::Sender<ControlEnvelope>>,
+    pub(super) unary_metrics: CommunicationMetrics,
+    pub(super) stream_metrics: CommunicationMetrics,
+    pub(super) stream_peer_pid: Option<u32>,
+    pub(super) stream_peer_uid: Option<u32>,
+    pub(super) stream_peer_gid: Option<u32>,
     pub(super) rate_window_started_ms: u64,
     pub(super) rate_window_count: u32,
     pub(super) last_activity_ms: u64,
@@ -43,6 +48,11 @@ impl LocalClientState {
             max_queued_events,
             queued_events: VecDeque::new(),
             stream_sender: None,
+            unary_metrics: CommunicationMetrics::default(),
+            stream_metrics: CommunicationMetrics::default(),
+            stream_peer_pid: None,
+            stream_peer_uid: None,
+            stream_peer_gid: None,
             rate_window_started_ms: now_ms,
             rate_window_count: 0,
             last_activity_ms: now_ms,

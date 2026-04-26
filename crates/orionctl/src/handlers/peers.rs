@@ -1,5 +1,5 @@
 use orion_control_plane::{PeerEnrollment, PeerIdentityUpdate};
-use orion_core::NodeId;
+use orion_core::{NodeId, PeerBaseUrl, PublicKeyHex};
 
 use crate::{
     cli::{OutputFormat, PeerCommand},
@@ -20,9 +20,10 @@ pub(super) async fn run(command: PeerCommand) -> Result<(), String> {
                     print_peer_summary(&snapshot);
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&snapshot, args.local.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&snapshot, args.local.output),
             }
         }
         PeerCommand::Enroll(args) => {
@@ -30,8 +31,8 @@ pub(super) async fn run(command: PeerCommand) -> Result<(), String> {
             client
                 .enroll_peer(PeerEnrollment {
                     node_id: NodeId::new(args.node_id),
-                    base_url: args.base_url.into(),
-                    trusted_public_key_hex: args.public_key.map(Into::into),
+                    base_url: PeerBaseUrl::new(args.base_url),
+                    trusted_public_key_hex: args.public_key.map(PublicKeyHex::new),
                     trusted_tls_root_cert_pem: args
                         .tls_root_cert
                         .as_deref()
@@ -58,7 +59,7 @@ pub(super) async fn run(command: PeerCommand) -> Result<(), String> {
                 .client()?
                 .replace_peer_identity(PeerIdentityUpdate {
                     node_id: NodeId::new(args.node_id),
-                    public_key_hex: args.public_key.into(),
+                    public_key_hex: PublicKeyHex::new(args.public_key),
                 })
                 .await
                 .map_err(|error| error.to_string())?;

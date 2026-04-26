@@ -3,7 +3,10 @@ use orion_control_plane::{
     AvailabilityState, DesiredState, ExecutorRecord, HealthState, ResourceOwnershipMode,
     WorkloadObservedState, WorkloadRecord,
 };
-use orion_core::{RuntimeType, RuntimeTypeDef};
+use orion_core::{
+    ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, ResourceType, RuntimeType,
+    RuntimeTypeDef, WorkloadId,
+};
 
 #[path = "support/common.rs"]
 mod common;
@@ -35,34 +38,40 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         stream_resource_id,
         width,
     ] = common::read_exact_args::<8>()?;
-    let executor = ExecutorRecord::builder(executor_id.as_str(), node_id.as_str())
-        .runtime_type(RuntimeType::of::<CameraControllerRuntime>())
-        .runtime_type(RuntimeType::of::<VisionConsumerRuntime>())
-        .build();
+    let executor = ExecutorRecord::builder(
+        ExecutorId::new(executor_id.clone()),
+        NodeId::new(node_id.clone()),
+    )
+    .runtime_type(RuntimeType::of::<CameraControllerRuntime>())
+    .runtime_type(RuntimeType::of::<VisionConsumerRuntime>())
+    .build();
     let controller = WorkloadRecord::builder(
-        controller_workload_id.as_str(),
+        WorkloadId::new(controller_workload_id.clone()),
         RuntimeType::of::<CameraControllerRuntime>(),
-        "artifact.camera-controller",
+        ArtifactId::new("artifact.camera-controller"),
     )
     .desired_state(DesiredState::Running)
     .observed_state(WorkloadObservedState::Running)
-    .assigned_to(node_id.as_str())
+    .assigned_to(NodeId::new(node_id.clone()))
     .require_claim(
-        ResourceClaim::new("camera.device", 1)
+        ResourceClaim::new(ResourceType::new("camera.device"), 1)
             .ownership_mode(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
             .build(),
     )
-    .bind_resource(raw_resource_id.as_str(), node_id.as_str())
+    .bind_resource(
+        ResourceId::new(raw_resource_id.clone()),
+        NodeId::new(node_id.clone()),
+    )
     .build();
     let stream = DerivedResource::new(
-        stream_resource_id.as_str(),
-        "camera.frame_stream",
-        "provider.camera",
+        ResourceId::new(stream_resource_id.clone()),
+        ResourceType::new("camera.frame_stream"),
+        ProviderId::new("provider.camera"),
     )
-    .realized_by_executor(executor_id.as_str())
-    .realized_for_workload(controller_workload_id.as_str())
-    .source_resource(raw_resource_id.as_str())
-    .source_workload(controller_workload_id.as_str())
+    .realized_by_executor(ExecutorId::new(executor_id.clone()))
+    .realized_for_workload(WorkloadId::new(controller_workload_id.clone()))
+    .source_resource(ResourceId::new(raw_resource_id.clone()))
+    .source_workload(WorkloadId::new(controller_workload_id.clone()))
     .ownership_mode(ResourceOwnershipMode::SharedRead)
     .health(HealthState::Healthy)
     .availability(AvailabilityState::Available)

@@ -19,6 +19,8 @@ mod graph;
 mod provider;
 mod resource;
 #[cfg(feature = "ipc")]
+mod response;
+#[cfg(feature = "ipc")]
 mod session;
 #[cfg(feature = "ipc")]
 mod stream;

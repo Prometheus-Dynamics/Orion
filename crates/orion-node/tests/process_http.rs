@@ -520,7 +520,7 @@ async fn orion_node_binary_handles_repeated_control_plane_mutations() {
             base_revision: snapshot.state.desired.revision,
             mutations: vec![
                 DesiredStateMutation::PutArtifact(
-                    ArtifactRecord::builder(artifact_id.as_str()).build(),
+                    ArtifactRecord::builder(orion::ArtifactId::new(artifact_id.clone())).build(),
                 ),
                 DesiredStateMutation::PutWorkload(
                     WorkloadRecord::builder(
@@ -567,7 +567,8 @@ async fn orion_node_binary_survives_concurrent_http_ipc_and_peer_sync_activity()
                     base_revision: snapshot.state.desired.revision,
                     mutations: vec![
                         DesiredStateMutation::PutArtifact(
-                            ArtifactRecord::builder(artifact_id.as_str()).build(),
+                            ArtifactRecord::builder(orion::ArtifactId::new(artifact_id.clone()))
+                                .build(),
                         ),
                         DesiredStateMutation::PutWorkload(
                             WorkloadRecord::builder(

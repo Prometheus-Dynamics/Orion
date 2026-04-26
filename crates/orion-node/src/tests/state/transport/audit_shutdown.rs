@@ -105,7 +105,10 @@ async fn graceful_reconcile_loop_shutdown_completes_during_mutation_load() {
         while !stop_mutator.load(std::sync::atomic::Ordering::Relaxed) {
             let mut desired = mutator_app.state_snapshot().state.desired;
             desired.put_node(
-                orion::control_plane::NodeRecord::builder(format!("node-shutdown-{index}")).build(),
+                orion::control_plane::NodeRecord::builder(orion::NodeId::new(format!(
+                    "node-shutdown-{index}"
+                )))
+                .build(),
             );
             mutator_app.replace_desired(desired);
             index = index.saturating_add(1);

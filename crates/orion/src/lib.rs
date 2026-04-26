@@ -56,12 +56,15 @@ pub mod control_plane {
     pub use orion_control_plane::{
         AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, AvailabilityState, ClientEvent,
         ClientEventKind, ClientEventPoll, ClientHello, ClientRole, ClientSession,
-        ClientSessionMetricsSnapshot, ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef,
-        ControlMessage, DesiredClusterState, DesiredState, DesiredStateMutation,
+        ClientSessionMetricsSnapshot, ClusterStateEnvelope, CommunicationEndpointSnapshot,
+        CommunicationFailureCountSnapshot, CommunicationFailureKind, CommunicationMetricsSnapshot,
+        CommunicationRecentMetricsSnapshot, CommunicationStageMetricsSnapshot, ConfigDecodeError,
+        ConfigMapRef, ControlMessage, DesiredClusterState, DesiredState, DesiredStateMutation,
         DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,
         DesiredStateSummary, ExecutorRecord, ExecutorRecordBuilder, ExecutorStateUpdate,
-        ExecutorWorkloadQuery, HealthState, HttpEndpoint, IpcEndpoint, LeaseRecord,
-        LeaseRecordBuilder, LeaseState, MutationApplyError, MutationBatch, NodeHealthSnapshot,
+        ExecutorWorkloadQuery, HealthState, HostMetricsSnapshot, HttpEndpoint, IpcEndpoint,
+        LatencyMetricBuckets, LatencyMetricsSnapshot, LeaseRecord, LeaseRecordBuilder, LeaseState,
+        MetricsExportConfig, MutationApplyError, MutationBatch, NodeHealthSnapshot,
         NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,
         NodeRecord, NodeRecordBuilder, ObservabilityEvent, ObservabilityEventKind,
         ObservedClusterState, ObservedStateUpdate, OperationFailureCategory,
@@ -74,7 +77,10 @@ pub mod control_plane {
         SyncDiffRequest, SyncRequest, SyncSummaryRequest, TcpEndpoint, TransportMetricsSnapshot,
         TypedConfigValue, TypedResourceEndpoint, UnixEndpoint, WorkloadConfig,
         WorkloadObservedState, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
-        config_json_value, deserialize_config,
+        config_json_value, deserialize_config, duration_ms_u64, estimate_wire_bytes,
+        render_communication_metrics, render_communication_metrics_with_config,
+        render_host_metrics, render_observability_metrics,
+        render_observability_metrics_with_config,
     };
 }
 
@@ -130,7 +136,7 @@ pub mod transport {
             ControlEnvelope, DataEnvelope, IpcTransport, IpcTransportError, LocalAddress,
             LocalControlTransport, LocalDataTransport, UnixControlClient, UnixControlHandler,
             UnixControlServer, UnixControlStreamClient, UnixPeerIdentity, read_control_frame,
-            write_control_frame,
+            read_control_frame_with_limit, write_control_frame, write_control_frame_with_limit,
         };
     }
 

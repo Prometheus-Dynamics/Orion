@@ -1,5 +1,7 @@
 use crate::NodeError;
-use crate::storage_io::{atomic_write_file, sync_parent_directory as sync_directory};
+use crate::storage_io::{
+    atomic_write_file, atomic_write_stream, sync_parent_directory as sync_directory,
+};
 use orion::{
     ArtifactId, Revision,
     control_plane::{
@@ -14,7 +16,11 @@ use rkyv::{
     rancor::{Error as ArchiveError, Strategy},
     util::AlignedVec,
 };
-use std::path::{Path, PathBuf};
+use std::{
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 const SNAPSHOT_MANIFEST_FILE: &str = "snapshot-manifest.rkyv";
 const SNAPSHOT_DESIRED_FILE: &str = "snapshot-desired.rkyv";
@@ -405,6 +411,14 @@ impl NodeStorage {
     }
 
     pub fn put_artifact(&self, artifact: &ArtifactRecord, content: &[u8]) -> Result<(), NodeError> {
+        self.put_artifact_stream(artifact, content)
+    }
+
+    pub fn put_artifact_stream<R: Read>(
+        &self,
+        artifact: &ArtifactRecord,
+        mut content: R,
+    ) -> Result<(), NodeError> {
         self.ensure_layout()?;
         let artifact_dir = self
             .root
@@ -415,7 +429,7 @@ impl NodeStorage {
 
         let metadata = encode_to_vec(artifact)?;
         self.atomic_write(&artifact_dir.join(ARTIFACT_METADATA_FILE), &metadata)?;
-        self.atomic_write(&artifact_dir.join(ARTIFACT_PAYLOAD_FILE), content)?;
+        self.atomic_write_stream(&artifact_dir.join(ARTIFACT_PAYLOAD_FILE), &mut content)?;
         Ok(())
     }
 
@@ -423,6 +437,20 @@ impl NodeStorage {
         &self,
         artifact_id: &ArtifactId,
     ) -> Result<Option<(ArtifactRecord, Vec<u8>)>, NodeError> {
+        let Some((artifact, mut payload)) = self.open_artifact(artifact_id)? else {
+            return Ok(None);
+        };
+        let mut content = Vec::new();
+        payload
+            .read_to_end(&mut content)
+            .map_err(|err| NodeError::Storage(err.to_string()))?;
+        Ok(Some((artifact, content)))
+    }
+
+    pub fn open_artifact(
+        &self,
+        artifact_id: &ArtifactId,
+    ) -> Result<Option<(ArtifactRecord, File)>, NodeError> {
         let artifact_dir = self.root.join("artifacts").join(artifact_id.as_str());
         if !artifact_dir.exists() {
             return Ok(None);
@@ -430,7 +458,7 @@ impl NodeStorage {
 
         let metadata = std::fs::read(artifact_dir.join(ARTIFACT_METADATA_FILE))
             .map_err(|err| NodeError::Storage(err.to_string()))?;
-        let payload = std::fs::read(artifact_dir.join(ARTIFACT_PAYLOAD_FILE))
+        let payload = File::open(artifact_dir.join(ARTIFACT_PAYLOAD_FILE))
             .map_err(|err| NodeError::Storage(err.to_string()))?;
         let artifact = decode_from_slice(&metadata)?;
         Ok(Some((artifact, payload)))
@@ -440,6 +468,16 @@ impl NodeStorage {
         atomic_write_file(
             path,
             bytes,
+            "failed to create storage directory",
+            "failed to write storage file",
+            "failed to install storage file",
+        )
+    }
+
+    fn atomic_write_stream(&self, path: &Path, content: &mut dyn Read) -> Result<(), NodeError> {
+        atomic_write_stream(
+            path,
+            content,
             "failed to create storage directory",
             "failed to write storage file",
             "failed to install storage file",
@@ -637,6 +675,30 @@ mod tests {
             .expect("artifact should exist");
         assert_eq!(stored.0, artifact);
         assert_eq!(stored.1, b"payload");
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn artifact_stream_writes_and_opens_payload_without_vec_contract() {
+        let state_dir = temp_state_dir("artifact-stream");
+        let storage = NodeStorage::new(&state_dir);
+        let artifact = ArtifactRecord::builder("artifact.stream").build();
+
+        storage
+            .put_artifact_stream(&artifact, std::io::Cursor::new(b"streamed-payload"))
+            .expect("artifact stream write should succeed");
+
+        let (stored, mut payload) = storage
+            .open_artifact(&ArtifactId::new("artifact.stream"))
+            .expect("artifact stream lookup should succeed")
+            .expect("artifact should exist");
+        let mut content = Vec::new();
+        payload
+            .read_to_end(&mut content)
+            .expect("payload stream should be readable");
+        assert_eq!(stored, artifact);
+        assert_eq!(content, b"streamed-payload");
 
         let _ = fs::remove_dir_all(state_dir);
     }

@@ -158,6 +158,9 @@ pub(crate) fn print_structured<T: serde::Serialize>(
         OutputFormat::Toml => {
             toml::to_string_pretty(&TomlEnvelope { value }).map_err(|error| error.to_string())?
         }
+        OutputFormat::Metrics => {
+            return Err("metrics output is supported only for observability views".to_owned());
+        }
     };
     println!("{rendered}");
     Ok(())

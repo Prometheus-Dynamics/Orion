@@ -2,14 +2,20 @@
 //! control messages for Orion.
 
 mod messages;
+mod metrics_export;
+mod metrics_support;
 mod records;
 mod state;
 
 pub use messages::{
     AuditLogBackpressureMode, ClientEvent, ClientEventKind, ClientEventPoll, ClientHello,
-    ClientRole, ClientSession, ClientSessionMetricsSnapshot, ControlMessage, DesiredStateMutation,
-    DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,
-    DesiredStateSummary, ExecutorStateUpdate, ExecutorWorkloadQuery, HttpMutualTlsMode,
+    ClientRole, ClientSession, ClientSessionMetricsSnapshot, CommunicationEndpointScope,
+    CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot, CommunicationFailureKind,
+    CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
+    CommunicationStageMetricsSnapshot, CommunicationTransportKind, ControlMessage,
+    DesiredStateMutation, DesiredStateObjectSelector, DesiredStateSection,
+    DesiredStateSectionFingerprints, DesiredStateSummary, ExecutorStateUpdate,
+    ExecutorWorkloadQuery, HostMetricsSnapshot, HttpMutualTlsMode, LatencyMetricsSnapshot,
     MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
     MutationApplyError, MutationBatch, NodeHealthSnapshot, NodeHealthStatus,
     NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus, ObservabilityEvent,
@@ -18,6 +24,16 @@ pub use messages::{
     PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
     ProviderLeaseQuery, ProviderStateUpdate, StateSnapshot, StateWatch, SyncDiffRequest,
     SyncRequest, SyncSummaryRequest, TransportMetricsSnapshot,
+};
+pub use metrics_export::{
+    MetricsExportConfig, render_communication_metrics, render_communication_metrics_with_config,
+    render_host_metrics, render_observability_metrics, render_observability_metrics_with_config,
+};
+pub use metrics_support::{
+    COMMUNICATION_RECENT_SAMPLE_LIMIT, COMMUNICATION_RECENT_WINDOW_MS,
+    ESTIMATED_WIRE_OVERHEAD_BYTES, LATENCY_BUCKET_LE_1_MS, LATENCY_BUCKET_LE_5_MS,
+    LATENCY_BUCKET_LE_10_MS, LATENCY_BUCKET_LE_50_MS, LATENCY_BUCKET_LE_100_MS,
+    LATENCY_BUCKET_LE_500_MS, LatencyMetricBuckets, duration_ms_u64, estimate_wire_bytes,
 };
 pub use records::{
     AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, ClusterStateEnvelope,
@@ -245,7 +261,7 @@ mod tests {
     #[test]
     fn full_state_replay_builds_put_mutations_from_current_desired_state() {
         let mut desired = DesiredClusterState::default();
-        desired.put_artifact(ArtifactRecord::builder("artifact.pose").build());
+        desired.put_artifact(ArtifactRecord::builder(ArtifactId::new("artifact.pose")).build());
         desired.put_workload(
             WorkloadRecord::builder(
                 WorkloadId::new("workload.pose"),

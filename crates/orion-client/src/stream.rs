@@ -3,6 +3,7 @@ use crate::{
     session::{ClientIdentity, SessionConfig, ensure_client_role},
 };
 use orion_control_plane::{ClientEvent, ClientHello, ClientRole, ControlMessage};
+use orion_core::ClientName;
 use orion_transport_ipc::{ControlEnvelope, LocalAddress, UnixControlStreamClient};
 use std::path::Path;
 
@@ -27,7 +28,7 @@ impl ClientEventStreamSession {
                 source: config.local_address.clone(),
                 destination: config.daemon_address.clone(),
                 message: ControlMessage::ClientHello(ClientHello {
-                    client_name: identity.name.into(),
+                    client_name: ClientName::new(identity.name),
                     role: expected_role,
                 }),
             })

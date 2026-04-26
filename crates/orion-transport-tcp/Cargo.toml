@@ -10,6 +10,9 @@ authors.workspace = true
 description = "TCP transport adapter for Orion data-plane traffic."
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [lib]
 path = "src/lib.rs"
 

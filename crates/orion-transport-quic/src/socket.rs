@@ -1,19 +1,28 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+#[cfg(feature = "insecure-self-signed")]
+use orion_transport_common::DEFAULT_QUIC_INSECURE_SELF_SIGNED_SAN_HOSTS;
 use orion_transport_common::{
-    ConnectionTasks, DEFAULT_QUIC_INSECURE_SELF_SIGNED_SAN_HOSTS, DEFAULT_TRANSPORT_SERVER_NAME,
+    ConnectionTasks, DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES, DEFAULT_TRANSPORT_IO_TIMEOUT,
+    DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS, DEFAULT_TRANSPORT_SERVER_NAME,
     build_client_verifier, install_rustls_crypto_provider, loopback_ephemeral_socket_addr,
     parse_cert_chain, parse_private_key, root_store_from_pem,
 };
 use quinn::{ClientConfig, Connection, Endpoint, ServerConfig, TransportConfig};
+#[cfg(feature = "insecure-self-signed")]
 use rcgen::generate_simple_self_signed;
 use rustls::RootCertStore;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::UnixTime;
 use rustls_pki_types::{CertificateDer, ServerName};
+use tokio::sync::Semaphore;
 
 use crate::{QuicCodec, QuicEndpoint, QuicFrame, QuicTransportError};
 
+/// Synchronous QUIC frame handler boundary.
+///
+/// Implementations run from async QUIC stream tasks. Keep direct work bounded and offload
+/// persistence, filesystem, network fanout, or long CPU work through explicit worker APIs.
 pub trait QuicFrameHandler: Send + Sync + 'static {
     fn handle_frame(&self, frame: QuicFrame) -> Result<QuicFrame, QuicTransportError>;
 }
@@ -90,9 +99,13 @@ pub struct QuicFrameServer {
     endpoint: Endpoint,
     local_endpoint: QuicEndpoint,
     handler: Arc<dyn QuicFrameHandler>,
+    max_payload_bytes: usize,
+    io_timeout: Duration,
+    max_connections: usize,
 }
 
 impl QuicFrameServer {
+    #[cfg(feature = "insecure-self-signed")]
     pub async fn bind(
         endpoint: QuicEndpoint,
         handler: Arc<dyn QuicFrameHandler>,
@@ -131,9 +144,27 @@ impl QuicFrameServer {
                 endpoint: server_endpoint,
                 local_endpoint: local_endpoint.clone(),
                 handler,
+                max_payload_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
+                io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
+                max_connections: DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
             },
             local_endpoint,
         ))
+    }
+
+    pub fn with_max_payload_bytes(mut self, max_payload_bytes: usize) -> Self {
+        self.max_payload_bytes = max_payload_bytes.max(1);
+        self
+    }
+
+    pub fn with_io_timeout(mut self, io_timeout: Duration) -> Self {
+        self.io_timeout = io_timeout.max(Duration::from_millis(1));
+        self
+    }
+
+    pub fn with_max_connections(mut self, max_connections: usize) -> Self {
+        self.max_connections = max_connections.max(1);
+        self
     }
 
     pub fn local_endpoint(&self) -> &QuicEndpoint {
@@ -142,12 +173,28 @@ impl QuicFrameServer {
 
     pub async fn serve(self) -> Result<(), QuicTransportError> {
         let handler = self.handler.clone();
-        serve_quic_accept_loop(self.endpoint, move |connecting| {
-            let handler = handler.clone();
-            async move {
-                let _ = handle_connection(connecting.await, handler).await;
-            }
-        })
+        let max_payload_bytes = self.max_payload_bytes;
+        let io_timeout = self.io_timeout;
+        let max_connections = self.max_connections;
+        serve_quic_accept_loop(
+            self.endpoint,
+            move |connecting| {
+                let handler = handler.clone();
+                let max_payload_bytes = max_payload_bytes;
+                let io_timeout = io_timeout;
+                async move {
+                    let connection = timed_result(
+                        io_timeout,
+                        std::future::IntoFuture::into_future(connecting),
+                        "QUIC connect",
+                    )
+                    .await;
+                    let _ =
+                        handle_connection(connection, handler, max_payload_bytes, io_timeout).await;
+                }
+            },
+            max_connections,
+        )
         .await
     }
 
@@ -156,26 +203,53 @@ impl QuicFrameServer {
         F: std::future::Future<Output = ()>,
     {
         let handler = self.handler.clone();
-        serve_quic_accept_loop_with_shutdown(self.endpoint, shutdown, move |connecting| {
-            let handler = handler.clone();
-            async move {
-                let _ = handle_connection(connecting.await, handler).await;
-            }
-        })
+        let max_payload_bytes = self.max_payload_bytes;
+        let io_timeout = self.io_timeout;
+        let max_connections = self.max_connections;
+        serve_quic_accept_loop_with_shutdown(
+            self.endpoint,
+            shutdown,
+            move |connecting| {
+                let handler = handler.clone();
+                let max_payload_bytes = max_payload_bytes;
+                let io_timeout = io_timeout;
+                async move {
+                    let connection = timed_result(
+                        io_timeout,
+                        std::future::IntoFuture::into_future(connecting),
+                        "QUIC connect",
+                    )
+                    .await;
+                    let _ =
+                        handle_connection(connection, handler, max_payload_bytes, io_timeout).await;
+                }
+            },
+            max_connections,
+        )
         .await
     }
 }
 
 async fn serve_quic_accept_loop<SpawnFn, Fut>(
     endpoint: Endpoint,
-    mut spawn_connection: SpawnFn,
+    spawn_connection: SpawnFn,
+    max_connections: usize,
 ) -> Result<(), QuicTransportError>
 where
-    SpawnFn: FnMut(quinn::Incoming) -> Fut,
+    SpawnFn: Fn(quinn::Incoming) -> Fut + Clone + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
+    let semaphore = Arc::new(Semaphore::new(max_connections.max(1)));
     while let Some(connecting) = endpoint.accept().await {
-        tokio::spawn(spawn_connection(connecting));
+        let permit =
+            semaphore.clone().acquire_owned().await.map_err(|_| {
+                QuicTransportError::AcceptFailed("connection limiter closed".into())
+            })?;
+        let spawn_connection = spawn_connection.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            spawn_connection(connecting).await;
+        });
     }
     Ok(())
 }
@@ -183,22 +257,37 @@ where
 async fn serve_quic_accept_loop_with_shutdown<Shutdown, SpawnFn, Fut>(
     endpoint: Endpoint,
     shutdown: Shutdown,
-    mut spawn_connection: SpawnFn,
+    spawn_connection: SpawnFn,
+    max_connections: usize,
 ) -> Result<(), QuicTransportError>
 where
     Shutdown: std::future::Future<Output = ()>,
-    SpawnFn: FnMut(quinn::Incoming) -> Fut,
+    SpawnFn: Fn(quinn::Incoming) -> Fut + Clone + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
     let mut shutdown = std::pin::pin!(shutdown);
     let mut connection_tasks = ConnectionTasks::new();
+    let semaphore = Arc::new(Semaphore::new(max_connections.max(1)));
     loop {
+        let permit = tokio::select! {
+            permit = semaphore.clone().acquire_owned() => {
+                permit.map_err(|_| QuicTransportError::AcceptFailed("connection limiter closed".into()))?
+            }
+            _ = &mut shutdown => {
+                connection_tasks.abort_all().await;
+                break Ok(());
+            }
+        };
         tokio::select! {
             accepted = endpoint.accept() => {
                 let Some(connecting) = accepted else {
                     break Ok(());
                 };
-                connection_tasks.spawn_unit(spawn_connection(connecting));
+                let spawn_connection = spawn_connection.clone();
+                connection_tasks.spawn_unit(async move {
+                    let _permit = permit;
+                    spawn_connection(connecting).await;
+                });
             }
             _ = &mut shutdown => {
                 connection_tasks.abort_all().await;
@@ -212,6 +301,8 @@ where
 pub struct QuicFrameClient {
     endpoint: Endpoint,
     remote: QuicEndpoint,
+    max_payload_bytes: usize,
+    io_timeout: Duration,
 }
 
 impl QuicFrameClient {
@@ -228,7 +319,22 @@ impl QuicFrameClient {
         let mut endpoint = Endpoint::client(loopback_ephemeral_socket_addr())
             .map_err(|err| QuicTransportError::BindFailed(err.to_string()))?;
         endpoint.set_default_client_config(build_client_config(tls)?);
-        Ok(Self { endpoint, remote })
+        Ok(Self {
+            endpoint,
+            remote,
+            max_payload_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
+            io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
+        })
+    }
+
+    pub fn with_max_payload_bytes(mut self, max_payload_bytes: usize) -> Self {
+        self.max_payload_bytes = max_payload_bytes.max(1);
+        self
+    }
+
+    pub fn with_io_timeout(mut self, io_timeout: Duration) -> Self {
+        self.io_timeout = io_timeout.max(Duration::from_millis(1));
+        self
     }
 
     pub async fn send(&self, frame: QuicFrame) -> Result<QuicFrame, QuicTransportError> {
@@ -242,17 +348,22 @@ impl QuicFrameClient {
             .map_err(|err: std::net::AddrParseError| {
                 QuicTransportError::ConnectFailed(err.to_string())
             })?;
-        let connection = self
-            .endpoint
-            .connect(remote_addr, &server_name)
-            .map_err(|err| QuicTransportError::ConnectFailed(err.to_string()))?
-            .await
-            .map_err(|err| QuicTransportError::ConnectFailed(err.to_string()))?;
+        let connection = timed_result(
+            self.io_timeout,
+            self.endpoint
+                .connect(remote_addr, &server_name)
+                .map_err(|err| QuicTransportError::ConnectFailed(err.to_string()))?,
+            "QUIC connect",
+        )
+        .await
+        .map_err(|err| QuicTransportError::ConnectFailed(err.to_string()))?;
 
-        send_frame_over_connection(&connection, frame).await
+        send_frame_over_connection(&connection, frame, self.max_payload_bytes, self.io_timeout)
+            .await
     }
 }
 
+#[cfg(feature = "insecure-self-signed")]
 fn generate_insecure_self_signed_tls() -> Result<QuicServerTlsConfig, QuicTransportError> {
     let cert = generate_simple_self_signed(
         DEFAULT_QUIC_INSECURE_SELF_SIGNED_SAN_HOSTS
@@ -344,52 +455,70 @@ fn build_client_config(tls: &QuicClientTlsConfig) -> Result<ClientConfig, QuicTr
 }
 
 async fn handle_connection(
-    connection: Result<Connection, quinn::ConnectionError>,
+    connection: Result<Connection, String>,
     handler: Arc<dyn QuicFrameHandler>,
+    max_payload_bytes: usize,
+    io_timeout: Duration,
 ) -> Result<(), QuicTransportError> {
-    let connection = connection.map_err(|err| QuicTransportError::AcceptFailed(err.to_string()))?;
-    let (mut send, mut recv) = connection
-        .accept_bi()
+    let max_payload_bytes = max_payload_bytes.max(1);
+    let connection = connection.map_err(QuicTransportError::AcceptFailed)?;
+    let (mut send, mut recv) =
+        timed_result(io_timeout, connection.accept_bi(), "QUIC accept stream")
+            .await
+            .map_err(QuicTransportError::AcceptFailed)?;
+    let request = timed_result(io_timeout, recv.read_to_end(max_payload_bytes), "QUIC read")
         .await
-        .map_err(|err| QuicTransportError::AcceptFailed(err.to_string()))?;
-    let request = recv
-        .read_to_end(usize::MAX)
-        .await
-        .map_err(|err| QuicTransportError::ReadFailed(err.to_string()))?;
+        .map_err(QuicTransportError::ReadFailed)?;
     let codec = QuicCodec;
     let frame = codec.decode_frame(&request)?;
     let response = handler.handle_frame(frame)?;
     let bytes = codec.encode_frame(&response)?;
-    send.write_all(&bytes)
+    timed_result(io_timeout, send.write_all(&bytes), "QUIC write")
         .await
-        .map_err(|err| QuicTransportError::WriteFailed(err.to_string()))?;
+        .map_err(QuicTransportError::WriteFailed)?;
     send.finish()
         .map_err(|err| QuicTransportError::WriteFailed(err.to_string()))?;
-    let _ = send.stopped().await;
+    let _ = tokio::time::timeout(io_timeout, send.stopped()).await;
     Ok(())
 }
 
 async fn send_frame_over_connection(
     connection: &Connection,
     frame: QuicFrame,
+    max_payload_bytes: usize,
+    io_timeout: Duration,
 ) -> Result<QuicFrame, QuicTransportError> {
-    let (mut send, mut recv) = connection
-        .open_bi()
+    let max_payload_bytes = max_payload_bytes.max(1);
+    let (mut send, mut recv) = timed_result(io_timeout, connection.open_bi(), "QUIC open stream")
         .await
-        .map_err(|err| QuicTransportError::OpenStreamFailed(err.to_string()))?;
+        .map_err(QuicTransportError::OpenStreamFailed)?;
     let codec = QuicCodec;
     let bytes = codec.encode_frame(&frame)?;
-    send.write_all(&bytes)
+    timed_result(io_timeout, send.write_all(&bytes), "QUIC write")
         .await
-        .map_err(|err| QuicTransportError::WriteFailed(err.to_string()))?;
+        .map_err(QuicTransportError::WriteFailed)?;
     send.finish()
         .map_err(|err| QuicTransportError::WriteFailed(err.to_string()))?;
-    let _ = send.stopped().await;
-    let response = recv
-        .read_to_end(usize::MAX)
+    let _ = tokio::time::timeout(io_timeout, send.stopped()).await;
+    let response = timed_result(io_timeout, recv.read_to_end(max_payload_bytes), "QUIC read")
         .await
-        .map_err(|err| QuicTransportError::ReadFailed(err.to_string()))?;
+        .map_err(QuicTransportError::ReadFailed)?;
     codec.decode_frame(&response).map_err(Into::into)
+}
+
+async fn timed_result<T>(
+    timeout: Duration,
+    future: impl std::future::Future<Output = Result<T, impl std::fmt::Display>>,
+    context: &str,
+) -> Result<T, String> {
+    match tokio::time::timeout(timeout.max(Duration::from_millis(1)), future).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(err)) => Err(err.to_string()),
+        Err(_) => Err(format!(
+            "{context} timed out after {} ms",
+            timeout.as_millis()
+        )),
+    }
 }
 
 #[derive(Debug)]

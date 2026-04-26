@@ -3,7 +3,7 @@ use orion_control_plane::{
     ArtifactRecord, ControlMessage, DesiredState, DesiredStateMutation, ExecutorRecord,
     MutationBatch, StateSnapshot, SyncRequest, WorkloadRecord,
 };
-use orion_core::{ArtifactId, NodeId, Revision, RuntimeType, WorkloadId};
+use orion_core::{ArtifactId, ExecutorId, NodeId, Revision, RuntimeType, WorkloadId};
 use orion_transport_http::{HttpClient, HttpRequestPayload, HttpResponsePayload};
 
 #[path = "support/common.rs"]
@@ -26,9 +26,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         artifact_id,
         workload_id,
     ] = common::read_exact_args::<9>()?;
-    let executor = ExecutorRecord::builder(executor_id.as_str(), node_id.as_str())
-        .runtime_type(runtime_type.as_str())
-        .build();
+    let executor = ExecutorRecord::builder(
+        ExecutorId::new(executor_id.clone()),
+        NodeId::new(node_id.clone()),
+    )
+    .runtime_type(RuntimeType::new(runtime_type.clone()))
+    .build();
     let runtime = LocalNodeRuntime::new(ipc_socket, stream_socket);
     let service = LocalExecutorService::new(runtime, client_name, executor);
     service.register().await?;
@@ -42,16 +45,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 base_revision: snapshot.state.desired.revision,
                 mutations: vec![
                     DesiredStateMutation::PutArtifact(
-                        ArtifactRecord::builder(artifact_id.as_str()).build(),
+                        ArtifactRecord::builder(ArtifactId::new(artifact_id.clone())).build(),
                     ),
                     DesiredStateMutation::PutWorkload(
                         WorkloadRecord::builder(
                             WorkloadId::new(workload_id.as_str()),
-                            RuntimeType::new(runtime_type),
-                            ArtifactId::new(artifact_id.as_str()),
+                            RuntimeType::new(runtime_type.clone()),
+                            ArtifactId::new(artifact_id.clone()),
                         )
                         .desired_state(DesiredState::Stopped)
-                        .assigned_to(NodeId::new(node_id))
+                        .assigned_to(NodeId::new(node_id.clone()))
                         .build(),
                     ),
                 ],

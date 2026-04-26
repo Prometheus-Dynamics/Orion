@@ -245,8 +245,11 @@ async fn two_nodes_can_exchange_snapshots_over_https() {
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
             peers: vec![
-                PeerConfig::new("node-a", format!("https://localhost:{}", addr_a.port()))
-                    .with_tls_root_cert_path(cert_path.display().to_string()),
+                PeerConfig::new(
+                    "node-a",
+                    orion_core::PeerBaseUrl::new(format!("https://localhost:{}", addr_a.port())),
+                )
+                .with_tls_root_cert_path(cert_path.display().to_string()),
             ],
             peer_authentication: crate::PeerAuthenticationMode::Disabled,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()

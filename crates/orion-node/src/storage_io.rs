@@ -2,7 +2,7 @@ use crate::NodeError;
 use crate::blocking::run_possibly_blocking;
 use std::{
     fs::{File, OpenOptions},
-    io::Write,
+    io::Read,
     path::Path,
 };
 
@@ -33,6 +33,23 @@ pub(crate) fn atomic_write_file(
     write_action: &'static str,
     install_action: &'static str,
 ) -> Result<(), NodeError> {
+    let mut reader = bytes;
+    atomic_write_stream(
+        path,
+        &mut reader,
+        create_dir_action,
+        write_action,
+        install_action,
+    )
+}
+
+pub(crate) fn atomic_write_stream(
+    path: &Path,
+    reader: &mut dyn Read,
+    create_dir_action: &'static str,
+    write_action: &'static str,
+    install_action: &'static str,
+) -> Result<(), NodeError> {
     let parent = path.parent().ok_or_else(|| NodeError::StoragePath {
         action: write_action,
         path: path.to_path_buf(),
@@ -59,8 +76,7 @@ pub(crate) fn atomic_write_file(
             .write(true)
             .open(&tmp_path)
             .map_err(|err| storage_path_error(write_action, &tmp_path, err))?;
-        tmp_file
-            .write_all(bytes)
+        std::io::copy(reader, &mut tmp_file)
             .map_err(|err| storage_path_error(write_action, &tmp_path, err))?;
         tmp_file
             .sync_all()

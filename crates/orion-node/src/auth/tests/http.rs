@@ -358,7 +358,10 @@ async fn required_peer_auth_allows_signed_http_peer_sync() {
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-b"),
             reconcile_interval: Duration::from_millis(10),
             state_dir: Some(state_dir_b.clone()),
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr_a))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+            )],
             peer_authentication: PeerAuthenticationMode::Required,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),

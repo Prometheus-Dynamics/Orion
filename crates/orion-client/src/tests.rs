@@ -10,6 +10,7 @@ use orion_core::{
 };
 use orion_transport_ipc::{ControlEnvelope, IpcTransport, LocalAddress, LocalControlTransport};
 
+mod control_plane_metrics;
 mod local_defaults;
 mod local_services;
 

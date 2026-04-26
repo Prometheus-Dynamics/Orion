@@ -18,9 +18,10 @@ pub(crate) async fn run_maintenance(command: CliMaintenanceCommand) -> Result<()
                     print_maintenance_summary(&status);
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&status, args.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&status, args.output),
             }
         }
         CliMaintenanceCommand::Cordon(args) => {
@@ -99,7 +100,7 @@ async fn update_maintenance(
             print_maintenance_summary(&status);
             Ok(())
         }
-        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml | OutputFormat::Metrics => {
             print_structured(&status, args.output)
         }
     }

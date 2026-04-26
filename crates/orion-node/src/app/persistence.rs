@@ -18,6 +18,7 @@ use orion::{
         MutationBatch, ObservedClusterState,
     },
 };
+use std::{fs::File, io::Read};
 use tracing::info_span;
 
 pub(crate) use worker::PersistenceWorker;
@@ -314,6 +315,21 @@ impl NodeApp {
         artifact: &ArtifactRecord,
         content: &[u8],
     ) -> Result<(), NodeError> {
+        self.put_artifact_content_stream_async(
+            artifact.clone(),
+            std::io::Cursor::new(content.to_vec()),
+        )
+        .await
+    }
+
+    pub async fn put_artifact_content_stream_async<R>(
+        &self,
+        artifact: ArtifactRecord,
+        content: R,
+    ) -> Result<(), NodeError>
+    where
+        R: Read + Send + 'static,
+    {
         self.put_artifact_record_tracked_async(artifact.clone())
             .await?;
         if self.storage.is_some() {
@@ -321,19 +337,17 @@ impl NodeApp {
             let result = async {
                 if let Some(worker) = &self.persistence_worker {
                     worker
-                        .put_artifact_async(artifact.clone(), content.to_vec())
+                        .put_artifact_stream_async(artifact.clone(), Box::new(content))
                         .await?;
                 } else if let Some(storage) = &self.storage {
-                    let artifact = artifact.clone();
-                    let content = content.to_vec();
                     let storage = storage.clone();
-                    tokio::task::spawn_blocking(move || storage.put_artifact(&artifact, &content))
-                        .await
-                        .map_err(|err| {
-                            NodeError::Storage(format!(
-                                "artifact persistence task join failed: {err}"
-                            ))
-                        })??;
+                    tokio::task::spawn_blocking(move || {
+                        storage.put_artifact_stream(&artifact, content)
+                    })
+                    .await
+                    .map_err(|err| {
+                        NodeError::Storage(format!("artifact persistence task join failed: {err}"))
+                    })??;
                 }
                 Ok(())
             }
@@ -359,7 +373,10 @@ impl NodeApp {
             let started = std::time::Instant::now();
             let result = (|| {
                 if let Some(worker) = &self.persistence_worker {
-                    worker.put_artifact_blocking(artifact.clone(), content.to_vec())?;
+                    worker.put_artifact_stream_blocking(
+                        artifact.clone(),
+                        Box::new(std::io::Cursor::new(content.to_vec())),
+                    )?;
                 } else if let Some(storage) = &self.storage {
                     let storage = storage.clone();
                     run_possibly_blocking(|| storage.put_artifact(artifact, content))?;
@@ -373,6 +390,45 @@ impl NodeApp {
             result?;
         }
         self.persist_state()
+    }
+
+    pub fn put_artifact_content_stream<R>(
+        &self,
+        artifact: &ArtifactRecord,
+        content: R,
+    ) -> Result<(), NodeError>
+    where
+        R: Read + Send + 'static,
+    {
+        self.put_artifact_record_tracked(artifact.clone())?;
+        if self.storage.is_some() {
+            let started = std::time::Instant::now();
+            let result = (|| {
+                if let Some(worker) = &self.persistence_worker {
+                    worker.put_artifact_stream_blocking(artifact.clone(), Box::new(content))?;
+                } else if let Some(storage) = &self.storage {
+                    let storage = storage.clone();
+                    run_possibly_blocking(|| storage.put_artifact_stream(artifact, content))?;
+                }
+                Ok(())
+            })();
+            match &result {
+                Ok(()) => self.record_artifact_write_success(started.elapsed()),
+                Err(error) => self.record_artifact_write_failure(started.elapsed(), error),
+            }
+            result?;
+        }
+        self.persist_state()
+    }
+
+    pub fn artifact_content_stream(
+        &self,
+        artifact_id: &ArtifactId,
+    ) -> Result<Option<(ArtifactRecord, File)>, NodeError> {
+        match &self.storage {
+            Some(storage) => storage.open_artifact(artifact_id),
+            None => Ok(None),
+        }
     }
 
     pub fn artifact_content(

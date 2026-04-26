@@ -24,6 +24,7 @@ macro_rules! string_newtype {
         pub struct $name(String);
 
         impl $name {
+            /// Builds a checked identifier from runtime input.
             pub fn try_new(value: impl Into<String>) -> Result<Self, OrionError> {
                 let value = value.into();
                 if value.trim().is_empty() {
@@ -35,6 +36,11 @@ macro_rules! string_newtype {
                 Ok(Self(value))
             }
 
+            /// Builds an identifier from a known-good literal or invariant.
+            ///
+            /// Panics if the value is empty or whitespace-only. Use `try_new` for env, CLI,
+            /// network, or other runtime input.
+            #[track_caller]
             pub fn new(value: impl Into<String>) -> Self {
                 Self::try_new(value).expect(concat!(stringify!($name), " must not be empty"))
             }
@@ -68,15 +74,17 @@ macro_rules! string_newtype {
             }
         }
 
-        impl From<&str> for $name {
-            fn from(value: &str) -> Self {
+        impl From<&'static str> for $name {
+            fn from(value: &'static str) -> Self {
                 Self::new(value)
             }
         }
 
-        impl From<String> for $name {
-            fn from(value: String) -> Self {
-                Self::new(value)
+        impl TryFrom<String> for $name {
+            type Error = OrionError;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::try_new(value)
             }
         }
 

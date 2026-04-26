@@ -211,7 +211,10 @@ fn repeated_compaction_cycles_over_long_churn_remain_replayable_without_snapshot
 
         let artifact_id = format!("artifact.long-churn.{cycle}");
         app.put_artifact_content(
-            &orion::control_plane::ArtifactRecord::builder(artifact_id.as_str()).build(),
+            &orion::control_plane::ArtifactRecord::builder(orion::ArtifactId::new(
+                artifact_id.clone(),
+            ))
+            .build(),
             &[cycle as u8],
         )
         .expect("artifact should persist");

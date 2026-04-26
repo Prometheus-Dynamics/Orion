@@ -14,6 +14,8 @@ pub enum ClientError {
     NoMessageAvailable,
     #[error("orion rejected the client request: {0}")]
     Rejected(String),
+    #[error("invalid client identity name: {0}")]
+    InvalidIdentityName(String),
     #[error("client role mismatch: expected {expected:?}, found {found:?}")]
     RoleMismatch {
         expected: ClientRole,

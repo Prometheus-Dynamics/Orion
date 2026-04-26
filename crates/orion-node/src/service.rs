@@ -3,15 +3,18 @@ use orion::{
     auth::{AuthenticatedPeerRequest, PeerRequestAuth, PeerRequestPayload},
     control_plane::{ControlMessage, ObservedStateUpdate},
     transport::{
-        http::{HttpControlHandler, HttpRequestPayload, HttpResponsePayload, HttpTransportError},
-        ipc::{
-            ControlEnvelope, IpcTransportError, LocalAddress, UnixControlHandler, UnixPeerIdentity,
-        },
+        http::{HttpRequestPayload, HttpResponsePayload, HttpTransportError},
+        ipc::{ControlEnvelope, IpcTransportError, LocalAddress, UnixPeerIdentity},
     },
 };
 use orion_service::{MiddlewareNext, MiddlewareStack, RequestMiddleware, RequestService};
 use std::sync::Arc;
 use tracing::error;
+
+mod adapters;
+pub(crate) use adapters::{
+    HttpControlServiceAdapter, HttpProbeServiceAdapter, UnixControlServiceAdapter,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlPrincipal {
@@ -422,121 +425,6 @@ impl RequestService<ControlRequest> for NodeControlService {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct HttpControlServiceAdapter {
-    app: NodeApp,
-}
-
-impl HttpControlServiceAdapter {
-    pub(crate) fn new(app: NodeApp) -> Self {
-        Self { app }
-    }
-}
-
-impl HttpControlHandler for HttpControlServiceAdapter {
-    fn handle_payload(
-        &self,
-        payload: HttpRequestPayload,
-    ) -> Result<HttpResponsePayload, HttpTransportError> {
-        let request = ControlRequest::from_http_payload(payload);
-        self.app.execute_http_control_request(request)
-    }
-
-    fn handle_health(&self) -> Result<HttpResponsePayload, HttpTransportError> {
-        self.app
-            .execute_http_control_request(ControlRequest::health())
-    }
-
-    fn handle_readiness(&self) -> Result<HttpResponsePayload, HttpTransportError> {
-        self.app
-            .execute_http_control_request(ControlRequest::readiness())
-    }
-
-    fn record_transport_error(&self, error: &HttpTransportError) {
-        self.app.record_http_transport_error(error);
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct HttpProbeServiceAdapter {
-    app: NodeApp,
-}
-
-impl HttpProbeServiceAdapter {
-    pub(crate) fn new(app: NodeApp) -> Self {
-        Self { app }
-    }
-}
-
-impl HttpControlHandler for HttpProbeServiceAdapter {
-    fn handle_payload(
-        &self,
-        _payload: HttpRequestPayload,
-    ) -> Result<HttpResponsePayload, HttpTransportError> {
-        Err(HttpTransportError::UnsupportedPath(
-            "probe server only exposes health and readiness".into(),
-        ))
-    }
-
-    fn handle_health(&self) -> Result<HttpResponsePayload, HttpTransportError> {
-        self.app
-            .execute_http_control_request(ControlRequest::health())
-    }
-
-    fn handle_readiness(&self) -> Result<HttpResponsePayload, HttpTransportError> {
-        self.app
-            .execute_http_control_request(ControlRequest::readiness())
-    }
-
-    fn record_transport_error(&self, error: &HttpTransportError) {
-        self.app.record_http_transport_error(error);
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct UnixControlServiceAdapter {
-    app: NodeApp,
-}
-
-impl UnixControlServiceAdapter {
-    pub(crate) fn new(app: NodeApp) -> Self {
-        Self { app }
-    }
-}
-
-impl UnixControlHandler for UnixControlServiceAdapter {
-    fn handle_control(
-        &self,
-        envelope: ControlEnvelope,
-    ) -> Result<ControlEnvelope, IpcTransportError> {
-        self.handle_control_with_identity(envelope, None)
-    }
-
-    fn handle_control_with_identity(
-        &self,
-        envelope: ControlEnvelope,
-        identity: Option<UnixPeerIdentity>,
-    ) -> Result<ControlEnvelope, IpcTransportError> {
-        let message = self.app.execute_local_control_request(
-            ControlRequest::from_local_envelope_with_identity(
-                ControlSurface::LocalIpc,
-                &envelope,
-                identity,
-            ),
-        )?;
-
-        Ok(ControlEnvelope {
-            source: envelope.destination,
-            destination: envelope.source,
-            message,
-        })
-    }
-
-    fn record_transport_error(&self, error: &IpcTransportError) {
-        self.app.record_ipc_transport_error(error);
-    }
-}
-
 impl NodeApp {
     fn execute_control_request(
         &self,
@@ -607,6 +495,21 @@ impl NodeApp {
         ))?
         .into_local()
         .map_err(NodeError::IpcTransport)
+    }
+
+    pub(crate) async fn serve_local_control_message_async(
+        &self,
+        surface: ControlSurface,
+        source: LocalAddress,
+        destination: LocalAddress,
+        message: ControlMessage,
+    ) -> Result<ControlMessage, NodeError> {
+        let app = self.clone();
+        tokio::task::spawn_blocking(move || {
+            app.serve_local_control_message(surface, source, destination, message)
+        })
+        .await
+        .map_err(|err| NodeError::Storage(format!("control request task join failed: {err}")))?
     }
 
     pub(crate) fn http_control_handler(&self) -> HttpControlServiceAdapter {

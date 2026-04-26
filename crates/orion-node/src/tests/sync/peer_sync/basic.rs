@@ -39,7 +39,10 @@ async fn node_sync_peer_pulls_remote_snapshot_when_peer_is_ahead() {
         .expect("node A server should start");
 
     node_b
-        .register_peer(PeerConfig::new("node-a", format!("http://{}", addr_a)))
+        .register_peer(PeerConfig::new(
+            "node-a",
+            orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+        ))
         .expect("peer registration should succeed");
 
     node_b
@@ -163,7 +166,10 @@ async fn node_sync_peer_remote_ahead_does_not_require_summary_round_trip() {
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -259,7 +265,10 @@ async fn node_sync_peer_pushes_local_snapshot_when_local_is_ahead() {
         .expect("node A server should start");
 
     node_b
-        .register_peer(PeerConfig::new("node-a", format!("http://{}", addr_a)))
+        .register_peer(PeerConfig::new(
+            "node-a",
+            orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+        ))
         .expect("peer registration should succeed");
 
     node_b
@@ -363,7 +372,10 @@ async fn node_sync_peer_local_ahead_without_history_does_not_require_summary_rou
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Disabled,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -422,7 +434,10 @@ async fn node_sync_peer_makes_progress_while_remote_desired_state_is_mutating() 
         .await
         .expect("node A server should start");
     node_b
-        .register_peer(PeerConfig::new("node-a", format!("http://{}", addr_a)))
+        .register_peer(PeerConfig::new(
+            "node-a",
+            orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+        ))
         .expect("peer registration should succeed");
 
     let last_node_id = Arc::new(Mutex::new(NodeId::new("node-a")));

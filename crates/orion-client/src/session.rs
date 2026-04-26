@@ -2,7 +2,7 @@ use orion_control_plane::{
     ClientHello, ClientRole, ClientSession as ProtocolClientSession, ControlMessage, MutationBatch,
     PeerHello, SyncRequest,
 };
-use orion_core::{NodeId, Revision};
+use orion_core::{ClientName, NodeId, Revision};
 use orion_transport_ipc::{ControlEnvelope, LocalAddress, LocalControlTransport};
 use std::{env, path::PathBuf};
 
@@ -23,13 +23,21 @@ pub struct ClientIdentity {
 }
 
 impl ClientIdentity {
-    pub fn new(name: impl Into<String>, role: ClientRole) -> Self {
+    pub fn try_new(name: impl Into<String>, role: ClientRole) -> Result<Self, ClientError> {
         let name = name.into();
-        assert!(
-            !name.trim().is_empty(),
-            "client identities must not be empty"
-        );
-        Self { name, role }
+        if name.trim().is_empty() {
+            return Err(ClientError::InvalidIdentityName(name));
+        }
+        Ok(Self { name, role })
+    }
+
+    /// Builds a client identity from a known-good literal or invariant.
+    ///
+    /// Panics if the value is empty or whitespace-only. Use `try_new` for env, CLI, network, or
+    /// other runtime input.
+    #[track_caller]
+    pub fn new(name: impl Into<String>, role: ClientRole) -> Self {
+        Self::try_new(name, role).expect("client identities must not be empty")
     }
 }
 
@@ -199,7 +207,7 @@ where
 
     pub fn send_client_hello(&self) -> Result<(), ClientError> {
         self.send_control(ControlMessage::ClientHello(ClientHello {
-            client_name: self.identity.name.clone().into(),
+            client_name: ClientName::new(self.identity.name.clone()),
             role: self.identity.role.clone(),
         }))
     }

@@ -3,11 +3,16 @@ mod classification;
 mod lifecycle;
 mod metrics;
 
-use orion::control_plane::{
-    HttpMutualTlsMode as PublicHttpMutualTlsMode, ObservabilityEvent, ObservabilityEventKind,
+use orion::{
+    NodeId,
+    control_plane::{
+        CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationFailureKind,
+        CommunicationTransportKind, HttpMutualTlsMode as PublicHttpMutualTlsMode,
+        ObservabilityEvent, ObservabilityEventKind,
+    },
 };
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -16,12 +21,17 @@ use audit::should_emit_audit_drop_warning;
 pub(super) use audit::{AuditEventKind, AuditLogSink, write_audit_record};
 #[cfg(test)]
 pub(crate) use audit::{clear_test_audit_append_delay, set_test_audit_append_delay};
-pub(super) use classification::{
-    classify_node_error, classify_peer_sync_error, classify_peer_sync_error_kind,
-    is_client_auth_tls_error, peer_sync_troubleshooting_hint,
+#[cfg(feature = "transport-quic")]
+pub(crate) use classification::classify_quic_communication_failure;
+#[cfg(feature = "transport-tcp")]
+pub(crate) use classification::classify_tcp_communication_failure;
+pub(crate) use classification::{
+    classify_http_communication_failure, classify_node_error, classify_peer_sync_error,
+    classify_peer_sync_error_kind, is_client_auth_tls_error, peer_sync_troubleshooting_hint,
 };
 pub(super) use lifecycle::{LifecycleSnapshot, LifecycleState};
 use metrics::OperationMetrics;
+pub(crate) use metrics::{CommunicationMetrics, CommunicationStageDurations};
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct ObservabilityState {
@@ -46,7 +56,56 @@ pub(super) struct ObservabilityState {
     pub(super) ipc_frame_failures: u64,
     pub(super) ipc_malformed_input_count: u64,
     pub(super) reconnect_count: u64,
+    pub(super) peer_http_communication: BTreeMap<NodeId, CommunicationMetrics>,
+    pub(super) communication_endpoints: BTreeMap<String, CommunicationEndpointRuntime>,
     pub(super) seen_stream_sources: BTreeSet<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CommunicationEndpointRuntime {
+    pub(crate) id: String,
+    pub(crate) transport: CommunicationTransportKind,
+    pub(crate) scope: CommunicationEndpointScope,
+    pub(crate) local: Option<String>,
+    pub(crate) remote: Option<String>,
+    pub(crate) labels: BTreeMap<String, String>,
+    pub(crate) connected: bool,
+    pub(crate) queued: Option<u64>,
+    pub(crate) metrics: CommunicationMetrics,
+}
+
+impl CommunicationEndpointRuntime {
+    pub(crate) fn new(
+        id: impl Into<String>,
+        transport: impl Into<String>,
+        scope: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            transport: CommunicationTransportKind::from_label(transport),
+            scope: CommunicationEndpointScope::from_label(scope),
+            local: None,
+            remote: None,
+            labels: BTreeMap::new(),
+            connected: true,
+            queued: None,
+            metrics: CommunicationMetrics::default(),
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> CommunicationEndpointSnapshot {
+        CommunicationEndpointSnapshot {
+            id: self.id.clone(),
+            transport: self.transport.clone(),
+            scope: self.scope.clone(),
+            local: self.local.clone(),
+            remote: self.remote.clone(),
+            labels: self.labels.clone(),
+            connected: self.connected,
+            queued: self.queued,
+            metrics: self.metrics.snapshot(),
+        }
+    }
 }
 
 pub(super) struct ObservabilityTxn<'a> {
@@ -99,6 +158,59 @@ impl ObservabilityState {
             event_limit: event_limit.max(1),
             ..Self::default()
         }
+    }
+}
+
+impl crate::app::NodeApp {
+    pub(crate) fn record_communication_endpoint_exchange_with_stages(
+        &self,
+        mut endpoint: CommunicationEndpointRuntime,
+        bytes_received: u64,
+        bytes_sent: u64,
+        duration: Duration,
+        stages: CommunicationStageDurations,
+    ) {
+        let now_ms = Self::current_time_ms();
+        self.with_observability_txn(|txn| {
+            let stored = txn
+                .state_mut()
+                .communication_endpoints
+                .entry(endpoint.id.clone())
+                .or_insert_with(|| endpoint.clone());
+            endpoint.metrics = stored.metrics.clone();
+            *stored = endpoint;
+            stored.metrics.record_received(bytes_received);
+            stored.metrics.record_sent(bytes_sent);
+            stored.metrics.record_success_exchange_with_stages(
+                now_ms,
+                duration,
+                bytes_sent,
+                bytes_received,
+                &stages,
+            );
+        });
+    }
+
+    pub(crate) fn record_communication_endpoint_failure_kind(
+        &self,
+        mut endpoint: CommunicationEndpointRuntime,
+        duration: Option<Duration>,
+        kind: CommunicationFailureKind,
+        error: impl Into<String>,
+    ) {
+        let now_ms = Self::current_time_ms();
+        self.with_observability_txn(|txn| {
+            let stored = txn
+                .state_mut()
+                .communication_endpoints
+                .entry(endpoint.id.clone())
+                .or_insert_with(|| endpoint.clone());
+            endpoint.metrics = stored.metrics.clone();
+            *stored = endpoint;
+            stored
+                .metrics
+                .record_failure_kind(now_ms, duration, kind, error);
+        });
     }
 }
 

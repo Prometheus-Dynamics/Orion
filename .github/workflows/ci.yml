@@ -6,6 +6,9 @@ on:
       - main
       - master
   pull_request:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
 
 jobs:
   workspace:
@@ -51,7 +54,26 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Build docs
-        run: cargo doc --workspace --no-deps
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: Run dependency audit
+        run: cargo audit
 
   package-surface:
     runs-on: ubuntu-latest
@@ -66,5 +88,28 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Validate package surface
-        run: cargo package --workspace --allow-dirty --no-verify
+      - name: Verify package tarballs
+        run: ./scripts/verify-package-tarballs.sh
+
+  dependency-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.ref_name, 'release')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Report duplicate dependencies
+        run: cargo tree -d --workspace
+
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@cargo-machete
+
+      - name: Check unused dependency candidates
+        run: cargo machete

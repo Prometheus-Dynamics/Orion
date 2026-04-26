@@ -54,6 +54,168 @@ async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
     );
     assert!(String::from_utf8_lossy(&observability.stdout).contains("mutation_success="));
 
+    let observability_metrics = run_orionctl([
+        "get",
+        "observability",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "metrics",
+    ]);
+    assert!(
+        observability_metrics.status.success(),
+        "{}",
+        output_text(&observability_metrics)
+    );
+    let observability_metrics_stdout = String::from_utf8_lossy(&observability_metrics.stdout);
+    assert!(observability_metrics_stdout.contains("# TYPE orion_peer_count gauge"));
+    assert!(observability_metrics_stdout.contains("orion_communication_messages_sent_total"));
+
+    let host = run_orionctl([
+        "get",
+        "host",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+    ]);
+    assert!(host.status.success(), "{}", output_text(&host));
+    assert!(String::from_utf8_lossy(&host.stdout).contains("process_id="));
+
+    let host_metrics = run_orionctl([
+        "get",
+        "host",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "metrics",
+    ]);
+    assert!(
+        host_metrics.status.success(),
+        "{}",
+        output_text(&host_metrics)
+    );
+    assert!(String::from_utf8_lossy(&host_metrics.stdout).contains("orion_process_id"));
+
+    let communication = run_orionctl([
+        "get",
+        "communication",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+    ]);
+    assert!(
+        communication.status.success(),
+        "{}",
+        output_text(&communication)
+    );
+    let communication_stdout = String::from_utf8_lossy(&communication.stdout);
+    assert!(communication_stdout.contains("communication id=ipc/local-unary/"));
+    assert!(communication_stdout.contains("transport=ipc"));
+    assert!(communication_stdout.contains("latency_samples="));
+    assert!(communication_stdout.contains("estimated_wire_sent_bytes="));
+    assert!(communication_stdout.contains("recent_successes="));
+
+    let sorted_limited_communication = run_orionctl([
+        "get",
+        "communication",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--sort",
+        "bytes",
+        "--limit",
+        "1",
+    ]);
+    assert!(
+        sorted_limited_communication.status.success(),
+        "{}",
+        output_text(&sorted_limited_communication)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&sorted_limited_communication.stdout)
+            .lines()
+            .filter(|line| line.starts_with("communication id="))
+            .count(),
+        1
+    );
+
+    let peer_communication = run_orionctl([
+        "get",
+        "communication",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--view",
+        "peers",
+    ]);
+    assert!(
+        peer_communication.status.success(),
+        "{}",
+        output_text(&peer_communication)
+    );
+    assert!(
+        String::from_utf8_lossy(&peer_communication.stdout)
+            .lines()
+            .all(|line| line.starts_with("peer="))
+    );
+
+    let filtered_communication = run_orionctl([
+        "get",
+        "communication",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--transport",
+        "ipc",
+        "--scope",
+        "local_unary",
+        "--label",
+        "client_name=orionctl.get",
+        "-o",
+        "json",
+    ]);
+    assert!(
+        filtered_communication.status.success(),
+        "{}",
+        output_text(&filtered_communication)
+    );
+    let filtered_communication_json: serde_json::Value =
+        serde_json::from_slice(&filtered_communication.stdout).expect("json output should parse");
+    let filtered_communication_array = filtered_communication_json
+        .as_array()
+        .expect("json should be an array");
+    assert!(!filtered_communication_array.is_empty());
+    assert!(
+        filtered_communication_array
+            .iter()
+            .all(|endpoint| endpoint["transport"] == "ipc"
+                && endpoint["scope"] == "local_unary"
+                && endpoint["labels"]["client_name"] == "orionctl.get")
+    );
+
+    let filtered_communication_metrics = run_orionctl([
+        "get",
+        "communication",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "--transport",
+        "ipc",
+        "--scope",
+        "local_unary",
+        "--label",
+        "client_name=orionctl.get",
+        "--metrics-max-communication-endpoints",
+        "1",
+        "-o",
+        "metrics",
+    ]);
+    assert!(
+        filtered_communication_metrics.status.success(),
+        "{}",
+        output_text(&filtered_communication_metrics)
+    );
+    let filtered_communication_metrics_stdout =
+        String::from_utf8_lossy(&filtered_communication_metrics.stdout);
+    assert!(
+        filtered_communication_metrics_stdout.contains("orion_communication_latency_ms_bucket")
+    );
+    assert!(filtered_communication_metrics_stdout.contains("client_name=\"orionctl.get\""));
+
     let snapshot = run_orionctl([
         "get",
         "snapshot",
@@ -80,6 +242,20 @@ async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
             .iter()
             .any(|node| node["node_id"] == "node.orionctl.get"),
         "expected seeded node in get nodes output"
+    );
+
+    let nodes_metrics = run_orionctl([
+        "get",
+        "nodes",
+        "--socket",
+        &harness.ipc_socket.to_string_lossy(),
+        "-o",
+        "metrics",
+    ]);
+    assert!(!nodes_metrics.status.success());
+    assert!(
+        String::from_utf8_lossy(&nodes_metrics.stderr)
+            .contains("metrics output is supported only for observability views")
     );
 
     let artifacts = run_orionctl([

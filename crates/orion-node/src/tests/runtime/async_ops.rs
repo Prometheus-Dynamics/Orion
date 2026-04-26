@@ -159,11 +159,16 @@ async fn tick_async_makes_progress_under_concurrent_mutation_load() {
         for index in 0..24_u32 {
             let mut desired = mutator_app.state_snapshot().state.desired;
             desired.put_node(
-                orion::control_plane::NodeRecord::builder(format!("node-churn-{index}")).build(),
+                orion::control_plane::NodeRecord::builder(orion::NodeId::new(format!(
+                    "node-churn-{index}"
+                )))
+                .build(),
             );
             desired.put_artifact(
-                orion::control_plane::ArtifactRecord::builder(format!("artifact-churn-{index}"))
-                    .build(),
+                orion::control_plane::ArtifactRecord::builder(orion::ArtifactId::new(format!(
+                    "artifact-churn-{index}"
+                )))
+                .build(),
             );
             mutator_app.replace_desired(desired);
             tokio::task::yield_now().await;

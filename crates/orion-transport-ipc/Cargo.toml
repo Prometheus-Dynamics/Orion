@@ -10,6 +10,9 @@ authors.workspace = true
 description = "Same-device IPC transport adapter for Orion."
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [lib]
 path = "src/lib.rs"
 
@@ -21,7 +24,7 @@ orion-transport-common.workspace = true
 serde.workspace = true
 rkyv.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync", "time"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }

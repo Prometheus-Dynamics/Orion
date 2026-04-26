@@ -8,13 +8,19 @@ use crate::peer::{PeerConfig, PeerState, PeerSyncStatus, PeerTrustStatus};
 use orion::{
     NodeId,
     control_plane::{
-        AuditLogBackpressureMode, ClientSessionMetricsSnapshot, NodeHealthSnapshot,
-        NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,
-        PersistenceMetricsSnapshot, TransportMetricsSnapshot,
+        AuditLogBackpressureMode, ClientSessionMetricsSnapshot, CommunicationEndpointScope,
+        CommunicationEndpointSnapshot, CommunicationMetricsSnapshot, CommunicationTransportKind,
+        HostMetricsSnapshot, NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot,
+        NodeReadinessSnapshot, NodeReadinessStatus, PersistenceMetricsSnapshot,
+        TransportMetricsSnapshot,
     },
 };
 use orion_core::PublicKeyHex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::BTreeMap,
+    fs,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tracing::warn;
 
 impl NodeApp {
@@ -83,6 +89,86 @@ impl NodeApp {
             .as_ref()
             .map(|worker| worker.metrics_snapshot())
             .unwrap_or_default();
+        let mut communication = Vec::new();
+        for (source, client) in clients.iter() {
+            let mut labels = BTreeMap::new();
+            labels.insert(
+                "client_name".to_owned(),
+                client.session.client_name.to_string(),
+            );
+            labels.insert(
+                "client_role".to_owned(),
+                format!("{:?}", client.session.role),
+            );
+            labels.insert("local_address".to_owned(), source.as_str().to_owned());
+            communication.push(CommunicationEndpointSnapshot {
+                id: format!("ipc/local-unary/{}", source.as_str()),
+                transport: CommunicationTransportKind::Ipc,
+                scope: CommunicationEndpointScope::LocalUnary,
+                local: Some(source.as_str().to_owned()),
+                remote: None,
+                labels: labels.clone(),
+                connected: true,
+                queued: None,
+                metrics: client.unary_metrics.snapshot(),
+            });
+
+            let mut stream_labels = labels;
+            if let Some(pid) = client.stream_peer_pid {
+                stream_labels.insert("pid".to_owned(), pid.to_string());
+            }
+            if let Some(uid) = client.stream_peer_uid {
+                stream_labels.insert("uid".to_owned(), uid.to_string());
+            }
+            if let Some(gid) = client.stream_peer_gid {
+                stream_labels.insert("gid".to_owned(), gid.to_string());
+            }
+            communication.push(CommunicationEndpointSnapshot {
+                id: format!("ipc/local-stream/{}", source.as_str()),
+                transport: CommunicationTransportKind::Ipc,
+                scope: CommunicationEndpointScope::LocalStream,
+                local: Some(source.as_str().to_owned()),
+                remote: None,
+                labels: stream_labels,
+                connected: client.stream_sender.is_some(),
+                queued: Some(client.queued_events.len().min(u64::MAX as usize) as u64),
+                metrics: client.stream_metrics.snapshot(),
+            });
+        }
+        for (node_id, peer) in peers.iter() {
+            let mut labels = BTreeMap::new();
+            labels.insert("peer_node_id".to_owned(), node_id.to_string());
+            labels.insert("base_url".to_owned(), peer.base_url.to_string());
+            labels.insert("sync_status".to_owned(), format!("{:?}", peer.sync_status));
+            if let Some(kind) = &peer.last_error_kind {
+                labels.insert("last_error_kind".to_owned(), kind.to_string());
+            }
+            let metrics = observability
+                .peer_http_communication
+                .get(node_id)
+                .map(|metrics| metrics.snapshot())
+                .unwrap_or_else(empty_communication_metrics);
+            communication.push(CommunicationEndpointSnapshot {
+                id: format!("http/peer-sync/{node_id}"),
+                transport: CommunicationTransportKind::Http,
+                scope: CommunicationEndpointScope::PeerSync,
+                local: Some(self.config.node_id.to_string()),
+                remote: Some(peer.base_url.to_string()),
+                labels,
+                connected: !matches!(
+                    peer.sync_status,
+                    PeerSyncStatus::BackingOff | PeerSyncStatus::Error
+                ),
+                queued: None,
+                metrics,
+            });
+        }
+        communication.extend(
+            observability
+                .communication_endpoints
+                .values()
+                .map(|endpoint| endpoint.snapshot()),
+        );
 
         NodeObservabilitySnapshot {
             node_id: self.config.node_id.clone(),
@@ -92,6 +178,7 @@ impl NodeApp {
             maintenance: self.maintenance_state_read().clone(),
             peer_sync_paused: self.peer_sync_paused(),
             remote_desired_state_blocked: self.remote_desired_state_blocked(),
+            host: host_metrics_snapshot(),
             configured_peer_count,
             ready_peer_count,
             pending_peer_count,
@@ -110,6 +197,15 @@ impl NodeApp {
                     .runtime_tuning
                     .persistence_worker_queue_capacity
                     .min(u64::MAX as usize) as u64,
+                worker_operation_count: persistence_worker_metrics.operation_count,
+                worker_queue_wait_count: persistence_worker_metrics.queue_wait_count,
+                worker_queue_wait_ms_total: persistence_worker_metrics.queue_wait_ms_total,
+                worker_queue_wait_ms_max: persistence_worker_metrics.queue_wait_ms_max,
+                worker_reply_wait_count: persistence_worker_metrics.reply_wait_count,
+                worker_reply_wait_ms_total: persistence_worker_metrics.reply_wait_ms_total,
+                worker_reply_wait_ms_max: persistence_worker_metrics.reply_wait_ms_max,
+                worker_operation_ms_total: persistence_worker_metrics.operation_ms_total,
+                worker_operation_ms_max: persistence_worker_metrics.operation_ms_max,
                 worker_enqueue_count: persistence_worker_metrics.enqueue_count,
                 worker_enqueue_wait_count: persistence_worker_metrics.enqueue_wait_count,
                 worker_enqueue_wait_ms_total: persistence_worker_metrics.enqueue_wait_ms_total,
@@ -167,6 +263,7 @@ impl NodeApp {
                 ipc_malformed_input_count: observability.ipc_malformed_input_count,
                 reconnect_count: observability.reconnect_count,
             },
+            communication,
             recent_events: observability.recent_events.iter().cloned().collect(),
         }
     }
@@ -174,6 +271,7 @@ impl NodeApp {
     pub fn health_snapshot(&self) -> NodeHealthSnapshot {
         let lifecycle = self.lifecycle_snapshot();
         let peers = self.peers_read();
+        let communication_degraded_count = self.communication_degraded_count();
         let degraded_peer_count = peers
             .values()
             .filter(|peer| {
@@ -200,6 +298,12 @@ impl NodeApp {
         }
         if degraded_peer_count > 0 {
             reasons.push(format!("{} peers degraded", degraded_peer_count));
+        }
+        if communication_degraded_count > 0 {
+            reasons.push(format!(
+                "{} communication endpoints degraded",
+                communication_degraded_count
+            ));
         }
         let status = if reasons.is_empty() {
             NodeHealthStatus::Healthy
@@ -480,4 +584,126 @@ impl NodeApp {
         );
         Ok(())
     }
+}
+
+impl NodeApp {
+    fn communication_degraded_count(&self) -> u64 {
+        let observability = self.observability_read();
+        observability
+            .communication_endpoints
+            .values()
+            .filter(|endpoint| communication_endpoint_degraded(&endpoint.snapshot()))
+            .count()
+            .saturating_add(
+                observability
+                    .peer_http_communication
+                    .values()
+                    .filter(|metrics| communication_metrics_degraded(&metrics.snapshot()))
+                    .count(),
+            )
+            .min(u64::MAX as usize) as u64
+    }
+}
+
+fn communication_endpoint_degraded(endpoint: &CommunicationEndpointSnapshot) -> bool {
+    let critical_disconnected = !endpoint.connected && !endpoint.scope.is_local_stream();
+    critical_disconnected || communication_metrics_degraded(&endpoint.metrics)
+}
+
+fn communication_metrics_degraded(metrics: &CommunicationMetricsSnapshot) -> bool {
+    metrics.recent.failures > 0
+        && (metrics.recent.successes == 0
+            || metrics.last_failure_at_ms >= metrics.last_success_at_ms)
+}
+
+fn empty_communication_metrics() -> CommunicationMetricsSnapshot {
+    super::CommunicationMetrics::default().snapshot()
+}
+
+fn host_metrics_snapshot() -> HostMetricsSnapshot {
+    HostMetricsSnapshot {
+        hostname: read_trimmed("/proc/sys/kernel/hostname"),
+        os_name: std::env::consts::OS.to_owned(),
+        os_version: os_release_value("VERSION_ID"),
+        kernel_version: read_trimmed("/proc/sys/kernel/osrelease"),
+        architecture: std::env::consts::ARCH.to_owned(),
+        uptime_seconds: proc_uptime_seconds(),
+        load_1_milli: proc_loadavg_milli(0),
+        load_5_milli: proc_loadavg_milli(1),
+        load_15_milli: proc_loadavg_milli(2),
+        memory_total_bytes: proc_meminfo_kib("MemTotal").map(kib_to_bytes),
+        memory_available_bytes: proc_meminfo_kib("MemAvailable").map(kib_to_bytes),
+        swap_total_bytes: proc_meminfo_kib("SwapTotal").map(kib_to_bytes),
+        swap_free_bytes: proc_meminfo_kib("SwapFree").map(kib_to_bytes),
+        process_id: std::process::id(),
+        process_rss_bytes: process_rss_pages().map(|pages| {
+            pages
+                .saturating_mul(page_size_bytes())
+                .min(u64::MAX as usize) as u64
+        }),
+    }
+}
+
+fn read_trimmed(path: &str) -> Option<String> {
+    fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn os_release_value(key: &str) -> Option<String> {
+    let contents = fs::read_to_string("/etc/os-release").ok()?;
+    contents.lines().find_map(|line| {
+        let (line_key, value) = line.split_once('=')?;
+        (line_key == key).then(|| value.trim_matches('"').to_owned())
+    })
+}
+
+fn proc_uptime_seconds() -> Option<u64> {
+    let contents = fs::read_to_string("/proc/uptime").ok()?;
+    let first = contents.split_whitespace().next()?;
+    let whole_seconds = first.split('.').next()?;
+    whole_seconds.parse().ok()
+}
+
+fn proc_loadavg_milli(index: usize) -> Option<u64> {
+    let contents = fs::read_to_string("/proc/loadavg").ok()?;
+    let value = contents.split_whitespace().nth(index)?;
+    decimal_to_milli(value)
+}
+
+fn proc_meminfo_kib(key: &str) -> Option<u64> {
+    let contents = fs::read_to_string("/proc/meminfo").ok()?;
+    contents.lines().find_map(|line| {
+        let (line_key, rest) = line.split_once(':')?;
+        if line_key != key {
+            return None;
+        }
+        rest.split_whitespace().next()?.parse().ok()
+    })
+}
+
+fn process_rss_pages() -> Option<usize> {
+    let contents = fs::read_to_string("/proc/self/statm").ok()?;
+    contents.split_whitespace().nth(1)?.parse().ok()
+}
+
+fn page_size_bytes() -> usize {
+    let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    usize::try_from(size).unwrap_or(0)
+}
+
+fn decimal_to_milli(value: &str) -> Option<u64> {
+    let (whole, fractional) = value.split_once('.').unwrap_or((value, ""));
+    let whole = whole.parse::<u64>().ok()?;
+    let mut digits = fractional.chars().take(3).collect::<String>();
+    while digits.len() < 3 {
+        digits.push('0');
+    }
+    let fractional = digits.parse::<u64>().ok()?;
+    Some(whole.saturating_mul(1000).saturating_add(fractional))
+}
+
+fn kib_to_bytes(kib: u64) -> u64 {
+    kib.saturating_mul(1024)
 }

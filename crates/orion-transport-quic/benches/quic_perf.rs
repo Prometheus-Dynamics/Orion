@@ -57,10 +57,18 @@ fn frame(payload_len: usize) -> QuicFrame {
 
 fn benchmark_quic_perf(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should build");
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["node-b.local".to_owned()])
+            .expect("test QUIC certificate should generate");
+    let server_tls = orion_transport_quic::QuicServerTlsConfig::new(
+        cert.pem().into_bytes(),
+        signing_key.serialize_pem().into_bytes(),
+    );
     let (server, endpoint) = runtime
-        .block_on(QuicFrameServer::bind(
+        .block_on(QuicFrameServer::bind_secure(
             QuicEndpoint::new("127.0.0.1", 0).with_server_name("node-b.local"),
             Arc::new(EchoHandler),
+            server_tls,
         ))
         .expect("QUIC server should bind");
     let task = runtime.spawn(server.serve());

@@ -238,6 +238,27 @@ Release changes from this audit:
 This helper should stay scoped to short, bounded synchronous work. It should not become a catch-all
 for long-running CPU-heavy tasks.
 
+## Transport Handler Boundary
+
+HTTP, IPC, TCP, and QUIC server traits remain synchronous for this release.
+
+Release decision:
+
+- Keep the traits synchronous because they are narrow adapter boundaries and the node already owns
+  explicit worker APIs for durable work.
+- Persistence-heavy async flows that do not cross the synchronous handler trait boundary should use
+  the async persistence APIs. Peer sync and async reconcile paths currently route remote snapshot
+  and mutation adoption through `persist_state_async()`.
+- Local control messages handled through the synchronous HTTP/IPC trait boundary still use the
+  blocking persistence edge, but that edge hands off queue send/reply wait to the persistence
+  worker helper thread instead of parking a Tokio runtime worker directly.
+- Handler implementations must keep direct work bounded. Persistence, filesystem access, network
+  fanout, certificate generation, and long CPU work should be routed through worker or helper
+  boundaries before returning to the async socket task.
+- Do not hide new blocking work inside transport adapters. If a future handler needs broad async
+  composition, redesign the handler trait intentionally instead of adding ad hoc blocking in the
+  adapter.
+
 ## Peer Sync Parallelism
 
 Peer sync concurrency currently lives in

@@ -305,8 +305,22 @@ pub(super) fn normalize_mutation_history_in_place(
 
     let keep_bytes = max_bytes.max(1);
     let mut encoded_len = mutation_history_encoded_len(history);
+    if history.len() > 1 && encoded_len > keep_bytes {
+        let drain_count = mutation_history_byte_trim_count(history, keep_bytes);
+        for dropped in history.drain(0..drain_count) {
+            dropped.apply_to_checked(baseline).map_err(|err| {
+                mutation_history_contiguity_error(
+                    "failed to fold trimmed mutation batch into history baseline",
+                    err,
+                )
+            })?;
+        }
+        encoded_len = mutation_history_encoded_len(history);
+    }
     while history.len() > 1 && encoded_len > keep_bytes {
-        let dropped = history.remove(0);
+        let dropped = history.drain(0..1).next().ok_or_else(|| {
+            NodeError::Storage("failed to trim mutation history despite non-empty history".into())
+        })?;
         dropped.apply_to_checked(baseline).map_err(|err| {
             mutation_history_contiguity_error(
                 "failed to fold trimmed mutation batch into history baseline",
@@ -316,6 +330,24 @@ pub(super) fn normalize_mutation_history_in_place(
         encoded_len = mutation_history_encoded_len(history);
     }
     Ok(())
+}
+
+fn mutation_history_byte_trim_count(history: &[MutationBatch], keep_bytes: usize) -> usize {
+    if history.len() <= 1 || mutation_history_encoded_len(history) <= keep_bytes {
+        return 0;
+    }
+
+    let mut low = 0;
+    let mut high = history.len() - 1;
+    while low < high {
+        let mid = (low + high) / 2;
+        if mutation_history_encoded_len(&history[mid..]) <= keep_bytes {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    low
 }
 
 fn mutation_history_encoded_len(history: &[MutationBatch]) -> usize {

@@ -18,6 +18,7 @@ use orion::{
     transport::ipc::{ControlEnvelope, LocalAddress},
 };
 use orion_core::SessionId;
+use std::time::Duration;
 
 impl NodeApp {
     pub(crate) fn apply_local_control_message(
@@ -251,6 +252,80 @@ impl NodeApp {
         });
     }
 
+    pub(crate) fn record_local_unary_communication(
+        &self,
+        source: &LocalAddress,
+        bytes_in: u64,
+        bytes_out: u64,
+        duration: Duration,
+        stages: crate::app::CommunicationStageDurations,
+    ) {
+        let now_ms = Self::current_time_ms();
+        let _ = self.with_client_mut_if_present(source, |client| {
+            client.unary_metrics.record_received(bytes_in);
+            client.unary_metrics.record_sent(bytes_out);
+            client.unary_metrics.record_success_exchange_with_stages(
+                now_ms, duration, bytes_out, bytes_in, &stages,
+            );
+        });
+    }
+
+    pub(super) fn record_local_stream_received(&self, source: &LocalAddress, bytes: u64) {
+        let _ = self.with_client_mut_if_present(source, |client| {
+            client.stream_metrics.record_received(bytes);
+        });
+    }
+
+    pub(super) fn record_local_stream_sent(&self, source: &LocalAddress, bytes: u64) {
+        let _ = self.with_client_mut_if_present(source, |client| {
+            client.stream_metrics.record_sent(bytes);
+        });
+    }
+
+    pub(super) fn record_local_stream_success(&self, source: &LocalAddress, duration: Duration) {
+        let now_ms = Self::current_time_ms();
+        let _ = self.with_client_mut_if_present(source, |client| {
+            client
+                .stream_metrics
+                .record_success_exchange(now_ms, duration, 0, 0);
+        });
+    }
+
+    pub(super) fn record_local_stream_failure(
+        &self,
+        source: &LocalAddress,
+        duration: Option<Duration>,
+        error: impl Into<String>,
+    ) {
+        let now_ms = Self::current_time_ms();
+        let _ = self.with_client_mut_if_present(source, |client| {
+            client
+                .stream_metrics
+                .record_failure(now_ms, duration, error);
+            client.stream_sender = None;
+        });
+    }
+
+    pub(super) fn record_local_stream_reconnect(&self, source: &LocalAddress) {
+        let _ = self.with_client_mut_if_present(source, |client| {
+            client.stream_metrics.record_reconnect();
+        });
+    }
+
+    pub(super) fn record_local_stream_peer_identity(
+        &self,
+        source: &LocalAddress,
+        identity: Option<orion::transport::ipc::UnixPeerIdentity>,
+    ) {
+        let _ = self.with_client_mut_if_present(source, |client| {
+            if let Some(identity) = identity {
+                client.stream_peer_pid = identity.pid;
+                client.stream_peer_uid = Some(identity.uid);
+                client.stream_peer_gid = Some(identity.gid);
+            }
+        });
+    }
+
     fn prune_expired_clients(&self, now_ms: u64, preserve_source: Option<&LocalAddress>) {
         let ttl_ms = self
             .config
@@ -368,12 +443,13 @@ impl NodeApp {
             client.stream_sender = Some(sender);
             client.last_activity_ms = Self::current_time_ms();
         })?;
-        self.with_observability_txn(|txn| {
+        let reconnected = self.with_observability_txn(|txn| {
             let observability = txn.state_mut();
-            if !observability
+            let first_stream_for_source = observability
                 .seen_stream_sources
-                .insert(source.as_str().to_owned())
-            {
+                .insert(source.as_str().to_owned());
+            let reconnected = !first_stream_for_source;
+            if !first_stream_for_source {
                 observability.reconnect_count = observability.reconnect_count.saturating_add(1);
             }
             observability.client_stream_attaches_total =
@@ -386,7 +462,11 @@ impl NodeApp {
                 Some(source.as_str().to_owned()),
                 format!("source={}", source.as_str()),
             );
+            reconnected
         });
+        if reconnected {
+            self.record_local_stream_reconnect(source);
+        }
         Ok(())
     }
 

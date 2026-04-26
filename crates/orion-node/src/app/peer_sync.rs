@@ -78,7 +78,7 @@ impl NodeApp {
                 Ok(true)
             }
             HttpResponsePayload::Snapshot(snapshot) => {
-                self.reconcile_conflicting_remote_snapshot(snapshot, client)
+                self.reconcile_conflicting_remote_snapshot(node_id, snapshot, client)
                     .await?;
                 Ok(true)
             }
@@ -154,7 +154,7 @@ impl NodeApp {
         client: &HttpClient,
         payload: HttpRequestPayload,
     ) -> Result<bool, NodeError> {
-        let Ok(response) = self.send_peer_http_request(client, payload).await else {
+        let Ok(response) = self.send_peer_http_request(node_id, client, payload).await else {
             return Ok(false);
         };
         self.try_complete_peer_sync_response(node_id, client, response, None)
@@ -332,6 +332,7 @@ impl NodeApp {
         let local_summary = self.desired_state_summary_for_sections(&sections)?;
         match self
             .send_peer_http_request(
+                node_id,
                 client,
                 self.peer_sync_request_payload(
                     revisions.desired,
@@ -369,6 +370,7 @@ impl NodeApp {
         desired_metadata: &crate::app::DesiredStateMetadataCache,
     ) -> Result<(), NodeError> {
         self.send_peer_http_request(
+            node_id,
             client,
             HttpRequestPayload::Control(Box::new(ControlMessage::Snapshot(self.state_snapshot()))),
         )
@@ -404,6 +406,7 @@ impl NodeApp {
         if let Some(batch) = self.mutation_batch_since(remote_hello.desired_revision) {
             match self
                 .send_peer_http_request(
+                    node_id,
                     client,
                     HttpRequestPayload::Control(Box::new(ControlMessage::Mutations(batch))),
                 )
@@ -440,6 +443,7 @@ impl NodeApp {
         )?;
         match self
             .send_peer_http_request(
+                node_id,
                 client,
                 HttpRequestPayload::Control(Box::new(ControlMessage::Mutations(batch))),
             )
@@ -461,6 +465,7 @@ impl NodeApp {
             | HttpResponsePayload::Health(_)
             | HttpResponsePayload::Readiness(_) => {
                 self.send_peer_http_request(
+                    node_id,
                     client,
                     HttpRequestPayload::Control(Box::new(ControlMessage::Snapshot(
                         self.state_snapshot(),
@@ -481,6 +486,7 @@ impl NodeApp {
     ) -> Result<(), NodeError> {
         match self
             .send_peer_http_request(
+                node_id,
                 client,
                 self.peer_sync_request_payload(
                     revisions.desired,
@@ -512,6 +518,7 @@ impl NodeApp {
                 )?;
                 let snapshot = match self
                     .send_peer_http_request(
+                        node_id,
                         client,
                         self.peer_sync_request_payload(
                             self.current_revisions().desired,
@@ -532,7 +539,7 @@ impl NodeApp {
                         ));
                     }
                 };
-                self.reconcile_conflicting_remote_snapshot(snapshot, client)
+                self.reconcile_conflicting_remote_snapshot(node_id, snapshot, client)
                     .await?;
             }
             HttpResponsePayload::Hello(_)

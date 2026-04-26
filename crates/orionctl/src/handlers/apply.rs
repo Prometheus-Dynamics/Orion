@@ -3,7 +3,7 @@ use orion_control_plane::{
     ArtifactRecord, DesiredStateMutation, MutationBatch, TypedConfigValue, WorkloadConfig,
     WorkloadRecord, WorkloadRequirement,
 };
-use orion_core::{ArtifactId, ConfigSchemaId, RuntimeType};
+use orion_core::{ArtifactId, ConfigSchemaId, NodeId, RuntimeType, WorkloadId};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -37,7 +37,7 @@ pub(super) async fn run(command: ApplyCommand) -> Result<(), String> {
                 .fetch_state_snapshot()
                 .await
                 .map_err(|error| error.to_string())?;
-            let mut builder = ArtifactRecord::builder(args.artifact_id.clone());
+            let mut builder = ArtifactRecord::builder(ArtifactId::new(args.artifact_id.clone()));
             if let Some(content_type) = args.content_type {
                 builder = builder.content_type(content_type);
             }
@@ -77,9 +77,10 @@ pub(super) async fn run(command: ApplyCommand) -> Result<(), String> {
                     println!("apply artifact accepted id={}", artifact.artifact_id);
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&artifact, args.local.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&artifact, args.local.output),
             }
         }
         ApplyCommand::Workload(args) => {
@@ -158,7 +159,7 @@ async fn run_workload_apply(
             println!("apply workload accepted id={}", workload.workload_id);
             Ok(())
         }
-        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml | OutputFormat::Metrics => {
             print_structured(&workload, output)
         }
     }
@@ -183,7 +184,7 @@ fn print_artifact_dry_run(
             );
             Ok(())
         }
-        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml | OutputFormat::Metrics => {
             print_structured(&report, output)
         }
     }
@@ -223,7 +224,7 @@ fn print_workload_dry_run(
             }
             Ok(())
         }
-        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml | OutputFormat::Metrics => {
             print_structured(&report, output)
         }
     }
@@ -250,14 +251,14 @@ fn workload_from_apply_args(args: crate::cli::ApplyWorkloadArgs) -> Result<Workl
         .ok_or_else(|| "--artifact-id is required when --spec is not used".to_owned())?;
 
     let mut builder = WorkloadRecord::builder(
-        workload_id,
+        WorkloadId::new(workload_id),
         RuntimeType::new(runtime_type),
         ArtifactId::new(artifact_id),
     )
     .desired_state(args.desired_state.into())
     .restart_policy(args.restart_policy.into());
     if let Some(node_id) = args.assigned_node {
-        builder = builder.assigned_to(node_id);
+        builder = builder.assigned_to(NodeId::new(node_id));
     }
     for requirement in args.requirements {
         builder = builder.require_claim(WorkloadRequirement::new(

@@ -23,7 +23,10 @@ async fn node_sync_all_peers_uses_configured_execution_and_reports_mixed_results
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
             peers: vec![
-                PeerConfig::new("node-a", format!("http://{}", addr_a)),
+                PeerConfig::new(
+                    "node-a",
+                    orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+                ),
                 PeerConfig::new("node-b", "http://127.0.0.1:65534"),
             ],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
@@ -75,7 +78,10 @@ async fn node_sync_all_peers_parallel_reports_mixed_success_and_failure() {
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
             peers: vec![
-                PeerConfig::new("node-a", format!("http://{}", addr_a)),
+                PeerConfig::new(
+                    "node-a",
+                    orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+                ),
                 PeerConfig::new("node-b", "http://127.0.0.1:65534"),
             ],
             peer_authentication: crate::PeerAuthenticationMode::Optional,

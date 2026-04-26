@@ -43,13 +43,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 base_revision: snapshot.state.desired.revision,
                 mutations: vec![
                     DesiredStateMutation::PutArtifact(
-                        ArtifactRecord::builder(artifact_id.as_str()).build(),
+                        ArtifactRecord::builder(ArtifactId::new(artifact_id.clone())).build(),
                     ),
                     DesiredStateMutation::PutWorkload(
                         WorkloadRecord::builder(
                             WorkloadId::new(workload_id.as_str()),
-                            RuntimeType::new(runtime_type),
-                            ArtifactId::new(artifact_id.as_str()),
+                            RuntimeType::new(runtime_type.clone()),
+                            ArtifactId::new(artifact_id.clone()),
                         )
                         .desired_state(DesiredState::Stopped)
                         .assigned_to(NodeId::new(assigned_node))

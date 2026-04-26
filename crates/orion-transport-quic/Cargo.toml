@@ -10,8 +10,15 @@ authors.workspace = true
 description = "QUIC transport adapter for Orion data-plane traffic."
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [lib]
 path = "src/lib.rs"
+
+[features]
+default = []
+insecure-self-signed = ["dep:rcgen"]
 
 [dependencies]
 orion-data-plane.workspace = true
@@ -25,10 +32,11 @@ quinn.workspace = true
 rustls = { workspace = true, features = ["ring"] }
 rustls-pki-types.workspace = true
 rustls-pemfile.workspace = true
-rcgen.workspace = true
+rcgen = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
+rcgen.workspace = true
 
 [[bench]]
 name = "quic_perf"

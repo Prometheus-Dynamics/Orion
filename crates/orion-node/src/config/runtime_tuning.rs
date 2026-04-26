@@ -1,4 +1,8 @@
 use crate::NodeError;
+use orion_transport_common::{
+    DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES, DEFAULT_TRANSPORT_IO_TIMEOUT,
+    DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
+};
 use std::{env, time::Duration};
 
 const DEFAULT_MUTATION_HISTORY_BATCHES: usize = 256;
@@ -52,6 +56,9 @@ pub struct NodeRuntimeTuning {
     pub local_stream_send_queue_capacity: usize,
     pub local_client_event_queue_limit: usize,
     pub observability_event_limit: usize,
+    pub transport_max_payload_bytes: usize,
+    pub transport_io_timeout: Duration,
+    pub transport_max_concurrent_connections: usize,
     pub persistence_worker_queue_capacity: usize,
     pub auth_state_worker_queue_capacity: usize,
     pub audit_log_queue_capacity: usize,
@@ -151,6 +158,24 @@ impl NodeRuntimeTuning {
 
     pub fn with_observability_event_limit(mut self, limit: usize) -> Self {
         self.observability_event_limit = limit;
+        self.normalize();
+        self
+    }
+
+    pub fn with_transport_max_payload_bytes(mut self, max_payload_bytes: usize) -> Self {
+        self.transport_max_payload_bytes = max_payload_bytes;
+        self.normalize();
+        self
+    }
+
+    pub fn with_transport_io_timeout(mut self, timeout: Duration) -> Self {
+        self.transport_io_timeout = timeout;
+        self.normalize();
+        self
+    }
+
+    pub fn with_transport_max_concurrent_connections(mut self, max_connections: usize) -> Self {
+        self.transport_max_concurrent_connections = max_connections;
         self.normalize();
         self
     }
@@ -257,6 +282,20 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_OBSERVABILITY_EVENT_LIMIT",
                 DEFAULT_OBSERVABILITY_EVENT_LIMIT,
             )?,
+            transport_max_payload_bytes: parse_env_or(
+                "ORION_NODE_TRANSPORT_MAX_PAYLOAD_BYTES",
+                DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
+            )?,
+            transport_io_timeout: duration_ms_env_or(
+                "ORION_NODE_TRANSPORT_IO_TIMEOUT_MS",
+                DEFAULT_TRANSPORT_IO_TIMEOUT
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64,
+            )?,
+            transport_max_concurrent_connections: parse_env_or(
+                "ORION_NODE_TRANSPORT_MAX_CONCURRENT_CONNECTIONS",
+                DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
+            )?,
             persistence_worker_queue_capacity: parse_env_or(
                 "ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY",
                 DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY,
@@ -299,6 +338,10 @@ impl NodeRuntimeTuning {
         self.local_stream_send_queue_capacity = self.local_stream_send_queue_capacity.max(1);
         self.local_client_event_queue_limit = self.local_client_event_queue_limit.max(1);
         self.observability_event_limit = self.observability_event_limit.max(1);
+        self.transport_max_payload_bytes = self.transport_max_payload_bytes.max(1);
+        self.transport_io_timeout = normalize_runtime_tuning_duration(self.transport_io_timeout);
+        self.transport_max_concurrent_connections =
+            self.transport_max_concurrent_connections.max(1);
         self.persistence_worker_queue_capacity = self.persistence_worker_queue_capacity.max(1);
         self.auth_state_worker_queue_capacity = self.auth_state_worker_queue_capacity.max(1);
         self.audit_log_queue_capacity = self.audit_log_queue_capacity.max(1);
@@ -329,12 +372,126 @@ impl Default for NodeRuntimeTuning {
             local_stream_send_queue_capacity: DEFAULT_LOCAL_STREAM_SEND_QUEUE_CAPACITY,
             local_client_event_queue_limit: DEFAULT_LOCAL_CLIENT_EVENT_QUEUE_LIMIT,
             observability_event_limit: DEFAULT_OBSERVABILITY_EVENT_LIMIT,
+            transport_max_payload_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
+            transport_io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
+            transport_max_concurrent_connections: DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
             persistence_worker_queue_capacity: DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY,
             auth_state_worker_queue_capacity: DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY,
             audit_log_queue_capacity: DEFAULT_AUDIT_LOG_QUEUE_CAPACITY,
             audit_log_overload_policy: AuditLogOverloadPolicy::DropNewest,
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
+    let tuning = NodeRuntimeTuning::default();
+    vec![
+        (
+            "ORION_NODE_MAX_MUTATION_HISTORY",
+            tuning.max_mutation_history_batches.to_string(),
+        ),
+        (
+            "ORION_NODE_MAX_MUTATION_HISTORY_BYTES",
+            tuning.max_mutation_history_bytes.to_string(),
+        ),
+        (
+            "ORION_NODE_SNAPSHOT_REWRITE_CADENCE",
+            tuning.snapshot_rewrite_cadence.to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_BACKOFF_BASE_MS",
+            tuning.peer_sync_backoff_base.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_BACKOFF_MAX_MS",
+            tuning.peer_sync_backoff_max.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_BACKOFF_JITTER_MS",
+            tuning.peer_sync_backoff_jitter_ms.to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_SMALL_CLUSTER_THRESHOLD",
+            tuning
+                .peer_sync_parallel_small_cluster_peer_count_threshold
+                .to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_SMALL_CLUSTER_CAP",
+            tuning.peer_sync_parallel_small_cluster_cap.to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_LARGE_CLUSTER_CAP",
+            tuning.peer_sync_parallel_large_cluster_cap.to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_NO_STAGGER_THRESHOLD",
+            tuning
+                .peer_sync_parallel_no_stagger_peer_count_threshold
+                .to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_SPAWN_STAGGER_STEP_MS",
+            tuning.peer_sync_parallel_spawn_stagger_step_ms.to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_SPAWN_STAGGER_MAX_MS",
+            tuning.peer_sync_parallel_spawn_stagger_max_ms.to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_SYNC_FOLLOWUP_STAGGER_MS",
+            tuning.peer_sync_parallel_followup_stagger_ms.to_string(),
+        ),
+        (
+            "ORION_NODE_LOCAL_RATE_LIMIT_WINDOW_MS",
+            tuning.local_rate_limit_window.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES",
+            tuning.local_rate_limit_max_messages.to_string(),
+        ),
+        (
+            "ORION_NODE_LOCAL_SESSION_TTL_MS",
+            tuning.local_session_ttl.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_LOCAL_STREAM_SEND_QUEUE_CAPACITY",
+            tuning.local_stream_send_queue_capacity.to_string(),
+        ),
+        (
+            "ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT",
+            tuning.local_client_event_queue_limit.to_string(),
+        ),
+        (
+            "ORION_NODE_OBSERVABILITY_EVENT_LIMIT",
+            tuning.observability_event_limit.to_string(),
+        ),
+        (
+            "ORION_NODE_TRANSPORT_MAX_PAYLOAD_BYTES",
+            tuning.transport_max_payload_bytes.to_string(),
+        ),
+        (
+            "ORION_NODE_TRANSPORT_IO_TIMEOUT_MS",
+            tuning.transport_io_timeout.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_TRANSPORT_MAX_CONCURRENT_CONNECTIONS",
+            tuning.transport_max_concurrent_connections.to_string(),
+        ),
+        (
+            "ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY",
+            tuning.persistence_worker_queue_capacity.to_string(),
+        ),
+        (
+            "ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY",
+            tuning.auth_state_worker_queue_capacity.to_string(),
+        ),
+        (
+            "ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY",
+            tuning.audit_log_queue_capacity.to_string(),
+        ),
+    ]
 }
 
 pub(crate) fn min_runtime_tuning_duration() -> Duration {

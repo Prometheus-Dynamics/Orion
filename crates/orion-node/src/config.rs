@@ -3,6 +3,8 @@ mod runtime_tuning;
 pub(crate) use runtime_tuning::normalize_runtime_tuning_duration;
 #[cfg(test)]
 pub(crate) use runtime_tuning::parse_config_value;
+#[cfg(test)]
+pub(crate) use runtime_tuning::runtime_tuning_doc_defaults;
 pub use runtime_tuning::{AuditLogOverloadPolicy, NodeRuntimeTuning};
 use runtime_tuning::{bool_env_or_false, duration_ms_env_or, parse_env_or};
 
@@ -180,7 +182,10 @@ impl NodeConfig {
 
     /// Loads node config from the current process environment with typed validation errors.
     pub fn try_from_env() -> Result<Self, NodeError> {
-        let node_id = env::var("ORION_NODE_ID").unwrap_or_else(|_| "node.local".to_owned());
+        let node_id_raw = env::var("ORION_NODE_ID").unwrap_or_else(|_| "node.local".to_owned());
+        let node_id = NodeId::try_new(node_id_raw.clone()).map_err(|err| {
+            NodeError::Config(format!("ORION_NODE_ID must be a non-empty node id: {err}"))
+        })?;
         let http_bind_addr_raw = env::var("ORION_NODE_HTTP_ADDR")
             .unwrap_or_else(|_| Self::default_http_bind_addr().to_string());
         let http_bind_addr = http_bind_addr_raw.parse().map_err(|err| {
@@ -190,7 +195,7 @@ impl NodeConfig {
         })?;
         let ipc_socket_path = env::var("ORION_NODE_IPC_SOCKET")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| Self::default_ipc_socket_path_for(&node_id));
+            .unwrap_or_else(|_| Self::default_ipc_socket_path_for(&node_id_raw));
         let reconcile_interval =
             duration_ms_env_or("ORION_NODE_RECONCILE_MS", DEFAULT_RECONCILE_INTERVAL_MS)?;
         let state_dir = env::var("ORION_NODE_STATE_DIR").ok().map(PathBuf::from);
@@ -199,7 +204,7 @@ impl NodeConfig {
             Err(_) => Vec::new(),
         };
         Ok(Self {
-            node_id: NodeId::new(node_id),
+            node_id,
             http_bind_addr,
             ipc_socket_path,
             reconcile_interval,
@@ -347,7 +352,8 @@ fn parse_peer_configs_checked(value: &str) -> Result<Vec<PeerConfig>, NodeError>
                         "invalid ORION_NODE_PEERS entry `{entry}`; peer base URL segment is missing"
                     ))
                 })?;
-                let mut peer = PeerConfig::new(node_id.trim(), base_url.trim());
+                let mut peer = PeerConfig::try_new(node_id.trim(), base_url.trim())
+                    .map_err(|err| NodeError::Config(format!("invalid ORION_NODE_PEERS entry `{entry}`: {err}")))?;
                 for segment in segments {
                     let segment = segment.trim();
                     if segment.is_empty() {
@@ -357,7 +363,11 @@ fn parse_peer_configs_checked(value: &str) -> Result<Vec<PeerConfig>, NodeError>
                         peer = peer.with_tls_root_cert_path(path);
                         continue;
                     }
-                    peer = peer.with_trusted_public_key_hex(segment);
+                    peer = peer.try_with_trusted_public_key_hex(segment).map_err(|err| {
+                        NodeError::Config(format!(
+                            "invalid ORION_NODE_PEERS trust key in entry `{entry}`: {err}"
+                        ))
+                    })?;
                 }
                 Ok(peer)
             })())

@@ -75,6 +75,9 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_LOCAL_STREAM_SEND_QUEUE_CAPACITY` | `64` | Per-stream send queue capacity. |
 | `ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT` | `256` | Local client event backlog limit. |
 | `ORION_NODE_OBSERVABILITY_EVENT_LIMIT` | `128` | Retained observability events. |
+| `ORION_NODE_TRANSPORT_MAX_PAYLOAD_BYTES` | `8388608` | Max inbound HTTP, IPC, TCP, and QUIC payload bytes before transport decode. |
+| `ORION_NODE_TRANSPORT_IO_TIMEOUT_MS` | `5000` | Per-operation transport connect/read/write/handshake timeout. |
+| `ORION_NODE_TRANSPORT_MAX_CONCURRENT_CONNECTIONS` | `1024` | Max in-flight accepted connections per managed transport listener. |
 | `ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY` | `64` | Persistence worker queue capacity. |
 | `ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY` | `128` | Auth state worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |

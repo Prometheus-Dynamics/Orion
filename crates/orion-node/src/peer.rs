@@ -1,5 +1,5 @@
 use orion::{
-    CompatibilityState, NodeId, Revision,
+    CompatibilityState, NodeId, OrionError, Revision,
     control_plane::{
         DesiredStateSectionFingerprints, PeerSyncErrorKind, PeerSyncStatus as PublicPeerSyncStatus,
     },
@@ -28,6 +28,26 @@ impl PeerConfig {
             trusted_public_key_hex: None,
             tls_root_cert_path: None,
         }
+    }
+
+    pub fn try_new(
+        node_id: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Result<Self, OrionError> {
+        Ok(Self {
+            node_id: NodeId::try_new(node_id)?,
+            base_url: PeerBaseUrl::try_new(base_url)?,
+            trusted_public_key_hex: None,
+            tls_root_cert_path: None,
+        })
+    }
+
+    pub fn try_with_trusted_public_key_hex(
+        mut self,
+        public_key_hex: impl Into<String>,
+    ) -> Result<Self, OrionError> {
+        self.trusted_public_key_hex = Some(PublicKeyHex::try_new(public_key_hex)?);
+        Ok(self)
     }
 
     pub fn with_trusted_public_key_hex(mut self, public_key_hex: impl Into<PublicKeyHex>) -> Self {

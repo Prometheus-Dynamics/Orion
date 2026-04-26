@@ -6,8 +6,6 @@
 //! - Use [`NodeApp::try_new`] for the shortest explicit-config path.
 //! - Use [`NodeApp::builder`] when tests or embedded runtimes need to override transports,
 //!   runtime tuning, or startup behavior.
-//!
-//! The panic-based compatibility constructors remain only as deprecated migration shims.
 
 extern crate self as orion;
 
@@ -62,7 +60,7 @@ pub mod transport {
             ControlEnvelope, DataEnvelope, IpcTransport, IpcTransportError, LocalAddress,
             LocalControlTransport, LocalDataTransport, UnixControlClient, UnixControlHandler,
             UnixControlServer, UnixControlStreamClient, UnixPeerIdentity, read_control_frame,
-            write_control_frame,
+            read_control_frame_with_limit, write_control_frame, write_control_frame_with_limit,
         };
     }
 

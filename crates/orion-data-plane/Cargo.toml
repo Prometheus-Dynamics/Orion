@@ -10,6 +10,9 @@ authors.workspace = true
 description = "Data-plane link and binding contracts for Orion."
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [lib]
 path = "src/lib.rs"
 

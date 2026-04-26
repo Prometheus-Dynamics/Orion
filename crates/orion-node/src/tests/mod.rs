@@ -37,8 +37,8 @@ use orion::{
 };
 #[cfg(any(feature = "transport-tcp", feature = "transport-quic"))]
 use orion::{ProtocolVersion, ResourceId};
-use orion_macros::OrionConfigDecode;
 use rcgen::generate_simple_self_signed;
+use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
@@ -48,7 +48,7 @@ use std::{fs, path::PathBuf};
 #[derive(Clone)]
 struct TestProvider;
 
-#[derive(OrionConfigDecode)]
+#[derive(Deserialize)]
 struct CameraControllerWorkloadConfig {
     width: u64,
 }
@@ -518,7 +518,9 @@ impl ExecutorIntegration for ValidatingExecutor {
                 },
             );
         }
-        match CameraControllerWorkloadConfig::try_from(config) {
+        match orion::control_plane::deserialize_config::<CameraControllerWorkloadConfig>(
+            &config.payload,
+        ) {
             Ok(decoded) => {
                 let _ = decoded.width;
                 Ok(())

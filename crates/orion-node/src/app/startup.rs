@@ -10,6 +10,9 @@ use orion::{
         ipc::{ControlEnvelope, IpcTransportError, LocalAddress, UnixControlServer},
     },
 };
+use orion_transport_ipc::{
+    read_control_frame_with_limit_metered, write_control_frame_with_limit_metered,
+};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -180,7 +183,14 @@ impl NodeApp {
     > {
         let server =
             UnixControlServer::bind(socket_path.as_ref(), Arc::new(self.unix_control_handler()))
-                .await?;
+                .await?
+                .with_max_payload_bytes(self.config.runtime_tuning.transport_max_payload_bytes)
+                .with_io_timeout(self.config.runtime_tuning.transport_io_timeout)
+                .with_max_connections(
+                    self.config
+                        .runtime_tuning
+                        .transport_max_concurrent_connections,
+                );
         let path = server.socket_path().to_path_buf();
         let app = self.clone();
         self.state.lifecycle.mark_ipc_bound();
@@ -198,7 +208,14 @@ impl NodeApp {
     ) -> Result<(PathBuf, GracefulTaskHandle<IpcTransportError>), NodeError> {
         let server =
             UnixControlServer::bind(socket_path.as_ref(), Arc::new(self.unix_control_handler()))
-                .await?;
+                .await?
+                .with_max_payload_bytes(self.config.runtime_tuning.transport_max_payload_bytes)
+                .with_io_timeout(self.config.runtime_tuning.transport_io_timeout)
+                .with_max_connections(
+                    self.config
+                        .runtime_tuning
+                        .transport_max_concurrent_connections,
+                );
         let path = server.socket_path().to_path_buf();
         self.state.lifecycle.mark_ipc_bound();
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
@@ -302,22 +319,33 @@ impl NodeApp {
         stream: tokio::net::UnixStream,
     ) -> Result<(), IpcTransportError> {
         info!(node = %self.config.node_id, "client stream session opened");
+        let peer_identity = stream
+            .peer_cred()
+            .map(|cred| orion::transport::ipc::UnixPeerIdentity {
+                pid: cred.pid().and_then(|pid| u32::try_from(pid).ok()),
+                uid: cred.uid(),
+                gid: cred.gid(),
+            })
+            .ok();
+        let max_payload_bytes = self.config.runtime_tuning.transport_max_payload_bytes;
         let (mut reader, mut writer) = stream.into_split();
-        let hello = match orion::transport::ipc::read_control_frame(&mut reader).await? {
-            Some(envelope) => envelope,
-            None => return Ok(()),
-        };
+        let (hello, hello_bytes) =
+            match read_control_frame_with_limit_metered(&mut reader, max_payload_bytes).await? {
+                Some((envelope, bytes)) => (envelope, bytes_len_u64(bytes)),
+                None => return Ok(()),
+            };
 
         let (source, destination, welcome): (LocalAddress, LocalAddress, ControlMessage) =
             match hello.message {
                 ControlMessage::ClientHello(client_hello) => {
                     let response = self
-                        .serve_local_control_message(
+                        .serve_local_control_message_async(
                             ControlSurface::LocalIpcStream,
                             hello.source.clone(),
                             hello.destination.clone(),
                             ControlMessage::ClientHello(client_hello),
                         )
+                        .await
                         .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
                     (hello.source, hello.destination, response)
                 }
@@ -329,10 +357,20 @@ impl NodeApp {
                             "stream session requires ClientHello as first message, got {other:?}"
                         )),
                     };
-                    orion::transport::ipc::write_control_frame(&mut writer, &rejected).await?;
+                    let rejected_bytes = write_control_frame_with_limit_metered(
+                        &mut writer,
+                        &rejected,
+                        max_payload_bytes,
+                    )
+                    .await?;
+                    self.record_local_stream_sent(
+                        &rejected.destination,
+                        bytes_len_u64(rejected_bytes),
+                    );
                     return Ok(());
                 }
             };
+        self.record_local_stream_received(&source, hello_bytes);
 
         if matches!(welcome, ControlMessage::Rejected(_)) {
             let rejected = ControlEnvelope {
@@ -340,7 +378,10 @@ impl NodeApp {
                 destination: source,
                 message: welcome,
             };
-            orion::transport::ipc::write_control_frame(&mut writer, &rejected).await?;
+            let rejected_bytes =
+                write_control_frame_with_limit_metered(&mut writer, &rejected, max_payload_bytes)
+                    .await?;
+            self.record_local_stream_sent(&rejected.destination, bytes_len_u64(rejected_bytes));
             return Ok(());
         }
 
@@ -349,6 +390,7 @@ impl NodeApp {
         );
         self.attach_local_client_stream(&source, tx.clone())
             .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
+        self.record_local_stream_peer_identity(&source, peer_identity);
 
         let welcome_envelope = ControlEnvelope {
             source: destination.clone(),
@@ -360,9 +402,28 @@ impl NodeApp {
             .map_err(|_| IpcTransportError::WriteFailed("failed to queue welcome frame".into()))?;
         self.flush_client_stream_for_source(&source);
 
+        let writer_app = self.clone();
+        let writer_source = source.clone();
         let writer_task = tokio::spawn(async move {
             while let Some(envelope) = rx.recv().await {
-                orion::transport::ipc::write_control_frame(&mut writer, &envelope).await?;
+                let bytes = match write_control_frame_with_limit_metered(
+                    &mut writer,
+                    &envelope,
+                    max_payload_bytes,
+                )
+                .await
+                {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        writer_app.record_local_stream_failure(
+                            &writer_source,
+                            None,
+                            err.to_string(),
+                        );
+                        return Err(err);
+                    }
+                };
+                writer_app.record_local_stream_sent(&writer_source, bytes_len_u64(bytes));
             }
             Ok::<(), IpcTransportError>(())
         });
@@ -376,25 +437,36 @@ impl NodeApp {
 
         loop {
             tokio::select! {
-                frame = orion::transport::ipc::read_control_frame(&mut reader) => {
-                    let Some(envelope) = frame? else {
-                        break;
+                frame = read_control_frame_with_limit_metered(&mut reader, max_payload_bytes) => {
+                    let (envelope, bytes_received) = match frame {
+                        Ok(Some((envelope, bytes_received))) => (envelope, bytes_len_u64(bytes_received)),
+                        Ok(None) => break,
+                        Err(err) => {
+                            self.record_local_stream_failure(&source, None, err.to_string());
+                            return Err(err);
+                        }
                     };
+                    self.record_local_stream_received(&source, bytes_received);
                     let source = envelope.source.clone();
                     let destination = envelope.destination.clone();
                     match envelope.message {
                         ControlMessage::Pong => {
                             self.touch_local_client_activity(&source, Self::current_time_ms());
+                            if let Some(since) = awaiting_pong_since {
+                                self.record_local_stream_success(&source, since.elapsed());
+                            }
                             awaiting_pong_since = None;
                             continue;
                         }
                         message => {
-                            let response = match self.serve_local_control_message(
+                            let response = match self.serve_local_control_message_async(
                                 ControlSurface::LocalIpcStream,
                                 source.clone(),
                                 destination.clone(),
                                 message,
-                            ) {
+                            )
+                            .await
+                            {
                                 Ok(response) => response,
                                 Err(err) => ControlMessage::Rejected(err.to_string()),
                             };
@@ -414,6 +486,11 @@ impl NodeApp {
                     if let Some(since) = awaiting_pong_since {
                         if now.duration_since(since) >= self.config.ipc_stream_heartbeat_timeout {
                             record_stale_stream_eviction(self, &source, now.duration_since(since));
+                            self.record_local_stream_failure(
+                                &source,
+                                Some(now.duration_since(since)),
+                                "ipc stream heartbeat timed out",
+                            );
                             break;
                         }
                     } else {
@@ -457,6 +534,10 @@ fn map_managed_task_result<E>(
         },
         Err(err) => Err(wrap(format!("managed transport task join failed: {err}"))),
     }
+}
+
+fn bytes_len_u64(bytes: usize) -> u64 {
+    bytes.min(u64::MAX as usize) as u64
 }
 
 #[cfg(test)]

@@ -38,6 +38,99 @@ fn frame() -> QuicFrame {
     }
 }
 
+fn test_server_tls() -> QuicServerTlsConfig {
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["node-b.local".to_owned()])
+            .expect("test QUIC certificate should generate");
+    QuicServerTlsConfig::new(
+        cert.pem().into_bytes(),
+        signing_key.serialize_pem().into_bytes(),
+    )
+}
+
+#[tokio::test]
+async fn real_quic_transport_rejects_oversized_payload_without_poisoning_server() {
+    struct EchoHandler;
+
+    impl QuicFrameHandler for EchoHandler {
+        fn handle_frame(&self, frame: QuicFrame) -> Result<QuicFrame, QuicTransportError> {
+            Ok(QuicFrame {
+                source: frame.destination.clone(),
+                destination: frame.source.clone(),
+                ..frame
+            })
+        }
+    }
+
+    let codec = QuicCodec;
+    let max_payload_bytes = codec
+        .encode_frame(&frame())
+        .expect("QUIC frame should encode")
+        .len();
+    let (server, endpoint) = QuicFrameServer::bind_secure(
+        QuicEndpoint::new("127.0.0.1", 0).with_server_name("node-b.local"),
+        Arc::new(EchoHandler),
+        test_server_tls(),
+    )
+    .await
+    .expect("QUIC server should bind");
+    let server = server.with_max_payload_bytes(max_payload_bytes);
+    let task = tokio::spawn(server.serve());
+
+    install_rustls_crypto_provider();
+    let bind_addr: SocketAddr = "127.0.0.1:0"
+        .parse()
+        .expect("test client bind addr should parse");
+    let mut raw_endpoint = Endpoint::client(bind_addr).expect("raw client endpoint should bind");
+    raw_endpoint.set_default_client_config(
+        build_client_config(&QuicClientTlsConfig {
+            root_cert_pem: Vec::new(),
+            client_cert_pem: None,
+            client_key_pem: None,
+        })
+        .expect("client config"),
+    );
+    let remote_addr: SocketAddr = format!("{}:{}", endpoint.host, endpoint.port)
+        .parse()
+        .expect("remote addr should parse");
+    let connection = raw_endpoint
+        .connect(
+            remote_addr,
+            endpoint.server_name.as_deref().unwrap_or("localhost"),
+        )
+        .expect("raw QUIC connect should start")
+        .await
+        .expect("raw QUIC connect should succeed");
+
+    let (mut send, mut recv) = connection
+        .open_bi()
+        .await
+        .expect("raw QUIC stream should open");
+    send.write_all(&vec![0; max_payload_bytes + 1])
+        .await
+        .expect("oversized QUIC payload should send");
+    send.finish().expect("raw QUIC send should finish");
+    let raw_response = recv.read_to_end(usize::MAX).await;
+    assert!(
+        raw_response
+            .as_ref()
+            .map(|bytes| bytes.is_empty())
+            .unwrap_or(true),
+        "oversized QUIC payloads should not get a response payload"
+    );
+
+    let client = QuicFrameClient::new(endpoint)
+        .expect("QUIC client should build")
+        .with_max_payload_bytes(max_payload_bytes);
+    let roundtrip = client
+        .send(frame())
+        .await
+        .expect("server should still accept a valid frame after oversized bytes");
+
+    assert_eq!(roundtrip.payload, vec![1, 2, 3, 4]);
+    task.abort();
+}
+
 #[tokio::test]
 async fn real_quic_transport_rejects_malformed_frames_without_poisoning_server() {
     struct EchoHandler;
@@ -52,9 +145,10 @@ async fn real_quic_transport_rejects_malformed_frames_without_poisoning_server()
         }
     }
 
-    let (server, endpoint) = QuicFrameServer::bind(
+    let (server, endpoint) = QuicFrameServer::bind_secure(
         QuicEndpoint::new("127.0.0.1", 0).with_server_name("node-b.local"),
         Arc::new(EchoHandler),
+        test_server_tls(),
     )
     .await
     .expect("QUIC server should bind");
@@ -128,9 +222,10 @@ async fn real_quic_transport_accepts_partial_writes_and_reconnects() {
         }
     }
 
-    let (server, endpoint) = QuicFrameServer::bind(
+    let (server, endpoint) = QuicFrameServer::bind_secure(
         QuicEndpoint::new("127.0.0.1", 0).with_server_name("node-b.local"),
         Arc::new(EchoHandler),
+        test_server_tls(),
     )
     .await
     .expect("QUIC server should bind");
@@ -207,9 +302,10 @@ async fn real_quic_transport_graceful_shutdown_aborts_stalled_connections() {
         }
     }
 
-    let (server, endpoint) = QuicFrameServer::bind(
+    let (server, endpoint) = QuicFrameServer::bind_secure(
         QuicEndpoint::new("127.0.0.1", 0).with_server_name("node-b.local"),
         Arc::new(EchoHandler),
+        test_server_tls(),
     )
     .await
     .expect("QUIC server should bind");
@@ -268,9 +364,10 @@ async fn real_quic_transport_survives_interrupted_clients_and_concurrent_pressur
         }
     }
 
-    let (server, endpoint) = QuicFrameServer::bind(
+    let (server, endpoint) = QuicFrameServer::bind_secure(
         QuicEndpoint::new("127.0.0.1", 0).with_server_name("node-b.local"),
         Arc::new(EchoHandler),
+        test_server_tls(),
     )
     .await
     .expect("QUIC server should bind");

@@ -26,7 +26,10 @@ fn repeated_replay_cycles_under_churn_converge_to_latest_state() {
 
         let artifact_id = format!("artifact.churn.{cycle}");
         app.put_artifact_content(
-            &orion::control_plane::ArtifactRecord::builder(artifact_id.as_str()).build(),
+            &orion::control_plane::ArtifactRecord::builder(orion::ArtifactId::new(
+                artifact_id.clone(),
+            ))
+            .build(),
             &[cycle as u8],
         )
         .expect("artifact should persist");

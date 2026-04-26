@@ -1,5 +1,6 @@
 use super::*;
 
+mod communication_metrics;
 mod compaction;
 mod observability;
 mod peers;

@@ -7,6 +7,7 @@ use orion_transport_ipc::LocalControlTransport;
 use crate::{
     default_ipc_stream_socket_path,
     error::ClientError,
+    response::{expect_provider_leases, provider_lease_query},
     session::{
         ClientSession, ensure_client_role, local_identity_for_role, local_session_config_for_role,
         local_session_config_with_address,
@@ -57,14 +58,8 @@ where
 
     pub fn fetch_leases(&self, provider: &ProviderRecord) -> Result<Vec<LeaseRecord>, ClientError> {
         self.session.request_control_with(
-            ControlMessage::QueryProviderLeases(ProviderLeaseQuery {
-                provider_id: provider.provider_id.clone(),
-            }),
-            |message| match message {
-                ControlMessage::ProviderLeases(leases) => Ok(leases),
-                ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
-                _ => Err(ClientError::NoMessageAvailable),
-            },
+            provider_lease_query(provider.provider_id.clone()),
+            expect_provider_leases,
         )
     }
 }

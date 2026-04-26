@@ -57,7 +57,10 @@ pub(super) async fn run(command: DeleteCommand) -> Result<(), String> {
                     println!("delete artifact accepted id={artifact_id}");
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => {
                     print_structured(&json!({ "artifact_id": artifact_id }), args.local.output)
                 }
             }
@@ -100,7 +103,10 @@ pub(super) async fn run(command: DeleteCommand) -> Result<(), String> {
                     println!("delete workload accepted id={workload_id}");
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => {
                     print_structured(&json!({ "workload_id": workload_id }), args.local.output)
                 }
             }
@@ -131,7 +137,7 @@ fn print_delete_dry_run(report: DeleteDryRunReport, output: OutputFormat) -> Res
             }
             Ok(())
         }
-        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml | OutputFormat::Metrics => {
             print_structured(&report, output)
         }
     }

@@ -12,7 +12,9 @@ pub use route::{ControlRoute, HttpMethod};
 pub use tls::{
     HttpClientTlsConfig, HttpServerClientAuth, HttpServerTlsConfig, HttpTlsTrustProvider,
 };
-pub use transport::{HttpClient, HttpControlHandler, HttpServer, HttpService, HttpTransport};
+pub use transport::{
+    HttpClient, HttpControlHandler, HttpServer, HttpService, HttpTransport, METRICS_PATH,
+};
 
 #[cfg(test)]
 mod tests;

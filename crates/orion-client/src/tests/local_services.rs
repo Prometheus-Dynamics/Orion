@@ -3,7 +3,7 @@ use orion_control_plane::{
     ClientEvent, ClientEventKind, ClusterStateEnvelope, ControlMessage, DesiredClusterState,
     ExecutorWorkloadQuery, LeaseRecord, ProviderLeaseQuery, StateSnapshot, StateWatch,
 };
-use orion_core::{decode_from_slice, encode_to_vec};
+use orion_core::{ClientName, SessionId, decode_from_slice, encode_to_vec};
 use orion_transport_ipc::{read_control_frame, write_control_frame};
 use std::{
     path::PathBuf,
@@ -334,7 +334,7 @@ async fn local_runtime_publisher_registers_provider_and_executor() {
                     source: LocalAddress::new("orion"),
                     destination: hello.source,
                     message: ControlMessage::ClientWelcome(orion_control_plane::ClientSession {
-                        session_id: format!("node-a:{role:?}").into(),
+                        session_id: SessionId::new(format!("node-a:{role:?}")),
                         role: role.clone(),
                         node_id: NodeId::new("node-a"),
                         source: "publisher".into(),
@@ -426,7 +426,7 @@ async fn local_runtime_publisher_publishes_provider_resources_and_executor_snaps
                     source: LocalAddress::new("orion"),
                     destination: hello.source,
                     message: ControlMessage::ClientWelcome(orion_control_plane::ClientSession {
-                        session_id: format!("node-a:{expected_message}").into(),
+                        session_id: SessionId::new(format!("node-a:{expected_message}")),
                         role: if expected_message == "provider" {
                             ClientRole::Provider
                         } else {
@@ -718,11 +718,11 @@ async fn write_welcome(
             source: LocalAddress::new("orion"),
             destination,
             message: ControlMessage::ClientWelcome(orion_control_plane::ClientSession {
-                session_id: format!("node-a:{client_name}").into(),
+                session_id: SessionId::new(format!("node-a:{client_name}")),
                 role,
                 node_id: NodeId::new("node-a"),
                 source: client_name.into(),
-                client_name: client_name.into(),
+                client_name: ClientName::new(client_name),
             }),
         },
     )

@@ -6,6 +6,8 @@ pub enum IpcTransportError {
     BindFailed(String),
     #[error("failed to connect to unix socket: {0}")]
     ConnectFailed(String),
+    #[error("failed to connect to unix socket: {0}")]
+    ConnectionRefused(String),
     #[error("failed to accept unix socket connection: {0}")]
     AcceptFailed(String),
     #[error("failed to read unix socket message: {0}")]

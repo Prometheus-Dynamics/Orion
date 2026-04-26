@@ -8,6 +8,7 @@ use orion_transport_ipc::LocalControlTransport;
 use crate::{
     default_ipc_stream_socket_path,
     error::ClientError,
+    response::{executor_workload_query, expect_executor_workloads},
     session::{
         ClientSession, ensure_client_role, local_identity_for_role, local_session_config_for_role,
         local_session_config_with_address,
@@ -89,14 +90,8 @@ where
         executor: &ExecutorRecord,
     ) -> Result<Vec<WorkloadRecord>, ClientError> {
         self.session.request_control_with(
-            ControlMessage::QueryExecutorWorkloads(ExecutorWorkloadQuery {
-                executor_id: executor.executor_id.clone(),
-            }),
-            |message| match message {
-                ControlMessage::ExecutorWorkloads(workloads) => Ok(workloads),
-                ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
-                _ => Err(ClientError::NoMessageAvailable),
-            },
+            executor_workload_query(executor.executor_id.clone()),
+            expect_executor_workloads,
         )
     }
 }

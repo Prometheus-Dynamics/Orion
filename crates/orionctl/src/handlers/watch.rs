@@ -28,9 +28,10 @@ pub(super) async fn run(command: WatchCommand) -> Result<(), String> {
                 for event in events {
                     match args.output {
                         OutputFormat::Summary => print_event_summary(&event),
-                        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                            print_structured(&event, args.output)?
-                        }
+                        OutputFormat::Json
+                        | OutputFormat::Yaml
+                        | OutputFormat::Toml
+                        | OutputFormat::Metrics => print_structured(&event, args.output)?,
                     }
                 }
             }

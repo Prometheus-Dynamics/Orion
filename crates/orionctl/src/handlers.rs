@@ -2,6 +2,7 @@ mod apply;
 mod delete;
 mod describe;
 mod get;
+mod get_communication;
 mod peers;
 mod watch;
 

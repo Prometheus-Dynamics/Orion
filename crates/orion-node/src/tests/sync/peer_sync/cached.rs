@@ -60,7 +60,10 @@ async fn node_sync_peer_uses_cached_peer_state_to_skip_hello_when_remote_is_ahea
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -207,7 +210,10 @@ async fn node_sync_peer_uses_cached_peer_state_to_skip_hello_for_equal_revision_
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -272,7 +278,10 @@ async fn node_sync_peer_noops_when_revisions_already_match() {
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr_a))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -357,7 +366,10 @@ async fn node_sync_peer_uses_cached_peer_state_to_skip_hello_when_state_matches(
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -456,7 +468,10 @@ async fn node_sync_peer_uses_cached_peer_state_to_skip_hello_when_local_history_
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),
@@ -603,7 +618,10 @@ async fn node_sync_peer_remote_snapshot_preserves_local_registrations() {
             ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-test"),
             reconcile_interval: std::time::Duration::from_millis(50),
             state_dir: None,
-            peers: vec![PeerConfig::new("node-a", format!("http://{}", addr_a))],
+            peers: vec![PeerConfig::new(
+                "node-a",
+                orion_core::PeerBaseUrl::new(format!("http://{}", addr_a)),
+            )],
             peer_authentication: crate::PeerAuthenticationMode::Optional,
             peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
                 .expect("peer sync execution defaults should parse"),

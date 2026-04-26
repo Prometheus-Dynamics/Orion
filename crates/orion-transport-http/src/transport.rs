@@ -1,10 +1,10 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{future::Future, net::SocketAddr, pin::Pin, sync::Arc};
 
 use axum::{
     Router,
     body::{Body, to_bytes},
     extract::{Request, State},
-    http::{Method, StatusCode},
+    http::{Method, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -13,7 +13,10 @@ use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
 use orion_transport_common::{
     ConnectionTasks, DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT, DEFAULT_HTTP_CLIENT_REQUEST_TIMEOUT,
+    DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES, DEFAULT_TRANSPORT_IO_TIMEOUT,
+    DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
 };
+use tokio::sync::Semaphore;
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
@@ -25,20 +28,50 @@ use crate::{
     },
 };
 
+pub const METRICS_PATH: &str = "/metrics";
+
 pub trait HttpService {
     fn handle(&self, request: HttpRequest) -> HttpResponse;
 }
 
+/// Synchronous HTTP control handler boundary.
+///
+/// Implementations are called from async server tasks, so request handling should stay CPU-cheap
+/// and route persistence, filesystem, or other blocking work through an explicit worker boundary.
 pub trait HttpControlHandler: Send + Sync + 'static {
     fn handle_payload(
         &self,
         payload: HttpRequestPayload,
     ) -> Result<HttpResponsePayload, HttpTransportError>;
 
+    fn handle_payload_async(
+        &self,
+        payload: HttpRequestPayload,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponsePayload, HttpTransportError>> + Send + '_>>
+    {
+        Box::pin(async move { self.handle_payload(payload) })
+    }
+
+    fn handle_payload_metered_async(
+        &self,
+        payload: HttpRequestPayload,
+        _bytes_received: u64,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponsePayload, HttpTransportError>> + Send + '_>>
+    {
+        self.handle_payload_async(payload)
+    }
+
     fn handle_health(&self) -> Result<HttpResponsePayload, HttpTransportError> {
         Err(HttpTransportError::UnsupportedPath(
             ControlRoute::Health.path().to_owned(),
         ))
+    }
+
+    fn handle_health_async(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponsePayload, HttpTransportError>> + Send + '_>>
+    {
+        Box::pin(async move { self.handle_health() })
     }
 
     fn handle_readiness(&self) -> Result<HttpResponsePayload, HttpTransportError> {
@@ -47,7 +80,34 @@ pub trait HttpControlHandler: Send + Sync + 'static {
         ))
     }
 
+    fn handle_readiness_async(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponsePayload, HttpTransportError>> + Send + '_>>
+    {
+        Box::pin(async move { self.handle_readiness() })
+    }
+
+    fn handle_metrics(&self) -> Result<String, HttpTransportError> {
+        Err(HttpTransportError::UnsupportedPath(METRICS_PATH.to_owned()))
+    }
+
+    fn handle_metrics_async(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, HttpTransportError>> + Send + '_>> {
+        Box::pin(async move { self.handle_metrics() })
+    }
+
     fn record_transport_error(&self, _error: &HttpTransportError) {}
+
+    fn record_control_exchange(
+        &self,
+        _id: &str,
+        _scope: &str,
+        _bytes_received: u64,
+        _bytes_sent: u64,
+        _duration: std::time::Duration,
+    ) {
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -248,6 +308,9 @@ fn normalize_base_url(base_url: String) -> Result<(String, BaseUrlScheme), HttpT
 pub struct HttpServer {
     service: Arc<dyn HttpControlHandler>,
     surface: HttpServerSurface,
+    max_body_bytes: usize,
+    io_timeout: std::time::Duration,
+    max_connections: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -256,11 +319,27 @@ enum HttpServerSurface {
     Probe,
 }
 
+#[derive(Clone)]
+struct HttpServerState {
+    service: Arc<dyn HttpControlHandler>,
+    max_body_bytes: usize,
+    io_timeout: std::time::Duration,
+}
+
+#[derive(Clone, Copy)]
+struct HttpTlsServeConfig {
+    io_timeout: std::time::Duration,
+    max_connections: usize,
+}
+
 impl HttpServer {
     pub fn new(service: Arc<dyn HttpControlHandler>) -> Self {
         Self {
             service,
             surface: HttpServerSurface::Control,
+            max_body_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
+            io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
+            max_connections: DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
         }
     }
 
@@ -268,7 +347,25 @@ impl HttpServer {
         Self {
             service,
             surface: HttpServerSurface::Probe,
+            max_body_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
+            io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
+            max_connections: DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
         }
+    }
+
+    pub fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
+        self.max_body_bytes = max_body_bytes.max(1);
+        self
+    }
+
+    pub fn with_io_timeout(mut self, io_timeout: std::time::Duration) -> Self {
+        self.io_timeout = io_timeout.max(std::time::Duration::from_millis(1));
+        self
+    }
+
+    pub fn with_max_connections(mut self, max_connections: usize) -> Self {
+        self.max_connections = max_connections.max(1);
+        self
     }
 
     pub fn router(&self) -> Router {
@@ -286,7 +383,9 @@ impl HttpServer {
                     ControlRoute::ObservedUpdate.path(),
                     post(handle_http_request),
                 ),
-            HttpServerSurface::Probe => Router::new(),
+            HttpServerSurface::Probe => {
+                Router::new().route(METRICS_PATH, get(handle_metrics_request))
+            }
         };
 
         router
@@ -295,7 +394,11 @@ impl HttpServer {
                 ControlRoute::Readiness.path(),
                 get(handle_readiness_request),
             )
-            .with_state(self.service.clone())
+            .with_state(HttpServerState {
+                service: self.service.clone(),
+                max_body_bytes: self.max_body_bytes,
+                io_timeout: self.io_timeout,
+            })
     }
 
     pub async fn serve(self, listener: tokio::net::TcpListener) -> Result<(), HttpTransportError> {
@@ -326,8 +429,12 @@ impl HttpServer {
     ) -> Result<(), HttpTransportError> {
         let app = self.router();
         let handler = self.service.clone();
+        let config = HttpTlsServeConfig {
+            io_timeout: self.io_timeout,
+            max_connections: self.max_connections,
+        };
         let mut cached_acceptor: Option<CachedTlsAcceptor> = None;
-        serve_tls_accept_loop(listener, &tls, &mut cached_acceptor, handler, app).await
+        serve_tls_accept_loop(listener, &tls, &mut cached_acceptor, handler, app, config).await
     }
 
     pub async fn serve_tls_with_shutdown<F>(
@@ -341,6 +448,10 @@ impl HttpServer {
     {
         let app = self.router();
         let handler = self.service.clone();
+        let config = HttpTlsServeConfig {
+            io_timeout: self.io_timeout,
+            max_connections: self.max_connections,
+        };
         let mut cached_acceptor: Option<CachedTlsAcceptor> = None;
         serve_tls_accept_loop_with_shutdown(
             listener,
@@ -348,6 +459,7 @@ impl HttpServer {
             &mut cached_acceptor,
             handler,
             app,
+            config,
             shutdown,
         )
         .await
@@ -386,8 +498,15 @@ async fn serve_tls_accept_loop(
     cached_acceptor: &mut Option<CachedTlsAcceptor>,
     handler: Arc<dyn HttpControlHandler>,
     app: Router,
+    config: HttpTlsServeConfig,
 ) -> Result<(), HttpTransportError> {
+    let semaphore = Arc::new(Semaphore::new(config.max_connections.max(1)));
     loop {
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| HttpTransportError::ServeFailed("connection limiter closed".into()))?;
         let (stream, _) = listener
             .accept()
             .await
@@ -396,7 +515,8 @@ async fn serve_tls_accept_loop(
         let service = app.clone();
         let handler = handler.clone();
         tokio::spawn(async move {
-            serve_tls_connection(stream, acceptor, handler, service).await;
+            let _permit = permit;
+            serve_tls_connection(stream, acceptor, handler, service, config.io_timeout).await;
         });
     }
 }
@@ -407,6 +527,7 @@ async fn serve_tls_accept_loop_with_shutdown<F>(
     cached_acceptor: &mut Option<CachedTlsAcceptor>,
     handler: Arc<dyn HttpControlHandler>,
     app: Router,
+    config: HttpTlsServeConfig,
     shutdown: F,
 ) -> Result<(), HttpTransportError>
 where
@@ -414,7 +535,17 @@ where
 {
     let mut shutdown = std::pin::pin!(shutdown);
     let mut connection_tasks = ConnectionTasks::new();
+    let semaphore = Arc::new(Semaphore::new(config.max_connections.max(1)));
     loop {
+        let permit = tokio::select! {
+            permit = semaphore.clone().acquire_owned() => {
+                permit.map_err(|_| HttpTransportError::ServeFailed("connection limiter closed".into()))?
+            }
+            _ = &mut shutdown => {
+                connection_tasks.abort_all().await;
+                break Ok(());
+            }
+        };
         tokio::select! {
             accepted = listener.accept() => {
                 let (stream, _) = accepted
@@ -423,7 +554,8 @@ where
                 let service = app.clone();
                 let handler = handler.clone();
                 connection_tasks.spawn_unit(async move {
-                    serve_tls_connection(stream, acceptor, handler, service).await;
+                    let _permit = permit;
+                    serve_tls_connection(stream, acceptor, handler, service, config.io_timeout).await;
                 });
             }
             _ = &mut shutdown => {
@@ -439,12 +571,25 @@ async fn serve_tls_connection(
     acceptor: TlsAcceptor,
     handler: Arc<dyn HttpControlHandler>,
     service: Router,
+    io_timeout: std::time::Duration,
 ) {
-    let tls_stream = match acceptor.accept(stream).await {
-        Ok(stream) => stream,
-        Err(err) => {
+    let tls_stream = match tokio::time::timeout(
+        io_timeout.max(std::time::Duration::from_millis(1)),
+        acceptor.accept(stream),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(err)) => {
             handler.record_transport_error(&HttpTransportError::Tls(format!(
                 "tls handshake failed: {err}"
+            )));
+            return;
+        }
+        Err(_) => {
+            handler.record_transport_error(&HttpTransportError::Tls(format!(
+                "tls handshake timed out after {} ms",
+                io_timeout.as_millis()
             )));
             return;
         }
@@ -458,14 +603,28 @@ async fn serve_tls_connection(
 }
 
 async fn handle_http_request(
-    State(service): State<Arc<dyn HttpControlHandler>>,
+    State(state): State<HttpServerState>,
     request: Request<Body>,
 ) -> Response {
+    let started = std::time::Instant::now();
     let (parts, body) = request.into_parts();
-    let body = match to_bytes(body, usize::MAX).await {
-        Ok(body) => body.to_vec(),
-        Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
-    };
+    let body =
+        match tokio::time::timeout(state.io_timeout, to_bytes(body, state.max_body_bytes)).await {
+            Ok(Ok(body)) => body.to_vec(),
+            Ok(Err(err)) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+            Err(_) => {
+                return (
+                    StatusCode::REQUEST_TIMEOUT,
+                    format!(
+                        "HTTP request body timed out after {} ms",
+                        state.io_timeout.as_millis()
+                    ),
+                )
+                    .into_response();
+            }
+        };
+    let bytes_received = body.len().min(u64::MAX as usize) as u64;
+    let service = state.service;
 
     let codec = HttpCodec;
     let method = match crate::HttpMethod::from_http_name(parts.method.as_str()) {
@@ -488,7 +647,10 @@ async fn handle_http_request(
         }
     };
 
-    let response_payload = match service.handle_payload(payload) {
+    let response_payload = match service
+        .handle_payload_metered_async(payload, bytes_received)
+        .await
+    {
         Ok(response) => response,
         Err(err) => {
             service.record_transport_error(&err);
@@ -503,6 +665,14 @@ async fn handle_http_request(
             return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
         }
     };
+    let bytes_sent = response.body.len().min(u64::MAX as usize) as u64;
+    service.record_control_exchange(
+        "http/control",
+        "control",
+        bytes_received,
+        bytes_sent,
+        started.elapsed(),
+    );
 
     (
         StatusCode::from_u16(response.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
@@ -511,9 +681,11 @@ async fn handle_http_request(
         .into_response()
 }
 
-async fn handle_health_request(State(service): State<Arc<dyn HttpControlHandler>>) -> Response {
+async fn handle_health_request(State(state): State<HttpServerState>) -> Response {
+    let started = std::time::Instant::now();
+    let service = state.service;
     let codec = HttpCodec;
-    let response_payload = match service.handle_health() {
+    let response_payload = match service.handle_health_async().await {
         Ok(response) => response,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     };
@@ -522,6 +694,13 @@ async fn handle_health_request(State(service): State<Arc<dyn HttpControlHandler>
         Ok(response) => response,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     };
+    service.record_control_exchange(
+        "http/health",
+        "health",
+        0,
+        response.body.len().min(u64::MAX as usize) as u64,
+        started.elapsed(),
+    );
 
     (
         StatusCode::from_u16(response.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
@@ -530,9 +709,11 @@ async fn handle_health_request(State(service): State<Arc<dyn HttpControlHandler>
         .into_response()
 }
 
-async fn handle_readiness_request(State(service): State<Arc<dyn HttpControlHandler>>) -> Response {
+async fn handle_readiness_request(State(state): State<HttpServerState>) -> Response {
+    let started = std::time::Instant::now();
+    let service = state.service;
     let codec = HttpCodec;
-    let response_payload = match service.handle_readiness() {
+    let response_payload = match service.handle_readiness_async().await {
         Ok(response) => response,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     };
@@ -541,10 +722,36 @@ async fn handle_readiness_request(State(service): State<Arc<dyn HttpControlHandl
         Ok(response) => response,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     };
+    service.record_control_exchange(
+        "http/readiness",
+        "readiness",
+        0,
+        response.body.len().min(u64::MAX as usize) as u64,
+        started.elapsed(),
+    );
 
     (
         StatusCode::from_u16(response.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
         response.body,
     )
         .into_response()
+}
+
+async fn handle_metrics_request(State(state): State<HttpServerState>) -> Response {
+    let service = state.service;
+    match service.handle_metrics_async().await {
+        Ok(metrics) => (
+            StatusCode::OK,
+            [(
+                header::CONTENT_TYPE,
+                "text/plain; version=0.0.4; charset=utf-8",
+            )],
+            metrics,
+        )
+            .into_response(),
+        Err(err) => {
+            service.record_transport_error(&err);
+            (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+    }
 }

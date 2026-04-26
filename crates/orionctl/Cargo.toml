@@ -10,6 +10,9 @@ authors.workspace = true
 description = "Operator CLI for the Orion daemon."
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "orionctl"
 path = "src/main.rs"

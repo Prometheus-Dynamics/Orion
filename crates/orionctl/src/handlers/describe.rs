@@ -120,7 +120,10 @@ pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
                     print_workload_describe_summary(&workload, &blockers);
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => print_structured(
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(
                     &WorkloadDescribeReport { workload, blockers },
                     args.source.output,
                 ),
@@ -197,9 +200,10 @@ pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
                     print_node_describe_summary(&report);
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&report, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&report, args.source.output),
             }
         }
         DescribeCommand::Artifact(args) => {
@@ -226,9 +230,10 @@ pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
                     print_artifact_describe_summary(&report);
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&report, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&report, args.source.output),
             }
         }
         DescribeCommand::Resource(args) => {
@@ -255,9 +260,10 @@ pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
                     print_resource_describe_summary(&report);
                     Ok(())
                 }
-                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-                    print_structured(&report, args.source.output)
-                }
+                OutputFormat::Json
+                | OutputFormat::Yaml
+                | OutputFormat::Toml
+                | OutputFormat::Metrics => print_structured(&report, args.source.output),
             }
         }
     }

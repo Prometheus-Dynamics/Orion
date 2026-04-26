@@ -3,6 +3,7 @@ use crate::{NodeAppBuilder, NodeConfig};
 use orion::{
     NodeId, Revision,
     control_plane::{ClientHello, ClientRole, MutationBatch},
+    transport::{http::HttpControlHandler, ipc::UnixControlHandler},
 };
 use orion_service::{MiddlewareNext, RequestMiddleware};
 use std::sync::{

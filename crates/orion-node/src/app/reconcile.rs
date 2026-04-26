@@ -230,10 +230,6 @@ impl NodeApp {
                 self.record_mutation_apply_failure(started.elapsed(), &error);
                 return Err(error);
             }
-            if let Err(err) = self.validate_remote_mutation_candidate(&candidate) {
-                self.record_mutation_apply_failure(started.elapsed(), &err);
-                return Err(err);
-            }
             if let Err(err) = self.validate_desired_state(&candidate) {
                 self.record_mutation_apply_failure(started.elapsed(), &err);
                 return Err(err);
@@ -267,10 +263,6 @@ impl NodeApp {
             let error = NodeError::from(err);
             self.record_mutation_apply_failure(started.elapsed(), &error);
             return Err(error);
-        }
-        if let Err(err) = self.validate_remote_mutation_candidate(&candidate) {
-            self.record_mutation_apply_failure(started.elapsed(), &err);
-            return Err(err);
         }
         if let Err(err) = self.validate_desired_state(&candidate) {
             self.record_mutation_apply_failure(started.elapsed(), &err);
@@ -345,6 +337,7 @@ impl NodeApp {
 
     pub(super) async fn reconcile_conflicting_remote_snapshot(
         &self,
+        node_id: &orion::NodeId,
         remote_snapshot: StateSnapshot,
         client: &orion::transport::http::HttpClient,
     ) -> Result<(), NodeError> {
@@ -367,6 +360,7 @@ impl NodeApp {
             let mut merged_snapshot = remote_snapshot;
             merged_snapshot.state.desired = merged_desired;
             self.send_peer_http_request(
+                node_id,
                 client,
                 orion::transport::http::HttpRequestPayload::Control(Box::new(
                     ControlMessage::Snapshot(merged_snapshot),
@@ -615,14 +609,6 @@ impl NodeApp {
             }
         }
 
-        Ok(())
-    }
-
-    fn validate_remote_mutation_candidate(
-        &self,
-        desired: &DesiredClusterState,
-    ) -> Result<(), NodeError> {
-        let _ = desired;
         Ok(())
     }
 
