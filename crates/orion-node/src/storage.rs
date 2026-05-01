@@ -59,9 +59,9 @@ pub struct SnapshotManifest {
 #[derive(Clone, Debug)]
 pub(crate) struct EncodedDesiredSnapshot {
     pub(crate) revision: Revision,
-    pub(crate) bytes: Vec<u8>,
-    pub(crate) section_fingerprints: DesiredStateSectionFingerprints,
-    pub(crate) section_counts: DesiredStateSectionCounts,
+    pub(crate) bytes: Option<Vec<u8>>,
+    pub(crate) section_fingerprints: Option<DesiredStateSectionFingerprints>,
+    pub(crate) section_counts: Option<DesiredStateSectionCounts>,
 }
 
 #[derive(Clone, Debug)]
@@ -150,7 +150,8 @@ impl NodeStorage {
     ) -> Result<(), NodeError> {
         self.ensure_layout()?;
         let existing_manifest = self.load_snapshot_manifest()?;
-        let rewrite_desired = rewrite_desired || existing_manifest.is_none();
+        let has_existing_manifest = existing_manifest.is_some();
+        let rewrite_desired = rewrite_desired || !has_existing_manifest;
         let (desired_snapshot_revision, desired_section_fingerprints, desired_section_counts) =
             if rewrite_desired {
                 let desired_bytes = encode_to_vec(&snapshot.desired)?;
@@ -161,7 +162,7 @@ impl NodeStorage {
                     desired_section_counts(&snapshot.desired),
                 )
             } else {
-                let manifest = existing_manifest.ok_or_else(|| {
+                let manifest = existing_manifest.as_ref().ok_or_else(|| {
                     NodeError::Storage(
                         "cannot reuse desired snapshot metadata without an existing manifest"
                             .into(),
@@ -175,8 +176,8 @@ impl NodeStorage {
                 }
                 (
                     manifest.desired_snapshot_revision,
-                    manifest.desired_section_fingerprints,
-                    manifest.desired_section_counts,
+                    manifest.desired_section_fingerprints.clone(),
+                    manifest.desired_section_counts.clone(),
                 )
             };
 
@@ -202,21 +203,35 @@ impl NodeStorage {
         &self,
         desired: &EncodedDesiredSnapshot,
         observed_revision: Revision,
-        observed_bytes: &[u8],
+        observed_bytes: Option<&[u8]>,
         applied_revision: Revision,
-        applied_bytes: &[u8],
+        applied_bytes: Option<&[u8]>,
         rewrite_desired: bool,
     ) -> Result<(), NodeError> {
         self.ensure_layout()?;
         let existing_manifest = self.load_snapshot_manifest()?;
-        let rewrite_desired = rewrite_desired || existing_manifest.is_none();
+        let has_existing_manifest = existing_manifest.is_some();
+        let rewrite_desired = rewrite_desired || !has_existing_manifest;
         let (desired_snapshot_revision, desired_section_fingerprints, desired_section_counts) =
             if rewrite_desired {
-                self.atomic_write(&self.snapshot_desired_path(), &desired.bytes)?;
+                let desired_bytes = desired.bytes.as_ref().ok_or_else(|| {
+                    NodeError::Storage(
+                        "cannot rewrite desired snapshot without encoded desired bytes".into(),
+                    )
+                })?;
+                self.atomic_write(&self.snapshot_desired_path(), desired_bytes)?;
                 (
                     desired.revision,
-                    desired.section_fingerprints.clone(),
-                    desired.section_counts.clone(),
+                    desired.section_fingerprints.clone().ok_or_else(|| {
+                        NodeError::Storage(
+                            "cannot rewrite desired snapshot without section fingerprints".into(),
+                        )
+                    })?,
+                    desired.section_counts.clone().ok_or_else(|| {
+                        NodeError::Storage(
+                            "cannot rewrite desired snapshot without section counts".into(),
+                        )
+                    })?,
                 )
             } else {
                 let manifest = existing_manifest.ok_or_else(|| {
@@ -249,8 +264,32 @@ impl NodeStorage {
         };
         let manifest_bytes = encode_archive_to_vec(&manifest)?;
 
-        self.atomic_write(&self.snapshot_observed_path(), observed_bytes)?;
-        self.atomic_write(&self.snapshot_applied_path(), applied_bytes)?;
+        match observed_bytes {
+            Some(observed_bytes) => {
+                self.atomic_write(&self.snapshot_observed_path(), observed_bytes)?
+            }
+            None => {
+                if !has_existing_manifest || !self.snapshot_observed_path().exists() {
+                    return Err(NodeError::Storage(
+                        "cannot reuse observed snapshot bytes without an existing observed snapshot"
+                            .into(),
+                    ));
+                }
+            }
+        }
+        match applied_bytes {
+            Some(applied_bytes) => {
+                self.atomic_write(&self.snapshot_applied_path(), applied_bytes)?
+            }
+            None => {
+                if !has_existing_manifest || !self.snapshot_applied_path().exists() {
+                    return Err(NodeError::Storage(
+                        "cannot reuse applied snapshot bytes without an existing applied snapshot"
+                            .into(),
+                    ));
+                }
+            }
+        }
         self.atomic_write(&self.snapshot_manifest_path(), &manifest_bytes)
     }
 
@@ -524,10 +563,21 @@ pub(crate) fn encode_desired_snapshot(
 ) -> Result<EncodedDesiredSnapshot, NodeError> {
     Ok(EncodedDesiredSnapshot {
         revision: desired.revision,
-        bytes: encode_archive_to_vec(desired)?,
-        section_fingerprints: desired_section_fingerprints(desired)?,
-        section_counts: desired_section_counts(desired),
+        bytes: Some(encode_archive_to_vec(desired)?),
+        section_fingerprints: Some(desired_section_fingerprints(desired)?),
+        section_counts: Some(desired_section_counts(desired)),
     })
+}
+
+pub(crate) fn desired_snapshot_revision_only(
+    desired: &DesiredClusterState,
+) -> EncodedDesiredSnapshot {
+    EncodedDesiredSnapshot {
+        revision: desired.revision,
+        bytes: None,
+        section_fingerprints: None,
+        section_counts: None,
+    }
 }
 
 fn entry_fingerprint<T>(value: &T) -> Result<u64, NodeError>

@@ -79,7 +79,7 @@ impl LocalRuntimeStore {
     pub fn apply_provider_snapshot(
         &mut self,
         snapshot: ProviderSnapshot,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<bool, RuntimeError> {
         if snapshot.provider.node_id != self.local_node_id {
             return Err(RuntimeError::ProviderNodeMismatch {
                 expected: self.local_node_id.clone(),
@@ -94,25 +94,39 @@ impl LocalRuntimeStore {
             return Err(RuntimeError::UnknownProvider(provider_id));
         }
 
-        self.observed
-            .resources
-            .retain(|_, resource| resource.provider_id != provider_id);
+        let previous_observed_revision = self.observed.revision;
+        let mut changed = false;
+        self.observed.resources.retain(|resource_id, resource| {
+            let retain = resource.provider_id != provider_id
+                || snapshot
+                    .resources
+                    .iter()
+                    .any(|incoming| incoming.resource_id == *resource_id && incoming == resource);
+            if !retain {
+                changed = true;
+            }
+            retain
+        });
 
         for resource in snapshot.resources {
-            self.observed.put_resource(resource);
+            if self.observed.resources.get(&resource.resource_id) != Some(&resource) {
+                changed = true;
+                self.observed.put_resource(resource);
+            }
         }
 
         self.provider_sync_revisions
             .insert(snapshot.provider.provider_id, self.desired.revision);
         self.refresh_observed_revision();
+        changed |= self.observed.revision != previous_observed_revision;
 
-        Ok(())
+        Ok(changed)
     }
 
     pub fn apply_executor_snapshot(
         &mut self,
         snapshot: ExecutorSnapshot,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<bool, RuntimeError> {
         if snapshot.executor.node_id != self.local_node_id {
             return Err(RuntimeError::ExecutorNodeMismatch {
                 expected: self.local_node_id.clone(),
@@ -129,28 +143,16 @@ impl LocalRuntimeStore {
             .iter()
             .map(|workload| workload.workload_id.clone())
             .collect();
-
-        self.observed.workloads.retain(|_, workload| {
-            workload.assigned_node_id.as_ref() != Some(&self.local_node_id)
-                || !workload_ids.contains(&workload.workload_id)
-        });
-        self.observed.resources.retain(|_, resource| {
-            resource.realized_by_executor_id.as_ref() != Some(&snapshot.executor.executor_id)
-        });
-
-        for workload in snapshot.workloads {
-            self.observed.put_workload(workload);
-        }
-        for resource in snapshot.resources {
+        for resource in &snapshot.resources {
             if resource.realized_by_executor_id.as_ref() != Some(&snapshot.executor.executor_id) {
                 return Err(RuntimeError::InvalidDerivedResource {
-                    resource_id: resource.resource_id,
+                    resource_id: resource.resource_id.clone(),
                     reason: "realized resource must declare its realizing executor".into(),
                 });
             }
             if resource.source_workload_id.is_none() {
                 return Err(RuntimeError::InvalidDerivedResource {
-                    resource_id: resource.resource_id,
+                    resource_id: resource.resource_id.clone(),
                     reason: "realized resource must declare its source workload".into(),
                 });
             }
@@ -158,7 +160,7 @@ impl LocalRuntimeStore {
                 && !workload_ids.contains(realized_for_workload_id)
             {
                 return Err(RuntimeError::InvalidDerivedResource {
-                    resource_id: resource.resource_id,
+                    resource_id: resource.resource_id.clone(),
                     reason: "realized resource owner must exist in executor snapshot".into(),
                 });
             }
@@ -166,18 +168,55 @@ impl LocalRuntimeStore {
                 && !workload_ids.contains(source_workload_id)
             {
                 return Err(RuntimeError::InvalidDerivedResource {
-                    resource_id: resource.resource_id,
+                    resource_id: resource.resource_id.clone(),
                     reason: "realized resource source workload must exist in executor snapshot"
                         .into(),
                 });
             }
-            self.observed.put_resource(resource);
+        }
+
+        let previous_observed_revision = self.observed.revision;
+        let mut changed = false;
+        let desired_workload_ids: BTreeSet<_> = self.desired.workloads.keys().cloned().collect();
+        self.observed.workloads.retain(|_, workload| {
+            let retain = workload.assigned_node_id.as_ref() != Some(&self.local_node_id)
+                || workload_ids.contains(&workload.workload_id)
+                || desired_workload_ids.contains(&workload.workload_id);
+            if !retain {
+                changed = true;
+            }
+            retain
+        });
+        self.observed.resources.retain(|resource_id, resource| {
+            let retain =
+                resource.realized_by_executor_id.as_ref() != Some(&snapshot.executor.executor_id)
+                    || snapshot.resources.iter().any(|incoming| {
+                        incoming.resource_id == *resource_id && incoming == resource
+                    });
+            if !retain {
+                changed = true;
+            }
+            retain
+        });
+
+        for workload in snapshot.workloads {
+            if self.observed.workloads.get(&workload.workload_id) != Some(&workload) {
+                changed = true;
+                self.observed.put_workload(workload);
+            }
+        }
+        for resource in snapshot.resources {
+            if self.observed.resources.get(&resource.resource_id) != Some(&resource) {
+                changed = true;
+                self.observed.put_resource(resource);
+            }
         }
 
         self.executor_sync_revisions
             .insert(snapshot.executor.executor_id, self.desired.revision);
         self.refresh_observed_revision();
-        Ok(())
+        changed |= self.observed.revision != previous_observed_revision;
+        Ok(changed)
     }
 
     pub fn mark_applied_revision(&mut self, revision: Revision) {

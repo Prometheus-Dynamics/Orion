@@ -440,6 +440,14 @@ pub struct HostMetricsSnapshot {
     pub swap_free_bytes: Option<u64>,
     pub process_id: u32,
     pub process_rss_bytes: Option<u64>,
+    pub process_pss_bytes: Option<u64>,
+    pub process_private_dirty_bytes: Option<u64>,
+    pub process_anonymous_bytes: Option<u64>,
+    pub process_vm_size_bytes: Option<u64>,
+    pub process_vm_data_bytes: Option<u64>,
+    pub process_vm_hwm_bytes: Option<u64>,
+    pub process_threads: Option<u64>,
+    pub process_fd_count: Option<u64>,
 }
 
 #[derive(

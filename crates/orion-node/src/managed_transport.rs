@@ -17,7 +17,11 @@ use orion_data_plane::RemoteBinding;
 use orion_transport_quic::QuicCodec;
 #[cfg(feature = "transport-tcp")]
 use orion_transport_tcp::TcpCodec;
-use std::{collections::BTreeMap, net::SocketAddr, sync::Arc, time::Instant};
+#[cfg(any(feature = "transport-tcp", feature = "transport-quic"))]
+use std::collections::BTreeMap;
+#[cfg(any(feature = "transport-tcp", feature = "transport-quic"))]
+use std::time::Instant;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::oneshot;
 
 #[derive(Clone)]

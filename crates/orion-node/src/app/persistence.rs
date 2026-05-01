@@ -8,8 +8,8 @@ use super::{
 };
 use crate::blocking::run_possibly_blocking;
 use crate::storage::{
-    EncodedDesiredSnapshot, NodeStorage, PersistedSnapshotSections, encode_archive_to_vec,
-    encode_desired_snapshot,
+    EncodedDesiredSnapshot, NodeStorage, PersistedSnapshotSections, SnapshotManifest,
+    desired_snapshot_revision_only, encode_archive_to_vec, encode_desired_snapshot,
 };
 use orion::{
     ArtifactId, Revision,
@@ -34,10 +34,10 @@ struct PersistedStateBundle {
 pub(super) struct EncodedPersistedStateBundle {
     desired: EncodedDesiredSnapshot,
     observed_revision: Revision,
-    observed_bytes: Vec<u8>,
+    observed_bytes: Option<Vec<u8>>,
     applied_revision: Revision,
-    applied_bytes: Vec<u8>,
-    history_bytes: Vec<u8>,
+    applied_bytes: Option<Vec<u8>>,
+    history_bytes: Option<Vec<u8>>,
     baseline_revision: Revision,
     baseline_bytes: Option<Vec<u8>>,
     snapshot_rewrite_cadence: u64,
@@ -48,18 +48,20 @@ pub(super) fn persist_bundle_to_storage(
     bundle: &EncodedPersistedStateBundle,
 ) -> Result<(), NodeError> {
     worker::delay_before_persist_for_tests();
-    storage.save_mutation_history_bytes(&bundle.history_bytes)?;
-    storage.save_mutation_history_baseline_bytes(
-        bundle.baseline_revision,
-        bundle.baseline_bytes.as_deref(),
-    )?;
+    if let Some(history_bytes) = &bundle.history_bytes {
+        storage.save_mutation_history_bytes(history_bytes)?;
+        storage.save_mutation_history_baseline_bytes(
+            bundle.baseline_revision,
+            bundle.baseline_bytes.as_deref(),
+        )?;
+    }
     let rewrite_desired = should_rewrite_desired_snapshot(storage, bundle)?;
     storage.save_encoded_snapshot(
         &bundle.desired,
         bundle.observed_revision,
-        &bundle.observed_bytes,
+        bundle.observed_bytes.as_deref(),
         bundle.applied_revision,
-        &bundle.applied_bytes,
+        bundle.applied_bytes.as_deref(),
         rewrite_desired,
     )
 }
@@ -123,17 +125,63 @@ impl NodeApp {
 
     fn capture_encoded_persisted_state_bundle(
         &self,
+        rewrite_desired: bool,
+        history_compacted: bool,
     ) -> Result<EncodedPersistedStateBundle, NodeError> {
+        let manifest = self
+            .storage
+            .as_ref()
+            .map(NodeStorage::load_snapshot_manifest)
+            .transpose()?
+            .flatten();
         self.with_persisted_state_read(|store, history, baseline| {
+            let encode_all_sections = manifest.is_none();
+            let observed_changed =
+                section_needs_rewrite(self.storage.as_ref(), &manifest, SnapshotSection::Observed)
+                    || manifest.as_ref().is_none_or(|manifest| {
+                        store.observed.revision != manifest.observed_revision
+                    });
+            let applied_changed =
+                section_needs_rewrite(self.storage.as_ref(), &manifest, SnapshotSection::Applied)
+                    || manifest
+                        .as_ref()
+                        .is_none_or(|manifest| store.applied.revision != manifest.applied_revision);
+            let history_changed = history_compacted
+                || section_needs_rewrite(
+                    self.storage.as_ref(),
+                    &manifest,
+                    SnapshotSection::MutationHistory,
+                )
+                || manifest.as_ref().is_none_or(|manifest| {
+                    store.desired.revision != manifest.latest_desired_revision
+                });
             Ok(EncodedPersistedStateBundle {
-                desired: encode_desired_snapshot(&store.desired)?,
+                desired: if rewrite_desired {
+                    encode_desired_snapshot(&store.desired)?
+                } else {
+                    desired_snapshot_revision_only(&store.desired)
+                },
                 observed_revision: store.observed.revision,
-                observed_bytes: encode_archive_to_vec(&store.observed)?,
+                observed_bytes: if encode_all_sections || observed_changed {
+                    Some(encode_archive_to_vec(&store.observed)?)
+                } else {
+                    None
+                },
                 applied_revision: store.applied.revision,
-                applied_bytes: encode_archive_to_vec(&store.applied)?,
-                history_bytes: encode_archive_to_vec(history)?,
+                applied_bytes: if encode_all_sections || applied_changed {
+                    Some(encode_archive_to_vec(&store.applied)?)
+                } else {
+                    None
+                },
+                history_bytes: if encode_all_sections || history_changed {
+                    Some(encode_archive_to_vec(history)?)
+                } else {
+                    None
+                },
                 baseline_revision: baseline.revision,
-                baseline_bytes: if baseline.revision == Revision::ZERO {
+                baseline_bytes: if !(encode_all_sections || history_changed)
+                    || baseline.revision == Revision::ZERO
+                {
                     None
                 } else {
                     Some(encode_archive_to_vec(baseline)?)
@@ -271,8 +319,10 @@ impl NodeApp {
         };
         let started = std::time::Instant::now();
         let result = async {
-            self.compact_mutation_history()?;
-            let bundle = self.capture_encoded_persisted_state_bundle()?;
+            let history_compacted = self.compact_mutation_history()?;
+            let rewrite_desired = should_capture_desired_snapshot(storage, self)?;
+            let bundle =
+                self.capture_encoded_persisted_state_bundle(rewrite_desired, history_compacted)?;
             if let Some(worker) = &self.persistence_worker {
                 return worker.persist_bundle_async(bundle).await;
             }
@@ -295,8 +345,10 @@ impl NodeApp {
         };
         let started = std::time::Instant::now();
         let result = (|| {
-            self.compact_mutation_history()?;
-            let bundle = self.capture_encoded_persisted_state_bundle()?;
+            let history_compacted = self.compact_mutation_history()?;
+            let rewrite_desired = should_capture_desired_snapshot(storage, self)?;
+            let bundle =
+                self.capture_encoded_persisted_state_bundle(rewrite_desired, history_compacted)?;
             if let Some(worker) = &self.persistence_worker {
                 return worker.persist_bundle_blocking(bundle);
             }
@@ -441,7 +493,7 @@ impl NodeApp {
         }
     }
 
-    fn compact_mutation_history(&self) -> Result<(), NodeError> {
+    fn compact_mutation_history(&self) -> Result<bool, NodeError> {
         self.with_mutation_history_mut(|history, baseline| {
             normalize_mutation_history_in_place(
                 history,
@@ -449,8 +501,7 @@ impl NodeApp {
                 self.config.runtime_tuning.max_mutation_history_batches,
                 self.config.runtime_tuning.max_mutation_history_bytes,
             )
-        })?;
-        Ok(())
+        })
     }
 
     fn replay_desired_from_snapshot(
@@ -476,6 +527,51 @@ impl NodeApp {
             history,
         )
     }
+}
+
+#[derive(Clone, Copy)]
+enum SnapshotSection {
+    Observed,
+    Applied,
+    MutationHistory,
+}
+
+fn section_needs_rewrite(
+    storage: Option<&NodeStorage>,
+    manifest: &Option<SnapshotManifest>,
+    section: SnapshotSection,
+) -> bool {
+    let Some(storage) = storage else {
+        return true;
+    };
+    if manifest.is_none() {
+        return true;
+    }
+    match section {
+        SnapshotSection::Observed => !storage.snapshot_observed_path().exists(),
+        SnapshotSection::Applied => !storage.snapshot_applied_path().exists(),
+        SnapshotSection::MutationHistory => !storage.mutation_history_path().exists(),
+    }
+}
+
+fn should_capture_desired_snapshot(
+    storage: &NodeStorage,
+    app: &NodeApp,
+) -> Result<bool, NodeError> {
+    let desired_revision = app.current_desired_revision();
+    let Some(manifest) = storage.load_snapshot_manifest()? else {
+        return Ok(true);
+    };
+    if !storage.snapshot_desired_path().exists() {
+        return Ok(true);
+    }
+    if desired_revision <= manifest.desired_snapshot_revision {
+        return Ok(false);
+    }
+    Ok(desired_revision
+        .get()
+        .saturating_sub(manifest.desired_snapshot_revision.get())
+        >= app.config.runtime_tuning.snapshot_rewrite_cadence.max(1))
 }
 
 fn reconstruct_desired_from_history(

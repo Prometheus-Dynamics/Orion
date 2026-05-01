@@ -87,3 +87,9 @@ print_stderr = "allow"
 print_stdout = "allow"
 todo = "deny"
 unimplemented = "deny"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = "z"
+strip = "symbols"

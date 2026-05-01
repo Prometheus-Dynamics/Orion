@@ -135,6 +135,81 @@ fn replay_rejects_corrupt_snapshot_file() {
 }
 
 #[test]
+fn observed_only_persist_reuses_unchanged_applied_and_history_files() {
+    let state_dir = temp_state_dir("dirty-section-persist");
+    let app = NodeApp::builder()
+        .config(test_node_config_with_state_dir_and_auth(
+            "node-a",
+            "node-dirty-section",
+            state_dir.clone(),
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .try_build()
+        .expect("node app should build");
+
+    app.put_artifact_content(
+        &orion::control_plane::ArtifactRecord::builder("artifact.dirty")
+            .content_type("application/octet-stream")
+            .size_bytes(1)
+            .build(),
+        &[1],
+    )
+    .expect("artifact should persist");
+
+    let storage = NodeStorage::new(&state_dir);
+    let applied_modified_before = fs::metadata(storage.snapshot_applied_path())
+        .expect("applied snapshot should exist")
+        .modified()
+        .expect("applied modified time should read");
+    let history_modified_before = fs::metadata(storage.mutation_history_path())
+        .expect("mutation history should exist")
+        .modified()
+        .expect("history modified time should read");
+
+    std::thread::sleep(Duration::from_millis(25));
+    let mut observed = orion::control_plane::ObservedClusterState::default();
+    observed.set_revision(Revision::new(1));
+    app.apply_observed_update(orion::control_plane::ObservedStateUpdate {
+        observed,
+        applied: Default::default(),
+    })
+    .expect("observed update should persist");
+
+    let applied_modified_after = fs::metadata(storage.snapshot_applied_path())
+        .expect("applied snapshot should exist")
+        .modified()
+        .expect("applied modified time should read");
+    let history_modified_after = fs::metadata(storage.mutation_history_path())
+        .expect("mutation history should exist")
+        .modified()
+        .expect("history modified time should read");
+
+    assert_eq!(applied_modified_after, applied_modified_before);
+    assert_eq!(history_modified_after, history_modified_before);
+
+    let replayed = NodeApp::builder()
+        .config(test_node_config_with_state_dir_and_auth(
+            "node-a",
+            "node-dirty-section",
+            state_dir.clone(),
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .try_build()
+        .expect("node app should build");
+    assert!(
+        replayed
+            .replay_state()
+            .expect("state replay should succeed")
+    );
+    assert_eq!(
+        replayed.state_snapshot().state.observed.revision,
+        Revision::new(1)
+    );
+
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn replay_ignores_orphaned_interrupted_write_temp_files() {
     let state_dir = temp_state_dir("orphaned-temp-files");
     let app = NodeApp::builder()

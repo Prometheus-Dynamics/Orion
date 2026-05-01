@@ -25,7 +25,6 @@ rkyv.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "sync", "time"] }
 rustls = { workspace = true, features = ["ring"] }
-rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 
 [dev-dependencies]

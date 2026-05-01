@@ -577,13 +577,15 @@ impl NodeApp {
         update: ProviderStateUpdate,
     ) -> Result<(), NodeError> {
         self.ensure_provider_record(update.provider.clone())?;
-        self.with_store_mut(|store| {
+        let changed = self.with_store_mut(|store| {
             store.apply_provider_snapshot(ProviderSnapshot {
                 provider: update.provider,
                 resources: update.resources,
             })
         })?;
-        self.persist_state()?;
+        if changed {
+            self.persist_state()?;
+        }
         let _ = self.tick()?;
         Ok(())
     }
@@ -594,14 +596,16 @@ impl NodeApp {
         update: ExecutorStateUpdate,
     ) -> Result<(), NodeError> {
         self.ensure_executor_record(update.executor.clone())?;
-        self.with_store_mut(|store| {
+        let changed = self.with_store_mut(|store| {
             store.apply_executor_snapshot(ExecutorSnapshot {
                 executor: update.executor,
                 workloads: update.workloads,
                 resources: update.resources,
             })
         })?;
-        self.persist_state()?;
+        if changed {
+            self.persist_state()?;
+        }
         let _ = self.tick()?;
         Ok(())
     }

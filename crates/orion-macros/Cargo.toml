@@ -18,6 +18,5 @@ proc-macro = true
 path = "src/lib.rs"
 
 [dependencies]
-proc-macro2.workspace = true
 quote.workspace = true
 syn.workspace = true

@@ -631,7 +631,7 @@ fn match_list_filters(args: &ListArgs, node: Option<String>, labels: &[String]) 
 fn print_host_summary(snapshot: &NodeObservabilitySnapshot) {
     let host = &snapshot.host;
     println!(
-        "host node={} hostname={} os={} os_version={} kernel={} arch={} uptime_seconds={} load_1_milli={} load_5_milli={} load_15_milli={} memory_total_bytes={} memory_available_bytes={} swap_total_bytes={} swap_free_bytes={} process_id={} process_rss_bytes={}",
+        "host node={} hostname={} os={} os_version={} kernel={} arch={} uptime_seconds={} load_1_milli={} load_5_milli={} load_15_milli={} memory_total_bytes={} memory_available_bytes={} swap_total_bytes={} swap_free_bytes={} process_id={} process_rss_bytes={} process_pss_bytes={} process_private_dirty_bytes={} process_anonymous_bytes={} process_vm_size_bytes={} process_vm_data_bytes={} process_vm_hwm_bytes={} process_threads={} process_fd_count={}",
         snapshot.node_id,
         host.hostname.as_deref().unwrap_or("-"),
         host.os_name,
@@ -648,6 +648,14 @@ fn print_host_summary(snapshot: &NodeObservabilitySnapshot) {
         option_u64(host.swap_free_bytes),
         host.process_id,
         option_u64(host.process_rss_bytes),
+        option_u64(host.process_pss_bytes),
+        option_u64(host.process_private_dirty_bytes),
+        option_u64(host.process_anonymous_bytes),
+        option_u64(host.process_vm_size_bytes),
+        option_u64(host.process_vm_data_bytes),
+        option_u64(host.process_vm_hwm_bytes),
+        option_u64(host.process_threads),
+        option_u64(host.process_fd_count),
     );
 }
 

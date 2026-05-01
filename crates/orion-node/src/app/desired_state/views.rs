@@ -253,10 +253,35 @@ fn diff_section<K, V, Put, Remove>(
 pub(crate) fn merge_observed_state(
     target: &mut ObservedClusterState,
     source: ObservedClusterState,
-) {
-    target.revision = source.revision;
-    target.nodes.extend(source.nodes);
-    target.workloads.extend(source.workloads);
-    target.resources.extend(source.resources);
-    target.leases.extend(source.leases);
+) -> bool {
+    let mut changed = false;
+    if target.revision != source.revision {
+        target.revision = source.revision;
+        changed = true;
+    }
+    for (key, value) in source.nodes {
+        if target.nodes.get(&key) != Some(&value) {
+            target.nodes.insert(key, value);
+            changed = true;
+        }
+    }
+    for (key, value) in source.workloads {
+        if target.workloads.get(&key) != Some(&value) {
+            target.workloads.insert(key, value);
+            changed = true;
+        }
+    }
+    for (key, value) in source.resources {
+        if target.resources.get(&key) != Some(&value) {
+            target.resources.insert(key, value);
+            changed = true;
+        }
+    }
+    for (key, value) in source.leases {
+        if target.leases.get(&key) != Some(&value) {
+            target.leases.insert(key, value);
+            changed = true;
+        }
+    }
+    changed
 }

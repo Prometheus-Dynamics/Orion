@@ -25,12 +25,13 @@ pub(super) struct DesiredStateTxn<'a> {
 
 impl DesiredStateTxn<'_> {
     fn normalize_history(&mut self) -> Result<(), NodeError> {
-        normalize_mutation_history_in_place(
+        let _ = normalize_mutation_history_in_place(
             self.history,
             self.baseline,
             self.max_batches,
             self.max_bytes,
-        )
+        )?;
+        Ok(())
     }
 
     pub(super) fn replace_desired(&mut self, desired: DesiredClusterState) {
@@ -275,7 +276,7 @@ pub(super) fn normalize_mutation_history_with_baseline(
     max_batches: usize,
     max_bytes: usize,
 ) -> Result<Vec<MutationBatch>, NodeError> {
-    normalize_mutation_history_in_place(&mut history, baseline, max_batches, max_bytes)?;
+    let _ = normalize_mutation_history_in_place(&mut history, baseline, max_batches, max_bytes)?;
     Ok(history)
 }
 
@@ -284,15 +285,20 @@ pub(super) fn normalize_mutation_history_in_place(
     baseline: &mut DesiredClusterState,
     max_batches: usize,
     max_bytes: usize,
-) -> Result<(), NodeError> {
+) -> Result<bool, NodeError> {
+    let mut changed = false;
+    let original_len = history.len();
     history.retain(|batch| !batch.mutations.is_empty());
+    changed |= history.len() != original_len;
     if history.is_empty() {
+        changed |= baseline.revision != Revision::ZERO;
         *baseline = DesiredClusterState::default();
-        return Ok(());
+        return Ok(changed);
     }
     let keep_batches = max_batches.max(1);
     if history.len() > keep_batches {
         let drain_count = history.len() - keep_batches;
+        changed = true;
         for dropped in history.drain(0..drain_count) {
             dropped.apply_to_checked(baseline).map_err(|err| {
                 mutation_history_contiguity_error(
@@ -307,6 +313,7 @@ pub(super) fn normalize_mutation_history_in_place(
     let mut encoded_len = mutation_history_encoded_len(history);
     if history.len() > 1 && encoded_len > keep_bytes {
         let drain_count = mutation_history_byte_trim_count(history, keep_bytes);
+        changed |= drain_count > 0;
         for dropped in history.drain(0..drain_count) {
             dropped.apply_to_checked(baseline).map_err(|err| {
                 mutation_history_contiguity_error(
@@ -318,6 +325,7 @@ pub(super) fn normalize_mutation_history_in_place(
         encoded_len = mutation_history_encoded_len(history);
     }
     while history.len() > 1 && encoded_len > keep_bytes {
+        changed = true;
         let dropped = history.drain(0..1).next().ok_or_else(|| {
             NodeError::Storage("failed to trim mutation history despite non-empty history".into())
         })?;
@@ -329,7 +337,7 @@ pub(super) fn normalize_mutation_history_in_place(
         })?;
         encoded_len = mutation_history_encoded_len(history);
     }
-    Ok(())
+    Ok(changed)
 }
 
 fn mutation_history_byte_trim_count(history: &[MutationBatch], keep_bytes: usize) -> usize {

@@ -78,7 +78,12 @@ async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
         &harness.ipc_socket.to_string_lossy(),
     ]);
     assert!(host.status.success(), "{}", output_text(&host));
-    assert!(String::from_utf8_lossy(&host.stdout).contains("process_id="));
+    let host_stdout = String::from_utf8_lossy(&host.stdout);
+    assert!(host_stdout.contains("process_id="));
+    assert!(host_stdout.contains("process_pss_bytes="));
+    assert!(host_stdout.contains("process_private_dirty_bytes="));
+    assert!(host_stdout.contains("process_threads="));
+    assert!(host_stdout.contains("process_fd_count="));
 
     let host_metrics = run_orionctl([
         "get",
@@ -93,7 +98,10 @@ async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
         "{}",
         output_text(&host_metrics)
     );
-    assert!(String::from_utf8_lossy(&host_metrics.stdout).contains("orion_process_id"));
+    let host_metrics_stdout = String::from_utf8_lossy(&host_metrics.stdout);
+    assert!(host_metrics_stdout.contains("orion_process_id"));
+    assert!(host_metrics_stdout.contains("orion_process_pss_bytes"));
+    assert!(host_metrics_stdout.contains("orion_process_private_dirty_bytes"));
 
     let communication = run_orionctl([
         "get",

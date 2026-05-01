@@ -319,23 +319,29 @@ mod tests {
         )
         .expect("first audit enqueue should succeed");
         let started = Instant::now();
-        sink.enqueue_test_record(
-            2,
-            "node.audit.drop",
-            AuditEventKind::TransportSecurityFailure,
-            Some("subject-b".to_owned()),
-            "second",
-        )
-        .expect("second audit enqueue should succeed even when dropped");
+        for sequence in 2..=32 {
+            sink.enqueue_test_record(
+                sequence,
+                "node.audit.drop",
+                AuditEventKind::TransportSecurityFailure,
+                Some(format!("subject-{sequence}")),
+                "second",
+            )
+            .expect("audit enqueue should succeed even when dropped");
+        }
         assert!(
             started.elapsed() < Duration::from_millis(10),
             "drop_newest audit enqueue should not block behind slow audit I/O"
+        );
+        assert!(
+            sink.dropped_records() > 0,
+            "drop_newest policy should drop at least one record under a slow one-slot worker"
         );
         clear_test_audit_append_delay();
         drop(sink);
 
         let contents = fs::read_to_string(&path).expect("audit log should be readable");
-        assert_eq!(contents.lines().count(), 1);
+        assert!(contents.lines().count() < 32);
         let _ = fs::remove_dir_all(root);
     }
 

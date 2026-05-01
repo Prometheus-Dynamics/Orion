@@ -285,6 +285,62 @@ fn append_host_metrics(out: &mut String, node_id: &NodeId, host: &HostMetricsSna
         &[("node_id", node)],
         host.process_rss_bytes,
     );
+    optional_gauge(
+        out,
+        "orion_process_pss_bytes",
+        "Orion process proportional set size in bytes.",
+        &[("node_id", node)],
+        host.process_pss_bytes,
+    );
+    optional_gauge(
+        out,
+        "orion_process_private_dirty_bytes",
+        "Orion process private dirty memory in bytes.",
+        &[("node_id", node)],
+        host.process_private_dirty_bytes,
+    );
+    optional_gauge(
+        out,
+        "orion_process_anonymous_bytes",
+        "Orion process anonymous memory in bytes.",
+        &[("node_id", node)],
+        host.process_anonymous_bytes,
+    );
+    optional_gauge(
+        out,
+        "orion_process_vm_size_bytes",
+        "Orion process virtual memory size in bytes.",
+        &[("node_id", node)],
+        host.process_vm_size_bytes,
+    );
+    optional_gauge(
+        out,
+        "orion_process_vm_data_bytes",
+        "Orion process data segment size in bytes.",
+        &[("node_id", node)],
+        host.process_vm_data_bytes,
+    );
+    optional_gauge(
+        out,
+        "orion_process_vm_hwm_bytes",
+        "Orion process resident set high-water mark in bytes.",
+        &[("node_id", node)],
+        host.process_vm_hwm_bytes,
+    );
+    optional_gauge(
+        out,
+        "orion_process_threads",
+        "Orion process thread count.",
+        &[("node_id", node)],
+        host.process_threads,
+    );
+    optional_gauge(
+        out,
+        "orion_process_fd_count",
+        "Orion process open file descriptor count.",
+        &[("node_id", node)],
+        host.process_fd_count,
+    );
 }
 
 fn append_operation_metrics(

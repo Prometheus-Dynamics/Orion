@@ -84,6 +84,37 @@ fn node_app_registration_and_tick_drive_executor_commands() {
 }
 
 #[test]
+fn stable_reconcile_tick_does_not_persist_unchanged_state() {
+    let state_dir = temp_state_dir("stable-reconcile-no-persist");
+    let app = NodeApp::builder()
+        .config(test_node_config_with_state_dir_and_auth(
+            "node-stable",
+            "node-stable",
+            state_dir.clone(),
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .try_build()
+        .expect("node app should build");
+
+    app.tick().expect("initial tick should reconcile");
+    let after_initial_tick = app
+        .observability_snapshot()
+        .persistence
+        .state_persist
+        .success_count;
+
+    app.tick().expect("stable tick should reconcile");
+    let after_stable_tick = app
+        .observability_snapshot()
+        .persistence
+        .state_persist
+        .success_count;
+
+    assert_eq!(after_stable_tick, after_initial_tick);
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn node_tick_plans_running_workload_from_desired_only_bound_resource() {
     let app = NodeApp::builder()
         .config(test_node_config_with_auth(

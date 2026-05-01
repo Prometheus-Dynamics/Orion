@@ -29,6 +29,12 @@ enum PersistenceCommand {
     },
 }
 
+struct CoalescedPersistCommand {
+    bundle: Box<EncodedPersistedStateBundle>,
+    replies: Vec<oneshot::Sender<Result<(), NodeError>>>,
+    pending_command: Option<PersistenceCommand>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct PersistenceWorkerMetricsSnapshot {
     pub(crate) operation_count: u64,
@@ -290,10 +296,16 @@ fn duration_ms(duration: Duration) -> u64 {
 }
 
 fn run_persistence_worker(storage: NodeStorage, mut receiver: mpsc::Receiver<PersistenceCommand>) {
-    while let Some(command) = receiver.blocking_recv() {
+    let mut pending_command = None;
+    while let Some(command) = pending_command.take().or_else(|| receiver.blocking_recv()) {
         match command {
             PersistenceCommand::Persist { bundle, reply } => {
-                let _ = reply.send(persist_bundle_to_storage(&storage, &bundle));
+                let coalesced = coalesce_queued_persist_commands(bundle, reply, &mut receiver);
+                pending_command = coalesced.pending_command;
+                send_persist_result(
+                    coalesced.replies,
+                    persist_bundle_to_storage(&storage, &coalesced.bundle),
+                );
             }
             PersistenceCommand::PutArtifactStream {
                 artifact,
@@ -301,6 +313,58 @@ fn run_persistence_worker(storage: NodeStorage, mut receiver: mpsc::Receiver<Per
                 reply,
             } => {
                 let _ = reply.send(storage.put_artifact_stream(&artifact, content));
+            }
+        }
+    }
+}
+
+fn coalesce_queued_persist_commands(
+    mut bundle: Box<EncodedPersistedStateBundle>,
+    reply: oneshot::Sender<Result<(), NodeError>>,
+    receiver: &mut mpsc::Receiver<PersistenceCommand>,
+) -> CoalescedPersistCommand {
+    let mut replies = vec![reply];
+    let mut pending_command = None;
+    while let Ok(command) = receiver.try_recv() {
+        match command {
+            PersistenceCommand::Persist {
+                bundle: next_bundle,
+                reply,
+            } => {
+                bundle = next_bundle;
+                replies.push(reply);
+            }
+            command => {
+                pending_command = Some(command);
+                break;
+            }
+        }
+    }
+    CoalescedPersistCommand {
+        bundle,
+        replies,
+        pending_command,
+    }
+}
+
+fn send_persist_result(
+    replies: Vec<oneshot::Sender<Result<(), NodeError>>>,
+    result: Result<(), NodeError>,
+) {
+    match result {
+        Ok(()) => {
+            for reply in replies {
+                let _ = reply.send(Ok(()));
+            }
+        }
+        Err(err) => {
+            let message = err.to_string();
+            let mut replies = replies.into_iter();
+            if let Some(reply) = replies.next() {
+                let _ = reply.send(Err(err));
+            }
+            for reply in replies {
+                let _ = reply.send(Err(NodeError::Storage(message.clone())));
             }
         }
     }
@@ -330,4 +394,82 @@ pub(crate) fn clear_test_persist_delay() {
 pub(super) fn delay_before_persist_for_tests() {
     #[cfg(test)]
     maybe_test_delay_before_persist();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{desired_snapshot_revision_only, encode_archive_to_vec};
+    use orion::{
+        Revision,
+        control_plane::{
+            AppliedClusterState, DesiredClusterState, MutationBatch, ObservedClusterState,
+        },
+    };
+    use std::io::Cursor;
+
+    #[test]
+    fn coalesce_queued_persist_commands_keeps_latest_bundle_before_next_artifact() {
+        let (sender, mut receiver) = mpsc::channel(8);
+        let (first_reply, _first_rx) = oneshot::channel();
+        let (second_reply, _second_rx) = oneshot::channel();
+        let (third_reply, _third_rx) = oneshot::channel();
+        let (artifact_reply, _artifact_rx) = oneshot::channel();
+        sender
+            .try_send(PersistenceCommand::Persist {
+                bundle: Box::new(test_bundle(Revision::new(2))),
+                reply: second_reply,
+            })
+            .expect("queued persist should send");
+        sender
+            .try_send(PersistenceCommand::Persist {
+                bundle: Box::new(test_bundle(Revision::new(3))),
+                reply: third_reply,
+            })
+            .expect("queued persist should send");
+        sender
+            .try_send(PersistenceCommand::PutArtifactStream {
+                artifact: ArtifactRecord::builder("artifact.coalesce").build(),
+                content: Box::new(Cursor::new(Vec::<u8>::new())),
+                reply: artifact_reply,
+            })
+            .expect("queued artifact should send");
+
+        let coalesced = coalesce_queued_persist_commands(
+            Box::new(test_bundle(Revision::new(1))),
+            first_reply,
+            &mut receiver,
+        );
+
+        assert_eq!(coalesced.bundle.observed_revision, Revision::new(3));
+        assert_eq!(coalesced.replies.len(), 3);
+        assert!(matches!(
+            coalesced.pending_command,
+            Some(PersistenceCommand::PutArtifactStream { .. })
+        ));
+    }
+
+    fn test_bundle(revision: Revision) -> EncodedPersistedStateBundle {
+        let desired = DesiredClusterState {
+            revision,
+            ..Default::default()
+        };
+        let observed = ObservedClusterState {
+            revision,
+            ..Default::default()
+        };
+        let applied = AppliedClusterState { revision };
+        let history = Vec::<MutationBatch>::new();
+        EncodedPersistedStateBundle {
+            desired: desired_snapshot_revision_only(&desired),
+            observed_revision: observed.revision,
+            observed_bytes: Some(encode_archive_to_vec(&observed).expect("observed should encode")),
+            applied_revision: applied.revision,
+            applied_bytes: Some(encode_archive_to_vec(&applied).expect("applied should encode")),
+            history_bytes: Some(encode_archive_to_vec(&history).expect("history should encode")),
+            baseline_revision: Revision::ZERO,
+            baseline_bytes: None,
+            snapshot_rewrite_cadence: 1,
+        }
+    }
 }

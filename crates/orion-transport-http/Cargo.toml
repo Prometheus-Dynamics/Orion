@@ -28,7 +28,6 @@ reqwest.workspace = true
 serde.workspace = true
 rkyv.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
 tokio-rustls.workspace = true

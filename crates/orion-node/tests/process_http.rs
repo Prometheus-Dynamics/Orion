@@ -88,6 +88,7 @@ async fn orion_node_binary_reports_observability_snapshot() {
 async fn orion_node_binary_observability_tracks_malformed_http_and_ipc_inputs() {
     let process = spawn_node("node.transport.obs", None, &[]);
 
+    orion_transport_common::install_rustls_crypto_provider();
     let response = reqwest::Client::new()
         .post(format!("{}/v1/control/hello", process.http_endpoint))
         .body("not-rkyv")

@@ -1,7 +1,8 @@
 use super::*;
 use orion_control_plane::{
-    ClientEvent, ClientEventKind, ClusterStateEnvelope, ControlMessage, DesiredClusterState,
-    ExecutorWorkloadQuery, LeaseRecord, ProviderLeaseQuery, StateSnapshot, StateWatch,
+    ClientEvent, ClientEventKind, ClientHello, ClusterStateEnvelope, ControlMessage,
+    DesiredClusterState, ExecutorWorkloadQuery, LeaseRecord, ProviderLeaseQuery, StateSnapshot,
+    StateWatch,
 };
 use orion_core::{ClientName, SessionId, decode_from_slice, encode_to_vec};
 use orion_transport_ipc::{read_control_frame, write_control_frame};
@@ -232,6 +233,7 @@ async fn local_provider_service_bootstraps_leases_and_state_then_watches_both() 
         stream_listener,
         provider.clone(),
         vec![watched_lease.clone()],
+        bootstrap_snapshot.clone(),
         watched_snapshot.clone(),
         5,
         9,
@@ -590,7 +592,7 @@ async fn serve_provider_bootstrap_queries(
     leases: Vec<LeaseRecord>,
     snapshot: StateSnapshot,
 ) {
-    for _ in 0..4 {
+    for _ in 0..2 {
         let (mut stream, _) = listener.accept().await.expect("unary accept should work");
         let request = read_unary_envelope(&mut stream).await;
         let message = match request.message {
@@ -635,28 +637,27 @@ async fn serve_provider_and_control_watch_streams(
     listener: UnixListener,
     provider: ProviderRecord,
     leases: Vec<LeaseRecord>,
+    bootstrap_snapshot: StateSnapshot,
     snapshot: StateSnapshot,
     lease_sequence: u64,
     snapshot_sequence: u64,
 ) {
     let mut held_streams = Vec::new();
-    for stream_index in 0..2 {
+    let mut watch_streams = 0;
+    while watch_streams < 2 {
         let (mut stream, _) = listener.accept().await.expect("stream accept should work");
         let hello = read_control_frame(&mut stream)
             .await
             .expect("hello frame should decode")
             .expect("hello frame should exist");
-        let role = if stream_index == 0 {
-            ClientRole::Provider
-        } else {
-            ClientRole::ControlPlane
+        let ControlMessage::ClientHello(ClientHello {
+            role, client_name, ..
+        }) = &hello.message
+        else {
+            panic!("unexpected stream hello: {:?}", hello.message);
         };
-        let client_name = if stream_index == 0 {
-            "peripherals-leases"
-        } else {
-            "peripherals-control"
-        };
-        write_welcome(&mut stream, hello.source, role, client_name).await;
+        let client_name = client_name.as_str().to_owned();
+        write_welcome(&mut stream, hello.source, role.clone(), &client_name).await;
 
         let request = read_control_frame(&mut stream)
             .await
@@ -679,8 +680,22 @@ async fn serve_provider_and_control_watch_streams(
                     event: ClientEventKind::StateSnapshot(Box::new(snapshot.clone())),
                 }])
             }
+            ControlMessage::QueryStateSnapshot => {
+                write_control_frame(
+                    &mut stream,
+                    &ControlEnvelope {
+                        source: LocalAddress::new("orion"),
+                        destination: request.source,
+                        message: ControlMessage::Snapshot(bootstrap_snapshot.clone()),
+                    },
+                )
+                .await
+                .expect("snapshot response should send");
+                continue;
+            }
             other => panic!("unexpected watch request: {other:?}"),
         };
+        watch_streams += 1;
         write_control_frame(
             &mut stream,
             &ControlEnvelope {

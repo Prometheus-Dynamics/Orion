@@ -31,7 +31,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "syn
 quinn.workspace = true
 rustls = { workspace = true, features = ["ring"] }
 rustls-pki-types.workspace = true
-rustls-pemfile.workspace = true
 rcgen = { workspace = true, optional = true }
 
 [dev-dependencies]

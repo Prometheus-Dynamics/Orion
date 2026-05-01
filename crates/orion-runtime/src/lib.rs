@@ -230,13 +230,14 @@ mod tests {
         let mut workload = workload_record(DesiredState::Running);
         workload.observed_state = WorkloadObservedState::Running;
 
-        store
+        let changed = store
             .apply_executor_snapshot(ExecutorSnapshot {
                 executor: executor_record(),
                 workloads: vec![workload.clone()],
                 resources: Vec::new(),
             })
             .expect("executor snapshot should apply");
+        assert!(changed);
 
         assert_eq!(
             store
@@ -247,6 +248,35 @@ mod tests {
                 .observed_state,
             WorkloadObservedState::Running
         );
+
+        let changed = store
+            .apply_executor_snapshot(ExecutorSnapshot {
+                executor: executor_record(),
+                workloads: vec![workload.clone()],
+                resources: Vec::new(),
+            })
+            .expect("stable executor snapshot should apply");
+        assert!(!changed);
+    }
+
+    #[test]
+    fn executor_snapshot_prunes_observed_local_workloads_that_are_no_longer_present_or_desired() {
+        let mut store = runtime_store();
+        let mut stale = workload_record(DesiredState::Running);
+        stale.workload_id = WorkloadId::new("workload.stale");
+        stale.observed_state = WorkloadObservedState::Running;
+        store.observed.put_workload(stale.clone());
+
+        let changed = store
+            .apply_executor_snapshot(ExecutorSnapshot {
+                executor: executor_record(),
+                workloads: Vec::new(),
+                resources: Vec::new(),
+            })
+            .expect("executor snapshot should apply");
+
+        assert!(changed);
+        assert!(!store.observed.workloads.contains_key(&stale.workload_id));
     }
 
     #[test]

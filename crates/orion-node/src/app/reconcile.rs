@@ -30,14 +30,14 @@ impl NodeApp {
             let _span = info_span!("reconcile", node = %self.config.node_id).entered();
             self.collect_runtime_state()?
         };
-        self.apply_runtime_snapshots(&collected)?;
+        let runtime_changed = self.apply_runtime_snapshots(&collected)?;
         let reconcile = {
             let store = self.store_read();
             self.runtime.reconcile(&store)?
         };
 
         let result = self
-            .apply_reconcile_report_async(&collected.executors, reconcile)
+            .apply_reconcile_report_async(&collected.executors, reconcile, runtime_changed)
             .await;
         match &result {
             Ok(_) => self.record_reconcile_success(started.elapsed()),
@@ -50,14 +50,14 @@ impl NodeApp {
         let _span = info_span!("reconcile", node = %self.config.node_id).entered();
         let started = std::time::Instant::now();
         let collected = self.collect_runtime_state()?;
-        self.apply_runtime_snapshots(&collected)?;
+        let runtime_changed = self.apply_runtime_snapshots(&collected)?;
 
         let reconcile = {
             let store = self.store_read();
             self.runtime.reconcile(&store)?
         };
 
-        let result = self.apply_reconcile_report(&collected.executors, reconcile);
+        let result = self.apply_reconcile_report(&collected.executors, reconcile, runtime_changed);
         match &result {
             Ok(_) => self.record_reconcile_success(started.elapsed()),
             Err(err) => self.record_reconcile_failure(started.elapsed(), err),
@@ -69,6 +69,7 @@ impl NodeApp {
         &self,
         executors: &[Arc<dyn orion::runtime::ExecutorIntegration + Send + Sync>],
         report: ReconcileReport,
+        runtime_changed: bool,
     ) -> Result<NodeTickReport, NodeError> {
         // Executor integrations are still synchronous. Async reconcile only makes persistence
         // asynchronous after command application; executor callbacks themselves must stay cheap.
@@ -80,10 +81,16 @@ impl NodeApp {
             }
         }
 
+        let mut state_changed = runtime_changed;
         self.with_store_mut(|store| {
-            store.mark_applied_revision(report.desired_revision);
+            if store.applied.revision != report.desired_revision {
+                store.mark_applied_revision(report.desired_revision);
+                state_changed = true;
+            }
         });
-        self.persist_state_async().await?;
+        if state_changed {
+            self.persist_state_async().await?;
+        }
 
         Ok(NodeTickReport {
             local_node_id: report.local_node_id,
@@ -97,6 +104,7 @@ impl NodeApp {
         &self,
         executors: &[Arc<dyn orion::runtime::ExecutorIntegration + Send + Sync>],
         report: ReconcileReport,
+        runtime_changed: bool,
     ) -> Result<NodeTickReport, NodeError> {
         let executors_by_id = executor_index(executors);
         for command in &report.commands {
@@ -105,10 +113,16 @@ impl NodeApp {
             }
         }
 
+        let mut state_changed = runtime_changed;
         self.with_store_mut(|store| {
-            store.mark_applied_revision(report.desired_revision);
+            if store.applied.revision != report.desired_revision {
+                store.mark_applied_revision(report.desired_revision);
+                state_changed = true;
+            }
         });
-        self.persist_state()?;
+        if state_changed {
+            self.persist_state()?;
+        }
 
         Ok(NodeTickReport {
             local_node_id: report.local_node_id,
@@ -651,15 +665,19 @@ impl NodeApp {
         })
     }
 
-    fn apply_runtime_snapshots(&self, collected: &CollectedRuntimeState) -> Result<(), NodeError> {
-        self.with_store_mut(|store| -> Result<(), NodeError> {
+    fn apply_runtime_snapshots(
+        &self,
+        collected: &CollectedRuntimeState,
+    ) -> Result<bool, NodeError> {
+        self.with_store_mut(|store| -> Result<bool, NodeError> {
+            let mut changed = false;
             for provider_snapshot in &collected.provider_snapshots {
-                store.apply_provider_snapshot(provider_snapshot.clone())?;
+                changed |= store.apply_provider_snapshot(provider_snapshot.clone())?;
             }
             for executor_snapshot in &collected.executor_snapshots {
-                store.apply_executor_snapshot(executor_snapshot.clone())?;
+                changed |= store.apply_executor_snapshot(executor_snapshot.clone())?;
             }
-            Ok(())
+            Ok(changed)
         })
     }
 
@@ -702,13 +720,17 @@ impl NodeApp {
         &self,
         update: ObservedStateUpdate,
     ) -> Result<HttpResponsePayload, NodeError> {
+        let mut state_changed =
+            self.with_store_mut(|store| merge_observed_state(&mut store.observed, update.observed));
         self.with_store_mut(|store| {
-            merge_observed_state(&mut store.observed, update.observed);
             if update.applied.revision > store.applied.revision {
                 store.applied = update.applied;
+                state_changed = true;
             }
         });
-        self.persist_state()?;
+        if state_changed {
+            self.persist_state()?;
+        }
         Ok(HttpResponsePayload::Accepted)
     }
 }

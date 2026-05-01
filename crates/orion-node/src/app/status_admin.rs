@@ -621,6 +621,8 @@ fn empty_communication_metrics() -> CommunicationMetricsSnapshot {
 }
 
 fn host_metrics_snapshot() -> HostMetricsSnapshot {
+    let process_status = process_status_snapshot();
+    let process_smaps = process_smaps_rollup_snapshot();
     HostMetricsSnapshot {
         hostname: read_trimmed("/proc/sys/kernel/hostname"),
         os_name: std::env::consts::OS.to_owned(),
@@ -641,7 +643,30 @@ fn host_metrics_snapshot() -> HostMetricsSnapshot {
                 .saturating_mul(page_size_bytes())
                 .min(u64::MAX as usize) as u64
         }),
+        process_pss_bytes: process_smaps.pss_bytes,
+        process_private_dirty_bytes: process_smaps.private_dirty_bytes,
+        process_anonymous_bytes: process_smaps.anonymous_bytes,
+        process_vm_size_bytes: process_status.vm_size_bytes,
+        process_vm_data_bytes: process_status.vm_data_bytes,
+        process_vm_hwm_bytes: process_status.vm_hwm_bytes,
+        process_threads: process_status.threads,
+        process_fd_count: process_fd_count(),
     }
+}
+
+#[derive(Default)]
+struct ProcessStatusSnapshot {
+    vm_size_bytes: Option<u64>,
+    vm_data_bytes: Option<u64>,
+    vm_hwm_bytes: Option<u64>,
+    threads: Option<u64>,
+}
+
+#[derive(Default)]
+struct ProcessSmapsRollupSnapshot {
+    pss_bytes: Option<u64>,
+    private_dirty_bytes: Option<u64>,
+    anonymous_bytes: Option<u64>,
 }
 
 fn read_trimmed(path: &str) -> Option<String> {
@@ -686,6 +711,63 @@ fn proc_meminfo_kib(key: &str) -> Option<u64> {
 fn process_rss_pages() -> Option<usize> {
     let contents = fs::read_to_string("/proc/self/statm").ok()?;
     contents.split_whitespace().nth(1)?.parse().ok()
+}
+
+fn process_status_snapshot() -> ProcessStatusSnapshot {
+    let mut snapshot = ProcessStatusSnapshot::default();
+    let Ok(contents) = fs::read_to_string("/proc/self/status") else {
+        return snapshot;
+    };
+    for line in contents.lines() {
+        if let Some(value) = proc_status_kib_line(line, "VmSize") {
+            snapshot.vm_size_bytes = Some(kib_to_bytes(value));
+        } else if let Some(value) = proc_status_kib_line(line, "VmData") {
+            snapshot.vm_data_bytes = Some(kib_to_bytes(value));
+        } else if let Some(value) = proc_status_kib_line(line, "VmHWM") {
+            snapshot.vm_hwm_bytes = Some(kib_to_bytes(value));
+        } else if let Some(value) = proc_status_plain_line(line, "Threads") {
+            snapshot.threads = Some(value);
+        }
+    }
+    snapshot
+}
+
+fn process_smaps_rollup_snapshot() -> ProcessSmapsRollupSnapshot {
+    let mut snapshot = ProcessSmapsRollupSnapshot::default();
+    let Ok(contents) = fs::read_to_string("/proc/self/smaps_rollup") else {
+        return snapshot;
+    };
+    for line in contents.lines() {
+        if let Some(value) = proc_status_kib_line(line, "Pss") {
+            snapshot.pss_bytes = Some(kib_to_bytes(value));
+        } else if let Some(value) = proc_status_kib_line(line, "Private_Dirty") {
+            snapshot.private_dirty_bytes = Some(kib_to_bytes(value));
+        } else if let Some(value) = proc_status_kib_line(line, "Anonymous") {
+            snapshot.anonymous_bytes = Some(kib_to_bytes(value));
+        }
+    }
+    snapshot
+}
+
+fn proc_status_kib_line(line: &str, key: &str) -> Option<u64> {
+    let value = proc_status_plain_line(line, key)?;
+    line.split_whitespace()
+        .nth(2)
+        .filter(|unit| *unit == "kB")?;
+    Some(value)
+}
+
+fn proc_status_plain_line(line: &str, key: &str) -> Option<u64> {
+    let (line_key, rest) = line.split_once(':')?;
+    if line_key != key {
+        return None;
+    }
+    rest.split_whitespace().next()?.parse().ok()
+}
+
+fn process_fd_count() -> Option<u64> {
+    let entries = fs::read_dir("/proc/self/fd").ok()?;
+    Some(entries.filter_map(Result::ok).count() as u64)
 }
 
 fn page_size_bytes() -> usize {
