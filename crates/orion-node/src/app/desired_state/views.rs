@@ -4,7 +4,7 @@ use crate::app::{
     desired_sync::{section_fingerprints, section_mask, summarize_desired_state_for_sections},
 };
 use orion::{
-    ArchiveEncode, Revision,
+    ArchiveEncode, NodeId, Revision,
     control_plane::{
         ClusterStateEnvelope, DesiredClusterState, DesiredStateMutation, DesiredStateSection,
         DesiredStateSummary, ObservedClusterState, StateSnapshot,
@@ -12,7 +12,7 @@ use orion::{
     encode_to_vec,
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     hash::{Hash, Hasher},
 };
 
@@ -284,4 +284,137 @@ pub(crate) fn merge_observed_state(
         }
     }
     changed
+}
+
+pub(crate) fn merge_peer_observed_state(
+    target: &mut ObservedClusterState,
+    desired: &DesiredClusterState,
+    peer_node_id: &NodeId,
+    source: ObservedClusterState,
+) -> bool {
+    let mut changed = false;
+    if target.revision != source.revision {
+        target.revision = source.revision;
+        changed = true;
+    }
+
+    let source_node_ids: BTreeSet<_> = source.nodes.keys().cloned().collect();
+    let source_workload_ids: BTreeSet<_> = source.workloads.keys().cloned().collect();
+    let source_resource_ids: BTreeSet<_> = source.resources.keys().cloned().collect();
+    let source_lease_ids: BTreeSet<_> = source.leases.keys().cloned().collect();
+    let peer_provider_ids: BTreeSet<_> = desired
+        .providers
+        .values()
+        .filter(|provider| &provider.node_id == peer_node_id)
+        .map(|provider| provider.provider_id.clone())
+        .collect();
+    let peer_executor_ids: BTreeSet<_> = desired
+        .executors
+        .values()
+        .filter(|executor| &executor.node_id == peer_node_id)
+        .map(|executor| executor.executor_id.clone())
+        .collect();
+    let peer_desired_resource_ids: BTreeSet<_> = desired
+        .resources
+        .iter()
+        .filter(|(_, resource)| {
+            peer_provider_ids.contains(&resource.provider_id)
+                || resource
+                    .realized_by_executor_id
+                    .as_ref()
+                    .is_some_and(|executor_id| peer_executor_ids.contains(executor_id))
+        })
+        .map(|(resource_id, _)| resource_id.clone())
+        .collect();
+
+    changed |= retain_with_change(&mut target.nodes, |node_id, _| {
+        node_id != peer_node_id || source_node_ids.contains(node_id)
+    });
+    changed |= retain_with_change(&mut target.workloads, |_, workload| {
+        workload.assigned_node_id.as_ref() != Some(peer_node_id)
+            || source_workload_ids.contains(&workload.workload_id)
+    });
+    changed |= retain_with_change(&mut target.resources, |resource_id, resource| {
+        let peer_owned = peer_provider_ids.contains(&resource.provider_id)
+            || resource
+                .realized_by_executor_id
+                .as_ref()
+                .is_some_and(|executor_id| peer_executor_ids.contains(executor_id))
+            || peer_desired_resource_ids.contains(resource_id);
+        !peer_owned || source_resource_ids.contains(resource_id)
+    });
+    changed |= retain_with_change(&mut target.leases, |resource_id, lease| {
+        let peer_owned = peer_desired_resource_ids.contains(resource_id)
+            || source_resource_ids.contains(resource_id)
+            || lease.holder_node_id.as_ref() == Some(peer_node_id);
+        !peer_owned || source_lease_ids.contains(resource_id)
+    });
+
+    merge_observed_state(target, source) || changed
+}
+
+fn retain_with_change<K, V>(map: &mut BTreeMap<K, V>, mut keep: impl FnMut(&K, &V) -> bool) -> bool
+where
+    K: Ord,
+{
+    let before = map.len();
+    map.retain(|key, value| keep(key, value));
+    map.len() != before
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_peer_observed_state;
+    use orion::control_plane::{
+        DesiredClusterState, DesiredState, ExecutorRecord, LeaseRecord, NodeRecord,
+        ObservedClusterState, ProviderRecord, ResourceRecord, WorkloadObservedState,
+        WorkloadRecord,
+    };
+    use orion_core::{ExecutorId, NodeId, ProviderId, ResourceType, RuntimeType};
+
+    #[test]
+    fn peer_observed_merge_prunes_records_missing_from_peer_snapshot() {
+        let peer_node_id = NodeId::new("node-b");
+        let mut desired = DesiredClusterState::default();
+        desired.put_node(NodeRecord::builder("node-b").build());
+        desired.put_provider(ProviderRecord {
+            provider_id: ProviderId::new("provider.peer"),
+            node_id: peer_node_id.clone(),
+            resource_types: vec![ResourceType::new("camera")],
+        });
+        desired.put_executor(ExecutorRecord {
+            executor_id: ExecutorId::new("executor.peer"),
+            node_id: peer_node_id.clone(),
+            runtime_types: vec![RuntimeType::new("camera.runtime")],
+        });
+
+        let mut target = ObservedClusterState::default();
+        target.put_node(NodeRecord::builder("node-b").build());
+        target.put_workload(
+            WorkloadRecord::builder("workload.old", "camera.runtime", "artifact.old")
+                .desired_state(DesiredState::Running)
+                .observed_state(WorkloadObservedState::Running)
+                .assigned_to("node-b")
+                .build(),
+        );
+        target.put_resource(
+            ResourceRecord::builder("resource.old", "camera", "provider.peer")
+                .endpoint("tcp://127.0.0.1:1234")
+                .build(),
+        );
+        target.put_lease(
+            LeaseRecord::builder("resource.old")
+                .holder_node("node-b")
+                .build(),
+        );
+
+        let source = ObservedClusterState::default();
+        let changed = merge_peer_observed_state(&mut target, &desired, &peer_node_id, source);
+
+        assert!(changed);
+        assert!(target.nodes.is_empty());
+        assert!(target.workloads.is_empty());
+        assert!(target.resources.is_empty());
+        assert!(target.leases.is_empty());
+    }
 }

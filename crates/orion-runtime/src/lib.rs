@@ -613,6 +613,31 @@ mod tests {
     }
 
     #[test]
+    fn desired_replacement_prunes_observed_records_that_lost_ownership() {
+        let mut store = runtime_store();
+        let workload = workload_record(DesiredState::Running);
+        store.desired.put_workload(workload.clone());
+        store.observed.put_workload(workload);
+        store.observed.put_resource(
+            ResourceRecord::builder("resource.derived", "imu.sample", "provider.local")
+                .realized_by_executor("executor.local")
+                .source_workload("workload.pose")
+                .build(),
+        );
+        store
+            .observed
+            .put_lease(orion_control_plane::LeaseRecord::builder("resource.derived").build());
+
+        let mut desired = DesiredClusterState::default();
+        desired.put_node(orion_control_plane::NodeRecord::builder("node-a").build());
+        store.replace_desired(desired);
+
+        assert!(store.observed.workloads.is_empty());
+        assert!(store.observed.resources.is_empty());
+        assert!(store.observed.leases.is_empty());
+    }
+
+    #[test]
     fn unknown_executor_snapshot_is_rejected() {
         let mut store = runtime_store();
         let err = store

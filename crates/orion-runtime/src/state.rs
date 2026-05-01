@@ -73,7 +73,34 @@ impl LocalRuntimeStore {
             .retain(|provider_id, _| self.desired.providers.contains_key(provider_id));
         self.executor_sync_revisions
             .retain(|executor_id, _| self.desired.executors.contains_key(executor_id));
+        self.prune_observed_for_desired();
         self.refresh_observed_revision();
+    }
+
+    fn prune_observed_for_desired(&mut self) {
+        let desired_node_ids: BTreeSet<_> = self.desired.nodes.keys().cloned().collect();
+        let desired_workload_ids: BTreeSet<_> = self.desired.workloads.keys().cloned().collect();
+        let desired_resource_ids: BTreeSet<_> = self.desired.resources.keys().cloned().collect();
+        let desired_provider_ids: BTreeSet<_> = self.desired.providers.keys().cloned().collect();
+        let desired_executor_ids: BTreeSet<_> = self.desired.executors.keys().cloned().collect();
+
+        self.observed
+            .nodes
+            .retain(|node_id, _| desired_node_ids.contains(node_id));
+        self.observed
+            .workloads
+            .retain(|workload_id, _| desired_workload_ids.contains(workload_id));
+        self.observed.resources.retain(|resource_id, resource| {
+            desired_resource_ids.contains(resource_id)
+                || desired_provider_ids.contains(&resource.provider_id)
+                || resource
+                    .realized_by_executor_id
+                    .as_ref()
+                    .is_some_and(|executor_id| desired_executor_ids.contains(executor_id))
+        });
+        self.observed
+            .leases
+            .retain(|resource_id, _| self.observed.resources.contains_key(resource_id));
     }
 
     pub fn apply_provider_snapshot(

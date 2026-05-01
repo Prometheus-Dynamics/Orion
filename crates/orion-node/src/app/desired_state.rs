@@ -12,7 +12,8 @@ use orion::{
     runtime::LocalRuntimeStore,
 };
 pub(crate) use views::{
-    diff_desired_cluster_state, entry_fingerprint, merge_observed_state, summarize_section,
+    diff_desired_cluster_state, entry_fingerprint, merge_observed_state, merge_peer_observed_state,
+    summarize_section,
 };
 
 pub(super) struct DesiredStateTxn<'a> {

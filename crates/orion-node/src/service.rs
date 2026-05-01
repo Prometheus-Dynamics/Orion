@@ -411,10 +411,15 @@ impl RequestService<ControlRequest> for NodeControlService {
                         .map(|message| ControlResponse::Local(Box::new(message)))
                 }
             },
-            ControlRequestBody::ObservedUpdate(update) => self
-                .app
-                .apply_observed_update(update)
-                .map(|response| ControlResponse::Http(Box::new(response))),
+            ControlRequestBody::ObservedUpdate(update) => {
+                let peer_node_id = context
+                    .authenticated_peer
+                    .as_ref()
+                    .map(|peer| &peer.node_id);
+                self.app
+                    .apply_observed_update_from_peer(peer_node_id, update)
+                    .map(|response| ControlResponse::Http(Box::new(response)))
+            }
             ControlRequestBody::Health => Ok(ControlResponse::Http(Box::new(
                 HttpResponsePayload::Health(self.app.health_snapshot()),
             ))),

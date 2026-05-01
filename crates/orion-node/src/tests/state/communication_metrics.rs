@@ -189,12 +189,23 @@ async fn observability_reports_ipc_stream_communication_metrics() {
         .expect("welcome frame should be returned");
     assert!(matches!(welcome.message, ControlMessage::ClientWelcome(_)));
 
-    let snapshot = app.observability_snapshot();
-    let ipc_stream = snapshot
-        .communication
-        .iter()
-        .find(|endpoint| endpoint.id == "ipc/local-stream/executor.metrics")
-        .expect("local stream communication endpoint should be reported");
+    let mut ipc_stream = None;
+    for _ in 0..50 {
+        let snapshot = app.observability_snapshot();
+        let endpoint = snapshot
+            .communication
+            .into_iter()
+            .find(|endpoint| endpoint.id == "ipc/local-stream/executor.metrics")
+            .expect("local stream communication endpoint should be reported");
+        if endpoint.metrics.messages_sent_total == 1
+            && endpoint.metrics.messages_received_total == 1
+        {
+            ipc_stream = Some(endpoint);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let ipc_stream = ipc_stream.expect("local stream metrics should be recorded");
     assert_eq!(ipc_stream.transport, "ipc");
     assert_eq!(ipc_stream.scope, "local_stream");
     assert!(ipc_stream.connected);

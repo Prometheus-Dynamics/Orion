@@ -1,10 +1,10 @@
 use super::{
     NodeApp, NodeError, NodeTickReport,
-    desired_state::{diff_desired_cluster_state, merge_observed_state},
+    desired_state::{diff_desired_cluster_state, merge_observed_state, merge_peer_observed_state},
     desired_sync::merge_desired_cluster_state,
 };
 use orion::{
-    ResourceId, Revision,
+    NodeId, ResourceId, Revision,
     control_plane::{
         ControlMessage, DesiredClusterState, MutationBatch, ObservedStateUpdate, StateSnapshot,
     },
@@ -716,12 +716,28 @@ impl NodeApp {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_observed_update(
         &self,
         update: ObservedStateUpdate,
     ) -> Result<HttpResponsePayload, NodeError> {
-        let mut state_changed =
-            self.with_store_mut(|store| merge_observed_state(&mut store.observed, update.observed));
+        self.apply_observed_update_from_peer(None, update)
+    }
+
+    pub(crate) fn apply_observed_update_from_peer(
+        &self,
+        peer_node_id: Option<&NodeId>,
+        update: ObservedStateUpdate,
+    ) -> Result<HttpResponsePayload, NodeError> {
+        let mut state_changed = self.with_store_mut(|store| match peer_node_id {
+            Some(peer_node_id) => merge_peer_observed_state(
+                &mut store.observed,
+                &store.desired,
+                peer_node_id,
+                update.observed,
+            ),
+            None => merge_observed_state(&mut store.observed, update.observed),
+        });
         self.with_store_mut(|store| {
             if update.applied.revision > store.applied.revision {
                 store.applied = update.applied;
