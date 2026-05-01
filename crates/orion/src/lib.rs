@@ -133,10 +133,13 @@ pub mod transport {
     #[cfg(feature = "transport-ipc")]
     pub mod ipc {
         pub use orion_transport_ipc::{
-            ControlEnvelope, DataEnvelope, IpcTransport, IpcTransportError, LocalAddress,
-            LocalControlTransport, LocalDataTransport, UnixControlClient, UnixControlHandler,
-            UnixControlServer, UnixControlStreamClient, UnixPeerIdentity, read_control_frame,
-            read_control_frame_with_limit, write_control_frame, write_control_frame_with_limit,
+            ControlEnvelope, DEFAULT_UNIX_FD_FRAME_MAX_FDS,
+            DEFAULT_UNIX_FD_FRAME_MAX_PAYLOAD_BYTES, DataEnvelope, IpcTransport, IpcTransportError,
+            LocalAddress, LocalControlTransport, LocalDataTransport, UnixControlClient,
+            UnixControlHandler, UnixControlServer, UnixControlStreamClient, UnixFdFrame,
+            UnixPeerIdentity, read_control_frame, read_control_frame_with_limit,
+            recv_unix_fd_frame, recv_unix_fd_frame_async, send_unix_fd_frame,
+            send_unix_fd_frame_async, write_control_frame, write_control_frame_with_limit,
         };
     }
 

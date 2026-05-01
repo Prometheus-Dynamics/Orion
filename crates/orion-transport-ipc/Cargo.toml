@@ -21,6 +21,7 @@ orion-control-plane.workspace = true
 orion-data-plane.workspace = true
 orion-core.workspace = true
 orion-transport-common.workspace = true
+libc.workspace = true
 serde.workspace = true
 rkyv.workspace = true
 thiserror.workspace = true

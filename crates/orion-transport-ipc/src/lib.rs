@@ -2,6 +2,7 @@ mod address;
 mod control;
 mod data;
 mod error;
+mod fd_frame;
 mod memory;
 mod unix;
 
@@ -9,6 +10,10 @@ pub use address::LocalAddress;
 pub use control::{ControlEnvelope, LocalControlTransport, UnixPeerIdentity};
 pub use data::{DataEnvelope, LocalDataTransport};
 pub use error::IpcTransportError;
+pub use fd_frame::{
+    DEFAULT_UNIX_FD_FRAME_MAX_FDS, DEFAULT_UNIX_FD_FRAME_MAX_PAYLOAD_BYTES, UnixFdFrame,
+    recv_unix_fd_frame, recv_unix_fd_frame_async, send_unix_fd_frame, send_unix_fd_frame_async,
+};
 pub use memory::IpcTransport;
 pub use unix::{
     UnixControlClient, UnixControlHandler, UnixControlServer, UnixControlStreamClient,

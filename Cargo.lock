@@ -1357,6 +1357,7 @@ name = "orion-transport-ipc"
 version = "1.0.0"
 dependencies = [
  "criterion",
+ "libc",
  "orion-control-plane",
  "orion-core",
  "orion-data-plane",
