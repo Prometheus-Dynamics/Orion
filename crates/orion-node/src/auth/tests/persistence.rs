@@ -109,6 +109,47 @@ fn outbound_nonce_persists_when_state_dir_is_reused() {
 }
 
 #[test]
+fn loaded_seen_nonces_are_clamped_to_runtime_limit() {
+    let state_dir = temp_state_dir("nonce-load-clamp");
+    let storage = NodeStorage::new(state_dir.clone());
+    let peer_id = NodeId::new("node-peer");
+    let nonce_count = NONCE_CACHE_LIMIT + 32;
+    let persisted_nonces = (0..nonce_count as u64).collect::<Vec<_>>();
+    let mut seen_nonces = std::collections::BTreeMap::new();
+    seen_nonces.insert(peer_id.clone(), persisted_nonces);
+    let store = TrustedPeerStore {
+        peers: std::collections::BTreeMap::new(),
+        tls_root_certs: std::collections::BTreeMap::new(),
+        revoked: std::collections::BTreeSet::new(),
+        seen_nonces,
+        next_outbound_nonce: 1,
+    };
+    let bytes = orion::encode_to_vec(&store).expect("trust store should encode");
+    let trust_store_path = storage.trust_store_path();
+    fs::create_dir_all(
+        trust_store_path
+            .parent()
+            .expect("trust store should have parent directory"),
+    )
+    .expect("state directory should be created");
+    fs::write(&trust_store_path, bytes).expect("oversized trust store should be written");
+
+    let loaded = load_seen_nonces(Some(&storage)).expect("seen nonces should load");
+    let loaded_nonces = loaded
+        .get(&peer_id)
+        .expect("peer nonce window should be retained");
+
+    assert_eq!(loaded_nonces.len(), NONCE_CACHE_LIMIT);
+    assert_eq!(loaded_nonces.front().copied(), Some(32));
+    assert_eq!(
+        loaded_nonces.back().copied(),
+        Some((nonce_count - 1) as u64)
+    );
+
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn trusted_peer_store_load_ignores_stale_temp_files() {
     let state_dir = temp_state_dir("trust-store-stale-temp");
     let storage = NodeStorage::new(state_dir.clone());

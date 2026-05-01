@@ -1,6 +1,6 @@
 use super::{
-    IDENTITY_FILE, NodeSecurity, TRUST_STORE_FILE, TrustedPeerState, TrustedPeerStore,
-    crypto::parse_public_key_bytes,
+    IDENTITY_FILE, NONCE_CACHE_LIMIT, NodeSecurity, TRUST_STORE_FILE, TrustedPeerState,
+    TrustedPeerStore, crypto::parse_public_key_bytes,
 };
 use crate::blocking::{
     WorkerThread, request_worker_operation_async, request_worker_operation_blocking,
@@ -238,7 +238,11 @@ pub(super) fn load_seen_nonces(
     Ok(store
         .seen_nonces
         .into_iter()
-        .map(|(node_id, nonces)| (node_id, nonces.into_iter().collect()))
+        .filter_map(|(node_id, nonces)| {
+            let skip = nonces.len().saturating_sub(NONCE_CACHE_LIMIT);
+            let retained = nonces.into_iter().skip(skip).collect::<VecDeque<_>>();
+            (!retained.is_empty()).then_some((node_id, retained))
+        })
         .collect())
 }
 
