@@ -76,10 +76,9 @@ fn workload_section_fingerprint(
     workloads: &BTreeMap<WorkloadId, WorkloadRecord>,
     tombstones: &BTreeMap<WorkloadId, Revision>,
 ) -> Result<u64, NodeError> {
-    let bytes = encode_to_vec(&(workloads.clone(), tombstones.clone()))
-        .map_err(|err| NodeError::Storage(err.to_string()))?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
+    section_fingerprint(workloads)?.hash(&mut hasher);
+    section_fingerprint(tombstones)?.hash(&mut hasher);
     Ok(hasher.finish())
 }
 

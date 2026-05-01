@@ -57,10 +57,7 @@ fn desired_fingerprint(desired: &orion::control_plane::DesiredClusterState) -> u
     let section_fingerprints = orion::control_plane::DesiredStateSectionFingerprints {
         nodes: entry_fingerprint(&desired.nodes),
         artifacts: entry_fingerprint(&desired.artifacts),
-        workloads: entry_fingerprint(&(
-            desired.workloads.clone(),
-            desired.workload_tombstones.clone(),
-        )),
+        workloads: workload_section_fingerprint(desired),
         resources: entry_fingerprint(&desired.resources),
         providers: entry_fingerprint(&desired.providers),
         executors: entry_fingerprint(&desired.executors),
@@ -70,6 +67,13 @@ fn desired_fingerprint(desired: &orion::control_plane::DesiredClusterState) -> u
         .expect("desired state section fingerprints should encode");
     let mut hasher = DefaultHasher::new();
     bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn workload_section_fingerprint(desired: &orion::control_plane::DesiredClusterState) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    entry_fingerprint(&desired.workloads).hash(&mut hasher);
+    entry_fingerprint(&desired.workload_tombstones).hash(&mut hasher);
     hasher.finish()
 }
 

@@ -180,7 +180,22 @@ fn recv_unix_fd_frame_raw(
     flags: i32,
 ) -> Result<Option<UnixFdFrame>, RawFdFrameError> {
     let max_payload_bytes = max_payload_bytes.max(1);
-    let mut bytes = vec![0_u8; HEADER_BYTES + max_payload_bytes + 1];
+    let Some(payload_len) = peek_payload_len(raw_fd, flags)? else {
+        return Ok(None);
+    };
+    if payload_len > max_payload_bytes {
+        return Err(RawFdFrameError::Decode(
+            "fd frame payload exceeds maximum transport payload size".into(),
+        ));
+    }
+    let frame_len = HEADER_BYTES + payload_len;
+    if flags & libc::MSG_DONTWAIT != 0 && queued_bytes(raw_fd)? < frame_len {
+        return Err(RawFdFrameError::Io(io::Error::from(
+            io::ErrorKind::WouldBlock,
+        )));
+    }
+
+    let mut bytes = vec![0_u8; frame_len];
     let mut iov = [libc::iovec {
         iov_base: bytes.as_mut_ptr().cast(),
         iov_len: bytes.len(),
@@ -217,17 +232,16 @@ fn recv_unix_fd_frame_raw(
             "fd frame missing payload length header".into(),
         ));
     }
-    let payload_len = u32::from_le_bytes(
+    let received_payload_len = u32::from_le_bytes(
         bytes[..HEADER_BYTES]
             .try_into()
             .expect("header slice has fixed length"),
     ) as usize;
-    if payload_len > max_payload_bytes {
+    if received_payload_len != payload_len {
         return Err(RawFdFrameError::Decode(
-            "fd frame payload exceeds maximum transport payload size".into(),
+            "fd frame payload length header changed while receiving frame".into(),
         ));
     }
-    let frame_len = HEADER_BYTES + payload_len;
     if received < frame_len {
         return Err(RawFdFrameError::Decode(format!(
             "short fd frame read: received {received} of {frame_len} bytes"
@@ -261,6 +275,42 @@ impl RawFdFrameError {
             Self::Decode(message) => IpcTransportError::DecodeFailed(message),
         }
     }
+}
+
+fn peek_payload_len(raw_fd: RawFd, flags: i32) -> Result<Option<usize>, RawFdFrameError> {
+    let mut header = [0_u8; HEADER_BYTES];
+    let mut iov = [libc::iovec {
+        iov_base: header.as_mut_ptr().cast(),
+        iov_len: header.len(),
+    }];
+    let mut msg: libc::msghdr = unsafe { zeroed() };
+    msg.msg_iov = iov.as_mut_ptr();
+    msg.msg_iovlen = iov.len();
+
+    let received =
+        retry_interrupted(|| unsafe { libc::recvmsg(raw_fd, &mut msg, flags | libc::MSG_PEEK) })
+            .map_err(RawFdFrameError::Io)?;
+    if received == 0 {
+        return Ok(None);
+    }
+    let received = usize::try_from(received)
+        .map_err(|_| RawFdFrameError::Io(io::Error::other("recvmsg returned invalid length")))?;
+    if received < HEADER_BYTES {
+        return Err(RawFdFrameError::Io(io::Error::from(
+            io::ErrorKind::WouldBlock,
+        )));
+    }
+    Ok(Some(u32::from_le_bytes(header) as usize))
+}
+
+fn queued_bytes(raw_fd: RawFd) -> Result<usize, RawFdFrameError> {
+    let mut available: libc::c_int = 0;
+    let result = unsafe { libc::ioctl(raw_fd, libc::FIONREAD, &mut available) };
+    if result < 0 {
+        return Err(RawFdFrameError::Io(io::Error::last_os_error()));
+    }
+    usize::try_from(available)
+        .map_err(|_| RawFdFrameError::Io(io::Error::other("FIONREAD returned invalid length")))
 }
 
 fn control_buffer_for(fd_count: usize) -> Vec<u8> {

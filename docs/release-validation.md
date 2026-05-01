@@ -122,13 +122,13 @@ Some suites are intentionally `#[ignore]` by default because they require heavie
 
 Location:
 
-- `crates/orion-node/tests/docker_cluster_baseline.rs`
-- `crates/orion-node/tests/docker_cluster_failure.rs`
-- `crates/orion-node/tests/docker_cluster_adversarial.rs`
-- `crates/orion-node/tests/docker_cluster_scale.rs`
-- `crates/orion-node/tests/docker_cluster_soak.rs`
-- `crates/orion-node/tests/docker_cluster_perf.rs`
-- `crates/orion-node/tests/docker_client_examples.rs`
+- `crates/node/tests/docker_cluster_baseline.rs`
+- `crates/node/tests/docker_cluster_failure.rs`
+- `crates/node/tests/docker_cluster_adversarial.rs`
+- `crates/node/tests/docker_cluster_scale.rs`
+- `crates/node/tests/docker_cluster_soak.rs`
+- `crates/node/tests/docker_cluster_perf.rs`
+- `crates/node/tests/docker_client_examples.rs`
 
 These require Docker Compose and are intended to validate multi-node convergence, restart behavior,
 partition handling, and operator examples against real processes.
@@ -150,8 +150,8 @@ not every pull request.
 
 Location:
 
-- `crates/orion-node/tests/perf_baselines.rs`
-- `crates/orion-node/tests/perf_release.rs`
+- `crates/node/tests/perf_baselines.rs`
+- `crates/node/tests/perf_release.rs`
 
 These are baseline harnesses for replay time, idle CPU, and memory growth. They are intended for
 comparison across release candidates, not as hard pass/fail unit tests on developer machines.

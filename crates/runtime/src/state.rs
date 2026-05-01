@@ -78,25 +78,19 @@ impl LocalRuntimeStore {
     }
 
     fn prune_observed_for_desired(&mut self) {
-        let desired_node_ids: BTreeSet<_> = self.desired.nodes.keys().cloned().collect();
-        let desired_workload_ids: BTreeSet<_> = self.desired.workloads.keys().cloned().collect();
-        let desired_resource_ids: BTreeSet<_> = self.desired.resources.keys().cloned().collect();
-        let desired_provider_ids: BTreeSet<_> = self.desired.providers.keys().cloned().collect();
-        let desired_executor_ids: BTreeSet<_> = self.desired.executors.keys().cloned().collect();
-
         self.observed
             .nodes
-            .retain(|node_id, _| desired_node_ids.contains(node_id));
+            .retain(|node_id, _| self.desired.nodes.contains_key(node_id));
         self.observed
             .workloads
-            .retain(|workload_id, _| desired_workload_ids.contains(workload_id));
+            .retain(|workload_id, _| self.desired.workloads.contains_key(workload_id));
         self.observed.resources.retain(|resource_id, resource| {
-            desired_resource_ids.contains(resource_id)
-                || desired_provider_ids.contains(&resource.provider_id)
+            self.desired.resources.contains_key(resource_id)
+                || self.desired.providers.contains_key(&resource.provider_id)
                 || resource
                     .realized_by_executor_id
                     .as_ref()
-                    .is_some_and(|executor_id| desired_executor_ids.contains(executor_id))
+                    .is_some_and(|executor_id| self.desired.executors.contains_key(executor_id))
         });
         self.observed
             .leases
@@ -204,11 +198,10 @@ impl LocalRuntimeStore {
 
         let previous_observed_revision = self.observed.revision;
         let mut changed = false;
-        let desired_workload_ids: BTreeSet<_> = self.desired.workloads.keys().cloned().collect();
         self.observed.workloads.retain(|_, workload| {
             let retain = workload.assigned_node_id.as_ref() != Some(&self.local_node_id)
                 || workload_ids.contains(&workload.workload_id)
-                || desired_workload_ids.contains(&workload.workload_id);
+                || self.desired.workloads.contains_key(&workload.workload_id);
             if !retain {
                 changed = true;
             }

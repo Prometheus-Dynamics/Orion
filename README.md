@@ -7,12 +7,12 @@ The repository is split into focused crates so runtime, transport, client, and o
 ## Workspace Layout
 
 - `crates/orion`: consumer-facing facade and public API re-exports
-- `crates/orion-node`: node binary and runtime orchestration
-- `crates/orion-client`: Rust SDK for local and daemon clients
+- `crates/node`: node binary and runtime orchestration
+- `crates/client`: Rust SDK for local and daemon clients
 - `crates/orionctl`: operator CLI
-- `crates/orion-runtime`, `crates/orion-cluster`, `crates/orion-control-plane`, `crates/orion-data-plane`: core runtime and protocol crates
-- `crates/orion-transport-*`: HTTP, TCP, QUIC, and IPC transport adapters
-- `crates/orion-auth`, `crates/orion-service`, `crates/orion-macros`, `crates/orion-core`: shared support crates
+- `crates/runtime`, `crates/cluster`, `crates/control-plane`, `crates/data-plane`: core runtime and protocol crates
+- `crates/transport-*`: HTTP, TCP, QUIC, and IPC transport adapters
+- `crates/auth`, `crates/service`, `crates/macros`, `crates/core`: shared support crates
 
 Additional repository notes live under [docs/README.md](docs/README.md).
 

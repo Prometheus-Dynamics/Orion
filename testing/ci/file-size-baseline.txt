@@ -1,3 +1,3 @@
 # Existing oversized Rust files to reduce over time.
-crates/orion-client/src/tests.rs
-crates/orion-node/src/app/observability.rs
+crates/client/src/tests.rs
+crates/node/src/app/observability.rs

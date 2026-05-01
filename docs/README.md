@@ -16,7 +16,7 @@ This directory holds repository-level documentation for the Orion workspace.
 ## Where To Start
 
 - Using Orion: start with the root [README.md](../README.md) and [`crates/orion/README.md`](../crates/orion/README.md)
-- Operating a node: read [`crates/orion-node/README.md`](../crates/orion-node/README.md), [node-env.md](node-env.md), and [observability.md](observability.md)
-- Client and control surfaces: read [`crates/orion-client/README.md`](../crates/orion-client/README.md), [`crates/orionctl/README.md`](../crates/orionctl/README.md), and [`crates/orion-control-plane/README.md`](../crates/orion-control-plane/README.md)
-- Transport layers: read [`architecture-crate-map.md`](architecture-crate-map.md) and the `crates/orion-transport-*` crate READMEs
+- Operating a node: read [`crates/node/README.md`](../crates/node/README.md), [node-env.md](node-env.md), and [observability.md](observability.md)
+- Client and control surfaces: read [`crates/client/README.md`](../crates/client/README.md), [`crates/orionctl/README.md`](../crates/orionctl/README.md), and [`crates/control-plane/README.md`](../crates/control-plane/README.md)
+- Transport layers: read [`architecture-crate-map.md`](architecture-crate-map.md) and the `crates/transport-*` crate READMEs
 - Running validation: read [testing.md](testing.md) and [`../testing/README.md`](../testing/README.md)

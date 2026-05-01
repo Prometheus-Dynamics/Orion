@@ -6,7 +6,7 @@ and peer-sync concurrency defaults.
 ## Locking Model
 
 `orion-node` intentionally uses `std::sync::RwLock` for the in-memory registries and persisted
-runtime state in [`crates/orion-node/src/app/state_access.rs`](../crates/orion-node/src/app/state_access.rs).
+runtime state in [`crates/node/src/app/state_access.rs`](../crates/node/src/app/state_access.rs).
 
 Audit conclusions:
 
@@ -38,7 +38,7 @@ The release audit now treats the following as the canonical lock ordering for `o
 Practical rules derived from the current code:
 
 - Desired-state transactions in
-  [`crates/orion-node/src/app/desired_state.rs`](../crates/orion-node/src/app/desired_state.rs)
+  [`crates/node/src/app/desired_state.rs`](../crates/node/src/app/desired_state.rs)
   take `store -> mutation_history -> mutation_history_baseline` together and should finish their
   in-memory mutation before touching persistence or watcher fanout.
 - Desired-state cache invalidation happens after those transaction locks are released. Cache locks
@@ -90,7 +90,7 @@ Current release stance:
 - Saturated persistence queues must still expose backpressure clearly in observability metrics.
 
 Synthetic regression coverage now exists in
-[`crates/orion-node/src/tests/state/observability.rs`](../crates/orion-node/src/tests/state/observability.rs)
+[`crates/node/src/tests/state/observability.rs`](../crates/node/src/tests/state/observability.rs)
 with a queue capacity of `1`, injected persist delay of `25ms`, and `8` concurrent artifact writes.
 
 Current regression bounds for that scenario:
@@ -113,7 +113,7 @@ is intentionally binary:
 
 For the non-blocking `drop_newest` path, release guardrails are defined by the direct audit-sink
 regression in
-[`crates/orion-node/src/app/observability.rs`](../crates/orion-node/src/app/observability.rs):
+[`crates/node/src/app/observability.rs`](../crates/node/src/app/observability.rs):
 
 - queue capacity `1`
 - injected audit append delay `25ms`
@@ -140,7 +140,7 @@ complexity before there is evidence that synchronous snapshot reads are the rele
 
 ## Reconcile Serialization Audit
 
-`crates/orion-node/src/app/reconcile.rs` was re-reviewed specifically for unnecessary
+`crates/node/src/app/reconcile.rs` was re-reviewed specifically for unnecessary
 serialization.
 
 Current conclusions:
@@ -185,14 +185,14 @@ docs and README now treat that as the supported boundary rather than leaving it 
 tradeoff.
 
 The release cleanup removed an unnecessary internal boxed-future layer from
-[`crates/orion-node/src/managed_transport.rs`](../crates/orion-node/src/managed_transport.rs), so
+[`crates/node/src/managed_transport.rs`](../crates/node/src/managed_transport.rs), so
 the remaining dynamic dispatch is concentrated at those boundaries rather than in internal startup
 plumbing.
 
 ## Blocking Behavior
 
 Blocking work is intentionally routed through
-[`crates/orion-node/src/blocking.rs`](../crates/orion-node/src/blocking.rs).
+[`crates/node/src/blocking.rs`](../crates/node/src/blocking.rs).
 
 Reviewed call sites fall into three categories:
 
@@ -208,7 +208,7 @@ Current request-serving classification after the service-adapter narrowing:
 - required blocking I/O
   - trust-store persistence and trust-root writes triggered by local peer-admin operations
   - explicit storage durability helpers in
-    [`crates/orion-node/src/storage_io.rs`](../crates/orion-node/src/storage_io.rs)
+    [`crates/node/src/storage_io.rs`](../crates/node/src/storage_io.rs)
   - audit-log appends when operators explicitly choose `ORION_NODE_AUDIT_LOG_OVERLOAD_POLICY=block`
 - avoidable blocking
   - none remain at the HTTP/IPC adapter boundary after the blanket request wrapping was removed
@@ -229,11 +229,11 @@ Release changes from this audit:
 - Some blocking paths are intentionally still synchronous because they are startup/admin code, not
   hot-path request handling:
   - HTTP TLS bootstrap and rotation in
-    [`crates/orion-node/src/app/tls_bootstrap.rs`](../crates/orion-node/src/app/tls_bootstrap.rs)
+    [`crates/node/src/app/tls_bootstrap.rs`](../crates/node/src/app/tls_bootstrap.rs)
   - server TLS certificate/key file loading in
-    [`crates/orion-transport-http/src/tls.rs`](../crates/orion-transport-http/src/tls.rs)
+    [`crates/transport-http/src/tls.rs`](../crates/transport-http/src/tls.rs)
   - durable storage read/write helpers in
-    [`crates/orion-node/src/storage_io.rs`](../crates/orion-node/src/storage_io.rs)
+    [`crates/node/src/storage_io.rs`](../crates/node/src/storage_io.rs)
 
 This helper should stay scoped to short, bounded synchronous work. It should not become a catch-all
 for long-running CPU-heavy tasks.
@@ -262,7 +262,7 @@ Release decision:
 ## Peer Sync Parallelism
 
 Peer sync concurrency currently lives in
-[`crates/orion-node/src/app/peer_sync_parallel.rs`](../crates/orion-node/src/app/peer_sync_parallel.rs)
+[`crates/node/src/app/peer_sync_parallel.rs`](../crates/node/src/app/peer_sync_parallel.rs)
 and is operator-configurable through `ORION_NODE_PEER_SYNC_MODE` and
 `ORION_NODE_PEER_SYNC_MAX_IN_FLIGHT`.
 
@@ -275,7 +275,7 @@ Current behavior:
 - spawn staggering only activates once the peer count crosses the no-stagger threshold
 
 This behavior is covered by the unit tests in
-[`crates/orion-node/src/tests/sync/peer_sync/parallel.rs`](../crates/orion-node/src/tests/sync/peer_sync/parallel.rs).
+[`crates/node/src/tests/sync/peer_sync/parallel.rs`](../crates/node/src/tests/sync/peer_sync/parallel.rs).
 
 The policy is intentionally conservative for public release. The remaining open work is empirical:
 recording perf-harness results for different node counts and confirming whether these defaults are

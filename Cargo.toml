@@ -1,22 +1,22 @@
 [workspace]
 members = [
-    "crates/orion-core",
-    "crates/orion-auth",
-    "crates/orion-service",
-    "crates/orion-macros",
-    "crates/orion-control-plane",
-    "crates/orion-data-plane",
-    "crates/orion-cluster",
-    "crates/orion-runtime",
-    "crates/orion-client",
+    "crates/core",
+    "crates/auth",
+    "crates/service",
+    "crates/macros",
+    "crates/control-plane",
+    "crates/data-plane",
+    "crates/cluster",
+    "crates/runtime",
+    "crates/client",
     "crates/orionctl",
-    "crates/orion-transport-common",
-    "crates/orion-transport-http",
-    "crates/orion-transport-tcp",
-    "crates/orion-transport-quic",
-    "crates/orion-transport-ipc",
-    "crates/orion-node",
-    "crates/orion-perf-check",
+    "crates/transport-common",
+    "crates/transport-http",
+    "crates/transport-tcp",
+    "crates/transport-quic",
+    "crates/transport-ipc",
+    "crates/node",
+    "crates/perf-check",
     "crates/orion",
 ]
 resolver = "3"
@@ -31,22 +31,22 @@ rust-version = "1.94"
 authors = ["Mathias Petersen"]
 
 [workspace.dependencies]
-orion-auth = { path = "crates/orion-auth", version = "1.0.0" }
-orion-client = { path = "crates/orion-client", version = "1.0.0" }
-orion-cluster = { path = "crates/orion-cluster", version = "1.0.0" }
-orion-control-plane = { path = "crates/orion-control-plane", version = "1.0.0" }
-orion-core = { path = "crates/orion-core", version = "1.0.0" }
-orion-data-plane = { path = "crates/orion-data-plane", version = "1.0.0" }
-orion-macros = { path = "crates/orion-macros", version = "1.0.0" }
-orion-node = { path = "crates/orion-node", version = "1.0.0" }
+orion-auth = { path = "crates/auth", version = "1.0.0" }
+orion-client = { path = "crates/client", version = "1.0.0" }
+orion-cluster = { path = "crates/cluster", version = "1.0.0" }
+orion-control-plane = { path = "crates/control-plane", version = "1.0.0" }
+orion-core = { path = "crates/core", version = "1.0.0" }
+orion-data-plane = { path = "crates/data-plane", version = "1.0.0" }
+orion-macros = { path = "crates/macros", version = "1.0.0" }
+orion-node = { path = "crates/node", version = "1.0.0" }
 orion = { path = "crates/orion", version = "1.0.0", default-features = false }
-orion-runtime = { path = "crates/orion-runtime", version = "1.0.0" }
-orion-service = { path = "crates/orion-service", version = "1.0.0" }
-orion-transport-common = { path = "crates/orion-transport-common", version = "1.0.0" }
-orion-transport-http = { path = "crates/orion-transport-http", version = "1.0.0" }
-orion-transport-ipc = { path = "crates/orion-transport-ipc", version = "1.0.0" }
-orion-transport-quic = { path = "crates/orion-transport-quic", version = "1.0.0" }
-orion-transport-tcp = { path = "crates/orion-transport-tcp", version = "1.0.0" }
+orion-runtime = { path = "crates/runtime", version = "1.0.0" }
+orion-service = { path = "crates/service", version = "1.0.0" }
+orion-transport-common = { path = "crates/transport-common", version = "1.0.0" }
+orion-transport-http = { path = "crates/transport-http", version = "1.0.0" }
+orion-transport-ipc = { path = "crates/transport-ipc", version = "1.0.0" }
+orion-transport-quic = { path = "crates/transport-quic", version = "1.0.0" }
+orion-transport-tcp = { path = "crates/transport-tcp", version = "1.0.0" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_path_to_error = "0.1.20"

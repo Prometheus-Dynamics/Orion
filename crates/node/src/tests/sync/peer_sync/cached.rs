@@ -185,10 +185,7 @@ async fn node_sync_peer_uses_cached_peer_state_to_skip_hello_for_equal_revision_
     let local_section_fingerprints = orion::control_plane::DesiredStateSectionFingerprints {
         nodes: entry_fingerprint(&desired.nodes),
         artifacts: entry_fingerprint(&desired.artifacts),
-        workloads: entry_fingerprint(&(
-            desired.workloads.clone(),
-            desired.workload_tombstones.clone(),
-        )),
+        workloads: workload_section_fingerprint(&desired),
         resources: entry_fingerprint(&desired.resources),
         providers: entry_fingerprint(&desired.providers),
         executors: entry_fingerprint(&desired.executors),
@@ -341,10 +338,7 @@ async fn node_sync_peer_uses_cached_peer_state_to_skip_hello_when_state_matches(
     let section_fingerprints = orion::control_plane::DesiredStateSectionFingerprints {
         nodes: entry_fingerprint(&desired.nodes),
         artifacts: entry_fingerprint(&desired.artifacts),
-        workloads: entry_fingerprint(&(
-            desired.workloads.clone(),
-            desired.workload_tombstones.clone(),
-        )),
+        workloads: workload_section_fingerprint(&desired),
         resources: entry_fingerprint(&desired.resources),
         providers: entry_fingerprint(&desired.providers),
         executors: entry_fingerprint(&desired.executors),
