@@ -63,14 +63,14 @@ impl ClientEventStreamSession {
         message: ControlMessage,
     ) -> Result<(), ClientError> {
         self.send(message).await?;
-        match self.recv_message().await? {
+        match self.recv_response_message().await? {
             ControlMessage::Accepted => Ok(()),
             ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
             _ => Err(ClientError::NoMessageAvailable),
         }
     }
 
-    pub(crate) async fn recv_message(&mut self) -> Result<ControlMessage, ClientError> {
+    pub(crate) async fn recv_response_message(&mut self) -> Result<ControlMessage, ClientError> {
         loop {
             let Some(response) = self.client.recv().await? else {
                 return Err(ClientError::NoMessageAvailable);
@@ -84,8 +84,22 @@ impl ClientEventStreamSession {
         }
     }
 
+    pub(crate) async fn recv_event_message(&mut self) -> Result<ControlMessage, ClientError> {
+        loop {
+            let Some(response) = self.client.recv_wait().await? else {
+                return Err(ClientError::NoMessageAvailable);
+            };
+            match response.message {
+                ControlMessage::Ping => {
+                    self.send(ControlMessage::Pong).await?;
+                }
+                message => return Ok(message),
+            }
+        }
+    }
+
     pub(crate) async fn next_client_events(&mut self) -> Result<Vec<ClientEvent>, ClientError> {
-        match self.recv_message().await? {
+        match self.recv_event_message().await? {
             ControlMessage::ClientEvents(events) => Ok(events),
             ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
             _ => Err(ClientError::NoMessageAvailable),

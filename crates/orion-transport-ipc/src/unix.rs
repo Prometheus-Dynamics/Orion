@@ -322,6 +322,18 @@ impl UnixControlStreamClient {
         .map_err(IpcTransportError::ReadFailed)
     }
 
+    pub async fn recv_wait(&mut self) -> Result<Option<ControlEnvelope>, IpcTransportError> {
+        self.recv_wait_metered()
+            .await
+            .map(|envelope| envelope.map(|(envelope, _)| envelope))
+    }
+
+    pub async fn recv_wait_metered(
+        &mut self,
+    ) -> Result<Option<(ControlEnvelope, usize)>, IpcTransportError> {
+        read_control_frame_with_limit_metered(&mut self.stream, self.max_payload_bytes).await
+    }
+
     pub fn into_split(self) -> (OwnedReadHalf, OwnedWriteHalf) {
         self.stream.into_split()
     }
@@ -562,6 +574,9 @@ fn ipc_connect_error(err: std::io::Error) -> IpcTransportError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_control_plane::ControlMessage;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::net::UnixListener;
 
     #[tokio::test]
     async fn unary_read_times_out_stalled_reader() {
@@ -577,5 +592,44 @@ mod tests {
         .await
         .expect_err("stalled IPC reader should time out");
         assert!(err.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn stream_recv_wait_does_not_treat_idle_as_timeout() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should advance")
+            .as_nanos();
+        let socket_path = std::env::temp_dir().join(format!("orion-ipc-stream-idle-{nanos}.sock"));
+        let _ = tokio::fs::remove_file(&socket_path).await;
+        let listener = UnixListener::bind(&socket_path).expect("listener should bind");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept should work");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            write_control_frame(
+                &mut stream,
+                &ControlEnvelope {
+                    source: LocalAddress::new("orion"),
+                    destination: LocalAddress::new("client"),
+                    message: ControlMessage::Ping,
+                },
+            )
+            .await
+            .expect("ping should write");
+        });
+
+        let mut client = UnixControlStreamClient::connect(&socket_path)
+            .await
+            .expect("client should connect")
+            .with_io_timeout(Duration::from_millis(10));
+        let envelope = client
+            .recv_wait()
+            .await
+            .expect("idle stream recv should not timeout")
+            .expect("server should send a frame");
+
+        assert_eq!(envelope.message, ControlMessage::Ping);
+        server.await.expect("server should complete");
+        let _ = tokio::fs::remove_file(&socket_path).await;
     }
 }
