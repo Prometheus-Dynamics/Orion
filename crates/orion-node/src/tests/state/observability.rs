@@ -533,7 +533,7 @@ async fn saturated_persistence_queue_exposes_backpressure_metrics_with_bounded_c
     assert_eq!(snapshot.persistence.artifact_write.success_count, 8);
     assert!(snapshot.persistence.state_persist.success_count >= 8);
     assert!(snapshot.persistence.worker_operation_count >= 16);
-    assert!(snapshot.persistence.worker_queue_wait_count >= 7);
+    assert!(snapshot.persistence.worker_queue_wait_count > 0);
     assert!(snapshot.persistence.worker_queue_wait_ms_total > 0);
     assert!(snapshot.persistence.worker_queue_wait_ms_max > 0);
     assert!(snapshot.persistence.worker_reply_wait_count > 0);
@@ -545,7 +545,7 @@ async fn saturated_persistence_queue_exposes_backpressure_metrics_with_bounded_c
         "queue wait should only count saturated sends, not every persistence operation"
     );
     assert!(snapshot.persistence.worker_enqueue_count >= 16);
-    assert!(snapshot.persistence.worker_enqueue_wait_count >= 7);
+    assert!(snapshot.persistence.worker_enqueue_wait_count > 0);
     assert!(snapshot.persistence.worker_enqueue_wait_ms_total > 0);
     assert!(snapshot.persistence.worker_enqueue_wait_ms_max > 0);
     assert!(

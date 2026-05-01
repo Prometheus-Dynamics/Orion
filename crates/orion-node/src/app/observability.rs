@@ -12,9 +12,11 @@ use orion::{
     },
 };
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+const COMMUNICATION_ENDPOINT_RUNTIME_LIMIT: usize = 512;
 
 #[cfg(test)]
 use audit::should_emit_audit_drop_warning;
@@ -58,7 +60,6 @@ pub(super) struct ObservabilityState {
     pub(super) reconnect_count: u64,
     pub(super) peer_http_communication: BTreeMap<NodeId, CommunicationMetrics>,
     pub(super) communication_endpoints: BTreeMap<String, CommunicationEndpointRuntime>,
-    pub(super) seen_stream_sources: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -172,6 +173,7 @@ impl crate::app::NodeApp {
     ) {
         let now_ms = Self::current_time_ms();
         self.with_observability_txn(|txn| {
+            prune_communication_endpoints_for_insert(txn.state_mut(), &endpoint.id);
             let stored = txn
                 .state_mut()
                 .communication_endpoints
@@ -200,6 +202,7 @@ impl crate::app::NodeApp {
     ) {
         let now_ms = Self::current_time_ms();
         self.with_observability_txn(|txn| {
+            prune_communication_endpoints_for_insert(txn.state_mut(), &endpoint.id);
             let stored = txn
                 .state_mut()
                 .communication_endpoints
@@ -211,6 +214,18 @@ impl crate::app::NodeApp {
                 .metrics
                 .record_failure_kind(now_ms, duration, kind, error);
         });
+    }
+}
+
+fn prune_communication_endpoints_for_insert(observability: &mut ObservabilityState, id: &str) {
+    if observability.communication_endpoints.contains_key(id) {
+        return;
+    }
+    while observability.communication_endpoints.len() >= COMMUNICATION_ENDPOINT_RUNTIME_LIMIT {
+        let Some(oldest_key) = observability.communication_endpoints.keys().next().cloned() else {
+            break;
+        };
+        observability.communication_endpoints.remove(&oldest_key);
     }
 }
 
@@ -276,7 +291,9 @@ pub(super) fn push_observability_event_with_context(
 #[cfg(test)]
 mod tests {
     use super::{
-        AuditEventKind, AuditLogSink, classify_peer_sync_error, clear_test_audit_append_delay,
+        AuditEventKind, AuditLogSink, COMMUNICATION_ENDPOINT_RUNTIME_LIMIT,
+        CommunicationEndpointRuntime, ObservabilityState, classify_peer_sync_error,
+        clear_test_audit_append_delay, prune_communication_endpoints_for_insert,
         set_test_audit_append_delay, should_emit_audit_drop_warning,
     };
     use crate::NodeError;
@@ -296,6 +313,24 @@ mod tests {
         assert!(should_emit_audit_drop_warning(4));
         assert!(!should_emit_audit_drop_warning(6));
         assert!(should_emit_audit_drop_warning(8));
+    }
+
+    #[test]
+    fn communication_endpoint_runtime_map_is_bounded() {
+        let mut observability = ObservabilityState::with_event_limit(128);
+        for index in 0..(COMMUNICATION_ENDPOINT_RUNTIME_LIMIT + 32) {
+            let id = format!("tcp/data-plane/node-a/resource-{index}");
+            prune_communication_endpoints_for_insert(&mut observability, &id);
+            observability.communication_endpoints.insert(
+                id.clone(),
+                CommunicationEndpointRuntime::new(id, "tcp", "data_plane"),
+            );
+        }
+
+        assert_eq!(
+            observability.communication_endpoints.len(),
+            COMMUNICATION_ENDPOINT_RUNTIME_LIMIT
+        );
     }
 
     #[test]

@@ -439,17 +439,16 @@ impl NodeApp {
         source: &LocalAddress,
         sender: tokio::sync::mpsc::Sender<ControlEnvelope>,
     ) -> Result<(), NodeError> {
-        self.with_client_mut(source, |client| {
+        let reconnected = self.with_client_mut(source, |client| {
+            let reconnected = client.stream_seen;
+            client.stream_seen = true;
             client.stream_sender = Some(sender);
             client.last_activity_ms = Self::current_time_ms();
+            reconnected
         })?;
-        let reconnected = self.with_observability_txn(|txn| {
+        self.with_observability_txn(|txn| {
             let observability = txn.state_mut();
-            let first_stream_for_source = observability
-                .seen_stream_sources
-                .insert(source.as_str().to_owned());
-            let reconnected = !first_stream_for_source;
-            if !first_stream_for_source {
+            if reconnected {
                 observability.reconnect_count = observability.reconnect_count.saturating_add(1);
             }
             observability.client_stream_attaches_total =
@@ -462,7 +461,6 @@ impl NodeApp {
                 Some(source.as_str().to_owned()),
                 format!("source={}", source.as_str()),
             );
-            reconnected
         });
         if reconnected {
             self.record_local_stream_reconnect(source);
