@@ -197,6 +197,57 @@ mod tests {
         assert!(!transport.register_data_endpoint(address));
     }
 
+    #[test]
+    fn memory_transport_applies_queue_backpressure() {
+        let transport = IpcTransport::new().with_queue_capacity(1);
+        let source = LocalAddress::new("engine");
+        let destination = LocalAddress::new("orion");
+        assert!(transport.register_control_endpoint(destination.clone()));
+        assert!(transport.register_data_endpoint(destination.clone()));
+
+        assert!(transport.send_control(ControlEnvelope {
+            source: source.clone(),
+            destination: destination.clone(),
+            message: ControlMessage::Accepted,
+        }));
+        assert!(!transport.send_control(ControlEnvelope {
+            source: source.clone(),
+            destination: destination.clone(),
+            message: ControlMessage::Accepted,
+        }));
+        assert!(transport.recv_control(&destination).is_some());
+        assert!(transport.send_control(ControlEnvelope {
+            source: source.clone(),
+            destination: destination.clone(),
+            message: ControlMessage::Accepted,
+        }));
+
+        assert!(transport.send_data(DataEnvelope {
+            source: source.clone(),
+            destination: destination.clone(),
+            link: peer_link(),
+            binding: RemoteBinding::Channel(ChannelBinding {
+                remote_node_id: NodeId::new("node-b"),
+                resource_id: ResourceId::new("resource.imu"),
+                transport: TransportType::Ipc,
+                link_type: LinkType::LocalSharedMemory,
+            }),
+            payload: vec![1],
+        }));
+        assert!(!transport.send_data(DataEnvelope {
+            source,
+            destination,
+            link: peer_link(),
+            binding: RemoteBinding::Channel(ChannelBinding {
+                remote_node_id: NodeId::new("node-b"),
+                resource_id: ResourceId::new("resource.imu"),
+                transport: TransportType::Ipc,
+                link_type: LinkType::LocalSharedMemory,
+            }),
+            payload: vec![2],
+        }));
+    }
+
     #[tokio::test]
     async fn unix_control_transport_roundtrips_real_messages() {
         use std::sync::Arc;

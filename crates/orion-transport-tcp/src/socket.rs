@@ -291,6 +291,7 @@ where
     let mut connection_tasks = ConnectionTasks::new();
     let semaphore = Arc::new(Semaphore::new(max_connections.max(1)));
     loop {
+        connection_tasks.reap_finished();
         let permit = tokio::select! {
             permit = semaphore.clone().acquire_owned() => {
                 permit.map_err(|_| TcpTransportError::AcceptFailed("connection limiter closed".into()))?

@@ -153,6 +153,10 @@ impl ConnectionTasks {
         self.tasks.spawn(future);
     }
 
+    pub fn reap_finished(&mut self) {
+        while let Some(_result) = self.tasks.try_join_next() {}
+    }
+
     pub async fn abort_all(&mut self) {
         self.tasks.abort_all();
         while self.tasks.join_next().await.is_some() {}
@@ -162,5 +166,26 @@ impl ConnectionTasks {
 impl Default for ConnectionTasks {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConnectionTasks;
+
+    #[test]
+    fn connection_tasks_reaps_completed_tasks_without_shutdown() {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime should build")
+            .block_on(async {
+                let mut tasks = ConnectionTasks::new();
+                tasks.spawn_unit(async {});
+                tokio::task::yield_now().await;
+
+                tasks.reap_finished();
+
+                assert!(tasks.tasks.is_empty());
+            });
     }
 }

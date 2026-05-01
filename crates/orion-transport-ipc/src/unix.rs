@@ -141,6 +141,7 @@ impl UnixControlServer {
         let mut connection_tasks = ConnectionTasks::new();
         let semaphore = Arc::new(Semaphore::new(self.max_connections.max(1)));
         loop {
+            connection_tasks.reap_finished();
             let permit =
                 semaphore.clone().acquire_owned().await.map_err(|_| {
                     IpcTransportError::AcceptFailed("connection limiter closed".into())

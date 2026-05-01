@@ -291,6 +291,7 @@ impl NodeApp {
         let handle = tokio::spawn(async move {
             let mut connection_tasks = JoinSet::new();
             let result = loop {
+                while let Some(_result) = connection_tasks.try_join_next() {}
                 tokio::select! {
                     accepted = listener.accept() => {
                         let (stream, _) = accepted

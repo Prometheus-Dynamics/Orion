@@ -156,6 +156,23 @@ mod tests {
         assert!(!transport.send_frame(sent));
     }
 
+    #[test]
+    fn memory_transport_applies_queue_backpressure() {
+        let transport = QuicTransport::new().with_queue_capacity(1);
+        let destination = QuicEndpoint::new("127.0.0.1", 5200).with_server_name("node-b.local");
+        assert!(transport.register_listener(destination.clone()));
+
+        let mut first = frame();
+        first.destination = destination.clone();
+        let mut second = frame();
+        second.destination = destination.clone();
+
+        assert!(transport.send_frame(first.clone()));
+        assert!(!transport.send_frame(second.clone()));
+        assert_eq!(transport.recv_frame(&destination), Some(first));
+        assert!(transport.send_frame(second));
+    }
+
     #[tokio::test]
     async fn real_quic_transport_roundtrips_frames() {
         use std::sync::Arc;

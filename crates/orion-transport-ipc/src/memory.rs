@@ -4,20 +4,37 @@ use crate::{
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+const DEFAULT_MEMORY_QUEUE_CAPACITY: usize = 1024;
+
 #[derive(Default)]
 struct Inner {
     control_endpoints: BTreeMap<LocalAddress, VecDeque<ControlEnvelope>>,
     data_endpoints: BTreeMap<LocalAddress, VecDeque<DataEnvelope>>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct IpcTransport {
     inner: Arc<Mutex<Inner>>,
+    queue_capacity: usize,
+}
+
+impl Default for IpcTransport {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Inner::default())),
+            queue_capacity: DEFAULT_MEMORY_QUEUE_CAPACITY,
+        }
+    }
 }
 
 impl IpcTransport {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_queue_capacity(mut self, queue_capacity: usize) -> Self {
+        self.queue_capacity = queue_capacity.max(1);
+        self
     }
 }
 
@@ -35,6 +52,9 @@ impl LocalControlTransport for IpcTransport {
         let Some(queue) = inner.control_endpoints.get_mut(&envelope.destination) else {
             return false;
         };
+        if queue.len() >= self.queue_capacity {
+            return false;
+        }
         queue.push_back(envelope);
         true
     }
@@ -59,6 +79,9 @@ impl LocalDataTransport for IpcTransport {
         let Some(queue) = inner.data_endpoints.get_mut(&envelope.destination) else {
             return false;
         };
+        if queue.len() >= self.queue_capacity {
+            return false;
+        }
         queue.push_back(envelope);
         true
     }
