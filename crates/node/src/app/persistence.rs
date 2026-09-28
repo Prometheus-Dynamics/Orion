@@ -76,7 +76,13 @@ fn should_rewrite_desired_snapshot(
     if !storage.snapshot_desired_path().exists() {
         return Ok(true);
     }
-    if bundle.desired.revision <= manifest.desired_snapshot_revision {
+    // The capture step decides whether to encode desired bytes from the revision it saw before
+    // taking the state read lock. A mutation that lands in between can push the captured revision
+    // across the rewrite cadence without bytes having been encoded; defer the cadence rewrite to
+    // the next persist instead of failing this one; the history still bridges the gap.
+    if bundle.desired.revision <= manifest.desired_snapshot_revision
+        || bundle.desired.bytes.is_none()
+    {
         return Ok(false);
     }
     Ok(bundle
@@ -620,4 +626,83 @@ fn reconstruct_desired_from_checkpoint_and_history(
     }
 
     Ok(desired)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bundle(desired: EncodedDesiredSnapshot, cadence: u64) -> EncodedPersistedStateBundle {
+        EncodedPersistedStateBundle {
+            desired,
+            observed_revision: Revision::ZERO,
+            observed_bytes: Some(
+                encode_archive_to_vec(&ObservedClusterState::default()).expect("observed encodes"),
+            ),
+            applied_revision: Revision::ZERO,
+            applied_bytes: Some(
+                encode_archive_to_vec(&AppliedClusterState::default()).expect("applied encodes"),
+            ),
+            history_bytes: None,
+            baseline_revision: Revision::ZERO,
+            baseline_bytes: None,
+            snapshot_rewrite_cadence: cadence,
+        }
+    }
+
+    // Regression: a mutation racing between `should_capture_desired_snapshot` and the capture
+    // itself produced a revision-only bundle that crossed the rewrite cadence, and persisting it
+    // failed with "cannot rewrite desired snapshot without encoded desired bytes".
+    #[test]
+    fn revision_only_bundle_past_cadence_defers_desired_rewrite() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "orion-persist-cadence-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        let storage = NodeStorage::new(&state_dir);
+        let mut desired = DesiredClusterState {
+            revision: Revision::new(1),
+            ..DesiredClusterState::default()
+        };
+        persist_bundle_to_storage(
+            &storage,
+            &bundle(
+                encode_desired_snapshot(&desired).expect("desired encodes"),
+                4,
+            ),
+        )
+        .expect("initial persist should write the desired snapshot");
+
+        desired.revision = Revision::new(9);
+        persist_bundle_to_storage(
+            &storage,
+            &bundle(desired_snapshot_revision_only(&desired), 4),
+        )
+        .expect("revision-only bundle past the cadence should persist");
+        let manifest = storage
+            .load_snapshot_manifest()
+            .expect("manifest should load")
+            .expect("manifest should exist");
+        assert_eq!(manifest.desired_snapshot_revision, Revision::new(1));
+        assert_eq!(manifest.latest_desired_revision, Revision::new(9));
+
+        persist_bundle_to_storage(
+            &storage,
+            &bundle(
+                encode_desired_snapshot(&desired).expect("desired encodes"),
+                4,
+            ),
+        )
+        .expect("next encoded persist should rewrite the desired snapshot");
+        let manifest = storage
+            .load_snapshot_manifest()
+            .expect("manifest should load")
+            .expect("manifest should exist");
+        assert_eq!(manifest.desired_snapshot_revision, Revision::new(9));
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
 }
