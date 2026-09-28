@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn node_persists_and_replays_state_and_artifacts() {
     let state_dir = temp_state_dir("persist");

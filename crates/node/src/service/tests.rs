@@ -1,3 +1,5 @@
+// Some shared helpers are only exercised by HTTP tests.
+#![cfg_attr(not(feature = "transport-http"), allow(dead_code, unused_imports))]
 use super::*;
 use crate::{NodeAppBuilder, NodeConfig};
 use orion::{
@@ -139,6 +141,7 @@ fn thread_capture_app(expected_thread: ThreadId, mismatch: Arc<AtomicBool>) -> N
         .expect("node app should build")
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn http_requests_flow_through_control_middleware() {
     let app = test_app();
@@ -193,6 +196,7 @@ fn local_stream_requests_share_the_same_control_pipeline() {
     assert!(matches!(response, ControlMessage::ClientWelcome(_)));
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn authorization_middleware_can_block_requests_before_app_logic() {
     let peer_sync_execution = NodeConfig::try_peer_sync_execution_from_env()
@@ -233,6 +237,7 @@ fn authorization_middleware_can_block_requests_before_app_logic() {
     assert!(err.to_string().contains("mutations blocked by authorizer"));
 }
 
+#[cfg(feature = "transport-http")]
 #[tokio::test(flavor = "current_thread")]
 async fn http_control_requests_stay_on_the_runtime_thread() {
     let mismatch = Arc::new(AtomicBool::new(false));

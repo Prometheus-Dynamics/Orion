@@ -149,6 +149,7 @@ fn loaded_seen_nonces_are_clamped_to_runtime_limit() {
     let _ = std::fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn trusted_peer_store_load_ignores_stale_temp_files() {
     let state_dir = temp_state_dir("trust-store-stale-temp");
@@ -231,6 +232,7 @@ fn trusted_peer_store_load_ignores_stale_temp_files() {
     let _ = fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn replayed_nonce_is_rejected_after_restart() {
     let state_dir_main = temp_state_dir("nonce-replay-main");
@@ -307,6 +309,7 @@ fn replayed_nonce_is_rejected_after_restart() {
     let _ = std::fs::remove_dir_all(state_dir_peer);
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn revoked_peer_is_rejected_until_it_is_replaced() {
     let state_dir_main = temp_state_dir("revoked-peer-main");

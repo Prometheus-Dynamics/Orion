@@ -1,3 +1,5 @@
+// Some shared helpers are only exercised by HTTP tests.
+#![cfg_attr(not(feature = "transport-http"), allow(dead_code, unused_imports))]
 //! Camera-pipeline provider/executor fixtures shared by the runtime composition and validation
 //! tests.
 

@@ -1,5 +1,14 @@
-use crate::{ControlOperation, NodeError};
-use orion::control_plane::{CommunicationFailureKind, OperationFailureCategory, PeerSyncErrorKind};
+#[cfg(any(test, feature = "transport-http"))]
+use crate::ControlOperation;
+use crate::NodeError;
+#[cfg(any(
+    feature = "transport-http",
+    feature = "transport-tcp",
+    feature = "transport-quic"
+))]
+use orion::control_plane::CommunicationFailureKind;
+use orion::control_plane::{OperationFailureCategory, PeerSyncErrorKind};
+#[cfg(any(test, feature = "transport-http"))]
 use orion_transport_http::{HttpRequestFailureKind, HttpTransportError};
 #[cfg(feature = "transport-quic")]
 use orion_transport_quic::QuicTransportError;

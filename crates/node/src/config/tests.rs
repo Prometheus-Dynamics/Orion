@@ -221,6 +221,7 @@ fn node_process_config_disables_http_listener_with_off() {
     );
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn node_process_config_keeps_http_listener_enabled_by_default() {
     let process = with_env_vars(
@@ -283,4 +284,110 @@ fn node_process_config_rejects_zero_runtime_worker_threads() {
     assert!(
         matches!(err, crate::NodeError::Config(message) if message.contains("ORION_NODE_RUNTIME_WORKER_THREADS"))
     );
+}
+
+#[cfg(not(feature = "transport-http"))]
+mod without_transport_http {
+    use super::*;
+    use crate::{NodeConfig, NodeProcessConfig};
+
+    fn config_error(vars: &[(&str, Option<&str>)]) -> String {
+        match with_env_vars(vars, NodeProcessConfig::try_from_env) {
+            Err(crate::NodeError::Config(message)) => message,
+            other => panic!("expected config error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_listener_is_off_by_default() {
+        let process = with_env_vars(
+            &[("ORION_NODE_HTTP_ADDR", None), ("ORION_NODE_PEERS", None)],
+            NodeProcessConfig::try_from_env,
+        )
+        .expect("IPC-only process config should parse");
+        assert!(!process.http_enabled);
+        assert!(process.http_probe_addr.is_none());
+    }
+
+    #[test]
+    fn explicit_off_is_accepted() {
+        let process = with_env_vars(
+            &[
+                ("ORION_NODE_HTTP_ADDR", Some("off")),
+                ("ORION_NODE_PEERS", None),
+            ],
+            NodeProcessConfig::try_from_env,
+        )
+        .expect("ORION_NODE_HTTP_ADDR=off should parse");
+        assert!(!process.http_enabled);
+    }
+
+    #[test]
+    fn http_address_is_rejected() {
+        let message = config_error(&[
+            ("ORION_NODE_HTTP_ADDR", Some("127.0.0.1:9100")),
+            ("ORION_NODE_PEERS", None),
+        ]);
+        assert!(message.contains("ORION_NODE_HTTP_ADDR"), "{message}");
+        assert!(message.contains("transport-http"), "{message}");
+    }
+
+    #[test]
+    fn peers_are_rejected() {
+        let message = config_error(&[
+            ("ORION_NODE_HTTP_ADDR", None),
+            ("ORION_NODE_PEERS", Some("node-b=http://127.0.0.1:9101")),
+        ]);
+        assert!(message.contains("ORION_NODE_PEERS"), "{message}");
+        assert!(message.contains("transport-http"), "{message}");
+    }
+
+    #[test]
+    fn http_tls_settings_are_rejected() {
+        for var in [
+            ("ORION_NODE_HTTP_TLS_AUTO", Some("true")),
+            ("ORION_NODE_HTTP_TLS_CERT", Some("/tmp/cert.pem")),
+        ] {
+            let message = config_error(&[
+                ("ORION_NODE_HTTP_ADDR", None),
+                ("ORION_NODE_PEERS", None),
+                var,
+            ]);
+            assert!(message.contains("ORION_NODE_HTTP_TLS"), "{message}");
+            assert!(message.contains("transport-http"), "{message}");
+        }
+    }
+
+    #[test]
+    fn http_probe_address_is_rejected() {
+        let message = config_error(&[
+            ("ORION_NODE_HTTP_ADDR", None),
+            ("ORION_NODE_PEERS", None),
+            ("ORION_NODE_HTTP_PROBE_ADDR", Some("127.0.0.1:9180")),
+        ]);
+        assert!(message.contains("ORION_NODE_HTTP_PROBE_ADDR"), "{message}");
+        assert!(message.contains("transport-http"), "{message}");
+    }
+
+    #[test]
+    fn builder_rejects_peers_and_http_tls() {
+        let peers = NodeConfig::for_local_node("node-a").with_peers(vec![crate::PeerConfig::new(
+            "node-b",
+            "http://127.0.0.1:9101",
+        )]);
+        let err = crate::NodeApp::builder()
+            .config(peers)
+            .try_build()
+            .err()
+            .expect("peers should be rejected");
+        assert!(err.to_string().contains("transport-http"), "{err}");
+
+        let tls = crate::NodeApp::builder()
+            .config(NodeConfig::for_local_node("node-a"))
+            .with_auto_http_tls(true)
+            .try_build()
+            .err()
+            .expect("HTTP TLS should be rejected");
+        assert!(tls.to_string().contains("transport-http"), "{tls}");
+    }
 }

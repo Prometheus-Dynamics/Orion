@@ -22,6 +22,7 @@ fn node_sync_status_and_error_updates_reject_unknown_peers() {
     assert!(matches!(err, NodeError::UnknownPeer(_)));
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn node_app_tracks_configured_and_registered_peers() {
     let app = NodeApp::builder()
@@ -52,6 +53,7 @@ fn node_app_tracks_configured_and_registered_peers() {
     assert_eq!(app.snapshot().registered_peers, 2);
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn node_app_records_peer_hello_and_sync_status() {
     let app = NodeApp::builder()
@@ -186,6 +188,7 @@ fn peer_trust_statuses_include_revoked_unconfigured_peers() {
     assert_eq!(status.sync_status, None);
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn peer_trust_query_exposes_mtls_mode_and_learned_tls_binding() {
     let state_dir_a = temp_state_dir("trust-query-a");
@@ -338,6 +341,7 @@ fn local_enroll_peer_can_pretrust_tls_root_cert() {
     );
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn peer_trust_status_classifies_sync_errors_for_troubleshooting() {
     let app = NodeApp::builder()

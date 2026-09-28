@@ -54,6 +54,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         peer_sync_execution = ?config.peer_sync_execution,
         state_dir = ?config.state_dir,
         reconcile_interval_ms = config.reconcile_interval.as_millis(),
+        reconcile_backstop_ms = config.runtime_tuning.reconcile_backstop_interval.as_millis(),
         ipc_stream_heartbeat_interval_ms = config.ipc_stream_heartbeat_interval.as_millis(),
         ipc_stream_heartbeat_timeout_ms = config.ipc_stream_heartbeat_timeout.as_millis(),
         audit_log_path = ?process.audit_log_path,

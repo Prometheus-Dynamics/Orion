@@ -4,6 +4,7 @@ mod data;
 mod error;
 mod fd_frame;
 mod fd_latest;
+mod frame_read;
 mod memory;
 mod unix;
 
@@ -20,6 +21,7 @@ pub use fd_latest::{
     UnixFdLatestConfig, UnixFdLatestFrame, UnixFdLatestPublisher, UnixFdLatestReply,
     UnixFdLatestServer,
 };
+pub use frame_read::ControlFrameReadState;
 pub use memory::IpcTransport;
 pub use unix::{
     UnixControlClient, UnixControlHandler, UnixControlServer, UnixControlStreamClient,
@@ -464,6 +466,59 @@ mod tests {
             .expect("unix control server join should succeed")
             .expect("unix control server shutdown should succeed");
 
+        let _ = std::fs::remove_file(socket_path);
+    }
+
+    #[tokio::test]
+    async fn unix_control_transport_shuts_down_while_connection_limit_is_saturated() {
+        use std::sync::Arc;
+        use tokio::{
+            net::UnixStream,
+            sync::oneshot,
+            time::{Duration, sleep, timeout},
+        };
+
+        struct LoopbackHandler;
+
+        impl UnixControlHandler for LoopbackHandler {
+            fn handle_control(
+                &self,
+                envelope: ControlEnvelope,
+            ) -> Result<ControlEnvelope, IpcTransportError> {
+                Ok(envelope)
+            }
+        }
+
+        let socket_path = std::env::temp_dir().join(format!(
+            "orion-ipc-saturated-shutdown-test-{}.sock",
+            std::process::id(),
+        ));
+        let server = UnixControlServer::bind(&socket_path, Arc::new(LoopbackHandler))
+            .await
+            .expect("unix control server should bind")
+            .with_max_connections(1)
+            .with_io_timeout(Duration::from_secs(30));
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let task = tokio::spawn(server.serve_with_shutdown(async move {
+            let _ = shutdown_rx.await;
+        }));
+
+        // Hold the only permit, then wait until the accept loop is parked on the limiter.
+        let stalled_client = UnixStream::connect(&socket_path)
+            .await
+            .expect("stalled unix client should connect");
+        sleep(Duration::from_millis(50)).await;
+
+        shutdown_tx
+            .send(())
+            .expect("shutdown signal should be sent");
+        timeout(Duration::from_millis(500), task)
+            .await
+            .expect("saturated unix control server should still shut down promptly")
+            .expect("unix control server join should succeed")
+            .expect("unix control server shutdown should succeed");
+
+        drop(stalled_client);
         let _ = std::fs::remove_file(socket_path);
     }
 

@@ -175,6 +175,7 @@ impl ReconcileLoopHandle {
     }
 }
 
+#[cfg(feature = "transport-http")]
 pub(super) fn is_https_base_url(base_url: &str) -> bool {
     base_url
         .get(..8)

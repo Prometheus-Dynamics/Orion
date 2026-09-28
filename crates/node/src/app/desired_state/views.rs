@@ -113,6 +113,7 @@ impl NodeApp {
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(feature = "transport-http"), allow(dead_code))]
     pub(crate) fn desired_metadata_for_test(
         &self,
     ) -> Result<

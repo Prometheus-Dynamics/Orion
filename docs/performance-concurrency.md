@@ -71,9 +71,9 @@ still a few sections worth treating as the main contention budget:
 - Status/observability snapshots take several read locks in sequence (`store`, `peers`, `clients`,
   `observability`). That is acceptable for admin surfaces, but they should stay read-only and
   avoid growing extra derived work.
-- Local control-plane state updates still do `store` mutation, persistence, and then reconcile in
-  sequence. That is correct, but it remains one of the higher-latency synchronous paths in the
-  node.
+- Local control-plane state updates still do `store` mutation and persistence in sequence. When the
+  event-driven reconcile loop is running, the follow-up reconcile is handed to the loop (coalesced
+  with other updates) instead of running inline; without a loop it still runs inline.
 - Mutation-history normalization and persisted-state capture hold the store/history/baseline locks
   long enough to clone and encode state. If release perf work finds contention there, that is the
   next place to consider more incremental persistence formats.

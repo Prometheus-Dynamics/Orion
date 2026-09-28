@@ -1,6 +1,9 @@
+// Some shared helpers are only exercised by HTTP tests.
+#![cfg_attr(not(feature = "transport-http"), allow(dead_code, unused_imports))]
 use super::*;
 use orion::transport::ipc::UnixControlHandler;
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn observability_reports_host_and_local_communication_metrics() {
     let app = NodeApp::builder()

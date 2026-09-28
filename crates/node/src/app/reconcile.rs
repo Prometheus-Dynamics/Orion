@@ -1,7 +1,7 @@
 #[cfg(feature = "transport-http")]
 use super::desired_sync::merge_desired_cluster_state;
 use super::{
-    NodeApp, NodeError, NodeTickReport,
+    NodeApp, NodeError,
     desired_state::{diff_desired_cluster_state, merge_observed_state, merge_peer_observed_state},
 };
 use orion::{
@@ -9,130 +9,13 @@ use orion::{
     control_plane::{
         ControlMessage, DesiredClusterState, MutationBatch, ObservedStateUpdate, StateSnapshot,
     },
-    runtime::{
-        ExecutorCommand, ExecutorIntegration, ExecutorSnapshot, ProviderSnapshot, ReconcileReport,
-        RuntimeError,
-    },
+    runtime::RuntimeError,
     transport::http::HttpResponsePayload,
 };
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::info_span;
 
-struct CollectedRuntimeState {
-    executors: Vec<Arc<dyn ExecutorIntegration + Send + Sync>>,
-    provider_snapshots: Vec<ProviderSnapshot>,
-    executor_snapshots: Vec<ExecutorSnapshot>,
-}
-
 impl NodeApp {
-    pub async fn tick_async(&self) -> Result<NodeTickReport, NodeError> {
-        let started = std::time::Instant::now();
-        let collected = {
-            let _span = info_span!("reconcile", node = %self.config.node_id).entered();
-            self.collect_runtime_state()?
-        };
-        let runtime_changed = self.apply_runtime_snapshots(&collected)?;
-        let reconcile = {
-            let store = self.store_read();
-            self.runtime.reconcile(&store)?
-        };
-
-        let result = self
-            .apply_reconcile_report_async(&collected.executors, reconcile, runtime_changed)
-            .await;
-        match &result {
-            Ok(_) => self.record_reconcile_success(started.elapsed()),
-            Err(err) => self.record_reconcile_failure(started.elapsed(), err),
-        }
-        result
-    }
-
-    pub fn tick(&self) -> Result<NodeTickReport, NodeError> {
-        let _span = info_span!("reconcile", node = %self.config.node_id).entered();
-        let started = std::time::Instant::now();
-        let collected = self.collect_runtime_state()?;
-        let runtime_changed = self.apply_runtime_snapshots(&collected)?;
-
-        let reconcile = {
-            let store = self.store_read();
-            self.runtime.reconcile(&store)?
-        };
-
-        let result = self.apply_reconcile_report(&collected.executors, reconcile, runtime_changed);
-        match &result {
-            Ok(_) => self.record_reconcile_success(started.elapsed()),
-            Err(err) => self.record_reconcile_failure(started.elapsed(), err),
-        }
-        result
-    }
-
-    async fn apply_reconcile_report_async(
-        &self,
-        executors: &[Arc<dyn orion::runtime::ExecutorIntegration + Send + Sync>],
-        report: ReconcileReport,
-        runtime_changed: bool,
-    ) -> Result<NodeTickReport, NodeError> {
-        // Executor integrations are still synchronous. Async reconcile only makes persistence
-        // asynchronous after command application; executor callbacks themselves must stay cheap.
-        // Command application is intentionally serialized by reconcile order for this release.
-        let executors_by_id = executor_index(executors);
-        for command in &report.commands {
-            if let Some(executor) = executor_for_command(&executors_by_id, command) {
-                executor.apply_command(command)?;
-            }
-        }
-
-        let mut state_changed = runtime_changed;
-        self.with_store_mut(|store| {
-            if store.applied.revision != report.desired_revision {
-                store.mark_applied_revision(report.desired_revision);
-                state_changed = true;
-            }
-        });
-        if state_changed {
-            self.persist_state_async().await?;
-        }
-
-        Ok(NodeTickReport {
-            local_node_id: report.local_node_id,
-            desired_revision: report.desired_revision,
-            applied_revision: self.store_read().applied.revision,
-            commands: report.commands,
-        })
-    }
-
-    fn apply_reconcile_report(
-        &self,
-        executors: &[Arc<dyn orion::runtime::ExecutorIntegration + Send + Sync>],
-        report: ReconcileReport,
-        runtime_changed: bool,
-    ) -> Result<NodeTickReport, NodeError> {
-        let executors_by_id = executor_index(executors);
-        for command in &report.commands {
-            if let Some(executor) = executor_for_command(&executors_by_id, command) {
-                executor.apply_command(command)?;
-            }
-        }
-
-        let mut state_changed = runtime_changed;
-        self.with_store_mut(|store| {
-            if store.applied.revision != report.desired_revision {
-                store.mark_applied_revision(report.desired_revision);
-                state_changed = true;
-            }
-        });
-        if state_changed {
-            self.persist_state()?;
-        }
-
-        Ok(NodeTickReport {
-            local_node_id: report.local_node_id,
-            desired_revision: report.desired_revision,
-            applied_revision: self.store_read().applied.revision,
-            commands: report.commands,
-        })
-    }
-
     #[cfg(any(test, feature = "transport-http"))]
     pub(super) async fn adopt_remote_snapshot_async(
         &self,
@@ -261,7 +144,7 @@ impl NodeApp {
         };
         commit_result?;
         self.record_mutation_apply_success(started.elapsed());
-        let _ = self.tick_async().await?;
+        self.reconcile_after_change_async().await?;
         Ok(())
     }
 
@@ -291,7 +174,7 @@ impl NodeApp {
             Ok(())
         })?;
         self.record_mutation_apply_success(started.elapsed());
-        let _ = self.tick()?;
+        self.reconcile_after_change()?;
         Ok(())
     }
 
@@ -646,45 +529,6 @@ impl NodeApp {
         self.adopt_remote_snapshot_async(snapshot).await
     }
 
-    fn collect_runtime_state(&self) -> Result<CollectedRuntimeState, NodeError> {
-        // Provider/executor snapshot collection is intentionally synchronous today. Integration
-        // implementations are expected to treat these callbacks as cheap local reads. The work is
-        // serialized, but it happens before the runtime-store mutation phase so expensive
-        // integrations do not stall while holding shared-state write access.
-        let providers: Vec<_> = self.providers_read().values().cloned().collect();
-        let executors: Vec<_> = self.executors_read().values().cloned().collect();
-        let provider_snapshots = providers
-            .iter()
-            .map(|provider| provider.snapshot())
-            .collect();
-        let executor_snapshots = executors
-            .iter()
-            .map(|executor| executor.snapshot())
-            .collect();
-
-        Ok(CollectedRuntimeState {
-            executors,
-            provider_snapshots,
-            executor_snapshots,
-        })
-    }
-
-    fn apply_runtime_snapshots(
-        &self,
-        collected: &CollectedRuntimeState,
-    ) -> Result<bool, NodeError> {
-        self.with_store_mut(|store| -> Result<bool, NodeError> {
-            let mut changed = false;
-            for provider_snapshot in &collected.provider_snapshots {
-                changed |= store.apply_provider_snapshot(provider_snapshot.clone())?;
-            }
-            for executor_snapshot in &collected.executor_snapshots {
-                changed |= store.apply_executor_snapshot(executor_snapshot.clone())?;
-            }
-            Ok(changed)
-        })
-    }
-
     pub(super) fn mutation_batch_since(&self, base_revision: Revision) -> Option<MutationBatch> {
         let history = self.mutation_history_read();
         if let Some(full_replay) = self.with_desired_state_read(|desired| {
@@ -749,31 +593,10 @@ impl NodeApp {
             }
         });
         if state_changed {
-            self.persist_state()?;
+            let persisted = self.persist_state();
+            self.request_reconcile();
+            persisted?;
         }
         Ok(HttpResponsePayload::Accepted)
     }
-}
-
-fn executor_index(
-    executors: &[Arc<dyn ExecutorIntegration + Send + Sync>],
-) -> BTreeMap<orion::ExecutorId, &Arc<dyn ExecutorIntegration + Send + Sync>> {
-    executors
-        .iter()
-        .map(|executor| (executor.executor_record().executor_id, executor))
-        .collect()
-}
-
-fn executor_for_command<'a>(
-    executors_by_id: &'a BTreeMap<
-        orion::ExecutorId,
-        &'a Arc<dyn ExecutorIntegration + Send + Sync>,
-    >,
-    command: &ExecutorCommand,
-) -> Option<&'a Arc<dyn ExecutorIntegration + Send + Sync>> {
-    let executor_id = match command {
-        ExecutorCommand::Start(plan) => &plan.executor_id,
-        ExecutorCommand::Stop { executor_id, .. } => executor_id,
-    };
-    executors_by_id.get(executor_id).copied()
 }

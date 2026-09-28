@@ -318,6 +318,7 @@ fn node_tick_allows_consumers_to_bind_executor_published_derived_resources() {
     );
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn node_tick_does_not_start_two_controller_workloads_for_one_exclusive_raw_resource() {
     let app = NodeApp::builder()

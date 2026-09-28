@@ -1,14 +1,17 @@
 use crate::{AuthenticatedPeer, NodeApp, NodeError};
+#[cfg(feature = "transport-http")]
+use orion::transport::http::HttpTransportError;
 use orion::{
     auth::{AuthenticatedPeerRequest, PeerRequestAuth, PeerRequestPayload},
     control_plane::{ControlMessage, ObservedStateUpdate},
     transport::{
-        http::{HttpRequestPayload, HttpResponsePayload, HttpTransportError},
+        http::{HttpRequestPayload, HttpResponsePayload},
         ipc::{ControlEnvelope, IpcTransportError, LocalAddress, UnixPeerIdentity},
     },
 };
 use orion_service::{MiddlewareNext, MiddlewareStack, RequestMiddleware, RequestService};
 use std::sync::Arc;
+#[cfg(feature = "transport-http")]
 use tracing::error;
 
 mod adapters;
@@ -303,6 +306,7 @@ pub enum ControlResponse {
 }
 
 impl ControlResponse {
+    #[cfg(feature = "transport-http")]
     fn into_http(self) -> Result<HttpResponsePayload, HttpTransportError> {
         match self {
             Self::Http(response) => Ok(*response),
@@ -438,6 +442,7 @@ impl NodeApp {
         self.serve_control_request(request)
     }
 
+    #[cfg(feature = "transport-http")]
     fn execute_http_control_request(
         &self,
         request: ControlRequest,

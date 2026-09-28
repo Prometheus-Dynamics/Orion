@@ -111,6 +111,14 @@ The facade crate `orion` is feature-gated by subsystem.
 - `service`, `macros`, and `cluster` are explicit opt-ins.
 - Transport layers stay opt-in through `transport-http`, `transport-ipc`, `transport-tcp`, and `transport-quic`.
 - `orion-client` defaults to local IPC support through its `ipc` feature.
+- `orion-node` enables `transport-http`, `transport-tcp`, and `transport-quic` by default. The local
+  IPC control plane is always built. `cargo build -p orion-node --no-default-features` produces an
+  IPC-only node without the HTTP stack (no axum, hyper, reqwest, or rustls). In that build, peer sync,
+  the HTTP control and probe listeners, and HTTP TLS are unavailable, and configuring them fails at
+  startup with an error. You can add back any of the three transport features independently.
+- `orion-transport-http` exposes its protocol types (payloads, routes, codec, errors, and handler
+  traits) without the network stack. The HTTP client and server sit behind its default `transport`
+  feature.
 
 For production consumers that want a narrow dependency surface, prefer direct crate dependencies or disable default features on the facade and opt in explicitly.
 

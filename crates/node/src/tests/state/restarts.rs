@@ -289,6 +289,7 @@ fn maintenance_state_persists_across_restart() {
     let _ = fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[tokio::test]
 async fn restart_during_mutation_apply_recovers_latest_mutation() {
     let state_dir = temp_state_dir("restart-mutation");
@@ -404,6 +405,7 @@ async fn restart_during_mutation_apply_recovers_latest_mutation() {
     let _ = fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[tokio::test]
 async fn maintenance_isolation_persists_across_restart_and_blocks_remote_mutations_until_exit() {
     let state_dir = temp_state_dir("maintenance-isolation-restart");
@@ -525,6 +527,7 @@ async fn maintenance_isolation_persists_across_restart_and_blocks_remote_mutatio
     let _ = fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[tokio::test]
 async fn unschedulable_node_persists_across_restart_and_rejects_remote_assignment() {
     let state_dir = temp_state_dir("unschedulable-restart");

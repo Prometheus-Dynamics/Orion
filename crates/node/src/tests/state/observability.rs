@@ -1,9 +1,12 @@
+// Some shared helpers are only exercised by HTTP tests.
+#![cfg_attr(not(feature = "transport-http"), allow(dead_code, unused_imports))]
 use super::*;
 use crate::config::AuditLogOverloadPolicy;
 use orion::control_plane::DesiredStateMutation;
 use orion::transport::http::HttpResponsePayload;
 use orion::transport::ipc::UnixControlHandler;
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn observability_tracks_mutation_failures_and_replay_timing() {
     let state_dir = temp_state_dir("observability");
@@ -270,6 +273,7 @@ async fn observability_tracks_persistence_latency_and_worker_backpressure() {
     let _ = fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
     let state_dir = temp_state_dir("control-pressure");
@@ -378,6 +382,7 @@ async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
     let _ = fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn concurrent_peer_sync_persistence_and_local_control_activity_remains_responsive() {
     let state_dir = temp_state_dir("peer-sync-persistence-control");
@@ -560,6 +565,7 @@ async fn saturated_persistence_queue_exposes_backpressure_metrics_with_bounded_c
     let _ = fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[tokio::test]
 async fn health_and_readiness_reflect_graceful_transport_shutdown() {
     let state_dir = temp_state_dir("observability-shutdown");
@@ -670,6 +676,7 @@ async fn health_and_readiness_reflect_graceful_transport_shutdown() {
     let _ = fs::remove_dir_all(state_dir);
 }
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn observability_reports_peer_sync_counts_and_effective_parallel_cap() {
     let app = NodeApp::builder()

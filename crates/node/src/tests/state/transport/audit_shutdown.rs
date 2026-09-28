@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(feature = "transport-http")]
 #[test]
 fn audit_log_records_transport_security_and_trust_lifecycle_events() {
     let state_dir = temp_state_dir("audit-log");

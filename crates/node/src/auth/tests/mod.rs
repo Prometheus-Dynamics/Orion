@@ -1,3 +1,5 @@
+// Some shared helpers are only exercised by HTTP tests.
+#![cfg_attr(not(feature = "transport-http"), allow(dead_code, unused_imports))]
 use super::*;
 use crate::{NodeApp, NodeConfig};
 use orion::{
@@ -12,6 +14,7 @@ use orion::{
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(feature = "transport-http")]
 mod http;
 mod local_ipc;
 mod persistence;

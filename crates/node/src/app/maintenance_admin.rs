@@ -76,6 +76,7 @@ impl NodeApp {
         self.with_store_mut(|store| {
             store.set_maintenance(state.clone());
         });
+        self.request_reconcile();
         if let Some(storage) = &self.storage {
             storage.save_maintenance_state(&state)?;
         }

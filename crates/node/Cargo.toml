@@ -61,6 +61,56 @@ orion-macros.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
 
+# Integration tests that drive the node over its HTTP control plane.
+
+[[test]]
+name = "process_http"
+required-features = ["transport-http"]
+
+[[test]]
+name = "process_http_ipc"
+required-features = ["transport-http"]
+
+[[test]]
+name = "perf_baselines"
+required-features = ["transport-http"]
+
+[[test]]
+name = "perf_release"
+required-features = ["transport-http"]
+
+[[test]]
+name = "docker_client_examples"
+required-features = ["transport-http"]
+
+[[test]]
+name = "docker_client_orionctl_examples"
+required-features = ["transport-http"]
+
+[[test]]
+name = "docker_cluster_adversarial"
+required-features = ["transport-http"]
+
+[[test]]
+name = "docker_cluster_baseline"
+required-features = ["transport-http"]
+
+[[test]]
+name = "docker_cluster_failure"
+required-features = ["transport-http"]
+
+[[test]]
+name = "docker_cluster_perf"
+required-features = ["transport-http"]
+
+[[test]]
+name = "docker_cluster_scale"
+required-features = ["transport-http"]
+
+[[test]]
+name = "docker_cluster_soak"
+required-features = ["transport-http"]
+
 [[bench]]
 name = "persistence_replay"
 harness = false

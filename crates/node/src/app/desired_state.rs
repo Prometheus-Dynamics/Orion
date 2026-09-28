@@ -158,6 +158,7 @@ impl NodeApp {
             Ok(())
         })?;
         self.invalidate_desired_metadata_cache();
+        self.request_reconcile();
         Ok(())
     }
 
@@ -175,7 +176,9 @@ impl NodeApp {
         previous_revision: Revision,
     ) -> Result<(), NodeError> {
         self.invalidate_desired_metadata_cache();
-        self.persist_state()?;
+        let persisted = self.persist_state();
+        self.request_reconcile();
+        persisted?;
         self.notify_desired_state_watchers(previous_revision);
         Ok(())
     }
@@ -185,7 +188,9 @@ impl NodeApp {
         previous_revision: Revision,
     ) -> Result<(), NodeError> {
         self.invalidate_desired_metadata_cache();
-        self.persist_state_async().await?;
+        let persisted = self.persist_state_async().await;
+        self.request_reconcile();
+        persisted?;
         self.notify_desired_state_watchers(previous_revision);
         Ok(())
     }

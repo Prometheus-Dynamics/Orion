@@ -14,6 +14,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 ### Added
 
 - `ORION_NODE_HTTP_ADDR=off` runs `orion-node` without the HTTP control listener for IPC-only appliances.
+- `transport-http` cargo feature for `orion-node`, enabled by default. `cargo build -p orion-node --no-default-features` builds an IPC-only node without axum, hyper, reqwest, or rustls. In that build, `ORION_NODE_PEERS`, HTTP TLS settings, `ORION_NODE_HTTP_PROBE_ADDR`, and an `ORION_NODE_HTTP_ADDR` socket address fail startup with an error that names the missing feature.
+- `orion-transport-http` gains a default `transport` feature. Without it, the crate exposes only the protocol layer: payloads, routes, codec, errors, and handler traits. `orion-transport-common` gates its rustls helpers behind a default `tls` feature.
 - `ORION_NODE_RUNTIME_WORKER_THREADS` and `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` size the node's Tokio runtime.
 - Single-node appliance profile guidance in `docs/node-env.md`, and an `appliance_memory_soak` suite that checks memory slope and caps under provider/executor/mutation load.
 - `ResourceEndpoint::Custom` accepts any valid URI scheme (for example `styx-frame-lease+unix://`), with `CustomEndpointScheme` for typed downstream endpoints and `Display`/`FromStr` round-tripping.
@@ -23,6 +25,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- The node reconcile loop is event-driven: it wakes (coalesced for up to 5ms) on desired-state commits, observed-state merges, provider/executor state published over IPC, maintenance changes, and integration registration, plus a periodic backstop (`ORION_NODE_RECONCILE_BACKSTOP_MS`, default 5000). `ORION_NODE_RECONCILE_MS` is now the minimum idle gap between passes. With the loop running, IPC provider/executor updates and applied mutations defer their reconcile to it.
+- Successful reconcile passes log at `debug` and only record a recent observability event when they changed something; reconcile counters and latency still cover every pass.
 - `ResourceEndpoint` and `ResourceEndpointError` are now `#[non_exhaustive]`; unknown but valid schemes parse as `Custom` instead of failing with `UnsupportedScheme`.
 - Snapshot additions change the rkyv control-protocol layout, so `orionctl` and `orion-node` must be upgraded together.
 

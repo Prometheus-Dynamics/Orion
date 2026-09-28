@@ -5,12 +5,20 @@ mod lifecycle;
 mod metrics;
 mod resource_usage;
 
+#[cfg(any(
+    test,
+    any(
+        feature = "transport-http",
+        feature = "transport-tcp",
+        feature = "transport-quic"
+    )
+))]
+use orion::control_plane::CommunicationFailureKind;
 use orion::{
     NodeId,
     control_plane::{
-        CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationFailureKind,
-        CommunicationTransportKind, HttpMutualTlsMode as PublicHttpMutualTlsMode,
-        ObservabilityEvent, ObservabilityEventKind,
+        CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationTransportKind,
+        HttpMutualTlsMode as PublicHttpMutualTlsMode, ObservabilityEvent, ObservabilityEventKind,
     },
 };
 use std::{
@@ -177,7 +185,6 @@ impl ObservabilityState {
 
 impl crate::app::NodeApp {
     #[cfg(any(
-        test,
         feature = "transport-http",
         feature = "transport-tcp",
         feature = "transport-quic"

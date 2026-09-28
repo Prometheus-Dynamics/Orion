@@ -20,7 +20,8 @@ The node currently logs:
 
 - startup configuration summary after initialization
 - replay success and replay failure with duration and failure category
-- reconcile success and reconcile failure with duration and failure category
+- reconcile failure with duration and failure category (reconcile success is logged at `debug`
+  with duration and what the pass changed, so an idle node does not log every pass)
 - peer sync success and peer sync failure with peer id, duration, and failure category
 - mutation apply success and mutation apply failure with duration and failure category
 - HTTP TLS failures and audit-log backpressure warnings
@@ -43,7 +44,7 @@ errors.
 For routine production operation:
 
 - use `info` for normal lifecycle visibility
-- use `debug` when investigating peer sync or transport behavior
+- use `debug` when investigating peer sync, transport, or reconcile behavior
 
 For incident investigation, combine:
 

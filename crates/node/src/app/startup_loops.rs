@@ -79,12 +79,6 @@ impl NodeApp {
         }
     }
 
-    pub fn spawn_reconcile_loop(&self, interval: Duration) -> ReconcileLoopHandle {
-        self.spawn_fallible_background_loop(interval, "reconcile", |app| async move {
-            app.tick_async().await.map(|_| ())
-        })
-    }
-
     pub fn spawn_peer_sync_loop(&self, interval: Duration) -> ReconcileLoopHandle {
         self.spawn_peer_sync_loop_with_execution(interval, self.config.peer_sync_execution)
     }

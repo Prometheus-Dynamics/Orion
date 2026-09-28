@@ -16,14 +16,41 @@ instead of silently falling back.
 | `ORION_NODE_HTTP_PROBE_ADDR` | unset | Socket address | Invalid address fails startup. |
 | `ORION_NODE_RUNTIME_WORKER_THREADS` | unset (one per CPU core) | Positive integer | Zero or invalid integer fails startup. |
 | `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` | unset (Tokio default `512`) | Positive integer | Zero or invalid integer fails startup. |
-| `ORION_NODE_RECONCILE_MS` | `250` | Integer milliseconds, minimum effective value `1` | Invalid integer fails startup. |
+| `ORION_NODE_RECONCILE_MS` | `250` | Integer milliseconds, minimum effective value `1` | Invalid integer fails startup. Minimum idle gap between reconcile passes (see below); also the peer sync interval. |
+
+### Reconcile scheduling
+
+The reconcile loop is event-driven. It runs one pass at startup and then sleeps until something
+that can change the outcome of a pass is committed: a desired-state commit (local or remote
+mutations, snapshot adoption, peer sync, lease or assignment changes), an observed-state merge,
+provider or executor state published over local IPC, a maintenance change, or a newly registered
+in-process integration. Wake-ups coalesce for up to 5ms so a burst of updates collapses into one
+pass. A pass that dispatched commands to an in-process executor, or saw an in-process integration
+snapshot change, schedules a follow-up pass so in-process integrations keep converging.
+
+- `ORION_NODE_RECONCILE_MS` keeps its name and default but now means the minimum idle gap between
+  the end of one pass and the start of the next. Under continuous load the loop therefore runs no
+  more often than before; when idle it does not run at all until woken or the backstop fires.
+- `ORION_NODE_RECONCILE_BACKSTOP_MS` (default `5000`, runtime tuning below) is the longest the loop
+  stays idle before a periodic safety pass. It is clamped to at least `ORION_NODE_RECONCILE_MS`,
+  so setting it at or below that value restores the previous fixed-interval polling.
+- In-process integrations whose snapshots change outside Orion can call
+  `NodeApp::request_reconcile()` to be picked up before the next backstop pass.
+- While the loop runs, local IPC provider/executor state updates and applied mutations defer their
+  follow-up reconcile to the loop instead of reconciling inline. Reconcile failures are then
+  reported through reconcile metrics and the `reconcile failed` log instead of rejecting the
+  already committed update. Without a running loop (embedded use) they still reconcile inline.
 
 ### Single-node appliance profile
 
 A standalone node that only serves local IPC clients can shed most of its network surface:
 
-- build with `cargo build -p orion-node --release --no-default-features` to drop the TCP and QUIC data-plane transports
-- set `ORION_NODE_HTTP_ADDR=off` to skip the HTTP control listener (the optional probe listener on `ORION_NODE_HTTP_PROBE_ADDR` still works)
+- build with `cargo build -p orion-node --release --no-default-features` to get an IPC-only binary. This build drops the HTTP stack (the `transport-http` feature: axum, hyper, reqwest, and rustls) and the TCP and QUIC data-plane transports. Add `--features transport-http`, `transport-tcp`, or `transport-quic` to keep any of them.
+- with a default (HTTP-enabled) build, set `ORION_NODE_HTTP_ADDR=off` to skip the HTTP control listener. The optional probe listener on `ORION_NODE_HTTP_PROBE_ADDR` still works.
+- in a build without `transport-http`, the HTTP listener is always off:
+  - `ORION_NODE_HTTP_ADDR` must be unset or one of `off`, `disabled`, or `none`. Setting it to an address fails startup, because the build cannot serve it.
+  - `ORION_NODE_PEERS`, `ORION_NODE_HTTP_PROBE_ADDR`, `ORION_NODE_HTTP_TLS_CERT`, `ORION_NODE_HTTP_TLS_KEY`, and `ORION_NODE_HTTP_TLS_AUTO` fail startup with an error that names the missing feature.
+  - Embedders that pass peers or HTTP TLS files to `NodeApp::builder()` get the same error from `try_build()`.
 - set `ORION_NODE_RUNTIME_WORKER_THREADS=1` or `2` and lower `ORION_NODE_MAX_MUTATION_HISTORY*` and worker queue capacities to fit the device memory budget
 - on glibc targets, `MALLOC_ARENA_MAX=2` limits per-thread malloc arenas, which otherwise dominate anonymous memory on small multi-core devices
 
@@ -92,5 +119,6 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY` | `64` | Persistence worker queue capacity. |
 | `ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY` | `128` | Auth state worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |
+| `ORION_NODE_RECONCILE_BACKSTOP_MS` | `5000` | Longest idle period before the event-driven reconcile loop runs a periodic backstop pass. Clamped to at least `ORION_NODE_RECONCILE_MS`. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_INTERVAL_MS` | `5000` | `50` in test builds. IPC stream heartbeat interval. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_TIMEOUT_MS` | `15000` | `125` in test builds. IPC stream heartbeat timeout. |

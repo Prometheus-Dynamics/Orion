@@ -14,6 +14,8 @@ mod peer_sync_response;
 mod peer_sync_state;
 mod persistence;
 mod reconcile;
+mod reconcile_tick;
+mod reconcile_trigger;
 mod startup;
 mod startup_loops;
 mod state_access;
@@ -25,11 +27,7 @@ mod types;
 pub(crate) use observability::{clear_test_audit_append_delay, set_test_audit_append_delay};
 #[cfg(test)]
 pub(crate) use persistence::{clear_test_persist_delay, set_test_persist_delay};
-#[cfg(any(
-    feature = "transport-http",
-    feature = "transport-tcp",
-    feature = "transport-quic"
-))]
+#[cfg(feature = "transport-http")]
 pub(crate) use task_handle::GracefulTaskHandle;
 pub use types::{
     HttpMutualTlsMode, NodeError, NodeSnapshot, NodeTickReport, PeerSyncExecution,
@@ -49,22 +47,35 @@ use desired_sync::diff_desired_against_summary_sections;
 #[cfg(feature = "transport-http")]
 use desired_sync::{all_desired_sections, changed_sections, empty_summary_for_sections};
 use local_clients::{ClientRegistryTxn, LocalClientState};
+#[cfg(any(
+    test,
+    any(
+        feature = "transport-http",
+        feature = "transport-tcp",
+        feature = "transport-quic"
+    )
+))]
+pub(crate) use observability::CommunicationEndpointRuntime;
 #[cfg(feature = "transport-http")]
 pub(crate) use observability::classify_http_communication_failure;
+#[cfg(feature = "transport-http")]
+use observability::classify_peer_sync_error;
 #[cfg(feature = "transport-quic")]
 pub(crate) use observability::classify_quic_communication_failure;
 #[cfg(feature = "transport-tcp")]
 pub(crate) use observability::classify_tcp_communication_failure;
+#[cfg(any(test, feature = "transport-http"))]
+use observability::is_client_auth_tls_error;
 use observability::{
     AuditEventKind, AuditLogSink, LifecycleSnapshot, LifecycleState, MutationHistorySizeCache,
     ObservabilityState, ObservabilityTxn, classify_node_error, classify_peer_sync_error_kind,
     peer_sync_troubleshooting_hint, push_observability_event, write_audit_record,
 };
-pub(crate) use observability::{
-    CommunicationEndpointRuntime, CommunicationMetrics, CommunicationStageDurations,
-};
+pub(crate) use observability::{CommunicationMetrics, CommunicationStageDurations};
+#[cfg(feature = "transport-http")]
+use orion::encode_to_vec;
 #[cfg(any(test, feature = "transport-http"))]
-use observability::{classify_peer_sync_error, is_client_auth_tls_error};
+use orion::transport::http::HttpTransportError;
 #[cfg(feature = "transport-quic")]
 use orion::transport::quic::{QuicClientTlsConfig, QuicServerTlsConfig, QuicTransport};
 #[cfg(feature = "transport-tcp")]
@@ -76,10 +87,9 @@ use orion::{
         DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary, MutationBatch,
         ObservabilityEventKind, ObservedClusterState, WorkloadRecord,
     },
-    encode_to_vec,
     runtime::{ExecutorIntegration, ProviderIntegration, Runtime},
     transport::{
-        http::{HttpTransport, HttpTransportError},
+        http::HttpTransport,
         ipc::{IpcTransport, IpcTransportError, LocalAddress},
     },
 };
@@ -94,7 +104,7 @@ use std::{
     time::Duration,
 };
 use tls_bootstrap::stable_fingerprint;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 #[cfg(feature = "transport-http")]
 use types::is_https_base_url;
 
@@ -293,6 +303,7 @@ impl NodeApp {
         }
 
         self.put_provider_record_tracked(record.clone())?;
+        self.request_reconcile();
         Ok(record.provider_id)
     }
 
@@ -319,6 +330,7 @@ impl NodeApp {
         }
 
         self.put_executor_record_tracked(record.clone())?;
+        self.request_reconcile();
         Ok(record.executor_id)
     }
 
@@ -422,17 +434,45 @@ impl NodeApp {
         );
     }
 
-    fn record_reconcile_success(&self, duration: Duration) {
-        let mut observability = self.observability_lock();
-        observability.reconcile.record_success(duration);
-        push_observability_event(
-            &mut observability,
-            ObservabilityEventKind::Reconcile,
-            true,
-            Some(duration),
-            "reconcile succeeded".into(),
+    /// Every pass updates the reconcile counters and latency metrics. Only passes that changed
+    /// something push a recent event, and success logs at `debug` so an idle node does not flood
+    /// the journal or evict useful events from the bounded ring.
+    fn record_reconcile_success(
+        &self,
+        duration: Duration,
+        outcome: &reconcile_tick::ReconcileOutcome,
+        planned_commands: usize,
+    ) {
+        let changed = outcome.changed();
+        {
+            let mut observability = self.observability_lock();
+            observability.reconcile.record_success(duration);
+            if changed {
+                push_observability_event(
+                    &mut observability,
+                    ObservabilityEventKind::Reconcile,
+                    true,
+                    Some(duration),
+                    format!(
+                        "reconcile succeeded runtime_changed={} applied_revision_changed={} \
+                         dispatched_commands={}",
+                        outcome.runtime_changed,
+                        outcome.applied_revision_changed,
+                        outcome.dispatched_commands
+                    ),
+                );
+            }
+        }
+        debug!(
+            node = %self.config.node_id,
+            duration_ms = duration.as_millis() as u64,
+            changed,
+            runtime_changed = outcome.runtime_changed,
+            applied_revision_changed = outcome.applied_revision_changed,
+            dispatched_commands = outcome.dispatched_commands,
+            planned_commands,
+            "reconcile succeeded"
         );
-        info!(node = %self.config.node_id, duration_ms = duration.as_millis() as u64, "reconcile succeeded");
     }
 
     fn record_reconcile_failure(&self, duration: Duration, error: &NodeError) {

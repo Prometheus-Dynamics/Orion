@@ -55,6 +55,7 @@ impl NodeApp {
         Ok(())
     }
 
+    #[cfg(feature = "transport-http")]
     pub(crate) fn evict_all_peer_clients(&self) {
         self.with_peer_clients_mut(|peer_clients| {
             peer_clients.clear();

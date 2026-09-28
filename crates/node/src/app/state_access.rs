@@ -140,11 +140,13 @@ impl NodeApp {
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(feature = "transport-http"), allow(dead_code))]
     pub(crate) fn peer_state_for_test(&self, node_id: &NodeId) -> Option<PeerState> {
         self.peers_read().get(node_id).cloned()
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(feature = "transport-http"), allow(dead_code))]
     pub(crate) fn effective_parallel_in_flight_for_test(
         requested: usize,
         peer_count: usize,
@@ -157,6 +159,7 @@ impl NodeApp {
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(feature = "transport-http"), allow(dead_code))]
     pub(crate) fn parallel_spawn_stagger_ms_for_test(slot: usize, peer_count: usize) -> u64 {
         let config = crate::config::NodeConfig::try_from_env()
             .expect("test helper should build node config from environment");
@@ -391,6 +394,7 @@ pub(super) struct NodeState {
     pub(super) clients: ClientRegistryState,
     pub(super) observability: std::sync::RwLock<ObservabilityState>,
     pub(super) lifecycle: super::LifecycleState,
+    pub(super) reconcile: super::reconcile_trigger::ReconcileTrigger,
 }
 
 #[derive(Clone)]

@@ -1,8 +1,12 @@
+// Some shared helpers are only exercised by HTTP tests.
+#![cfg_attr(not(feature = "transport-http"), allow(dead_code, unused_imports))]
 use super::*;
 #[cfg(any(feature = "transport-tcp", feature = "transport-quic"))]
 use orion::data_plane::{
     ChannelBinding, LinkType, PeerCapabilities, PeerLink, RemoteBinding, TransportType,
 };
+#[cfg(feature = "transport-http")]
+use orion::transport::http::{HttpClient, HttpServer};
 #[cfg(feature = "transport-quic")]
 use orion::transport::quic::{
     QuicChannel, QuicEndpoint, QuicFrame, QuicFrameClient, QuicFrameHandler, QuicTransportError,
@@ -29,8 +33,8 @@ use orion::{
     },
     transport::{
         http::{
-            ControlRoute, HttpClient, HttpControlHandler, HttpRequestPayload, HttpResponsePayload,
-            HttpServer, HttpTransportError,
+            ControlRoute, HttpControlHandler, HttpRequestPayload, HttpResponsePayload,
+            HttpTransportError,
         },
         ipc::{ControlEnvelope, LocalAddress, UnixControlClient, UnixControlStreamClient},
     },
@@ -534,8 +538,10 @@ use camera_fixtures::{
 };
 
 mod runtime;
+#[cfg(feature = "transport-http")]
 mod runtime_http;
 mod state;
+#[cfg(feature = "transport-http")]
 mod sync;
 
 fn test_node_config(node_id: impl Into<NodeId>, ipc_label: impl AsRef<str>) -> NodeConfig {

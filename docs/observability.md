@@ -43,7 +43,8 @@ It currently includes:
   memory/swap, process id, and process RSS when the host exposes `/proc`
 - configured, ready, pending, and degraded peer counts
 - effective peer-sync parallel in-flight cap
-- operation metrics for replay, peer sync, reconcile, and mutation apply
+- operation metrics for replay, peer sync, reconcile, and mutation apply (reconcile counters and
+  latency cover every pass, including passes that changed nothing)
 - persistence worker queue capacity plus queue-send wait, reply wait, and operation duration metrics
 - audit-log queue capacity, backpressure mode, and dropped-record count
 - client-session metrics including registered clients, live stream clients, and queued client events
@@ -219,7 +220,7 @@ The most commonly consumed fields are:
 | `client_sessions` | `ClientSessionMetricsSnapshot` | Registered clients, live streams, queue depth, and churn counters. |
 | `transport` | `TransportMetricsSnapshot` | HTTP/IPС malformed input, TLS, frame, and reconnect counters. |
 | `communication` | array of `CommunicationEndpointSnapshot` | Endpoint-level communication metrics. |
-| `recent_events` | array of `ObservabilityEvent` | Recent bounded event log. |
+| `recent_events` | array of `ObservabilityEvent` | Recent bounded event log. Successful reconcile passes appear only when they changed something (runtime snapshot, applied revision, or commands dispatched to an in-process executor); failed passes always appear. |
 | `resource_usage` | `NodeResourceUsageSnapshot` | Memory, state-size, and backlog diagnostics. Defaults to zeroed/empty values when absent from older structured input. |
 
 `HostMetricsSnapshot` fields:

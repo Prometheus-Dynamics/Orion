@@ -125,6 +125,7 @@ pub use transport_security::{
 };
 
 #[cfg(test)]
+#[cfg_attr(not(feature = "transport-http"), allow(unused_imports))]
 pub(crate) use app::{
     clear_test_audit_append_delay, clear_test_persist_delay, set_test_audit_append_delay,
     set_test_persist_delay,
