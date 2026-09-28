@@ -27,10 +27,17 @@ path = "src/main.rs"
 default = ["transport-tcp", "transport-quic"]
 transport-tcp = ["dep:orion-transport-tcp"]
 transport-quic = ["dep:orion-transport-quic"]
+# Opt-in global allocators for the `orion-node` binary only (the library never sets one). Both are
+# off by default so the binary uses the platform allocator (glibc malloc on Linux). They are meant
+# to be enabled one at a time; if both are enabled (for example by `--all-features`), jemalloc takes
+# precedence and mimalloc is compiled but unused. See docs/node-env.md.
+alloc-mimalloc = ["dep:mimalloc"]
+alloc-jemalloc = ["dep:tikv-jemallocator"]
 
 [dependencies]
 ed25519-dalek.workspace = true
 libc.workspace = true
+mimalloc = { workspace = true, optional = true }
 orion-auth.workspace = true
 orion-control-plane.workspace = true
 orion-core.workspace = true
@@ -48,6 +55,7 @@ rkyv.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time", "sync", "signal", "io-util", "fs"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true

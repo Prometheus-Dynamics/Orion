@@ -16,6 +16,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `ORION_NODE_HTTP_ADDR=off` runs `orion-node` without the HTTP control listener for IPC-only appliances.
 - `ORION_NODE_RUNTIME_WORKER_THREADS` and `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` size the node's Tokio runtime.
 - Single-node appliance profile guidance in `docs/node-env.md`, and an `appliance_memory_soak` suite that checks memory slope and caps under provider/executor/mutation load.
+- Opt-in `alloc-jemalloc` and `alloc-mimalloc` features that set the `orion-node` binary's global allocator (jemalloc wins if both are on), with allocator soak measurements in `docs/node-env.md`. The soak gains `ORION_SOAK_NODE_WORKER_THREADS` and `ORION_SOAK_NODE_BIN`.
 - `ResourceEndpoint::Custom` accepts any valid URI scheme (for example `styx-frame-lease+unix://`), with `CustomEndpointScheme` for typed downstream endpoints and `Display`/`FromStr` round-tripping.
 - `UnixFdLatestServer` / `UnixFdLatestClient` in `orion-transport-ipc`: a bounded latest-value channel that hands out dup'd fds (for example dmabuf frame leases) with sequence waits, max age, and max clients.
 - `resource_usage` section in node observability snapshots (process RSS/PSS, state record counts, mutation history vs caps, local stream backlog, worker queue depth, registry sizes), `orionctl get memory`, and matching Prometheus families.

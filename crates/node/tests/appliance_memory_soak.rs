@@ -402,11 +402,18 @@ async fn appliance_memory_soak_stays_flat_under_heartbeat_load() {
     let (memory_slope, anon_slope) = report_slopes("after warm-up", &warm);
     let (first_warm, last) = (warm.first().expect("warm samples"), samples.last().unwrap());
     println!(
-        "memory: start={} KiB warm={} KiB end={} KiB peak={} KiB",
+        "memory: start={} KiB warm={} KiB end={} KiB peak={} KiB anon_warm={} KiB anon_end={} KiB \
+         threads={}",
         samples[0].memory_kib,
         first_warm.memory_kib,
         last.memory_kib,
-        samples.iter().map(|s| s.memory_kib).max().unwrap_or(0)
+        samples.iter().map(|s| s.memory_kib).max().unwrap_or(0),
+        first_warm.rss_anon_kib,
+        last.rss_anon_kib,
+        last.usage
+            .process
+            .threads
+            .map_or_else(|| "?".to_owned(), |threads| threads.to_string())
     );
 
     assert!(
