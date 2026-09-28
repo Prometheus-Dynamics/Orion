@@ -6,6 +6,7 @@ mod fd_frame;
 mod fd_latest;
 mod frame_read;
 mod memory;
+mod preamble;
 mod unix;
 
 pub use address::LocalAddress;
@@ -23,10 +24,14 @@ pub use fd_latest::{
 };
 pub use frame_read::ControlFrameReadState;
 pub use memory::IpcTransport;
+pub use preamble::{
+    CONTROL_PREAMBLE_BYTES, CONTROL_PREAMBLE_MAGIC, check_control_preamble, control_preamble,
+};
 pub use unix::{
     UnixControlClient, UnixControlHandler, UnixControlServer, UnixControlStreamClient,
     read_control_frame, read_control_frame_with_limit, read_control_frame_with_limit_metered,
     write_control_frame, write_control_frame_with_limit, write_control_frame_with_limit_metered,
+    write_control_protocol_mismatch_frame,
 };
 
 #[cfg(test)]
@@ -138,6 +143,10 @@ mod tests {
 
         let (mut client, mut server) = tokio::io::duplex(16);
         let writer = tokio::spawn(async move {
+            client
+                .write_all(&control_preamble())
+                .await
+                .expect("preamble should write");
             client
                 .write_u32_le((DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES + 1) as u32)
                 .await
@@ -581,7 +590,8 @@ mod tests {
                 transport_binding_signature: None,
             }),
         };
-        let payload = encode_to_vec(&envelope).expect("control envelope should encode");
+        let mut payload = control_preamble().to_vec();
+        payload.extend(encode_to_vec(&envelope).expect("control envelope should encode"));
 
         let mut raw = UnixStream::connect(&socket_path)
             .await
@@ -602,8 +612,9 @@ mod tests {
         raw.read_to_end(&mut response)
             .await
             .expect("raw unix client should read response");
+        assert_eq!(response[..CONTROL_PREAMBLE_BYTES], control_preamble());
         let response: ControlEnvelope =
-            decode_from_slice(&response).expect("response should decode");
+            decode_from_slice(&response[CONTROL_PREAMBLE_BYTES..]).expect("response should decode");
         assert_eq!(response.source.as_str(), "orion");
 
         let client = UnixControlClient::new(&socket_path);

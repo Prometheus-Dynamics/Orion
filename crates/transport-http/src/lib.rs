@@ -1,6 +1,7 @@
 mod codec;
 mod error;
 mod message;
+mod protocol;
 mod route;
 mod tls;
 mod transport;

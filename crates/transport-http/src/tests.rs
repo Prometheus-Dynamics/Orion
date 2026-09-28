@@ -17,6 +17,7 @@ use tokio::{
 };
 
 mod probe_metrics;
+mod protocol_version;
 
 #[derive(Default)]
 struct LoopbackService;
@@ -670,8 +671,9 @@ async fn http_server_accepts_partial_writes_and_survives_interrupted_clients() {
         .encode_request(&HttpRequestPayload::Control(Box::new(hello_message())))
         .expect("hello request should encode");
     let raw = format!(
-        "POST {} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        "POST {} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nx-orion-control-protocol: {}\r\nContent-Length: {}\r\n\r\n",
         request.path,
+        orion_core::CONTROL_PROTOCOL_VERSION,
         request.body.len()
     );
 

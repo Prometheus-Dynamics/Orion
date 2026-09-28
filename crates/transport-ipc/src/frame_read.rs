@@ -10,9 +10,16 @@
 use orion_core::decode_from_slice_with;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::{ControlEnvelope, IpcTransportError};
+use crate::{
+    ControlEnvelope, IpcTransportError,
+    preamble::{CONTROL_PREAMBLE_BYTES, check_control_preamble},
+};
 
-const HEADER_BYTES: usize = std::mem::size_of::<u32>();
+/// Stream frame header: `[control preamble][payload_len u32 LE]`. Its layout is frozen across
+/// protocol versions, so a frame from a different version can still be delimited and skipped.
+pub(crate) const STREAM_FRAME_HEADER_BYTES: usize =
+    CONTROL_PREAMBLE_BYTES + std::mem::size_of::<u32>();
+const HEADER_BYTES: usize = STREAM_FRAME_HEADER_BYTES;
 
 /// Partial-frame state for reading control frames from one stream. Keep one per stream and reuse
 /// it for every read on that stream.
@@ -22,6 +29,9 @@ pub struct ControlFrameReadState {
     header_filled: usize,
     payload: Option<Vec<u8>>,
     payload_filled: usize,
+    /// Set when the header announced another protocol version: the payload is drained (never
+    /// decoded) and this error is returned once the frame is complete.
+    mismatch: Option<IpcTransportError>,
 }
 
 impl ControlFrameReadState {
@@ -59,8 +69,19 @@ impl ControlFrameReadState {
         }
 
         if self.payload.is_none() {
-            let len = u32::from_le_bytes(self.header) as usize;
-            if len > max_payload_bytes.max(1) {
+            let (preamble, len) = self.header.split_at(CONTROL_PREAMBLE_BYTES);
+            let len = u32::from_le_bytes([len[0], len[1], len[2], len[3]]) as usize;
+            if let Err(err) = check_control_preamble(preamble) {
+                // Skip a mismatched frame's payload (if bounded) so the peer is not left with
+                // unread bytes; garbage without the magic is rejected immediately.
+                if !matches!(err, IpcTransportError::ProtocolMismatch { .. })
+                    || len > max_payload_bytes.max(1)
+                {
+                    self.reset();
+                    return Err(err);
+                }
+                self.mismatch = Some(err);
+            } else if len > max_payload_bytes.max(1) {
                 self.reset();
                 return Err(IpcTransportError::DecodeFailed(
                     "control frame exceeds maximum transport payload size".into(),
@@ -87,7 +108,11 @@ impl ControlFrameReadState {
         }
 
         let payload = self.payload.take().expect("payload buffer allocated above");
+        let mismatch = self.mismatch.take();
         self.reset();
+        if let Some(err) = mismatch {
+            return Err(err);
+        }
         let bytes_received = payload.len() + HEADER_BYTES;
         decode_from_slice_with(&payload, IpcTransportError::DecodeFailed)
             .map(|envelope| Some((envelope, bytes_received)))
@@ -97,6 +122,7 @@ impl ControlFrameReadState {
         self.header_filled = 0;
         self.payload = None;
         self.payload_filled = 0;
+        self.mismatch = None;
     }
 }
 
@@ -165,6 +191,10 @@ mod tests {
     async fn eof_mid_payload_and_oversized_frames_are_errors() {
         let (mut client, mut server) = tokio::io::duplex(64);
         client
+            .write_all(&crate::control_preamble())
+            .await
+            .expect("preamble should write");
+        client
             .write_all(&8_u32.to_le_bytes())
             .await
             .expect("header should write");
@@ -180,6 +210,10 @@ mod tests {
         ));
 
         let (mut client, mut server) = tokio::io::duplex(64);
+        client
+            .write_all(&crate::control_preamble())
+            .await
+            .expect("preamble should write");
         client
             .write_all(&65_u32.to_le_bytes())
             .await

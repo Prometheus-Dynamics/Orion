@@ -3,6 +3,7 @@ use orion_control_plane::{ControlMessage, StateSnapshot, SyncRequest};
 use orion_core::{NodeId, Revision};
 use orion_transport_http::{
     ControlRoute, HttpClient, HttpClientTlsConfig, HttpRequestPayload, HttpResponsePayload,
+    HttpTransportError,
 };
 
 use crate::cli::{
@@ -121,6 +122,19 @@ impl HttpTargetExt for HttpTargetArgs {
 }
 
 impl HttpTargetArgs {
+    /// Renders HTTP errors, spelling out control-protocol skew in orionctl terms.
+    fn describe_http_error(&self, error: HttpTransportError) -> String {
+        match error {
+            HttpTransportError::ProtocolMismatch { local, remote } => format!(
+                "incompatible Orion control protocol: orionctl speaks v{local} but the orion-node \
+                 at {} speaks v{remote}; upgrade orionctl and orion-node together (they must come \
+                 from the same Orion release)",
+                self.http
+            ),
+            other => other.to_string(),
+        }
+    }
+
     pub(crate) async fn get_route(
         &self,
         route: ControlRoute,
@@ -128,7 +142,7 @@ impl HttpTargetArgs {
         self.client()?
             .get_route(route)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(|error| self.describe_http_error(error))
     }
 
     pub(crate) async fn send_control(
@@ -138,7 +152,7 @@ impl HttpTargetArgs {
         self.client()?
             .send(&HttpRequestPayload::Control(Box::new(message)))
             .await
-            .map_err(|error| error.to_string())
+            .map_err(|error| self.describe_http_error(error))
     }
 
     pub(crate) async fn fetch_snapshot(&self) -> Result<StateSnapshot, String> {

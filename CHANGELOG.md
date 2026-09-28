@@ -27,6 +27,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Successful reconcile passes log at `debug` and only record a recent observability event when they changed something; reconcile counters and latency still cover every pass.
 - `ResourceEndpoint` and `ResourceEndpointError` are now `#[non_exhaustive]`; unknown but valid schemes parse as `Custom` instead of failing with `UnsupportedScheme`.
 - Snapshot additions change the rkyv control-protocol layout, so `orionctl` and `orion-node` must be upgraded together.
+- Explicit control-protocol versioning: `orion_core::CONTROL_PROTOCOL_VERSION` (now 2, for the `resource_usage` layout) is carried in a fixed 4-byte preamble on every local IPC message (unary and stream frames, including the `ClientHello`/`ClientWelcome` handshake) and in the `x-orion-control-protocol` HTTP header, and checked before any rkyv payload is decoded. Version skew now fails with `IpcTransportError`/`HttpTransportError`/`ClientError::ProtocolMismatch { local, remote }` telling operators to upgrade orionctl and orion-node together, instead of opaque rkyv decode errors. A layout fingerprint test (`crates/orion/tests/control_protocol_layout.rs`) forces a version bump on future layout changes. See `docs/protocol-compatibility.md`.
+- CI workflows install the pinned 1.94.0 toolchain (matching `rust-toolchain.toml`) instead of `stable`.
 
 ### Fixed
 

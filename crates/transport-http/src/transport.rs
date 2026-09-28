@@ -11,6 +11,7 @@ use axum::{
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
+use orion_core::CONTROL_PROTOCOL_HTTP_HEADER;
 use orion_transport_common::{
     ConnectionTasks, DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT, DEFAULT_HTTP_CLIENT_REQUEST_TIMEOUT,
     DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES, DEFAULT_TRANSPORT_IO_TIMEOUT,
@@ -22,6 +23,10 @@ use tokio_rustls::TlsAcceptor;
 use crate::{
     ControlRoute, HttpCodec, HttpRequest, HttpRequestPayload, HttpResponse, HttpResponsePayload,
     HttpTransportError,
+    protocol::{
+        check_request_protocol, check_response_protocol, local_protocol_header_value,
+        protocol_rejection, stamp_protocol_header,
+    },
     tls::{
         CachedTlsAcceptor, HttpClientTlsConfig, HttpServerTlsConfig, cached_tls_acceptor,
         install_crypto_provider,
@@ -236,12 +241,14 @@ impl HttpClient {
         let response = self
             .client
             .request(method, format!("{}{}", self.base_url, request.path))
+            .header(CONTROL_PROTOCOL_HTTP_HEADER, local_protocol_header_value())
             .body(request.body)
             .send()
             .await
             .map_err(HttpTransportError::request_failed_from_reqwest)?;
 
         let status = response.status().as_u16();
+        check_response_protocol(status, response.headers())?;
         let body = response
             .bytes()
             .await
@@ -266,11 +273,13 @@ impl HttpClient {
         let response = self
             .client
             .request(Method::GET, format!("{}{}", self.base_url, route.path()))
+            .header(CONTROL_PROTOCOL_HTTP_HEADER, local_protocol_header_value())
             .send()
             .await
             .map_err(HttpTransportError::request_failed_from_reqwest)?;
 
         let status = response.status().as_u16();
+        check_response_protocol(status, response.headers())?;
         let body = response
             .bytes()
             .await
@@ -394,6 +403,7 @@ impl HttpServer {
                 ControlRoute::Readiness.path(),
                 get(handle_readiness_request),
             )
+            .layer(axum::middleware::from_fn(stamp_protocol_header))
             .with_state(HttpServerState {
                 service: self.service.clone(),
                 max_body_bytes: self.max_body_bytes,
@@ -625,6 +635,12 @@ async fn handle_http_request(
         };
     let bytes_received = body.len().min(u64::MAX as usize) as u64;
     let service = state.service;
+    // Checked after the (bounded) body is read so the connection stays usable, but before any
+    // byte of the rkyv body is decoded.
+    if let Err(err) = check_request_protocol(&parts.headers) {
+        service.record_transport_error(&err);
+        return protocol_rejection(&err);
+    }
 
     let codec = HttpCodec;
     let method = match crate::HttpMethod::from_http_name(parts.method.as_str()) {

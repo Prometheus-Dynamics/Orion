@@ -10,7 +10,10 @@ use orion::{
         ipc::{ControlEnvelope, IpcTransportError, LocalAddress, UnixControlServer},
     },
 };
-use orion_transport_ipc::{ControlFrameReadState, write_control_frame_with_limit_metered};
+use orion_transport_ipc::{
+    ControlFrameReadState, write_control_frame_with_limit_metered,
+    write_control_protocol_mismatch_frame,
+};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -333,10 +336,17 @@ impl NodeApp {
         let mut read_state = ControlFrameReadState::new();
         let (hello, hello_bytes) = match read_state
             .read_metered(&mut reader, max_payload_bytes)
-            .await?
+            .await
         {
-            Some((envelope, bytes)) => (envelope, bytes_len_u64(bytes)),
-            None => return Ok(()),
+            Ok(Some((envelope, bytes))) => (envelope, bytes_len_u64(bytes)),
+            Ok(None) => return Ok(()),
+            Err(err @ IpcTransportError::ProtocolMismatch { .. }) => {
+                // Tell the client which version we speak before closing the session.
+                let _ = write_control_protocol_mismatch_frame(&mut writer).await;
+                self.record_ipc_transport_error(&err);
+                return Err(err);
+            }
+            Err(err) => return Err(err),
         };
 
         let (source, destination, welcome): (LocalAddress, LocalAddress, ControlMessage) =

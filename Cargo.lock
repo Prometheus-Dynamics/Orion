@@ -1188,6 +1188,7 @@ dependencies = [
  "orion-transport-ipc",
  "orion-transport-quic",
  "orion-transport-tcp",
+ "rkyv",
  "serde",
 ]
 

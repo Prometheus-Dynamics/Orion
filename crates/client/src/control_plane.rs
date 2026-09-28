@@ -734,7 +734,8 @@ fn classify_ipc_failure(
         | orion_transport_ipc::IpcTransportError::WriteFailed(_) => {
             CommunicationFailureKind::Transport
         }
-        orion_transport_ipc::IpcTransportError::EncodeFailed(_) => {
+        orion_transport_ipc::IpcTransportError::EncodeFailed(_)
+        | orion_transport_ipc::IpcTransportError::ProtocolMismatch { .. } => {
             CommunicationFailureKind::Protocol
         }
         orion_transport_ipc::IpcTransportError::DecodeFailed(_) => CommunicationFailureKind::Decode,
