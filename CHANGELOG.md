@@ -4,7 +4,12 @@ All notable changes to this workspace should be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
-## [Unreleased]
+## [1.0.0] - 2026-04-19
+
+- Standardized the workspace layout, docs, CI, linting, and helper scripts.
+- Added repo-level testing guidance for default, Docker, perf, and soak validation surfaces.
+- Added `scripts/check-file-sizes.sh`, `scripts/ci.sh`, and `scripts/repo-clean.sh`.
+- Preserved the richer Orion-specific operational and performance workflow split.
 
 ### Added
 
@@ -19,7 +24,6 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 ### Changed
 
 - `ResourceEndpoint` and `ResourceEndpointError` are now `#[non_exhaustive]`; unknown but valid schemes parse as `Custom` instead of failing with `UnsupportedScheme`.
-
 - Snapshot additions change the rkyv control-protocol layout, so `orionctl` and `orion-node` must be upgraded together.
 
 ### Fixed
@@ -27,10 +31,3 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `send_unix_fd_frame_async` / `recv_unix_fd_frame_async` no longer spin at 100% CPU on idle connections; readiness is now cleared through `try_io`.
 - Background loops no longer busy-spin when their `ReconcileLoopHandle` is dropped without shutdown (for example after a startup error).
 - Executor and provider subscriptions no longer drop all but the first matching event of a batched `ClientEvents` frame.
-
-## [1.0.0] - 2026-04-19
-
-- Standardized the workspace layout, docs, CI, linting, and helper scripts.
-- Added repo-level testing guidance for default, Docker, perf, and soak validation surfaces.
-- Added `scripts/check-file-sizes.sh`, `scripts/ci.sh`, and `scripts/repo-clean.sh`.
-- Preserved the richer Orion-specific operational and performance workflow split.
