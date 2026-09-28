@@ -13,7 +13,7 @@ use std::{
 use tokio::net::UnixListener;
 use tokio::time::{Duration, sleep};
 
-fn unique_socket_path(label: &str) -> PathBuf {
+pub(super) fn unique_socket_path(label: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time should advance")
@@ -491,7 +491,7 @@ async fn local_runtime_publisher_publishes_provider_resources_and_executor_snaps
     let _ = tokio::fs::remove_file(&socket_path).await;
 }
 
-async fn serve_executor_bootstrap_query(
+pub(super) async fn serve_executor_bootstrap_query(
     listener: UnixListener,
     executor: ExecutorRecord,
     workloads: Vec<WorkloadRecord>,
@@ -721,7 +721,7 @@ async fn serve_provider_and_control_watch_streams(
     sleep(Duration::from_millis(50)).await;
 }
 
-async fn write_welcome(
+pub(super) async fn write_welcome(
     stream: &mut tokio::net::UnixStream,
     destination: LocalAddress,
     role: ClientRole,

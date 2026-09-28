@@ -1211,6 +1211,7 @@ dependencies = [
  "orion-runtime",
  "orion-transport-http",
  "orion-transport-ipc",
+ "serde",
  "thiserror 2.0.18",
  "tokio",
 ]

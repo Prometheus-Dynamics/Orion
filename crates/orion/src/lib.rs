@@ -36,6 +36,12 @@ pub mod cluster {
 
 #[cfg(feature = "client")]
 pub mod client {
+    pub use orion_client::prelude;
+    pub use orion_client::{
+        AssignedWorkload, AssignedWorkloadWatch, AssignedWorkloadsUpdate, BoundResource,
+        assigned_workloads, assigned_workloads_for_executor, assigned_workloads_from_records,
+        is_assigned_to, resources_bound_to,
+    };
     pub use orion_client::{
         ClientError, ClientIdentity, ClientRole, ClientSession, ControlPlaneClient,
         ControlPlaneEventStream, DEFAULT_DAEMON_ADDRESS, DerivedResource, ExecutorApp,
@@ -174,6 +180,10 @@ pub mod transport {
 ))]
 pub mod prelude {
     pub use crate::client::{
+        AssignedWorkload, AssignedWorkloadWatch, AssignedWorkloadsUpdate, BoundResource,
+        assigned_workloads, assigned_workloads_for_executor, resources_bound_to,
+    };
+    pub use crate::client::{
         ClientIdentity, ClientRole, ClientSession, ControlPlaneClient, ControlPlaneEventStream,
         DerivedResource, ExecutorApp, ExecutorClient, ExecutorEventStream, GraphPayload,
         GraphPayloadSource, GraphReference, GraphResolutionError, LocalControlPlaneClient,
@@ -194,9 +204,10 @@ pub mod prelude {
         UnixEndpoint, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
         config_json_value, deserialize_config,
     };
+    pub use crate::control_plane::{StateSnapshot, TypedConfigValue, WorkloadConfig};
     pub use crate::core::{
-        ArtifactId, NodeId, ProviderId, ResourceId, ResourceType, ResourceTypeDef, RuntimeType,
-        RuntimeTypeDef, WorkloadId,
+        ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, ResourceType, ResourceTypeDef,
+        Revision, RuntimeType, RuntimeTypeDef, WorkloadId,
     };
     pub use crate::data_plane::{LinkType, PeerLink, RemoteBinding, TransportType};
     pub use crate::runtime::{LocalRuntimeStore, Runtime};
@@ -207,6 +218,11 @@ pub mod prelude {
 pub use auth::{
     AuthProtocolError, AuthenticatedPeerRequest, PEER_REQUEST_AUTH_VERSION,
     PEER_REQUEST_SIGNING_DOMAIN, PeerRequestAuth, PeerRequestPayload, canonical_peer_request_bytes,
+};
+#[cfg(feature = "client")]
+pub use client::{
+    AssignedWorkload, AssignedWorkloadWatch, AssignedWorkloadsUpdate, BoundResource,
+    assigned_workloads, assigned_workloads_for_executor, resources_bound_to,
 };
 #[cfg(feature = "client")]
 pub use client::{
@@ -281,6 +297,12 @@ mod tests {
         let _node_id = prelude::NodeId::new("node-a");
         let _runtime = prelude::Runtime::new(prelude::NodeId::new("node-a"));
         let _coordinator = prelude::ClusterCoordinator;
+        let _assigned: fn(
+            &prelude::StateSnapshot,
+            &control_plane::ExecutorRecord,
+        ) -> Vec<prelude::AssignedWorkload> = prelude::assigned_workloads;
+        let _client_prelude_node = client::prelude::NodeId::new("node-a");
+        let _client_prelude_revision = client::prelude::Revision::ZERO;
     }
 
     #[test]
