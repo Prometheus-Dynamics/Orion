@@ -34,6 +34,8 @@ async fn orionctl_describe_reports_full_object_state_and_blockers() {
         ResourceRecord::builder("resource.describe", "camera.device", "provider.describe")
             .health(orion::control_plane::HealthState::Healthy)
             .availability(orion::control_plane::AvailabilityState::Available)
+            .endpoint("shm://camera-describe")
+            .endpoint("styx-frame-lease+unix:///run/helios/cam0.sock")
             .build(),
     );
     desired.put_workload(
@@ -132,6 +134,12 @@ async fn orionctl_describe_reports_full_object_state_and_blockers() {
     let resource_stdout = String::from_utf8_lossy(&resource.stdout);
     assert!(resource_stdout.contains("resource: resource.describe"));
     assert!(resource_stdout.contains("type: camera.device"));
+    assert!(
+        resource_stdout.contains(
+            "endpoints: shm://camera-describe,styx-frame-lease+unix:///run/helios/cam0.sock"
+        ),
+        "{resource_stdout}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

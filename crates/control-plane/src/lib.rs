@@ -36,15 +36,16 @@ pub use metrics_support::{
     LATENCY_BUCKET_LE_500_MS, LatencyMetricBuckets, duration_ms_u64, estimate_wire_bytes,
 };
 pub use records::{
-    AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, ClusterStateEnvelope,
-    ConfigDecodeError, ConfigMapRef, DesiredClusterState, ExecutorRecord, ExecutorRecordBuilder,
-    HttpEndpoint, IpcEndpoint, LeaseRecord, LeaseRecordBuilder, NodeRecord, NodeRecordBuilder,
-    ObservedClusterState, ProviderRecord, ProviderRecordBuilder, ResourceActionResult,
-    ResourceActionStatus, ResourceBinding, ResourceCapability, ResourceConfigState,
-    ResourceEndpoint, ResourceEndpointError, ResourceOwnershipMode, ResourceRecord,
-    ResourceRecordBuilder, ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue,
-    TypedResourceEndpoint, UnixEndpoint, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder,
-    WorkloadRequirement, config_json_value, deserialize_config,
+    AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, BUILTIN_ENDPOINT_SCHEMES,
+    ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef, CustomEndpoint, CustomEndpointScheme,
+    DesiredClusterState, ExecutorRecord, ExecutorRecordBuilder, HttpEndpoint, IpcEndpoint,
+    LeaseRecord, LeaseRecordBuilder, NodeRecord, NodeRecordBuilder, ObservedClusterState,
+    ProviderRecord, ProviderRecordBuilder, ResourceActionResult, ResourceActionStatus,
+    ResourceBinding, ResourceCapability, ResourceConfigState, ResourceEndpoint,
+    ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
+    ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue, TypedResourceEndpoint,
+    UnixEndpoint, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
+    config_json_value, deserialize_config, is_valid_endpoint_scheme,
 };
 pub use state::{
     AvailabilityState, DesiredState, HealthState, LeaseState, RestartPolicy, WorkloadObservedState,
