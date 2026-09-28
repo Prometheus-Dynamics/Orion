@@ -82,6 +82,7 @@ fn workload_section_fingerprint(
     Ok(hasher.finish())
 }
 
+#[cfg(feature = "transport-http")]
 pub(super) fn changed_sections(
     local: &DesiredStateSectionFingerprints,
     remote: &DesiredStateSectionFingerprints,
@@ -111,6 +112,7 @@ pub(super) fn changed_sections(
     sections
 }
 
+#[cfg(feature = "transport-http")]
 pub(super) fn empty_summary_for_sections(
     revision: Revision,
     _sections: &[DesiredStateSection],
@@ -137,6 +139,7 @@ pub(super) fn empty_summary_for_sections(
     }
 }
 
+#[cfg(feature = "transport-http")]
 pub(super) fn all_desired_sections() -> Vec<DesiredStateSection> {
     vec![
         DesiredStateSection::Nodes,
@@ -428,11 +431,13 @@ fn diff_workloads_against_summary_or_selected(
     Ok(())
 }
 
+#[cfg(feature = "transport-http")]
 type WorkloadMergeResult = (
     BTreeMap<WorkloadId, WorkloadRecord>,
     BTreeMap<WorkloadId, Revision>,
 );
 
+#[cfg(feature = "transport-http")]
 pub(super) fn merge_desired_cluster_state(
     local: &DesiredClusterState,
     remote: &DesiredClusterState,
@@ -479,6 +484,7 @@ pub(super) fn merge_desired_cluster_state(
     Ok(merged)
 }
 
+#[cfg(feature = "transport-http")]
 fn merge_workload_section(
     local: &DesiredClusterState,
     remote: &DesiredClusterState,
@@ -526,12 +532,14 @@ fn merge_workload_section(
     Ok((workloads, workload_tombstones))
 }
 
+#[cfg(feature = "transport-http")]
 enum WorkloadMergeEntry {
     Record(WorkloadRecord),
     Tombstone(Revision),
     Absent,
 }
 
+#[cfg(feature = "transport-http")]
 fn select_workload_entry(
     workload_id: &WorkloadId,
     local_record: Option<&WorkloadRecord>,
@@ -586,6 +594,7 @@ fn select_workload_entry(
     }
 }
 
+#[cfg(feature = "transport-http")]
 fn merge_section<K, V>(
     local: &BTreeMap<K, V>,
     remote: &BTreeMap<K, V>,

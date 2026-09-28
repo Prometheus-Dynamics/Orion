@@ -34,10 +34,12 @@ impl LifecycleState {
         self.replay_successful.store(successful, Ordering::SeqCst);
     }
 
+    #[cfg(feature = "transport-http")]
     pub(crate) fn mark_http_bound(&self) {
         self.http_bound.store(true, Ordering::SeqCst);
     }
 
+    #[cfg(feature = "transport-http")]
     pub(crate) fn clear_http_bound(&self) {
         self.http_bound.store(false, Ordering::SeqCst);
     }

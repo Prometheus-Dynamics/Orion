@@ -96,6 +96,7 @@ fn classify_peer_sync_message_fallback(message: &str) -> PeerSyncErrorKind {
     }
 }
 
+#[cfg(any(test, feature = "transport-http"))]
 fn classify_http_transport_error_for_peer_sync(error: &HttpTransportError) -> PeerSyncErrorKind {
     match error {
         // TLS transport errors from the HTTP layer currently arrive as free-text messages,
@@ -129,6 +130,7 @@ pub(crate) fn classify_peer_sync_error_kind(message: &str) -> PeerSyncErrorKind 
     classify_peer_sync_message_fallback(message)
 }
 
+#[cfg(any(test, feature = "transport-http"))]
 pub(crate) fn classify_peer_sync_error(error: &NodeError) -> PeerSyncErrorKind {
     match error {
         NodeError::Config(_)
@@ -182,6 +184,7 @@ pub(crate) fn classify_peer_sync_error(error: &NodeError) -> PeerSyncErrorKind {
     }
 }
 
+#[cfg(feature = "transport-http")]
 pub(crate) fn classify_http_communication_failure(
     error: &HttpTransportError,
 ) -> CommunicationFailureKind {
@@ -245,6 +248,7 @@ pub(crate) fn classify_quic_communication_failure(
     }
 }
 
+#[cfg(any(test, feature = "transport-http"))]
 pub(crate) fn is_client_auth_tls_error(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
     is_tls_handshake_error(&message)

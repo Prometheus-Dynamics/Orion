@@ -21,10 +21,12 @@ name = "orion-node"
 path = "src/main.rs"
 
 [features]
-# Release binaries keep the HTTP control plane always on and enable both data-plane transports by
-# default. Downstream builds can opt out of either transport with `--no-default-features` plus the
-# specific transport feature they want to retain.
-default = ["transport-tcp", "transport-quic"]
+# Release binaries enable the HTTP control plane (peer sync, HTTP probe, HTTP TLS bootstrap) and
+# both data-plane transports by default. `--no-default-features` produces an IPC-only node (no
+# axum/hyper/reqwest/rustls); add back any of `transport-http`, `transport-tcp` or `transport-quic`
+# independently.
+default = ["transport-http", "transport-tcp", "transport-quic"]
+transport-http = ["orion-transport-http/transport", "orion-transport-common/tls", "dep:rcgen"]
 transport-tcp = ["dep:orion-transport-tcp"]
 transport-quic = ["dep:orion-transport-quic"]
 
@@ -43,7 +45,7 @@ orion-transport-ipc.workspace = true
 orion-transport-quic = { workspace = true, optional = true }
 orion-transport-tcp = { workspace = true, optional = true }
 rand_core.workspace = true
-rcgen.workspace = true
+rcgen = { workspace = true, optional = true }
 rkyv.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -56,6 +58,7 @@ tracing-subscriber.workspace = true
 criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
 orion = { workspace = true, features = ["auth", "client", "runtime", "macros", "transport-http", "transport-tcp", "transport-quic", "transport-ipc"] }
 orion-macros.workspace = true
+rcgen.workspace = true
 reqwest.workspace = true
 
 [[bench]]

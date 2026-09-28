@@ -53,6 +53,18 @@ jobs:
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      - name: Run clippy on orion-node feature matrix
+        run: |
+          # IPC-only appliance build (no HTTP stack) and each transport on its own.
+          cargo clippy -p orion-node --no-default-features --all-targets -- -D warnings
+          cargo clippy -p orion-node --no-default-features --features transport-http --all-targets -- -D warnings
+          cargo clippy -p orion-node --no-default-features --features transport-tcp --all-targets -- -D warnings
+          cargo clippy -p orion-node --no-default-features --features transport-quic --all-targets -- -D warnings
+          cargo clippy -p orion-node --all-targets -- -D warnings
+
+      - name: Test IPC-only orion-node build
+        run: cargo test -p orion-node --no-default-features
+
       - name: Build docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 

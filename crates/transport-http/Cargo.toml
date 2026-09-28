@@ -16,21 +16,36 @@ workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+# `transport` enables the network client/server (axum, hyper, reqwest, rustls). Without it the
+# crate only exposes the protocol layer: payload types, routes, codec, errors and handler traits.
+default = ["transport"]
+transport = [
+    "dep:axum",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:reqwest",
+    "dep:rustls",
+    "dep:tokio",
+    "dep:tokio-rustls",
+    "orion-transport-common/tls",
+]
+
 [dependencies]
 orion-auth.workspace = true
 orion-control-plane.workspace = true
 orion-core.workspace = true
 orion-transport-common.workspace = true
-axum.workspace = true
-hyper.workspace = true
-hyper-util.workspace = true
-reqwest.workspace = true
+axum = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 serde.workspace = true
 rkyv.workspace = true
-rustls.workspace = true
+rustls = { workspace = true, optional = true }
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
-tokio-rustls.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"], optional = true }
+tokio-rustls = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
@@ -39,3 +54,4 @@ rcgen.workspace = true
 [[bench]]
 name = "http_latency"
 harness = false
+required-features = ["transport"]

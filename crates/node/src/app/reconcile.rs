@@ -1,7 +1,8 @@
+#[cfg(feature = "transport-http")]
+use super::desired_sync::merge_desired_cluster_state;
 use super::{
     NodeApp, NodeError, NodeTickReport,
     desired_state::{diff_desired_cluster_state, merge_observed_state, merge_peer_observed_state},
-    desired_sync::merge_desired_cluster_state,
 };
 use orion::{
     NodeId, ResourceId, Revision,
@@ -132,6 +133,7 @@ impl NodeApp {
         })
     }
 
+    #[cfg(any(test, feature = "transport-http"))]
     pub(super) async fn adopt_remote_snapshot_async(
         &self,
         snapshot: StateSnapshot,
@@ -224,6 +226,7 @@ impl NodeApp {
         Ok(())
     }
 
+    #[cfg(feature = "transport-http")]
     pub(super) async fn apply_remote_mutations_async(
         &self,
         batch: &MutationBatch,
@@ -349,6 +352,7 @@ impl NodeApp {
         }
     }
 
+    #[cfg(feature = "transport-http")]
     pub(super) async fn reconcile_conflicting_remote_snapshot(
         &self,
         node_id: &orion::NodeId,

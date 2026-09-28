@@ -1,11 +1,9 @@
-use super::{
-    ManagedTransportBinding, data_endpoint, launch_socket_surface,
-    launch_socket_surface_with_shutdown,
-};
-use crate::{
-    ManagedNodeTransportSurface, ManagedServerTransportSecurity, NodeApp, NodeError,
-    app::GracefulTaskHandle,
-};
+#[cfg(feature = "transport-http")]
+use super::launch_socket_surface_with_shutdown;
+use super::{ManagedTransportBinding, data_endpoint, launch_socket_surface};
+#[cfg(feature = "transport-http")]
+use crate::app::GracefulTaskHandle;
+use crate::{ManagedNodeTransportSurface, ManagedServerTransportSecurity, NodeApp, NodeError};
 use orion::transport::tcp::{
     TcpFrame, TcpFrameClient, TcpFrameHandler, TcpFrameServer, TcpTransportError,
 };
@@ -14,7 +12,6 @@ use std::time::Instant;
 use std::{net::SocketAddr, sync::Arc};
 
 impl NodeApp {
-    #[cfg(feature = "transport-tcp")]
     pub async fn send_tcp_data_frame_metered(
         &self,
         client: &TcpFrameClient,
@@ -63,13 +60,13 @@ impl NodeApp {
     }
 }
 
-#[cfg(feature = "transport-tcp")]
 fn resolve_tcp_tls(
     app: &NodeApp,
     surface: ManagedNodeTransportSurface,
 ) -> Result<Option<orion::transport::tcp::TcpServerTlsConfig>, NodeError> {
     match app.managed_surface_server_transport_security(surface)? {
         Some(ManagedServerTransportSecurity::Tcp(tls)) => Ok(Some(tls)),
+        #[cfg(any(feature = "transport-http", feature = "transport-quic"))]
         Some(_) => Err(NodeError::Storage(
             "managed TCP adapter resolved non-TCP transport security".into(),
         )),
@@ -77,7 +74,6 @@ fn resolve_tcp_tls(
     }
 }
 
-#[cfg(feature = "transport-tcp")]
 pub(super) async fn start_tcp_surface(
     app: NodeApp,
     surface: ManagedNodeTransportSurface,
@@ -96,6 +92,7 @@ pub(super) async fn start_tcp_surface(
     });
     let (addr, server, listener) = match surface {
         ManagedNodeTransportSurface::PeerTcpData => TcpFrameServer::bind(addr, handler).await?,
+        #[cfg(any(feature = "transport-http", feature = "transport-quic"))]
         _ => {
             return Err(NodeError::Storage(
                 "non-TCP managed surface cannot be started with the TCP transport adapter".into(),
@@ -120,7 +117,7 @@ pub(super) async fn start_tcp_surface(
     }))
 }
 
-#[cfg(feature = "transport-tcp")]
+#[cfg(feature = "transport-http")]
 pub(super) async fn start_tcp_surface_with_shutdown(
     app: NodeApp,
     surface: ManagedNodeTransportSurface,
@@ -133,6 +130,7 @@ pub(super) async fn start_tcp_surface_with_shutdown(
     });
     let (addr, server, listener) = match surface {
         ManagedNodeTransportSurface::PeerTcpData => TcpFrameServer::bind(addr, handler).await?,
+        #[cfg(any(feature = "transport-http", feature = "transport-quic"))]
         _ => {
             return Err(NodeError::Storage(
                 "non-TCP managed surface cannot be started with the TCP transport adapter".into(),
@@ -172,13 +170,11 @@ pub(super) async fn start_tcp_surface_with_shutdown(
     ))
 }
 
-#[cfg(feature = "transport-tcp")]
 struct MeteredTcpFrameHandler {
     app: NodeApp,
     inner: Arc<dyn TcpFrameHandler>,
 }
 
-#[cfg(feature = "transport-tcp")]
 impl TcpFrameHandler for MeteredTcpFrameHandler {
     fn handle_frame(&self, frame: TcpFrame) -> Result<TcpFrame, TcpTransportError> {
         let started = Instant::now();
@@ -225,7 +221,6 @@ impl TcpFrameHandler for MeteredTcpFrameHandler {
     }
 }
 
-#[cfg(feature = "transport-tcp")]
 fn tcp_inbound_data_endpoint(frame: &TcpFrame) -> crate::app::CommunicationEndpointRuntime {
     data_endpoint(
         "tcp",
@@ -236,7 +231,6 @@ fn tcp_inbound_data_endpoint(frame: &TcpFrame) -> crate::app::CommunicationEndpo
     )
 }
 
-#[cfg(feature = "transport-tcp")]
 fn tcp_outbound_data_endpoint(frame: &TcpFrame) -> crate::app::CommunicationEndpointRuntime {
     data_endpoint(
         "tcp",

@@ -25,14 +25,17 @@ use audit::should_emit_audit_drop_warning;
 pub(super) use audit::{AuditEventKind, AuditLogSink, write_audit_record};
 #[cfg(test)]
 pub(crate) use audit::{clear_test_audit_append_delay, set_test_audit_append_delay};
+#[cfg(feature = "transport-http")]
+pub(crate) use classification::classify_http_communication_failure;
 #[cfg(feature = "transport-quic")]
 pub(crate) use classification::classify_quic_communication_failure;
 #[cfg(feature = "transport-tcp")]
 pub(crate) use classification::classify_tcp_communication_failure;
 pub(crate) use classification::{
-    classify_http_communication_failure, classify_node_error, classify_peer_sync_error,
-    classify_peer_sync_error_kind, is_client_auth_tls_error, peer_sync_troubleshooting_hint,
+    classify_node_error, classify_peer_sync_error_kind, peer_sync_troubleshooting_hint,
 };
+#[cfg(any(test, feature = "transport-http"))]
+pub(crate) use classification::{classify_peer_sync_error, is_client_auth_tls_error};
 pub(crate) use host::sample_host_and_process_memory;
 pub(super) use lifecycle::{LifecycleSnapshot, LifecycleState};
 use metrics::OperationMetrics;
@@ -80,6 +83,12 @@ pub(crate) struct CommunicationEndpointRuntime {
 }
 
 impl CommunicationEndpointRuntime {
+    #[cfg(any(
+        test,
+        feature = "transport-http",
+        feature = "transport-tcp",
+        feature = "transport-quic"
+    ))]
     pub(crate) fn new(
         id: impl Into<String>,
         transport: impl Into<String>,
@@ -167,6 +176,12 @@ impl ObservabilityState {
 }
 
 impl crate::app::NodeApp {
+    #[cfg(any(
+        test,
+        feature = "transport-http",
+        feature = "transport-tcp",
+        feature = "transport-quic"
+    ))]
     pub(crate) fn record_communication_endpoint_exchange_with_stages(
         &self,
         mut endpoint: CommunicationEndpointRuntime,
@@ -197,6 +212,12 @@ impl crate::app::NodeApp {
         });
     }
 
+    #[cfg(any(
+        test,
+        feature = "transport-http",
+        feature = "transport-tcp",
+        feature = "transport-quic"
+    ))]
     pub(crate) fn record_communication_endpoint_failure_kind(
         &self,
         mut endpoint: CommunicationEndpointRuntime,
@@ -221,6 +242,12 @@ impl crate::app::NodeApp {
     }
 }
 
+#[cfg(any(
+    test,
+    feature = "transport-http",
+    feature = "transport-tcp",
+    feature = "transport-quic"
+))]
 fn prune_communication_endpoints_for_insert(observability: &mut ObservabilityState, id: &str) {
     if observability.communication_endpoints.contains_key(id) {
         return;

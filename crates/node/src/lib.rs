@@ -14,6 +14,11 @@ mod auth;
 mod blocking;
 mod config;
 mod lock;
+#[cfg(any(
+    feature = "transport-http",
+    feature = "transport-tcp",
+    feature = "transport-quic"
+))]
 mod managed_transport;
 mod peer;
 mod service;
@@ -46,12 +51,21 @@ pub mod runtime {
 }
 
 pub mod transport {
+    /// HTTP control-plane protocol types.
+    ///
+    /// The payload, route, codec and error types are protocol data shared with the IPC control
+    /// path and are always available. The network client/server and TLS configuration require the
+    /// `transport-http` feature.
     pub mod http {
         pub use orion_transport_http::{
-            ControlRoute, HttpClient, HttpClientTlsConfig, HttpCodec, HttpControlHandler,
-            HttpMethod, HttpRequest, HttpRequestPayload, HttpResponse, HttpResponsePayload,
-            HttpServer, HttpServerClientAuth, HttpServerTlsConfig, HttpService,
-            HttpTlsTrustProvider, HttpTransport, HttpTransportError,
+            ControlRoute, HttpCodec, HttpControlHandler, HttpMethod, HttpRequest,
+            HttpRequestPayload, HttpResponse, HttpResponsePayload, HttpService, HttpTransport,
+            HttpTransportError,
+        };
+        #[cfg(feature = "transport-http")]
+        pub use orion_transport_http::{
+            HttpClient, HttpClientTlsConfig, HttpServer, HttpServerClientAuth, HttpServerTlsConfig,
+            HttpTlsTrustProvider,
         };
     }
 

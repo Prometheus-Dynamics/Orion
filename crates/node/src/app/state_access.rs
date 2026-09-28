@@ -165,6 +165,7 @@ impl NodeApp {
             .parallel_spawn_stagger_ms(slot, peer_count)
     }
 
+    #[cfg(feature = "transport-http")]
     pub(super) fn peer_clients_read(&self) -> RwLockReadGuard<'_, PeerClientRegistry> {
         read_rwlock(
             self.state.peers.peer_clients.read(),

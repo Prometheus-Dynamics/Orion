@@ -48,6 +48,7 @@ impl HttpTransportError {
         }
     }
 
+    #[cfg(feature = "transport")]
     pub fn request_failed_from_reqwest(err: reqwest::Error) -> Self {
         let kind = if err.is_timeout() {
             HttpRequestFailureKind::Timeout

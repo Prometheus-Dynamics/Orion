@@ -62,12 +62,6 @@ impl NodeApp {
         Ok(client)
     }
 
-    pub(super) fn evict_peer_client(&self, node_id: &NodeId) {
-        self.with_peer_clients_mut(|peer_clients| {
-            peer_clients.remove(node_id);
-        });
-    }
-
     pub(super) async fn send_peer_http_request(
         &self,
         node_id: &NodeId,
@@ -256,41 +250,6 @@ impl NodeApp {
             }
         }
         Ok(None)
-    }
-
-    pub(super) fn peer_hello(&self) -> Result<PeerHello, NodeError> {
-        let revisions = self.current_revisions();
-        let desired_metadata = self.desired_metadata()?;
-        let (
-            transport_binding_version,
-            transport_binding_public_key,
-            transport_tls_cert_pem,
-            transport_binding_signature,
-        ) = match self.http_tls_cert_path.as_deref() {
-            Some(cert_path) => {
-                let cert_pem = read_file_bytes(cert_path)?;
-                let binding = self.security.transport_binding(&cert_pem)?;
-                (
-                    Some(binding.version),
-                    Some(binding.public_key),
-                    Some(binding.tls_cert_pem),
-                    Some(binding.signature),
-                )
-            }
-            None => (None, None, None, None),
-        };
-        Ok(PeerHello {
-            node_id: self.config.node_id.clone(),
-            desired_revision: revisions.desired,
-            desired_fingerprint: desired_metadata.fingerprint,
-            desired_section_fingerprints: desired_metadata.section_fingerprints.clone(),
-            observed_revision: revisions.observed,
-            applied_revision: revisions.applied,
-            transport_binding_version,
-            transport_binding_public_key,
-            transport_tls_cert_pem,
-            transport_binding_signature,
-        })
     }
 
     fn record_peer_http_sent(&self, node_id: &NodeId, bytes_sent: u64) {

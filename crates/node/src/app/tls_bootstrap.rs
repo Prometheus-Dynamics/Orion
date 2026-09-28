@@ -1,21 +1,32 @@
-use super::{AuditEventKind, NodeApp, NodeError};
+#[cfg(feature = "transport-http")]
+use super::AuditEventKind;
+use super::{NodeApp, NodeError};
+#[cfg(feature = "transport-http")]
 use crate::blocking::run_possibly_blocking;
 use crate::storage::NodeStorage;
+#[cfg(feature = "transport-http")]
 use crate::storage_io::storage_path_error;
 use orion::NodeId;
-use std::{
-    collections::BTreeSet,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-};
+#[cfg(feature = "transport-http")]
+use std::{collections::BTreeSet, path::Path};
+use std::{net::SocketAddr, path::PathBuf};
 
 pub(super) use orion_transport_common::stable_fingerprint;
 
+#[cfg(feature = "transport-http")]
 const AUTO_HTTP_TLS_DIR: &str = "http-tls";
+#[cfg(feature = "transport-http")]
 const AUTO_HTTP_TLS_CERT_FILE: &str = "cert.pem";
+#[cfg(feature = "transport-http")]
 const AUTO_HTTP_TLS_KEY_FILE: &str = "key.pem";
 
 impl NodeApp {
+    #[cfg(not(feature = "transport-http"))]
+    pub fn rotate_http_tls_identity(&self) -> Result<(), NodeError> {
+        Err(NodeError::Config(HTTP_FEATURE_DISABLED_TLS.into()))
+    }
+
+    #[cfg(feature = "transport-http")]
     pub fn rotate_http_tls_identity(&self) -> Result<(), NodeError> {
         if !self.auto_http_tls {
             return Err(NodeError::Storage(
@@ -51,6 +62,11 @@ impl NodeApp {
     }
 }
 
+#[cfg(not(feature = "transport-http"))]
+const HTTP_FEATURE_DISABLED_TLS: &str =
+    "HTTP TLS requires orion-node to be built with the `transport-http` feature";
+
+#[cfg(feature = "transport-http")]
 pub(super) fn build_peer_http_client(
     base_url: &str,
     tls: Option<orion::transport::http::HttpClientTlsConfig>,
@@ -63,6 +79,7 @@ pub(super) fn build_peer_http_client(
     }
 }
 
+#[cfg(feature = "transport-http")]
 pub(super) fn build_bootstrap_peer_http_client(
     base_url: &str,
 ) -> Result<orion::transport::http::HttpClient, NodeError> {
@@ -70,6 +87,22 @@ pub(super) fn build_bootstrap_peer_http_client(
         .map_err(NodeError::from)
 }
 
+#[cfg(not(feature = "transport-http"))]
+pub(super) fn resolve_http_server_tls_paths(
+    cert_path: Option<PathBuf>,
+    key_path: Option<PathBuf>,
+    auto_http_tls: bool,
+    _storage: Option<&NodeStorage>,
+    _node_id: &NodeId,
+    _bind_addr: SocketAddr,
+) -> Result<(Option<PathBuf>, Option<PathBuf>), NodeError> {
+    if cert_path.is_some() || key_path.is_some() || auto_http_tls {
+        return Err(NodeError::Config(HTTP_FEATURE_DISABLED_TLS.into()));
+    }
+    Ok((None, None))
+}
+
+#[cfg(feature = "transport-http")]
 pub(super) fn resolve_http_server_tls_paths(
     cert_path: Option<PathBuf>,
     key_path: Option<PathBuf>,
@@ -98,6 +131,7 @@ pub(super) fn resolve_http_server_tls_paths(
     }
 }
 
+#[cfg(feature = "transport-http")]
 fn ensure_auto_http_tls_files(
     state_dir: &Path,
     node_id: &NodeId,
@@ -121,6 +155,7 @@ fn ensure_auto_http_tls_files(
     Ok((cert_path, key_path))
 }
 
+#[cfg(feature = "transport-http")]
 pub(super) fn rewrite_auto_http_tls_files(
     cert_path: &Path,
     key_path: &Path,
@@ -156,6 +191,7 @@ pub(super) fn rewrite_auto_http_tls_files(
     })
 }
 
+#[cfg(feature = "transport-http")]
 fn auto_http_tls_subject_names(node_id: &NodeId, bind_addr: SocketAddr) -> Vec<String> {
     let mut names = BTreeSet::from([
         "localhost".to_owned(),

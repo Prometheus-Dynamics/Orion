@@ -1,18 +1,19 @@
-use super::{ManagedTransportBinding, data_endpoint, new_shutdown_handle, spawn_managed_task};
-use crate::{
-    ManagedNodeTransportSurface, ManagedServerTransportSecurity, NodeApp, NodeError,
-    app::GracefulTaskHandle,
-};
+#[cfg(feature = "transport-http")]
+use super::new_shutdown_handle;
+use super::{ManagedTransportBinding, data_endpoint, spawn_managed_task};
+#[cfg(feature = "transport-http")]
+use crate::app::GracefulTaskHandle;
+use crate::{ManagedNodeTransportSurface, ManagedServerTransportSecurity, NodeApp, NodeError};
 use orion::transport::quic::{
     QuicEndpoint, QuicFrame, QuicFrameClient, QuicFrameHandler, QuicFrameServer, QuicTransportError,
 };
 use orion_transport_quic::QuicCodec;
 use std::time::Instant;
 use std::{net::SocketAddr, sync::Arc};
+#[cfg(feature = "transport-http")]
 use tokio::sync::oneshot;
 
 impl NodeApp {
-    #[cfg(feature = "transport-quic")]
     pub async fn send_quic_data_frame_metered(
         &self,
         client: &QuicFrameClient,
@@ -61,7 +62,6 @@ impl NodeApp {
     }
 }
 
-#[cfg(feature = "transport-quic")]
 fn launch_quic_surface<F>(
     endpoint: QuicEndpoint,
     future: F,
@@ -78,7 +78,7 @@ where
     )
 }
 
-#[cfg(feature = "transport-quic")]
+#[cfg(feature = "transport-http")]
 fn launch_quic_surface_with_shutdown<F>(
     endpoint: QuicEndpoint,
     future: impl FnOnce(oneshot::Receiver<()>) -> F,
@@ -92,13 +92,13 @@ where
     )
 }
 
-#[cfg(feature = "transport-quic")]
 fn resolve_quic_tls(
     app: &NodeApp,
     surface: ManagedNodeTransportSurface,
 ) -> Result<Option<orion::transport::quic::QuicServerTlsConfig>, NodeError> {
     match app.managed_surface_server_transport_security(surface)? {
         Some(ManagedServerTransportSecurity::Quic(tls)) => Ok(Some(tls)),
+        #[cfg(any(feature = "transport-http", feature = "transport-tcp"))]
         Some(_) => Err(NodeError::Storage(
             "managed QUIC adapter resolved non-QUIC transport security".into(),
         )),
@@ -106,7 +106,6 @@ fn resolve_quic_tls(
     }
 }
 
-#[cfg(feature = "transport-quic")]
 fn peer_quic_endpoint(
     surface: ManagedNodeTransportSurface,
     addr: SocketAddr,
@@ -120,13 +119,13 @@ fn peer_quic_endpoint(
             }
             Ok(endpoint)
         }
+        #[cfg(any(feature = "transport-http", feature = "transport-tcp"))]
         _ => Err(NodeError::Storage(
             "non-QUIC managed surface cannot be started with the QUIC transport adapter".into(),
         )),
     }
 }
 
-#[cfg(feature = "transport-quic")]
 pub(super) async fn start_quic_surface(
     app: NodeApp,
     surface: ManagedNodeTransportSurface,
@@ -168,7 +167,7 @@ pub(super) async fn start_quic_surface(
     }))
 }
 
-#[cfg(feature = "transport-quic")]
+#[cfg(feature = "transport-http")]
 pub(super) async fn start_quic_surface_with_shutdown(
     app: NodeApp,
     surface: ManagedNodeTransportSurface,
@@ -212,13 +211,11 @@ pub(super) async fn start_quic_surface_with_shutdown(
     ))
 }
 
-#[cfg(feature = "transport-quic")]
 struct MeteredQuicFrameHandler {
     app: NodeApp,
     inner: Arc<dyn QuicFrameHandler>,
 }
 
-#[cfg(feature = "transport-quic")]
 impl QuicFrameHandler for MeteredQuicFrameHandler {
     fn handle_frame(&self, frame: QuicFrame) -> Result<QuicFrame, QuicTransportError> {
         let started = Instant::now();
@@ -265,7 +262,6 @@ impl QuicFrameHandler for MeteredQuicFrameHandler {
     }
 }
 
-#[cfg(feature = "transport-quic")]
 fn quic_inbound_data_endpoint(frame: &QuicFrame) -> crate::app::CommunicationEndpointRuntime {
     data_endpoint(
         "quic",
@@ -276,7 +272,6 @@ fn quic_inbound_data_endpoint(frame: &QuicFrame) -> crate::app::CommunicationEnd
     )
 }
 
-#[cfg(feature = "transport-quic")]
 fn quic_outbound_data_endpoint(frame: &QuicFrame) -> crate::app::CommunicationEndpointRuntime {
     data_endpoint(
         "quic",

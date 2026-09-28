@@ -12,9 +12,9 @@ use std::sync::Arc;
 use tracing::error;
 
 mod adapters;
-pub(crate) use adapters::{
-    HttpControlServiceAdapter, HttpProbeServiceAdapter, UnixControlServiceAdapter,
-};
+pub(crate) use adapters::UnixControlServiceAdapter;
+#[cfg(feature = "transport-http")]
+pub(crate) use adapters::{HttpControlServiceAdapter, HttpProbeServiceAdapter};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlPrincipal {
@@ -517,10 +517,12 @@ impl NodeApp {
         .map_err(|err| NodeError::Storage(format!("control request task join failed: {err}")))?
     }
 
+    #[cfg(feature = "transport-http")]
     pub(crate) fn http_control_handler(&self) -> HttpControlServiceAdapter {
         HttpControlServiceAdapter::new(self.clone())
     }
 
+    #[cfg(feature = "transport-http")]
     pub(crate) fn http_probe_handler(&self) -> HttpProbeServiceAdapter {
         HttpProbeServiceAdapter::new(self.clone())
     }

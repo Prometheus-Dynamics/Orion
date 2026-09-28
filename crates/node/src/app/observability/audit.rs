@@ -21,11 +21,13 @@ static TEST_AUDIT_APPEND_DELAY_MS: AtomicU64 = AtomicU64::new(0);
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AuditEventKind {
+    #[cfg_attr(not(any(test, feature = "transport-http")), allow(dead_code))]
     TransportSecurityFailure,
     PeerEnrolled,
     PeerRevoked,
     PeerIdentityReplaced,
     PeerTlsPretrusted,
+    #[cfg_attr(not(feature = "transport-http"), allow(dead_code))]
     HttpTlsRotated,
 }
 

@@ -23,7 +23,7 @@ orion = { workspace = true, features = ["control-plane", "core", "macros"] }
 orion-client.workspace = true
 orion-control-plane.workspace = true
 orion-core.workspace = true
-orion-transport-http.workspace = true
+orion-transport-http = { workspace = true, features = ["transport"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

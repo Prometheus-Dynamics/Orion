@@ -24,6 +24,11 @@ use std::{
 const DEFAULT_RECONCILE_INTERVAL_MS: u64 = 250;
 const DEFAULT_PEER_SYNC_MAX_IN_FLIGHT: usize = 4;
 const HTTP_ADDR_DISABLED_VALUES: &[&str] = &["off", "disabled", "none"];
+/// Suffix for configuration errors raised when an HTTP-only setting is used in a build without
+/// the `transport-http` feature (IPC-only appliance builds).
+#[cfg(not(feature = "transport-http"))]
+const HTTP_FEATURE_DISABLED: &str =
+    "orion-node was built without the `transport-http` feature (IPC-only build)";
 #[cfg(test)]
 const DEFAULT_IPC_STREAM_HEARTBEAT_INTERVAL_MS: u64 = 50;
 #[cfg(not(test))]
@@ -240,6 +245,13 @@ impl NodeConfig {
         })?;
         let http_bind_addr = match env::var("ORION_NODE_HTTP_ADDR") {
             Ok(raw) if is_http_addr_disabled(&raw) => Self::default_http_bind_addr(),
+            #[cfg(not(feature = "transport-http"))]
+            Ok(raw) => {
+                return Err(NodeError::Config(format!(
+                    "ORION_NODE_HTTP_ADDR={raw} is not supported: {HTTP_FEATURE_DISABLED}; unset it or set it to `off`"
+                )));
+            }
+            #[cfg(feature = "transport-http")]
             Ok(raw) => raw.parse().map_err(|err| {
                 NodeError::Config(format!(
                     "ORION_NODE_HTTP_ADDR must be a valid socket address or `off`: {raw} ({err})"
@@ -257,6 +269,12 @@ impl NodeConfig {
             Ok(value) => parse_peer_configs_checked(&value)?,
             Err(_) => Vec::new(),
         };
+        #[cfg(not(feature = "transport-http"))]
+        if !peers.is_empty() {
+            return Err(NodeError::Config(format!(
+                "ORION_NODE_PEERS is not supported: peer sync runs over HTTP and {HTTP_FEATURE_DISABLED}"
+            )));
+        }
         Ok(Self {
             node_id,
             http_bind_addr,
@@ -323,11 +341,20 @@ impl NodeConfig {
     }
 
     /// Returns `false` when `ORION_NODE_HTTP_ADDR` is `off`, `disabled`, or `none`.
+    /// Whether the peer HTTP listener should be started. Always `false` in builds without the
+    /// `transport-http` feature.
     pub fn http_enabled_from_env() -> bool {
-        env::var("ORION_NODE_HTTP_ADDR").map_or(true, |raw| !is_http_addr_disabled(&raw))
+        cfg!(feature = "transport-http")
+            && env::var("ORION_NODE_HTTP_ADDR").map_or(true, |raw| !is_http_addr_disabled(&raw))
     }
 
     pub fn try_http_probe_addr_from_env() -> Result<Option<SocketAddr>, NodeError> {
+        #[cfg(not(feature = "transport-http"))]
+        if let Ok(value) = env::var("ORION_NODE_HTTP_PROBE_ADDR") {
+            return Err(NodeError::Config(format!(
+                "ORION_NODE_HTTP_PROBE_ADDR={value} is not supported: {HTTP_FEATURE_DISABLED}"
+            )));
+        }
         env::var("ORION_NODE_HTTP_PROBE_ADDR")
             .ok()
             .map(|value| {
@@ -373,6 +400,13 @@ impl NodeProcessConfig {
         let shutdown_after_init = NodeConfig::try_shutdown_after_init_from_env()?;
         let http_enabled = NodeConfig::http_enabled_from_env();
         let runtime_threads = NodeRuntimeThreads::try_from_env()?;
+
+        #[cfg(not(feature = "transport-http"))]
+        if http_tls_cert_path.is_some() || http_tls_key_path.is_some() || auto_http_tls {
+            return Err(NodeError::Config(format!(
+                "ORION_NODE_HTTP_TLS_CERT, ORION_NODE_HTTP_TLS_KEY and ORION_NODE_HTTP_TLS_AUTO are not supported: {HTTP_FEATURE_DISABLED}"
+            )));
+        }
 
         if !http_enabled {
             if !node.peers.is_empty() {

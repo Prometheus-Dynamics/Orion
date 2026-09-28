@@ -297,6 +297,14 @@ impl NodeAppBuilder {
         )
         .map_err(|err| super::NodeError::Config(format!("failed to initialize HTTP TLS: {err}")))?;
         let peer_configs = self.peers.unwrap_or_else(|| config.peers.clone());
+        #[cfg(not(feature = "transport-http"))]
+        if !peer_configs.is_empty() {
+            return Err(super::NodeError::Config(format!(
+                "{} configured peer(s) cannot be used: {}",
+                peer_configs.len(),
+                super::peer_sync_state::PEER_SYNC_REQUIRES_HTTP
+            )));
+        }
         if let Some(mut runtime_tuning) = self.runtime_tuning {
             runtime_tuning.normalize();
             config.runtime_tuning = runtime_tuning;
@@ -382,6 +390,7 @@ impl NodeAppBuilder {
             persistence_worker,
             http_tls_cert_path,
             http_tls_key_path,
+            #[cfg(feature = "transport-http")]
             auto_http_tls: self.auto_http_tls,
             http_mutual_tls_mode,
             transport_security,

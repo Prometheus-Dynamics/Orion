@@ -16,7 +16,13 @@ workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+# rustls certificate/key helpers for the TLS-capable transports. IPC-only consumers (and the
+# IPC-only orion-node build) leave this off so rustls is not linked.
+default = ["tls"]
+tls = ["dep:rustls", "dep:rustls-pemfile"]
+
 [dependencies]
-rustls = { workspace = true, features = ["ring"] }
-rustls-pemfile.workspace = true
+rustls = { workspace = true, features = ["ring"], optional = true }
+rustls-pemfile = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt"] }

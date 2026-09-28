@@ -42,8 +42,8 @@ orion-node = { path = "crates/node", version = "1.0.0" }
 orion = { path = "crates/orion", version = "1.0.0", default-features = false }
 orion-runtime = { path = "crates/runtime", version = "1.0.0" }
 orion-service = { path = "crates/service", version = "1.0.0" }
-orion-transport-common = { path = "crates/transport-common", version = "1.0.0" }
-orion-transport-http = { path = "crates/transport-http", version = "1.0.0" }
+orion-transport-common = { path = "crates/transport-common", version = "1.0.0", default-features = false }
+orion-transport-http = { path = "crates/transport-http", version = "1.0.0", default-features = false }
 orion-transport-ipc = { path = "crates/transport-ipc", version = "1.0.0" }
 orion-transport-quic = { path = "crates/transport-quic", version = "1.0.0" }
 orion-transport-tcp = { path = "crates/transport-tcp", version = "1.0.0" }

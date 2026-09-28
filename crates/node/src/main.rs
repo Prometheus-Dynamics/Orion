@@ -12,6 +12,18 @@ fn init_tracing() {
         .try_init();
 }
 
+/// Stand-in for the HTTP server handles in builds without the `transport-http` feature, so the
+/// startup/shutdown sequence below stays identical across feature sets.
+#[cfg(not(feature = "transport-http"))]
+struct DisabledHttpServer;
+
+#[cfg(not(feature = "transport-http"))]
+impl DisabledHttpServer {
+    async fn shutdown(self) -> Result<(), std::convert::Infallible> {
+        Ok(())
+    }
+}
+
 fn log_shutdown_error(
     node_id: &orion_node::NodeId,
     component: &'static str,
@@ -76,6 +88,12 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     let (ipc_stream_socket, ipc_stream_server) = app
         .start_ipc_stream_server_graceful(&process.ipc_stream_socket_path)
         .await?;
+    #[cfg(not(feature = "transport-http"))]
+    let (http_server, probe_server) = (
+        None::<(std::net::SocketAddr, DisabledHttpServer)>,
+        None::<(std::net::SocketAddr, DisabledHttpServer)>,
+    );
+    #[cfg(feature = "transport-http")]
     let http_server = if process.http_enabled {
         Some(
             app.start_http_server_graceful(config.http_bind_addr)
@@ -84,6 +102,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     } else {
         None
     };
+    #[cfg(feature = "transport-http")]
     let probe_server = if let Some(probe_addr) = process.http_probe_addr {
         Some(app.start_http_probe_server_graceful(probe_addr).await?)
     } else {

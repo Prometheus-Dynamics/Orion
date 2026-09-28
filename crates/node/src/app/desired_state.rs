@@ -108,6 +108,7 @@ impl NodeApp {
         Ok(result)
     }
 
+    #[cfg(any(test, feature = "transport-http"))]
     pub(super) async fn commit_desired_state_update_async<T>(
         &self,
         previous_revision: Revision,

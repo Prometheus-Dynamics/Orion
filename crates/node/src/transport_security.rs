@@ -1,16 +1,15 @@
 use crate::auth::NodeSecurity;
 use crate::blocking::run_possibly_blocking;
 use crate::{NodeError, app::HttpMutualTlsMode};
+use orion::NodeId;
+#[cfg(feature = "transport-http")]
+use orion::transport::http::{
+    HttpClientTlsConfig, HttpServerClientAuth, HttpServerTlsConfig, HttpTlsTrustProvider,
+};
 #[cfg(feature = "transport-quic")]
 use orion::transport::quic::{QuicClientTlsConfig, QuicServerClientAuth, QuicServerTlsConfig};
 #[cfg(feature = "transport-tcp")]
 use orion::transport::tcp::{TcpClientTlsConfig, TcpServerClientAuth, TcpServerTlsConfig};
-use orion::{
-    NodeId,
-    transport::http::{
-        HttpClientTlsConfig, HttpServerClientAuth, HttpServerTlsConfig, HttpTlsTrustProvider,
-    },
-};
 #[cfg(feature = "transport-tcp")]
 use orion_transport_common::DEFAULT_TRANSPORT_SERVER_NAME;
 use std::{
@@ -22,6 +21,7 @@ type IdentityPemPair = (Vec<u8>, Vec<u8>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManagedTransportProtocol {
+    #[cfg(feature = "transport-http")]
     Http,
     #[cfg(feature = "transport-tcp")]
     Tcp,
@@ -31,7 +31,9 @@ pub enum ManagedTransportProtocol {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManagedNodeTransportSurface {
+    #[cfg(feature = "transport-http")]
     PeerHttpControl,
+    #[cfg(feature = "transport-http")]
     HttpProbe,
     #[cfg(feature = "transport-tcp")]
     PeerTcpData,
@@ -42,6 +44,7 @@ pub enum ManagedNodeTransportSurface {
 impl ManagedNodeTransportSurface {
     pub fn protocol(self) -> ManagedTransportProtocol {
         match self {
+            #[cfg(feature = "transport-http")]
             Self::PeerHttpControl | Self::HttpProbe => ManagedTransportProtocol::Http,
             #[cfg(feature = "transport-tcp")]
             Self::PeerTcpData => ManagedTransportProtocol::Tcp,
@@ -51,7 +54,16 @@ impl ManagedNodeTransportSurface {
     }
 
     pub fn uses_transport_security(self) -> bool {
-        !matches!(self, Self::HttpProbe)
+        match self {
+            #[cfg(feature = "transport-http")]
+            Self::HttpProbe => false,
+            #[cfg(feature = "transport-http")]
+            Self::PeerHttpControl => true,
+            #[cfg(feature = "transport-tcp")]
+            Self::PeerTcpData => true,
+            #[cfg(feature = "transport-quic")]
+            Self::PeerQuicData => true,
+        }
     }
 }
 
@@ -104,6 +116,7 @@ impl NodeTransportSecurityManager {
         protocol: ManagedTransportProtocol,
     ) -> Result<Option<ManagedServerTransportSecurity>, NodeError> {
         match protocol {
+            #[cfg(feature = "transport-http")]
             ManagedTransportProtocol::Http => self
                 .http_server_config()
                 .map(|config| config.map(ManagedServerTransportSecurity::Http)),
@@ -128,7 +141,16 @@ impl NodeTransportSecurityManager {
     ) -> Result<Option<ManagedClientTransportSecurity>, NodeError> {
         #[cfg(not(feature = "transport-tcp"))]
         let _ = server_name;
+        #[cfg(not(feature = "transport-http"))]
+        let _ = endpoint_hint;
+        #[cfg(not(any(
+            feature = "transport-http",
+            feature = "transport-tcp",
+            feature = "transport-quic"
+        )))]
+        let _ = (node_id, configured_path);
         match protocol {
+            #[cfg(feature = "transport-http")]
             ManagedTransportProtocol::Http => self
                 .http_client_config(node_id, endpoint_hint.unwrap_or("http://"), configured_path)
                 .map(|config| config.map(ManagedClientTransportSecurity::Http)),
@@ -151,10 +173,23 @@ impl NodeTransportSecurityManager {
         &self,
         surface: ManagedNodeTransportSurface,
     ) -> Result<Option<ManagedServerTransportSecurity>, NodeError> {
-        if !surface.uses_transport_security() {
-            return Ok(None);
+        #[cfg(not(any(
+            feature = "transport-http",
+            feature = "transport-tcp",
+            feature = "transport-quic"
+        )))]
+        match surface {}
+        #[cfg(any(
+            feature = "transport-http",
+            feature = "transport-tcp",
+            feature = "transport-quic"
+        ))]
+        {
+            if !surface.uses_transport_security() {
+                return Ok(None);
+            }
+            self.server_security(surface.protocol())
         }
-        self.server_security(surface.protocol())
     }
 
     pub fn surface_client_security(
@@ -165,16 +200,32 @@ impl NodeTransportSecurityManager {
         server_name: Option<&str>,
         endpoint_hint: Option<&str>,
     ) -> Result<Option<ManagedClientTransportSecurity>, NodeError> {
-        if !surface.uses_transport_security() {
-            return Ok(None);
+        #[cfg(not(any(
+            feature = "transport-http",
+            feature = "transport-tcp",
+            feature = "transport-quic"
+        )))]
+        {
+            let _ = (node_id, configured_path, server_name, endpoint_hint);
+            match surface {}
         }
-        self.client_security(
-            surface.protocol(),
-            node_id,
-            configured_path,
-            server_name,
-            endpoint_hint,
-        )
+        #[cfg(any(
+            feature = "transport-http",
+            feature = "transport-tcp",
+            feature = "transport-quic"
+        ))]
+        {
+            if !surface.uses_transport_security() {
+                return Ok(None);
+            }
+            self.client_security(
+                surface.protocol(),
+                node_id,
+                configured_path,
+                server_name,
+                endpoint_hint,
+            )
+        }
     }
 
     pub fn local_server_identity_pem(&self) -> Result<Option<IdentityPemPair>, NodeError> {
@@ -199,6 +250,7 @@ impl NodeTransportSecurityManager {
         }
     }
 
+    #[cfg(feature = "transport-http")]
     pub fn http_server_config(&self) -> Result<Option<HttpServerTlsConfig>, NodeError> {
         let Some((cert_pem, key_pem)) = self.local_server_identity_pem()? else {
             return Ok(None);
@@ -224,6 +276,7 @@ impl NodeTransportSecurityManager {
         }))
     }
 
+    #[cfg(feature = "transport-http")]
     pub fn http_client_config(
         &self,
         node_id: &NodeId,
@@ -350,6 +403,7 @@ impl NodeTransportSecurityManager {
 
 #[derive(Clone)]
 pub enum ManagedServerTransportSecurity {
+    #[cfg(feature = "transport-http")]
     Http(HttpServerTlsConfig),
     #[cfg(feature = "transport-tcp")]
     Tcp(TcpServerTlsConfig),
@@ -359,6 +413,7 @@ pub enum ManagedServerTransportSecurity {
 
 #[derive(Clone)]
 pub enum ManagedClientTransportSecurity {
+    #[cfg(feature = "transport-http")]
     Http(HttpClientTlsConfig),
     #[cfg(feature = "transport-tcp")]
     Tcp(TcpClientTlsConfig),
@@ -366,11 +421,13 @@ pub enum ManagedClientTransportSecurity {
     Quic(QuicClientTlsConfig),
 }
 
+#[cfg(feature = "transport-http")]
 #[derive(Clone)]
 struct SecurityTrustProvider {
     security: Arc<NodeSecurity>,
 }
 
+#[cfg(feature = "transport-http")]
 impl HttpTlsTrustProvider for SecurityTrustProvider {
     fn trusted_client_roots_pem(&self) -> Vec<Vec<u8>> {
         self.security

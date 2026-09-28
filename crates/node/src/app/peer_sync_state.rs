@@ -1,9 +1,19 @@
 use super::{NodeApp, NodeError, classify_peer_sync_error_kind};
 use crate::peer::{PeerSyncBackoff, PeerSyncStatus};
+use crate::storage_io::blocking_read_file;
 use orion::{
     CompatibilityState, NodeId, Revision,
-    control_plane::{DesiredStateSectionFingerprints, PeerSyncErrorKind},
+    control_plane::{DesiredStateSectionFingerprints, PeerHello, PeerSyncErrorKind},
 };
+
+/// Error text returned when peer sync is requested from a build without HTTP support.
+#[cfg(not(feature = "transport-http"))]
+pub(crate) const PEER_SYNC_REQUIRES_HTTP: &str =
+    "peer sync requires orion-node to be built with the `transport-http` feature";
+
+fn read_file_bytes(path: &std::path::Path) -> Result<Vec<u8>, NodeError> {
+    blocking_read_file(path, "failed to read file")
+}
 
 impl NodeApp {
     pub fn set_peer_sync_status(
@@ -86,6 +96,7 @@ impl NodeApp {
         })
     }
 
+    #[cfg(feature = "transport-http")]
     pub(super) fn infer_peer_matches_local_desired(
         &self,
         node_id: &NodeId,
@@ -102,6 +113,7 @@ impl NodeApp {
         )
     }
 
+    #[cfg(feature = "transport-http")]
     pub(super) fn infer_peer_matches_current_desired(
         &self,
         node_id: &NodeId,
@@ -114,5 +126,56 @@ impl NodeApp {
             desired.fingerprint,
             desired.section_fingerprints,
         )
+    }
+
+    pub(super) fn evict_peer_client(&self, node_id: &NodeId) {
+        self.with_peer_clients_mut(|peer_clients| {
+            peer_clients.remove(node_id);
+        });
+    }
+
+    pub(super) fn peer_hello(&self) -> Result<PeerHello, NodeError> {
+        let revisions = self.current_revisions();
+        let desired_metadata = self.desired_metadata()?;
+        let (
+            transport_binding_version,
+            transport_binding_public_key,
+            transport_tls_cert_pem,
+            transport_binding_signature,
+        ) = match self.http_tls_cert_path.as_deref() {
+            Some(cert_path) => {
+                let cert_pem = read_file_bytes(cert_path)?;
+                let binding = self.security.transport_binding(&cert_pem)?;
+                (
+                    Some(binding.version),
+                    Some(binding.public_key),
+                    Some(binding.tls_cert_pem),
+                    Some(binding.signature),
+                )
+            }
+            None => (None, None, None, None),
+        };
+        Ok(PeerHello {
+            node_id: self.config.node_id.clone(),
+            desired_revision: revisions.desired,
+            desired_fingerprint: desired_metadata.fingerprint,
+            desired_section_fingerprints: desired_metadata.section_fingerprints.clone(),
+            observed_revision: revisions.observed,
+            applied_revision: revisions.applied,
+            transport_binding_version,
+            transport_binding_public_key,
+            transport_tls_cert_pem,
+            transport_binding_signature,
+        })
+    }
+}
+
+#[cfg(not(feature = "transport-http"))]
+impl NodeApp {
+    /// Peer sync runs over the HTTP control plane; IPC-only builds reject it.
+    pub async fn sync_peer(&self, node_id: &NodeId) -> Result<(), NodeError> {
+        Err(NodeError::Config(format!(
+            "cannot sync peer {node_id}: {PEER_SYNC_REQUIRES_HTTP}"
+        )))
     }
 }

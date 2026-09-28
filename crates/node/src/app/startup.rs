@@ -1,20 +1,29 @@
 use super::startup_loops::record_stale_stream_eviction;
 use super::task_handle::GracefulTaskHandle;
 use super::{NodeApp, NodeError};
+#[cfg(any(
+    feature = "transport-http",
+    feature = "transport-tcp",
+    feature = "transport-quic"
+))]
 use crate::managed_transport::{ManagedSurfaceLaunchRequest, ManagedTransportBinding};
 use crate::service::ControlSurface;
+#[cfg(feature = "transport-http")]
+use orion::transport::http::HttpTransportError;
 use orion::{
     control_plane::ControlMessage,
-    transport::{
-        http::HttpTransportError,
-        ipc::{ControlEnvelope, IpcTransportError, LocalAddress, UnixControlServer},
-    },
+    transport::ipc::{ControlEnvelope, IpcTransportError, LocalAddress, UnixControlServer},
 };
 use orion_transport_ipc::{
     read_control_frame_with_limit_metered, write_control_frame_with_limit_metered,
 };
+#[cfg(any(
+    feature = "transport-http",
+    feature = "transport-tcp",
+    feature = "transport-quic"
+))]
+use std::net::SocketAddr;
 use std::{
-    net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -22,6 +31,7 @@ use tokio::{sync::oneshot, task::JoinSet};
 use tracing::info;
 
 impl NodeApp {
+    #[cfg(feature = "transport-http")]
     pub async fn start_http_server_graceful(
         &self,
         addr: SocketAddr,
@@ -44,7 +54,7 @@ impl NodeApp {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "transport-http"))]
     pub(crate) async fn start_http_server(
         &self,
         addr: SocketAddr,
@@ -121,12 +131,14 @@ impl NodeApp {
             ManagedTransportBinding::Quic(endpoint) => {
                 Ok((endpoint, map_managed_quic_handle(handle)))
             }
+            #[cfg(any(feature = "transport-http", feature = "transport-tcp"))]
             ManagedTransportBinding::Socket(_) => Err(NodeError::Storage(
                 "managed QUIC adapter returned socket binding".into(),
             )),
         }
     }
 
+    #[cfg(feature = "transport-http")]
     pub async fn start_http_probe_server_graceful(
         &self,
         addr: SocketAddr,
@@ -149,7 +161,11 @@ impl NodeApp {
         }
     }
 
-    #[cfg(any(test, feature = "transport-tcp", feature = "transport-quic"))]
+    #[cfg(any(
+        all(test, feature = "transport-http"),
+        feature = "transport-tcp",
+        feature = "transport-quic"
+    ))]
     pub(crate) async fn start_managed_surface(
         &self,
         request: ManagedSurfaceLaunchRequest,
@@ -163,6 +179,7 @@ impl NodeApp {
         request.start(self.clone()).await
     }
 
+    #[cfg(feature = "transport-http")]
     pub(crate) async fn start_managed_surface_with_shutdown(
         &self,
         request: ManagedSurfaceLaunchRequest,
@@ -522,6 +539,11 @@ impl NodeApp {
     }
 }
 
+#[cfg(any(
+    feature = "transport-http",
+    feature = "transport-tcp",
+    feature = "transport-quic"
+))]
 fn map_managed_task_result<E>(
     result: Result<Result<(), NodeError>, tokio::task::JoinError>,
     extract: impl FnOnce(NodeError) -> Result<E, NodeError>,
@@ -541,7 +563,7 @@ fn bytes_len_u64(bytes: usize) -> u64 {
     bytes.min(u64::MAX as usize) as u64
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "transport-http"))]
 fn map_managed_http_handle(
     app: NodeApp,
     handle: tokio::task::JoinHandle<Result<(), NodeError>>,
@@ -560,6 +582,7 @@ fn map_managed_http_handle(
     })
 }
 
+#[cfg(feature = "transport-http")]
 fn map_managed_http_shutdown_handle(
     app: NodeApp,
     handle: GracefulTaskHandle<NodeError>,

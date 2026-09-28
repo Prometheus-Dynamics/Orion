@@ -5,7 +5,9 @@ mod local_clients;
 mod local_control;
 mod maintenance_admin;
 mod observability;
+#[cfg(feature = "transport-http")]
 mod peer_sync;
+#[cfg(feature = "transport-http")]
 mod peer_sync_client;
 mod peer_sync_parallel;
 mod peer_sync_response;
@@ -23,6 +25,11 @@ mod types;
 pub(crate) use observability::{clear_test_audit_append_delay, set_test_audit_append_delay};
 #[cfg(test)]
 pub(crate) use persistence::{clear_test_persist_delay, set_test_persist_delay};
+#[cfg(any(
+    feature = "transport-http",
+    feature = "transport-tcp",
+    feature = "transport-quic"
+))]
 pub(crate) use task_handle::GracefulTaskHandle;
 pub use types::{
     HttpMutualTlsMode, NodeError, NodeSnapshot, NodeTickReport, PeerSyncExecution,
@@ -38,25 +45,26 @@ use crate::transport_security::{
     ManagedClientTransportSecurity, ManagedNodeTransportSurface, ManagedServerTransportSecurity,
     ManagedTransportProtocol, NodeTransportSecurityManager,
 };
-use desired_sync::{
-    all_desired_sections, changed_sections, diff_desired_against_summary_sections,
-    empty_summary_for_sections,
-};
+use desired_sync::diff_desired_against_summary_sections;
+#[cfg(feature = "transport-http")]
+use desired_sync::{all_desired_sections, changed_sections, empty_summary_for_sections};
 use local_clients::{ClientRegistryTxn, LocalClientState};
+#[cfg(feature = "transport-http")]
+pub(crate) use observability::classify_http_communication_failure;
 #[cfg(feature = "transport-quic")]
 pub(crate) use observability::classify_quic_communication_failure;
 #[cfg(feature = "transport-tcp")]
 pub(crate) use observability::classify_tcp_communication_failure;
 use observability::{
     AuditEventKind, AuditLogSink, LifecycleSnapshot, LifecycleState, MutationHistorySizeCache,
-    ObservabilityState, ObservabilityTxn, classify_node_error, classify_peer_sync_error,
-    classify_peer_sync_error_kind, is_client_auth_tls_error, peer_sync_troubleshooting_hint,
-    push_observability_event, write_audit_record,
+    ObservabilityState, ObservabilityTxn, classify_node_error, classify_peer_sync_error_kind,
+    peer_sync_troubleshooting_hint, push_observability_event, write_audit_record,
 };
 pub(crate) use observability::{
     CommunicationEndpointRuntime, CommunicationMetrics, CommunicationStageDurations,
-    classify_http_communication_failure,
 };
+#[cfg(any(test, feature = "transport-http"))]
+use observability::{classify_peer_sync_error, is_client_auth_tls_error};
 #[cfg(feature = "transport-quic")]
 use orion::transport::quic::{QuicClientTlsConfig, QuicServerTlsConfig, QuicTransport};
 #[cfg(feature = "transport-tcp")]
@@ -75,6 +83,7 @@ use orion::{
         ipc::{IpcTransport, IpcTransportError, LocalAddress},
     },
 };
+#[cfg(feature = "transport-http")]
 use orion_core::PeerBaseUrl;
 use state_access::NodeState;
 use std::{
@@ -86,14 +95,20 @@ use std::{
 };
 use tls_bootstrap::stable_fingerprint;
 use tracing::{error, info, warn};
+#[cfg(feature = "transport-http")]
 use types::is_https_base_url;
 
 type ProviderRegistry = BTreeMap<ProviderId, Arc<dyn ProviderIntegration + Send + Sync>>;
 type ExecutorRegistry = BTreeMap<ExecutorId, Arc<dyn ExecutorIntegration + Send + Sync>>;
 type PeerRegistry = BTreeMap<NodeId, PeerState>;
 type ClientRegistry = BTreeMap<LocalAddress, LocalClientState>;
+#[cfg(feature = "transport-http")]
 type PeerClientRegistry = BTreeMap<NodeId, CachedPeerClient>;
+/// IPC-only builds never create peer HTTP clients, so the cache is always empty.
+#[cfg(not(feature = "transport-http"))]
+type PeerClientRegistry = BTreeMap<NodeId, std::convert::Infallible>;
 
+#[cfg(feature = "transport-http")]
 #[derive(Clone)]
 struct CachedPeerClient {
     base_url: PeerBaseUrl,
@@ -138,6 +153,7 @@ pub struct NodeApp {
     persistence_worker: Option<Arc<persistence::PersistenceWorker>>,
     http_tls_cert_path: Option<PathBuf>,
     http_tls_key_path: Option<PathBuf>,
+    #[cfg(feature = "transport-http")]
     auto_http_tls: bool,
     http_mutual_tls_mode: HttpMutualTlsMode,
     transport_security: Arc<NodeTransportSecurityManager>,
@@ -344,6 +360,7 @@ impl NodeApp {
         );
     }
 
+    #[cfg(feature = "transport-http")]
     fn record_peer_sync_success(
         &self,
         node_id: &NodeId,
@@ -367,6 +384,7 @@ impl NodeApp {
         Ok(())
     }
 
+    #[cfg(feature = "transport-http")]
     fn record_peer_sync_failure(
         &self,
         node_id: Option<&NodeId>,
@@ -548,6 +566,7 @@ impl NodeApp {
         );
     }
 
+    #[cfg(any(test, feature = "transport-http"))]
     pub(crate) fn record_http_transport_error(&self, error: &HttpTransportError) {
         let mut observability = self.observability_lock();
         match error {

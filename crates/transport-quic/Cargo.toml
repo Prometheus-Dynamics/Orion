@@ -23,7 +23,7 @@ insecure-self-signed = ["dep:rcgen"]
 [dependencies]
 orion-data-plane.workspace = true
 orion-core.workspace = true
-orion-transport-common.workspace = true
+orion-transport-common = { workspace = true, features = ["tls"] }
 serde.workspace = true
 rkyv.workspace = true
 thiserror.workspace = true
