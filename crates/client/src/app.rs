@@ -2,6 +2,7 @@ mod local_unary;
 mod publish;
 mod runtime;
 mod service;
+mod watch;
 
 pub use local_unary::{
     LocalExecutorApp, LocalExecutorClient, LocalProviderApp, LocalProviderClient,
@@ -12,3 +13,4 @@ pub use service::{
     LocalExecutorEvent, LocalExecutorService, LocalExecutorSubscription, LocalProviderEvent,
     LocalProviderService, LocalProviderSubscription, LocalServiceRetryPolicy,
 };
+pub use watch::{AssignedWorkloadWatch, AssignedWorkloadsUpdate};
