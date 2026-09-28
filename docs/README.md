@@ -12,6 +12,7 @@ This directory holds repository-level documentation for the Orion workspace.
 - [observability.md](observability.md): health, readiness, observability, and audit surfaces
 - [logging.md](logging.md): structured tracing behavior and operator guidance
 - [public-api.md](public-api.md): preferred constructors and compatibility shims
+- [protocol-compatibility.md](protocol-compatibility.md): control-protocol wire version, IPC preamble / HTTP header handshake, and how to bump it
 
 ## Where To Start
 

@@ -9,6 +9,7 @@ mod archive;
 mod compat;
 mod error;
 mod ids;
+mod protocol;
 mod types;
 mod version;
 
@@ -21,6 +22,10 @@ pub use error::OrionError;
 pub use ids::{
     ArtifactId, ClientName, ExecutorId, NodeId, PeerBaseUrl, ProviderId, PublicKeyHex, ResourceId,
     SessionId, WorkloadId,
+};
+pub use protocol::{
+    CONTROL_PROTOCOL_HTTP_HEADER, CONTROL_PROTOCOL_LAYOUT_FINGERPRINT, CONTROL_PROTOCOL_VERSION,
+    ControlProtocolMismatch,
 };
 pub use types::{
     CapabilityDef, CapabilityId, ConfigSchemaDef, ConfigSchemaId, ResourceType, ResourceTypeDef,

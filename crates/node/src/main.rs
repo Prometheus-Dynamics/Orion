@@ -4,6 +4,28 @@ use tracing::info;
 use tracing::warn;
 use tracing_subscriber::{EnvFilter, fmt};
 
+// Opt-in global allocators, set only for the binary so library users keep control. `alloc-jemalloc`
+// wins when both features are enabled (for example `cargo clippy --all-features`); enabling only
+// one of them is the supported configuration. See docs/node-env.md.
+#[cfg(feature = "alloc-jemalloc")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(all(feature = "alloc-mimalloc", not(feature = "alloc-jemalloc")))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// Compiled-in jemalloc options tuned for small appliances: two arenas instead of four per core,
+/// one background thread that purges freed pages after about a second (so memory returns even when
+/// the node is idle), no lazy `MADV_FREE` stage that keeps pages counted in RSS, and no transparent
+/// huge pages for jemalloc's own mappings. tikv-jemallocator prefixes jemalloc symbols, so the
+/// options symbol is `_rjem_malloc_conf` and runtime overrides go in `_RJEM_MALLOC_CONF`.
+#[cfg(feature = "alloc-jemalloc")]
+#[used]
+#[unsafe(export_name = "_rjem_malloc_conf")]
+static JEMALLOC_CONF: &[u8; 105] = b"narenas:2,background_thread:true,max_background_threads:1,\
+dirty_decay_ms:1000,muzzy_decay_ms:0,thp:never\0";
+
 fn init_tracing() {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let _ = fmt()

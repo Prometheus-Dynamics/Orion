@@ -61,3 +61,10 @@ orion-transport-ipc = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde.workspace = true
+# Control-protocol layout guard (tests/control_protocol_layout.rs).
+orion-auth.workspace = true
+orion-control-plane.workspace = true
+orion-core.workspace = true
+orion-transport-http.workspace = true
+orion-transport-ipc.workspace = true
+rkyv.workspace = true

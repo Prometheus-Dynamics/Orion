@@ -753,13 +753,16 @@ async fn read_unary_envelope(stream: &mut tokio::net::UnixStream) -> ControlEnve
         .read_to_end(&mut payload)
         .await
         .expect("unary payload should read");
-    decode_from_slice(&payload).expect("unary payload should decode")
+    let (preamble, archive) = payload.split_at(orion_transport_ipc::CONTROL_PREAMBLE_BYTES);
+    orion_transport_ipc::check_control_preamble(preamble).expect("unary preamble should match");
+    decode_from_slice(archive).expect("unary payload should decode")
 }
 
 async fn write_unary_envelope(stream: &mut tokio::net::UnixStream, envelope: &ControlEnvelope) {
     use tokio::io::AsyncWriteExt;
 
-    let payload = encode_to_vec(envelope).expect("unary response should encode");
+    let mut payload = orion_transport_ipc::control_preamble().to_vec();
+    payload.extend(encode_to_vec(envelope).expect("unary response should encode"));
     stream
         .write_all(&payload)
         .await

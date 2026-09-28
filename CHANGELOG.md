@@ -18,6 +18,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `orion-transport-http` gains a default `transport` feature. Without it, the crate exposes only the protocol layer: payloads, routes, codec, errors, and handler traits. `orion-transport-common` gates its rustls helpers behind a default `tls` feature.
 - `ORION_NODE_RUNTIME_WORKER_THREADS` and `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` size the node's Tokio runtime.
 - Single-node appliance profile guidance in `docs/node-env.md`, and an `appliance_memory_soak` suite that checks memory slope and caps under provider/executor/mutation load.
+- Opt-in `alloc-jemalloc` and `alloc-mimalloc` features that set the `orion-node` binary's global allocator (jemalloc wins if both are on), with allocator soak measurements in `docs/node-env.md`. The soak gains `ORION_SOAK_NODE_WORKER_THREADS` and `ORION_SOAK_NODE_BIN`.
 - `ResourceEndpoint::Custom` accepts any valid URI scheme (for example `styx-frame-lease+unix://`), with `CustomEndpointScheme` for typed downstream endpoints and `Display`/`FromStr` round-tripping.
 - `UnixFdLatestServer` / `UnixFdLatestClient` in `orion-transport-ipc`: a bounded latest-value channel that hands out dup'd fds (for example dmabuf frame leases) with sequence waits, max age, and max clients.
 - `resource_usage` section in node observability snapshots (process RSS/PSS, state record counts, mutation history vs caps, local stream backlog, worker queue depth, registry sizes), `orionctl get memory`, and matching Prometheus families.
@@ -29,6 +30,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Successful reconcile passes log at `debug` and only record a recent observability event when they changed something; reconcile counters and latency still cover every pass.
 - `ResourceEndpoint` and `ResourceEndpointError` are now `#[non_exhaustive]`; unknown but valid schemes parse as `Custom` instead of failing with `UnsupportedScheme`.
 - Snapshot additions change the rkyv control-protocol layout, so `orionctl` and `orion-node` must be upgraded together.
+- Explicit control-protocol versioning: `orion_core::CONTROL_PROTOCOL_VERSION` (now 2, for the `resource_usage` layout) is carried in a fixed 4-byte preamble on every local IPC message (unary and stream frames, including the `ClientHello`/`ClientWelcome` handshake) and in the `x-orion-control-protocol` HTTP header, and checked before any rkyv payload is decoded. Version skew now fails with `IpcTransportError`/`HttpTransportError`/`ClientError::ProtocolMismatch { local, remote }` telling operators to upgrade orionctl and orion-node together, instead of opaque rkyv decode errors. A layout fingerprint test (`crates/orion/tests/control_protocol_layout.rs`) forces a version bump on future layout changes. See `docs/protocol-compatibility.md`.
+- CI workflows install the pinned 1.94.0 toolchain (matching `rust-toolchain.toml`) instead of `stable`.
 
 ### Fixed
 

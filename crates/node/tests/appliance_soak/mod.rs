@@ -29,6 +29,10 @@ pub struct SoakConfig {
     pub mutation_interval: Duration,
     pub workload_slots: usize,
     pub max_mutation_history: u64,
+    /// `ORION_NODE_RUNTIME_WORKER_THREADS` for the node; `None` keeps Tokio's per-core default.
+    pub node_worker_threads: Option<u64>,
+    /// Node binary to spawn; defaults to the `orion-node` built with this test.
+    pub node_bin: PathBuf,
 }
 
 impl SoakConfig {
@@ -50,6 +54,12 @@ impl SoakConfig {
             ),
             workload_slots: env_u64("ORION_SOAK_WORKLOAD_SLOTS", 6).clamp(1, 256) as usize,
             max_mutation_history: env_u64("ORION_SOAK_MAX_MUTATION_HISTORY", 64).max(1),
+            node_worker_threads: Some(env_u64("ORION_SOAK_NODE_WORKER_THREADS", 2))
+                .filter(|threads| *threads > 0),
+            node_bin: std::env::var_os("ORION_SOAK_NODE_BIN").map_or_else(
+                || PathBuf::from(env!("CARGO_BIN_EXE_orion-node")),
+                PathBuf::from,
+            ),
         }
     }
 }
@@ -96,11 +106,14 @@ impl ApplianceNode {
             ipc_stream_socket.display()
         );
 
-        let mut command = Command::new(env!("CARGO_BIN_EXE_orion-node"));
+        let mut command = Command::new(&config.node_bin);
+        match config.node_worker_threads {
+            Some(threads) => command.env("ORION_NODE_RUNTIME_WORKER_THREADS", threads.to_string()),
+            None => command.env_remove("ORION_NODE_RUNTIME_WORKER_THREADS"),
+        };
         command
             .env("ORION_NODE_ID", NODE_ID)
             .env("ORION_NODE_HTTP_ADDR", "off")
-            .env("ORION_NODE_RUNTIME_WORKER_THREADS", "2")
             .env("ORION_NODE_PEER_AUTH", "disabled")
             .env("ORION_NODE_STATE_DIR", root.join("state"))
             .env("ORION_NODE_IPC_SOCKET", &ipc_socket)

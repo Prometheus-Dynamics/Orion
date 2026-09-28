@@ -52,7 +52,83 @@ A standalone node that only serves local IPC clients can shed most of its networ
   - `ORION_NODE_PEERS`, `ORION_NODE_HTTP_PROBE_ADDR`, `ORION_NODE_HTTP_TLS_CERT`, `ORION_NODE_HTTP_TLS_KEY`, and `ORION_NODE_HTTP_TLS_AUTO` fail startup with an error that names the missing feature.
   - Embedders that pass peers or HTTP TLS files to `NodeApp::builder()` get the same error from `try_build()`.
 - set `ORION_NODE_RUNTIME_WORKER_THREADS=1` or `2` and lower `ORION_NODE_MAX_MUTATION_HISTORY*` and worker queue capacities to fit the device memory budget
-- on glibc targets, `MALLOC_ARENA_MAX=2` limits per-thread malloc arenas, which otherwise dominate anonymous memory on small multi-core devices
+- on glibc targets, set `MALLOC_ARENA_MAX=2` to limit per-thread malloc arenas
+- keep the default allocator (glibc malloc). In every appliance soak run, the opt-in `alloc-jemalloc` and `alloc-mimalloc` features below used more memory than glibc
+- check transparent huge pages (THP) on the device: `cat /sys/kernel/mm/transparent_hugepage/enabled` and `grep AnonHugePages /proc/$(pidof orion-node)/smaps_rollup`. With THP set to `always`, the kernel can back sparsely used heap regions with whole huge pages. On a kernel with 16 KiB pages, as Raspberry Pi OS ships for BCM2712 (Pi 5 / CM5), a PMD huge page is 32 MiB instead of 2 MiB, so check `getconf PAGESIZE` too. If `AnonHugePages` is a large share of `Anonymous`, boot with `transparent_hugepage=madvise` (or write `madvise` to that sysfs file)
+
+#### Global allocator features
+
+`orion-node` has two opt-in Cargo features that replace the global allocator of the binary. The
+`orion-node` library never sets a global allocator. Both features are off by default.
+
+| Feature | Allocator | Runtime tuning |
+| --- | --- | --- |
+| `alloc-jemalloc` | jemalloc 5.3 via `tikv-jemallocator` | Built-in options: `narenas:2,background_thread:true,max_background_threads:1,dirty_decay_ms:1000,muzzy_decay_ms:0,thp:never`. Override or extend them at runtime with `_RJEM_MALLOC_CONF` (the symbols are prefixed, so plain `MALLOC_CONF` is ignored). For example, `_RJEM_MALLOC_CONF=confirm_conf:true` prints the options in effect at startup. |
+| `alloc-mimalloc` | mimalloc 3 via the `mimalloc` crate | `MIMALLOC_*` environment variables. Set `MIMALLOC_ALLOW_THP=0` on hosts with THP set to `always` (see the measurements below). `MIMALLOC_PURGE_DELAY` controls how soon freed memory is returned. |
+
+```sh
+cargo build -p orion-node --release --no-default-features --features alloc-jemalloc
+```
+
+Enable only one of them. If both are enabled, for example by `cargo clippy --all-features`,
+jemalloc takes precedence and mimalloc is compiled but not used. They are not made mutually
+exclusive with `compile_error!` because that would break workspace `--all-features` builds.
+`MALLOC_ARENA_MAX` has no effect with either feature.
+
+#### Allocator measurements
+
+These numbers come from the appliance memory soak (`docs/testing.md`) on current `main`, which
+includes the event-driven reconcile loop. Each run used release binaries with default features,
+lasted 600 s, and was sampled every 2 s. The host was x86_64 with 24 cores, glibc 2.43, 4 KiB
+pages, and THP `always`, and other builds were running on it. Memory values are in MiB. "Warm" is
+the first sample after the 120 s warm-up. The slope is post-warm-up PSS growth. "Default" workers
+means one per core the process may run on: 24, or 4 with `taskset -c`. The jemalloc rows use the
+built-in options above.
+
+| Allocator | Workers | CPUs | PSS warm | PSS end | Peak PSS | Anon end | Slope (KiB/min) | Threads |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| glibc | 2 | 24 | 3.7 | 4.5 | 4.5 | 3.1 | -27 | 10 |
+| glibc + `MALLOC_ARENA_MAX=2` | 2 | 24 | 2.9 | 2.9 | 3.1 | 2.6 | 3 | 10 |
+| mimalloc | 2 | 24 | 28.1 | 9.3 | 41.2 | 9.0 | -3307 | 11 |
+| mimalloc + `MIMALLOC_ALLOW_THP=0` | 2 | 24 | 6.1 | 5.6 | 6.4 | 5.2 | -93 | 11 |
+| jemalloc | 2 | 24 | 11.7 | 11.5 | 11.8 | 10.0 | -59 | 12 |
+| glibc | default | 24 | 4.6 | 4.4 | 4.9 | 3.8 | -77 | 31 |
+| glibc + `MALLOC_ARENA_MAX=2` | default | 24 | 3.7 | 3.6 | 3.8 | 3.2 | -16 | 32 |
+| mimalloc | default | 24 | 43.0 | 15.2 | 54.1 | 14.9 | -4412 | 34 |
+| mimalloc + `MIMALLOC_ALLOW_THP=0` | default | 24 | 8.8 | 7.8 | 9.0 | 7.5 | -125 | 33 |
+| jemalloc | default | 24 | 14.7 | 13.8 | 15.0 | 13.1 | -88 | 33 |
+| glibc | 2 | 4 | 3.5 | 3.4 | 4.0 | 3.1 | -39 | 10 |
+| glibc + `MALLOC_ARENA_MAX=2` | 2 | 4 | 3.0 | 3.9 | 3.9 | 2.5 | -33 | 10 |
+| mimalloc | 2 | 4 | 20.2 | 12.6 | 33.4 | 11.9 | -1441 | 10 |
+| jemalloc | 2 | 4 | 12.6 | 12.5 | 13.2 | 12.0 | -62 | 11 |
+| glibc | default | 4 | 4.5 | 4.6 | 4.9 | 3.9 | -69 | 13 |
+| glibc + `MALLOC_ARENA_MAX=2` | default | 4 | 3.4 | 3.4 | 3.8 | 3.0 | -49 | 13 |
+| mimalloc | default | 4 | 28.7 | 13.2 | 42.4 | 12.7 | -2814 | 12 |
+| mimalloc + `MIMALLOC_ALLOW_THP=0` | default | 4 | 6.5 | 6.0 | 7.1 | 5.5 | -147 | 12 |
+| jemalloc | default | 4 | 11.4 | 11.3 | 12.0 | 10.5 | -56 | 14 |
+| jemalloc, THP off for the process | default | 4 | 5.6 | 6.0 | 6.0 | 4.6 | -105 | 13 |
+
+Every run passed the soak's caps and its 256 KiB/min slope limit. glibc with `MALLOC_ARENA_MAX=2`
+was the smallest configuration in every row group. It saved 0.5 to 1 MiB over plain glibc, and the
+saving was largest with one worker per core. In this workload, glibc arenas stayed small: plain
+glibc with 24 workers used about 1 MiB more than with 2 workers. That is far from the roughly
+25 MiB of extra anonymous memory measured on HeliOS, so arenas alone are unlikely to explain it.
+
+Transparent huge pages cause most of the jemalloc and mimalloc overhead here. In an earlier run of
+this matrix, 200 s in with default workers on 24 CPUs, `AnonHugePages` was 12 MiB of mimalloc's
+29 MiB anonymous memory, 6 MiB of jemalloc's 12 MiB, and 0 of glibc's 4 MiB. With THP disabled
+(`MIMALLOC_ALLOW_THP=0`, or `prctl(PR_SET_THP_DISABLE)` set by a wrapper and inherited by the node),
+both allocators come close to glibc but stay above it. jemalloc's own `thp:never` option only
+recovers 2 to 5 MiB: the pre-merge runs without it ended at 13.8 and 17.0 MiB PSS, compared with
+11.4 and 11.0 MiB with it. mimalloc also peaks high, then returns memory once its purge delay
+expires, which produces the large negative slopes.
+
+Stripped `opt-level = "z"` binary sizes were 5.39 MiB for glibc, 5.50 MiB for mimalloc
+(+0.11 MiB), and 5.68 MiB for jemalloc (+0.29 MiB).
+
+These measurements were taken on x86_64, not on the CM5. On the device, compare `RssAnon` and
+`AnonHugePages` with and without `MALLOC_ARENA_MAX=2` and with THP set to `madvise` before you
+switch allocators.
 
 ## Peer and Auth Controls
 

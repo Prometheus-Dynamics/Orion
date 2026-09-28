@@ -44,12 +44,14 @@ fn envelope(destination: &LocalAddress, message: ControlMessage) -> ControlEnvel
 
 async fn write_frame_in_two_chunks(stream: &mut UnixStream, envelope: &ControlEnvelope) {
     let payload = encode_to_vec(envelope).expect("frame should encode");
-    let mut frame = Vec::with_capacity(payload.len() + 4);
+    let header_len = orion_transport_ipc::CONTROL_PREAMBLE_BYTES + 4;
+    let mut frame = Vec::with_capacity(payload.len() + header_len);
+    frame.extend_from_slice(&orion_transport_ipc::control_preamble());
     frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     frame.extend_from_slice(&payload);
-    // Split inside the payload so the reader has consumed the length prefix and part of the body
+    // Split inside the payload so the reader has consumed the frame header and part of the body
     // when it gets cancelled.
-    let split = 4 + payload.len() / 2;
+    let split = header_len + payload.len() / 2;
     stream
         .write_all(&frame[..split])
         .await

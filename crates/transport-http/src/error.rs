@@ -1,3 +1,4 @@
+use orion_core::ControlProtocolMismatch;
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +39,20 @@ pub enum HttpTransportError {
     BindFailed(String),
     #[error("failed to serve HTTP listener: {0}")]
     ServeFailed(String),
+    /// The peer speaks a different control-protocol wire version (see
+    /// [`orion_core::CONTROL_PROTOCOL_VERSION`]); detected from the
+    /// `x-orion-control-protocol` header before any body is decoded.
+    #[error("{}", ControlProtocolMismatch::new(*local, *remote))]
+    ProtocolMismatch { local: u16, remote: u16 },
+}
+
+impl From<ControlProtocolMismatch> for HttpTransportError {
+    fn from(mismatch: ControlProtocolMismatch) -> Self {
+        Self::ProtocolMismatch {
+            local: mismatch.local,
+            remote: mismatch.remote,
+        }
+    }
 }
 
 impl HttpTransportError {

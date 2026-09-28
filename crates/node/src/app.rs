@@ -617,6 +617,17 @@ impl NodeApp {
                 observability.http_malformed_input_count =
                     observability.http_malformed_input_count.saturating_add(1);
             }
+            HttpTransportError::ProtocolMismatch { local, remote } => {
+                observability.http_malformed_input_count =
+                    observability.http_malformed_input_count.saturating_add(1);
+                warn!(
+                    node = %self.config.node_id,
+                    local_protocol = local,
+                    remote_protocol = remote,
+                    "rejected HTTP control request speaking a different control protocol \
+                     version; upgrade orionctl and orion-node peers together"
+                );
+            }
             HttpTransportError::Tls(message) => {
                 observability.http_tls_failures = observability.http_tls_failures.saturating_add(1);
                 if is_client_auth_tls_error(message) {
@@ -648,9 +659,22 @@ impl NodeApp {
     pub(crate) fn record_ipc_transport_error(&self, error: &IpcTransportError) {
         let mut observability = self.observability_lock();
         observability.ipc_frame_failures = observability.ipc_frame_failures.saturating_add(1);
-        if matches!(error, IpcTransportError::DecodeFailed(_)) {
+        if matches!(
+            error,
+            IpcTransportError::DecodeFailed(_) | IpcTransportError::ProtocolMismatch { .. }
+        ) {
             observability.ipc_malformed_input_count =
                 observability.ipc_malformed_input_count.saturating_add(1);
+        }
+        drop(observability);
+        if let IpcTransportError::ProtocolMismatch { local, remote } = error {
+            warn!(
+                node = %self.config.node_id,
+                local_protocol = local,
+                remote_protocol = remote,
+                "rejected local IPC client speaking a different control protocol version; \
+                 upgrade orionctl/client libraries and orion-node together"
+            );
         }
     }
 }

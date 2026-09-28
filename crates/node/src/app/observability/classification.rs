@@ -131,7 +131,8 @@ fn classify_http_transport_error_for_peer_sync(error: &HttpTransportError) -> Pe
         | HttpTransportError::EncodeResponse(_)
         | HttpTransportError::UnexpectedStatus(_)
         | HttpTransportError::BindFailed(_)
-        | HttpTransportError::ServeFailed(_) => PeerSyncErrorKind::PeerSync,
+        | HttpTransportError::ServeFailed(_)
+        | HttpTransportError::ProtocolMismatch { .. } => PeerSyncErrorKind::PeerSync,
     }
 }
 
@@ -215,7 +216,8 @@ pub(crate) fn classify_http_communication_failure(
         | HttpTransportError::UnsupportedControlMessage
         | HttpTransportError::UnsupportedMethod(_)
         | HttpTransportError::UnsupportedPath(_)
-        | HttpTransportError::UnexpectedStatus(_) => CommunicationFailureKind::Protocol,
+        | HttpTransportError::UnexpectedStatus(_)
+        | HttpTransportError::ProtocolMismatch { .. } => CommunicationFailureKind::Protocol,
         HttpTransportError::InvalidBaseUrl(_)
         | HttpTransportError::BindFailed(_)
         | HttpTransportError::ServeFailed(_)

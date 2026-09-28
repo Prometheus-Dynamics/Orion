@@ -12,6 +12,8 @@ mod codec;
 mod error;
 mod handler;
 mod message;
+#[cfg(feature = "transport")]
+mod protocol;
 mod route;
 #[cfg(feature = "transport")]
 mod tls;

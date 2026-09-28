@@ -21,7 +21,49 @@ pub enum ClientError {
         expected: ClientRole,
         found: ClientRole,
     },
+    /// orion-node speaks a different control-protocol wire version than this client build.
+    #[error(
+        "incompatible Orion control protocol: this client speaks v{local} but orion-node speaks \
+         v{remote}; upgrade orionctl/client libraries and orion-node together (they must come \
+         from the same Orion release)"
+    )]
+    ProtocolMismatch { local: u16, remote: u16 },
     #[cfg(feature = "ipc")]
     #[error(transparent)]
-    Ipc(#[from] IpcTransportError),
+    Ipc(IpcTransportError),
+}
+
+#[cfg(feature = "ipc")]
+impl From<IpcTransportError> for ClientError {
+    fn from(error: IpcTransportError) -> Self {
+        match error {
+            IpcTransportError::ProtocolMismatch { local, remote } => {
+                Self::ProtocolMismatch { local, remote }
+            }
+            other => Self::Ipc(other),
+        }
+    }
+}
+
+#[cfg(all(test, feature = "ipc"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ipc_protocol_mismatch_maps_to_typed_client_error() {
+        let error = ClientError::from(IpcTransportError::ProtocolMismatch {
+            local: 2,
+            remote: 3,
+        });
+        assert_eq!(
+            error,
+            ClientError::ProtocolMismatch {
+                local: 2,
+                remote: 3
+            }
+        );
+        let message = error.to_string();
+        assert!(message.contains("this client speaks v2 but orion-node speaks v3"));
+        assert!(message.contains("upgrade orionctl"));
+    }
 }

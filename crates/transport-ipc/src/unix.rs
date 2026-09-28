@@ -22,6 +22,8 @@ use tokio::{
 
 use crate::{
     ControlEnvelope, ControlFrameReadState, IpcTransportError, LocalAddress, UnixPeerIdentity,
+    frame_read::STREAM_FRAME_HEADER_BYTES,
+    preamble::{CONTROL_PREAMBLE_BYTES, check_control_preamble, control_preamble},
 };
 
 /// Synchronous Unix control handler boundary.
@@ -238,30 +240,25 @@ impl UnixControlClient {
         .await?;
         let bytes = encode_to_vec(&envelope)
             .map_err(|err| IpcTransportError::EncodeFailed(err.to_string()))?;
-        let bytes_sent = bytes.len();
-        timed(self.io_timeout, stream.write_all(&bytes), "IPC write")
-            .await
-            .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
-        timed(self.io_timeout, stream.shutdown(), "IPC shutdown")
-            .await
-            .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
-
-        let mut response = Vec::new();
+        let bytes_sent = bytes.len() + CONTROL_PREAMBLE_BYTES;
         timed(
             self.io_timeout,
-            (&mut stream)
-                .take(self.max_payload_bytes as u64 + 1)
-                .read_to_end(&mut response),
-            "IPC read",
+            write_unary_message(&mut stream, &bytes),
+            "IPC write",
         )
         .await
-        .map_err(|err| IpcTransportError::ReadFailed(err.to_string()))?;
-        if response.len() > self.max_payload_bytes {
-            return Err(IpcTransportError::DecodeFailed(
-                "control response exceeds maximum transport payload size".into(),
-            ));
-        }
-        let bytes_received = response.len();
+        .map_err(IpcTransportError::WriteFailed)?;
+        timed(self.io_timeout, stream.shutdown(), "IPC shutdown")
+            .await
+            .map_err(IpcTransportError::WriteFailed)?;
+
+        let response = timeout_ipc(
+            self.io_timeout,
+            read_unary_message(&mut stream, self.max_payload_bytes, "control response"),
+            "IPC read",
+        )
+        .await?;
+        let bytes_received = response.len() + CONTROL_PREAMBLE_BYTES;
 
         Ok(UnixControlExchange {
             envelope: decode_from_slice_with(&response, IpcTransportError::DecodeFailed)?,
@@ -305,7 +302,7 @@ impl UnixControlStreamClient {
         &mut self,
         envelope: &ControlEnvelope,
     ) -> Result<usize, IpcTransportError> {
-        timed(
+        timed_stream(
             self.io_timeout,
             write_control_frame_with_limit_metered(
                 &mut self.stream,
@@ -313,9 +310,9 @@ impl UnixControlStreamClient {
                 self.max_payload_bytes,
             ),
             "IPC stream write",
+            IpcTransportError::WriteFailed,
         )
         .await
-        .map_err(IpcTransportError::WriteFailed)
     }
 
     /// Receives the next frame, failing after the configured I/O timeout.
@@ -331,14 +328,14 @@ impl UnixControlStreamClient {
     pub async fn recv_metered(
         &mut self,
     ) -> Result<Option<(ControlEnvelope, usize)>, IpcTransportError> {
-        timed(
+        timed_stream(
             self.io_timeout,
             self.read_state
                 .read_metered(&mut self.stream, self.max_payload_bytes),
             "IPC stream read",
+            IpcTransportError::ReadFailed,
         )
         .await
-        .map_err(IpcTransportError::ReadFailed)
     }
 
     pub async fn recv_wait(&mut self) -> Result<Option<ControlEnvelope>, IpcTransportError> {
@@ -404,7 +401,7 @@ where
     let len = u32::try_from(bytes.len())
         .map_err(|_| IpcTransportError::EncodeFailed("control frame too large".into()))?;
     writer
-        .write_u32_le(len)
+        .write_all(&stream_frame_header(len))
         .await
         .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
     writer
@@ -415,7 +412,35 @@ where
         .flush()
         .await
         .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
-    Ok(bytes.len() + std::mem::size_of::<u32>())
+    Ok(bytes.len() + STREAM_FRAME_HEADER_BYTES)
+}
+
+/// Writes a payload-free stream frame carrying only this build's protocol preamble.
+///
+/// Servers send it after a read failed with [`IpcTransportError::ProtocolMismatch`], so the
+/// remote side reports the same typed mismatch (with the server's version) instead of seeing the
+/// connection drop.
+pub async fn write_control_protocol_mismatch_frame<W>(
+    writer: &mut W,
+) -> Result<(), IpcTransportError>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    writer
+        .write_all(&stream_frame_header(0))
+        .await
+        .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
+    writer
+        .flush()
+        .await
+        .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))
+}
+
+fn stream_frame_header(len: u32) -> [u8; STREAM_FRAME_HEADER_BYTES] {
+    let mut header = [0_u8; STREAM_FRAME_HEADER_BYTES];
+    header[..CONTROL_PREAMBLE_BYTES].copy_from_slice(&control_preamble());
+    header[CONTROL_PREAMBLE_BYTES..].copy_from_slice(&len.to_le_bytes());
+    header
 }
 
 pub async fn read_control_frame<R>(
@@ -471,29 +496,31 @@ async fn handle_stream(
             gid: cred.gid(),
         })
         .ok();
-    let mut request = Vec::new();
-    if let Err(err) = timed(
+    let request = match timeout_ipc(
         io_timeout,
-        (&mut stream)
-            .take(max_payload_bytes as u64 + 1)
-            .read_to_end(&mut request),
+        read_unary_message(&mut stream, max_payload_bytes, "control envelope"),
         "IPC read",
     )
     .await
-    .map_err(IpcTransportError::ReadFailed)
     {
-        handler.record_transport_error(&err);
-        return Err(err);
-    }
-    if request.len() > max_payload_bytes {
-        let err = IpcTransportError::DecodeFailed(
-            "control envelope exceeds maximum transport payload size".into(),
-        );
-        handler.record_transport_error(&err);
-        return Err(err);
-    }
+        Ok(request) => request,
+        Err(err) => {
+            handler.record_transport_error(&err);
+            if matches!(err, IpcTransportError::ProtocolMismatch { .. }) {
+                // Answer with our preamble only, so the client reports a typed mismatch too.
+                let _ = timed(
+                    io_timeout,
+                    write_unary_message(&mut stream, &[]),
+                    "IPC write",
+                )
+                .await;
+                let _ = timed(io_timeout, stream.shutdown(), "IPC shutdown").await;
+            }
+            return Err(err);
+        }
+    };
 
-    let bytes_received = request.len().min(u64::MAX as usize) as u64;
+    let bytes_received = (request.len() + CONTROL_PREAMBLE_BYTES).min(u64::MAX as usize) as u64;
     let started = Instant::now();
     let envelope: ControlEnvelope =
         match decode_from_slice_with(&request, IpcTransportError::DecodeFailed) {
@@ -523,11 +550,15 @@ async fn handle_stream(
             return Err(err);
         }
     };
-    let bytes_sent = bytes.len().min(u64::MAX as usize) as u64;
+    let bytes_sent = (bytes.len() + CONTROL_PREAMBLE_BYTES).min(u64::MAX as usize) as u64;
 
-    if let Err(err) = timed(io_timeout, stream.write_all(&bytes), "IPC write")
-        .await
-        .map_err(IpcTransportError::WriteFailed)
+    if let Err(err) = timed(
+        io_timeout,
+        write_unary_message(&mut stream, &bytes),
+        "IPC write",
+    )
+    .await
+    .map_err(IpcTransportError::WriteFailed)
     {
         handler.record_transport_error(&err);
         return Err(err);
@@ -557,6 +588,89 @@ async fn timed<T>(
             timeout.as_millis()
         )),
     }
+}
+
+/// Like [`timed`], but keeps typed inner errors and only maps the timeout.
+async fn timeout_ipc<T>(
+    timeout: Duration,
+    future: impl Future<Output = Result<T, IpcTransportError>>,
+    context: &str,
+) -> Result<T, IpcTransportError> {
+    tokio::time::timeout(timeout.max(Duration::from_millis(1)), future)
+        .await
+        .unwrap_or_else(|_| {
+            Err(IpcTransportError::ReadFailed(format!(
+                "{context} timed out after {} ms",
+                timeout.as_millis()
+            )))
+        })
+}
+
+/// Stream I/O timeout wrapper: inner errors are folded into `wrap` as before, except protocol
+/// mismatches, which stay typed so callers can report them clearly.
+async fn timed_stream<T>(
+    timeout: Duration,
+    future: impl Future<Output = Result<T, IpcTransportError>>,
+    context: &str,
+    wrap: fn(String) -> IpcTransportError,
+) -> Result<T, IpcTransportError> {
+    match tokio::time::timeout(timeout.max(Duration::from_millis(1)), future).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(err @ IpcTransportError::ProtocolMismatch { .. })) => Err(err),
+        Ok(Err(err)) => Err(wrap(err.to_string())),
+        Err(_) => Err(wrap(format!(
+            "{context} timed out after {} ms",
+            timeout.as_millis()
+        ))),
+    }
+}
+
+async fn write_unary_message<W>(writer: &mut W, archive: &[u8]) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    writer.write_all(&control_preamble()).await?;
+    writer.write_all(archive).await
+}
+
+/// Reads `[preamble][archive]` until EOF. The whole (bounded) message is drained before the
+/// preamble is checked so a mismatched peer is never left with unread bytes; the archive is only
+/// returned, never decoded, when the preamble matches.
+async fn read_unary_message<R>(
+    reader: &mut R,
+    max_payload_bytes: usize,
+    what: &str,
+) -> Result<Vec<u8>, IpcTransportError>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let max_payload_bytes = max_payload_bytes.max(1);
+    let mut preamble = [0_u8; CONTROL_PREAMBLE_BYTES];
+    let mut filled = 0;
+    while filled < CONTROL_PREAMBLE_BYTES {
+        let read = reader
+            .read(&mut preamble[filled..])
+            .await
+            .map_err(|err| IpcTransportError::ReadFailed(err.to_string()))?;
+        if read == 0 {
+            break;
+        }
+        filled += read;
+    }
+    // A separate buffer keeps the archive at the start of its allocation for aligned decode.
+    let mut archive = Vec::new();
+    (&mut *reader)
+        .take(max_payload_bytes as u64 + 1)
+        .read_to_end(&mut archive)
+        .await
+        .map_err(|err| IpcTransportError::ReadFailed(err.to_string()))?;
+    check_control_preamble(&preamble[..filled])?;
+    if archive.len() > max_payload_bytes {
+        return Err(IpcTransportError::DecodeFailed(format!(
+            "{what} exceeds maximum transport payload size"
+        )));
+    }
+    Ok(archive)
 }
 
 pub(crate) async fn timed_connect<T>(

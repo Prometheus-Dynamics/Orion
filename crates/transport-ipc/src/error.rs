@@ -1,3 +1,4 @@
+use orion_core::ControlProtocolMismatch;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -18,4 +19,18 @@ pub enum IpcTransportError {
     EncodeFailed(String),
     #[error("failed to decode unix socket message: {0}")]
     DecodeFailed(String),
+    /// The peer speaks a different control-protocol wire version (see
+    /// [`orion_core::CONTROL_PROTOCOL_VERSION`]). Detected from the fixed preamble before any
+    /// archived payload is decoded.
+    #[error("{}", ControlProtocolMismatch::new(*local, *remote))]
+    ProtocolMismatch { local: u16, remote: u16 },
+}
+
+impl From<ControlProtocolMismatch> for IpcTransportError {
+    fn from(mismatch: ControlProtocolMismatch) -> Self {
+        Self::ProtocolMismatch {
+            local: mismatch.local,
+            remote: mismatch.remote,
+        }
+    }
 }

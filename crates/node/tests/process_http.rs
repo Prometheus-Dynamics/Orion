@@ -691,20 +691,30 @@ async fn orion_node_binary_survives_concurrent_http_ipc_and_peer_sync_activity()
 
     wait_for_workload(&client, "workload.concurrent.11", Duration::from_secs(5)).await;
 
-    let response = client
-        .send(&HttpRequestPayload::Control(Box::new(
-            ControlMessage::QueryObservability,
-        )))
-        .await
-        .expect("final observability request should succeed");
-
-    match response {
-        HttpResponsePayload::Observability(snapshot) => {
-            assert!(snapshot.mutation_apply.success_count >= 12);
-            assert!(snapshot.peer_sync.failure_count >= 1);
-            assert_eq!(snapshot.configured_peer_count, 1);
-            assert!(snapshot.degraded_peer_count >= 1);
+    // The unreachable peer's sync attempt runs on its own loop and may still be inside its
+    // connect timeout when the mixed load finishes, so wait for the failure to be recorded.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let snapshot = loop {
+        let response = client
+            .send(&HttpRequestPayload::Control(Box::new(
+                ControlMessage::QueryObservability,
+            )))
+            .await
+            .expect("final observability request should succeed");
+        let snapshot = match response {
+            HttpResponsePayload::Observability(snapshot) => snapshot,
+            other => panic!("expected observability response, got {other:?}"),
+        };
+        if (snapshot.peer_sync.failure_count >= 1 && snapshot.degraded_peer_count >= 1)
+            || tokio::time::Instant::now() >= deadline
+        {
+            break snapshot;
         }
-        other => panic!("expected observability response, got {other:?}"),
-    }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    assert!(snapshot.mutation_apply.success_count >= 12);
+    assert!(snapshot.peer_sync.failure_count >= 1);
+    assert_eq!(snapshot.configured_peer_count, 1);
+    assert!(snapshot.degraded_peer_count >= 1);
 }

@@ -25,6 +25,15 @@ Examples:
 - use documented `ORION_NODE_*` env vars instead of internal `*_from_env()` helper methods
 - use health/readiness/observability endpoints and docs rather than internal status helper methods
 
+## Control Protocol Version
+
+The rkyv control protocol is versioned by `orion_core::CONTROL_PROTOCOL_VERSION`. Clients and
+nodes built from different Orion releases reject each other with a typed `ProtocolMismatch
+{ local, remote }` error (`IpcTransportError`, `HttpTransportError`, `ClientError`) before any
+payload is decoded. If you write raw IPC frames yourself, use `control_preamble()` /
+`check_control_preamble()` from `orion-transport-ipc`. See
+[protocol-compatibility.md](protocol-compatibility.md).
+
 ## Config Decode
 
 Prefer the explicit free function:
