@@ -548,7 +548,7 @@ async fn timed<T>(
     }
 }
 
-async fn timed_connect<T>(
+pub(crate) async fn timed_connect<T>(
     timeout: Duration,
     future: impl Future<Output = Result<T, std::io::Error>>,
     context: &str,

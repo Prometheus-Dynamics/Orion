@@ -58,12 +58,15 @@ pub mod transport {
     pub mod ipc {
         pub use orion_transport_ipc::{
             ControlEnvelope, DEFAULT_UNIX_FD_FRAME_MAX_FDS,
-            DEFAULT_UNIX_FD_FRAME_MAX_PAYLOAD_BYTES, DataEnvelope, IpcTransport, IpcTransportError,
+            DEFAULT_UNIX_FD_FRAME_MAX_PAYLOAD_BYTES, DEFAULT_UNIX_FD_LATEST_MAX_CLIENTS,
+            DEFAULT_UNIX_FD_LATEST_MAX_WAIT, DataEnvelope, IpcTransport, IpcTransportError,
             LocalAddress, LocalControlTransport, LocalDataTransport, UnixControlClient,
             UnixControlHandler, UnixControlServer, UnixControlStreamClient, UnixFdFrame,
-            UnixPeerIdentity, read_control_frame, read_control_frame_with_limit,
-            recv_unix_fd_frame, recv_unix_fd_frame_async, send_unix_fd_frame,
-            send_unix_fd_frame_async, write_control_frame, write_control_frame_with_limit,
+            UnixFdLatestClient, UnixFdLatestConfig, UnixFdLatestFrame, UnixFdLatestPublisher,
+            UnixFdLatestReply, UnixFdLatestServer, UnixPeerIdentity, read_control_frame,
+            read_control_frame_with_limit, recv_unix_fd_frame, recv_unix_fd_frame_async,
+            send_unix_fd_frame, send_unix_fd_frame_async, write_control_frame,
+            write_control_frame_with_limit,
         };
     }
 
