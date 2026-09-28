@@ -1,11 +1,27 @@
 use orion_client::{GraphPayload, resolve_workload_graph};
 use orion_control_plane::{
-    AppliedClusterState, ClusterStateEnvelope, DesiredClusterState, DesiredState,
-    ObservedClusterState, ResourceConfigState, ResourceRecord, ResourceState, SharedMemoryEndpoint,
-    StateSnapshot, TypedConfigValue, UnixEndpoint, WorkloadConfig, WorkloadObservedState,
-    WorkloadRecord,
+    AppliedClusterState, ClusterStateEnvelope, CustomEndpointScheme, DesiredClusterState,
+    DesiredState, ObservedClusterState, ResourceConfigState, ResourceEndpoint, ResourceRecord,
+    ResourceState, SharedMemoryEndpoint, StateSnapshot, TypedConfigValue, UnixEndpoint,
+    WorkloadConfig, WorkloadObservedState, WorkloadRecord,
 };
 use orion_core::{ArtifactId, ConfigSchemaId, RuntimeType, WorkloadId};
+
+/// A downstream-defined endpoint type for a scheme Orion does not know about.
+struct FrameLeaseEndpoint {
+    socket_path: String,
+}
+
+impl CustomEndpointScheme for FrameLeaseEndpoint {
+    const SCHEME: &'static str = "styx-frame-lease+unix";
+    const TYPE_NAME: &'static str = "frame lease";
+
+    fn from_payload(payload: &str) -> Option<Self> {
+        Some(Self {
+            socket_path: payload.to_owned(),
+        })
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let resource = ResourceRecord::builder("resource.graph", "graph.payload", "provider.graph")
@@ -34,6 +50,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build();
     let unix = unix_resource.endpoint::<UnixEndpoint>()?;
     println!("unix_endpoint={}", unix.path);
+
+    let camera_resource =
+        ResourceRecord::builder("resource.cam0", "camera.frames", "provider.helios")
+            .endpoint(FrameLeaseEndpoint::endpoint_string("/run/helios/cam0.sock"))
+            .build();
+    let lease = camera_resource.endpoint::<FrameLeaseEndpoint>()?;
+    println!("frame_lease_endpoint={}", lease.socket_path);
+    for endpoint in camera_resource.parsed_endpoints()? {
+        if let ResourceEndpoint::Custom(custom) = &endpoint {
+            println!(
+                "custom_endpoint scheme={} transport={} payload={}",
+                custom.base_scheme(),
+                custom.transport_suffix().unwrap_or("-"),
+                custom.payload()
+            );
+        }
+    }
 
     let workload = WorkloadRecord::builder(
         WorkloadId::new("workload.graph"),

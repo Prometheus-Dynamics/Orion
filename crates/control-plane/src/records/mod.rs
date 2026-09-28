@@ -1,6 +1,7 @@
 mod cluster;
 mod config_decode;
 mod inventory;
+mod resource_endpoints;
 mod resources;
 mod workloads;
 
@@ -12,11 +13,15 @@ pub use inventory::{
     ArtifactRecord, ArtifactRecordBuilder, ExecutorRecord, ExecutorRecordBuilder, NodeRecord,
     NodeRecordBuilder, ProviderRecord, ProviderRecordBuilder,
 };
+pub use resource_endpoints::{
+    BUILTIN_ENDPOINT_SCHEMES, CustomEndpoint, CustomEndpointScheme, HttpEndpoint, IpcEndpoint,
+    ResourceEndpoint, ResourceEndpointError, SharedMemoryEndpoint, TcpEndpoint,
+    TypedResourceEndpoint, UnixEndpoint, is_valid_endpoint_scheme,
+};
 pub use resources::{
-    HttpEndpoint, IpcEndpoint, LeaseRecord, LeaseRecordBuilder, ResourceActionResult,
-    ResourceActionStatus, ResourceCapability, ResourceConfigState, ResourceEndpoint,
-    ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
-    ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedResourceEndpoint, UnixEndpoint,
+    LeaseRecord, LeaseRecordBuilder, ResourceActionResult, ResourceActionStatus,
+    ResourceCapability, ResourceConfigState, ResourceOwnershipMode, ResourceRecord,
+    ResourceRecordBuilder, ResourceState,
 };
 pub use workloads::{
     ResourceBinding, TypedConfigValue, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder,
