@@ -214,3 +214,20 @@ async fn graceful_ipc_stream_server_shutdown_removes_socket_file() {
 
     let _ = fs::remove_dir_all(state_dir);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropped_reconcile_loop_handle_stops_loop_instead_of_spinning() {
+    let app = NodeApp::builder()
+        .config(NodeConfig::for_local_node(NodeId::new("node.loop.dropped")))
+        .try_build()
+        .expect("node app should build");
+
+    drop(app.spawn_reconcile_loop(Duration::from_secs(60)));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let reconciles = app.observability_snapshot().reconcile.success_count;
+    assert!(
+        reconciles <= 2,
+        "dropped loop handle should stop the loop, observed {reconciles} reconciles"
+    );
+}

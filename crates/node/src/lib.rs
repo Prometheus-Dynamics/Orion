@@ -94,7 +94,7 @@ pub use auth::{
     AuthenticatedPeer, LocalAuthenticationMode, NodeSecurity, PeerAuthenticationMode,
     PeerSecurityMiddleware,
 };
-pub use config::{NodeConfig, NodeProcessConfig};
+pub use config::{NodeConfig, NodeProcessConfig, NodeRuntimeThreads};
 pub use peer::{PeerConfig, PeerState, PeerSyncStatus, PeerTrustStatus};
 pub use service::{
     Authenticator, AuthorizationMiddleware, Authorizer, ControlMiddleware, ControlOperation,

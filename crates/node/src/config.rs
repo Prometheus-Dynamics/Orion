@@ -23,6 +23,7 @@ use std::{
 
 const DEFAULT_RECONCILE_INTERVAL_MS: u64 = 250;
 const DEFAULT_PEER_SYNC_MAX_IN_FLIGHT: usize = 4;
+const HTTP_ADDR_DISABLED_VALUES: &[&str] = &["off", "disabled", "none"];
 #[cfg(test)]
 const DEFAULT_IPC_STREAM_HEARTBEAT_INTERVAL_MS: u64 = 50;
 #[cfg(not(test))]
@@ -91,6 +92,57 @@ pub struct NodeProcessConfig {
     pub http_tls_key_path: Option<PathBuf>,
     pub auto_http_tls: bool,
     pub shutdown_after_init: Option<Duration>,
+    /// Whether the HTTP control listener is started. Disabled with `ORION_NODE_HTTP_ADDR=off`
+    /// for single-node appliances that only use local IPC.
+    pub http_enabled: bool,
+    pub runtime_threads: NodeRuntimeThreads,
+}
+
+/// Tokio runtime sizing for the node binary.
+///
+/// `None` keeps Tokio's defaults (one worker per core, 512 blocking threads).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NodeRuntimeThreads {
+    pub worker_threads: Option<usize>,
+    pub max_blocking_threads: Option<usize>,
+}
+
+impl NodeRuntimeThreads {
+    pub fn try_from_env() -> Result<Self, NodeError> {
+        Ok(Self {
+            worker_threads: positive_usize_env("ORION_NODE_RUNTIME_WORKER_THREADS")?,
+            max_blocking_threads: positive_usize_env("ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS")?,
+        })
+    }
+
+    /// Builds the multi-threaded Tokio runtime used by the node binary.
+    pub fn build_runtime(&self) -> std::io::Result<tokio::runtime::Runtime> {
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        builder.enable_all();
+        if let Some(worker_threads) = self.worker_threads {
+            builder.worker_threads(worker_threads);
+        }
+        if let Some(max_blocking_threads) = self.max_blocking_threads {
+            builder.max_blocking_threads(max_blocking_threads);
+        }
+        builder.build()
+    }
+}
+
+fn positive_usize_env(key: &str) -> Result<Option<usize>, NodeError> {
+    let Ok(raw) = env::var(key) else {
+        return Ok(None);
+    };
+    match raw.trim().parse::<usize>() {
+        Ok(0) | Err(_) => Err(NodeError::Config(format!(
+            "{key} must be a positive integer: {raw}"
+        ))),
+        Ok(value) => Ok(Some(value)),
+    }
+}
+
+fn is_http_addr_disabled(raw: &str) -> bool {
+    HTTP_ADDR_DISABLED_VALUES.contains(&raw.trim().to_ascii_lowercase().as_str())
 }
 
 impl NodeConfig {
@@ -186,13 +238,15 @@ impl NodeConfig {
         let node_id = NodeId::try_new(node_id_raw.clone()).map_err(|err| {
             NodeError::Config(format!("ORION_NODE_ID must be a non-empty node id: {err}"))
         })?;
-        let http_bind_addr_raw = env::var("ORION_NODE_HTTP_ADDR")
-            .unwrap_or_else(|_| Self::default_http_bind_addr().to_string());
-        let http_bind_addr = http_bind_addr_raw.parse().map_err(|err| {
-            NodeError::Config(format!(
-                "ORION_NODE_HTTP_ADDR must be a valid socket address: {http_bind_addr_raw} ({err})"
-            ))
-        })?;
+        let http_bind_addr = match env::var("ORION_NODE_HTTP_ADDR") {
+            Ok(raw) if is_http_addr_disabled(&raw) => Self::default_http_bind_addr(),
+            Ok(raw) => raw.parse().map_err(|err| {
+                NodeError::Config(format!(
+                    "ORION_NODE_HTTP_ADDR must be a valid socket address or `off`: {raw} ({err})"
+                ))
+            })?,
+            Err(_) => Self::default_http_bind_addr(),
+        };
         let ipc_socket_path = env::var("ORION_NODE_IPC_SOCKET")
             .map(PathBuf::from)
             .unwrap_or_else(|_| Self::default_ipc_socket_path_for(&node_id_raw));
@@ -268,6 +322,11 @@ impl NodeConfig {
         bool_env_or_false("ORION_NODE_HTTP_TLS_AUTO")
     }
 
+    /// Returns `false` when `ORION_NODE_HTTP_ADDR` is `off`, `disabled`, or `none`.
+    pub fn http_enabled_from_env() -> bool {
+        env::var("ORION_NODE_HTTP_ADDR").map_or(true, |raw| !is_http_addr_disabled(&raw))
+    }
+
     pub fn try_http_probe_addr_from_env() -> Result<Option<SocketAddr>, NodeError> {
         env::var("ORION_NODE_HTTP_PROBE_ADDR")
             .ok()
@@ -312,6 +371,21 @@ impl NodeProcessConfig {
         let http_tls_key_path = env::var("ORION_NODE_HTTP_TLS_KEY").ok().map(PathBuf::from);
         let auto_http_tls = NodeConfig::try_http_tls_auto_from_env()?;
         let shutdown_after_init = NodeConfig::try_shutdown_after_init_from_env()?;
+        let http_enabled = NodeConfig::http_enabled_from_env();
+        let runtime_threads = NodeRuntimeThreads::try_from_env()?;
+
+        if !http_enabled {
+            if !node.peers.is_empty() {
+                return Err(NodeError::Config(
+                    "ORION_NODE_HTTP_ADDR=off cannot be combined with ORION_NODE_PEERS; peer sync requires the HTTP listener".into(),
+                ));
+            }
+            if http_tls_cert_path.is_some() || http_tls_key_path.is_some() || auto_http_tls {
+                return Err(NodeError::Config(
+                    "ORION_NODE_HTTP_ADDR=off cannot be combined with HTTP TLS settings".into(),
+                ));
+            }
+        }
 
         match (&http_tls_cert_path, &http_tls_key_path) {
             (Some(_), Some(_)) | (None, None) => Ok(Self {
@@ -323,6 +397,8 @@ impl NodeProcessConfig {
                 http_tls_key_path,
                 auto_http_tls,
                 shutdown_after_init,
+                http_enabled,
+                runtime_threads,
             }),
             _ => Err(NodeError::Config(
                 "ORION_NODE_HTTP_TLS_CERT and ORION_NODE_HTTP_TLS_KEY must either both be set or both be unset".into(),

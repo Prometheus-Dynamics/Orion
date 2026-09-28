@@ -20,7 +20,13 @@ impl NodeApp {
                 }
                 tick(app.clone()).await;
                 tokio::select! {
-                    _ = shutdown_rx.changed() => {}
+                    // A dropped handle closes the channel; stop instead of spinning on the
+                    // immediately-ready `changed()` error.
+                    changed = shutdown_rx.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                    }
                     _ = tokio::time::sleep(interval) => {}
                 }
             }
@@ -55,7 +61,13 @@ impl NodeApp {
                     error!(node = %node_id, task = task_name, error = %err, "background loop iteration failed");
                 }
                 tokio::select! {
-                    _ = shutdown_rx.changed() => {}
+                    // A dropped handle closes the channel; stop instead of spinning on the
+                    // immediately-ready `changed()` error.
+                    changed = shutdown_rx.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                    }
                     _ = tokio::time::sleep(interval) => {}
                 }
             }

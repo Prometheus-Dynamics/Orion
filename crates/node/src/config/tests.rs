@@ -179,3 +179,108 @@ fn node_process_config_try_from_env_rejects_invalid_shutdown_after_init() {
         matches!(err, crate::NodeError::Config(message) if message.contains("ORION_NODE_SHUTDOWN_AFTER_INIT_MS"))
     );
 }
+
+fn with_env_vars<T>(vars: &[(&str, Option<&str>)], run: impl FnOnce() -> T) -> T {
+    let _guard = env_lock().lock().expect("env lock should not be poisoned");
+    let prior: Vec<_> = vars
+        .iter()
+        .map(|(key, _)| (*key, std::env::var_os(key)))
+        .collect();
+    for (key, value) in vars {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+    let result = run();
+    for (key, value) in prior {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+    result
+}
+
+#[test]
+fn node_process_config_disables_http_listener_with_off() {
+    let process = with_env_vars(
+        &[
+            ("ORION_NODE_HTTP_ADDR", Some("off")),
+            ("ORION_NODE_PEERS", None),
+            ("ORION_NODE_HTTP_TLS_AUTO", None),
+        ],
+        crate::NodeProcessConfig::try_from_env,
+    )
+    .expect("http off should load");
+
+    assert!(!process.http_enabled);
+    assert_eq!(
+        process.node.http_bind_addr,
+        crate::NodeConfig::default_http_bind_addr()
+    );
+}
+
+#[test]
+fn node_process_config_keeps_http_listener_enabled_by_default() {
+    let process = with_env_vars(
+        &[("ORION_NODE_HTTP_ADDR", None), ("ORION_NODE_PEERS", None)],
+        crate::NodeProcessConfig::try_from_env,
+    )
+    .expect("default config should load");
+
+    assert!(process.http_enabled);
+    assert_eq!(
+        process.runtime_threads,
+        crate::NodeRuntimeThreads::default()
+    );
+}
+
+#[test]
+fn node_process_config_rejects_http_off_with_peers() {
+    let err = with_env_vars(
+        &[
+            ("ORION_NODE_HTTP_ADDR", Some("disabled")),
+            ("ORION_NODE_PEERS", Some("node-b=http://127.0.0.1:9101")),
+        ],
+        crate::NodeProcessConfig::try_from_env,
+    )
+    .expect_err("http off with peers should fail");
+
+    assert!(
+        matches!(err, crate::NodeError::Config(message) if message.contains("ORION_NODE_PEERS"))
+    );
+}
+
+#[test]
+fn node_process_config_parses_runtime_threads() {
+    let process = with_env_vars(
+        &[
+            ("ORION_NODE_RUNTIME_WORKER_THREADS", Some("2")),
+            ("ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS", Some("4")),
+        ],
+        crate::NodeProcessConfig::try_from_env,
+    )
+    .expect("runtime threads should load");
+
+    assert_eq!(process.runtime_threads.worker_threads, Some(2));
+    assert_eq!(process.runtime_threads.max_blocking_threads, Some(4));
+    let runtime = process
+        .runtime_threads
+        .build_runtime()
+        .expect("runtime should build");
+    assert_eq!(runtime.metrics().num_workers(), 2);
+}
+
+#[test]
+fn node_process_config_rejects_zero_runtime_worker_threads() {
+    let err = with_env_vars(
+        &[("ORION_NODE_RUNTIME_WORKER_THREADS", Some("0"))],
+        crate::NodeProcessConfig::try_from_env,
+    )
+    .expect_err("zero workers should fail");
+
+    assert!(
+        matches!(err, crate::NodeError::Config(message) if message.contains("ORION_NODE_RUNTIME_WORKER_THREADS"))
+    );
+}

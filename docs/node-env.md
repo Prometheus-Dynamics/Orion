@@ -10,11 +10,22 @@ instead of silently falling back.
 | Variable | Default | Valid values | Failure behavior |
 | --- | --- | --- | --- |
 | `ORION_NODE_ID` | `node.local` | Any valid Unicode string | Invalid Unicode fails startup. |
-| `ORION_NODE_HTTP_ADDR` | `127.0.0.1:9100` | Socket address like `127.0.0.1:9100` | Invalid address fails startup. |
+| `ORION_NODE_HTTP_ADDR` | `127.0.0.1:9100` | Socket address like `127.0.0.1:9100`, or `off` / `disabled` / `none` to skip the HTTP control listener | Invalid address fails startup. `off` combined with `ORION_NODE_PEERS` or HTTP TLS settings fails startup. |
 | `ORION_NODE_IPC_SOCKET` | `${TMPDIR}/orion-<node-id>-control.sock` | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_IPC_STREAM_SOCKET` | `${TMPDIR}/orion-<node-id>-control-stream.sock` | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_HTTP_PROBE_ADDR` | unset | Socket address | Invalid address fails startup. |
+| `ORION_NODE_RUNTIME_WORKER_THREADS` | unset (one per CPU core) | Positive integer | Zero or invalid integer fails startup. |
+| `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` | unset (Tokio default `512`) | Positive integer | Zero or invalid integer fails startup. |
 | `ORION_NODE_RECONCILE_MS` | `250` | Integer milliseconds, minimum effective value `1` | Invalid integer fails startup. |
+
+### Single-node appliance profile
+
+A standalone node that only serves local IPC clients can shed most of its network surface:
+
+- build with `cargo build -p orion-node --release --no-default-features` to drop the TCP and QUIC data-plane transports
+- set `ORION_NODE_HTTP_ADDR=off` to skip the HTTP control listener (the optional probe listener on `ORION_NODE_HTTP_PROBE_ADDR` still works)
+- set `ORION_NODE_RUNTIME_WORKER_THREADS=1` or `2` and lower `ORION_NODE_MAX_MUTATION_HISTORY*` and worker queue capacities to fit the device memory budget
+- on glibc targets, `MALLOC_ARENA_MAX=2` limits per-thread malloc arenas, which otherwise dominate anonymous memory on small multi-core devices
 
 ## Peer and Auth Controls
 

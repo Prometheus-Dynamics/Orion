@@ -20,14 +20,23 @@ fn log_shutdown_error(
     warn!(node = %node_id, component, error = %error, "graceful shutdown reported an error");
 }
 
-#[tokio::main]
-async fn main() -> Result<(), orion_node::NodeError> {
+fn main() -> Result<(), orion_node::NodeError> {
     init_tracing();
     let process = NodeProcessConfig::try_from_env()?;
+    let runtime = process.runtime_threads.build_runtime().map_err(|err| {
+        orion_node::NodeError::Config(format!("failed to build tokio runtime: {err}"))
+    })?;
+    runtime.block_on(run(process))
+}
+
+async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     let config = process.node.clone();
     info!(
         node = %config.node_id,
+        http_enabled = process.http_enabled,
         http_bind_addr = %config.http_bind_addr,
+        runtime_worker_threads = ?process.runtime_threads.worker_threads,
+        runtime_max_blocking_threads = ?process.runtime_threads.max_blocking_threads,
         peers = config.peers.len(),
         peer_authentication = ?config.peer_authentication,
         peer_sync_execution = ?config.peer_sync_execution,
@@ -67,9 +76,14 @@ async fn main() -> Result<(), orion_node::NodeError> {
     let (ipc_stream_socket, ipc_stream_server) = app
         .start_ipc_stream_server_graceful(&process.ipc_stream_socket_path)
         .await?;
-    let (http_addr, http_server) = app
-        .start_http_server_graceful(config.http_bind_addr)
-        .await?;
+    let http_server = if process.http_enabled {
+        Some(
+            app.start_http_server_graceful(config.http_bind_addr)
+                .await?,
+        )
+    } else {
+        None
+    };
     let probe_server = if let Some(probe_addr) = process.http_probe_addr {
         Some(app.start_http_probe_server_graceful(probe_addr).await?)
     } else {
@@ -81,6 +95,10 @@ async fn main() -> Result<(), orion_node::NodeError> {
     } else {
         "http"
     };
+    let http_addr = http_server
+        .as_ref()
+        .map(|(addr, _)| format!("{http_scheme}://{addr}"))
+        .unwrap_or_else(|| "off".to_owned());
     let http_probe = probe_server
         .as_ref()
         .map(|(addr, _)| addr.to_string())
@@ -90,9 +108,8 @@ async fn main() -> Result<(), orion_node::NodeError> {
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "-".to_owned());
     println!(
-        "orion-node: initialized node={} http={}://{} http_probe={} http_tls_cert={} ipc={} ipc_stream={} peers={} desired_rev={} observed_rev={} applied_rev={}",
+        "orion-node: initialized node={} http={} http_probe={} http_tls_cert={} ipc={} ipc_stream={} peers={} desired_rev={} observed_rev={} applied_rev={}",
         snapshot.node_id,
-        http_scheme,
         http_addr,
         http_probe,
         http_tls_cert,
@@ -105,7 +122,6 @@ async fn main() -> Result<(), orion_node::NodeError> {
     );
     info!(
         node = %snapshot.node_id,
-        http_scheme,
         http_addr = %http_addr,
         http_probe = %http_probe,
         http_tls_cert = %http_tls_cert,
@@ -140,7 +156,9 @@ async fn main() -> Result<(), orion_node::NodeError> {
         if let Err(err) = ipc_stream_server.shutdown().await {
             log_shutdown_error(&snapshot.node_id, "ipc_stream", &err);
         }
-        if let Err(err) = http_server.shutdown().await {
+        if let Some((_, http_server)) = http_server
+            && let Err(err) = http_server.shutdown().await
+        {
             log_shutdown_error(&snapshot.node_id, "http", &err);
         }
         if let Some((_, probe_server)) = probe_server
@@ -168,7 +186,9 @@ async fn main() -> Result<(), orion_node::NodeError> {
     if let Err(err) = ipc_stream_server.shutdown().await {
         log_shutdown_error(&snapshot.node_id, "ipc_stream", &err);
     }
-    if let Err(err) = http_server.shutdown().await {
+    if let Some((_, http_server)) = http_server
+        && let Err(err) = http_server.shutdown().await
+    {
         log_shutdown_error(&snapshot.node_id, "http", &err);
     }
     if let Some((_, probe_server)) = probe_server
