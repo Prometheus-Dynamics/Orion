@@ -14,6 +14,9 @@ async fn server_rejects_skewed_client_with_conflict_before_decoding() {
     let request = HttpCodec
         .encode_request(&HttpRequestPayload::Control(Box::new(hello_message())))
         .expect("hello should encode");
+    // Raw reqwest clients need a process-wide rustls provider; install it explicitly so the
+    // result does not depend on which test happens to run first.
+    crate::tls::install_crypto_provider();
     let response = reqwest::Client::new()
         .post(format!("http://{addr}{}", request.path))
         .header(CONTROL_PROTOCOL_HTTP_HEADER, CONTROL_PROTOCOL_VERSION + 1)

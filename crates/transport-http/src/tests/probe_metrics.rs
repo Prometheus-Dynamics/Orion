@@ -70,6 +70,9 @@ async fn tls_probe_server_exposes_metrics_with_configured_tls() {
     };
     let server_task = tokio::spawn(server.serve_tls(listener, tls));
 
+    // Raw reqwest clients need a process-wide rustls provider; install it explicitly so the
+    // result does not depend on which test happens to run first.
+    crate::tls::install_crypto_provider();
     let client = reqwest::Client::builder()
         .add_root_certificate(
             reqwest::Certificate::from_pem(cert.pem().as_bytes())
