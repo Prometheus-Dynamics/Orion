@@ -53,7 +53,11 @@ pub async fn send_unix_fd_frame_async(
             .writable()
             .await
             .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
-        match send_unix_fd_frame_raw(stream.as_raw_fd(), frame, libc::MSG_DONTWAIT) {
+        // `try_io` clears tokio's cached readiness on `WouldBlock`, so the loop parks instead of
+        // spinning until the socket becomes writable again.
+        match stream.try_io(tokio::io::Interest::WRITABLE, || {
+            send_unix_fd_frame_raw(stream.as_raw_fd(), frame, libc::MSG_DONTWAIT)
+        }) {
             Ok(sent) => return Ok(sent),
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
             Err(err) => return Err(IpcTransportError::WriteFailed(err.to_string())),
@@ -160,15 +164,27 @@ pub async fn recv_unix_fd_frame_async(
             .readable()
             .await
             .map_err(|err| IpcTransportError::ReadFailed(err.to_string()))?;
-        match recv_unix_fd_frame_raw(
-            stream.as_raw_fd(),
-            max_payload_bytes,
-            max_fds,
-            libc::MSG_DONTWAIT | RECV_CLOEXEC_FLAG,
-        ) {
-            Ok(frame) => return Ok(frame),
-            Err(RawFdFrameError::Io(err)) if err.kind() == io::ErrorKind::WouldBlock => continue,
-            Err(err) => return Err(err.into_ipc()),
+        // `try_io` clears tokio's cached readiness on `WouldBlock` (including a partially queued
+        // frame), so idle persistent connections park instead of spinning.
+        let attempt = stream.try_io(
+            tokio::io::Interest::READABLE,
+            || match recv_unix_fd_frame_raw(
+                stream.as_raw_fd(),
+                max_payload_bytes,
+                max_fds,
+                libc::MSG_DONTWAIT | RECV_CLOEXEC_FLAG,
+            ) {
+                Err(RawFdFrameError::Io(err)) if err.kind() == io::ErrorKind::WouldBlock => {
+                    Err(err)
+                }
+                other => Ok(other),
+            },
+        );
+        match attempt {
+            Ok(Ok(frame)) => return Ok(frame),
+            Ok(Err(err)) => return Err(err.into_ipc()),
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(err) => return Err(IpcTransportError::ReadFailed(err.to_string())),
         }
     }
 }

@@ -3,6 +3,7 @@ mod control;
 mod data;
 mod error;
 mod fd_frame;
+mod fd_latest;
 mod memory;
 mod unix;
 
@@ -13,6 +14,11 @@ pub use error::IpcTransportError;
 pub use fd_frame::{
     DEFAULT_UNIX_FD_FRAME_MAX_FDS, DEFAULT_UNIX_FD_FRAME_MAX_PAYLOAD_BYTES, UnixFdFrame,
     recv_unix_fd_frame, recv_unix_fd_frame_async, send_unix_fd_frame, send_unix_fd_frame_async,
+};
+pub use fd_latest::{
+    DEFAULT_UNIX_FD_LATEST_MAX_CLIENTS, DEFAULT_UNIX_FD_LATEST_MAX_WAIT, UnixFdLatestClient,
+    UnixFdLatestConfig, UnixFdLatestFrame, UnixFdLatestPublisher, UnixFdLatestReply,
+    UnixFdLatestServer,
 };
 pub use memory::IpcTransport;
 pub use unix::{
