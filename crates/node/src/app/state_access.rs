@@ -272,10 +272,12 @@ impl NodeApp {
     }
 
     pub(super) fn mutation_history_lock(&self) -> RwLockWriteGuard<'_, Vec<MutationBatch>> {
-        write_rwlock(
+        let guard = write_rwlock(
             self.state.persisted.mutation_history.write(),
             "node mutation history",
-        )
+        );
+        self.state.persisted.mutation_history_size.mark_changed();
+        guard
     }
 
     pub(super) fn mutation_history_baseline_read(
@@ -361,6 +363,7 @@ pub(super) struct PersistedState {
     pub(super) store: std::sync::RwLock<LocalRuntimeStore>,
     pub(super) mutation_history: std::sync::RwLock<Vec<MutationBatch>>,
     pub(super) mutation_history_baseline: std::sync::RwLock<DesiredClusterState>,
+    pub(super) mutation_history_size: super::MutationHistorySizeCache,
     pub(super) maintenance_state: std::sync::RwLock<MaintenanceState>,
     pub(super) desired_metadata_cache: std::sync::RwLock<Option<DesiredStateMetadataCache>>,
     pub(super) desired_summary_cache: std::sync::RwLock<Option<DesiredStateSummaryCache>>,

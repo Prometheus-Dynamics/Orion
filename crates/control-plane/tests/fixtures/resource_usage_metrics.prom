@@ -1,0 +1,96 @@
+# HELP orion_process_rss_anon_bytes Orion process resident anonymous memory in bytes.
+# TYPE orion_process_rss_anon_bytes gauge
+orion_process_rss_anon_bytes{node_id="node-a"} 30932992
+# HELP orion_process_rss_file_bytes Orion process resident file-backed memory in bytes.
+# TYPE orion_process_rss_file_bytes gauge
+orion_process_rss_file_bytes{node_id="node-a"} 12058624
+# HELP orion_process_rss_shmem_bytes Orion process resident shared memory in bytes.
+# TYPE orion_process_rss_shmem_bytes gauge
+orion_process_rss_shmem_bytes{node_id="node-a"} 131072
+# HELP orion_process_pss_anon_bytes Orion process proportional anonymous memory in bytes.
+# TYPE orion_process_pss_anon_bytes gauge
+orion_process_pss_anon_bytes{node_id="node-a"} 30932992
+# HELP orion_process_pss_file_bytes Orion process proportional file-backed memory in bytes.
+# TYPE orion_process_pss_file_bytes gauge
+orion_process_pss_file_bytes{node_id="node-a"} 10878976
+# HELP orion_state_records In-memory cluster-state record count by state view and record kind.
+# TYPE orion_state_records gauge
+orion_state_records{node_id="node-a",view="desired",kind="nodes"} 1
+orion_state_records{node_id="node-a",view="desired",kind="artifacts"} 3
+orion_state_records{node_id="node-a",view="desired",kind="workloads"} 3
+orion_state_records{node_id="node-a",view="desired",kind="workload_tombstones"} 1
+orion_state_records{node_id="node-a",view="desired",kind="resources"} 4
+orion_state_records{node_id="node-a",view="desired",kind="providers"} 1
+orion_state_records{node_id="node-a",view="desired",kind="executors"} 1
+orion_state_records{node_id="node-a",view="desired",kind="leases"} 2
+orion_state_records{node_id="node-a",view="observed",kind="nodes"} 1
+orion_state_records{node_id="node-a",view="observed",kind="workloads"} 3
+orion_state_records{node_id="node-a",view="observed",kind="resources"} 4
+orion_state_records{node_id="node-a",view="observed",kind="leases"} 2
+# HELP orion_state_persisted_bytes On-disk size of persisted node state by section.
+# TYPE orion_state_persisted_bytes gauge
+orion_state_persisted_bytes{node_id="node-a",section="snapshot"} 8192
+# HELP orion_mutation_history_batches Retained desired-state mutation batches.
+# TYPE orion_mutation_history_batches gauge
+orion_mutation_history_batches{node_id="node-a"} 12
+# HELP orion_mutation_history_max_batches Configured mutation-history batch cap.
+# TYPE orion_mutation_history_max_batches gauge
+orion_mutation_history_max_batches{node_id="node-a"} 256
+# HELP orion_mutation_history_mutations Mutations contained in the retained history batches.
+# TYPE orion_mutation_history_mutations gauge
+orion_mutation_history_mutations{node_id="node-a"} 30
+# HELP orion_mutation_history_encoded_bytes Encoded size of the retained mutation history in bytes.
+# TYPE orion_mutation_history_encoded_bytes gauge
+orion_mutation_history_encoded_bytes{node_id="node-a"} 20480
+# HELP orion_mutation_history_max_bytes Configured mutation-history encoded byte cap.
+# TYPE orion_mutation_history_max_bytes gauge
+orion_mutation_history_max_bytes{node_id="node-a"} 1048576
+# HELP orion_local_stream_subscribers Local IPC clients, attached streams, and watchers by kind.
+# TYPE orion_local_stream_subscribers gauge
+orion_local_stream_subscribers{node_id="node-a",kind="registered_clients"} 3
+orion_local_stream_subscribers{node_id="node-a",kind="attached_streams"} 2
+orion_local_stream_subscribers{node_id="node-a",kind="state_watchers"} 1
+orion_local_stream_subscribers{node_id="node-a",kind="executor_watchers"} 1
+orion_local_stream_subscribers{node_id="node-a",kind="provider_watchers"} 0
+# HELP orion_local_stream_send_queue_depth Envelopes waiting in local stream send queues, summed or per-stream maximum.
+# TYPE orion_local_stream_send_queue_depth gauge
+orion_local_stream_send_queue_depth{node_id="node-a",stat="total"} 5
+orion_local_stream_send_queue_depth{node_id="node-a",stat="max"} 4
+# HELP orion_local_stream_send_queue_capacity Configured per-stream send queue capacity.
+# TYPE orion_local_stream_send_queue_capacity gauge
+orion_local_stream_send_queue_capacity{node_id="node-a"} 64
+# HELP orion_local_client_event_queue_depth Pending local client events, summed or per-client maximum.
+# TYPE orion_local_client_event_queue_depth gauge
+orion_local_client_event_queue_depth{node_id="node-a",stat="total"} 7
+orion_local_client_event_queue_depth{node_id="node-a",stat="max"} 6
+# HELP orion_local_client_event_queue_limit Configured per-client pending event limit.
+# TYPE orion_local_client_event_queue_limit gauge
+orion_local_client_event_queue_limit{node_id="node-a"} 256
+# HELP orion_local_client_dropped_events Events dropped from full client queues, summed over currently registered clients.
+# TYPE orion_local_client_dropped_events gauge
+orion_local_client_dropped_events{node_id="node-a"} 2
+# HELP orion_worker_queue_depth Commands waiting in a bounded background worker queue.
+# TYPE orion_worker_queue_depth gauge
+orion_worker_queue_depth{node_id="node-a",queue="persistence"} 1
+orion_worker_queue_depth{node_id="node-a",queue="audit_log"} 0
+# HELP orion_worker_queue_capacity Configured capacity of a bounded background worker queue.
+# TYPE orion_worker_queue_capacity gauge
+orion_worker_queue_capacity{node_id="node-a",queue="persistence"} 64
+orion_worker_queue_capacity{node_id="node-a",queue="audit_log"} 1024
+# HELP orion_worker_queue_dropped_total Commands dropped by a worker queue overload policy.
+# TYPE orion_worker_queue_dropped_total counter
+orion_worker_queue_dropped_total{node_id="node-a",queue="audit_log"} 3
+# HELP orion_registry_entries Entries held in bounded or traffic-driven in-memory registries.
+# TYPE orion_registry_entries gauge
+orion_registry_entries{node_id="node-a",registry="peers"} 2
+orion_registry_entries{node_id="node-a",registry="local_clients"} 3
+orion_registry_entries{node_id="node-a",registry="local_providers"} 1
+orion_registry_entries{node_id="node-a",registry="local_executors"} 1
+orion_registry_entries{node_id="node-a",registry="communication_endpoints"} 5
+orion_registry_entries{node_id="node-a",registry="recent_events"} 40
+orion_registry_entries{node_id="node-a",registry="auth_nonce_peers"} 2
+orion_registry_entries{node_id="node-a",registry="auth_seen_nonces"} 64
+# HELP orion_registry_limit Configured cap for bounded in-memory registries.
+# TYPE orion_registry_limit gauge
+orion_registry_limit{node_id="node-a",registry="communication_endpoints"} 512
+orion_registry_limit{node_id="node-a",registry="recent_events"} 128

@@ -1,7 +1,9 @@
 mod audit;
 mod classification;
+mod host;
 mod lifecycle;
 mod metrics;
+mod resource_usage;
 
 use orion::{
     NodeId,
@@ -31,9 +33,11 @@ pub(crate) use classification::{
     classify_http_communication_failure, classify_node_error, classify_peer_sync_error,
     classify_peer_sync_error_kind, is_client_auth_tls_error, peer_sync_troubleshooting_hint,
 };
+pub(crate) use host::sample_host_and_process_memory;
 pub(super) use lifecycle::{LifecycleSnapshot, LifecycleState};
 use metrics::OperationMetrics;
 pub(crate) use metrics::{CommunicationMetrics, CommunicationStageDurations};
+pub(crate) use resource_usage::MutationHistorySizeCache;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct ObservabilityState {

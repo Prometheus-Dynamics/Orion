@@ -103,6 +103,57 @@ async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
     assert!(host_metrics_stdout.contains("orion_process_pss_bytes"));
     assert!(host_metrics_stdout.contains("orion_process_private_dirty_bytes"));
 
+    let socket = harness.ipc_socket.to_string_lossy().into_owned();
+    let memory = run_orionctl(["get", "memory", "--socket", &socket]);
+    assert!(memory.status.success(), "{}", output_text(&memory));
+    let memory_stdout = String::from_utf8_lossy(&memory.stdout);
+    assert!(memory_stdout.contains("memory node=node.orionctl.get vm_rss_bytes="));
+    assert!(memory_stdout.contains("pss_bytes="));
+    assert!(memory_stdout.contains("state desired_records="));
+    assert!(memory_stdout.contains("desired_workloads=1 "));
+    assert!(memory_stdout.contains("mutation_history batches="));
+    assert!(memory_stdout.contains("local_streams clients="));
+    assert!(memory_stdout.contains("registries peers="));
+
+    let memory_json = run_orionctl(["get", "resource-usage", "--socket", &socket, "-o", "json"]);
+    assert!(
+        memory_json.status.success(),
+        "{}",
+        output_text(&memory_json)
+    );
+    let usage: serde_json::Value =
+        serde_json::from_slice(&memory_json.stdout).expect("memory json should parse");
+    assert_eq!(usage["state"]["desired"]["workloads"], 1);
+    assert_eq!(usage["state"]["desired"]["executors"], 1);
+    assert!(
+        usage["mutation_history"]["max_batches"]
+            .as_u64()
+            .unwrap_or(0)
+            > 0
+    );
+    assert!(
+        usage["local_streams"]["send_queue_capacity"]
+            .as_u64()
+            .unwrap_or(0)
+            > 0
+    );
+    assert!(usage["worker_queues"].is_array());
+    assert!(usage["process"].is_object());
+
+    let memory_metrics = run_orionctl(["get", "memory", "--socket", &socket, "-o", "metrics"]);
+    assert!(
+        memory_metrics.status.success(),
+        "{}",
+        output_text(&memory_metrics)
+    );
+    let memory_metrics_stdout = String::from_utf8_lossy(&memory_metrics.stdout);
+    assert!(memory_metrics_stdout.contains("orion_process_pss_bytes"));
+    assert!(memory_metrics_stdout.contains(
+        "orion_state_records{node_id=\"node.orionctl.get\",view=\"desired\",kind=\"workloads\"} 1"
+    ));
+    assert!(memory_metrics_stdout.contains("# TYPE orion_mutation_history_batches gauge"));
+    assert!(memory_metrics_stdout.contains("orion_local_stream_send_queue_capacity"));
+
     let communication = run_orionctl([
         "get",
         "communication",

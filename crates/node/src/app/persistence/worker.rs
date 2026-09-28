@@ -113,6 +113,10 @@ impl PersistenceWorker {
         update_max(&self.operation_ms_max, operation_ms);
     }
 
+    pub(crate) fn queue_depth(&self) -> u64 {
+        self.thread.queue_depth()
+    }
+
     pub(crate) fn metrics_snapshot(&self) -> PersistenceWorkerMetricsSnapshot {
         let operation_count = self.operation_count.load(Ordering::Relaxed);
         let queue_wait_count = self.queue_wait_count.load(Ordering::Relaxed);

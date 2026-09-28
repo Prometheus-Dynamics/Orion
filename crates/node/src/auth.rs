@@ -312,6 +312,20 @@ impl NodeSecurity {
         }))
     }
 
+    /// Pending auth-state persistence commands, or `None` when no storage worker is running.
+    pub(crate) fn auth_state_worker_queue_depth(&self) -> Option<u64> {
+        self.auth_state_worker
+            .as_ref()
+            .map(|worker| worker.queue_depth())
+    }
+
+    /// Returns `(peers with nonce windows, total retained nonces)` for replay protection.
+    pub(crate) fn seen_nonce_usage(&self) -> (u64, u64) {
+        let nonces = read_rwlock(self.seen_nonces.read(), "seen_nonces");
+        let total = nonces.values().map(VecDeque::len).sum::<usize>();
+        (nonces.len() as u64, total.min(u64::MAX as usize) as u64)
+    }
+
     pub fn configured_peer_node_ids(&self) -> Result<BTreeSet<NodeId>, NodeError> {
         let configured = self.configured_peer_keys.read();
         let configured = read_rwlock(configured, "configured_peer_keys");

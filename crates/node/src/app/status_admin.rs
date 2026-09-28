@@ -1,5 +1,6 @@
 use super::{
-    AuditEventKind, NodeApp, NodeError, NodeSnapshot, peer_sync_troubleshooting_hint,
+    AuditEventKind, NodeApp, NodeError, NodeSnapshot,
+    observability::sample_host_and_process_memory, peer_sync_troubleshooting_hint,
     stable_fingerprint, write_audit_record,
 };
 use crate::PeerSyncExecution;
@@ -10,15 +11,13 @@ use orion::{
     control_plane::{
         AuditLogBackpressureMode, ClientSessionMetricsSnapshot, CommunicationEndpointScope,
         CommunicationEndpointSnapshot, CommunicationMetricsSnapshot, CommunicationTransportKind,
-        HostMetricsSnapshot, NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot,
-        NodeReadinessSnapshot, NodeReadinessStatus, PersistenceMetricsSnapshot,
-        TransportMetricsSnapshot,
+        NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot,
+        NodeReadinessStatus, PersistenceMetricsSnapshot, TransportMetricsSnapshot,
     },
 };
 use orion_core::PublicKeyHex;
 use std::{
     collections::BTreeMap,
-    fs,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::warn;
@@ -44,6 +43,8 @@ impl NodeApp {
     }
 
     pub fn observability_snapshot(&self) -> NodeObservabilitySnapshot {
+        let (host, process_memory) = sample_host_and_process_memory();
+        let resource_usage = self.resource_usage_snapshot(process_memory);
         let revisions = self.current_revisions();
         let clients = self.clients_read();
         let peers = self.peers_read();
@@ -178,7 +179,7 @@ impl NodeApp {
             maintenance: self.maintenance_state_read().clone(),
             peer_sync_paused: self.peer_sync_paused(),
             remote_desired_state_blocked: self.remote_desired_state_blocked(),
-            host: host_metrics_snapshot(),
+            host,
             configured_peer_count,
             ready_peer_count,
             pending_peer_count,
@@ -265,6 +266,7 @@ impl NodeApp {
             },
             communication,
             recent_events: observability.recent_events.iter().cloned().collect(),
+            resource_usage,
         }
     }
 
@@ -618,174 +620,4 @@ fn communication_metrics_degraded(metrics: &CommunicationMetricsSnapshot) -> boo
 
 fn empty_communication_metrics() -> CommunicationMetricsSnapshot {
     super::CommunicationMetrics::default().snapshot()
-}
-
-fn host_metrics_snapshot() -> HostMetricsSnapshot {
-    let process_status = process_status_snapshot();
-    let process_smaps = process_smaps_rollup_snapshot();
-    HostMetricsSnapshot {
-        hostname: read_trimmed("/proc/sys/kernel/hostname"),
-        os_name: std::env::consts::OS.to_owned(),
-        os_version: os_release_value("VERSION_ID"),
-        kernel_version: read_trimmed("/proc/sys/kernel/osrelease"),
-        architecture: std::env::consts::ARCH.to_owned(),
-        uptime_seconds: proc_uptime_seconds(),
-        load_1_milli: proc_loadavg_milli(0),
-        load_5_milli: proc_loadavg_milli(1),
-        load_15_milli: proc_loadavg_milli(2),
-        memory_total_bytes: proc_meminfo_kib("MemTotal").map(kib_to_bytes),
-        memory_available_bytes: proc_meminfo_kib("MemAvailable").map(kib_to_bytes),
-        swap_total_bytes: proc_meminfo_kib("SwapTotal").map(kib_to_bytes),
-        swap_free_bytes: proc_meminfo_kib("SwapFree").map(kib_to_bytes),
-        process_id: std::process::id(),
-        process_rss_bytes: process_rss_pages().map(|pages| {
-            pages
-                .saturating_mul(page_size_bytes())
-                .min(u64::MAX as usize) as u64
-        }),
-        process_pss_bytes: process_smaps.pss_bytes,
-        process_private_dirty_bytes: process_smaps.private_dirty_bytes,
-        process_anonymous_bytes: process_smaps.anonymous_bytes,
-        process_vm_size_bytes: process_status.vm_size_bytes,
-        process_vm_data_bytes: process_status.vm_data_bytes,
-        process_vm_hwm_bytes: process_status.vm_hwm_bytes,
-        process_threads: process_status.threads,
-        process_fd_count: process_fd_count(),
-    }
-}
-
-#[derive(Default)]
-struct ProcessStatusSnapshot {
-    vm_size_bytes: Option<u64>,
-    vm_data_bytes: Option<u64>,
-    vm_hwm_bytes: Option<u64>,
-    threads: Option<u64>,
-}
-
-#[derive(Default)]
-struct ProcessSmapsRollupSnapshot {
-    pss_bytes: Option<u64>,
-    private_dirty_bytes: Option<u64>,
-    anonymous_bytes: Option<u64>,
-}
-
-fn read_trimmed(path: &str) -> Option<String> {
-    fs::read_to_string(path)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-fn os_release_value(key: &str) -> Option<String> {
-    let contents = fs::read_to_string("/etc/os-release").ok()?;
-    contents.lines().find_map(|line| {
-        let (line_key, value) = line.split_once('=')?;
-        (line_key == key).then(|| value.trim_matches('"').to_owned())
-    })
-}
-
-fn proc_uptime_seconds() -> Option<u64> {
-    let contents = fs::read_to_string("/proc/uptime").ok()?;
-    let first = contents.split_whitespace().next()?;
-    let whole_seconds = first.split('.').next()?;
-    whole_seconds.parse().ok()
-}
-
-fn proc_loadavg_milli(index: usize) -> Option<u64> {
-    let contents = fs::read_to_string("/proc/loadavg").ok()?;
-    let value = contents.split_whitespace().nth(index)?;
-    decimal_to_milli(value)
-}
-
-fn proc_meminfo_kib(key: &str) -> Option<u64> {
-    let contents = fs::read_to_string("/proc/meminfo").ok()?;
-    contents.lines().find_map(|line| {
-        let (line_key, rest) = line.split_once(':')?;
-        if line_key != key {
-            return None;
-        }
-        rest.split_whitespace().next()?.parse().ok()
-    })
-}
-
-fn process_rss_pages() -> Option<usize> {
-    let contents = fs::read_to_string("/proc/self/statm").ok()?;
-    contents.split_whitespace().nth(1)?.parse().ok()
-}
-
-fn process_status_snapshot() -> ProcessStatusSnapshot {
-    let mut snapshot = ProcessStatusSnapshot::default();
-    let Ok(contents) = fs::read_to_string("/proc/self/status") else {
-        return snapshot;
-    };
-    for line in contents.lines() {
-        if let Some(value) = proc_status_kib_line(line, "VmSize") {
-            snapshot.vm_size_bytes = Some(kib_to_bytes(value));
-        } else if let Some(value) = proc_status_kib_line(line, "VmData") {
-            snapshot.vm_data_bytes = Some(kib_to_bytes(value));
-        } else if let Some(value) = proc_status_kib_line(line, "VmHWM") {
-            snapshot.vm_hwm_bytes = Some(kib_to_bytes(value));
-        } else if let Some(value) = proc_status_plain_line(line, "Threads") {
-            snapshot.threads = Some(value);
-        }
-    }
-    snapshot
-}
-
-fn process_smaps_rollup_snapshot() -> ProcessSmapsRollupSnapshot {
-    let mut snapshot = ProcessSmapsRollupSnapshot::default();
-    let Ok(contents) = fs::read_to_string("/proc/self/smaps_rollup") else {
-        return snapshot;
-    };
-    for line in contents.lines() {
-        if let Some(value) = proc_status_kib_line(line, "Pss") {
-            snapshot.pss_bytes = Some(kib_to_bytes(value));
-        } else if let Some(value) = proc_status_kib_line(line, "Private_Dirty") {
-            snapshot.private_dirty_bytes = Some(kib_to_bytes(value));
-        } else if let Some(value) = proc_status_kib_line(line, "Anonymous") {
-            snapshot.anonymous_bytes = Some(kib_to_bytes(value));
-        }
-    }
-    snapshot
-}
-
-fn proc_status_kib_line(line: &str, key: &str) -> Option<u64> {
-    let value = proc_status_plain_line(line, key)?;
-    line.split_whitespace()
-        .nth(2)
-        .filter(|unit| *unit == "kB")?;
-    Some(value)
-}
-
-fn proc_status_plain_line(line: &str, key: &str) -> Option<u64> {
-    let (line_key, rest) = line.split_once(':')?;
-    if line_key != key {
-        return None;
-    }
-    rest.split_whitespace().next()?.parse().ok()
-}
-
-fn process_fd_count() -> Option<u64> {
-    let entries = fs::read_dir("/proc/self/fd").ok()?;
-    Some(entries.filter_map(Result::ok).count() as u64)
-}
-
-fn page_size_bytes() -> usize {
-    let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    usize::try_from(size).unwrap_or(0)
-}
-
-fn decimal_to_milli(value: &str) -> Option<u64> {
-    let (whole, fractional) = value.split_once('.').unwrap_or((value, ""));
-    let whole = whole.parse::<u64>().ok()?;
-    let mut digits = fractional.chars().take(3).collect::<String>();
-    while digits.len() < 3 {
-        digits.push('0');
-    }
-    let fractional = digits.parse::<u64>().ok()?;
-    Some(whole.saturating_mul(1000).saturating_add(fractional))
-}
-
-fn kib_to_bytes(kib: u64) -> u64 {
-    kib.saturating_mul(1024)
 }

@@ -9,7 +9,7 @@ use crate::build_info;
 
 const RUNTIME_IPC_SOCKET_PATH: &str = "/run/orion/control.sock";
 const RUNTIME_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.sock";
-const GET_AFTER_HELP: &str = "Examples:\n  orionctl get workloads --socket /run/orion/control.sock\n  orionctl get workloads --http http://127.0.0.1:9100 --node node-a\n  orionctl get workload workload.camera --socket /run/orion/control.sock\n  orionctl get events --http http://127.0.0.1:9100 --kind mutation -o json";
+const GET_AFTER_HELP: &str = "Examples:\n  orionctl get workloads --socket /run/orion/control.sock\n  orionctl get workloads --http http://127.0.0.1:9100 --node node-a\n  orionctl get workload workload.camera --socket /run/orion/control.sock\n  orionctl get events --http http://127.0.0.1:9100 --kind mutation -o json\n  orionctl get memory --socket /run/orion/control.sock -o json";
 const DESCRIBE_AFTER_HELP: &str = "Examples:\n  orionctl describe workload workload.camera --socket /run/orion/control.sock\n  orionctl describe node node-a --http http://127.0.0.1:9100\n  orionctl describe resource resource.camera.front -o json";
 const APPLY_WORKLOAD_AFTER_HELP: &str = "Examples:\n  orionctl apply workload --socket /run/orion/control.sock --workload-id workload.demo --runtime-type graph.exec.v1 --artifact-id artifact.demo --assigned-node node-a --desired-state running\n  orionctl apply workload --socket /run/orion/control.sock --spec workload.yaml\n  orionctl apply workload --socket /run/orion/control.sock --spec workload.yaml --dry-run";
 const APPLY_ARTIFACT_AFTER_HELP: &str = "Examples:\n  orionctl apply artifact --socket /run/orion/control.sock --artifact-id artifact.demo --content-type application/octet-stream --size-bytes 128\n  orionctl apply artifact --socket /run/orion/control.sock --artifact-id artifact.demo --dry-run";
@@ -65,6 +65,9 @@ pub(crate) enum GetCommand {
     Health(HttpTargetArgs),
     Readiness(HttpTargetArgs),
     Host(StateQueryArgs),
+    /// Process memory, state size, mutation history, stream backlog, and worker queue depth.
+    #[command(alias = "resource-usage")]
+    Memory(StateQueryArgs),
     Observability(StateQueryArgs),
     Communication(CommunicationArgs),
     Snapshot(StateQueryArgs),

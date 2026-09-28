@@ -53,6 +53,9 @@ It currently includes:
   local IPC unary, local IPC stream, peer HTTP sync endpoints, and managed TCP/QUIC data-plane
   frame handlers
 - recent structured observability events
+- `resource_usage`: process memory breakdown, cluster-state record counts, mutation-history size
+  versus its caps, local stream subscriber backlog, background worker queue depth, and in-memory
+  registry sizes (see [Memory And Backlog Diagnostics](#memory-and-backlog-diagnostics))
 
 Communication endpoint metrics use one transport-agnostic shape so operator tooling can render a
 single table without each transport inventing its own counters. Each endpoint carries:
@@ -94,6 +97,7 @@ scrape server:
 - `orionctl get observability -o metrics`
 - `orionctl get host -o metrics`
 - `orionctl get communication -o metrics`
+- `orionctl get memory -o metrics`
 
 The metrics output is generated from the same control-plane snapshots as the structured outputs.
 Communication filters apply before rendering, so commands such as
@@ -145,6 +149,23 @@ Exported metric families:
 | `orion_communication_recent_successes_total`, `orion_communication_recent_failures_total` | counter | endpoint labels | Recent rolling-window counters. |
 | `orion_communication_recent_avg_latency_ms` | gauge | endpoint labels | Average latency in the recent rolling window. |
 | `orion_communication_export_dropped_endpoints` | gauge | `node_id` | Endpoints omitted from metrics export by cardinality limits. |
+| `orion_process_rss_anon_bytes`, `orion_process_rss_file_bytes`, `orion_process_rss_shmem_bytes` | gauge | `node_id` | `RssAnon`/`RssFile`/`RssShmem` from `/proc/self/status`; omitted when absent. |
+| `orion_process_pss_anon_bytes`, `orion_process_pss_file_bytes` | gauge | `node_id` | `Pss_Anon`/`Pss_File` from `/proc/self/smaps_rollup` (Linux 5.x+); omitted when absent. |
+| `orion_state_records` | gauge | `node_id`, `view`, `kind` | In-memory record counts. `view` is `desired` or `observed`; observed only reports `nodes`, `workloads`, `resources`, and `leases`. |
+| `orion_state_persisted_bytes` | gauge | `node_id`, `section` | On-disk size of persisted state; `section` is `snapshot` or `mutation_history`. Omitted without a state dir. |
+| `orion_mutation_history_batches`, `orion_mutation_history_max_batches` | gauge | `node_id` | Retained mutation batches and the `ORION_NODE_MAX_MUTATION_HISTORY` cap. |
+| `orion_mutation_history_mutations` | gauge | `node_id` | Mutations inside retained batches. |
+| `orion_mutation_history_encoded_bytes`, `orion_mutation_history_max_bytes` | gauge | `node_id` | Encoded retained history size and the `ORION_NODE_MAX_MUTATION_HISTORY_BYTES` cap. |
+| `orion_local_stream_subscribers` | gauge | `node_id`, `kind` | `registered_clients`, `attached_streams`, `state_watchers`, `executor_watchers`, `provider_watchers`. |
+| `orion_local_stream_send_queue_depth` | gauge | `node_id`, `stat` | Envelopes waiting in stream send queues; `stat` is `total` or `max`. |
+| `orion_local_stream_send_queue_capacity` | gauge | `node_id` | `ORION_NODE_LOCAL_STREAM_SEND_QUEUE_CAPACITY`. |
+| `orion_local_client_event_queue_depth` | gauge | `node_id`, `stat` | Pending client events; `stat` is `total` or `max`. |
+| `orion_local_client_event_queue_limit` | gauge | `node_id` | `ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT`. |
+| `orion_local_client_dropped_events` | gauge | `node_id` | Events dropped from full client queues, summed over currently registered clients. |
+| `orion_worker_queue_depth`, `orion_worker_queue_capacity` | gauge | `node_id`, `queue` | `queue` is `persistence`, `auth_state`, or `audit_log`; only running workers are listed. |
+| `orion_worker_queue_dropped_total` | counter | `node_id`, `queue` | Records dropped by an overload policy (currently `audit_log`). |
+| `orion_registry_entries` | gauge | `node_id`, `registry` | `peers`, `local_clients`, `local_providers`, `local_executors`, `communication_endpoints`, `recent_events`, `auth_nonce_peers`, `auth_seen_nonces`. |
+| `orion_registry_limit` | gauge | `node_id`, `registry` | Caps for `communication_endpoints` and `recent_events`. |
 
 Endpoint labels always include `node_id`, `id`, `transport`, and `scope`. The exporter also
 promotes the stable optional labels `peer_node_id`, `resource_id`, `client_name`, `role`,
@@ -199,6 +220,7 @@ The most commonly consumed fields are:
 | `transport` | `TransportMetricsSnapshot` | HTTP/IPС malformed input, TLS, frame, and reconnect counters. |
 | `communication` | array of `CommunicationEndpointSnapshot` | Endpoint-level communication metrics. |
 | `recent_events` | array of `ObservabilityEvent` | Recent bounded event log. |
+| `resource_usage` | `NodeResourceUsageSnapshot` | Memory, state-size, and backlog diagnostics. Defaults to zeroed/empty values when absent from older structured input. |
 
 `HostMetricsSnapshot` fields:
 
@@ -278,6 +300,67 @@ surface. Free-text fallback is intentionally limited to external boundary cases 
 HTTP transport layer still exposes only an unstructured message, such as raw TLS failures or
 untyped request failures.
 
+## Memory And Backlog Diagnostics
+
+`orionctl get memory` (alias `orionctl get resource-usage`) prints the `resource_usage` section of
+the observability snapshot so appliance integrators can diagnose node memory growth without
+knowing Orion internals:
+
+```text
+orionctl get memory --socket /run/orion/control.sock
+orionctl get memory --socket /run/orion/control.sock -o json
+orionctl get memory --socket /run/orion/control.sock -o metrics
+```
+
+The summary output prints one `key=value` line per section (`memory`, `state`,
+`mutation_history`, `local_streams`, one `worker_queue` line per running worker, and
+`registries`). `x/y` values are `current/cap`. `-` means the value is not available on this host.
+Structured output (`-o json|yaml|toml`) returns `NodeResourceUsageSnapshot`; `-o metrics` renders
+the host metrics plus the resource-usage metric families listed above.
+
+Every value is cheap to compute on demand: counts are read under short read locks one at a time,
+queue depths come from channel capacity, and the encoded mutation-history size is recomputed only
+after the history changes. Full cluster-state snapshots are intentionally not re-encoded; state
+size is reported as record counts plus the size of the persisted snapshot files on disk.
+
+`NodeResourceUsageSnapshot` fields:
+
+| Field | Shape | Notes |
+| --- | --- | --- |
+| `process` | `ProcessMemorySnapshot` | `vm_rss_bytes`, `vm_hwm_bytes`, `rss_anon_bytes`, `rss_file_bytes`, `rss_shmem_bytes`, `vm_data_bytes`, and `threads` from `/proc/self/status`; `pss_bytes`, `pss_anon_bytes`, `pss_file_bytes`, and `private_dirty_bytes` from `/proc/self/smaps_rollup`. Each is `null` when the host does not expose it (non-Linux, or older kernels without split PSS). |
+| `state.desired`, `state.observed` | `StateSectionCounts` | Record counts for `nodes`, `artifacts`, `workloads`, `workload_tombstones`, `resources`, `providers`, `executors`, and `leases`. Observed state only tracks nodes, workloads, resources, and leases. |
+| `state.persisted_snapshot_bytes` | integer or null | Sum of the persisted snapshot manifest and desired/observed/applied section files. |
+| `state.persisted_mutation_history_bytes` | integer or null | Size of the persisted mutation-history file. |
+| `mutation_history.batches`, `mutation_history.max_batches` | integer | Retained batches versus `ORION_NODE_MAX_MUTATION_HISTORY`. |
+| `mutation_history.mutations` | integer | Mutations inside retained batches. |
+| `mutation_history.encoded_bytes`, `mutation_history.max_bytes` | integer or null / integer | Encoded retained history versus `ORION_NODE_MAX_MUTATION_HISTORY_BYTES`, measured with the same encoding the cap uses. |
+| `local_streams.registered_clients`, `attached_streams` | integer | Registered local IPC clients and clients with an attached event stream. |
+| `local_streams.state_watchers`, `executor_watchers`, `provider_watchers` | integer | Active watches by kind. |
+| `local_streams.send_queue_capacity`, `send_queue_depth_total`, `send_queue_depth_max` | integer | Per-stream send queue capacity and current depth summed or maximum across streams. |
+| `local_streams.client_event_queue_limit`, `queued_client_events_total`, `queued_client_events_max` | integer | Per-client pending event limit and current pending events. |
+| `local_streams.dropped_client_events_total` | integer | Oldest events discarded because a client's pending queue was full, for currently registered clients. |
+| `worker_queues[]` | `{ name, capacity, depth, dropped_total }` | Running bounded workers: `persistence`, `auth_state`, and `audit_log`. `dropped_total` is set only where an overload policy can drop work. |
+| `registries` | `RegistryUsageSnapshot` | Peers, local clients/providers/executors, runtime communication endpoints and their cap, retained recent events and their cap, and peers/nonces held in the replay-protection nonce windows. |
+
+Reading the numbers when resident memory grows:
+
+- A growing `process.rss_anon_bytes`/`pss_anon_bytes` with flat `rss_file_bytes` points at heap
+  growth rather than mapped binaries or libraries. `vm_hwm_bytes` shows the peak since start.
+- Compare `state.desired`/`state.observed` record counts over time. Growth that tracks workload or
+  resource churn but never falls back indicates retained records such as tombstones.
+- `mutation_history.encoded_bytes` near `max_bytes` (or `batches` at `max_batches`) is expected
+  steady state; lower `ORION_NODE_MAX_MUTATION_HISTORY_BYTES` to bound that memory more tightly.
+- Non-zero `local_streams.send_queue_depth_max` or `queued_client_events_max` near its limit means
+  a local subscriber is not draining its stream; `dropped_client_events_total` counts the loss.
+- `worker_queues[].depth` close to `capacity` means the worker is saturated; see the queue
+  pressure guidance below.
+- `registries.communication_endpoints` at its limit or large `auth_seen_nonces` identifies traffic-
+  driven registries as the source of growth.
+
+Structured consumers get additive compatibility: every new section derives defaults, so JSON/YAML
+written by an older node still decodes. The binary control protocol (rkyv) is layout-exact, so
+`orionctl` and `orion-node` must still run matching versions to exchange snapshots.
+
 ## Queue Pressure
 
 Queue pressure is currently represented through:
@@ -286,6 +369,9 @@ Queue pressure is currently represented through:
 - `persistence.worker_queue_capacity` plus queue-send wait, reply wait, and operation duration counters in the observability snapshot
 - `audit_log_queue_capacity` in the observability snapshot
 - `audit_log_backpressure_mode` in the observability snapshot
+- `resource_usage.worker_queues` with live depth versus capacity for the persistence, auth-state,
+  and audit-log workers
+- `resource_usage.local_streams` with local stream send-queue and pending client event depth
 - `audit_log_dropped_records` in the observability snapshot when the audit overload policy drops
   events
 - sampled runtime warnings when the audit-log queue is full and the overload policy is

@@ -99,6 +99,10 @@ impl AuthStateWorker {
         })
     }
 
+    pub(super) fn queue_depth(&self) -> u64 {
+        self.thread.queue_depth()
+    }
+
     async fn persist_state_async(&self, store: TrustedPeerStore) -> Result<(), NodeError> {
         request_worker_operation_async(
             self.thread.sender(),

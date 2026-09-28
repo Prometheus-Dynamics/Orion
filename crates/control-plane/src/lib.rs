@@ -16,18 +16,21 @@ pub use messages::{
     DesiredStateMutation, DesiredStateObjectSelector, DesiredStateSection,
     DesiredStateSectionFingerprints, DesiredStateSummary, ExecutorStateUpdate,
     ExecutorWorkloadQuery, HostMetricsSnapshot, HttpMutualTlsMode, LatencyMetricsSnapshot,
-    MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
-    MutationApplyError, MutationBatch, NodeHealthSnapshot, NodeHealthStatus,
-    NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus, ObservabilityEvent,
+    LocalStreamUsageSnapshot, MaintenanceAction, MaintenanceCommand, MaintenanceMode,
+    MaintenanceState, MaintenanceStatus, MutationApplyError, MutationBatch,
+    MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot,
+    NodeReadinessSnapshot, NodeReadinessStatus, NodeResourceUsageSnapshot, ObservabilityEvent,
     ObservabilityEventKind, ObservedStateUpdate, OperationFailureCategory,
     OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerSyncErrorKind,
     PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
-    ProviderLeaseQuery, ProviderStateUpdate, StateSnapshot, StateWatch, SyncDiffRequest,
-    SyncRequest, SyncSummaryRequest, TransportMetricsSnapshot,
+    ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate, RegistryUsageSnapshot,
+    StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch, SyncDiffRequest, SyncRequest,
+    SyncSummaryRequest, TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
 };
 pub use metrics_export::{
     MetricsExportConfig, render_communication_metrics, render_communication_metrics_with_config,
     render_host_metrics, render_observability_metrics, render_observability_metrics_with_config,
+    render_resource_usage_metrics,
 };
 pub use metrics_support::{
     COMMUNICATION_RECENT_SAMPLE_LIMIT, COMMUNICATION_RECENT_WINDOW_MS,

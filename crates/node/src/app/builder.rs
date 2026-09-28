@@ -342,6 +342,7 @@ impl NodeAppBuilder {
                 store: RwLock::new(store),
                 mutation_history: RwLock::new(Vec::new()),
                 mutation_history_baseline: RwLock::new(DesiredClusterState::default()),
+                mutation_history_size: Default::default(),
                 maintenance_state: RwLock::new(maintenance_state),
                 desired_metadata_cache: RwLock::new(None),
                 desired_summary_cache: RwLock::new(None),
