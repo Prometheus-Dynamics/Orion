@@ -2,7 +2,10 @@ use orion_control_plane::{
     CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot,
     CommunicationFailureKind, CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
     CommunicationStageMetricsSnapshot, CommunicationTransportKind, LatencyMetricsSnapshot,
-    MetricsExportConfig, render_communication_metrics, render_communication_metrics_with_config,
+    LocalStreamUsageSnapshot, MetricsExportConfig, MutationHistoryUsageSnapshot,
+    NodeResourceUsageSnapshot, ProcessMemorySnapshot, RegistryUsageSnapshot, StateSectionCounts,
+    StateSizeSnapshot, WorkerQueueUsageSnapshot, render_communication_metrics,
+    render_communication_metrics_with_config, render_resource_usage_metrics,
 };
 use orion_core::NodeId;
 use std::collections::BTreeMap;
@@ -187,5 +190,114 @@ fn empty_communication_metrics() -> CommunicationMetricsSnapshot {
         latency: LatencyMetricsSnapshot::default(),
         stages: CommunicationStageMetricsSnapshot::default(),
         recent: CommunicationRecentMetricsSnapshot::default(),
+    }
+}
+
+#[test]
+fn resource_usage_metrics_match_golden_fixture() {
+    let rendered = render_resource_usage_metrics(&NodeId::new("node-a"), &sample_resource_usage());
+    assert_eq!(
+        rendered,
+        include_str!("fixtures/resource_usage_metrics.prom")
+    );
+}
+
+#[test]
+fn resource_usage_metrics_omit_absent_process_and_persisted_values() {
+    let rendered = render_resource_usage_metrics(
+        &NodeId::new("node-a"),
+        &NodeResourceUsageSnapshot::default(),
+    );
+
+    assert!(!rendered.contains("orion_process_rss_anon_bytes"));
+    assert!(!rendered.contains("orion_state_persisted_bytes"));
+    assert!(!rendered.contains("orion_mutation_history_encoded_bytes"));
+    assert!(!rendered.contains("orion_worker_queue_depth"));
+    assert!(rendered.contains("orion_mutation_history_batches{node_id=\"node-a\"} 0"));
+}
+
+fn sample_resource_usage() -> NodeResourceUsageSnapshot {
+    NodeResourceUsageSnapshot {
+        process: ProcessMemorySnapshot {
+            vm_rss_bytes: Some(43_122_688),
+            vm_hwm_bytes: Some(44_564_480),
+            rss_anon_bytes: Some(30_932_992),
+            rss_file_bytes: Some(12_058_624),
+            rss_shmem_bytes: Some(131_072),
+            vm_data_bytes: Some(62_914_560),
+            pss_bytes: Some(41_943_040),
+            pss_anon_bytes: Some(30_932_992),
+            pss_file_bytes: Some(10_878_976),
+            private_dirty_bytes: Some(30_801_920),
+            threads: Some(9),
+        },
+        state: StateSizeSnapshot {
+            desired: StateSectionCounts {
+                nodes: 1,
+                artifacts: 3,
+                workloads: 3,
+                workload_tombstones: 1,
+                resources: 4,
+                providers: 1,
+                executors: 1,
+                leases: 2,
+            },
+            observed: StateSectionCounts {
+                nodes: 1,
+                workloads: 3,
+                resources: 4,
+                leases: 2,
+                ..StateSectionCounts::default()
+            },
+            persisted_snapshot_bytes: Some(8_192),
+            persisted_mutation_history_bytes: None,
+        },
+        mutation_history: MutationHistoryUsageSnapshot {
+            batches: 12,
+            max_batches: 256,
+            mutations: 30,
+            encoded_bytes: Some(20_480),
+            max_bytes: 1_048_576,
+        },
+        local_streams: LocalStreamUsageSnapshot {
+            registered_clients: 3,
+            attached_streams: 2,
+            state_watchers: 1,
+            executor_watchers: 1,
+            provider_watchers: 0,
+            send_queue_capacity: 64,
+            send_queue_depth_total: 5,
+            send_queue_depth_max: 4,
+            client_event_queue_limit: 256,
+            queued_client_events_total: 7,
+            queued_client_events_max: 6,
+            dropped_client_events_total: 2,
+        },
+        worker_queues: vec![
+            WorkerQueueUsageSnapshot {
+                name: "persistence".to_owned(),
+                capacity: 64,
+                depth: 1,
+                dropped_total: None,
+            },
+            WorkerQueueUsageSnapshot {
+                name: "audit_log".to_owned(),
+                capacity: 1024,
+                depth: 0,
+                dropped_total: Some(3),
+            },
+        ],
+        registries: RegistryUsageSnapshot {
+            peers: 2,
+            local_clients: 3,
+            local_providers: 1,
+            local_executors: 1,
+            communication_endpoints: 5,
+            communication_endpoint_limit: 512,
+            recent_events: 40,
+            recent_event_limit: 128,
+            auth_nonce_peers: 2,
+            auth_seen_nonces: 64,
+        },
     }
 }

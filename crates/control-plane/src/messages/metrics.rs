@@ -1,4 +1,5 @@
 use super::maintenance::MaintenanceState;
+use super::resource_usage::NodeResourceUsageSnapshot;
 use orion_core::{NodeId, PeerBaseUrl, PublicKeyHex, Revision};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -666,4 +667,7 @@ pub struct NodeObservabilitySnapshot {
     pub transport: TransportMetricsSnapshot,
     pub communication: Vec<CommunicationEndpointSnapshot>,
     pub recent_events: Vec<ObservabilityEvent>,
+    /// Memory, state-size, and backlog diagnostics. Defaults when absent from structured input.
+    #[serde(default)]
+    pub resource_usage: NodeResourceUsageSnapshot,
 }

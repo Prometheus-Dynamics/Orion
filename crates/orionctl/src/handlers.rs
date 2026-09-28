@@ -3,6 +3,7 @@ mod delete;
 mod describe;
 mod get;
 mod get_communication;
+mod get_memory;
 mod peers;
 mod watch;
 

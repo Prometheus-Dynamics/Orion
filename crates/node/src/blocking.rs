@@ -109,6 +109,14 @@ impl<Command: Send + 'static> WorkerThread<Command> {
     pub(crate) fn sender(&self) -> &mpsc::Sender<Command> {
         &self.sender
     }
+
+    /// Commands currently waiting in the bounded queue (capacity minus free permits).
+    pub(crate) fn queue_depth(&self) -> u64 {
+        self.sender
+            .max_capacity()
+            .saturating_sub(self.sender.capacity())
+            .min(u64::MAX as usize) as u64
+    }
 }
 
 impl<Command> Drop for WorkerThread<Command> {

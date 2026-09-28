@@ -26,6 +26,7 @@ pub(super) struct LocalClientState {
     next_event_sequence: u64,
     max_queued_events: usize,
     pub(super) queued_events: VecDeque<ClientEvent>,
+    pub(super) dropped_events: u64,
     pub(super) stream_sender: Option<tokio::sync::mpsc::Sender<ControlEnvelope>>,
     pub(super) unary_metrics: CommunicationMetrics,
     pub(super) stream_metrics: CommunicationMetrics,
@@ -48,6 +49,7 @@ impl LocalClientState {
             next_event_sequence: 1,
             max_queued_events,
             queued_events: VecDeque::new(),
+            dropped_events: 0,
             stream_sender: None,
             unary_metrics: CommunicationMetrics::default(),
             stream_metrics: CommunicationMetrics::default(),
@@ -160,6 +162,7 @@ pub(super) fn enqueue_provider_leases_event(
 fn enqueue_client_event(client: &mut LocalClientState, event: ClientEventKind) {
     while client.queued_events.len() >= client.max_queued_events {
         client.queued_events.pop_front();
+        client.dropped_events = client.dropped_events.saturating_add(1);
     }
     let sequence = client.next_event_sequence;
     client.next_event_sequence = client.next_event_sequence.saturating_add(1);

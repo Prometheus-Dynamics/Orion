@@ -3,6 +3,7 @@ mod control;
 mod maintenance;
 mod metrics;
 mod mutations;
+mod resource_usage;
 mod sync;
 
 pub use client::{
@@ -26,6 +27,11 @@ pub use metrics::{
     TransportMetricsSnapshot,
 };
 pub use mutations::{DesiredStateMutation, MutationApplyError, MutationBatch};
+pub use resource_usage::{
+    LocalStreamUsageSnapshot, MutationHistoryUsageSnapshot, NodeResourceUsageSnapshot,
+    ProcessMemorySnapshot, RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot,
+    WorkerQueueUsageSnapshot,
+};
 pub use sync::{
     DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,
     DesiredStateSummary, PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest,

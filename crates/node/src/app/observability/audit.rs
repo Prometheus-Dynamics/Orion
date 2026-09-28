@@ -8,9 +8,9 @@ use std::{
     fs::OpenOptions,
     io::Write,
     path::PathBuf,
-    sync::Mutex,
     sync::atomic::{AtomicU64, Ordering},
     sync::mpsc::{self, SyncSender, TrySendError},
+    sync::{Arc, Mutex},
     thread::JoinHandle,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -44,12 +44,18 @@ pub(crate) struct AuditLogSink {
     sender: SyncSender<AuditEventRecord>,
     overload_policy: AuditLogOverloadPolicy,
     dropped_records: AtomicU64,
+    queued_records: Arc<AtomicU64>,
     join_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl AuditLogSink {
     pub(crate) fn dropped_records(&self) -> u64 {
         self.dropped_records.load(Ordering::Relaxed)
+    }
+
+    /// Records accepted by the queue that the writer thread has not picked up yet.
+    pub(crate) fn queued_records(&self) -> u64 {
+        self.queued_records.load(Ordering::Relaxed)
     }
 
     pub(crate) fn new(
@@ -59,10 +65,13 @@ impl AuditLogSink {
     ) -> Result<Self, NodeError> {
         let (sender, receiver) = mpsc::sync_channel(queue_capacity);
         let worker_path = path.clone();
+        let queued_records = Arc::new(AtomicU64::new(0));
+        let worker_queued_records = Arc::clone(&queued_records);
         let join_handle = std::thread::Builder::new()
             .name("orion-audit-log".into())
             .spawn(move || {
                 while let Ok(record) = receiver.recv() {
+                    saturating_decrement(&worker_queued_records);
                     if let Err(err) = append_audit_record(&worker_path, &record) {
                         tracing::warn!(
                             path = %worker_path.display(),
@@ -81,6 +90,7 @@ impl AuditLogSink {
             sender,
             overload_policy,
             dropped_records: AtomicU64::new(0),
+            queued_records,
             join_handle: Mutex::new(Some(join_handle)),
         })
     }
@@ -90,10 +100,20 @@ impl AuditLogSink {
     }
 
     fn enqueue(&self, record: AuditEventRecord) -> Result<(), NodeError> {
+        // Count before sending so the writer thread can never observe the record first.
+        self.queued_records.fetch_add(1, Ordering::Relaxed);
+        let result = self.enqueue_counted(record);
+        if !matches!(result, Ok(true)) {
+            saturating_decrement(&self.queued_records);
+        }
+        result.map(|_| ())
+    }
+
+    fn enqueue_counted(&self, record: AuditEventRecord) -> Result<bool, NodeError> {
         match self.overload_policy {
             AuditLogOverloadPolicy::Block => {
                 match run_possibly_blocking(|| self.sender.send(record)) {
-                    Ok(()) => Ok(()),
+                    Ok(()) => Ok(true),
                     Err(mpsc::SendError(_record)) => Err(NodeError::Storage(format!(
                         "audit log worker disconnected for `{}`",
                         self.path.display()
@@ -101,7 +121,7 @@ impl AuditLogSink {
                 }
             }
             AuditLogOverloadPolicy::DropNewest => match self.sender.try_send(record) {
-                Ok(()) => Ok(()),
+                Ok(()) => Ok(true),
                 Err(TrySendError::Full(_record)) => {
                     let dropped_total = self.dropped_records.fetch_add(1, Ordering::Relaxed) + 1;
                     if should_emit_audit_drop_warning(dropped_total) {
@@ -112,7 +132,7 @@ impl AuditLogSink {
                             "audit log queue full; dropping newest event"
                         );
                     }
-                    Ok(())
+                    Ok(false)
                 }
                 Err(TrySendError::Disconnected(_record)) => Err(NodeError::Storage(format!(
                     "audit log worker disconnected for `{}`",
@@ -246,4 +266,10 @@ pub(crate) fn write_audit_record(
         message,
     };
     audit_log.append_for_current_runtime(record)
+}
+
+fn saturating_decrement(counter: &AtomicU64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+        Some(value.saturating_sub(1))
+    });
 }
