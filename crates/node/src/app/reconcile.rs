@@ -530,14 +530,16 @@ impl NodeApp {
     }
 
     pub(super) fn mutation_batch_since(&self, base_revision: Revision) -> Option<MutationBatch> {
+        // Lock order must match `with_desired_state_transaction` (store, then mutation history):
+        // taking the history lock first deadlocks against a concurrent desired-state commit.
+        let store = self.store_read();
         let history = self.mutation_history_read();
-        if let Some(full_replay) = self.with_desired_state_read(|desired| {
-            (base_revision == Revision::ZERO
-                && history.is_empty()
-                && desired.revision > Revision::ZERO)
-                .then(|| MutationBatch::full_state_replay(Revision::ZERO, desired))
-        }) {
-            return Some(full_replay);
+        let desired = &store.desired;
+        if base_revision == Revision::ZERO
+            && history.is_empty()
+            && desired.revision > Revision::ZERO
+        {
+            return Some(MutationBatch::full_state_replay(Revision::ZERO, desired));
         }
 
         let start = history
@@ -554,7 +556,7 @@ impl NodeApp {
             expected_base = Revision::new(expected_base.get() + batch.mutations.len() as u64);
         }
 
-        if expected_base == self.current_desired_revision() {
+        if expected_base == desired.revision {
             Some(MutationBatch {
                 base_revision,
                 mutations,
