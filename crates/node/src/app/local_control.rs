@@ -584,7 +584,7 @@ impl NodeApp {
         if changed {
             self.persist_state()?;
         }
-        let _ = self.tick()?;
+        self.reconcile_after_change()?;
         Ok(())
     }
 
@@ -604,7 +604,7 @@ impl NodeApp {
         if changed {
             self.persist_state()?;
         }
-        let _ = self.tick()?;
+        self.reconcile_after_change()?;
         Ok(())
     }
 

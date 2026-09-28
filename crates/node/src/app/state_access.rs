@@ -390,6 +390,7 @@ pub(super) struct NodeState {
     pub(super) clients: ClientRegistryState,
     pub(super) observability: std::sync::RwLock<ObservabilityState>,
     pub(super) lifecycle: super::LifecycleState,
+    pub(super) reconcile: super::reconcile_trigger::ReconcileTrigger,
 }
 
 #[derive(Clone)]

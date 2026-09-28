@@ -362,6 +362,7 @@ impl NodeAppBuilder {
                 observability_event_limit,
             )),
             lifecycle: LifecycleState::default(),
+            reconcile: Default::default(),
         });
         let persistence_worker = storage
             .as_ref()

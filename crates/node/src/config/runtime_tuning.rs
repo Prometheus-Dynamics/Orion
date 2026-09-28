@@ -27,6 +27,7 @@ const DEFAULT_OBSERVABILITY_EVENT_LIMIT: usize = 128;
 const DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY: usize = 64;
 const DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY: usize = 128;
 const DEFAULT_AUDIT_LOG_QUEUE_CAPACITY: usize = 1024;
+const DEFAULT_RECONCILE_BACKSTOP_MS: u64 = 5_000;
 const MIN_RUNTIME_TUNING_DURATION_MS: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +64,10 @@ pub struct NodeRuntimeTuning {
     pub auth_state_worker_queue_capacity: usize,
     pub audit_log_queue_capacity: usize,
     pub audit_log_overload_policy: AuditLogOverloadPolicy,
+    /// Longest the reconcile loop stays idle without a wake-up before it runs a periodic
+    /// backstop pass. Values at or below the reconcile interval (`ORION_NODE_RECONCILE_MS`)
+    /// restore fixed-interval polling.
+    pub reconcile_backstop_interval: Duration,
 }
 
 impl NodeRuntimeTuning {
@@ -204,6 +209,12 @@ impl NodeRuntimeTuning {
         self
     }
 
+    pub fn with_reconcile_backstop_interval(mut self, interval: Duration) -> Self {
+        self.reconcile_backstop_interval = interval;
+        self.normalize();
+        self
+    }
+
     pub fn try_from_env() -> Result<Self, NodeError> {
         let mut tuning = Self {
             max_mutation_history_batches: parse_env_or(
@@ -312,6 +323,10 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_AUDIT_LOG_OVERLOAD_POLICY",
                 AuditLogOverloadPolicy::DropNewest,
             )?,
+            reconcile_backstop_interval: duration_ms_env_or(
+                "ORION_NODE_RECONCILE_BACKSTOP_MS",
+                DEFAULT_RECONCILE_BACKSTOP_MS,
+            )?,
         };
         tuning.normalize();
         Ok(tuning)
@@ -345,6 +360,8 @@ impl NodeRuntimeTuning {
         self.persistence_worker_queue_capacity = self.persistence_worker_queue_capacity.max(1);
         self.auth_state_worker_queue_capacity = self.auth_state_worker_queue_capacity.max(1);
         self.audit_log_queue_capacity = self.audit_log_queue_capacity.max(1);
+        self.reconcile_backstop_interval =
+            normalize_runtime_tuning_duration(self.reconcile_backstop_interval);
     }
 }
 
@@ -379,6 +396,7 @@ impl Default for NodeRuntimeTuning {
             auth_state_worker_queue_capacity: DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY,
             audit_log_queue_capacity: DEFAULT_AUDIT_LOG_QUEUE_CAPACITY,
             audit_log_overload_policy: AuditLogOverloadPolicy::DropNewest,
+            reconcile_backstop_interval: Duration::from_millis(DEFAULT_RECONCILE_BACKSTOP_MS),
         }
     }
 }
@@ -490,6 +508,10 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
         (
             "ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY",
             tuning.audit_log_queue_capacity.to_string(),
+        ),
+        (
+            "ORION_NODE_RECONCILE_BACKSTOP_MS",
+            tuning.reconcile_backstop_interval.as_millis().to_string(),
         ),
     ]
 }

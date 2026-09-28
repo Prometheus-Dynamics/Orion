@@ -23,6 +23,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- The node reconcile loop is event-driven: it wakes (coalesced for up to 5ms) on desired-state commits, observed-state merges, provider/executor state published over IPC, maintenance changes, and integration registration, plus a periodic backstop (`ORION_NODE_RECONCILE_BACKSTOP_MS`, default 5000). `ORION_NODE_RECONCILE_MS` is now the minimum idle gap between passes. With the loop running, IPC provider/executor updates and applied mutations defer their reconcile to it.
+- Successful reconcile passes log at `debug` and only record a recent observability event when they changed something; reconcile counters and latency still cover every pass.
 - `ResourceEndpoint` and `ResourceEndpointError` are now `#[non_exhaustive]`; unknown but valid schemes parse as `Custom` instead of failing with `UnsupportedScheme`.
 - Snapshot additions change the rkyv control-protocol layout, so `orionctl` and `orion-node` must be upgraded together.
 

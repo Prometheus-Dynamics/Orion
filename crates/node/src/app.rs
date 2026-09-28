@@ -12,6 +12,8 @@ mod peer_sync_response;
 mod peer_sync_state;
 mod persistence;
 mod reconcile;
+mod reconcile_tick;
+mod reconcile_trigger;
 mod startup;
 mod startup_loops;
 mod state_access;
@@ -85,7 +87,7 @@ use std::{
     time::Duration,
 };
 use tls_bootstrap::stable_fingerprint;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use types::is_https_base_url;
 
 type ProviderRegistry = BTreeMap<ProviderId, Arc<dyn ProviderIntegration + Send + Sync>>;
@@ -277,6 +279,7 @@ impl NodeApp {
         }
 
         self.put_provider_record_tracked(record.clone())?;
+        self.request_reconcile();
         Ok(record.provider_id)
     }
 
@@ -303,6 +306,7 @@ impl NodeApp {
         }
 
         self.put_executor_record_tracked(record.clone())?;
+        self.request_reconcile();
         Ok(record.executor_id)
     }
 
@@ -404,17 +408,45 @@ impl NodeApp {
         );
     }
 
-    fn record_reconcile_success(&self, duration: Duration) {
-        let mut observability = self.observability_lock();
-        observability.reconcile.record_success(duration);
-        push_observability_event(
-            &mut observability,
-            ObservabilityEventKind::Reconcile,
-            true,
-            Some(duration),
-            "reconcile succeeded".into(),
+    /// Every pass updates the reconcile counters and latency metrics. Only passes that changed
+    /// something push a recent event, and success logs at `debug` so an idle node does not flood
+    /// the journal or evict useful events from the bounded ring.
+    fn record_reconcile_success(
+        &self,
+        duration: Duration,
+        outcome: &reconcile_tick::ReconcileOutcome,
+        planned_commands: usize,
+    ) {
+        let changed = outcome.changed();
+        {
+            let mut observability = self.observability_lock();
+            observability.reconcile.record_success(duration);
+            if changed {
+                push_observability_event(
+                    &mut observability,
+                    ObservabilityEventKind::Reconcile,
+                    true,
+                    Some(duration),
+                    format!(
+                        "reconcile succeeded runtime_changed={} applied_revision_changed={} \
+                         dispatched_commands={}",
+                        outcome.runtime_changed,
+                        outcome.applied_revision_changed,
+                        outcome.dispatched_commands
+                    ),
+                );
+            }
+        }
+        debug!(
+            node = %self.config.node_id,
+            duration_ms = duration.as_millis() as u64,
+            changed,
+            runtime_changed = outcome.runtime_changed,
+            applied_revision_changed = outcome.applied_revision_changed,
+            dispatched_commands = outcome.dispatched_commands,
+            planned_commands,
+            "reconcile succeeded"
         );
-        info!(node = %self.config.node_id, duration_ms = duration.as_millis() as u64, "reconcile succeeded");
     }
 
     fn record_reconcile_failure(&self, duration: Duration, error: &NodeError) {
