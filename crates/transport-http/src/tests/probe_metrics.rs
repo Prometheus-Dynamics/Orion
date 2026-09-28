@@ -1,4 +1,5 @@
 use super::*;
+use rcgen::generate_simple_self_signed;
 
 #[tokio::test]
 async fn probe_server_exposes_metrics_but_control_server_does_not() {
