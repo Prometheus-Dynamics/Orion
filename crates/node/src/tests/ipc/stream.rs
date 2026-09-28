@@ -309,3 +309,90 @@ async fn node_ipc_stream_server_pushes_provider_lease_events() {
     server.abort();
     let _ = fs::remove_file(stream_socket_path);
 }
+
+/// A heartbeat tick that fires while a request frame is only partially received must not discard
+/// the bytes already read (the frame read used to be raced against the tick in `tokio::select!`).
+#[tokio::test]
+async fn node_ipc_stream_server_keeps_partial_frames_across_heartbeat_ticks() {
+    use orion_transport_ipc::{read_control_frame, write_control_frame};
+    use tokio::io::AsyncWriteExt;
+
+    let (_socket_path, app) = build_stream_ipc_app("stream-split-control");
+    let stream_socket_path = temp_stream_socket_path("stream-split-events");
+    let (_path, server) = app
+        .start_ipc_stream_server(&stream_socket_path)
+        .await
+        .expect("ipc stream server should start");
+    let mut stream = tokio::net::UnixStream::connect(&stream_socket_path)
+        .await
+        .expect("stream client should connect");
+    let envelope = |message| ControlEnvelope {
+        source: LocalAddress::new("cli-split"),
+        destination: LocalAddress::new("orion"),
+        message,
+    };
+
+    write_control_frame(
+        &mut stream,
+        &envelope(ControlMessage::ClientHello(ClientHello {
+            client_name: "cli-split".into(),
+            role: ClientRole::ControlPlane,
+        })),
+    )
+    .await
+    .expect("hello should send");
+    let welcome = read_control_frame(&mut stream)
+        .await
+        .expect("welcome should decode")
+        .expect("welcome should exist");
+    assert!(matches!(welcome.message, ControlMessage::ClientWelcome(_)));
+
+    let watch = envelope(ControlMessage::WatchState(
+        orion::control_plane::StateWatch {
+            desired_revision: Revision::ZERO,
+        },
+    ));
+    let mut frame = Vec::new();
+    write_control_frame(&mut frame, &watch)
+        .await
+        .expect("watch frame should encode");
+    let split = 4 + (frame.len() - 4) / 2;
+    stream
+        .write_all(&frame[..split])
+        .await
+        .expect("first half should send");
+    // Longer than the 50 ms test heartbeat interval, shorter than the 125 ms pong timeout.
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    stream
+        .write_all(&frame[split..])
+        .await
+        .expect("second half should send");
+
+    let accepted = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let Some(response) = read_control_frame(&mut stream)
+                .await
+                .expect("response should decode")
+            else {
+                panic!("server closed the stream instead of answering the split request");
+            };
+            match response.message {
+                ControlMessage::Ping => {
+                    write_control_frame(&mut stream, &envelope(ControlMessage::Pong))
+                        .await
+                        .expect("pong should send");
+                }
+                other => return other,
+            }
+        }
+    })
+    .await
+    .expect("split request should be answered");
+    assert!(
+        matches!(accepted, ControlMessage::Accepted),
+        "unexpected response {accepted:?}"
+    );
+
+    server.abort();
+    let _ = fs::remove_file(stream_socket_path);
+}

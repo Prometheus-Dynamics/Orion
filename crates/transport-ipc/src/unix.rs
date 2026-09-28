@@ -20,7 +20,9 @@ use tokio::{
     sync::Semaphore,
 };
 
-use crate::{ControlEnvelope, IpcTransportError, LocalAddress, UnixPeerIdentity};
+use crate::{
+    ControlEnvelope, ControlFrameReadState, IpcTransportError, LocalAddress, UnixPeerIdentity,
+};
 
 /// Synchronous Unix control handler boundary.
 ///
@@ -142,10 +144,19 @@ impl UnixControlServer {
         let semaphore = Arc::new(Semaphore::new(self.max_connections.max(1)));
         loop {
             connection_tasks.reap_finished();
-            let permit =
-                semaphore.clone().acquire_owned().await.map_err(|_| {
-                    IpcTransportError::AcceptFailed("connection limiter closed".into())
-                })?;
+            // Wait for a permit inside `select!` so shutdown is honoured while the limiter is
+            // saturated. `acquire_owned` is cancel-safe (the waiter is simply dequeued).
+            let permit = tokio::select! {
+                permit = semaphore.clone().acquire_owned() => {
+                    permit.map_err(|_| {
+                        IpcTransportError::AcceptFailed("connection limiter closed".into())
+                    })?
+                }
+                _ = &mut shutdown => {
+                    connection_tasks.abort_all().await;
+                    break Ok(());
+                }
+            };
             tokio::select! {
                 accepted = self.listener.accept() => {
                     let (stream, _) = accepted
@@ -176,6 +187,7 @@ pub struct UnixControlClient {
 
 pub struct UnixControlStreamClient {
     stream: UnixStream,
+    read_state: ControlFrameReadState,
     max_payload_bytes: usize,
     io_timeout: Duration,
 }
@@ -269,6 +281,7 @@ impl UnixControlStreamClient {
         .await?;
         Ok(Self {
             stream,
+            read_state: ControlFrameReadState::new(),
             max_payload_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
             io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
         })
@@ -305,6 +318,10 @@ impl UnixControlStreamClient {
         .map_err(IpcTransportError::WriteFailed)
     }
 
+    /// Receives the next frame, failing after the configured I/O timeout.
+    ///
+    /// Frame reads are cancel-safe: a partially received frame is kept and resumed by the next
+    /// `recv*` call, so these futures may be raced in `tokio::select!` or wrapped in timeouts.
     pub async fn recv(&mut self) -> Result<Option<ControlEnvelope>, IpcTransportError> {
         self.recv_metered()
             .await
@@ -316,7 +333,8 @@ impl UnixControlStreamClient {
     ) -> Result<Option<(ControlEnvelope, usize)>, IpcTransportError> {
         timed(
             self.io_timeout,
-            read_control_frame_with_limit_metered(&mut self.stream, self.max_payload_bytes),
+            self.read_state
+                .read_metered(&mut self.stream, self.max_payload_bytes),
             "IPC stream read",
         )
         .await
@@ -332,9 +350,13 @@ impl UnixControlStreamClient {
     pub async fn recv_wait_metered(
         &mut self,
     ) -> Result<Option<(ControlEnvelope, usize)>, IpcTransportError> {
-        read_control_frame_with_limit_metered(&mut self.stream, self.max_payload_bytes).await
+        self.read_state
+            .read_metered(&mut self.stream, self.max_payload_bytes)
+            .await
     }
 
+    /// Splits the underlying socket. Bytes of a partially received frame (only present if a
+    /// `recv*` call was cancelled mid-frame) are discarded.
     pub fn into_split(self) -> (OwnedReadHalf, OwnedWriteHalf) {
         self.stream.into_split()
     }
@@ -417,6 +439,11 @@ where
         .map(|frame| frame.map(|(envelope, _)| envelope))
 }
 
+/// Reads one control frame.
+///
+/// Not cancel-safe: dropping the future mid-frame discards the bytes already consumed. Use a
+/// persistent [`ControlFrameReadState`] when the read may be raced in `tokio::select!` or wrapped in
+/// a timeout that does not also abandon the stream.
 pub async fn read_control_frame_with_limit_metered<R>(
     reader: &mut R,
     max_payload_bytes: usize,
@@ -424,25 +451,9 @@ pub async fn read_control_frame_with_limit_metered<R>(
 where
     R: AsyncReadExt + Unpin,
 {
-    let max_payload_bytes = max_payload_bytes.max(1);
-    let len = match reader.read_u32_le().await {
-        Ok(len) => len,
-        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(err) => return Err(IpcTransportError::ReadFailed(err.to_string())),
-    };
-    if len as usize > max_payload_bytes {
-        return Err(IpcTransportError::DecodeFailed(
-            "control frame exceeds maximum transport payload size".into(),
-        ));
-    }
-    let mut bytes = vec![0_u8; len as usize];
-    reader
-        .read_exact(&mut bytes)
+    ControlFrameReadState::new()
+        .read_metered(reader, max_payload_bytes)
         .await
-        .map_err(|err| IpcTransportError::ReadFailed(err.to_string()))?;
-    let bytes_received = bytes.len() + std::mem::size_of::<u32>();
-    decode_from_slice_with(&bytes, IpcTransportError::DecodeFailed)
-        .map(|envelope| Some((envelope, bytes_received)))
 }
 
 async fn handle_stream(

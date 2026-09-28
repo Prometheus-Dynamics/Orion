@@ -6,6 +6,7 @@ use orion_control_plane::{
 use orion_core::Revision;
 use tokio::time::sleep;
 
+use super::event_pump::EventPump;
 use crate::{
     ClientError, ControlPlaneEventStream, ExecutorEventStream, LocalNodeRuntime,
     ProviderEventStream,
@@ -224,8 +225,10 @@ pub enum LocalProviderEvent {
 pub struct LocalProviderSubscription {
     service: LocalProviderService,
     desired_revision: Revision,
-    lease_stream: ProviderEventStream,
-    state_stream: ControlPlaneEventStream,
+    // Each stream is read by a dedicated task (see `EventPump`) so that racing the two in
+    // `tokio::select!` never cancels a frame read half way through.
+    lease_events: EventPump,
+    state_events: EventPump,
     pending: VecDeque<LocalProviderEvent>,
 }
 
@@ -306,8 +309,8 @@ impl LocalProviderService {
         Ok(LocalProviderSubscription {
             service: self.clone(),
             desired_revision: current_revision.max(desired_revision),
-            lease_stream,
-            state_stream,
+            lease_events: EventPump::spawn(lease_stream),
+            state_events: EventPump::spawn(state_stream),
             pending: VecDeque::from([
                 LocalProviderEvent::BootstrapLeases(leases),
                 LocalProviderEvent::BootstrapStateSnapshot(snapshot),
@@ -349,7 +352,7 @@ impl LocalProviderSubscription {
 
         loop {
             tokio::select! {
-                lease_result = self.lease_stream.next_events() => {
+                lease_result = self.lease_events.recv() => {
                     match lease_result {
                         Ok(events) => {
                             for event in events {
@@ -367,11 +370,12 @@ impl LocalProviderSubscription {
                             }
                         }
                         Err(_) => {
-                            self.lease_stream = self.service.connect_lease_stream().await?;
+                            let stream = self.service.connect_lease_stream().await?;
+                            self.lease_events = EventPump::spawn(stream);
                         }
                     }
                 }
-                state_result = self.state_stream.next_events() => {
+                state_result = self.state_events.recv() => {
                     match state_result {
                         Ok(events) => {
                             for event in events {
@@ -388,7 +392,11 @@ impl LocalProviderSubscription {
                             }
                         }
                         Err(_) => {
-                            self.state_stream = self.service.connect_state_stream(self.desired_revision).await?;
+                            let stream = self
+                                .service
+                                .connect_state_stream(self.desired_revision)
+                                .await?;
+                            self.state_events = EventPump::spawn(stream);
                         }
                     }
                 }

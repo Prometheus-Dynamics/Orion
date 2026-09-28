@@ -1,3 +1,4 @@
+mod event_pump;
 mod local_unary;
 mod publish;
 mod runtime;
