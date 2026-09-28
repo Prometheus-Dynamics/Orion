@@ -15,7 +15,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `ORION_NODE_HTTP_ADDR=off` runs `orion-node` without the HTTP control listener for IPC-only appliances.
 - `ORION_NODE_RUNTIME_WORKER_THREADS` and `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` size the node's Tokio runtime.
-- Single-node appliance profile guidance in `docs/node-env.md`.
+- Single-node appliance profile guidance in `docs/node-env.md`, and an `appliance_memory_soak` suite that checks memory slope and caps under provider/executor/mutation load.
 - `ResourceEndpoint::Custom` accepts any valid URI scheme (for example `styx-frame-lease+unix://`), with `CustomEndpointScheme` for typed downstream endpoints and `Display`/`FromStr` round-tripping.
 - `UnixFdLatestServer` / `UnixFdLatestClient` in `orion-transport-ipc`: a bounded latest-value channel that hands out dup'd fds (for example dmabuf frame leases) with sequence waits, max age, and max clients.
 - `resource_usage` section in node observability snapshots (process RSS/PSS, state record counts, mutation history vs caps, local stream backlog, worker queue depth, registry sizes), `orionctl get memory`, and matching Prometheus families.
@@ -30,4 +30,5 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `send_unix_fd_frame_async` / `recv_unix_fd_frame_async` no longer spin at 100% CPU on idle connections; readiness is now cleared through `try_io`.
 - Background loops no longer busy-spin when their `ReconcileLoopHandle` is dropped without shutdown (for example after a startup error).
+- State persistence no longer fails with "cannot rewrite desired snapshot without encoded desired bytes" when a mutation races the snapshot capture; the rewrite is deferred to the next persist.
 - Executor and provider subscriptions no longer drop all but the first matching event of a batched `ClientEvents` frame.
