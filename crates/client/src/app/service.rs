@@ -180,11 +180,15 @@ impl LocalExecutorSubscription {
                         } = event.event
                             && executor_id == self.service.executor.executor_id
                         {
-                            return Ok(LocalExecutorEvent::WorkloadsChanged {
-                                sequence: event.sequence,
-                                workloads,
-                            });
+                            self.pending
+                                .push_back(LocalExecutorEvent::WorkloadsChanged {
+                                    sequence: event.sequence,
+                                    workloads,
+                                });
                         }
+                    }
+                    if let Some(event) = self.pending.pop_front() {
+                        return Ok(event);
                     }
                 }
                 Err(_) => {
@@ -352,11 +356,14 @@ impl LocalProviderSubscription {
                                 if let ClientEventKind::ProviderLeases { provider_id, leases } = event.event
                                     && provider_id == self.service.provider.provider_id
                                 {
-                                    return Ok(LocalProviderEvent::LeasesChanged {
+                                    self.pending.push_back(LocalProviderEvent::LeasesChanged {
                                         sequence: event.sequence,
                                         leases,
                                     });
                                 }
+                            }
+                            if let Some(event) = self.pending.pop_front() {
+                                return Ok(event);
                             }
                         }
                         Err(_) => {
@@ -370,11 +377,14 @@ impl LocalProviderSubscription {
                             for event in events {
                                 if let ClientEventKind::StateSnapshot(snapshot) = event.event {
                                     self.desired_revision = snapshot.state.desired.revision;
-                                    return Ok(LocalProviderEvent::StateSnapshot {
+                                    self.pending.push_back(LocalProviderEvent::StateSnapshot {
                                         sequence: event.sequence,
                                         snapshot: *snapshot,
                                     });
                                 }
+                            }
+                            if let Some(event) = self.pending.pop_front() {
+                                return Ok(event);
                             }
                         }
                         Err(_) => {

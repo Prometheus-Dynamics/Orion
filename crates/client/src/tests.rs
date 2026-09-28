@@ -13,6 +13,7 @@ use orion_transport_ipc::{ControlEnvelope, IpcTransport, LocalAddress, LocalCont
 mod control_plane_metrics;
 mod local_defaults;
 mod local_services;
+mod subscription_batches;
 mod views;
 
 fn setup_transport() -> IpcTransport {
