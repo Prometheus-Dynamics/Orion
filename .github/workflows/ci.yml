@@ -56,6 +56,60 @@ jobs:
       - name: Build docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
+  allocator-features:
+    # `--all-features` above enables both allocator features at once (jemalloc takes precedence),
+    # so each opt-in global allocator is also linted, built, started, and cross-built on its own.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        feature:
+          - alloc-mimalloc
+          - alloc-jemalloc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install aarch64 cross compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.feature }}
+
+      - name: Run clippy
+        run: cargo clippy -p orion-node --all-targets --features ${{ matrix.feature }} -- -D warnings
+
+      - name: Build orion-node
+        run: cargo build -p orion-node --features ${{ matrix.feature }}
+
+      - name: Start and stop orion-node
+        env:
+          ORION_NODE_ID: node.alloc-smoke
+          ORION_NODE_HTTP_ADDR: "off"
+          ORION_NODE_PEER_AUTH: disabled
+          ORION_NODE_SHUTDOWN_AFTER_INIT_MS: "200"
+          RUST_LOG: warn
+        run: |
+          ORION_NODE_IPC_SOCKET="$RUNNER_TEMP/c.sock" \
+          ORION_NODE_IPC_STREAM_SOCKET="$RUNNER_TEMP/s.sock" \
+          ./target/debug/orion-node
+
+      - name: Cross-build orion-node for aarch64-unknown-linux-gnu
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+        run: cargo build -p orion-node --features ${{ matrix.feature }} --target aarch64-unknown-linux-gnu
+
   dependency-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
