@@ -10,9 +10,7 @@ use orion::{
         ipc::{ControlEnvelope, IpcTransportError, LocalAddress, UnixControlServer},
     },
 };
-use orion_transport_ipc::{
-    read_control_frame_with_limit_metered, write_control_frame_with_limit_metered,
-};
+use orion_transport_ipc::{ControlFrameReadState, write_control_frame_with_limit_metered};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -330,11 +328,16 @@ impl NodeApp {
             .ok();
         let max_payload_bytes = self.config.runtime_tuning.transport_max_payload_bytes;
         let (mut reader, mut writer) = stream.into_split();
-        let (hello, hello_bytes) =
-            match read_control_frame_with_limit_metered(&mut reader, max_payload_bytes).await? {
-                Some((envelope, bytes)) => (envelope, bytes_len_u64(bytes)),
-                None => return Ok(()),
-            };
+        // The frame read below is raced against the heartbeat tick, so partial-frame state must
+        // survive cancellation; one read state is kept for the whole connection.
+        let mut read_state = ControlFrameReadState::new();
+        let (hello, hello_bytes) = match read_state
+            .read_metered(&mut reader, max_payload_bytes)
+            .await?
+        {
+            Some((envelope, bytes)) => (envelope, bytes_len_u64(bytes)),
+            None => return Ok(()),
+        };
 
         let (source, destination, welcome): (LocalAddress, LocalAddress, ControlMessage) =
             match hello.message {
@@ -438,7 +441,7 @@ impl NodeApp {
 
         loop {
             tokio::select! {
-                frame = read_control_frame_with_limit_metered(&mut reader, max_payload_bytes) => {
+                frame = read_state.read_metered(&mut reader, max_payload_bytes) => {
                     let (envelope, bytes_received) = match frame {
                         Ok(Some((envelope, bytes_received))) => (envelope, bytes_len_u64(bytes_received)),
                         Ok(None) => break,

@@ -586,7 +586,7 @@ async fn serve_executor_watch_stream(
     .expect("client events should send");
 }
 
-async fn serve_provider_bootstrap_queries(
+pub(super) async fn serve_provider_bootstrap_queries(
     listener: UnixListener,
     provider: ProviderRecord,
     leases: Vec<LeaseRecord>,
