@@ -81,6 +81,36 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 - [ ] Use `watch_assigned_workloads` in the engine instead of its own retry loop.
 - [ ] Move FrameLease descriptor/backing types into Styx.
 
+### Decided model, not yet implemented
+
+Decisions from 2026-10-03, prompted by HeliOS multi-camera design questions. Orion stays generic;
+none of these are HeliOS-specific features.
+
+- [ ] **Durable vs volatile observed state.** Records hold durable facts only (existence,
+      health/availability, workload phase).
+  - [ ] Observed-state persistence is coalesced: at most one write per configurable interval, flushed
+        on shutdown. Today every provider or executor state change does an fsynced rewrite
+        (`apply_*_state_update` → `persist_state`).
+  - [ ] New volatile status lane: latest value per (subject, key), in memory only, never persisted,
+        with a TTL, watchable over client streams and queryable via `orionctl`.
+  - [ ] Bulk and high-rate data (frames, detections) stays out of Orion and uses resource endpoints.
+- [ ] **Cross-node binding.** A workload may bind another node's resource. Orion resolves,
+      authorizes and leases it; bytes flow over the resource's own endpoint. Orion's generic data
+      plane (`RemoteBinding`, TCP/QUIC frames) is not on the main path.
+- [ ] **Discovery.** mDNS for discovery only. Trust stays enrollment-based (ed25519 peer keys or a
+      shared enrollment key); discovered peers are never trusted automatically.
+- [ ] **Placement.** Node labels plus workload constraints (node selector, co-locate with resource X,
+      any eligible node), with a deterministic leaderless choice, owned by `orion-cluster`
+      (`ClusterCoordinator` is currently unused).
+- [ ] **Timebase.** Nodes publish their clock source and sync state (PTP/chrony, offset estimate) as an
+      observed node fact. Orion does not discipline clocks; producers timestamp in a declared
+      timebase.
+- [ ] **Lighter peer sync.** Peer sync over a transport lighter than full HTTP so IPC-only builds
+      can cluster (today it requires the `transport-http` feature).
+- [ ] **Per-object conflict resolution** for desired state using a hybrid logical clock (HLC).
+- [ ] **Remove `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`.** It is enforced exactly
+      like `Exclusive` and only appears in two client examples.
+
 ### Nice to have
 
 - [ ] Optional blocking client for the fd latest-value channel.
