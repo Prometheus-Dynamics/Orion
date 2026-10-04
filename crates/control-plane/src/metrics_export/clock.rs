@@ -12,7 +12,7 @@ fn nanos_to_seconds_u64(value: u64) -> f64 {
     value as f64 / NANOS_PER_SECOND
 }
 
-/// Renders the clock families of [`append_clock_metrics`] on their own.
+/// Renders the clock metric families on their own.
 pub fn render_clock_metrics(node_id: &NodeId, clock: Option<&NodeClockFacts>) -> String {
     let mut out = String::new();
     append_clock_metrics(&mut out, node_id, clock);

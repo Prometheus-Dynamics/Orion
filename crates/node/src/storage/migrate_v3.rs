@@ -210,7 +210,7 @@ fn unreadable(storage: &NodeStorage, detail: impl std::fmt::Display) -> NodeErro
 
 impl NodeStorage {
     /// Migrates a format-3 state directory to the current format in place, keeping the old files
-    /// in [`LEGACY_BACKUP_DIR`]. Returns `None` when there is nothing to migrate (no state, or
+    /// in `legacy-format-3/`. Returns `None` when there is nothing to migrate (no state, or
     /// already current). A format-3 directory that cannot be migrated is an error, so the node
     /// never starts on (and later overwrites) state it could not read.
     pub fn migrate_legacy_state(

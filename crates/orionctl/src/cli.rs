@@ -318,7 +318,7 @@ pub(crate) struct ListArgs {
 pub(crate) struct StatusArgs {
     #[command(flatten)]
     pub(crate) source: StateQueryArgs,
-    /// Only this subject: provider/<id>, executor/<id>, resource/<id>, or workload/<id>.
+    /// Only this subject: `provider/<id>`, `executor/<id>`, `resource/<id>`, or `workload/<id>`.
     #[arg(long)]
     pub(crate) subject: Option<String>,
     /// Only keys starting with this prefix.
