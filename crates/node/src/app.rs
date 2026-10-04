@@ -1,4 +1,5 @@
 mod builder;
+mod clock_facts;
 mod desired_state;
 mod desired_sync;
 #[cfg(feature = "link-gateway")]

@@ -1,4 +1,5 @@
 use crate::NodeError;
+use orion::control_plane::ClockSourceKind;
 use orion_transport_common::{
     DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES, DEFAULT_TRANSPORT_IO_TIMEOUT,
     DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
@@ -28,6 +29,7 @@ const DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY: usize = 64;
 const DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY: usize = 128;
 const DEFAULT_AUDIT_LOG_QUEUE_CAPACITY: usize = 1024;
 const DEFAULT_RECONCILE_BACKSTOP_MS: u64 = 5_000;
+const DEFAULT_CLOCK_REFRESH_MS: u64 = 10_000;
 const MIN_RUNTIME_TUNING_DURATION_MS: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +70,14 @@ pub struct NodeRuntimeTuning {
     /// backstop pass. Values at or below the reconcile interval (`ORION_NODE_RECONCILE_MS`)
     /// restore fixed-interval polling.
     pub reconcile_backstop_interval: Duration,
+    /// How often the node re-reads its clock state (`ORION_NODE_CLOCK_REFRESH_MS`). The observed
+    /// node record is only republished on meaningful change.
+    pub clock_refresh_interval: Duration,
+    /// Operator-declared clock source (`ORION_NODE_CLOCK_SOURCE`), for example PTP or chrony,
+    /// which the kernel cannot report. `None` reports `system` on Linux and `unknown` elsewhere.
+    pub clock_source: Option<ClockSourceKind>,
+    /// Timebase producers on this node stamp in (`ORION_NODE_TIMEBASE`), for example `TAI`.
+    pub clock_timebase: Option<String>,
 }
 
 impl NodeRuntimeTuning {
@@ -215,6 +225,22 @@ impl NodeRuntimeTuning {
         self
     }
 
+    pub fn with_clock_refresh_interval(mut self, interval: Duration) -> Self {
+        self.clock_refresh_interval = interval;
+        self.normalize();
+        self
+    }
+
+    pub fn with_clock_source(mut self, source: Option<ClockSourceKind>) -> Self {
+        self.clock_source = source;
+        self
+    }
+
+    pub fn with_clock_timebase(mut self, timebase: Option<String>) -> Self {
+        self.clock_timebase = timebase;
+        self
+    }
+
     pub fn try_from_env() -> Result<Self, NodeError> {
         let mut tuning = Self {
             max_mutation_history_batches: parse_env_or(
@@ -327,6 +353,14 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_RECONCILE_BACKSTOP_MS",
                 DEFAULT_RECONCILE_BACKSTOP_MS,
             )?,
+            clock_refresh_interval: duration_ms_env_or(
+                "ORION_NODE_CLOCK_REFRESH_MS",
+                DEFAULT_CLOCK_REFRESH_MS,
+            )?,
+            clock_source: optional_label_env("ORION_NODE_CLOCK_SOURCE")?
+                .as_deref()
+                .and_then(ClockSourceKind::from_label),
+            clock_timebase: optional_label_env("ORION_NODE_TIMEBASE")?,
         };
         tuning.normalize();
         Ok(tuning)
@@ -362,6 +396,8 @@ impl NodeRuntimeTuning {
         self.audit_log_queue_capacity = self.audit_log_queue_capacity.max(1);
         self.reconcile_backstop_interval =
             normalize_runtime_tuning_duration(self.reconcile_backstop_interval);
+        self.clock_refresh_interval =
+            normalize_runtime_tuning_duration(self.clock_refresh_interval);
     }
 }
 
@@ -397,6 +433,9 @@ impl Default for NodeRuntimeTuning {
             audit_log_queue_capacity: DEFAULT_AUDIT_LOG_QUEUE_CAPACITY,
             audit_log_overload_policy: AuditLogOverloadPolicy::DropNewest,
             reconcile_backstop_interval: Duration::from_millis(DEFAULT_RECONCILE_BACKSTOP_MS),
+            clock_refresh_interval: Duration::from_millis(DEFAULT_CLOCK_REFRESH_MS),
+            clock_source: None,
+            clock_timebase: None,
         }
     }
 }
@@ -513,6 +552,10 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
             "ORION_NODE_RECONCILE_BACKSTOP_MS",
             tuning.reconcile_backstop_interval.as_millis().to_string(),
         ),
+        (
+            "ORION_NODE_CLOCK_REFRESH_MS",
+            tuning.clock_refresh_interval.as_millis().to_string(),
+        ),
     ]
 }
 
@@ -562,6 +605,20 @@ pub(crate) fn bool_env_or_false(key: &str) -> Result<bool, NodeError> {
             ))),
         },
         Err(env::VarError::NotPresent) => Ok(false),
+        Err(env::VarError::NotUnicode(_)) => {
+            Err(NodeError::Config(format!("{key} must be valid unicode")))
+        }
+    }
+}
+
+/// A trimmed, non-empty string variable; unset or blank is `None`.
+fn optional_label_env(key: &str) -> Result<Option<String>, NodeError> {
+    match env::var(key) {
+        Ok(value) => {
+            let value = value.trim();
+            Ok((!value.is_empty()).then(|| value.to_owned()))
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => {
             Err(NodeError::Config(format!("{key} must be valid unicode")))
         }

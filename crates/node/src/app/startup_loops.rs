@@ -2,7 +2,7 @@ use super::observability::push_observability_event_with_context;
 use super::{NodeApp, NodeError, PeerSyncExecution, ReconcileLoopHandle};
 use orion::control_plane::{NodeObservabilitySnapshot, ObservabilityEventKind};
 use std::{future::Future, sync::Arc, time::Duration};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 impl NodeApp {
     fn spawn_background_loop<F, Fut>(&self, interval: Duration, mut tick: F) -> ReconcileLoopHandle
@@ -102,6 +102,17 @@ impl NodeApp {
                     "peer sync iteration reported failures: {}",
                     failures.join("; ")
                 )))
+            }
+        })
+    }
+
+    /// Re-reads the kernel clock state every `runtime_tuning.clock_refresh_interval` and
+    /// republishes the node's clock facts when they change meaningfully.
+    pub fn spawn_clock_facts_loop(&self) -> ReconcileLoopHandle {
+        let interval = self.config.runtime_tuning.clock_refresh_interval;
+        self.spawn_background_loop(interval, |app| async move {
+            if app.refresh_clock_facts_from(&crate::KernelClockStatusSource) {
+                debug!(node = %app.config.node_id, clock = ?app.published_clock_facts(), "published clock facts");
             }
         })
     }

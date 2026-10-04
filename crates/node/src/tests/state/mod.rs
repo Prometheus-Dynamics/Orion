@@ -1,5 +1,6 @@
 use super::*;
 
+mod clock_facts;
 mod communication_metrics;
 mod compaction;
 mod observability;

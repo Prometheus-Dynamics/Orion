@@ -486,7 +486,7 @@ mod tests {
         let mut raw = resource_record();
         raw.resource_id = ResourceId::new("resource.camera.raw.front");
         raw.resource_type = ResourceType::new("camera.device");
-        raw.ownership_mode = ResourceOwnershipMode::ExclusiveOwnerPublishesDerived;
+        raw.ownership_mode = ResourceOwnershipMode::Exclusive;
         observed.put_resource(raw);
         observed.put_resource(
             ResourceRecord::builder(
@@ -518,7 +518,7 @@ mod tests {
             .require_resource_with_ownership(
                 ResourceType::new("camera.device"),
                 1,
-                ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+                ResourceOwnershipMode::Exclusive,
             )
             .build(),
         );
@@ -640,6 +640,27 @@ mod tests {
         assert!(store.observed.workloads.is_empty());
         assert!(store.observed.resources.is_empty());
         assert!(store.observed.leases.is_empty());
+    }
+
+    #[test]
+    fn desired_replacement_keeps_observed_nodes_still_referenced() {
+        let mut store = runtime_store();
+        for node_id in ["node-a", "node-b", "node-gone"] {
+            store
+                .observed
+                .put_node(orion_control_plane::NodeRecord::builder(node_id).build());
+        }
+
+        let mut desired = DesiredClusterState::default();
+        desired.put_executor(ExecutorRecord {
+            executor_id: ExecutorId::new("executor.remote"),
+            node_id: NodeId::new("node-b"),
+            runtime_types: vec![RuntimeType::new("graph.exec.v1")],
+        });
+        store.replace_desired(desired);
+
+        let kept: Vec<_> = store.observed.nodes.keys().map(NodeId::as_str).collect();
+        assert_eq!(kept, ["node-a", "node-b"]);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use orion_core::{ArtifactId, NodeId, ResourceId, WorkloadId};
 use crate::{
     cli::{DescribeCommand, OutputFormat},
     render::{
-        join_display, join_or_dash, print_structured, render_availability_state,
+        join_display, join_or_dash, print_clock_lines, print_structured, render_availability_state,
         render_desired_state, render_health_state, render_lease_state, render_observed_state,
         render_restart_policy,
     },
@@ -133,14 +133,15 @@ pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
             let snapshot = args.source.fetch_snapshot().await?;
             let observability = fetch_observability_snapshot(&args.source).await?;
             let node_id = NodeId::new(args.id.clone());
+            let observed = snapshot.state.observed.nodes.get(&node_id).cloned();
             let node = snapshot
                 .state
                 .desired
                 .nodes
                 .get(&node_id)
+                .or(observed.as_ref())
                 .cloned()
                 .ok_or_else(|| format!("node `{}` not found", args.id))?;
-            let observed = snapshot.state.observed.nodes.get(&node_id).cloned();
             let executors = snapshot
                 .state
                 .desired
@@ -497,6 +498,12 @@ fn print_node_describe_summary(report: &NodeDescribeReport) {
             .unwrap_or("-")
     );
     println!("labels: {}", join_or_dash(&report.node.labels));
+    print_clock_lines(
+        report
+            .observed
+            .as_ref()
+            .and_then(|observed| observed.clock.as_ref()),
+    );
     println!("maintenance_mode: {}", report.maintenance_mode);
     println!("peer_sync_paused: {}", report.peer_sync_paused);
     println!(

@@ -1,10 +1,72 @@
 use orion_control_plane::{
     AvailabilityState, ClientEvent, ClientEventKind, DesiredState, HealthState, LeaseState,
-    MaintenanceStatus, ObservabilityEvent, ObservabilityEventKind, PeerTrustSnapshot,
-    RestartPolicy, StateSnapshot, WorkloadObservedState,
+    MaintenanceStatus, NodeClockFacts, ObservabilityEvent, ObservabilityEventKind,
+    PeerTrustSnapshot, RestartPolicy, StateSnapshot, WorkloadObservedState,
 };
 
 use crate::cli::OutputFormat;
+
+fn display_or_dash<T: std::fmt::Display>(value: Option<T>) -> String {
+    value.map_or_else(|| "-".to_owned(), |value| value.to_string())
+}
+
+/// `key=value` clock fields for one-line summaries.
+pub(crate) fn render_clock_fields(clock: Option<&NodeClockFacts>) -> String {
+    format!(
+        "clock_source={} clock_synced={} clock_offset_ns={} clock_max_error_ns={} timebase={}",
+        clock.map_or("-", |clock| clock.source.as_str()),
+        display_or_dash(clock.and_then(|clock| clock.synchronized)),
+        display_or_dash(clock.and_then(|clock| clock.offset_ns)),
+        display_or_dash(clock.and_then(|clock| clock.max_error_ns)),
+        clock
+            .and_then(|clock| clock.timebase.as_deref())
+            .unwrap_or("-"),
+    )
+}
+
+/// `key: value` clock lines for describe summaries.
+pub(crate) fn print_clock_lines(clock: Option<&NodeClockFacts>) {
+    println!(
+        "clock_source: {}",
+        clock.map_or("-", |clock| clock.source.as_str())
+    );
+    println!(
+        "clock_synchronized: {}",
+        display_or_dash(clock.and_then(|clock| clock.synchronized))
+    );
+    println!(
+        "clock_offset_ns: {}",
+        display_or_dash(clock.and_then(|clock| clock.offset_ns))
+    );
+    println!(
+        "clock_max_error_ns: {}",
+        display_or_dash(clock.and_then(|clock| clock.max_error_ns))
+    );
+    println!(
+        "clock_estimated_error_ns: {}",
+        display_or_dash(clock.and_then(|clock| clock.estimated_error_ns))
+    );
+    println!(
+        "clock_stratum: {}",
+        display_or_dash(clock.and_then(|clock| clock.stratum))
+    );
+    println!(
+        "clock_ptp_grandmaster: {}",
+        clock
+            .and_then(|clock| clock.ptp_grandmaster_id.as_deref())
+            .unwrap_or("-")
+    );
+    println!(
+        "timebase: {}",
+        clock
+            .and_then(|clock| clock.timebase.as_deref())
+            .unwrap_or("-")
+    );
+    println!(
+        "clock_checked_at_ms: {}",
+        display_or_dash(clock.map(|clock| clock.checked_at_ms))
+    );
+}
 
 pub(crate) fn print_snapshot_summary(snapshot: &StateSnapshot) {
     println!(

@@ -35,9 +35,9 @@ pub use messages::{
 };
 #[cfg(feature = "std")]
 pub use metrics_export::{
-    MetricsExportConfig, render_communication_metrics, render_communication_metrics_with_config,
-    render_host_metrics, render_observability_metrics, render_observability_metrics_with_config,
-    render_resource_usage_metrics,
+    MetricsExportConfig, render_clock_metrics, render_communication_metrics,
+    render_communication_metrics_with_config, render_host_metrics, render_observability_metrics,
+    render_observability_metrics_with_config, render_resource_usage_metrics,
 };
 pub use metrics_support::{
     COMMUNICATION_RECENT_SAMPLE_LIMIT, COMMUNICATION_RECENT_WINDOW_MS,
@@ -47,15 +47,15 @@ pub use metrics_support::{
 };
 pub use records::{
     AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, BUILTIN_ENDPOINT_SCHEMES,
-    ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef, CustomEndpoint, CustomEndpointScheme,
-    DesiredClusterState, ExecutorRecord, ExecutorRecordBuilder, HttpEndpoint, IpcEndpoint,
-    LeaseRecord, LeaseRecordBuilder, NodeRecord, NodeRecordBuilder, ObservedClusterState,
-    ProviderRecord, ProviderRecordBuilder, ResourceActionResult, ResourceActionStatus,
-    ResourceBinding, ResourceCapability, ResourceConfigState, ResourceEndpoint,
-    ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
-    ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue, TypedResourceEndpoint,
-    UnixEndpoint, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
-    config_json_value, deserialize_config, is_valid_endpoint_scheme,
+    ClockSourceKind, ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef, CustomEndpoint,
+    CustomEndpointScheme, DesiredClusterState, ExecutorRecord, ExecutorRecordBuilder, HttpEndpoint,
+    IpcEndpoint, LeaseRecord, LeaseRecordBuilder, NodeClockFacts, NodeRecord, NodeRecordBuilder,
+    ObservedClusterState, ProviderRecord, ProviderRecordBuilder, ResourceActionResult,
+    ResourceActionStatus, ResourceBinding, ResourceCapability, ResourceConfigState,
+    ResourceEndpoint, ResourceEndpointError, ResourceOwnershipMode, ResourceRecord,
+    ResourceRecordBuilder, ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue,
+    TypedResourceEndpoint, UnixEndpoint, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder,
+    WorkloadRequirement, config_json_value, deserialize_config, is_valid_endpoint_scheme,
 };
 pub use state::{
     AvailabilityState, DesiredState, HealthState, LeaseState, RestartPolicy, WorkloadObservedState,
@@ -129,7 +129,7 @@ mod tests {
         .require_resource_with_ownership(
             ResourceType::new("camera.device"),
             1,
-            ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+            ResourceOwnershipMode::Exclusive,
         )
         .build();
         let derived = ResourceRecord::builder(
@@ -154,7 +154,7 @@ mod tests {
         );
         assert_eq!(
             record.requirements[0].ownership_mode,
-            Some(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
+            Some(ResourceOwnershipMode::Exclusive)
         );
         assert_eq!(
             derived.source_workload_id,
@@ -404,6 +404,7 @@ mod tests {
             health: HealthState::Healthy,
             schedulable: true,
             labels: Vec::new(),
+            clock: None,
         });
 
         let result = MutationBatch {
@@ -430,6 +431,7 @@ mod tests {
             health: HealthState::Healthy,
             schedulable: true,
             labels: Vec::new(),
+            clock: None,
         });
 
         let mut applied = AppliedClusterState::default();

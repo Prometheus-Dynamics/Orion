@@ -119,6 +119,7 @@ mod tests {
                 health: HealthState::Healthy,
                 schedulable: true,
                 labels: Vec::new(),
+                clock: None,
             },
         );
         let mut replication = ReplicationState::new(orion_core::Revision::ZERO);

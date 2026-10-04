@@ -147,13 +147,15 @@ none of these are HeliOS-specific features.
 - [ ] **Placement.** Node labels plus workload constraints (node selector, co-locate with resource X,
       any eligible node), with a deterministic leaderless choice, owned by `orion-cluster`
       (`ClusterCoordinator` is currently unused).
-- [ ] **Timebase.** Nodes publish their clock source and sync state (PTP/chrony, offset estimate) as an
+- [x] **Timebase.** Nodes publish their clock source and sync state (PTP/chrony, offset estimate) as an
       observed node fact. Orion does not discipline clocks; producers timestamp in a declared
-      timebase.
+      timebase. (`NodeRecord::clock` / `NodeClockFacts` from read-only `adjtimex`, declared with
+      `ORION_NODE_CLOCK_SOURCE` and `ORION_NODE_TIMEBASE`; peers see it through snapshot sync, so
+      continuous propagation waits on the volatile status lane / lighter peer sync items.)
 - [ ] **Lighter peer sync.** Peer sync over a transport lighter than full HTTP so IPC-only builds
       can cluster (today it requires the `transport-http` feature).
 - [ ] **Per-object conflict resolution** for desired state using a hybrid logical clock (HLC).
-- [ ] **Remove `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`.** It is enforced exactly
+- [x] **Remove `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`.** It is enforced exactly
       like `Exclusive` and only appears in two client examples.
 
 ### Nice to have

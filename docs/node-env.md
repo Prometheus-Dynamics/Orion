@@ -187,6 +187,21 @@ Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:
 | `ORION_NODE_AUDIT_LOG` | unset | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_SHUTDOWN_AFTER_INIT_MS` | unset | Integer milliseconds | Invalid integer fails startup. Intended for tests and controlled automation, not steady-state production. |
 
+## Clock Facts
+
+The node reports its clock source and synchronization state in its observed node record (see
+[Clock Facts](observability.md#clock-facts)); Orion never adjusts the clock. The kernel reports
+whether the clock is synchronized but not which daemon disciplines it, so operators declare it.
+
+| Variable | Default | Valid values | Failure behavior |
+| --- | --- | --- | --- |
+| `ORION_NODE_CLOCK_SOURCE` | unset (`system` on Linux, `unknown` elsewhere) | `unknown`, `system`, `ntp`, `chrony`, `ptp`, `gps` (case-insensitive), or any other name, reported as `Other(name)` | Invalid Unicode fails startup. Blank is treated as unset. |
+| `ORION_NODE_TIMEBASE` | unset | Any name, for example `UTC`, `TAI`, or `monotonic` | Invalid Unicode fails startup. Blank is treated as unset. |
+
+The refresh interval is `ORION_NODE_CLOCK_REFRESH_MS` under Runtime Tuning. Programmatic callers
+set all three through `NodeRuntimeTuning::with_clock_refresh_interval`, `with_clock_source`, and
+`with_clock_timebase`.
+
 ## HTTP TLS
 
 | Variable | Default | Valid values | Failure behavior |
@@ -234,5 +249,6 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY` | `128` | Auth state worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |
 | `ORION_NODE_RECONCILE_BACKSTOP_MS` | `5000` | Longest idle period before the event-driven reconcile loop runs a periodic backstop pass. Clamped to at least `ORION_NODE_RECONCILE_MS`. |
+| `ORION_NODE_CLOCK_REFRESH_MS` | `10000` | How often the node re-reads its clock state. The observed node record is only republished on meaningful change (see `docs/observability.md`, Clock Facts). |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_INTERVAL_MS` | `5000` | `50` in test builds. IPC stream heartbeat interval. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_TIMEOUT_MS` | `15000` | `125` in test builds. IPC stream heartbeat timeout. |

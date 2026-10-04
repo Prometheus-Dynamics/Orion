@@ -81,7 +81,7 @@ fn node_validation_rejects_missing_required_resource_capability() {
         provider_id: "provider.camera",
         resource_id: "resource.camera.raw.front",
         resource_type: "camera.device",
-        ownership_mode: orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+        ownership_mode: orion::control_plane::ResourceOwnershipMode::Exclusive,
         capabilities: Vec::new(),
     })
     .expect("provider registration should succeed");
@@ -110,7 +110,7 @@ fn node_validation_rejects_missing_required_resource_capability() {
             .require_resource_with_ownership_and_capability(
                 "camera.device",
                 1,
-                orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+                orion::control_plane::ResourceOwnershipMode::Exclusive,
                 CapabilityId::of::<CaptureConfigurable>(),
             )
             .build(),
@@ -136,7 +136,7 @@ fn node_validation_accepts_required_resource_capability() {
         provider_id: "provider.camera",
         resource_id: "resource.camera.raw.front",
         resource_type: "camera.device",
-        ownership_mode: orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+        ownership_mode: orion::control_plane::ResourceOwnershipMode::Exclusive,
         capabilities: vec![CapabilityId::of::<CaptureConfigurable>()],
     })
     .expect("provider registration should succeed");
@@ -165,7 +165,7 @@ fn node_validation_accepts_required_resource_capability() {
             .require_resource_with_ownership_and_capability(
                 "camera.device",
                 1,
-                orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+                orion::control_plane::ResourceOwnershipMode::Exclusive,
                 CapabilityId::of::<CaptureConfigurable>(),
             )
             .build(),

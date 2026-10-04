@@ -19,7 +19,6 @@ pub enum ResourceOwnershipMode {
     Exclusive,
     SharedRead,
     SharedLimited { max_consumers: u32 },
-    ExclusiveOwnerPublishesDerived,
 }
 
 #[derive(

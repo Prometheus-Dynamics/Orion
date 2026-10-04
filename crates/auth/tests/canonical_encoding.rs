@@ -21,12 +21,12 @@ use orion_auth::{
     canonical_transport_binding_bytes,
 };
 use orion_control_plane::{
-    AppliedClusterState, ArtifactRecord, ClientHello, ClientRole, ClusterStateEnvelope,
-    ControlMessage, DesiredClusterState, DesiredState, DesiredStateSectionFingerprints,
-    ExecutorRecord, HealthState, LeaseRecord, LeaseState, MutationBatch, NodeRecord,
-    ObservedClusterState, ObservedStateUpdate, PeerHello, ProviderRecord, ResourceOwnershipMode,
-    ResourceRecord, RestartPolicy, StateSnapshot, TypedConfigValue, WorkloadConfig,
-    WorkloadObservedState, WorkloadRecord,
+    AppliedClusterState, ArtifactRecord, ClientHello, ClientRole, ClockSourceKind,
+    ClusterStateEnvelope, ControlMessage, DesiredClusterState, DesiredState,
+    DesiredStateSectionFingerprints, ExecutorRecord, HealthState, LeaseRecord, LeaseState,
+    MutationBatch, NodeClockFacts, NodeRecord, ObservedClusterState, ObservedStateUpdate,
+    PeerHello, ProviderRecord, ResourceOwnershipMode, ResourceRecord, RestartPolicy, StateSnapshot,
+    TypedConfigValue, WorkloadConfig, WorkloadObservedState, WorkloadRecord,
 };
 use orion_core::{
     ArtifactId, CapabilityId, ClientName, ConfigSchemaId, ExecutorId, NodeId, ProviderId,
@@ -71,7 +71,7 @@ fn desired_state() -> DesiredClusterState {
         .require_resource_with_ownership(
             ResourceType::new("imu.sample_source"),
             1,
-            ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+            ResourceOwnershipMode::Exclusive,
         )
         .bind_resource(ResourceId::new("node-a.imu-01"), NodeId::new("node-a"))
         .restart_policy(RestartPolicy::OnFailure)
@@ -119,6 +119,16 @@ fn observed_update() -> ObservedStateUpdate {
     observed.put_node(
         NodeRecord::builder(NodeId::new("node-a"))
             .health(HealthState::Degraded)
+            .clock(
+                NodeClockFacts::unknown(1_759_500_000_000)
+                    .with_source(ClockSourceKind::Ptp)
+                    .with_synchronized(true)
+                    .with_offset_ns(-1_500)
+                    .with_max_error_ns(16_000_000)
+                    .with_estimated_error_ns(2_000)
+                    .with_ptp_grandmaster_id("00:1b:19:ff:fe:00:00:01")
+                    .with_timebase("TAI"),
+            )
             .build(),
     );
     let mut applied = AppliedClusterState::default();

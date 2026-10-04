@@ -346,7 +346,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
                 .require_resource_with_ownership(
                     "camera.device",
                     1,
-                    ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+                    ResourceOwnershipMode::Exclusive,
                 )
                 .build(),
             ),
@@ -418,11 +418,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
             )
             .desired_state(DesiredState::Running)
             .assigned_to("node-a")
-            .require_resource_with_ownership(
-                "camera.device",
-                1,
-                ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
-            )
+            .require_resource_with_ownership("camera.device", 1, ResourceOwnershipMode::Exclusive)
             .build(),
         )],
     };
@@ -507,11 +503,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
             )
             .desired_state(DesiredState::Running)
             .assigned_to("node-a")
-            .require_resource_with_ownership(
-                "camera.device",
-                2,
-                ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
-            )
+            .require_resource_with_ownership("camera.device", 2, ResourceOwnershipMode::Exclusive)
             .build(),
         )],
     };
@@ -548,11 +540,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
             )
             .desired_state(DesiredState::Running)
             .assigned_to("node-a")
-            .require_resource_with_ownership(
-                "camera.device",
-                1,
-                ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
-            )
+            .require_resource_with_ownership("camera.device", 1, ResourceOwnershipMode::Exclusive)
             .build(),
         )],
     };

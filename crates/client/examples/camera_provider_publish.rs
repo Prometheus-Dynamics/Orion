@@ -31,7 +31,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         ResourceType::new("camera.device"),
         ProviderId::new(provider_id.clone()),
     )
-    .ownership_mode(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
+    .ownership_mode(ResourceOwnershipMode::Exclusive)
     .health(HealthState::Healthy)
     .availability(AvailabilityState::Available)
     .lease_state(LeaseState::Unleased)

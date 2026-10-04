@@ -267,6 +267,7 @@ impl NodeApp {
             communication,
             recent_events: observability.recent_events.iter().cloned().collect(),
             resource_usage,
+            clock: observability.clock.clone(),
         }
     }
 

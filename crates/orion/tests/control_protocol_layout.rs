@@ -137,6 +137,8 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
         ArtifactRecord,
         ExecutorRecord,
         NodeRecord,
+        NodeClockFacts,
+        ClockSourceKind,
         ProviderRecord,
         LeaseRecord,
         ResourceActionResult,

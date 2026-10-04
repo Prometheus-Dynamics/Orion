@@ -1,5 +1,6 @@
 use super::maintenance::MaintenanceState;
 use super::resource_usage::NodeResourceUsageSnapshot;
+use crate::NodeClockFacts;
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
 use alloc::{string::String, vec::Vec};
@@ -673,4 +674,8 @@ pub struct NodeObservabilitySnapshot {
     /// Memory, state-size, and backlog diagnostics. Defaults when absent from structured input.
     #[serde(default)]
     pub resource_usage: NodeResourceUsageSnapshot,
+    /// Latest sampled clock facts, refreshed on every check (the observed node record is only
+    /// republished on meaningful change). `None` until the first check.
+    #[serde(default)]
+    pub clock: Option<NodeClockFacts>,
 }

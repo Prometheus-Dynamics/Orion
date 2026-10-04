@@ -420,7 +420,7 @@ fn provider_app_uses_stored_provider_identity() {
     );
     app.publish_resource(
         ProviderResource::new("resource.camera-01", "camera.device", "provider.local")
-            .ownership_mode(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
+            .ownership_mode(ResourceOwnershipMode::Exclusive)
             .supports_capability_of::<CaptureConfigurable>()
             .health(HealthState::Healthy)
             .availability(AvailabilityState::Available)
@@ -528,15 +528,12 @@ fn executor_app_uses_stored_executor_identity() {
 #[test]
 fn resource_claim_builder_composes_ownership_and_capability() {
     let claim = ResourceClaim::new("camera.device", 1)
-        .ownership_mode(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
+        .ownership_mode(ResourceOwnershipMode::Exclusive)
         .requires_capability_of::<CaptureConfigurable>()
         .build();
 
     assert_eq!(claim.resource_type, ResourceType::new("camera.device"));
-    assert_eq!(
-        claim.ownership_mode,
-        Some(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
-    );
+    assert_eq!(claim.ownership_mode, Some(ResourceOwnershipMode::Exclusive));
     assert_eq!(
         claim.required_capabilities,
         vec![CapabilityId::of::<CaptureConfigurable>()]

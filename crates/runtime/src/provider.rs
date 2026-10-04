@@ -117,8 +117,7 @@ pub(crate) fn validate_claim_capacity(
     existing_claims: u32,
 ) -> Result<(), RuntimeError> {
     match ownership_mode {
-        ResourceOwnershipMode::Exclusive
-        | ResourceOwnershipMode::ExclusiveOwnerPublishesDerived => {
+        ResourceOwnershipMode::Exclusive => {
             if existing_claims > 0 {
                 return Err(RuntimeError::ResourceOwnershipConflict {
                     resource_id: resource_id.clone(),

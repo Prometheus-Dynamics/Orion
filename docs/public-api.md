@@ -99,3 +99,25 @@ let lease = resource.endpoint::<FrameLeaseEndpoint>()?;
 
 `SCHEME` must not be a built-in scheme, because built-in schemes never parse as `Custom`.
 `CustomEndpoint::new` rejects them with `ReservedScheme`.
+
+## Node Clock Facts
+
+`NodeRecord::clock: Option<NodeClockFacts>` carries a node's self-reported clock source
+(`ClockSourceKind`), synchronization state, offset and error estimates, and declared timebase. It
+is only meaningful in observed state, where each node publishes its own record; it is `None` in
+desired records. `NodeObservabilitySnapshot::clock` holds the latest sample and
+`orion::control_plane::render_clock_metrics` renders it as Prometheus gauges. See
+[observability.md](observability.md#clock-facts).
+
+`orion-node` reads the kernel with `KernelClockStatusSource` (read-only `adjtimex`).
+`NodeApp::spawn_clock_facts_loop()` refreshes the facts every
+`NodeRuntimeTuning::clock_refresh_interval`; `NodeApp::refresh_clock_facts_from(&source)` runs one
+check with any `ClockStatusSource` (for example a fake `KernelClockReading` in tests), and
+`NodeApp::published_clock_facts()` returns what the observed record currently holds.
+
+## Resource Ownership Modes
+
+`ResourceOwnershipMode` is `Exclusive`, `SharedRead`, or `SharedLimited { max_consumers }`.
+`ExclusiveOwnerPublishesDerived` was removed: it was enforced exactly like `Exclusive`. Use
+`Exclusive` for the source resource and publish derived resources with their own mode (typically
+`SharedRead`) and `source_resource` / `realized_for_workload` links.
