@@ -1,6 +1,10 @@
 //! Cluster membership, admission, replication, and assignment helpers for
 //! Orion.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 mod assignment;
 mod membership;
 
@@ -13,6 +17,7 @@ pub use membership::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::{vec, vec::Vec};
     use orion_control_plane::{DesiredClusterState, DesiredState, NodeRecord, WorkloadRecord};
     use orion_control_plane::{HealthState, RestartPolicy, WorkloadObservedState};
     use orion_core::{

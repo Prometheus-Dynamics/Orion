@@ -1,7 +1,13 @@
 //! Canonical control-plane records, state groupings, and transport-agnostic
 //! control messages for Orion.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 mod messages;
+// Prometheus text rendering (and its env-driven config) is host-only.
+#[cfg(feature = "std")]
 mod metrics_export;
 mod metrics_support;
 mod records;
@@ -27,6 +33,7 @@ pub use messages::{
     StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch, SyncDiffRequest, SyncRequest,
     SyncSummaryRequest, TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
 };
+#[cfg(feature = "std")]
 pub use metrics_export::{
     MetricsExportConfig, render_communication_metrics, render_communication_metrics_with_config,
     render_host_metrics, render_observability_metrics, render_observability_metrics_with_config,
@@ -57,6 +64,7 @@ pub use state::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::{vec, vec::Vec};
     use orion_core::{
         ArtifactId, CapabilityDef, CapabilityId, ConfigSchemaDef, ConfigSchemaId, ExecutorId,
         NodeId, ProviderId, ResourceId, ResourceType, ResourceTypeDef, Revision, RuntimeType,

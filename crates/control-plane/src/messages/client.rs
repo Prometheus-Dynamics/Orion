@@ -3,6 +3,7 @@ use crate::{
     AppliedClusterState, ExecutorRecord, LeaseRecord, ObservedClusterState, ProviderRecord,
     ResourceRecord, WorkloadRecord,
 };
+use alloc::{boxed::Box, string::String, vec::Vec};
 use orion_core::{
     ClientName, ExecutorId, NodeId, PeerBaseUrl, ProviderId, PublicKeyHex, Revision, SessionId,
 };

@@ -5,6 +5,7 @@
 //! fields are added. The rkyv wire encoding is layout-exact, so node and `orionctl` versions still
 //! need to match for the binary control protocol.
 
+use alloc::{string::String, vec::Vec};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 

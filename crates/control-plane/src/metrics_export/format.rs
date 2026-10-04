@@ -1,6 +1,6 @@
 pub(super) fn gauge<T>(out: &mut String, name: &str, help: &str, labels: &[(&str, &str)], value: T)
 where
-    T: std::fmt::Display,
+    T: core::fmt::Display,
 {
     metric_help(out, name, help);
     metric_type(out, name, "gauge");
@@ -14,7 +14,7 @@ pub(super) fn optional_gauge<T>(
     labels: &[(&str, &str)],
     value: Option<T>,
 ) where
-    T: std::fmt::Display,
+    T: core::fmt::Display,
 {
     if let Some(value) = value {
         gauge(out, name, help, labels, value);
@@ -39,7 +39,7 @@ pub(super) fn metric_type(out: &mut String, name: &str, metric_type: &str) {
 
 pub(super) fn sample<T>(out: &mut String, name: &str, labels: &[(&str, &str)], value: T)
 where
-    T: std::fmt::Display,
+    T: core::fmt::Display,
 {
     out.push_str(name);
     append_labels(out, labels.iter().copied());
@@ -50,7 +50,7 @@ where
 
 pub(super) fn sample_owned<T>(out: &mut String, name: &str, labels: &[(String, String)], value: T)
 where
-    T: std::fmt::Display,
+    T: core::fmt::Display,
 {
     out.push_str(name);
     append_labels(

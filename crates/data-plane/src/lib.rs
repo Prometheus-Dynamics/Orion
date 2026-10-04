@@ -1,6 +1,10 @@
 //! Transport-agnostic data-plane bindings, peer capabilities, and negotiation
 //! contracts for Orion.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 mod binding;
 mod peer;
 mod transport;
@@ -12,6 +16,7 @@ pub use transport::{LinkType, TransportType};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::{vec, vec::Vec};
     use orion_core::{CompatibilityState, FeatureFlag, NodeId, ProtocolVersion, ResourceId};
 
     #[test]

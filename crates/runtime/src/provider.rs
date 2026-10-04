@@ -1,4 +1,5 @@
 use crate::RuntimeError;
+use alloc::vec::Vec;
 use orion_control_plane::{
     ProviderRecord, ResourceOwnershipMode, ResourceRecord, WorkloadRequirement,
 };

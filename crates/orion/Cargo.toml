@@ -20,28 +20,41 @@ path = "src/lib.rs"
 # The facade crate defaults to core/control/runtime layers only; transport crates remain opt-in so
 # embedding libraries do not pull in HTTP/TCP/QUIC/IPC surfaces unless explicitly requested.
 default = [
+    "std",
     "core",
     "auth",
     "control-plane",
     "data-plane",
     "runtime",
 ]
+# Host (std) support for the model crates. Without it, `core`, `auth`, `control-plane`,
+# `data-plane`, `runtime`, `cluster`, and `macros` build `no_std` + `alloc` (for example on MCUs).
+# Transports, `client`, and `service` always imply `std`.
+std = [
+    "orion-auth?/std",
+    "orion-cluster?/std",
+    "orion-control-plane?/std",
+    "orion-core?/std",
+    "orion-data-plane?/std",
+    "orion-runtime?/std",
+]
 auth = ["dep:orion-auth", "control-plane", "core"]
 core = ["dep:orion-core"]
-service = ["dep:orion-service"]
+service = ["dep:orion-service", "std"]
 macros = ["dep:orion-macros", "core"]
 control-plane = ["dep:orion-control-plane", "core"]
 data-plane = ["dep:orion-data-plane", "core"]
 cluster = ["dep:orion-cluster", "control-plane", "core"]
 runtime = ["dep:orion-runtime", "control-plane", "core"]
-transport-http = ["dep:orion-transport-http", "orion-transport-http/transport", "control-plane"]
-transport-tcp = ["dep:orion-transport-tcp", "data-plane"]
-transport-quic = ["dep:orion-transport-quic", "data-plane"]
-transport-ipc = ["dep:orion-transport-ipc", "control-plane", "data-plane"]
+transport-http = ["dep:orion-transport-http", "orion-transport-http/transport", "control-plane", "std"]
+transport-tcp = ["dep:orion-transport-tcp", "data-plane", "std"]
+transport-quic = ["dep:orion-transport-quic", "data-plane", "std"]
+transport-ipc = ["dep:orion-transport-ipc", "control-plane", "data-plane", "std"]
 client = [
     "dep:orion-client",
     "runtime",
     "orion-client/ipc",
+    "std",
 ]
 
 [dependencies]
@@ -60,11 +73,11 @@ orion-transport-quic = { workspace = true, optional = true }
 orion-transport-ipc = { workspace = true, optional = true }
 
 [dev-dependencies]
-serde.workspace = true
+serde = { workspace = true, features = ["std"] }
 # Control-protocol layout guard (tests/control_protocol_layout.rs).
-orion-auth.workspace = true
-orion-control-plane.workspace = true
-orion-core.workspace = true
+orion-auth = { workspace = true, features = ["std"] }
+orion-control-plane = { workspace = true, features = ["std"] }
+orion-core = { workspace = true, features = ["std"] }
 orion-transport-http.workspace = true
 orion-transport-ipc.workspace = true
-rkyv.workspace = true
+rkyv = { workspace = true, features = ["std"] }

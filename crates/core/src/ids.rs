@@ -1,7 +1,8 @@
 use crate::OrionError;
+use alloc::string::String;
+use core::{borrow::Borrow, fmt, ops::Deref, str::FromStr};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, fmt, ops::Deref, str::FromStr};
 
 macro_rules! string_newtype {
     ($name:ident) => {

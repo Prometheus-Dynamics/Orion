@@ -10,6 +10,11 @@
 //! - Transport features remain opt-in.
 //! - `service`, `macros`, and `cluster` are ergonomic opt-ins rather than default dependencies.
 //! - `service` is ergonomic rather than strictly zero-cost because it uses dynamic dispatch.
+//! - `std` (default) enables host support. With `default-features = false` the model layers
+//!   (`core`, `auth`, `control-plane`, `data-plane`, `runtime`, `cluster`, `macros`) build
+//!   `no_std` + `alloc`; transports, `client`, and `service` imply `std`.
+
+#![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod build_info;
 
@@ -71,25 +76,31 @@ pub mod control_plane {
         ExecutorRecordBuilder, ExecutorStateUpdate, ExecutorWorkloadQuery, HealthState,
         HostMetricsSnapshot, HttpEndpoint, IpcEndpoint, LatencyMetricBuckets,
         LatencyMetricsSnapshot, LeaseRecord, LeaseRecordBuilder, LeaseState,
-        LocalStreamUsageSnapshot, MetricsExportConfig, MutationApplyError, MutationBatch,
-        MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus,
-        NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus, NodeRecord,
-        NodeRecordBuilder, NodeResourceUsageSnapshot, ObservabilityEvent, ObservabilityEventKind,
-        ObservedClusterState, ObservedStateUpdate, OperationFailureCategory,
-        OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerTrustRecord,
-        PeerTrustSnapshot, PersistenceMetricsSnapshot, ProcessMemorySnapshot, ProviderLeaseQuery,
-        ProviderRecord, ProviderRecordBuilder, ProviderStateUpdate, RegistryUsageSnapshot,
-        ResourceActionResult, ResourceActionStatus, ResourceBinding, ResourceCapability,
-        ResourceConfigState, ResourceEndpoint, ResourceEndpointError, ResourceOwnershipMode,
-        ResourceRecord, ResourceRecordBuilder, ResourceState, RestartPolicy, SharedMemoryEndpoint,
-        StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch, SyncDiffRequest,
-        SyncRequest, SyncSummaryRequest, TcpEndpoint, TransportMetricsSnapshot, TypedConfigValue,
-        TypedResourceEndpoint, UnixEndpoint, WorkerQueueUsageSnapshot, WorkloadConfig,
-        WorkloadObservedState, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
-        config_json_value, deserialize_config, duration_ms_u64, estimate_wire_bytes,
-        render_communication_metrics, render_communication_metrics_with_config,
-        render_host_metrics, render_observability_metrics,
-        render_observability_metrics_with_config, render_resource_usage_metrics,
+        LocalStreamUsageSnapshot, MutationApplyError, MutationBatch, MutationHistoryUsageSnapshot,
+        NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot,
+        NodeReadinessStatus, NodeRecord, NodeRecordBuilder, NodeResourceUsageSnapshot,
+        ObservabilityEvent, ObservabilityEventKind, ObservedClusterState, ObservedStateUpdate,
+        OperationFailureCategory, OperationMetricsSnapshot, PeerEnrollment, PeerHello,
+        PeerIdentityUpdate, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
+        ProcessMemorySnapshot, ProviderLeaseQuery, ProviderRecord, ProviderRecordBuilder,
+        ProviderStateUpdate, RegistryUsageSnapshot, ResourceActionResult, ResourceActionStatus,
+        ResourceBinding, ResourceCapability, ResourceConfigState, ResourceEndpoint,
+        ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
+        ResourceState, RestartPolicy, SharedMemoryEndpoint, StateSectionCounts, StateSizeSnapshot,
+        StateSnapshot, StateWatch, SyncDiffRequest, SyncRequest, SyncSummaryRequest, TcpEndpoint,
+        TransportMetricsSnapshot, TypedConfigValue, TypedResourceEndpoint, UnixEndpoint,
+        WorkerQueueUsageSnapshot, WorkloadConfig, WorkloadObservedState, WorkloadRecord,
+        WorkloadRecordBuilder, WorkloadRequirement, config_json_value, deserialize_config,
+        duration_ms_u64, estimate_wire_bytes,
+    };
+
+    /// Prometheus text rendering is host-only and requires the `std` feature.
+    #[cfg(feature = "std")]
+    pub use orion_control_plane::{
+        MetricsExportConfig, render_communication_metrics,
+        render_communication_metrics_with_config, render_host_metrics,
+        render_observability_metrics, render_observability_metrics_with_config,
+        render_resource_usage_metrics,
     };
 }
 

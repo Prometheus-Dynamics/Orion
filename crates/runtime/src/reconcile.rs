@@ -2,12 +2,13 @@ use crate::{
     ExecutorCommand, LocalRuntimeStore, RuntimeError, WorkloadPlan,
     provider::validate_requirement_against_resource,
 };
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::vec::Vec;
 use orion_control_plane::{
     AvailabilityState, DesiredState, ExecutorRecord, ResourceBinding, ResourceRecord,
     WorkloadObservedState, WorkloadRecord,
 };
 use orion_core::{ExecutorId, NodeId, ResourceId, WorkloadId};
-use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReconcileReport {

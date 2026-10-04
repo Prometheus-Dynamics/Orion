@@ -1,4 +1,5 @@
 use crate::{LinkType, TransportType};
+use alloc::vec::Vec;
 use orion_core::{CompatibilityState, FeatureFlag, NodeId, ProtocolVersion};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};

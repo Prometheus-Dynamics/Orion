@@ -1,3 +1,6 @@
+//! Prometheus rendering is host-only, so these tests need the `std` feature.
+#![cfg(feature = "std")]
+
 use orion_control_plane::{
     CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot,
     CommunicationFailureKind, CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,

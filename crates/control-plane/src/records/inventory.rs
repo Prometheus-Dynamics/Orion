@@ -1,4 +1,5 @@
 use crate::HealthState;
+use alloc::{string::String, vec::Vec};
 use orion_core::{
     ArtifactId, ExecutorId, NodeId, ProviderId, ResourceType, ResourceTypeDef, RuntimeType,
     RuntimeTypeDef,

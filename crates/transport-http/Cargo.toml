@@ -32,18 +32,18 @@ transport = [
 ]
 
 [dependencies]
-orion-auth.workspace = true
-orion-control-plane.workspace = true
-orion-core.workspace = true
+orion-auth = { workspace = true, features = ["std"] }
+orion-control-plane = { workspace = true, features = ["std"] }
+orion-core = { workspace = true, features = ["std"] }
 orion-transport-common.workspace = true
 axum = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
-serde.workspace = true
-rkyv.workspace = true
+serde = { workspace = true, features = ["std"] }
+rkyv = { workspace = true, features = ["std"] }
 rustls = { workspace = true, optional = true }
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"], optional = true }
 tokio-rustls = { workspace = true, optional = true }
 

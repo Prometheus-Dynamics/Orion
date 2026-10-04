@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use orion_control_plane::{ExecutorRecord, ResourceBinding, ResourceRecord, WorkloadRecord};
 use orion_core::{ExecutorId, WorkloadId};
 

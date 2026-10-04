@@ -1,4 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::{
+    borrow::ToOwned,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use serde::de::DeserializeOwned;
 use serde_json::{Map as JsonMap, Number as JsonNumber, Value as JsonValue};
@@ -440,6 +446,7 @@ impl<'a> ConfigMapRef<'a> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
     use serde::Deserialize;
 
     use super::*;

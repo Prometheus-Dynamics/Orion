@@ -1,9 +1,12 @@
 use super::maintenance::MaintenanceState;
 use super::resource_usage::NodeResourceUsageSnapshot;
+use alloc::borrow::ToOwned;
+use alloc::collections::BTreeMap;
+use alloc::{string::String, vec::Vec};
+use core::fmt;
 use orion_core::{NodeId, PeerBaseUrl, PublicKeyHex, Revision};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt};
 
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,

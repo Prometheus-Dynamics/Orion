@@ -8,7 +8,7 @@
 //!
 //! This is the single source of truth for that version. See `docs/protocol-compatibility.md`.
 
-use std::fmt;
+use core::fmt;
 
 /// Wire-layout version of the Orion control protocol.
 ///
@@ -69,11 +69,12 @@ impl fmt::Display for ControlProtocolMismatch {
     }
 }
 
-impl std::error::Error for ControlProtocolMismatch {}
+impl core::error::Error for ControlProtocolMismatch {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     #[test]
     fn check_accepts_only_the_local_version() {

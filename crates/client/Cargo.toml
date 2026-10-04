@@ -21,12 +21,12 @@ default = ["ipc"]
 ipc = ["dep:orion-transport-ipc"]
 
 [dependencies]
-orion-core.workspace = true
-orion-control-plane.workspace = true
-orion-runtime.workspace = true
+orion-core = { workspace = true, features = ["std"] }
+orion-control-plane = { workspace = true, features = ["std"] }
+orion-runtime = { workspace = true, features = ["std"] }
 orion-transport-ipc = { workspace = true, optional = true }
-serde.workspace = true
-thiserror.workspace = true
+serde = { workspace = true, features = ["std"] }
+thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "fs", "sync", "time"] }
 
 [dev-dependencies]

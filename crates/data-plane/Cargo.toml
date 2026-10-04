@@ -16,6 +16,11 @@ workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+# `std` is on by default. Without it the crate is `no_std` + `alloc`.
+default = ["std"]
+std = ["orion-core/std", "rkyv/std", "serde/std", "thiserror/std"]
+
 [dependencies]
 orion-core.workspace = true
 serde.workspace = true

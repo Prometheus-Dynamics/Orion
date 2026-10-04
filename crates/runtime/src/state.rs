@@ -1,10 +1,11 @@
 use crate::{ExecutorSnapshot, ProviderSnapshot, RuntimeError};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::vec::Vec;
 use orion_control_plane::{
     AppliedClusterState, DesiredClusterState, ExecutorRecord, MaintenanceMode, MaintenanceState,
     ObservedClusterState, ProviderRecord, ResourceRecord, WorkloadRecord,
 };
 use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId};
-use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeSnapshot {

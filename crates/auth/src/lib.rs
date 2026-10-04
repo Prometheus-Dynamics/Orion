@@ -1,3 +1,12 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
+};
 use orion_control_plane::{ControlMessage, ObservedStateUpdate};
 use orion_core::{NodeId, encode_to_vec};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
@@ -77,10 +86,10 @@ pub fn canonical_peer_request_bytes(
         encode_to_vec(payload).map_err(|err| AuthProtocolError::Encode(err.to_string()))?;
     let mut bytes = Vec::with_capacity(
         PEER_REQUEST_SIGNING_DOMAIN.len()
-            + std::mem::size_of::<u16>()
+            + core::mem::size_of::<u16>()
             + node_id.as_str().len()
             + public_key.len()
-            + std::mem::size_of::<u64>()
+            + core::mem::size_of::<u64>()
             + payload_bytes.len(),
     );
     bytes.extend_from_slice(PEER_REQUEST_SIGNING_DOMAIN);
@@ -107,7 +116,7 @@ pub fn canonical_transport_binding_bytes(
 
     let mut bytes = Vec::with_capacity(
         TRANSPORT_BINDING_SIGNING_DOMAIN.len()
-            + std::mem::size_of::<u16>()
+            + core::mem::size_of::<u16>()
             + node_id.as_str().len()
             + public_key.len()
             + tls_cert_pem.len(),

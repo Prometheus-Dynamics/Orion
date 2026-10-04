@@ -37,14 +37,14 @@ alloc-mimalloc = ["dep:mimalloc"]
 alloc-jemalloc = ["dep:tikv-jemallocator"]
 
 [dependencies]
-ed25519-dalek.workspace = true
+ed25519-dalek = { workspace = true, features = ["std"] }
 libc.workspace = true
 mimalloc = { workspace = true, optional = true }
-orion-auth.workspace = true
-orion-control-plane.workspace = true
-orion-core.workspace = true
-orion-data-plane.workspace = true
-orion-runtime.workspace = true
+orion-auth = { workspace = true, features = ["std"] }
+orion-control-plane = { workspace = true, features = ["std"] }
+orion-core = { workspace = true, features = ["std"] }
+orion-data-plane = { workspace = true, features = ["std"] }
+orion-runtime = { workspace = true, features = ["std"] }
 orion-service.workspace = true
 orion-transport-common.workspace = true
 orion-transport-http.workspace = true
@@ -53,10 +53,10 @@ orion-transport-quic = { workspace = true, optional = true }
 orion-transport-tcp = { workspace = true, optional = true }
 rand_core.workspace = true
 rcgen = { workspace = true, optional = true }
-rkyv.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
+rkyv = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true, features = ["std"] }
 tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time", "sync", "signal", "io-util", "fs"] }
 tracing.workspace = true
