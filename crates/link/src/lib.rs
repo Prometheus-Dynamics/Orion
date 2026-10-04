@@ -1,17 +1,21 @@
-//! Framing layers of the Orion link protocol (see `docs/link-protocol.md`).
+//! The Orion link protocol (see `docs/link-protocol.md`).
 //!
 //! The link protocol connects microcontrollers to an `orion-node` over UART, RS-485, USB-CDC,
-//! classic CAN, and CAN FD. This crate holds the transport-independent framing, which needs
-//! neither an allocator nor any other Orion crate:
+//! classic CAN, and CAN FD, without assuming any chip, HAL, RTOS, or async runtime. Layers:
 //!
 //! - [`frame`]: message frames `[version][kind][seq u16 LE][payload][crc32c LE]`.
 //! - [`stream`]: COBS encoding with `0x00` delimiters for byte streams, plus a resynchronizing
 //!   streaming decoder.
 //! - [`packet`]: segmentation into classic CAN / CAN FD frames and reassembly.
+//! - `message` (feature `alloc`): typed messages with postcard bodies and stable kind numbers.
+//! - `device` (feature `alloc`): the sans-IO device session, generic over `Stream` or
+//!   `Packet` transports, with fixed const-generic buffers.
+//! - `host` (feature `std`): the sans-IO host session and a multi-device CAN bus, for the node
+//!   gateway.
 //!
-//! Everything is `no_std`, allocation-free, sans-IO, and panic-free on any input: buffers are
-//! caller-provided or const-generic. Optional features add thin adapters for `embedded-io`,
-//! `embedded-io-async`, and `embedded-can`.
+//! The default build is only the framing layers: `no_std`, allocation-free, and panic-free on any
+//! input, with caller-provided or const-generic buffers. Optional features add thin adapters for
+//! `embedded-io`, `embedded-io-async`, and `embedded-can`.
 //!
 //! ```
 //! use orion_link::{FrameHeader, StreamDecoder, StreamEncoder};
@@ -43,6 +47,8 @@
 )]
 #![warn(missing_docs)]
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
@@ -51,6 +57,15 @@ pub mod frame;
 pub mod packet;
 mod source;
 pub mod stream;
+
+#[cfg(feature = "alloc")]
+pub mod device;
+#[cfg(feature = "std")]
+pub mod host;
+#[cfg(feature = "alloc")]
+pub mod message;
+#[cfg(feature = "alloc")]
+pub mod transport;
 
 #[cfg(feature = "embedded-can")]
 mod can;
@@ -74,3 +89,5 @@ pub use stream::{
     StreamDecoder, StreamEncoder, StreamError, StreamStats, encode_frame, encode_message,
     max_encoded_len,
 };
+#[cfg(feature = "alloc")]
+pub use transport::{Packet, Stream, Transport};

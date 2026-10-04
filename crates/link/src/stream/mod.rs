@@ -9,6 +9,8 @@ use core::fmt;
 #[cfg(any(feature = "embedded-io", feature = "embedded-io-async"))]
 pub(crate) use decode::Status;
 pub use decode::{StreamDecoder, StreamStats};
+#[cfg(feature = "alloc")]
+pub(crate) use encode::EncoderState;
 pub use encode::{StreamEncoder, encode_frame, encode_message, max_encoded_len};
 
 use crate::frame::FrameError;

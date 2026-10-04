@@ -35,6 +35,18 @@ enum BlockEnd {
     End,
 }
 
+/// Progress of a [`StreamEncoder`] without its borrowed frame, so a session can store it and resume
+/// the encoding on a later call (see [`StreamEncoder::save`] / [`StreamEncoder::resume`]).
+#[cfg(feature = "alloc")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(hidden)]
+pub struct EncoderState {
+    pos: usize,
+    block_left: usize,
+    block_end: BlockEnd,
+    state: State,
+}
+
 /// Incremental COBS encoder: yields the stream bytes for one frame, ending with `0x00`.
 ///
 /// It holds only a borrowed payload and a few counters, so a UART driver can pull bytes one at a
@@ -89,6 +101,30 @@ impl<'a> StreamEncoder<'a> {
             self.state = State::Leading;
         }
         self
+    }
+
+    /// Progress so far, to continue later over the same frame with [`StreamEncoder::resume`].
+    #[cfg(feature = "alloc")]
+    pub(crate) fn save(&self) -> EncoderState {
+        EncoderState {
+            pos: self.pos,
+            block_left: self.block_left,
+            block_end: self.block_end,
+            state: self.state,
+        }
+    }
+
+    /// Continues encoding the raw `frame` from a saved state. `frame` must be the same bytes the
+    /// state was saved from.
+    #[cfg(feature = "alloc")]
+    pub(crate) fn resume(frame: &'a [u8], saved: EncoderState) -> Self {
+        Self {
+            src: FrameSource::raw(frame),
+            pos: saved.pos,
+            block_left: saved.block_left,
+            block_end: saved.block_end,
+            state: saved.state,
+        }
     }
 
     /// Whether every byte has been produced.

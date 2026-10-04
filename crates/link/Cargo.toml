@@ -7,7 +7,7 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "no_std framing codecs (CRC-32C frames, COBS streams, CAN/CAN FD segmentation) for the Orion link protocol."
+description = "no_std link protocol for connecting microcontrollers to Orion: framing (CRC-32C, COBS, CAN/CAN FD), typed messages, and sans-IO device/host sessions."
 readme = "README.md"
 keywords = ["no-std", "embedded", "cobs", "can", "framing"]
 categories = ["embedded", "no-std", "encoding"]
@@ -19,10 +19,21 @@ workspace = true
 path = "src/lib.rs"
 
 [features]
-# Everything is no_std and allocation-free by default.
+# The default build is the no_std, allocation-free framing layer only.
 default = []
-# std-only conveniences (`std::error::Error` impls).
-std = ["embedded-io?/std", "embedded-io-async?/std"]
+# Typed link messages (postcard) and the sans-IO device session. Still no_std; needs a global
+# allocator for message bodies.
+alloc = ["dep:orion-core", "dep:orion-control-plane", "dep:postcard", "dep:serde"]
+# The sans-IO host session (`host`) and `std::error::Error` impls. Implies `alloc`.
+std = [
+    "alloc",
+    "orion-core/std",
+    "orion-control-plane/std",
+    "postcard/use-std",
+    "serde/std",
+    "embedded-io?/std",
+    "embedded-io-async?/std",
+]
 # 256-entry CRC-32C table (1 KiB of flash) instead of the 16-entry nibble table (64 bytes).
 crc-table = []
 # Blocking byte-stream adapters over `embedded_io::{Read, BufRead, Write}`.
@@ -33,6 +44,18 @@ embedded-io-async = ["dep:embedded-io-async"]
 embedded-can = ["dep:embedded-can"]
 
 [dependencies]
+orion-core = { workspace = true, optional = true }
+orion-control-plane = { workspace = true, optional = true }
+postcard = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 embedded-can = { version = "0.4", optional = true }
 embedded-io = { version = "0.6", optional = true }
 embedded-io-async = { version = "0.6", optional = true }
+
+[dev-dependencies]
+orion-control-plane.workspace = true
+orion-core.workspace = true
+
+[[example]]
+name = "sim_device"
+required-features = ["std"]

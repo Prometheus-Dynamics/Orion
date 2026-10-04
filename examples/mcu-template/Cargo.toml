@@ -1,0 +1,53 @@
+[package]
+name = "orion-mcu-template"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Template for porting the Orion link protocol to any microcontroller (no chip, HAL, RTOS, or async runtime assumed)."
+
+# Standalone: not a member of the Orion workspace (it is listed in the workspace `exclude`), so it
+# keeps its own lockfile and can be copied out of the repository as the start of a firmware crate.
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+# `staticlib` for linking into C firmware (any vendor SDK); `rlib` for Rust firmware.
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = ["standalone", "ffi-uart"]
+# Everything a standalone staticlib needs: the example heap as `#[global_allocator]` and a
+# `#[panic_handler]` (both only on bare-metal targets). Rust firmware that has its own allocator
+# and panic handler depends on this crate with `default-features = false`.
+standalone = ["global-heap", "panic-handler"]
+# The inline first-fit heap type (`heap::FreeListHeap`). Replaceable by any `GlobalAlloc`.
+heap = []
+# Install an 8 KiB `FreeListHeap` as `#[global_allocator]` on bare-metal targets.
+global-heap = ["heap"]
+# Install a spin-loop `#[panic_handler]` on bare-metal targets.
+panic-handler = []
+# C entry points (`orion_init`, `orion_rx`, `orion_tx`, ...) over a byte-stream link.
+ffi-uart = []
+# C entry points over a CAN link instead.
+ffi-can = []
+
+[dependencies]
+embedded-can = "0.4"
+embedded-io = "0.6"
+nb = "1"
+orion-link = { path = "../../crates/link", default-features = false, features = ["alloc", "embedded-can"] }
+
+[dev-dependencies]
+orion-link = { path = "../../crates/link", features = ["std"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = false

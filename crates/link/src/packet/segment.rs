@@ -46,6 +46,16 @@ impl Segment {
     }
 }
 
+/// Progress of a [`Segmenter`] without its borrowed frame (see [`Segmenter::save`]).
+#[cfg(feature = "alloc")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[doc(hidden)]
+pub struct SegmenterState {
+    pos: usize,
+    counter: u8,
+    done: bool,
+}
+
 /// Splits one frame into segments for a given [`SegmentMtu`].
 ///
 /// Full segments use the whole MTU. The tail is split into as few segments as possible whose
@@ -92,6 +102,28 @@ impl<'a> Segmenter<'a> {
     #[must_use]
     pub fn for_message(header: FrameHeader, payload: &'a [u8], mtu: SegmentMtu) -> Self {
         Self::new(FrameSource::message(header, payload), mtu)
+    }
+
+    /// Progress so far, to continue later with [`Segmenter::resume`].
+    #[cfg(feature = "alloc")]
+    pub(crate) fn save(&self) -> SegmenterState {
+        SegmenterState {
+            pos: self.pos,
+            counter: self.counter,
+            done: self.done,
+        }
+    }
+
+    /// Continues segmenting the raw `frame` from a saved state.
+    #[cfg(feature = "alloc")]
+    pub(crate) fn resume(frame: &'a [u8], mtu: SegmentMtu, saved: SegmenterState) -> Self {
+        Self {
+            src: FrameSource::raw(frame),
+            mtu,
+            pos: saved.pos,
+            counter: saved.counter,
+            done: saved.done,
+        }
     }
 
     /// Whether every segment has been produced.

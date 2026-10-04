@@ -14,6 +14,8 @@ use core::fmt;
 
 pub use ids::CanLinkIds;
 pub use reassemble::{PacketStats, Reassembler};
+#[cfg(feature = "alloc")]
+pub(crate) use segment::SegmenterState;
 pub use segment::{Segment, Segmenter};
 
 use crate::frame::FrameError;
