@@ -108,6 +108,7 @@ async fn orionctl_snapshot_and_watch_summaries_include_desired_and_observed_coun
                 mutations: vec![DesiredStateMutation::PutArtifact(
                     ArtifactRecord::builder("artifact.summary").build(),
                 )],
+                stamps: Vec::new(),
             }),
         )))
         .await

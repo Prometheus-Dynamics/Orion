@@ -104,6 +104,9 @@ pub enum NodeError {
     #[cfg(feature = "transport-quic")]
     #[error(transparent)]
     QuicTransport(#[from] QuicTransportError),
+    #[cfg(feature = "peer-tcp")]
+    #[error(transparent)]
+    PeerTcp(#[from] crate::peer_tcp::PeerTcpError),
     #[error("persistence worker is not available")]
     PersistenceWorkerUnavailable,
     #[error("persistence worker terminated")]

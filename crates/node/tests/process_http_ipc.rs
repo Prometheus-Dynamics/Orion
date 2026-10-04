@@ -86,6 +86,7 @@ async fn orion_node_binary_ipc_stream_pushes_control_plane_state_events() {
         mutations: vec![DesiredStateMutation::PutArtifact(
             ArtifactRecord::builder("artifact.ipc.control").build(),
         )],
+        stamps: Vec::new(),
     };
     let response = process
         .client()
@@ -163,6 +164,7 @@ async fn orion_node_binary_ipc_stream_pushes_executor_assignment_events() {
                 .build(),
             ),
         ],
+        stamps: Vec::new(),
     };
     let response = process
         .client()
@@ -259,6 +261,7 @@ async fn orion_node_binary_ipc_stream_pushes_provider_lease_events() {
                     .build(),
             ),
         ],
+        stamps: Vec::new(),
     };
     let response = process
         .client()
@@ -398,6 +401,7 @@ async fn orion_node_binary_ipc_unary_accepts_control_plane_mutations() {
                 mutations: vec![DesiredStateMutation::PutArtifact(
                     ArtifactRecord::builder("artifact.ipc.local-mutate").build(),
                 )],
+                stamps: Vec::new(),
             }),
         })
         .await
@@ -623,6 +627,7 @@ async fn orion_node_binary_stream_reconnect_resumes_queued_events_before_ttl() {
                 mutations: vec![DesiredStateMutation::PutArtifact(
                     ArtifactRecord::builder("artifact.resume").build(),
                 )],
+                stamps: Vec::new(),
             }),
         )))
         .await
@@ -731,6 +736,7 @@ async fn orion_node_binary_stream_reconnect_after_ttl_drops_resume_state() {
             mutations: vec![DesiredStateMutation::PutArtifact(
                 ArtifactRecord::builder("artifact.expire").build(),
             )],
+            stamps: Vec::new(),
         }),
     )
     .await;

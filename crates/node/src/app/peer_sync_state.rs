@@ -6,10 +6,10 @@ use orion::{
     control_plane::{DesiredStateSectionFingerprints, PeerHello, PeerSyncErrorKind},
 };
 
-/// Error text returned when peer sync is requested from a build without HTTP support.
-#[cfg(not(feature = "transport-http"))]
-pub(crate) const PEER_SYNC_REQUIRES_HTTP: &str =
-    "peer sync requires orion-node to be built with the `transport-http` feature";
+/// Error text returned when peer sync is requested from a build without a peer transport.
+#[cfg(not(peer_sync))]
+pub(crate) const PEER_SYNC_REQUIRES_TRANSPORT: &str = "peer sync requires orion-node to be built \
+     with the `transport-http` or `peer-tcp` feature";
 
 fn read_file_bytes(path: &std::path::Path) -> Result<Vec<u8>, NodeError> {
     blocking_read_file(path, "failed to read file")
@@ -96,38 +96,6 @@ impl NodeApp {
         })
     }
 
-    #[cfg(feature = "transport-http")]
-    pub(super) fn infer_peer_matches_local_desired(
-        &self,
-        node_id: &NodeId,
-        desired_revision: Revision,
-        desired_fingerprint: u64,
-        desired_section_fingerprints: DesiredStateSectionFingerprints,
-    ) -> Result<(), NodeError> {
-        self.record_peer_assumed_desired_state(
-            node_id,
-            desired_revision,
-            desired_fingerprint,
-            desired_section_fingerprints,
-            CompatibilityState::Preferred,
-        )
-    }
-
-    #[cfg(feature = "transport-http")]
-    pub(super) fn infer_peer_matches_current_desired(
-        &self,
-        node_id: &NodeId,
-    ) -> Result<(), NodeError> {
-        let desired = self.desired_metadata()?;
-        let revisions = self.current_revisions();
-        self.infer_peer_matches_local_desired(
-            node_id,
-            revisions.desired,
-            desired.fingerprint,
-            desired.section_fingerprints,
-        )
-    }
-
     pub(super) fn evict_peer_client(&self, node_id: &NodeId) {
         self.with_peer_clients_mut(|peer_clients| {
             peer_clients.remove(node_id);
@@ -170,12 +138,12 @@ impl NodeApp {
     }
 }
 
-#[cfg(not(feature = "transport-http"))]
+#[cfg(not(peer_sync))]
 impl NodeApp {
-    /// Peer sync runs over the HTTP control plane; IPC-only builds reject it.
+    /// Builds without a peer transport cannot sync.
     pub async fn sync_peer(&self, node_id: &NodeId) -> Result<(), NodeError> {
         Err(NodeError::Config(format!(
-            "cannot sync peer {node_id}: {PEER_SYNC_REQUIRES_HTTP}"
+            "cannot sync peer {node_id}: {PEER_SYNC_REQUIRES_TRANSPORT}"
         )))
     }
 }

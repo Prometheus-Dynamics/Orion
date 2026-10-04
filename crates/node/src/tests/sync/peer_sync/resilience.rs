@@ -78,37 +78,38 @@ async fn node_sync_peer_resolves_equal_revision_conflict_deterministically() {
     );
     node_a.replace_desired(desired_a.clone());
 
-    let mut expected = orion::control_plane::DesiredClusterState {
-        revision: orion::Revision::new(3),
-        ..Default::default()
+    let workload_id = WorkloadId::new("workload.conflict");
+    let stamp_a = node_a.state_snapshot().state.desired.stamps.workloads[&workload_id];
+    let stamp_b = node_b.state_snapshot().state.desired.stamps.workloads[&workload_id];
+    let winner = if stamp_a > stamp_b {
+        "node-a"
+    } else {
+        "node-b"
     };
-    expected.artifacts.insert(
-        ArtifactId::new("artifact.conflict.a"),
-        orion::control_plane::ArtifactRecord::builder("artifact.conflict.a").build(),
-    );
-    expected.artifacts.insert(
-        ArtifactId::new("artifact.conflict.b"),
-        orion::control_plane::ArtifactRecord::builder("artifact.conflict.b").build(),
-    );
-    expected.workloads.insert(
-        WorkloadId::new("workload.conflict"),
-        WorkloadRecord::builder(
-            WorkloadId::new("workload.conflict"),
-            RuntimeType::new("graph.exec.v1"),
-            ArtifactId::new("artifact.conflict.b"),
-        )
-        .desired_state(DesiredState::Stopped)
-        .assigned_to(NodeId::new("node-b"))
-        .build(),
-    );
 
     node_a
         .sync_peer(&NodeId::new("node-b"))
         .await
-        .expect("equal revision peer sync should succeed");
+        .expect("conflicting peer sync should succeed");
 
-    assert_eq!(node_a.state_snapshot().state.desired, expected);
-    assert_eq!(node_b.state_snapshot().state.desired, expected);
+    let merged_a = node_a.state_snapshot().state.desired;
+    let merged_b = node_b.state_snapshot().state.desired;
+    // Both nodes hold the same objects, stamps and tombstones (their local revisions may differ).
+    assert_eq!(desired_content(&merged_a), desired_content(&merged_b));
+    // Different objects never conflict; the workload written on both nodes goes to the version
+    // with the later HLC stamp.
+    assert_eq!(merged_a.artifacts.len(), 2);
+    assert_eq!(
+        merged_a.workloads[&workload_id]
+            .assigned_node_id
+            .as_ref()
+            .map(NodeId::as_str),
+        Some(winner)
+    );
+    assert_eq!(
+        merged_a.stamps.workloads[&workload_id],
+        stamp_a.max(stamp_b)
+    );
 
     server_b.abort();
 }
@@ -248,11 +249,12 @@ async fn node_sync_peer_propagates_workload_tombstone_over_existing_record() {
             .workloads
             .contains_key(&WorkloadId::new("workload.delete"))
     );
-    assert_eq!(
+    assert!(
         desired_b
-            .workload_tombstones
-            .get(&WorkloadId::new("workload.delete")),
-        Some(&Revision::new(2))
+            .tombstones
+            .workloads
+            .contains_key(&WorkloadId::new("workload.delete")),
+        "the delete travels as a tombstone"
     );
 
     server_a.abort();
@@ -332,7 +334,7 @@ async fn node_sync_peer_higher_revision_readd_overrides_tombstone() {
             .as_ref(),
         Some(&NodeId::new("node-b"))
     );
-    assert!(!desired_a.workload_tombstones.contains_key(&workload_id));
+    assert!(!desired_a.tombstones.workloads.contains_key(&workload_id));
 
     server_b.abort();
 }

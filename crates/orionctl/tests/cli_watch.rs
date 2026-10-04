@@ -62,6 +62,7 @@ async fn orionctl_watch_state_and_peers_list_use_local_admin_paths() {
                 mutations: vec![DesiredStateMutation::PutArtifact(
                     ArtifactRecord::builder("artifact.watch").build(),
                 )],
+                stamps: Vec::new(),
             }),
         )))
         .await

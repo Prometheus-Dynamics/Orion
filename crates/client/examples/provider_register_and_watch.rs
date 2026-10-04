@@ -64,6 +64,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .holder_node(NodeId::new(node_id.clone()))
                         .build(),
                 )],
+                stamps: Vec::new(),
             }),
         )))
         .await?;

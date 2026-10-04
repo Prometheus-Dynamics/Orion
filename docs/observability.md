@@ -329,7 +329,7 @@ size is reported as record counts plus the size of the persisted snapshot files 
 | Field | Shape | Notes |
 | --- | --- | --- |
 | `process` | `ProcessMemorySnapshot` | `vm_rss_bytes`, `vm_hwm_bytes`, `rss_anon_bytes`, `rss_file_bytes`, `rss_shmem_bytes`, `vm_data_bytes`, and `threads` from `/proc/self/status`; `pss_bytes`, `pss_anon_bytes`, `pss_file_bytes`, and `private_dirty_bytes` from `/proc/self/smaps_rollup`. Each is `null` when the host does not expose it (non-Linux, or older kernels without split PSS). |
-| `state.desired`, `state.observed` | `StateSectionCounts` | Record counts for `nodes`, `artifacts`, `workloads`, `workload_tombstones`, `resources`, `providers`, `executors`, and `leases`. Observed state only tracks nodes, workloads, resources, and leases. |
+| `state.desired`, `state.observed` | `StateSectionCounts` | Record counts for `nodes`, `artifacts`, `workloads`, `tombstones` (desired-state tombstones of every section), `resources`, `providers`, `executors`, and `leases`. Observed state only tracks nodes, workloads, resources, and leases. |
 | `state.persisted_snapshot_bytes` | integer or null | Sum of the persisted snapshot manifest and desired/observed/applied section files. |
 | `state.persisted_mutation_history_bytes` | integer or null | Size of the persisted mutation-history file. |
 | `mutation_history.batches`, `mutation_history.max_batches` | integer | Retained batches versus `ORION_NODE_MAX_MUTATION_HISTORY`. |
@@ -434,6 +434,27 @@ The observability snapshot already includes dedicated operation metrics for:
 
 The readiness and health snapshots also surface peer-sync and replay state in their top-level
 status and reasons.
+
+### Desired-state merge (`desired_merge`)
+
+`desired_merge` reports the node's hybrid logical clock and the per-object merge counters of peer
+sync (see `docs/peer-sync.md`):
+
+| Field | Prometheus | Meaning |
+| --- | --- | --- |
+| `hlc` | `orion_node_hlc_physical_ms` (physical part) | Latest HLC timestamp issued or accepted. |
+| `max_drift_ms`, `tombstone_retention_ms` | `orion_node_hlc_max_drift_ms` | `ORION_NODE_HLC_MAX_DRIFT_MS`, `ORION_NODE_TOMBSTONE_RETENTION_MS`. |
+| `tombstones` | `orion_node_desired_tombstones` | Retained desired-state tombstones. |
+| `local_writes` | `orion_node_desired_merge_local_writes_total` | Object versions written (stamped) by this node. |
+| `remote_writes_applied` | `orion_node_desired_merge_remote_applied_total` | Peer versions that replaced the local one. |
+| `stale_remote_writes_ignored` | `orion_node_desired_merge_remote_stale_total` | Peer versions that lost against a newer local one. |
+| `clock_skew_rejections`, `last_clock_skew` | `orion_node_desired_merge_clock_skew_rejections_total` | Peer versions stamped beyond the maximum drift and rejected. A growing value means a peer's clock is ahead. |
+| `expired_tombstones_ignored` | `orion_node_desired_merge_expired_tombstones_ignored_total` | Peer deletes already past retention. |
+| `tombstones_collected` | `orion_node_desired_tombstones_collected_total` | Tombstones dropped after retention. |
+
+Per-peer sync traffic is reported as `communication` endpoints `http/peer-sync/<node>` or
+`tcp/peer-sync/<node>` depending on the peer's transport; a node serving `orion+tcp` peers also
+reports `tcp/peer-control`.
 
 ## Peer Sync Failure Categories
 

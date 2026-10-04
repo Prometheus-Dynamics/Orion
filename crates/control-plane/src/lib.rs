@@ -19,8 +19,8 @@ pub use messages::{
     CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot, CommunicationFailureKind,
     CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
     CommunicationStageMetricsSnapshot, CommunicationTransportKind, ControlMessage,
-    DesiredStateMutation, DesiredStateObjectSelector, DesiredStateSection,
-    DesiredStateSectionFingerprints, DesiredStateSummary, ExecutorStateUpdate,
+    DesiredStateMergeSnapshot, DesiredStateMutation, DesiredStateObjectSelector,
+    DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary, ExecutorStateUpdate,
     ExecutorWorkloadQuery, HostMetricsSnapshot, HttpMutualTlsMode, LatencyMetricsSnapshot,
     LocalStreamUsageSnapshot, MaintenanceAction, MaintenanceCommand, MaintenanceMode,
     MaintenanceState, MaintenanceStatus, MutationApplyError, MutationBatch,
@@ -48,14 +48,15 @@ pub use metrics_support::{
 pub use records::{
     AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, BUILTIN_ENDPOINT_SCHEMES,
     ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef, CustomEndpoint, CustomEndpointScheme,
-    DesiredClusterState, ExecutorRecord, ExecutorRecordBuilder, HttpEndpoint, IpcEndpoint,
-    LeaseRecord, LeaseRecordBuilder, NodeRecord, NodeRecordBuilder, ObservedClusterState,
-    ProviderRecord, ProviderRecordBuilder, ResourceActionResult, ResourceActionStatus,
-    ResourceBinding, ResourceCapability, ResourceConfigState, ResourceEndpoint,
-    ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
-    ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue, TypedResourceEndpoint,
-    UnixEndpoint, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
-    config_json_value, deserialize_config, is_valid_endpoint_scheme,
+    DesiredClusterState, DesiredObjectKey, DesiredObjectStamps, DesiredObjectVersion,
+    ExecutorRecord, ExecutorRecordBuilder, HttpEndpoint, IpcEndpoint, LeaseRecord,
+    LeaseRecordBuilder, NodeRecord, NodeRecordBuilder, ObservedClusterState, ProviderRecord,
+    ProviderRecordBuilder, ResourceActionResult, ResourceActionStatus, ResourceBinding,
+    ResourceCapability, ResourceConfigState, ResourceEndpoint, ResourceEndpointError,
+    ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder, ResourceState,
+    SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue, TypedResourceEndpoint, UnixEndpoint,
+    WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement, config_json_value,
+    deserialize_config, is_valid_endpoint_scheme,
 };
 pub use state::{
     AvailabilityState, DesiredState, HealthState, LeaseState, RestartPolicy, WorkloadObservedState,
@@ -333,6 +334,7 @@ mod tests {
         MutationBatch {
             base_revision: desired.revision,
             mutations: vec![DesiredStateMutation::PutWorkload(workload.clone())],
+            stamps: Vec::new(),
         }
         .apply_to(&mut desired);
 
@@ -409,6 +411,7 @@ mod tests {
         let result = MutationBatch {
             base_revision: Revision::ZERO,
             mutations: Vec::new(),
+            stamps: Vec::new(),
         }
         .apply_to_checked(&mut desired);
 

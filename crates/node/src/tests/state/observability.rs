@@ -37,6 +37,7 @@ fn observability_tracks_mutation_failures_and_replay_timing() {
                     Box::new(ControlMessage::Mutations(MutationBatch {
                         base_revision: Revision::new(42),
                         mutations: Vec::new(),
+                        stamps: Vec::new(),
                     })),
                 ))
                 .expect("mutation request should be signed"),
@@ -58,6 +59,7 @@ fn observability_tracks_mutation_failures_and_replay_timing() {
                         mutations: vec![DesiredStateMutation::PutArtifact(
                             ArtifactRecord::builder("artifact.obs").build(),
                         )],
+                        stamps: Vec::new(),
                     })),
                 ))
                 .expect("mutation request should be signed"),

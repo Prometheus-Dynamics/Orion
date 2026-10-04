@@ -4,7 +4,7 @@ use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
 use alloc::{string::String, vec::Vec};
 use core::fmt;
-use orion_core::{NodeId, PeerBaseUrl, PublicKeyHex, Revision};
+use orion_core::{HlcTimestamp, NodeId, PeerBaseUrl, PublicKeyHex, Revision};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -511,6 +511,46 @@ pub struct TransportMetricsSnapshot {
     pub reconnect_count: u64,
 }
 
+/// Hybrid-logical-clock reading and per-object merge counters of a node (see
+/// `docs/peer-sync.md`).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+#[serde(default)]
+pub struct DesiredStateMergeSnapshot {
+    /// Latest HLC timestamp the node issued or accepted.
+    pub hlc: HlcTimestamp,
+    /// `ORION_NODE_HLC_MAX_DRIFT_MS`.
+    pub max_drift_ms: u64,
+    /// `ORION_NODE_TOMBSTONE_RETENTION_MS`.
+    pub tombstone_retention_ms: u64,
+    /// Desired-state tombstones currently retained.
+    pub tombstones: u64,
+    /// Object versions written locally (stamped by this node).
+    pub local_writes: u64,
+    /// Object versions received from peers that replaced the local version.
+    pub remote_writes_applied: u64,
+    /// Object versions received from peers that lost against a newer local version.
+    pub stale_remote_writes_ignored: u64,
+    /// Object versions rejected because their timestamp was beyond the maximum drift.
+    pub clock_skew_rejections: u64,
+    /// Received deletes already past tombstone retention, with nothing left to delete.
+    pub expired_tombstones_ignored: u64,
+    /// Tombstones dropped after the retention period.
+    pub tombstones_collected: u64,
+    /// The most recent clock-skew rejection, if any.
+    pub last_clock_skew: Option<String>,
+}
+
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
@@ -673,4 +713,8 @@ pub struct NodeObservabilitySnapshot {
     /// Memory, state-size, and backlog diagnostics. Defaults when absent from structured input.
     #[serde(default)]
     pub resource_usage: NodeResourceUsageSnapshot,
+    /// Hybrid-logical-clock and per-object merge counters. Defaults when absent from structured
+    /// input.
+    #[serde(default)]
+    pub desired_merge: DesiredStateMergeSnapshot,
 }

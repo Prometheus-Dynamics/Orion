@@ -22,16 +22,16 @@ use orion_auth::{
 };
 use orion_control_plane::{
     AppliedClusterState, ArtifactRecord, ClientHello, ClientRole, ClusterStateEnvelope,
-    ControlMessage, DesiredClusterState, DesiredState, DesiredStateSectionFingerprints,
-    ExecutorRecord, HealthState, LeaseRecord, LeaseState, MutationBatch, NodeRecord,
-    ObservedClusterState, ObservedStateUpdate, PeerHello, ProviderRecord, ResourceOwnershipMode,
-    ResourceRecord, RestartPolicy, StateSnapshot, TypedConfigValue, WorkloadConfig,
-    WorkloadObservedState, WorkloadRecord,
+    ControlMessage, DesiredClusterState, DesiredState, DesiredStateMutation,
+    DesiredStateSectionFingerprints, ExecutorRecord, HealthState, LeaseRecord, LeaseState,
+    MutationBatch, NodeRecord, ObservedClusterState, ObservedStateUpdate, PeerHello,
+    ProviderRecord, ResourceOwnershipMode, ResourceRecord, RestartPolicy, StateSnapshot,
+    TypedConfigValue, WorkloadConfig, WorkloadObservedState, WorkloadRecord,
 };
 use orion_core::{
-    ArtifactId, CapabilityId, ClientName, ConfigSchemaId, ExecutorId, NodeId, ProviderId,
-    ResourceId, ResourceType, Revision, RuntimeType, WorkloadId, decode_from_slice,
-    decode_length_prefixed, encode_length_prefixed, encode_to_vec,
+    ArtifactId, CapabilityId, ClientName, ConfigSchemaId, ExecutorId, HlcTimestamp, NodeId,
+    ProviderId, ResourceId, ResourceType, Revision, RuntimeType, WorkloadId, decode_from_slice,
+    decode_length_prefixed, encode_length_prefixed, encode_to_vec, hlc_node_tag,
 };
 use std::{fmt::Write as _, path::PathBuf};
 
@@ -109,6 +109,16 @@ fn desired_state() -> DesiredClusterState {
             .holder_node(NodeId::new("node-a"))
             .holder_workload(WorkloadId::new("workload.pose"))
             .build(),
+    );
+    // Per-object versions: a stamped node record and a tombstone (control protocol v3).
+    let node = desired.nodes[&NodeId::new("node-a")].clone();
+    desired.apply_stamped(
+        DesiredStateMutation::PutNode(node),
+        HlcTimestamp::new(1_791_000_000_000, 3, hlc_node_tag("node-a")),
+    );
+    desired.apply_stamped(
+        DesiredStateMutation::RemoveArtifact(ArtifactId::new("artifact.retired")),
+        HlcTimestamp::new(1_791_000_000_001, 0, hlc_node_tag("node-b")),
     );
     desired
 }

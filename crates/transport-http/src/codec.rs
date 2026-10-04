@@ -128,6 +128,35 @@ impl HttpCodec {
         })
     }
 
+    /// Decodes a request body (`[kind u8][archive]`, as produced by [`Self::encode_request`])
+    /// without an HTTP method and path, for transports that carry the body in their own framing
+    /// (the `orion+tcp` peer transport). The payload must still map to a peer control route, so
+    /// local-only control messages are rejected exactly as over HTTP.
+    pub fn decode_request_body(
+        &self,
+        body: &[u8],
+    ) -> Result<HttpRequestPayload, HttpTransportError> {
+        let (kind, body) = self.split_request_body(body)?;
+        let payload = match kind {
+            REQUEST_KIND_AUTHENTICATED_PEER => HttpRequestPayload::AuthenticatedPeer(
+                self.decode_authenticated_request_exact(body)?,
+            ),
+            REQUEST_KIND_CONTROL => {
+                HttpRequestPayload::Control(Box::new(self.decode_control_message_exact(body)?))
+            }
+            REQUEST_KIND_OBSERVED_UPDATE => {
+                HttpRequestPayload::ObservedUpdate(self.decode_observed_update_exact(body)?)
+            }
+            _ => {
+                return Err(HttpTransportError::DecodeRequest(
+                    "request body has an unknown wire-format prefix".into(),
+                ));
+            }
+        };
+        payload.route()?;
+        Ok(payload)
+    }
+
     pub fn decode_request(
         &self,
         request: &HttpRequest,

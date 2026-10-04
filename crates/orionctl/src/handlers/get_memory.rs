@@ -59,7 +59,7 @@ fn render_memory_summary(snapshot: &NodeObservabilitySnapshot) -> String {
         option_u64(process.threads),
     ));
     out.push_str(&format!(
-        "state desired_records={} desired_workloads={} desired_resources={} desired_providers={} desired_executors={} desired_artifacts={} desired_leases={} desired_nodes={} desired_workload_tombstones={} observed_records={} observed_workloads={} observed_resources={} observed_leases={} observed_nodes={} persisted_snapshot_bytes={} persisted_mutation_history_bytes={}\n",
+        "state desired_records={} desired_workloads={} desired_resources={} desired_providers={} desired_executors={} desired_artifacts={} desired_leases={} desired_nodes={} desired_tombstones={} observed_records={} observed_workloads={} observed_resources={} observed_leases={} observed_nodes={} persisted_snapshot_bytes={} persisted_mutation_history_bytes={}\n",
         state.desired.total(),
         state.desired.workloads,
         state.desired.resources,
@@ -68,7 +68,7 @@ fn render_memory_summary(snapshot: &NodeObservabilitySnapshot) -> String {
         state.desired.artifacts,
         state.desired.leases,
         state.desired.nodes,
-        state.desired.workload_tombstones,
+        state.desired.tombstones,
         state.observed.total(),
         state.observed.workloads,
         state.observed.resources,

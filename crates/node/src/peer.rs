@@ -131,6 +131,9 @@ pub struct PeerState {
     pub last_error_kind: Option<PeerSyncErrorKind>,
     pub consecutive_failures: u32,
     pub next_sync_allowed_at_ms: Option<u64>,
+    /// Fingerprint of the local observed slice last pushed to this peer, and when.
+    pub observed_pushed_fingerprint: Option<u64>,
+    pub observed_pushed_at_ms: Option<u64>,
 }
 
 impl PeerState {
@@ -158,7 +161,23 @@ impl PeerState {
             last_error_kind: None,
             consecutive_failures: 0,
             next_sync_allowed_at_ms: None,
+            observed_pushed_fingerprint: None,
+            observed_pushed_at_ms: None,
         }
+    }
+
+    /// `true` when the local observed slice changed since the last push to this peer, or the
+    /// last push is older than `refresh_ms`.
+    pub fn observed_push_due(&self, fingerprint: u64, now_ms: u64, refresh_ms: u64) -> bool {
+        self.observed_pushed_fingerprint != Some(fingerprint)
+            || self
+                .observed_pushed_at_ms
+                .is_none_or(|at| now_ms.saturating_sub(at) >= refresh_ms)
+    }
+
+    pub fn note_observed_pushed(&mut self, fingerprint: u64, now_ms: u64) {
+        self.observed_pushed_fingerprint = Some(fingerprint);
+        self.observed_pushed_at_ms = Some(now_ms);
     }
 
     pub fn record_hello(
@@ -275,9 +294,125 @@ impl PeerState {
     }
 }
 
+/// URL scheme of peers reached over the plain TCP peer transport (feature `peer-tcp`).
+pub const PEER_TCP_SCHEME: &str = "orion+tcp";
+
+/// Transport a peer is synced over, chosen by the scheme of its base URL. See
+/// `docs/peer-sync.md`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PeerTransportKind {
+    /// `http://` (feature `transport-http`).
+    Http,
+    /// `https://` (feature `transport-http`).
+    Https,
+    /// `orion+tcp://` (feature `peer-tcp`).
+    Tcp,
+}
+
+impl PeerTransportKind {
+    /// Maps a peer base URL to its transport, or explains why the scheme is unknown.
+    pub fn from_base_url(base_url: &str) -> Result<Self, String> {
+        let Some((scheme, rest)) = base_url.split_once("://") else {
+            return Err(format!(
+                "peer URL `{base_url}` has no scheme; use http://, https:// or {PEER_TCP_SCHEME}://"
+            ));
+        };
+        if rest.is_empty() {
+            return Err(format!("peer URL `{base_url}` has no host"));
+        }
+        match scheme.to_ascii_lowercase().as_str() {
+            "http" => Ok(Self::Http),
+            "https" => Ok(Self::Https),
+            PEER_TCP_SCHEME => Ok(Self::Tcp),
+            other => Err(format!(
+                "peer URL `{base_url}` uses unsupported scheme `{other}`; use http://, https:// \
+                 or {PEER_TCP_SCHEME}://"
+            )),
+        }
+    }
+
+    /// The cargo feature of `orion-node` that provides this transport.
+    pub const fn cargo_feature(self) -> &'static str {
+        match self {
+            Self::Http | Self::Https => "transport-http",
+            Self::Tcp => "peer-tcp",
+        }
+    }
+
+    /// Whether this build of `orion-node` includes the transport.
+    pub const fn is_compiled_in(self) -> bool {
+        match self {
+            Self::Http | Self::Https => cfg!(feature = "transport-http"),
+            Self::Tcp => cfg!(feature = "peer-tcp"),
+        }
+    }
+
+    /// Short label for logs and metrics (`http` or `tcp`).
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Http | Self::Https => "http",
+            Self::Tcp => "tcp",
+        }
+    }
+
+    /// Checks that this build can sync with a peer at `base_url`.
+    pub fn check_supported(base_url: &str) -> Result<Self, String> {
+        let kind = Self::from_base_url(base_url)?;
+        if kind.is_compiled_in() {
+            Ok(kind)
+        } else {
+            Err(format!(
+                "peer URL `{base_url}` needs orion-node built with the `{}` feature",
+                kind.cargo_feature()
+            ))
+        }
+    }
+}
+
+/// Splits an `orion+tcp://host:port[/]` URL into its `host:port` authority.
+#[cfg(any(test, feature = "peer-tcp"))]
+pub(crate) fn peer_tcp_authority(base_url: &str) -> Result<&str, String> {
+    let rest = base_url
+        .split_once("://")
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case(PEER_TCP_SCHEME))
+        .map(|(_, rest)| rest)
+        .ok_or_else(|| format!("`{base_url}` is not an {PEER_TCP_SCHEME}:// URL"))?;
+    let authority = rest.trim_end_matches('/');
+    if authority.is_empty() || authority.contains('/') || !authority.contains(':') {
+        return Err(format!(
+            "`{base_url}` must have the form {PEER_TCP_SCHEME}://host:port"
+        ));
+    }
+    Ok(authority)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peer_transport_kind_follows_the_url_scheme() {
+        assert_eq!(
+            PeerTransportKind::from_base_url("http://a:1"),
+            Ok(PeerTransportKind::Http)
+        );
+        assert_eq!(
+            PeerTransportKind::from_base_url("HTTPS://a:1"),
+            Ok(PeerTransportKind::Https)
+        );
+        assert_eq!(
+            PeerTransportKind::from_base_url("orion+tcp://10.0.0.2:9200"),
+            Ok(PeerTransportKind::Tcp)
+        );
+        assert!(PeerTransportKind::from_base_url("ftp://a:1").is_err());
+        assert!(PeerTransportKind::from_base_url("a:1").is_err());
+        assert_eq!(
+            peer_tcp_authority("orion+tcp://10.0.0.2:9200/"),
+            Ok("10.0.0.2:9200")
+        );
+        assert!(peer_tcp_authority("orion+tcp://host").is_err());
+        assert!(peer_tcp_authority("http://host:1").is_err());
+    }
 
     #[test]
     fn retry_jitter_uses_local_retry_scope() {

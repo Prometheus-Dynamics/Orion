@@ -10,7 +10,8 @@ instead of silently falling back.
 | Variable | Default | Valid values | Failure behavior |
 | --- | --- | --- | --- |
 | `ORION_NODE_ID` | `node.local` | Any valid Unicode string | Invalid Unicode fails startup. |
-| `ORION_NODE_HTTP_ADDR` | `127.0.0.1:9100` | Socket address like `127.0.0.1:9100`, or `off` / `disabled` / `none` to skip the HTTP control listener | Invalid address fails startup. `off` combined with `ORION_NODE_PEERS` or HTTP TLS settings fails startup. |
+| `ORION_NODE_HTTP_ADDR` | `127.0.0.1:9100` | Socket address like `127.0.0.1:9100`, or `off` / `disabled` / `none` to skip the HTTP control listener | Invalid address fails startup. `off` combined with `http://`/`https://` entries in `ORION_NODE_PEERS` or HTTP TLS settings fails startup (`orion+tcp://` peers do not need it). |
+| `ORION_NODE_PEER_ADDR` | unset (no listener) | Socket address like `0.0.0.0:9200` for the `orion+tcp` peer listener, or `off` | Invalid address fails startup. Setting it in a build without the `peer-tcp` feature fails startup. Without it the node still syncs outbound with its `orion+tcp://` peers, but peers cannot connect to it. |
 | `ORION_NODE_IPC_SOCKET` | `${TMPDIR}/orion-<node-id>-control.sock` | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_IPC_STREAM_SOCKET` | `${TMPDIR}/orion-<node-id>-control-stream.sock` | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_HTTP_PROBE_ADDR` | unset | Socket address | Invalid address fails startup. |
@@ -45,11 +46,12 @@ snapshot change, schedules a follow-up pass so in-process integrations keep conv
 
 A standalone node that only serves local IPC clients can shed most of its network surface:
 
-- build with `cargo build -p orion-node --release --no-default-features` to get an IPC-only binary. This build drops the HTTP stack (the `transport-http` feature: axum, hyper, reqwest, and rustls) and the TCP and QUIC data-plane transports. Add `--features transport-http`, `transport-tcp`, or `transport-quic` to keep any of them.
+- build with `cargo build -p orion-node --release --no-default-features` to get an IPC-only binary. This build drops the HTTP stack (the `transport-http` feature: axum, hyper, reqwest, and rustls), the `orion+tcp` peer transport, and the TCP and QUIC data-plane transports. Add `--features transport-http`, `peer-tcp`, `transport-tcp`, or `transport-quic` to keep any of them.
+- to cluster such appliances without the HTTP stack, build with `--no-default-features --features peer-tcp`, set `ORION_NODE_PEER_ADDR`, and list peers as `node-id=orion+tcp://host:port|<public-key-hex>` (see `docs/peer-sync.md` for the threat model: requests and responses are signed, traffic is not encrypted).
 - with a default (HTTP-enabled) build, set `ORION_NODE_HTTP_ADDR=off` to skip the HTTP control listener. The optional probe listener on `ORION_NODE_HTTP_PROBE_ADDR` still works.
 - in a build without `transport-http`, the HTTP listener is always off:
   - `ORION_NODE_HTTP_ADDR` must be unset or one of `off`, `disabled`, or `none`. Setting it to an address fails startup, because the build cannot serve it.
-  - `ORION_NODE_PEERS`, `ORION_NODE_HTTP_PROBE_ADDR`, `ORION_NODE_HTTP_TLS_CERT`, `ORION_NODE_HTTP_TLS_KEY`, and `ORION_NODE_HTTP_TLS_AUTO` fail startup with an error that names the missing feature.
+  - `http://`/`https://` entries in `ORION_NODE_PEERS`, `ORION_NODE_HTTP_PROBE_ADDR`, `ORION_NODE_HTTP_TLS_CERT`, `ORION_NODE_HTTP_TLS_KEY`, and `ORION_NODE_HTTP_TLS_AUTO` fail startup with an error that names the missing feature. `orion+tcp://` peers likewise need the `peer-tcp` feature.
   - Embedders that pass peers or HTTP TLS files to `NodeApp::builder()` get the same error from `try_build()`.
 - set `ORION_NODE_RUNTIME_WORKER_THREADS=1` or `2` and lower `ORION_NODE_MAX_MUTATION_HISTORY*` and worker queue capacities to fit the device memory budget
 - on glibc targets, set `MALLOC_ARENA_MAX=2` to limit per-thread malloc arenas
@@ -134,7 +136,7 @@ switch allocators.
 
 | Variable | Default | Valid values | Failure behavior |
 | --- | --- | --- | --- |
-| `ORION_NODE_PEERS` | unset | Comma-separated `node-id=http://host:port` entries, optional `|ca=/path` and trusted key segments | Invalid entry format fails startup. |
+| `ORION_NODE_PEERS` | unset | Comma-separated `node-id=<url>` entries where `<url>` is `http://host:port`, `https://host:port` (feature `transport-http`) or `orion+tcp://host:port` (feature `peer-tcp`); optional `|ca=/path` (HTTPS) and trusted public key segments. HTTP and TCP peers can be mixed. | Invalid entry format, an unknown scheme, or a scheme whose feature is not compiled in fails startup. |
 | `ORION_NODE_PEER_AUTH` | `optional` | `disabled`, `optional`, `required` | Invalid mode fails startup. |
 | `ORION_NODE_PEER_SYNC_MODE` | `parallel` | `serial`, `parallel` | Invalid mode fails startup. |
 | `ORION_NODE_PEER_SYNC_MAX_IN_FLIGHT` | `4` | Integer, minimum effective value `1` | Invalid integer fails startup. |
@@ -187,6 +189,12 @@ Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:
 | `ORION_NODE_AUDIT_LOG` | unset | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_SHUTDOWN_AFTER_INIT_MS` | unset | Integer milliseconds | Invalid integer fails startup. Intended for tests and controlled automation, not steady-state production. |
 
+A state directory written by an `orion-node` before control protocol v3 (snapshot format 3) is
+migrated in place on the first start: the old files are kept in `<state dir>/legacy-format-3/`,
+the desired state is rewritten with per-object versions, and observed state is rebuilt from live
+reports. If the old files cannot be read, startup fails without overwriting anything. See
+"Upgrading from protocol v2" in `docs/peer-sync.md`.
+
 ## HTTP TLS
 
 | Variable | Default | Valid values | Failure behavior |
@@ -234,5 +242,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY` | `128` | Auth state worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |
 | `ORION_NODE_RECONCILE_BACKSTOP_MS` | `5000` | Longest idle period before the event-driven reconcile loop runs a periodic backstop pass. Clamped to at least `ORION_NODE_RECONCILE_MS`. |
+| `ORION_NODE_HLC_MAX_DRIFT_MS` | `300000` | Largest distance a peer's hybrid-logical-clock timestamp may be ahead of the local wall clock; desired-state versions stamped further ahead are rejected and counted (`desired_merge.clock_skew_rejections`). See `docs/peer-sync.md`. |
+| `ORION_NODE_TOMBSTONE_RETENTION_MS` | `604800000` | How long desired-state tombstones (deletes) are kept before collection. A node offline for longer than this can resurrect deleted objects. See `docs/peer-sync.md`. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_INTERVAL_MS` | `5000` | `50` in test builds. IPC stream heartbeat interval. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_TIMEOUT_MS` | `15000` | `125` in test builds. IPC stream heartbeat timeout. |

@@ -171,6 +171,7 @@ impl DockerCluster {
                     DesiredStateMutation::PutArtifact(artifact),
                     DesiredStateMutation::PutWorkload(workload.clone()),
                 ],
+                stamps: Vec::new(),
             };
 
             let request = codec
@@ -296,6 +297,7 @@ impl DockerCluster {
                 mutations: vec![DesiredStateMutation::RemoveWorkload(WorkloadId::new(
                     workload_id,
                 ))],
+                stamps: Vec::new(),
             };
 
             match self

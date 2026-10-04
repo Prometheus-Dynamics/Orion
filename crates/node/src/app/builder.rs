@@ -30,7 +30,7 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use tracing::warn;
+use tracing::{info, warn};
 
 impl Default for NodeAppBuilder {
     fn default() -> Self {
@@ -297,13 +297,9 @@ impl NodeAppBuilder {
         )
         .map_err(|err| super::NodeError::Config(format!("failed to initialize HTTP TLS: {err}")))?;
         let peer_configs = self.peers.unwrap_or_else(|| config.peers.clone());
-        #[cfg(not(feature = "transport-http"))]
-        if !peer_configs.is_empty() {
-            return Err(super::NodeError::Config(format!(
-                "{} configured peer(s) cannot be used: {}",
-                peer_configs.len(),
-                super::peer_sync_state::PEER_SYNC_REQUIRES_HTTP
-            )));
+        for peer in &peer_configs {
+            crate::peer::PeerTransportKind::check_supported(peer.base_url.as_str())
+                .map_err(|err| super::NodeError::Config(format!("peer {}: {err}", peer.node_id)))?;
         }
         if let Some(mut runtime_tuning) = self.runtime_tuning {
             runtime_tuning.normalize();
@@ -354,10 +350,21 @@ impl NodeAppBuilder {
                 maintenance_state: RwLock::new(maintenance_state),
                 desired_metadata_cache: RwLock::new(None),
                 desired_summary_cache: RwLock::new(None),
+                clock: std::sync::Mutex::new(super::hlc_state::new_node_clock(
+                    &config.node_id,
+                    config
+                        .runtime_tuning
+                        .hlc_max_drift
+                        .as_millis()
+                        .min(u128::from(u64::MAX)) as u64,
+                )),
+                merge_metrics: Default::default(),
             },
             peers: PeerRegistryState {
                 peers: RwLock::new(peers),
                 peer_clients: RwLock::new(BTreeMap::new()),
+                #[cfg(feature = "peer-tcp")]
+                peer_tcp_clients: Default::default(),
             },
             runtime: RuntimeRegistryState {
                 providers: RwLock::new(BTreeMap::new()),
@@ -425,6 +432,22 @@ impl NodeAppBuilder {
         control_middlewares.extend(self.control_middlewares);
         app.control_middlewares = Arc::from(control_middlewares);
 
+        if let Some(storage) = app.storage.as_ref()
+            && let Some(report) =
+                storage.migrate_legacy_state(orion::hlc_node_tag(app.config.node_id.as_str()))?
+        {
+            info!(
+                node = %app.config.node_id,
+                from_format = report.from_format,
+                to_format = report.to_format,
+                desired_revision = %report.desired_revision,
+                objects = report.objects,
+                tombstones = report.tombstones,
+                backup_dir = %report.backup_dir.display(),
+                "migrated the state directory to the current snapshot format"
+            );
+        }
+        app.seed_clock_from_desired();
         if self.auto_startup_replay && app.storage.is_some() {
             if let Err(err) = app.replay_state() {
                 warn!(

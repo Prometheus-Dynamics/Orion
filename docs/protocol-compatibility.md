@@ -19,6 +19,7 @@ truth. It is a `u16` that changes whenever the archived layout of a protocol typ
 |---|---|
 | 1 | Implicit, unversioned layout before the preamble existed |
 | 2 | `NodeObservabilitySnapshot::resource_usage`; version preamble and header added |
+| 3 | Per-object hybrid-logical-clock versions in desired state (`DesiredClusterState::stamps`/`tombstones` replace `workload_tombstones`, `DesiredStateSummary::stamps`/`tombstones`, `MutationBatch::stamps`), `NodeObservabilitySnapshot::desired_merge`; the `orion+tcp` peer transport uses the same preamble. See `docs/peer-sync.md` |
 
 ## Local IPC
 

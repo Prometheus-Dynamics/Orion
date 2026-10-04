@@ -46,6 +46,7 @@ async fn docker_cluster_propagates_provider_resources_and_cross_node_leases() {
                     .build(),
             ),
         ],
+        stamps: Vec::new(),
     };
     let response = cluster
         .client("node-a")
@@ -128,6 +129,7 @@ async fn docker_cluster_workload_can_use_explicit_local_resource_binding() {
             ),
             DesiredStateMutation::PutWorkload(workload),
         ],
+        stamps: Vec::new(),
     };
     let response = cluster
         .client("node-a")
@@ -227,6 +229,7 @@ async fn docker_cluster_workload_move_updates_assignment_and_resource_binding() 
                 .build(),
             ),
         ],
+        stamps: Vec::new(),
     };
     let response = cluster
         .raw_post(
@@ -308,6 +311,7 @@ async fn docker_cluster_workload_move_updates_assignment_and_resource_binding() 
                 .build(),
             ),
         ],
+        stamps: Vec::new(),
     };
     let response = cluster
         .client("node-b")

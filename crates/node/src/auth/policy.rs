@@ -7,7 +7,7 @@ use super::{
 use crate::NodeError;
 use crate::service::{
     Authenticator, AuthorizationMiddleware, Authorizer, ControlOperation, ControlPrincipal,
-    ControlRequest, ControlSurface,
+    ControlRequest,
 };
 use orion::{
     control_plane::{ClientRole, ControlMessage, ObservedStateUpdate},
@@ -28,7 +28,7 @@ impl NodeSecurityAuthenticator {
 
 impl Authenticator for NodeSecurityAuthenticator {
     fn authenticate(&self, request: &mut ControlRequest) -> Result<(), NodeError> {
-        if !matches!(request.context.surface, ControlSurface::PeerHttp) {
+        if !request.context.surface.is_peer() {
             return Ok(());
         }
 

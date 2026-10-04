@@ -71,8 +71,9 @@ pub mod control_plane {
         CommunicationFailureCountSnapshot, CommunicationFailureKind, CommunicationMetricsSnapshot,
         CommunicationRecentMetricsSnapshot, CommunicationStageMetricsSnapshot, ConfigDecodeError,
         ConfigMapRef, ControlMessage, CustomEndpoint, CustomEndpointScheme, DesiredClusterState,
-        DesiredState, DesiredStateMutation, DesiredStateObjectSelector, DesiredStateSection,
-        DesiredStateSectionFingerprints, DesiredStateSummary, ExecutorRecord,
+        DesiredObjectKey, DesiredObjectStamps, DesiredObjectVersion, DesiredState,
+        DesiredStateMergeSnapshot, DesiredStateMutation, DesiredStateObjectSelector,
+        DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary, ExecutorRecord,
         ExecutorRecordBuilder, ExecutorStateUpdate, ExecutorWorkloadQuery, HealthState,
         HostMetricsSnapshot, HttpEndpoint, IpcEndpoint, LatencyMetricBuckets,
         LatencyMetricsSnapshot, LeaseRecord, LeaseRecordBuilder, LeaseState,
@@ -108,10 +109,10 @@ pub mod control_plane {
 pub mod core {
     pub use orion_core::{
         ArchiveEncode, ArtifactId, CapabilityDef, CapabilityId, ClientName, CompatibilityState,
-        ConfigSchemaDef, ConfigSchemaId, ExecutorId, FeatureFlag, NodeId, OrionError, PeerBaseUrl,
-        ProtocolVersion, ProviderId, PublicKeyHex, ResourceId, ResourceType, ResourceTypeDef,
-        Revision, RuntimeType, RuntimeTypeDef, SessionId, WorkloadId, decode_from_slice,
-        encode_to_vec,
+        ConfigSchemaDef, ConfigSchemaId, ExecutorId, FeatureFlag, HlcClockSkew, HlcTimestamp,
+        HybridLogicalClock, NodeId, OrionError, PeerBaseUrl, ProtocolVersion, ProviderId,
+        PublicKeyHex, ResourceId, ResourceType, ResourceTypeDef, Revision, RuntimeType,
+        RuntimeTypeDef, SessionId, WorkloadId, decode_from_slice, encode_to_vec, hlc_node_tag,
     };
 }
 

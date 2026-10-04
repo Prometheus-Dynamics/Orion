@@ -293,12 +293,16 @@ fn maintenance_isolation_blocks_remote_desired_state_mutations() {
     .expect("isolation should succeed");
 
     let err = app
-        .apply_control_message(ControlMessage::Mutations(MutationBatch {
-            base_revision: Revision::ZERO,
-            mutations: vec![DesiredStateMutation::PutArtifact(
-                ArtifactRecord::builder("artifact.remote.blocked").build(),
-            )],
-        }))
+        .apply_control_message(
+            None,
+            ControlMessage::Mutations(MutationBatch {
+                base_revision: Revision::ZERO,
+                mutations: vec![DesiredStateMutation::PutArtifact(
+                    ArtifactRecord::builder("artifact.remote.blocked").build(),
+                )],
+                stamps: Vec::new(),
+            }),
+        )
         .expect_err("remote mutation should be blocked while isolated");
 
     assert!(

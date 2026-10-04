@@ -1,185 +1,24 @@
-#[cfg(feature = "transport-http")]
-use super::desired_sync::merge_desired_cluster_state;
 use super::{
     NodeApp, NodeError,
-    desired_state::{diff_desired_cluster_state, merge_observed_state, merge_peer_observed_state},
+    desired_state::{merge_observed_state, merge_peer_observed_state},
+    desired_writes::WriteOrigin,
 };
+#[cfg(test)]
+use orion::control_plane::StateSnapshot;
 use orion::{
-    NodeId, ResourceId, Revision,
-    control_plane::{
-        ControlMessage, DesiredClusterState, MutationBatch, ObservedStateUpdate, StateSnapshot,
-    },
+    NodeId, ResourceId,
+    control_plane::{ControlMessage, DesiredClusterState, ObservedStateUpdate},
     runtime::RuntimeError,
     transport::http::HttpResponsePayload,
 };
 use std::{collections::BTreeMap, sync::Arc};
-use tracing::info_span;
 
 impl NodeApp {
-    #[cfg(any(test, feature = "transport-http"))]
-    pub(super) async fn adopt_remote_snapshot_async(
-        &self,
-        snapshot: StateSnapshot,
-    ) -> Result<(), NodeError> {
-        if self.remote_desired_state_blocked() {
-            return Err(NodeError::Authorization(
-                "remote desired state adoption is blocked while maintenance isolation is active"
-                    .into(),
-            ));
-        }
-        let previous_revision = self.current_desired_revision();
-        let remote_desired = snapshot.state.desired.clone();
-        self.validate_desired_state(&remote_desired)?;
-        let provider_records: Vec<_> = self
-            .providers_read()
-            .values()
-            .map(|provider| provider.provider_record())
-            .collect();
-        let executor_records: Vec<_> = self
-            .executors_read()
-            .values()
-            .map(|executor| executor.executor_record())
-            .collect();
-
-        self.commit_desired_state_update_async(previous_revision, |txn| {
-            txn.replace_bundle(
-                snapshot.state.desired,
-                snapshot.state.observed,
-                snapshot.state.applied,
-                Vec::new(),
-                remote_desired.clone(),
-            );
-
-            for provider in provider_records {
-                txn.store().desired.put_provider(provider);
-            }
-            for executor in executor_records {
-                txn.store().desired.put_executor(executor);
-            }
-
-            let local_delta = diff_desired_cluster_state(&remote_desired, &txn.store().desired);
-            txn.replace_history(remote_desired.clone(), Some(local_delta))?;
-            Ok(())
-        })
-        .await?;
-        Ok(())
-    }
-
-    pub(super) fn adopt_remote_snapshot(&self, snapshot: StateSnapshot) -> Result<(), NodeError> {
-        if self.remote_desired_state_blocked() {
-            return Err(NodeError::Authorization(
-                "remote desired state adoption is blocked while maintenance isolation is active"
-                    .into(),
-            ));
-        }
-        let previous_revision = self.current_desired_revision();
-        let remote_desired = snapshot.state.desired.clone();
-        self.validate_desired_state(&remote_desired)?;
-        let provider_records: Vec<_> = self
-            .providers_read()
-            .values()
-            .map(|provider| provider.provider_record())
-            .collect();
-        let executor_records: Vec<_> = self
-            .executors_read()
-            .values()
-            .map(|executor| executor.executor_record())
-            .collect();
-
-        self.commit_desired_state_update(previous_revision, |txn| {
-            txn.replace_bundle(
-                snapshot.state.desired,
-                snapshot.state.observed,
-                snapshot.state.applied,
-                Vec::new(),
-                remote_desired.clone(),
-            );
-
-            for provider in provider_records {
-                txn.store().desired.put_provider(provider);
-            }
-            for executor in executor_records {
-                txn.store().desired.put_executor(executor);
-            }
-
-            let local_delta = diff_desired_cluster_state(&remote_desired, &txn.store().desired);
-            txn.replace_history(remote_desired.clone(), Some(local_delta))?;
-            Ok(())
-        })?;
-        Ok(())
-    }
-
-    #[cfg(feature = "transport-http")]
-    pub(super) async fn apply_remote_mutations_async(
-        &self,
-        batch: &MutationBatch,
-    ) -> Result<(), NodeError> {
-        if self.remote_desired_state_blocked() {
-            return Err(NodeError::Authorization(
-                "remote desired state mutations are blocked while maintenance isolation is active"
-                    .into(),
-            ));
-        }
-        let started = std::time::Instant::now();
-        let commit_result = {
-            let _span = info_span!("mutation_apply", node = %self.config.node_id).entered();
-            let previous_revision = self.current_desired_revision();
-            let mut candidate = self.current_desired_state();
-            if let Err(err) = batch.clone().apply_to_checked(&mut candidate) {
-                let error = NodeError::from(err);
-                self.record_mutation_apply_failure(started.elapsed(), &error);
-                return Err(error);
-            }
-            if let Err(err) = self.validate_desired_state(&candidate) {
-                self.record_mutation_apply_failure(started.elapsed(), &err);
-                return Err(err);
-            }
-            let commit = self.commit_desired_state_update_async(previous_revision, |txn| {
-                batch.clone().apply_to_checked(&mut txn.store().desired)?;
-                txn.append_batch(batch.clone())?;
-                Ok(())
-            });
-            drop(_span);
-            commit.await
-        };
-        commit_result?;
-        self.record_mutation_apply_success(started.elapsed());
-        self.reconcile_after_change_async().await?;
-        Ok(())
-    }
-
-    pub(super) fn apply_remote_mutations(&self, batch: &MutationBatch) -> Result<(), NodeError> {
-        if self.remote_desired_state_blocked() {
-            return Err(NodeError::Authorization(
-                "remote desired state mutations are blocked while maintenance isolation is active"
-                    .into(),
-            ));
-        }
-        let _span = info_span!("mutation_apply", node = %self.config.node_id).entered();
-        let started = std::time::Instant::now();
-        let previous_revision = self.current_desired_revision();
-        let mut candidate = self.current_desired_state();
-        if let Err(err) = batch.clone().apply_to_checked(&mut candidate) {
-            let error = NodeError::from(err);
-            self.record_mutation_apply_failure(started.elapsed(), &error);
-            return Err(error);
-        }
-        if let Err(err) = self.validate_desired_state(&candidate) {
-            self.record_mutation_apply_failure(started.elapsed(), &err);
-            return Err(err);
-        }
-        self.commit_desired_state_update(previous_revision, |txn| {
-            batch.clone().apply_to_checked(&mut txn.store().desired)?;
-            txn.append_batch(batch.clone())?;
-            Ok(())
-        })?;
-        self.record_mutation_apply_success(started.elapsed());
-        self.reconcile_after_change()?;
-        Ok(())
-    }
-
+    /// Serves a control message from a peer (HTTP or TCP peer surface). `peer` is the
+    /// authenticated sender, when the request was signed.
     pub(crate) fn apply_control_message(
         &self,
+        peer: Option<NodeId>,
         message: ControlMessage,
     ) -> Result<HttpResponsePayload, NodeError> {
         match message {
@@ -193,11 +32,11 @@ impl NodeApp {
                 Ok(HttpResponsePayload::Snapshot(self.state_snapshot()))
             }
             ControlMessage::Snapshot(snapshot) => {
-                self.adopt_remote_snapshot(snapshot)?;
+                self.merge_peer_snapshot(peer, &snapshot)?;
                 Ok(HttpResponsePayload::Accepted)
             }
             ControlMessage::Mutations(batch) => {
-                self.apply_remote_mutations(&batch)?;
+                self.apply_mutation_batch(&batch, WriteOrigin::Peer(peer))?;
                 Ok(HttpResponsePayload::Accepted)
             }
             ControlMessage::QueryObservability => Ok(HttpResponsePayload::Observability(Box::new(
@@ -230,69 +69,15 @@ impl NodeApp {
             | ControlMessage::Pong
             | ControlMessage::Accepted
             | ControlMessage::Rejected(_) => Err(NodeError::Storage(
-                "local-only control message received on HTTP transport".into(),
+                "local-only control message received on a peer transport".into(),
             )),
         }
     }
 
-    #[cfg(feature = "transport-http")]
-    pub(super) async fn reconcile_conflicting_remote_snapshot(
+    pub(super) fn validate_desired_state(
         &self,
-        node_id: &orion::NodeId,
-        remote_snapshot: StateSnapshot,
-        client: &orion::transport::http::HttpClient,
+        desired: &DesiredClusterState,
     ) -> Result<(), NodeError> {
-        let local_snapshot = self.state_snapshot();
-        let merged_desired = merge_desired_cluster_state(
-            &local_snapshot.state.desired,
-            &remote_snapshot.state.desired,
-        )?;
-
-        let merged_local = merged_desired != local_snapshot.state.desired;
-        let merged_remote = merged_desired != remote_snapshot.state.desired;
-
-        if merged_local {
-            let mut merged_snapshot = local_snapshot.clone();
-            merged_snapshot.state.desired = merged_desired.clone();
-            self.adopt_remote_snapshot_async(merged_snapshot).await?;
-        }
-
-        if merged_remote {
-            let mut merged_snapshot = remote_snapshot;
-            merged_snapshot.state.desired = merged_desired;
-            self.send_peer_http_request(
-                node_id,
-                client,
-                orion::transport::http::HttpRequestPayload::Control(Box::new(
-                    ControlMessage::Snapshot(merged_snapshot),
-                )),
-            )
-            .await?;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn replace_desired_tracked(
-        &self,
-        desired: DesiredClusterState,
-    ) -> Result<(), NodeError> {
-        let current = self.current_desired_state();
-        let previous_revision = current.revision;
-        let batch = diff_desired_cluster_state(&current, &desired);
-        if batch.mutations.is_empty() {
-            return Ok(());
-        }
-        self.validate_desired_state(&desired)?;
-        self.commit_desired_state_update(previous_revision, |txn| {
-            txn.replace_desired(desired);
-            txn.append_batch(batch)?;
-            Ok(())
-        })?;
-        Ok(())
-    }
-
-    fn validate_desired_state(&self, desired: &DesiredClusterState) -> Result<(), NodeError> {
         for workload in desired.workloads.values().filter(|workload| {
             workload.desired_state == orion::control_plane::DesiredState::Running
         }) {
@@ -526,44 +311,9 @@ impl NodeApp {
         &self,
         snapshot: StateSnapshot,
     ) -> Result<(), NodeError> {
-        self.adopt_remote_snapshot_async(snapshot).await
-    }
-
-    pub(super) fn mutation_batch_since(&self, base_revision: Revision) -> Option<MutationBatch> {
-        // Lock order must match `with_desired_state_transaction` (store, then mutation history):
-        // taking the history lock first deadlocks against a concurrent desired-state commit.
-        let store = self.store_read();
-        let history = self.mutation_history_read();
-        let desired = &store.desired;
-        if base_revision == Revision::ZERO
-            && history.is_empty()
-            && desired.revision > Revision::ZERO
-        {
-            return Some(MutationBatch::full_state_replay(Revision::ZERO, desired));
-        }
-
-        let start = history
-            .iter()
-            .position(|batch| batch.base_revision == base_revision)?;
-        let mut expected_base = base_revision;
-        let mut mutations = Vec::new();
-
-        for batch in history.iter().skip(start) {
-            if batch.base_revision != expected_base {
-                return None;
-            }
-            mutations.extend(batch.mutations.clone());
-            expected_base = Revision::new(expected_base.get() + batch.mutations.len() as u64);
-        }
-
-        if expected_base == desired.revision {
-            Some(MutationBatch {
-                base_revision,
-                mutations,
-            })
-        } else {
-            None
-        }
+        self.merge_peer_snapshot_async(None, &snapshot)
+            .await
+            .map(|_| ())
     }
 
     #[cfg(test)]
@@ -588,8 +338,9 @@ impl NodeApp {
             ),
             None => merge_observed_state(&mut store.observed, update.observed),
         });
+        // A peer's applied revision counts its own commits; it means nothing here.
         self.with_store_mut(|store| {
-            if update.applied.revision > store.applied.revision {
+            if peer_node_id.is_none() && update.applied.revision > store.applied.revision {
                 store.applied = update.applied;
                 state_changed = true;
             }

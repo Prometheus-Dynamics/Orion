@@ -69,6 +69,7 @@ pub(super) async fn run(command: ApplyCommand) -> Result<(), String> {
                 .apply_mutations(MutationBatch {
                     base_revision: snapshot.state.desired.revision,
                     mutations: vec![DesiredStateMutation::PutArtifact(artifact.clone())],
+                    stamps: Vec::new(),
                 })
                 .await
                 .map_err(|error| error.to_string())?;
@@ -151,6 +152,7 @@ async fn run_workload_apply(
         .apply_mutations(MutationBatch {
             base_revision: snapshot.state.desired.revision,
             mutations: vec![DesiredStateMutation::PutWorkload(workload.clone())],
+            stamps: Vec::new(),
         })
         .await
         .map_err(|error| error.to_string())?;

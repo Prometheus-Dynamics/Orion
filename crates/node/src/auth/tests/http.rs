@@ -27,6 +27,7 @@ fn required_peer_auth_rejects_unsigned_http_requests() {
             Box::new(ControlMessage::Mutations(MutationBatch {
                 base_revision: Revision::ZERO,
                 mutations: Vec::new(),
+                stamps: Vec::new(),
             })),
         ))
         .expect_err("unsigned request should be rejected");
@@ -65,6 +66,7 @@ fn optional_peer_auth_still_rejects_unsigned_peer_write_operations() {
             Box::new(ControlMessage::Mutations(MutationBatch {
                 base_revision: Revision::ZERO,
                 mutations: Vec::new(),
+                stamps: Vec::new(),
             })),
         ))
         .expect_err("unsigned peer mutation writes should be rejected");
@@ -137,6 +139,7 @@ fn authenticated_but_unconfigured_peer_cannot_write_desired_state() {
                 ControlMessage::Mutations(MutationBatch {
                     base_revision: Revision::ZERO,
                     mutations: Vec::new(),
+                    stamps: Vec::new(),
                 }),
             )),
         ))

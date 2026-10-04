@@ -1,9 +1,9 @@
 mod views;
 mod watchers;
 
-use super::{NodeApp, NodeError};
+use super::{NodeApp, NodeError, hlc_state::RemoteApplyOutcome};
 use orion::{
-    Revision,
+    HybridLogicalClock, Revision,
     control_plane::{
         ArtifactRecord, DesiredClusterState, DesiredStateMutation, ExecutorRecord, MutationBatch,
         ObservedClusterState, ProviderRecord,
@@ -16,10 +16,15 @@ pub(crate) use views::{
     summarize_section,
 };
 
+/// One desired-state transaction. Holds the store, mutation history, history baseline and clock
+/// locks (in that order) for its whole lifetime.
 pub(super) struct DesiredStateTxn<'a> {
     store: &'a mut LocalRuntimeStore,
     history: &'a mut Vec<MutationBatch>,
     baseline: &'a mut DesiredClusterState,
+    clock: &'a mut HybridLogicalClock,
+    wall_ms: u64,
+    tombstone_cutoff_ms: u64,
     max_batches: usize,
     max_bytes: usize,
 }
@@ -35,10 +40,6 @@ impl DesiredStateTxn<'_> {
         Ok(())
     }
 
-    pub(super) fn replace_desired(&mut self, desired: DesiredClusterState) {
-        self.store.replace_desired(desired);
-    }
-
     pub(super) fn replace_bundle(
         &mut self,
         desired: DesiredClusterState,
@@ -47,6 +48,9 @@ impl DesiredStateTxn<'_> {
         history: Vec<MutationBatch>,
         baseline: DesiredClusterState,
     ) {
+        if let Some(max) = desired.max_stamp() {
+            self.clock.advance_to(max);
+        }
         self.store.replace_desired(desired);
         self.store.observed = observed;
         self.store.applied = applied;
@@ -62,17 +66,90 @@ impl DesiredStateTxn<'_> {
         self.normalize_history()
     }
 
-    pub(super) fn replace_history(
+    /// Commits local writes: every mutation gets a fresh timestamp from this node's clock (so it
+    /// wins against everything this node has seen) and the stamped batch is appended to the
+    /// mutation history. Returns the number of mutations written.
+    pub(super) fn apply_local(
         &mut self,
-        baseline_state: DesiredClusterState,
-        local_delta: Option<MutationBatch>,
-    ) -> Result<(), NodeError> {
-        self.history.clear();
-        *self.baseline = baseline_state;
-        if let Some(local_delta) = local_delta.filter(|delta| !delta.mutations.is_empty()) {
-            self.history.push(local_delta);
+        mutations: Vec<DesiredStateMutation>,
+    ) -> Result<usize, NodeError> {
+        if mutations.is_empty() {
+            return Ok(0);
         }
-        self.normalize_history()
+        let base_revision = self.store.desired.revision;
+        let mut versions = Vec::with_capacity(mutations.len());
+        for mutation in mutations {
+            let stamp = self.clock.now(self.wall_ms);
+            self.store.desired.force_stamped(mutation.clone(), stamp);
+            versions.push((mutation, stamp));
+        }
+        let count = versions.len();
+        self.append_batch(MutationBatch::stamped(base_revision, versions))?;
+        Ok(count)
+    }
+
+    /// Merges a stamped batch from a peer with the last-writer-wins rule. Versions stamped beyond
+    /// the clock's maximum drift are rejected; deletes that are already past tombstone retention
+    /// are dropped unless they still delete an older live copy. The versions that replaced the
+    /// local ones are appended to the mutation history.
+    pub(super) fn apply_remote(
+        &mut self,
+        batch: &MutationBatch,
+    ) -> Result<RemoteApplyOutcome, NodeError> {
+        let base_revision = self.store.desired.revision;
+        let mut outcome = RemoteApplyOutcome::default();
+        for (mutation, stamp) in batch.versions() {
+            if let Err(skew) = self.clock.check(stamp, self.wall_ms) {
+                outcome.skewed.push(skew);
+                continue;
+            }
+            self.clock.advance_to(stamp);
+            if mutation.is_remove() && stamp.physical_ms < self.tombstone_cutoff_ms {
+                let deletes_older_copy = self
+                    .store
+                    .desired
+                    .version_of(&mutation.key())
+                    .is_some_and(|version| !version.deleted && version.stamp < stamp);
+                if !deletes_older_copy {
+                    outcome.expired += 1;
+                    continue;
+                }
+            }
+            if self.store.desired.apply_stamped(mutation.clone(), stamp) {
+                outcome.applied.push((mutation.clone(), stamp));
+            } else {
+                outcome.stale += 1;
+            }
+        }
+        if !outcome.applied.is_empty() {
+            self.append_batch(MutationBatch::stamped(
+                base_revision,
+                outcome.applied.iter().cloned(),
+            ))?;
+        }
+        Ok(outcome)
+    }
+
+    /// Writes back the records of providers and executors registered in-process on this node if
+    /// a merge replaced them. Returns the number of records rewritten.
+    pub(super) fn reassert_local_records(
+        &mut self,
+        providers: &[ProviderRecord],
+        executors: &[ExecutorRecord],
+    ) -> Result<usize, NodeError> {
+        let desired = &self.store.desired;
+        let mut mutations = Vec::new();
+        for record in providers {
+            if desired.providers.get(&record.provider_id) != Some(record) {
+                mutations.push(DesiredStateMutation::PutProvider(record.clone()));
+            }
+        }
+        for record in executors {
+            if desired.executors.get(&record.executor_id) != Some(record) {
+                mutations.push(DesiredStateMutation::PutExecutor(record.clone()));
+            }
+        }
+        self.apply_local(mutations)
     }
 
     pub(super) fn store(&mut self) -> &mut LocalRuntimeStore {
@@ -85,39 +162,23 @@ impl NodeApp {
         &self,
         mutate: impl FnOnce(&mut DesiredStateTxn<'_>) -> Result<T, NodeError>,
     ) -> Result<T, NodeError> {
+        let wall_ms = Self::wall_clock_ms();
+        let tombstone_cutoff_ms = self.tombstone_cutoff_ms(wall_ms);
         let mut store = self.store_lock();
         let mut history = self.mutation_history_lock();
         let mut baseline = self.mutation_history_baseline_lock();
+        let mut clock = self.clock_lock();
         let mut txn = DesiredStateTxn {
             store: &mut store,
             history: &mut history,
             baseline: &mut baseline,
+            clock: &mut clock,
+            wall_ms,
+            tombstone_cutoff_ms,
             max_batches: self.config.runtime_tuning.max_mutation_history_batches,
             max_bytes: self.config.runtime_tuning.max_mutation_history_bytes,
         };
         mutate(&mut txn)
-    }
-
-    pub(super) fn commit_desired_state_update<T>(
-        &self,
-        previous_revision: Revision,
-        mutate: impl FnOnce(&mut DesiredStateTxn<'_>) -> Result<T, NodeError>,
-    ) -> Result<T, NodeError> {
-        let result = self.with_desired_state_transaction(mutate)?;
-        self.finalize_desired_state_update(previous_revision)?;
-        Ok(result)
-    }
-
-    #[cfg(any(test, feature = "transport-http"))]
-    pub(super) async fn commit_desired_state_update_async<T>(
-        &self,
-        previous_revision: Revision,
-        mutate: impl FnOnce(&mut DesiredStateTxn<'_>) -> Result<T, NodeError>,
-    ) -> Result<T, NodeError> {
-        let result = self.with_desired_state_transaction(mutate)?;
-        self.finalize_desired_state_update_async(previous_revision)
-            .await?;
-        Ok(result)
     }
 
     pub(super) fn commit_desired_state_update_if_changed<T>(
@@ -195,62 +256,61 @@ impl NodeApp {
         Ok(())
     }
 
+    /// Replaces the desired state with `desired` as a local write: the difference to the current
+    /// state is committed with fresh timestamps (objects missing from `desired` are deleted).
     pub fn replace_desired(&self, desired: DesiredClusterState) {
         let _ = self.replace_desired_tracked(desired);
+    }
+
+    /// Writes `mutation` locally unless `unchanged` says the current state already matches.
+    fn put_record_tracked(
+        &self,
+        unchanged: impl FnOnce(&DesiredClusterState) -> bool,
+        mutation: DesiredStateMutation,
+    ) -> Result<(), NodeError> {
+        let previous_revision = self.current_desired_revision();
+        let written = self.commit_desired_state_update_if_changed(previous_revision, |txn| {
+            if unchanged(&txn.store().desired) {
+                return Ok((0, false));
+            }
+            let written = txn.apply_local(vec![mutation])?;
+            Ok((written, true))
+        })?;
+        self.record_local_writes(written);
+        Ok(())
     }
 
     pub(super) fn put_provider_record_tracked(
         &self,
         record: ProviderRecord,
     ) -> Result<(), NodeError> {
-        let previous_revision = self.current_desired_revision();
-        self.commit_desired_state_update_if_changed(previous_revision, |txn| {
-            if txn.store().desired.providers.get(&record.provider_id) == Some(&record) {
-                return Ok(((), false));
-            }
-            txn.store().desired.put_provider(record.clone());
-            txn.append_batch(MutationBatch {
-                base_revision: previous_revision,
-                mutations: vec![DesiredStateMutation::PutProvider(record)],
-            })?;
-            Ok(((), true))
-        })
+        let check = record.clone();
+        self.put_record_tracked(
+            move |desired| desired.providers.get(&check.provider_id) == Some(&check),
+            DesiredStateMutation::PutProvider(record),
+        )
     }
 
     pub(super) fn put_executor_record_tracked(
         &self,
         record: ExecutorRecord,
     ) -> Result<(), NodeError> {
-        let previous_revision = self.current_desired_revision();
-        self.commit_desired_state_update_if_changed(previous_revision, |txn| {
-            if txn.store().desired.executors.get(&record.executor_id) == Some(&record) {
-                return Ok(((), false));
-            }
-            txn.store().desired.put_executor(record.clone());
-            txn.append_batch(MutationBatch {
-                base_revision: previous_revision,
-                mutations: vec![DesiredStateMutation::PutExecutor(record)],
-            })?;
-            Ok(((), true))
-        })
+        let check = record.clone();
+        self.put_record_tracked(
+            move |desired| desired.executors.get(&check.executor_id) == Some(&check),
+            DesiredStateMutation::PutExecutor(record),
+        )
     }
 
     pub(super) fn put_artifact_record_tracked(
         &self,
         record: ArtifactRecord,
     ) -> Result<(), NodeError> {
-        let previous_revision = self.current_desired_revision();
-        self.commit_desired_state_update_if_changed(previous_revision, |txn| {
-            if txn.store().desired.artifacts.get(&record.artifact_id) == Some(&record) {
-                return Ok(((), false));
-            }
-            txn.store().desired.put_artifact(record.clone());
-            txn.append_batch(MutationBatch {
-                base_revision: previous_revision,
-                mutations: vec![DesiredStateMutation::PutArtifact(record)],
-            })?;
-            Ok(((), true))
-        })
+        let check = record.clone();
+        self.put_record_tracked(
+            move |desired| desired.artifacts.get(&check.artifact_id) == Some(&check),
+            DesiredStateMutation::PutArtifact(record),
+        )
     }
 
     pub(super) async fn put_artifact_record_tracked_async(
@@ -258,18 +318,18 @@ impl NodeApp {
         record: ArtifactRecord,
     ) -> Result<(), NodeError> {
         let previous_revision = self.current_desired_revision();
-        self.commit_desired_state_update_async_if_changed(previous_revision, |txn| {
-            if txn.store().desired.artifacts.get(&record.artifact_id) == Some(&record) {
-                return Ok(((), false));
-            }
-            txn.store().desired.put_artifact(record.clone());
-            txn.append_batch(MutationBatch {
-                base_revision: previous_revision,
-                mutations: vec![DesiredStateMutation::PutArtifact(record)],
-            })?;
-            Ok(((), true))
-        })
-        .await
+        let written = self
+            .commit_desired_state_update_async_if_changed(previous_revision, |txn| {
+                if txn.store().desired.artifacts.get(&record.artifact_id) == Some(&record) {
+                    return Ok((0, false));
+                }
+                let written =
+                    txn.apply_local(vec![DesiredStateMutation::PutArtifact(record.clone())])?;
+                Ok((written, true))
+            })
+            .await?;
+        self.record_local_writes(written);
+        Ok(())
     }
 }
 

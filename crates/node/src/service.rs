@@ -31,14 +31,26 @@ pub enum ControlPrincipal {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ControlSurface {
+    /// Peer control requests over HTTP(S) (`transport-http`).
     PeerHttp,
+    /// Peer control requests over the `orion+tcp` transport (`peer-tcp`).
+    PeerTcp,
     LocalIpc,
     LocalIpcStream,
+}
+
+impl ControlSurface {
+    /// `true` for the surfaces that serve other nodes (and `orionctl --http`), where requests
+    /// are authenticated with peer signatures rather than local socket credentials.
+    pub fn is_peer(self) -> bool {
+        matches!(self, Self::PeerHttp | Self::PeerTcp)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlSource {
     PeerHttp,
+    PeerTcp,
     Local {
         source: LocalAddress,
         destination: LocalAddress,
@@ -64,6 +76,14 @@ impl ControlRequestContext {
             peer_auth: None,
             authenticated_peer: None,
             local_identity: None,
+        }
+    }
+
+    pub fn peer_tcp() -> Self {
+        Self {
+            surface: ControlSurface::PeerTcp,
+            source: ControlSource::PeerTcp,
+            ..Self::peer_http()
         }
     }
 
@@ -95,7 +115,7 @@ impl ControlRequestContext {
 
     pub fn local_source(&self) -> Option<&LocalAddress> {
         match &self.source {
-            ControlSource::PeerHttp => None,
+            ControlSource::PeerHttp | ControlSource::PeerTcp => None,
             ControlSource::Local { source, .. } => Some(source),
         }
     }
@@ -159,6 +179,15 @@ pub struct ControlRequest {
 
 impl ControlRequest {
     pub fn from_http_payload(payload: HttpRequestPayload) -> Self {
+        Self::from_peer_payload(payload, ControlRequestContext::peer_http())
+    }
+
+    /// A peer request received on the `orion+tcp` transport.
+    pub fn from_peer_tcp_payload(payload: HttpRequestPayload) -> Self {
+        Self::from_peer_payload(payload, ControlRequestContext::peer_tcp())
+    }
+
+    fn from_peer_payload(payload: HttpRequestPayload, context: ControlRequestContext) -> Self {
         let (body, peer_auth) = match payload {
             HttpRequestPayload::Control(message) => (ControlRequestBody::Control(message), None),
             HttpRequestPayload::ObservedUpdate(update) => {
@@ -178,7 +207,7 @@ impl ControlRequest {
         Self {
             context: ControlRequestContext {
                 peer_auth,
-                ..ControlRequestContext::peer_http()
+                ..context
             },
             body,
         }
@@ -284,7 +313,7 @@ impl ControlRequest {
     }
 
     pub fn peer_request_payload(&self) -> Option<PeerRequestPayload> {
-        if !matches!(self.context.surface, ControlSurface::PeerHttp) {
+        if !self.context.surface.is_peer() {
             return None;
         }
         match &self.body {
@@ -400,9 +429,15 @@ impl RequestService<ControlRequest> for NodeControlService {
 
         match body {
             ControlRequestBody::Control(message) => match context.surface {
-                ControlSurface::PeerHttp => self
+                ControlSurface::PeerHttp | ControlSurface::PeerTcp => self
                     .app
-                    .apply_control_message(*message)
+                    .apply_control_message(
+                        context
+                            .authenticated_peer
+                            .as_ref()
+                            .map(|peer| peer.node_id.clone()),
+                        *message,
+                    )
                     .map(|response| ControlResponse::Http(Box::new(response))),
                 ControlSurface::LocalIpc | ControlSurface::LocalIpcStream => {
                     let source = context.local_source().ok_or_else(|| {

@@ -1,5 +1,12 @@
+//! Desired-state fingerprints, summaries and per-object version diffs used by peer sync.
+//!
+//! Peers compare versions with the same last-writer-wins rule that
+//! [`DesiredClusterState::apply_stamped`] applies, so the initiator of a sync round can split the
+//! differing objects into the ones it pushes and the ones it pulls. See `docs/peer-sync.md`.
+
 use super::desired_state::{entry_fingerprint, summarize_section};
 use super::*;
+use orion::{HlcTimestamp, control_plane::DesiredObjectKey};
 
 pub(super) fn summarize_desired_state_for_sections(
     desired: &DesiredClusterState,
@@ -8,138 +15,105 @@ pub(super) fn summarize_desired_state_for_sections(
 ) -> Result<DesiredStateSummary, NodeError> {
     let include_all = sections.is_empty();
     let include = |target: DesiredStateSection| include_all || sections.contains(&target);
+    fn summarize_if<K: Ord + Clone, V: ArchiveEncode>(
+        include: bool,
+        section: &BTreeMap<K, V>,
+    ) -> Result<BTreeMap<K, u64>, NodeError> {
+        if include {
+            summarize_section(section)
+        } else {
+            Ok(BTreeMap::new())
+        }
+    }
     Ok(DesiredStateSummary {
         revision: desired.revision,
         section_fingerprints: section_fingerprints.clone(),
-        nodes: if include(DesiredStateSection::Nodes) {
-            summarize_section(&desired.nodes)?
-        } else {
-            BTreeMap::new()
-        },
-        artifacts: if include(DesiredStateSection::Artifacts) {
-            summarize_section(&desired.artifacts)?
-        } else {
-            BTreeMap::new()
-        },
-        workloads: if include(DesiredStateSection::Workloads) {
-            summarize_section(&desired.workloads)?
-        } else {
-            BTreeMap::new()
-        },
-        workload_tombstones: if include(DesiredStateSection::Workloads) {
-            desired.workload_tombstones.clone()
-        } else {
-            BTreeMap::new()
-        },
-        resources: if include(DesiredStateSection::Resources) {
-            summarize_section(&desired.resources)?
-        } else {
-            BTreeMap::new()
-        },
-        providers: if include(DesiredStateSection::Providers) {
-            summarize_section(&desired.providers)?
-        } else {
-            BTreeMap::new()
-        },
-        executors: if include(DesiredStateSection::Executors) {
-            summarize_section(&desired.executors)?
-        } else {
-            BTreeMap::new()
-        },
-        leases: if include(DesiredStateSection::Leases) {
-            summarize_section(&desired.leases)?
-        } else {
-            BTreeMap::new()
-        },
+        nodes: summarize_if(include(DesiredStateSection::Nodes), &desired.nodes)?,
+        artifacts: summarize_if(include(DesiredStateSection::Artifacts), &desired.artifacts)?,
+        workloads: summarize_if(include(DesiredStateSection::Workloads), &desired.workloads)?,
+        resources: summarize_if(include(DesiredStateSection::Resources), &desired.resources)?,
+        providers: summarize_if(include(DesiredStateSection::Providers), &desired.providers)?,
+        executors: summarize_if(include(DesiredStateSection::Executors), &desired.executors)?,
+        leases: summarize_if(include(DesiredStateSection::Leases), &desired.leases)?,
+        stamps: desired.stamps.for_sections(sections),
+        tombstones: desired.tombstones.for_sections(sections),
     })
 }
 
-pub(super) fn section_fingerprints(
+/// Per-section fingerprints over records, their stamps and the section's tombstones. Two nodes
+/// with equal fingerprints hold the same desired state, whatever their local revisions are.
+pub(crate) fn section_fingerprints(
     desired: &DesiredClusterState,
 ) -> Result<DesiredStateSectionFingerprints, NodeError> {
+    fn section<K, V>(
+        records: &BTreeMap<K, V>,
+        stamps: &BTreeMap<K, HlcTimestamp>,
+        tombstones: &BTreeMap<K, HlcTimestamp>,
+    ) -> Result<u64, NodeError>
+    where
+        BTreeMap<K, V>: ArchiveEncode,
+        BTreeMap<K, HlcTimestamp>: ArchiveEncode,
+    {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        entry_fingerprint(records)?.hash(&mut hasher);
+        entry_fingerprint(stamps)?.hash(&mut hasher);
+        entry_fingerprint(tombstones)?.hash(&mut hasher);
+        Ok(hasher.finish())
+    }
+    let (stamps, tombstones) = (&desired.stamps, &desired.tombstones);
     Ok(DesiredStateSectionFingerprints {
-        nodes: section_fingerprint(&desired.nodes)?,
-        artifacts: section_fingerprint(&desired.artifacts)?,
-        workloads: workload_section_fingerprint(&desired.workloads, &desired.workload_tombstones)?,
-        resources: section_fingerprint(&desired.resources)?,
-        providers: section_fingerprint(&desired.providers)?,
-        executors: section_fingerprint(&desired.executors)?,
-        leases: section_fingerprint(&desired.leases)?,
+        nodes: section(&desired.nodes, &stamps.nodes, &tombstones.nodes)?,
+        artifacts: section(&desired.artifacts, &stamps.artifacts, &tombstones.artifacts)?,
+        workloads: section(&desired.workloads, &stamps.workloads, &tombstones.workloads)?,
+        resources: section(&desired.resources, &stamps.resources, &tombstones.resources)?,
+        providers: section(&desired.providers, &stamps.providers, &tombstones.providers)?,
+        executors: section(&desired.executors, &stamps.executors, &tombstones.executors)?,
+        leases: section(&desired.leases, &stamps.leases, &tombstones.leases)?,
     })
 }
 
-fn section_fingerprint<T: ArchiveEncode>(value: &T) -> Result<u64, NodeError> {
-    entry_fingerprint(value)
-}
-
-fn workload_section_fingerprint(
-    workloads: &BTreeMap<WorkloadId, WorkloadRecord>,
-    tombstones: &BTreeMap<WorkloadId, Revision>,
-) -> Result<u64, NodeError> {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    section_fingerprint(workloads)?.hash(&mut hasher);
-    section_fingerprint(tombstones)?.hash(&mut hasher);
-    Ok(hasher.finish())
-}
-
-#[cfg(feature = "transport-http")]
+#[cfg(peer_sync)]
 pub(super) fn changed_sections(
     local: &DesiredStateSectionFingerprints,
     remote: &DesiredStateSectionFingerprints,
 ) -> Vec<DesiredStateSection> {
-    let mut sections = Vec::new();
-    if local.nodes != remote.nodes {
-        sections.push(DesiredStateSection::Nodes);
-    }
-    if local.artifacts != remote.artifacts {
-        sections.push(DesiredStateSection::Artifacts);
-    }
-    if local.workloads != remote.workloads {
-        sections.push(DesiredStateSection::Workloads);
-    }
-    if local.resources != remote.resources {
-        sections.push(DesiredStateSection::Resources);
-    }
-    if local.providers != remote.providers {
-        sections.push(DesiredStateSection::Providers);
-    }
-    if local.executors != remote.executors {
-        sections.push(DesiredStateSection::Executors);
-    }
-    if local.leases != remote.leases {
-        sections.push(DesiredStateSection::Leases);
-    }
-    sections
+    let pairs = [
+        (DesiredStateSection::Nodes, local.nodes, remote.nodes),
+        (
+            DesiredStateSection::Artifacts,
+            local.artifacts,
+            remote.artifacts,
+        ),
+        (
+            DesiredStateSection::Workloads,
+            local.workloads,
+            remote.workloads,
+        ),
+        (
+            DesiredStateSection::Resources,
+            local.resources,
+            remote.resources,
+        ),
+        (
+            DesiredStateSection::Providers,
+            local.providers,
+            remote.providers,
+        ),
+        (
+            DesiredStateSection::Executors,
+            local.executors,
+            remote.executors,
+        ),
+        (DesiredStateSection::Leases, local.leases, remote.leases),
+    ];
+    pairs
+        .into_iter()
+        .filter(|(_, local, remote)| local != remote)
+        .map(|(section, _, _)| section)
+        .collect()
 }
 
-#[cfg(feature = "transport-http")]
-pub(super) fn empty_summary_for_sections(
-    revision: Revision,
-    _sections: &[DesiredStateSection],
-) -> DesiredStateSummary {
-    DesiredStateSummary {
-        revision,
-        section_fingerprints: DesiredStateSectionFingerprints {
-            nodes: 0,
-            artifacts: 0,
-            workloads: 0,
-            resources: 0,
-            providers: 0,
-            executors: 0,
-            leases: 0,
-        },
-        nodes: BTreeMap::new(),
-        artifacts: BTreeMap::new(),
-        workloads: BTreeMap::new(),
-        workload_tombstones: BTreeMap::new(),
-        resources: BTreeMap::new(),
-        providers: BTreeMap::new(),
-        executors: BTreeMap::new(),
-        leases: BTreeMap::new(),
-    }
-}
-
-#[cfg(feature = "transport-http")]
+#[cfg(peer_sync)]
 pub(super) fn all_desired_sections() -> Vec<DesiredStateSection> {
     vec![
         DesiredStateSection::Nodes,
@@ -171,469 +145,293 @@ pub(super) fn section_mask(sections: &[DesiredStateSection]) -> u8 {
     mask
 }
 
-pub(super) fn diff_desired_against_summary_sections(
-    desired: &DesiredClusterState,
-    local_summary: &DesiredStateSummary,
-    summary: &DesiredStateSummary,
-    sections: &[DesiredStateSection],
-    object_selectors: &[DesiredStateObjectSelector],
-    base_revision: Revision,
-) -> Result<MutationBatch, NodeError> {
-    let mut mutations = Vec::new();
-    let selector_map = selector_map(object_selectors);
+/// The version of one object as seen in a summary (stamp plus content hash).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SummaryVersion {
+    stamp: HlcTimestamp,
+    /// `None` for a tombstone.
+    content: Option<u64>,
+}
 
-    for section in sections {
-        match section {
-            DesiredStateSection::Nodes => diff_section_against_summary_or_selected(
-                &desired.nodes,
-                &local_summary.nodes,
-                &summary.nodes,
-                selector_map.nodes.as_ref(),
-                |record| DesiredStateMutation::PutNode(record.clone()),
-                |node_id| DesiredStateMutation::RemoveNode(node_id.clone()),
-                &mut mutations,
-            )?,
-            DesiredStateSection::Artifacts => diff_section_against_summary_or_selected(
-                &desired.artifacts,
-                &local_summary.artifacts,
-                &summary.artifacts,
-                selector_map.artifacts.as_ref(),
-                |record| DesiredStateMutation::PutArtifact(record.clone()),
-                |artifact_id| DesiredStateMutation::RemoveArtifact(artifact_id.clone()),
-                &mut mutations,
-            )?,
-            DesiredStateSection::Workloads => diff_workloads_against_summary_or_selected(
-                &desired.workloads,
-                &desired.workload_tombstones,
-                &WorkloadSummaryViews {
-                    local_workloads: &local_summary.workloads,
-                    local_tombstones: &local_summary.workload_tombstones,
-                    remote_workloads: &summary.workloads,
-                    remote_tombstones: &summary.workload_tombstones,
-                },
-                selector_map.workloads.as_ref(),
-                &mut mutations,
-            )?,
-            DesiredStateSection::Resources => diff_section_against_summary_or_selected(
-                &desired.resources,
-                &local_summary.resources,
-                &summary.resources,
-                selector_map.resources.as_ref(),
-                |record| DesiredStateMutation::PutResource(record.clone()),
-                |resource_id| DesiredStateMutation::RemoveResource(resource_id.clone()),
-                &mut mutations,
-            )?,
-            DesiredStateSection::Providers => diff_section_against_summary_or_selected(
-                &desired.providers,
-                &local_summary.providers,
-                &summary.providers,
-                selector_map.providers.as_ref(),
-                |record| DesiredStateMutation::PutProvider(record.clone()),
-                |provider_id| DesiredStateMutation::RemoveProvider(provider_id.clone()),
-                &mut mutations,
-            )?,
-            DesiredStateSection::Executors => diff_section_against_summary_or_selected(
-                &desired.executors,
-                &local_summary.executors,
-                &summary.executors,
-                selector_map.executors.as_ref(),
-                |record| DesiredStateMutation::PutExecutor(record.clone()),
-                |executor_id| DesiredStateMutation::RemoveExecutor(executor_id.clone()),
-                &mut mutations,
-            )?,
-            DesiredStateSection::Leases => diff_section_against_summary_or_selected(
-                &desired.leases,
-                &local_summary.leases,
-                &summary.leases,
-                selector_map.leases.as_ref(),
-                |record| DesiredStateMutation::PutLease(record.clone()),
-                |resource_id| DesiredStateMutation::RemoveLease(resource_id.clone()),
-                &mut mutations,
-            )?,
-        }
+fn summary_content(summary: &DesiredStateSummary, key: &DesiredObjectKey) -> Option<u64> {
+    match key {
+        DesiredObjectKey::Node(id) => summary.nodes.get(id),
+        DesiredObjectKey::Artifact(id) => summary.artifacts.get(id),
+        DesiredObjectKey::Workload(id) => summary.workloads.get(id),
+        DesiredObjectKey::Resource(id) => summary.resources.get(id),
+        DesiredObjectKey::Provider(id) => summary.providers.get(id),
+        DesiredObjectKey::Executor(id) => summary.executors.get(id),
+        DesiredObjectKey::Lease(id) => summary.leases.get(id),
     }
+    .copied()
+}
 
-    Ok(MutationBatch {
-        base_revision,
-        mutations,
+fn summary_version(
+    summary: &DesiredStateSummary,
+    key: &DesiredObjectKey,
+) -> Option<SummaryVersion> {
+    if let Some(content) = summary_content(summary, key) {
+        return Some(SummaryVersion {
+            stamp: summary.stamps.get(key).unwrap_or(HlcTimestamp::ZERO),
+            content: Some(content),
+        });
+    }
+    summary.tombstones.get(key).map(|stamp| SummaryVersion {
+        stamp,
+        content: None,
     })
 }
 
-#[derive(Default)]
-struct SelectorMap {
-    nodes: Option<Vec<NodeId>>,
-    artifacts: Option<Vec<ArtifactId>>,
-    workloads: Option<Vec<WorkloadId>>,
-    resources: Option<Vec<ResourceId>>,
-    providers: Option<Vec<ProviderId>>,
-    executors: Option<Vec<ExecutorId>>,
-    leases: Option<Vec<ResourceId>>,
+/// Returns `true` when `ours` should replace `theirs` under the merge rule, judged from
+/// summaries. Equal stamps with different content count as a win for both sides, so both versions
+/// are exchanged and the receiver resolves the tie with the full records.
+fn summary_wins(ours: SummaryVersion, theirs: Option<SummaryVersion>) -> bool {
+    let Some(theirs) = theirs else {
+        return true;
+    };
+    match ours.stamp.cmp(&theirs.stamp) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => match (ours.content, theirs.content) {
+            (None, None) => false,
+            (None, Some(_)) => true,
+            (Some(_), None) => false,
+            (Some(left), Some(right)) => left != right,
+        },
+    }
 }
 
-struct WorkloadSummaryViews<'a> {
-    local_workloads: &'a BTreeMap<WorkloadId, u64>,
-    local_tombstones: &'a BTreeMap<WorkloadId, Revision>,
-    remote_workloads: &'a BTreeMap<WorkloadId, u64>,
-    remote_tombstones: &'a BTreeMap<WorkloadId, Revision>,
+#[cfg(peer_sync)]
+fn summary_keys(summary: &DesiredStateSummary) -> Vec<DesiredObjectKey> {
+    let mut keys = Vec::new();
+    keys.extend(summary.nodes.keys().cloned().map(DesiredObjectKey::Node));
+    keys.extend(
+        summary
+            .artifacts
+            .keys()
+            .cloned()
+            .map(DesiredObjectKey::Artifact),
+    );
+    keys.extend(
+        summary
+            .workloads
+            .keys()
+            .cloned()
+            .map(DesiredObjectKey::Workload),
+    );
+    keys.extend(
+        summary
+            .resources
+            .keys()
+            .cloned()
+            .map(DesiredObjectKey::Resource),
+    );
+    keys.extend(
+        summary
+            .providers
+            .keys()
+            .cloned()
+            .map(DesiredObjectKey::Provider),
+    );
+    keys.extend(
+        summary
+            .executors
+            .keys()
+            .cloned()
+            .map(DesiredObjectKey::Executor),
+    );
+    keys.extend(summary.leases.keys().cloned().map(DesiredObjectKey::Lease));
+    keys.extend(summary.tombstones.entries().into_iter().map(|(key, _)| key));
+    keys
 }
 
-fn selector_map(selectors: &[DesiredStateObjectSelector]) -> SelectorMap {
-    let mut map = SelectorMap::default();
+/// Tombstones whose stamp is older than `cutoff_ms` are expired: they are neither sent nor
+/// pulled (see "Tombstones and garbage collection" in `docs/peer-sync.md`).
+fn is_expired_tombstone(version: SummaryVersion, cutoff_ms: u64) -> bool {
+    version.content.is_none() && version.stamp.physical_ms < cutoff_ms
+}
+
+/// Keys whose version in `local` wins against `remote` (push set) and keys whose version in
+/// `remote` wins against `local` (pull set), restricted to `sections`.
+#[cfg(peer_sync)]
+pub(super) fn plan_sync_exchange(
+    local: &DesiredStateSummary,
+    remote: &DesiredStateSummary,
+    tombstone_cutoff_ms: u64,
+) -> (Vec<DesiredObjectKey>, Vec<DesiredObjectKey>) {
+    let mut keys = summary_keys(local);
+    keys.extend(summary_keys(remote));
+    keys.sort();
+    keys.dedup();
+    let mut push = Vec::new();
+    let mut pull = Vec::new();
+    for key in keys {
+        let ours = summary_version(local, &key)
+            .filter(|version| !is_expired_tombstone(*version, tombstone_cutoff_ms));
+        let theirs = summary_version(remote, &key)
+            .filter(|version| !is_expired_tombstone(*version, tombstone_cutoff_ms));
+        if let Some(ours) = ours
+            && summary_wins(ours, theirs)
+        {
+            push.push(key.clone());
+        }
+        if let Some(theirs) = theirs
+            && summary_wins(theirs, ours)
+        {
+            pull.push(key);
+        }
+    }
+    (push, pull)
+}
+
+/// Stamped versions of `keys` from `desired` (keys without a version are skipped).
+#[cfg(peer_sync)]
+pub(super) fn stamped_versions_for_keys(
+    desired: &DesiredClusterState,
+    keys: &[DesiredObjectKey],
+) -> MutationBatch {
+    MutationBatch::stamped(
+        desired.revision,
+        keys.iter()
+            .filter_map(|key| desired.stamped_mutation_for(key)),
+    )
+}
+
+/// Versions in `desired` (restricted to `sections`, or to the selected objects) that win against
+/// the versions described by `summary`, as a stamped batch.
+pub(super) fn versions_newer_than_summary(
+    desired: &DesiredClusterState,
+    summary: &DesiredStateSummary,
+    sections: &[DesiredStateSection],
+    object_selectors: &[DesiredStateObjectSelector],
+    tombstone_cutoff_ms: u64,
+) -> MutationBatch {
+    // A section with a selector is restricted to the selected objects; other requested sections
+    // (all sections when none are listed) are compared in full.
+    let selected = selected_keys(object_selectors);
+    let selected_sections: Vec<_> = selected.iter().map(DesiredObjectKey::section).collect();
+    let mut candidates: Vec<_> = desired
+        .object_keys()
+        .into_iter()
+        .filter(|key| {
+            let section = key.section();
+            (sections.is_empty() || sections.contains(&section))
+                && !selected_sections.contains(&section)
+        })
+        .collect();
+    candidates.extend(selected);
+    let mut versions = Vec::new();
+    for key in candidates {
+        let Some((mutation, stamp)) = desired.stamped_mutation_for(&key) else {
+            continue;
+        };
+        let content = if mutation.is_remove() {
+            None
+        } else {
+            let local_summary_hash = match &mutation {
+                DesiredStateMutation::PutNode(record) => entry_fingerprint(record),
+                DesiredStateMutation::PutArtifact(record) => entry_fingerprint(record),
+                DesiredStateMutation::PutWorkload(record) => entry_fingerprint(record),
+                DesiredStateMutation::PutResource(record) => entry_fingerprint(record),
+                DesiredStateMutation::PutProvider(record) => entry_fingerprint(record),
+                DesiredStateMutation::PutExecutor(record) => entry_fingerprint(record),
+                DesiredStateMutation::PutLease(record) => entry_fingerprint(record),
+                _ => Ok(0),
+            };
+            Some(local_summary_hash.unwrap_or(0))
+        };
+        let ours = SummaryVersion { stamp, content };
+        if is_expired_tombstone(ours, tombstone_cutoff_ms) {
+            continue;
+        }
+        if summary_wins(ours, summary_version(summary, &key)) {
+            versions.push((mutation, stamp));
+        }
+    }
+    MutationBatch::stamped(desired.revision, versions)
+}
+
+fn selected_keys(selectors: &[DesiredStateObjectSelector]) -> Vec<DesiredObjectKey> {
+    let mut keys = Vec::new();
     for selector in selectors {
         match selector {
-            DesiredStateObjectSelector::Nodes(ids) => map.nodes = Some(ids.clone()),
-            DesiredStateObjectSelector::Artifacts(ids) => map.artifacts = Some(ids.clone()),
-            DesiredStateObjectSelector::Workloads(ids) => map.workloads = Some(ids.clone()),
-            DesiredStateObjectSelector::Resources(ids) => map.resources = Some(ids.clone()),
-            DesiredStateObjectSelector::Providers(ids) => map.providers = Some(ids.clone()),
-            DesiredStateObjectSelector::Executors(ids) => map.executors = Some(ids.clone()),
-            DesiredStateObjectSelector::Leases(ids) => map.leases = Some(ids.clone()),
-        }
-    }
-    map
-}
-
-fn diff_section_against_summary_or_selected<K, V, Put, Remove>(
-    desired: &BTreeMap<K, V>,
-    local_summary: &BTreeMap<K, u64>,
-    summary: &BTreeMap<K, u64>,
-    selected_keys: Option<&Vec<K>>,
-    put: Put,
-    remove: Remove,
-    mutations: &mut Vec<DesiredStateMutation>,
-) -> Result<(), NodeError>
-where
-    K: Ord + Clone,
-    V: ArchiveEncode + Clone,
-    Put: Fn(&V) -> DesiredStateMutation,
-    Remove: Fn(&K) -> DesiredStateMutation,
-{
-    match selected_keys {
-        Some(keys) => {
-            for key in keys {
-                match desired.get(key) {
-                    Some(value) => {
-                        if summary.get(key) != local_summary.get(key) {
-                            mutations.push(put(value));
-                        }
-                    }
-                    None => {
-                        if summary.contains_key(key) {
-                            mutations.push(remove(key));
-                        }
-                    }
-                }
+            DesiredStateObjectSelector::Nodes(ids) => {
+                keys.extend(ids.iter().cloned().map(DesiredObjectKey::Node))
             }
-        }
-        None => {
-            if summary.is_empty() {
-                mutations.extend(desired.values().map(put));
-                return Ok(());
+            DesiredStateObjectSelector::Artifacts(ids) => {
+                keys.extend(ids.iter().cloned().map(DesiredObjectKey::Artifact))
             }
-
-            for (key, value) in desired {
-                if summary.get(key) != local_summary.get(key) {
-                    mutations.push(put(value));
-                }
+            DesiredStateObjectSelector::Workloads(ids) => {
+                keys.extend(ids.iter().cloned().map(DesiredObjectKey::Workload))
             }
-
-            for key in summary.keys() {
-                if !desired.contains_key(key) {
-                    mutations.push(remove(key));
-                }
+            DesiredStateObjectSelector::Resources(ids) => {
+                keys.extend(ids.iter().cloned().map(DesiredObjectKey::Resource))
+            }
+            DesiredStateObjectSelector::Providers(ids) => {
+                keys.extend(ids.iter().cloned().map(DesiredObjectKey::Provider))
+            }
+            DesiredStateObjectSelector::Executors(ids) => {
+                keys.extend(ids.iter().cloned().map(DesiredObjectKey::Executor))
+            }
+            DesiredStateObjectSelector::Leases(ids) => {
+                keys.extend(ids.iter().cloned().map(DesiredObjectKey::Lease))
             }
         }
     }
-
-    Ok(())
+    keys
 }
 
-fn diff_workloads_against_summary_or_selected(
-    desired_workloads: &BTreeMap<WorkloadId, WorkloadRecord>,
-    desired_tombstones: &BTreeMap<WorkloadId, Revision>,
-    summary_views: &WorkloadSummaryViews<'_>,
-    selected_ids: Option<&Vec<WorkloadId>>,
-    mutations: &mut Vec<DesiredStateMutation>,
-) -> Result<(), NodeError> {
-    match selected_ids {
-        Some(ids) => {
-            for workload_id in ids {
-                if let Some(record) = desired_workloads.get(workload_id) {
-                    if summary_views.remote_workloads.get(workload_id)
-                        != summary_views.local_workloads.get(workload_id)
-                    {
-                        mutations.push(DesiredStateMutation::PutWorkload(record.clone()));
-                    }
-                    continue;
-                }
-                if desired_tombstones.get(workload_id).is_some() {
-                    if summary_views.remote_tombstones.get(workload_id)
-                        != summary_views.local_tombstones.get(workload_id)
-                        || summary_views.remote_workloads.contains_key(workload_id)
-                    {
-                        mutations.push(DesiredStateMutation::RemoveWorkload(workload_id.clone()));
-                    }
-                    continue;
-                }
-                if summary_views.remote_workloads.contains_key(workload_id)
-                    || summary_views.remote_tombstones.contains_key(workload_id)
-                {
-                    mutations.push(DesiredStateMutation::RemoveWorkload(workload_id.clone()));
-                }
-            }
-        }
-        None => {
-            if summary_views.remote_workloads.is_empty()
-                && summary_views.remote_tombstones.is_empty()
-            {
-                mutations.extend(
-                    desired_workloads
-                        .values()
-                        .cloned()
-                        .map(DesiredStateMutation::PutWorkload),
-                );
-                mutations.extend(
-                    desired_tombstones
-                        .keys()
-                        .cloned()
-                        .map(DesiredStateMutation::RemoveWorkload),
-                );
-                return Ok(());
-            }
-
-            for (workload_id, record) in desired_workloads {
-                if summary_views.remote_workloads.get(workload_id)
-                    != summary_views.local_workloads.get(workload_id)
-                {
-                    mutations.push(DesiredStateMutation::PutWorkload(record.clone()));
-                }
-            }
-
-            for workload_id in desired_tombstones.keys() {
-                if summary_views.remote_tombstones.get(workload_id)
-                    != summary_views.local_tombstones.get(workload_id)
-                    || summary_views.remote_workloads.contains_key(workload_id)
-                {
-                    mutations.push(DesiredStateMutation::RemoveWorkload(workload_id.clone()));
-                }
-            }
-
-            for workload_id in summary_views.remote_workloads.keys() {
-                if !desired_workloads.contains_key(workload_id)
-                    && !desired_tombstones.contains_key(workload_id)
-                {
-                    mutations.push(DesiredStateMutation::RemoveWorkload(workload_id.clone()));
-                }
-            }
+/// Groups keys into one selector per section.
+#[cfg(peer_sync)]
+pub(super) fn selectors_for_keys(keys: &[DesiredObjectKey]) -> Vec<DesiredStateObjectSelector> {
+    let mut nodes = Vec::new();
+    let mut artifacts = Vec::new();
+    let mut workloads = Vec::new();
+    let mut resources = Vec::new();
+    let mut providers = Vec::new();
+    let mut executors = Vec::new();
+    let mut leases = Vec::new();
+    for key in keys {
+        match key.clone() {
+            DesiredObjectKey::Node(id) => nodes.push(id),
+            DesiredObjectKey::Artifact(id) => artifacts.push(id),
+            DesiredObjectKey::Workload(id) => workloads.push(id),
+            DesiredObjectKey::Resource(id) => resources.push(id),
+            DesiredObjectKey::Provider(id) => providers.push(id),
+            DesiredObjectKey::Executor(id) => executors.push(id),
+            DesiredObjectKey::Lease(id) => leases.push(id),
         }
     }
-
-    Ok(())
-}
-
-#[cfg(feature = "transport-http")]
-type WorkloadMergeResult = (
-    BTreeMap<WorkloadId, WorkloadRecord>,
-    BTreeMap<WorkloadId, Revision>,
-);
-
-#[cfg(feature = "transport-http")]
-pub(super) fn merge_desired_cluster_state(
-    local: &DesiredClusterState,
-    remote: &DesiredClusterState,
-) -> Result<DesiredClusterState, NodeError> {
-    let nodes = merge_section(&local.nodes, &remote.nodes)?;
-    let artifacts = merge_section(&local.artifacts, &remote.artifacts)?;
-    let (workloads, workload_tombstones) = merge_workload_section(local, remote)?;
-    let resources = merge_section(&local.resources, &remote.resources)?;
-    let providers = merge_section(&local.providers, &remote.providers)?;
-    let executors = merge_section(&local.executors, &remote.executors)?;
-    let leases = merge_section(&local.leases, &remote.leases)?;
-    let differs_from_local = local.nodes != nodes
-        || local.artifacts != artifacts
-        || local.workloads != workloads
-        || local.workload_tombstones != workload_tombstones
-        || local.resources != resources
-        || local.providers != providers
-        || local.executors != executors
-        || local.leases != leases;
-    let differs_from_remote = remote.nodes != nodes
-        || remote.artifacts != artifacts
-        || remote.workloads != workloads
-        || remote.workload_tombstones != workload_tombstones
-        || remote.resources != resources
-        || remote.providers != providers
-        || remote.executors != executors
-        || remote.leases != leases;
-    let mut merged = DesiredClusterState {
-        revision: std::cmp::max(local.revision, remote.revision),
-        nodes,
-        artifacts,
-        workloads,
-        workload_tombstones,
-        resources,
-        providers,
-        executors,
-        leases,
-    };
-
-    if differs_from_local && differs_from_remote {
-        merged.revision = merged.revision.next();
+    let mut selectors = Vec::new();
+    if !nodes.is_empty() {
+        selectors.push(DesiredStateObjectSelector::Nodes(nodes));
     }
-
-    Ok(merged)
-}
-
-#[cfg(feature = "transport-http")]
-fn merge_workload_section(
-    local: &DesiredClusterState,
-    remote: &DesiredClusterState,
-) -> Result<WorkloadMergeResult, NodeError> {
-    let mut workloads = BTreeMap::new();
-    let mut workload_tombstones = BTreeMap::new();
-
-    for workload_id in local
-        .workloads
-        .keys()
-        .chain(local.workload_tombstones.keys())
-        .chain(remote.workloads.keys())
-        .chain(remote.workload_tombstones.keys())
-    {
-        if workloads.contains_key(workload_id) || workload_tombstones.contains_key(workload_id) {
-            continue;
-        }
-
-        let local_record = local.workloads.get(workload_id);
-        let remote_record = remote.workloads.get(workload_id);
-        let local_tombstone = local.workload_tombstones.get(workload_id).copied();
-        let remote_tombstone = remote.workload_tombstones.get(workload_id).copied();
-
-        let winner = select_workload_entry(
-            workload_id,
-            local_record,
-            local.revision,
-            local_tombstone,
-            remote_record,
-            remote.revision,
-            remote_tombstone,
-        )?;
-
-        match winner {
-            WorkloadMergeEntry::Record(record) => {
-                workloads.insert(workload_id.clone(), record);
-            }
-            WorkloadMergeEntry::Tombstone(revision) => {
-                workload_tombstones.insert(workload_id.clone(), revision);
-            }
-            WorkloadMergeEntry::Absent => {}
-        }
+    if !artifacts.is_empty() {
+        selectors.push(DesiredStateObjectSelector::Artifacts(artifacts));
     }
-
-    Ok((workloads, workload_tombstones))
-}
-
-#[cfg(feature = "transport-http")]
-enum WorkloadMergeEntry {
-    Record(WorkloadRecord),
-    Tombstone(Revision),
-    Absent,
-}
-
-#[cfg(feature = "transport-http")]
-fn select_workload_entry(
-    workload_id: &WorkloadId,
-    local_record: Option<&WorkloadRecord>,
-    local_record_revision: Revision,
-    local_tombstone: Option<Revision>,
-    remote_record: Option<&WorkloadRecord>,
-    remote_record_revision: Revision,
-    remote_tombstone: Option<Revision>,
-) -> Result<WorkloadMergeEntry, NodeError> {
-    let winning_record = match (local_record, remote_record) {
-        (Some(left), Some(right)) if left == right => Some((
-            left.clone(),
-            local_record_revision.max(remote_record_revision),
-        )),
-        (Some(left), Some(right)) => {
-            let left_bytes =
-                encode_to_vec(left).map_err(|err| NodeError::Storage(err.to_string()))?;
-            let right_bytes =
-                encode_to_vec(right).map_err(|err| NodeError::Storage(err.to_string()))?;
-            if left_bytes >= right_bytes {
-                Some((left.clone(), local_record_revision))
-            } else {
-                Some((right.clone(), remote_record_revision))
-            }
-        }
-        (Some(left), None) => Some((left.clone(), local_record_revision)),
-        (None, Some(right)) => Some((right.clone(), remote_record_revision)),
-        (None, None) => None,
-    };
-
-    let winning_tombstone = match (local_tombstone, remote_tombstone) {
-        (Some(left), Some(right)) => Some(std::cmp::max(left, right)),
-        (Some(left), None) => Some(left),
-        (None, Some(right)) => Some(right),
-        (None, None) => None,
-    };
-
-    match (winning_record, winning_tombstone) {
-        (Some((record, record_revision)), Some(tombstone_revision)) => {
-            if tombstone_revision > record_revision {
-                Ok(WorkloadMergeEntry::Tombstone(tombstone_revision))
-            } else if record_revision > tombstone_revision {
-                Ok(WorkloadMergeEntry::Record(record))
-            } else {
-                let _ = workload_id;
-                Ok(WorkloadMergeEntry::Record(record))
-            }
-        }
-        (Some((record, _)), None) => Ok(WorkloadMergeEntry::Record(record)),
-        (None, Some(tombstone_revision)) => Ok(WorkloadMergeEntry::Tombstone(tombstone_revision)),
-        (None, None) => Ok(WorkloadMergeEntry::Absent),
+    if !workloads.is_empty() {
+        selectors.push(DesiredStateObjectSelector::Workloads(workloads));
     }
+    if !resources.is_empty() {
+        selectors.push(DesiredStateObjectSelector::Resources(resources));
+    }
+    if !providers.is_empty() {
+        selectors.push(DesiredStateObjectSelector::Providers(providers));
+    }
+    if !executors.is_empty() {
+        selectors.push(DesiredStateObjectSelector::Executors(executors));
+    }
+    if !leases.is_empty() {
+        selectors.push(DesiredStateObjectSelector::Leases(leases));
+    }
+    selectors
 }
 
-#[cfg(feature = "transport-http")]
-fn merge_section<K, V>(
-    local: &BTreeMap<K, V>,
-    remote: &BTreeMap<K, V>,
-) -> Result<BTreeMap<K, V>, NodeError>
-where
-    K: Ord + Clone,
-    V: Clone + Eq + ArchiveEncode,
-{
-    let mut merged = BTreeMap::new();
-
-    for key in local.keys().chain(remote.keys()) {
-        if merged.contains_key(key) {
-            continue;
-        }
-
-        match (local.get(key), remote.get(key)) {
-            (Some(left), Some(right)) if left == right => {
-                merged.insert(key.clone(), left.clone());
-            }
-            (Some(left), Some(right)) => {
-                let left_bytes =
-                    encode_to_vec(left).map_err(|err| NodeError::Storage(err.to_string()))?;
-                let right_bytes =
-                    encode_to_vec(right).map_err(|err| NodeError::Storage(err.to_string()))?;
-                if left_bytes >= right_bytes {
-                    merged.insert(key.clone(), left.clone());
-                } else {
-                    merged.insert(key.clone(), right.clone());
-                }
-            }
-            (Some(left), None) => {
-                merged.insert(key.clone(), left.clone());
-            }
-            (None, Some(right)) => {
-                merged.insert(key.clone(), right.clone());
-            }
-            (None, None) => {}
-        }
-    }
-
-    Ok(merged)
+/// Sections touched by `keys`, in canonical order.
+#[cfg(peer_sync)]
+pub(super) fn sections_of_keys(keys: &[DesiredObjectKey]) -> Vec<DesiredStateSection> {
+    all_desired_sections()
+        .into_iter()
+        .filter(|section| keys.iter().any(|key| key.section() == *section))
+        .collect()
 }

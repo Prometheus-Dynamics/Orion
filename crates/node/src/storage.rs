@@ -31,14 +31,20 @@ const MUTATION_HISTORY_BASELINE_FILE: &str = "mutation-history-baseline.rkyv";
 const MAINTENANCE_STATE_FILE: &str = "maintenance-state.rkyv";
 const ARTIFACT_METADATA_FILE: &str = "metadata.rkyv";
 const ARTIFACT_PAYLOAD_FILE: &str = "payload.bin";
-const SNAPSHOT_FORMAT_VERSION: u32 = 3;
+/// Snapshot format. `4`: per-object HLC stamps and tombstones in the desired state, stamped
+/// mutation history (format `3` directories are migrated by [`NodeStorage::migrate_legacy_state`]).
+const SNAPSHOT_FORMAT_VERSION: u32 = 4;
+
+mod migrate_v3;
+pub use migrate_v3::StateMigrationReport;
 
 #[derive(Clone, Debug, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct DesiredStateSectionCounts {
     pub nodes: u64,
     pub artifacts: u64,
     pub workloads: u64,
-    pub workload_tombstones: u64,
+    /// Desired-state tombstones of every section.
+    pub tombstones: u64,
     pub resources: u64,
     pub providers: u64,
     pub executors: u64,
@@ -133,7 +139,13 @@ impl NodeStorage {
 
         let manifest_bytes =
             std::fs::read(&manifest_path).map_err(|err| NodeError::Storage(err.to_string()))?;
-        let manifest: SnapshotManifest = decode_from_slice(&manifest_bytes)?;
+        let manifest: SnapshotManifest = decode_from_slice(&manifest_bytes).map_err(|err| {
+            NodeError::Storage(format!(
+                "snapshot manifest {} is not readable by this orion-node (snapshot format \
+                 {SNAPSHOT_FORMAT_VERSION}): {err}",
+                manifest_path.display()
+            ))
+        })?;
         if manifest.format_version != SNAPSHOT_FORMAT_VERSION {
             return Err(NodeError::Storage(format!(
                 "unsupported snapshot format version {}",
@@ -528,34 +540,29 @@ fn sync_parent_directory(path: &Path) -> Result<(), NodeError> {
     sync_directory(path, "failed to sync storage directory")
 }
 
-fn desired_section_counts(desired: &DesiredClusterState) -> DesiredStateSectionCounts {
-    DesiredStateSectionCounts {
-        nodes: desired.nodes.len() as u64,
-        artifacts: desired.artifacts.len() as u64,
-        workloads: desired.workloads.len() as u64,
-        workload_tombstones: desired.workload_tombstones.len() as u64,
-        resources: desired.resources.len() as u64,
-        providers: desired.providers.len() as u64,
-        executors: desired.executors.len() as u64,
-        leases: desired.leases.len() as u64,
+impl DesiredStateSectionCounts {
+    pub(crate) fn of(desired: &DesiredClusterState) -> Self {
+        Self {
+            nodes: desired.nodes.len() as u64,
+            artifacts: desired.artifacts.len() as u64,
+            workloads: desired.workloads.len() as u64,
+            tombstones: desired.tombstones.len() as u64,
+            resources: desired.resources.len() as u64,
+            providers: desired.providers.len() as u64,
+            executors: desired.executors.len() as u64,
+            leases: desired.leases.len() as u64,
+        }
     }
+}
+
+fn desired_section_counts(desired: &DesiredClusterState) -> DesiredStateSectionCounts {
+    DesiredStateSectionCounts::of(desired)
 }
 
 fn desired_section_fingerprints(
     desired: &DesiredClusterState,
 ) -> Result<DesiredStateSectionFingerprints, NodeError> {
-    Ok(DesiredStateSectionFingerprints {
-        nodes: entry_fingerprint(&desired.nodes)?,
-        artifacts: entry_fingerprint(&desired.artifacts)?,
-        workloads: combined_fingerprint([
-            entry_fingerprint(&desired.workloads)?,
-            entry_fingerprint(&desired.workload_tombstones)?,
-        ]),
-        resources: entry_fingerprint(&desired.resources)?,
-        providers: entry_fingerprint(&desired.providers)?,
-        executors: entry_fingerprint(&desired.executors)?,
-        leases: entry_fingerprint(&desired.leases)?,
-    })
+    crate::app::desired_section_fingerprints(desired)
 }
 
 pub(crate) fn encode_desired_snapshot(
@@ -578,34 +585,6 @@ pub(crate) fn desired_snapshot_revision_only(
         section_fingerprints: None,
         section_counts: None,
     }
-}
-
-fn entry_fingerprint<T>(value: &T) -> Result<u64, NodeError>
-where
-    T: for<'a> RkyvSerialize<
-        rkyv::api::high::HighSerializer<
-            AlignedVec,
-            rkyv::ser::allocator::ArenaHandle<'a>,
-            ArchiveError,
-        >,
-    >,
-{
-    use std::hash::{Hash, Hasher};
-
-    let bytes = encode_to_vec(value)?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Ok(hasher.finish())
-}
-
-fn combined_fingerprint(parts: impl IntoIterator<Item = u64>) -> u64 {
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for part in parts {
-        part.hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 type DecodeStrategy = Strategy<Pool, ArchiveError>;
@@ -760,6 +739,7 @@ mod tests {
         let history = vec![MutationBatch {
             base_revision: Revision::ZERO,
             mutations: Vec::new(),
+            stamps: Vec::new(),
         }];
 
         storage

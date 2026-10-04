@@ -174,11 +174,11 @@ impl NodeApp {
                 "diff requests are only supported over peer HTTP".into(),
             )),
             ControlMessage::Snapshot(snapshot) => {
-                self.adopt_remote_snapshot(snapshot)?;
+                self.merge_peer_snapshot(None, &snapshot)?;
                 Ok(ControlMessage::Accepted)
             }
             ControlMessage::Mutations(batch) => {
-                self.apply_remote_mutations(&batch)?;
+                self.apply_mutation_batch(&batch, super::desired_writes::WriteOrigin::Local)?;
                 Ok(ControlMessage::Accepted)
             }
             ControlMessage::ClientWelcome(_)

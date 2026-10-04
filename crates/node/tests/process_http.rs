@@ -55,6 +55,7 @@ async fn orion_node_binary_reports_observability_snapshot() {
                 mutations: vec![DesiredStateMutation::PutArtifact(
                     ArtifactRecord::builder("artifact.obs").build(),
                 )],
+                stamps: Vec::new(),
             }),
         )))
         .await
@@ -534,6 +535,7 @@ async fn orion_node_binary_handles_repeated_control_plane_mutations() {
                     .build(),
                 ),
             ],
+            stamps: Vec::new(),
         };
 
         let response = client
@@ -582,6 +584,7 @@ async fn orion_node_binary_survives_concurrent_http_ipc_and_peer_sync_activity()
                             .build(),
                         ),
                     ],
+                    stamps: Vec::new(),
                 };
                 let response = client
                     .send(&HttpRequestPayload::Control(Box::new(

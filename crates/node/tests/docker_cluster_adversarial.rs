@@ -90,6 +90,7 @@ async fn docker_cluster_returns_error_for_valid_json_with_invalid_mutation_seman
             "workload.invalid.semantic",
             "node-a",
         ))],
+        stamps: Vec::new(),
     }))
     .expect("mutation batch should encode");
 
@@ -142,6 +143,7 @@ async fn docker_cluster_accepts_duplicate_workload_ids_in_single_batch_and_stays
                 "node-b",
             )),
         ],
+        stamps: Vec::new(),
     };
 
     let response = cluster
@@ -233,6 +235,7 @@ async fn docker_cluster_large_mutation_batch_stays_healthy_and_propagates() {
     let batch = MutationBatch {
         base_revision: snapshot.state.desired.revision,
         mutations,
+        stamps: Vec::new(),
     };
 
     let response = cluster
@@ -292,6 +295,7 @@ async fn docker_cluster_impossible_mutation_revision_is_rejected_without_breakin
     let impossible_revision = encode_to_vec(&ControlMessage::Mutations(MutationBatch {
         base_revision: Revision::new(u64::MAX),
         mutations: Vec::new(),
+        stamps: Vec::new(),
     }))
     .expect("impossible revision payload should encode");
 

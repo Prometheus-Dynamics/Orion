@@ -65,6 +65,8 @@ fn node_persists_and_replays_state_and_artifacts() {
             .workloads
             .contains_key(&WorkloadId::new("workload.pose"))
     );
+    // Replay restores records, their HLC stamps and the revision exactly.
+    assert_eq!(snapshot.state.desired, app.state_snapshot().state.desired);
 
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should build");
     let delta = runtime.block_on(async {
@@ -79,9 +81,9 @@ fn node_persists_and_replays_state_and_artifacts() {
                 orion::control_plane::ControlMessage::SyncRequest(
                     orion::control_plane::SyncRequest {
                         node_id: NodeId::new("node-b"),
-                        desired_revision: orion::Revision::new(3),
+                        desired_revision: orion::Revision::ZERO,
                         desired_fingerprint: 0,
-                        desired_summary: None,
+                        desired_summary: Some(Default::default()),
                         sections: Vec::new(),
                         object_selectors: Vec::new(),
                     },
@@ -94,10 +96,15 @@ fn node_persists_and_replays_state_and_artifacts() {
     });
     match delta {
         HttpResponsePayload::Mutations(batch) => {
-            assert_eq!(batch.base_revision, orion::Revision::new(3));
-            assert_eq!(batch.mutations.len(), 1);
+            // Every replayed object comes back with the stamp of its last write.
+            assert!(batch.is_stamped());
+            assert_eq!(batch.mutations.len(), 4);
+            assert_eq!(
+                batch.stamps.iter().max().copied(),
+                snapshot.state.desired.max_stamp()
+            );
         }
-        other => panic!("expected persisted mutation replay, got {other:?}"),
+        other => panic!("expected the replayed object versions, got {other:?}"),
     }
 
     let (artifact, payload) = replayed

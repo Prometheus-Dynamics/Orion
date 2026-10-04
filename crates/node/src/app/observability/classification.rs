@@ -1,4 +1,4 @@
-#[cfg(any(test, feature = "transport-http"))]
+#[cfg(any(test, peer_sync))]
 use crate::ControlOperation;
 use crate::NodeError;
 #[cfg(any(
@@ -8,7 +8,7 @@ use crate::NodeError;
 ))]
 use orion::control_plane::CommunicationFailureKind;
 use orion::control_plane::{OperationFailureCategory, PeerSyncErrorKind};
-#[cfg(any(test, feature = "transport-http"))]
+#[cfg(any(test, peer_sync))]
 use orion_transport_http::{HttpRequestFailureKind, HttpTransportError};
 #[cfg(feature = "transport-quic")]
 use orion_transport_quic::QuicTransportError;
@@ -42,6 +42,8 @@ pub(crate) fn classify_node_error(error: &NodeError) -> OperationFailureCategory
         NodeError::TcpTransport(_) => OperationFailureCategory::Transport,
         #[cfg(feature = "transport-quic")]
         NodeError::QuicTransport(_) => OperationFailureCategory::Transport,
+        #[cfg(feature = "peer-tcp")]
+        NodeError::PeerTcp(_) => OperationFailureCategory::Transport,
         NodeError::PersistenceWorkerUnavailable
         | NodeError::PersistenceWorkerTerminated
         | NodeError::AuthStateWorkerUnavailable
@@ -105,7 +107,7 @@ fn classify_peer_sync_message_fallback(message: &str) -> PeerSyncErrorKind {
     }
 }
 
-#[cfg(any(test, feature = "transport-http"))]
+#[cfg(any(test, peer_sync))]
 fn classify_http_transport_error_for_peer_sync(error: &HttpTransportError) -> PeerSyncErrorKind {
     match error {
         // TLS transport errors from the HTTP layer currently arrive as free-text messages,
@@ -140,7 +142,7 @@ pub(crate) fn classify_peer_sync_error_kind(message: &str) -> PeerSyncErrorKind 
     classify_peer_sync_message_fallback(message)
 }
 
-#[cfg(any(test, feature = "transport-http"))]
+#[cfg(any(test, peer_sync))]
 pub(crate) fn classify_peer_sync_error(error: &NodeError) -> PeerSyncErrorKind {
     match error {
         NodeError::Config(_)
@@ -191,6 +193,16 @@ pub(crate) fn classify_peer_sync_error(error: &NodeError) -> PeerSyncErrorKind {
         NodeError::TcpTransport(_) => PeerSyncErrorKind::PeerSync,
         #[cfg(feature = "transport-quic")]
         NodeError::QuicTransport(_) => PeerSyncErrorKind::PeerSync,
+        #[cfg(feature = "peer-tcp")]
+        NodeError::PeerTcp(error) => {
+            if error.is_connectivity_error() {
+                PeerSyncErrorKind::TransportConnectivity
+            } else if let crate::PeerTcpError::Remote(message) = error {
+                classify_peer_sync_message_fallback(message)
+            } else {
+                PeerSyncErrorKind::PeerSync
+            }
+        }
     }
 }
 

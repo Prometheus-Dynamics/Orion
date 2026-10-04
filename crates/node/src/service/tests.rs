@@ -152,6 +152,7 @@ fn http_requests_flow_through_control_middleware() {
             ControlMessage::Mutations(MutationBatch {
                 base_revision: Revision::new(42),
                 mutations: Vec::new(),
+                stamps: Vec::new(),
             }),
         )))
         .expect("middleware should short-circuit stale mutation batch");
@@ -230,6 +231,7 @@ fn authorization_middleware_can_block_requests_before_app_logic() {
             ControlMessage::Mutations(MutationBatch {
                 base_revision: Revision::ZERO,
                 mutations: Vec::new(),
+                stamps: Vec::new(),
             }),
         )))
         .expect_err("authorizer should reject mutations");
@@ -250,6 +252,7 @@ async fn http_control_requests_stay_on_the_runtime_thread() {
                 ControlMessage::Mutations(MutationBatch {
                     base_revision: Revision::new(42),
                     mutations: Vec::new(),
+                    stamps: Vec::new(),
                 }),
             )))
             .expect("http request should complete on the runtime thread");

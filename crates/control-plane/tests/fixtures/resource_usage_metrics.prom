@@ -18,7 +18,7 @@ orion_process_pss_file_bytes{node_id="node-a"} 10878976
 orion_state_records{node_id="node-a",view="desired",kind="nodes"} 1
 orion_state_records{node_id="node-a",view="desired",kind="artifacts"} 3
 orion_state_records{node_id="node-a",view="desired",kind="workloads"} 3
-orion_state_records{node_id="node-a",view="desired",kind="workload_tombstones"} 1
+orion_state_records{node_id="node-a",view="desired",kind="tombstones"} 1
 orion_state_records{node_id="node-a",view="desired",kind="resources"} 4
 orion_state_records{node_id="node-a",view="desired",kind="providers"} 1
 orion_state_records{node_id="node-a",view="desired",kind="executors"} 1

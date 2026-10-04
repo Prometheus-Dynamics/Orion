@@ -80,7 +80,7 @@ pub struct StateSectionCounts {
     pub nodes: u64,
     pub artifacts: u64,
     pub workloads: u64,
-    pub workload_tombstones: u64,
+    pub tombstones: u64,
     pub resources: u64,
     pub providers: u64,
     pub executors: u64,
@@ -92,7 +92,7 @@ impl StateSectionCounts {
         self.nodes
             .saturating_add(self.artifacts)
             .saturating_add(self.workloads)
-            .saturating_add(self.workload_tombstones)
+            .saturating_add(self.tombstones)
             .saturating_add(self.resources)
             .saturating_add(self.providers)
             .saturating_add(self.executors)

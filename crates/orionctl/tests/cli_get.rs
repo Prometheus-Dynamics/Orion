@@ -344,6 +344,7 @@ async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
                 mutations: vec![DesiredStateMutation::PutArtifact(
                     ArtifactRecord::builder("artifact.events").build(),
                 )],
+                stamps: Vec::new(),
             }),
         )))
         .await

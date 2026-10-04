@@ -56,6 +56,29 @@ impl ControlFrameReadState {
     where
         R: AsyncRead + Unpin,
     {
+        let Some(payload) = self.read_payload(reader, max_payload_bytes).await? else {
+            return Ok(None);
+        };
+        let bytes_received = payload.len() + HEADER_BYTES;
+        decode_from_slice_with(&payload, IpcTransportError::DecodeFailed)
+            .map(|envelope| Some((envelope, bytes_received)))
+    }
+
+    /// Reads the next frame's payload bytes without decoding them, for protocols that carry
+    /// their own payload format inside the control frame (the `orion+tcp` peer transport).
+    ///
+    /// Same framing, version check, size limit and cancel-safety as [`Self::read_metered`].
+    /// Returns `Ok(None)` on end of stream before a complete header. A frame announcing another
+    /// protocol version yields [`IpcTransportError::ProtocolMismatch`] after its payload has been
+    /// drained.
+    pub async fn read_payload<R>(
+        &mut self,
+        reader: &mut R,
+        max_payload_bytes: usize,
+    ) -> Result<Option<Vec<u8>>, IpcTransportError>
+    where
+        R: AsyncRead + Unpin,
+    {
         while self.header_filled < HEADER_BYTES {
             let read = reader
                 .read(&mut self.header[self.header_filled..])
@@ -113,9 +136,7 @@ impl ControlFrameReadState {
         if let Some(err) = mismatch {
             return Err(err);
         }
-        let bytes_received = payload.len() + HEADER_BYTES;
-        decode_from_slice_with(&payload, IpcTransportError::DecodeFailed)
-            .map(|envelope| Some((envelope, bytes_received)))
+        Ok(Some(payload))
     }
 
     fn reset(&mut self) {

@@ -21,7 +21,7 @@ use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 // - Keep std::sync::RwLock guards scoped to synchronous sections only; do not hold them across
 //   `.await`.
 // - Persisted desired-state mutations acquire locks in a fixed order:
-//   store -> mutation_history -> mutation_history_baseline.
+//   store -> mutation_history -> mutation_history_baseline -> clock.
 // - If a workflow must touch more than one state family, acquire persisted-state locks before
 //   registry locks, and treat observability as the terminal lock so metrics/event updates never
 //   block higher-level state mutation or reconciliation work.
@@ -180,6 +180,19 @@ impl NodeApp {
         write_rwlock(
             self.state.peers.peer_clients.write(),
             "node peer client registry",
+        )
+    }
+
+    #[cfg(feature = "peer-tcp")]
+    pub(super) fn peer_tcp_clients_lock(
+        &self,
+    ) -> std::sync::MutexGuard<
+        '_,
+        std::collections::BTreeMap<NodeId, std::sync::Arc<crate::peer_tcp::PeerTcpClient>>,
+    > {
+        crate::lock::lock_mutex(
+            self.state.peers.peer_tcp_clients.lock(),
+            "peer tcp client registry",
         )
     }
 
@@ -371,11 +384,20 @@ pub(super) struct PersistedState {
     pub(super) maintenance_state: std::sync::RwLock<MaintenanceState>,
     pub(super) desired_metadata_cache: std::sync::RwLock<Option<DesiredStateMetadataCache>>,
     pub(super) desired_summary_cache: std::sync::RwLock<Option<DesiredStateSummaryCache>>,
+    /// Hybrid logical clock stamping desired-state writes. Locked after the store, history and
+    /// baseline locks inside desired-state transactions.
+    pub(super) clock: std::sync::Mutex<orion::HybridLogicalClock>,
+    pub(super) merge_metrics: std::sync::Mutex<super::hlc_state::DesiredMergeMetrics>,
 }
 
 pub(super) struct PeerRegistryState {
     pub(super) peers: std::sync::RwLock<PeerRegistry>,
     pub(super) peer_clients: std::sync::RwLock<PeerClientRegistry>,
+    /// Cached `orion+tcp` clients (one connection per peer).
+    #[cfg(feature = "peer-tcp")]
+    pub(super) peer_tcp_clients: std::sync::Mutex<
+        std::collections::BTreeMap<NodeId, std::sync::Arc<crate::peer_tcp::PeerTcpClient>>,
+    >,
 }
 
 pub(super) struct RuntimeRegistryState {

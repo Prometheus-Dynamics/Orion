@@ -57,28 +57,14 @@ struct CameraControllerWorkloadConfig {
     width: u64,
 }
 
-fn desired_fingerprint(desired: &orion::control_plane::DesiredClusterState) -> u64 {
-    let section_fingerprints = orion::control_plane::DesiredStateSectionFingerprints {
-        nodes: entry_fingerprint(&desired.nodes),
-        artifacts: entry_fingerprint(&desired.artifacts),
-        workloads: workload_section_fingerprint(desired),
-        resources: entry_fingerprint(&desired.resources),
-        providers: entry_fingerprint(&desired.providers),
-        executors: entry_fingerprint(&desired.executors),
-        leases: entry_fingerprint(&desired.leases),
-    };
-    let bytes = encode_to_vec(&section_fingerprints)
-        .expect("desired state section fingerprints should encode");
-    let mut hasher = DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn workload_section_fingerprint(desired: &orion::control_plane::DesiredClusterState) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    entry_fingerprint(&desired.workloads).hash(&mut hasher);
-    entry_fingerprint(&desired.workload_tombstones).hash(&mut hasher);
-    hasher.finish()
+/// Desired state without the node-local revision, for comparing converged peers.
+fn desired_content(
+    desired: &orion::control_plane::DesiredClusterState,
+) -> orion::control_plane::DesiredClusterState {
+    orion::control_plane::DesiredClusterState {
+        revision: Revision::ZERO,
+        ..desired.clone()
+    }
 }
 
 fn entry_fingerprint<T: orion::ArchiveEncode>(value: &T) -> u64 {
@@ -537,6 +523,8 @@ use camera_fixtures::{
     CaptureConfigurable,
 };
 
+#[cfg(peer_sync)]
+mod cluster;
 mod runtime;
 #[cfg(feature = "transport-http")]
 mod runtime_http;

@@ -34,6 +34,7 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
     archived_layouts![
         // orion-core
         Revision,
+        HlcTimestamp,
         ProtocolVersion,
         CompatibilityState,
         FeatureFlag,
@@ -92,6 +93,7 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
         DesiredStateSection,
         DesiredStateSectionFingerprints,
         DesiredStateSummary,
+        DesiredObjectStamps,
         // observability
         NodeObservabilitySnapshot,
         NodeHealthSnapshot,
@@ -129,6 +131,7 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
         StateSectionCounts,
         StateSizeSnapshot,
         WorkerQueueUsageSnapshot,
+        DesiredStateMergeSnapshot,
         // records and state
         AppliedClusterState,
         ClusterStateEnvelope,

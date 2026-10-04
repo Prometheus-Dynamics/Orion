@@ -21,12 +21,16 @@ name = "orion-node"
 path = "src/main.rs"
 
 [features]
-# Release binaries enable the HTTP control plane (peer sync, HTTP probe, HTTP TLS bootstrap) and
-# both data-plane transports by default. `--no-default-features` produces an IPC-only node (no
-# axum/hyper/reqwest/rustls); add back any of `transport-http`, `transport-tcp` or `transport-quic`
-# independently.
-default = ["transport-http", "transport-tcp", "transport-quic"]
+# Release binaries enable the HTTP control plane (peer sync, HTTP probe, HTTP TLS bootstrap), TCP
+# peer sync and both data-plane transports by default. `--no-default-features` produces an IPC-only
+# node (no axum/hyper/reqwest/rustls); add back any of `transport-http`, `peer-tcp`,
+# `transport-tcp` or `transport-quic` independently.
+default = ["transport-http", "transport-tcp", "transport-quic", "peer-tcp"]
 transport-http = ["orion-transport-http/transport", "orion-transport-common/tls", "dep:rcgen"]
+# Peer sync over plain TCP (`orion+tcp://` peers, `ORION_NODE_PEER_ADDR` listener) with ed25519
+# signed requests and responses. Needs only tokio, so `--no-default-features --features peer-tcp`
+# gives an IPC-only appliance build that can still cluster. See docs/peer-sync.md.
+peer-tcp = []
 transport-tcp = ["dep:orion-transport-tcp"]
 transport-quic = ["dep:orion-transport-quic"]
 # Opt-in global allocators for the `orion-node` binary only (the library never sets one). Both are

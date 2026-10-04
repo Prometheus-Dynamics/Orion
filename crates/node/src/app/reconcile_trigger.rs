@@ -88,7 +88,7 @@ impl NodeApp {
         self.tick().map(|_| ())
     }
 
-    #[cfg(feature = "transport-http")]
+    #[cfg(any(test, peer_sync))]
     pub(super) async fn reconcile_after_change_async(&self) -> Result<(), NodeError> {
         self.request_reconcile();
         if self.state.reconcile.loop_attached() {

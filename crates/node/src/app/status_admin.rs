@@ -45,6 +45,7 @@ impl NodeApp {
     pub fn observability_snapshot(&self) -> NodeObservabilitySnapshot {
         let (host, process_memory) = sample_host_and_process_memory();
         let resource_usage = self.resource_usage_snapshot(process_memory);
+        let desired_merge = self.desired_merge_snapshot();
         let revisions = self.current_revisions();
         let clients = self.clients_read();
         let peers = self.peers_read();
@@ -149,9 +150,14 @@ impl NodeApp {
                 .get(node_id)
                 .map(|metrics| metrics.snapshot())
                 .unwrap_or_else(empty_communication_metrics);
+            let transport =
+                match crate::peer::PeerTransportKind::from_base_url(peer.base_url.as_str()) {
+                    Ok(crate::peer::PeerTransportKind::Tcp) => CommunicationTransportKind::Tcp,
+                    _ => CommunicationTransportKind::Http,
+                };
             communication.push(CommunicationEndpointSnapshot {
-                id: format!("http/peer-sync/{node_id}"),
-                transport: CommunicationTransportKind::Http,
+                id: format!("{}/peer-sync/{node_id}", transport.as_label()),
+                transport,
                 scope: CommunicationEndpointScope::PeerSync,
                 local: Some(self.config.node_id.to_string()),
                 remote: Some(peer.base_url.to_string()),
@@ -267,6 +273,7 @@ impl NodeApp {
             communication,
             recent_events: observability.recent_events.iter().cloned().collect(),
             resource_usage,
+            desired_merge,
         }
     }
 

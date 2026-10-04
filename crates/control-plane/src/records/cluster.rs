@@ -1,12 +1,19 @@
 use super::{
-    ArtifactRecord, ExecutorRecord, LeaseRecord, NodeRecord, ProviderRecord, ResourceRecord,
-    WorkloadRecord,
+    ArtifactRecord, DesiredObjectStamps, ExecutorRecord, LeaseRecord, NodeRecord, ProviderRecord,
+    ResourceRecord, WorkloadRecord,
 };
 use alloc::collections::BTreeMap;
 use orion_core::{ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
+/// Desired state of the cluster.
+///
+/// `revision` is a node-local commit sequence number (one per applied object version), not a
+/// cluster-wide version. `stamps` and `tombstones` carry the hybrid-logical-clock version of every
+/// live and deleted object; peers merge per object with [`DesiredClusterState::apply_stamped`].
+/// The plain `put_*`/`remove_*` helpers below edit records without stamps (for building states
+/// in tests and clients); a node stamps every write it commits. See `docs/peer-sync.md`.
 #[derive(
     Clone,
     Debug,
@@ -24,11 +31,14 @@ pub struct DesiredClusterState {
     pub nodes: BTreeMap<NodeId, NodeRecord>,
     pub artifacts: BTreeMap<ArtifactId, ArtifactRecord>,
     pub workloads: BTreeMap<WorkloadId, WorkloadRecord>,
-    pub workload_tombstones: BTreeMap<WorkloadId, Revision>,
     pub resources: BTreeMap<ResourceId, ResourceRecord>,
     pub providers: BTreeMap<ProviderId, ProviderRecord>,
     pub executors: BTreeMap<ExecutorId, ExecutorRecord>,
     pub leases: BTreeMap<ResourceId, LeaseRecord>,
+    /// HLC stamp of the last write of every live object.
+    pub stamps: DesiredObjectStamps,
+    /// HLC stamp of the delete of every deleted object (until collected).
+    pub tombstones: DesiredObjectStamps,
 }
 
 impl DesiredClusterState {
@@ -37,37 +47,43 @@ impl DesiredClusterState {
     }
 
     pub fn put_node(&mut self, record: NodeRecord) {
+        self.tombstones.nodes.remove(&record.node_id);
         self.nodes.insert(record.node_id.clone(), record);
         self.bump_revision();
     }
 
     pub fn put_artifact(&mut self, record: ArtifactRecord) {
+        self.tombstones.artifacts.remove(&record.artifact_id);
         self.artifacts.insert(record.artifact_id.clone(), record);
         self.bump_revision();
     }
 
     pub fn put_workload(&mut self, record: WorkloadRecord) {
-        self.workload_tombstones.remove(&record.workload_id);
+        self.tombstones.workloads.remove(&record.workload_id);
         self.workloads.insert(record.workload_id.clone(), record);
         self.bump_revision();
     }
 
     pub fn put_resource(&mut self, record: ResourceRecord) {
+        self.tombstones.resources.remove(&record.resource_id);
         self.resources.insert(record.resource_id.clone(), record);
         self.bump_revision();
     }
 
     pub fn put_provider(&mut self, record: ProviderRecord) {
+        self.tombstones.providers.remove(&record.provider_id);
         self.providers.insert(record.provider_id.clone(), record);
         self.bump_revision();
     }
 
     pub fn put_executor(&mut self, record: ExecutorRecord) {
+        self.tombstones.executors.remove(&record.executor_id);
         self.executors.insert(record.executor_id.clone(), record);
         self.bump_revision();
     }
 
     pub fn put_lease(&mut self, record: LeaseRecord) {
+        self.tombstones.leases.remove(&record.resource_id);
         self.leases.insert(record.resource_id.clone(), record);
         self.bump_revision();
     }
@@ -75,6 +91,7 @@ impl DesiredClusterState {
     pub fn remove_node(&mut self, node_id: &NodeId) -> Option<NodeRecord> {
         let removed = self.nodes.remove(node_id);
         if removed.is_some() {
+            self.stamps.nodes.remove(node_id);
             self.bump_revision();
         }
         removed
@@ -83,6 +100,7 @@ impl DesiredClusterState {
     pub fn remove_artifact(&mut self, artifact_id: &ArtifactId) -> Option<ArtifactRecord> {
         let removed = self.artifacts.remove(artifact_id);
         if removed.is_some() {
+            self.stamps.artifacts.remove(artifact_id);
             self.bump_revision();
         }
         removed
@@ -90,11 +108,9 @@ impl DesiredClusterState {
 
     pub fn remove_workload(&mut self, workload_id: &WorkloadId) -> Option<WorkloadRecord> {
         let removed = self.workloads.remove(workload_id);
-        if removed.is_some() || !self.workload_tombstones.contains_key(workload_id) {
-            let next_revision = self.revision.next();
-            self.revision = next_revision;
-            self.workload_tombstones
-                .insert(workload_id.clone(), next_revision);
+        if removed.is_some() {
+            self.stamps.workloads.remove(workload_id);
+            self.bump_revision();
         }
         removed
     }
@@ -102,6 +118,7 @@ impl DesiredClusterState {
     pub fn remove_resource(&mut self, resource_id: &ResourceId) -> Option<ResourceRecord> {
         let removed = self.resources.remove(resource_id);
         if removed.is_some() {
+            self.stamps.resources.remove(resource_id);
             self.bump_revision();
         }
         removed
@@ -110,6 +127,7 @@ impl DesiredClusterState {
     pub fn remove_provider(&mut self, provider_id: &ProviderId) -> Option<ProviderRecord> {
         let removed = self.providers.remove(provider_id);
         if removed.is_some() {
+            self.stamps.providers.remove(provider_id);
             self.bump_revision();
         }
         removed
@@ -118,6 +136,7 @@ impl DesiredClusterState {
     pub fn remove_executor(&mut self, executor_id: &ExecutorId) -> Option<ExecutorRecord> {
         let removed = self.executors.remove(executor_id);
         if removed.is_some() {
+            self.stamps.executors.remove(executor_id);
             self.bump_revision();
         }
         removed
@@ -126,6 +145,7 @@ impl DesiredClusterState {
     pub fn remove_lease(&mut self, resource_id: &ResourceId) -> Option<LeaseRecord> {
         let removed = self.leases.remove(resource_id);
         if removed.is_some() {
+            self.stamps.leases.remove(resource_id);
             self.bump_revision();
         }
         removed

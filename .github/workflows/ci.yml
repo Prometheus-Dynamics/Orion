@@ -62,6 +62,10 @@ jobs:
           cargo clippy -p orion-node --no-default-features --features transport-http --all-targets -- -D warnings
           cargo clippy -p orion-node --no-default-features --features transport-tcp --all-targets -- -D warnings
           cargo clippy -p orion-node --no-default-features --features transport-quic --all-targets -- -D warnings
+          # IPC-only appliance build that clusters over orion+tcp (no HTTP stack), and with HTTP.
+          cargo clippy -p orion-node --no-default-features --features peer-tcp --all-targets -- -D warnings
+          cargo clippy -p orion-node --no-default-features --features peer-tcp,transport-http --all-targets -- -D warnings
+          cargo clippy -p orion-node --no-default-features --features peer-tcp,link-gateway --all-targets -- -D warnings
           cargo clippy -p orion-node --all-targets -- -D warnings
           # MCU link gateway, in the IPC-only appliance build and on top of the defaults.
           cargo clippy -p orion-node --no-default-features --features link-gateway --all-targets -- -D warnings
@@ -69,6 +73,9 @@ jobs:
 
       - name: Test IPC-only orion-node build
         run: cargo test -p orion-node --no-default-features
+
+      - name: Test IPC-only orion-node build with orion+tcp peer sync
+        run: cargo test -p orion-node --no-default-features --features peer-tcp
 
       - name: Test orion-node link gateway builds
         run: |

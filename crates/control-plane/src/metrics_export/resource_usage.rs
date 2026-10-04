@@ -117,7 +117,7 @@ fn append_state_counts(
         ("nodes", counts.nodes),
         ("artifacts", counts.artifacts),
         ("workloads", counts.workloads),
-        ("workload_tombstones", counts.workload_tombstones),
+        ("tombstones", counts.tombstones),
         ("resources", counts.resources),
         ("providers", counts.providers),
         ("executors", counts.executors),

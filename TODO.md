@@ -150,9 +150,16 @@ none of these are HeliOS-specific features.
 - [ ] **Timebase.** Nodes publish their clock source and sync state (PTP/chrony, offset estimate) as an
       observed node fact. Orion does not discipline clocks; producers timestamp in a declared
       timebase.
-- [ ] **Lighter peer sync.** Peer sync over a transport lighter than full HTTP so IPC-only builds
-      can cluster (today it requires the `transport-http` feature).
-- [ ] **Per-object conflict resolution** for desired state using a hybrid logical clock (HLC).
+- [x] **Lighter peer sync.** Peer sync over a transport lighter than full HTTP so IPC-only builds
+      can cluster: the `peer-tcp` feature (`orion+tcp://` peers, `ORION_NODE_PEER_ADDR`) with
+      signed requests and responses; the sync engine is transport-independent
+      (`PeerSyncTransport`). See `docs/peer-sync.md`.
+- [x] **Per-object conflict resolution** for desired state using a hybrid logical clock (HLC):
+      per-object stamps and tombstones, last writer wins, bounded drift, tombstone retention, and
+      migration of older state directories. See `docs/peer-sync.md`.
+  - [ ] Tombstone retention is time-based only; a node offline longer than
+        `ORION_NODE_TOMBSTONE_RETENTION_MS` can resurrect deleted objects. Consider refusing to
+        sync stale nodes (last successful sync older than the retention) until they are reset.
 - [ ] **Remove `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`.** It is enforced exactly
       like `Exclusive` and only appears in two client examples.
 

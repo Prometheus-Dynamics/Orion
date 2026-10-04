@@ -92,6 +92,7 @@ async fn docker_client_example_orionctl_apply_delete_over_local_ipc_propagates_c
                 .runtime_type("graph.exec.v1")
                 .build(),
         )],
+        stamps: Vec::new(),
     };
     let response = cluster
         .client("node-a")

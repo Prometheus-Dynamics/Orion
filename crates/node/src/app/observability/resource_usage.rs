@@ -196,7 +196,7 @@ fn desired_counts(desired: &DesiredClusterState) -> StateSectionCounts {
         nodes: usize_to_u64(desired.nodes.len()),
         artifacts: usize_to_u64(desired.artifacts.len()),
         workloads: usize_to_u64(desired.workloads.len()),
-        workload_tombstones: usize_to_u64(desired.workload_tombstones.len()),
+        tombstones: usize_to_u64(desired.tombstones.len()),
         resources: usize_to_u64(desired.resources.len()),
         providers: usize_to_u64(desired.providers.len()),
         executors: usize_to_u64(desired.executors.len()),

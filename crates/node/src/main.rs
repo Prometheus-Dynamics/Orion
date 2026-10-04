@@ -46,6 +46,17 @@ impl DisabledHttpServer {
     }
 }
 
+/// Stand-in for the `orion+tcp` peer listener in builds without the `peer-tcp` feature.
+#[cfg(not(feature = "peer-tcp"))]
+struct DisabledPeerTcpServer;
+
+#[cfg(not(feature = "peer-tcp"))]
+impl DisabledPeerTcpServer {
+    async fn shutdown(self) -> Result<(), std::convert::Infallible> {
+        Ok(())
+    }
+}
+
 /// Stand-in for the link gateway in builds without the `link-gateway` feature.
 #[cfg(not(feature = "link-gateway"))]
 struct DisabledLinkGateway;
@@ -152,6 +163,13 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     } else {
         None
     };
+    #[cfg(feature = "peer-tcp")]
+    let peer_tcp_server = match process.peer_tcp_addr {
+        Some(addr) => Some(app.start_peer_tcp_server(addr).await?),
+        None => None,
+    };
+    #[cfg(not(feature = "peer-tcp"))]
+    let peer_tcp_server = None::<(std::net::SocketAddr, DisabledPeerTcpServer)>;
     #[cfg(feature = "transport-http")]
     let probe_server = if let Some(probe_addr) = process.http_probe_addr {
         Some(app.start_http_probe_server_graceful(probe_addr).await?)
@@ -172,15 +190,20 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         .as_ref()
         .map(|(addr, _)| addr.to_string())
         .unwrap_or_else(|| "-".to_owned());
+    let peer_tcp = peer_tcp_server
+        .as_ref()
+        .map(|(addr, _)| format!("orion+tcp://{addr}"))
+        .unwrap_or_else(|| "-".to_owned());
     let http_tls_cert = app
         .http_tls_cert_path()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "-".to_owned());
     println!(
-        "orion-node: initialized node={} http={} http_probe={} http_tls_cert={} ipc={} ipc_stream={} links={} peers={} desired_rev={} observed_rev={} applied_rev={}",
+        "orion-node: initialized node={} http={} http_probe={} peer_tcp={} http_tls_cert={} ipc={} ipc_stream={} links={} peers={} desired_rev={} observed_rev={} applied_rev={}",
         snapshot.node_id,
         http_addr,
         http_probe,
+        peer_tcp,
         http_tls_cert,
         ipc_socket.display(),
         ipc_stream_socket.display(),
@@ -194,6 +217,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         node = %snapshot.node_id,
         http_addr = %http_addr,
         http_probe = %http_probe,
+        peer_tcp = %peer_tcp,
         http_tls_cert = %http_tls_cert,
         ipc_socket = %ipc_socket.display(),
         ipc_stream_socket = %ipc_stream_socket.display(),
@@ -238,6 +262,11 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         {
             log_shutdown_error(&snapshot.node_id, "http_probe", &err);
         }
+        if let Some((_, peer_tcp_server)) = peer_tcp_server
+            && let Err(err) = peer_tcp_server.shutdown().await
+        {
+            log_shutdown_error(&snapshot.node_id, "peer_tcp", &err);
+        }
         return Ok(());
     }
 
@@ -268,6 +297,11 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         && let Err(err) = probe_server.shutdown().await
     {
         log_shutdown_error(&snapshot.node_id, "http_probe", &err);
+    }
+    if let Some((_, peer_tcp_server)) = peer_tcp_server
+        && let Err(err) = peer_tcp_server.shutdown().await
+    {
+        log_shutdown_error(&snapshot.node_id, "peer_tcp", &err);
     }
     info!(node = %snapshot.node_id, "orion-node shutdown complete");
     Ok(())

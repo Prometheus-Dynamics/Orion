@@ -12,6 +12,7 @@ extern crate alloc;
 mod archive;
 mod compat;
 mod error;
+mod hlc;
 mod ids;
 mod protocol;
 mod types;
@@ -23,6 +24,7 @@ pub use archive::{
 };
 pub use compat::{CompatibilityState, FeatureFlag};
 pub use error::OrionError;
+pub use hlc::{HlcClockSkew, HlcTimestamp, HybridLogicalClock, hlc_node_tag};
 pub use ids::{
     ArtifactId, ClientName, ExecutorId, NodeId, PeerBaseUrl, ProviderId, PublicKeyHex, ResourceId,
     SessionId, WorkloadId,

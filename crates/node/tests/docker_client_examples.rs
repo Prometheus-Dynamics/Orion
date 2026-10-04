@@ -203,6 +203,7 @@ async fn docker_client_example_multi_watch_receives_all_roles() {
                     .build(),
             ),
         ],
+        stamps: Vec::new(),
     };
     let response = apply_mutations_with_retries(&cluster, "node-a", batch).await;
     assert_eq!(response, HttpResponsePayload::Accepted);
@@ -381,6 +382,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
                 .build(),
             ),
         ],
+        stamps: Vec::new(),
     };
     let response = cluster
         .client("node-a")
@@ -425,6 +427,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
             )
             .build(),
         )],
+        stamps: Vec::new(),
     };
     let response = cluster
         .client("node-a")
@@ -514,6 +517,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
             )
             .build(),
         )],
+        stamps: Vec::new(),
     };
     let invalid_request = codec
         .encode_request(&HttpRequestPayload::Control(Box::new(
@@ -555,6 +559,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
             )
             .build(),
         )],
+        stamps: Vec::new(),
     };
     let request = codec
         .encode_request(&HttpRequestPayload::Control(Box::new(

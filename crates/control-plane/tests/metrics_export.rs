@@ -239,7 +239,7 @@ fn sample_resource_usage() -> NodeResourceUsageSnapshot {
                 nodes: 1,
                 artifacts: 3,
                 workloads: 3,
-                workload_tombstones: 1,
+                tombstones: 1,
                 resources: 4,
                 providers: 1,
                 executors: 1,

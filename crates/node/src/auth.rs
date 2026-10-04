@@ -1,5 +1,7 @@
 mod crypto;
 mod modes;
+#[cfg(feature = "peer-tcp")]
+mod peer_response;
 mod policy;
 mod store;
 
@@ -28,6 +30,8 @@ pub use orion_auth::{
     AuthenticatedPeerRequest, NodeTransportBinding, PEER_REQUEST_AUTH_VERSION, PeerRequestAuth,
     PeerRequestPayload, TRANSPORT_BINDING_VERSION,
 };
+#[cfg(feature = "peer-tcp")]
+pub(crate) use peer_response::PeerResponseSignature;
 pub use policy::PeerSecurityMiddleware;
 use store::{
     AuthStateWorker, load_next_outbound_nonce, load_or_create_identity, load_seen_nonces,

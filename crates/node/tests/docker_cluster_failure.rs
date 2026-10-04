@@ -82,6 +82,7 @@ async fn docker_cluster_rejects_stale_mutation_batch_without_crashing() {
             .assigned_to(NodeId::new("node-a"))
             .build(),
         )],
+        stamps: Vec::new(),
     };
 
     let response = cluster

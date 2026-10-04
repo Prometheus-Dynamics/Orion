@@ -355,6 +355,7 @@ async fn restart_during_mutation_apply_recovers_latest_mutation() {
                                     .build(),
                                 ),
                             ],
+                            stamps: Vec::new(),
                         },
                     ),
                 )))
@@ -471,6 +472,7 @@ async fn maintenance_isolation_persists_across_restart_and_blocks_remote_mutatio
                             orion::control_plane::ArtifactRecord::builder("artifact.blocked")
                                 .build(),
                         )],
+                        stamps: Vec::new(),
                     },
                 ),
             )))
@@ -508,6 +510,7 @@ async fn maintenance_isolation_persists_across_restart_and_blocks_remote_mutatio
                                     .build(),
                                 ),
                             ],
+                            stamps: Vec::new(),
                         },
                     ),
                 )))
@@ -605,6 +608,7 @@ async fn unschedulable_node_persists_across_restart_and_rejects_remote_assignmen
                             .assigned_to(NodeId::new("node-b"))
                             .build(),
                         )],
+                        stamps: Vec::new(),
                     },
                 ),
             )))

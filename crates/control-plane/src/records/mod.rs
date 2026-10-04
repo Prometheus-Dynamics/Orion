@@ -3,6 +3,7 @@ mod config_decode;
 mod inventory;
 mod resource_endpoints;
 mod resources;
+mod versions;
 mod workloads;
 
 pub use cluster::{
@@ -23,6 +24,7 @@ pub use resources::{
     ResourceCapability, ResourceConfigState, ResourceOwnershipMode, ResourceRecord,
     ResourceRecordBuilder, ResourceState,
 };
+pub use versions::{DesiredObjectKey, DesiredObjectStamps, DesiredObjectVersion};
 pub use workloads::{
     ResourceBinding, TypedConfigValue, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder,
     WorkloadRequirement,

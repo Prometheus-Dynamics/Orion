@@ -58,6 +58,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .build(),
                     ),
                 ],
+                stamps: Vec::new(),
             }),
         )))
         .await?;

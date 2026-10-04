@@ -101,6 +101,8 @@ pub struct NodeProcessConfig {
     /// for single-node appliances that only use local IPC.
     pub http_enabled: bool,
     pub runtime_threads: NodeRuntimeThreads,
+    /// Listener for `orion+tcp` peers (`ORION_NODE_PEER_ADDR`, feature `peer-tcp`).
+    pub peer_tcp_addr: Option<SocketAddr>,
     /// Microcontroller links to serve (`ORION_NODE_LINKS`, feature `link-gateway`).
     #[cfg(feature = "link-gateway")]
     pub links: Vec<crate::link_gateway::LinkConfig>,
@@ -272,11 +274,15 @@ impl NodeConfig {
             Ok(value) => parse_peer_configs_checked(&value)?,
             Err(_) => Vec::new(),
         };
-        #[cfg(not(feature = "transport-http"))]
-        if !peers.is_empty() {
-            return Err(NodeError::Config(format!(
-                "ORION_NODE_PEERS is not supported: peer sync runs over HTTP and {HTTP_FEATURE_DISABLED}"
-            )));
+        for peer in &peers {
+            crate::peer::PeerTransportKind::check_supported(peer.base_url.as_str()).map_err(
+                |err| {
+                    NodeError::Config(format!(
+                        "invalid ORION_NODE_PEERS entry for {}: {err}",
+                        peer.node_id
+                    ))
+                },
+            )?;
         }
         Ok(Self {
             node_id,
@@ -370,6 +376,27 @@ impl NodeConfig {
             .transpose()
     }
 
+    /// Parses `ORION_NODE_PEER_ADDR`, the `orion+tcp` peer listener. Unset means no listener (the
+    /// node can still sync outbound with `orion+tcp://` peers).
+    pub fn try_peer_tcp_addr_from_env() -> Result<Option<SocketAddr>, NodeError> {
+        let Ok(raw) = env::var("ORION_NODE_PEER_ADDR") else {
+            return Ok(None);
+        };
+        if is_http_addr_disabled(&raw) || raw.trim().is_empty() {
+            return Ok(None);
+        }
+        if !cfg!(feature = "peer-tcp") {
+            return Err(NodeError::Config(format!(
+                "ORION_NODE_PEER_ADDR={raw} is not supported: orion-node was built without the `peer-tcp` feature"
+            )));
+        }
+        raw.trim().parse().map(Some).map_err(|err| {
+            NodeError::Config(format!(
+                "ORION_NODE_PEER_ADDR must be a valid socket address or `off`: {raw} ({err})"
+            ))
+        })
+    }
+
     pub fn audit_log_path_from_env() -> Option<PathBuf> {
         env::var("ORION_NODE_AUDIT_LOG").ok().map(PathBuf::from)
     }
@@ -403,6 +430,7 @@ impl NodeProcessConfig {
         let shutdown_after_init = NodeConfig::try_shutdown_after_init_from_env()?;
         let http_enabled = NodeConfig::http_enabled_from_env();
         let runtime_threads = NodeRuntimeThreads::try_from_env()?;
+        let peer_tcp_addr = NodeConfig::try_peer_tcp_addr_from_env()?;
         #[cfg(feature = "link-gateway")]
         let links = crate::link_gateway::LinkConfig::try_from_env()?;
         #[cfg(all(feature = "link-gateway", not(target_os = "linux")))]
@@ -426,9 +454,16 @@ impl NodeProcessConfig {
         }
 
         if !http_enabled {
-            if !node.peers.is_empty() {
+            let http_peer = node.peers.iter().any(|peer| {
+                matches!(
+                    crate::peer::PeerTransportKind::from_base_url(peer.base_url.as_str()),
+                    Ok(crate::peer::PeerTransportKind::Http
+                        | crate::peer::PeerTransportKind::Https)
+                )
+            });
+            if http_peer {
                 return Err(NodeError::Config(
-                    "ORION_NODE_HTTP_ADDR=off cannot be combined with ORION_NODE_PEERS; peer sync requires the HTTP listener".into(),
+                    "ORION_NODE_HTTP_ADDR=off cannot be combined with http:// or https:// entries in ORION_NODE_PEERS; HTTP peer sync requires the HTTP listener (use orion+tcp:// peers instead)".into(),
                 ));
             }
             if http_tls_cert_path.is_some() || http_tls_key_path.is_some() || auto_http_tls {
@@ -450,6 +485,7 @@ impl NodeProcessConfig {
                 shutdown_after_init,
                 http_enabled,
                 runtime_threads,
+                peer_tcp_addr,
                 #[cfg(feature = "link-gateway")]
                 links,
             }),

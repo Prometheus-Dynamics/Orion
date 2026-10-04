@@ -23,6 +23,8 @@ mod lock;
 ))]
 mod managed_transport;
 mod peer;
+#[cfg(feature = "peer-tcp")]
+mod peer_tcp;
 mod service;
 mod storage;
 mod storage_io;
@@ -38,9 +40,10 @@ pub mod data_plane {
 
 pub use orion_core::{
     ArchiveEncode, ArtifactId, CapabilityDef, CapabilityId, CompatibilityState, ConfigSchemaDef,
-    ConfigSchemaId, ExecutorId, FeatureFlag, NodeId, OrionError, ProtocolVersion, ProviderId,
-    ResourceId, ResourceType, ResourceTypeDef, Revision, RuntimeType, RuntimeTypeDef, WorkloadId,
-    decode_from_slice, decode_from_slice_with, encode_to_vec,
+    ConfigSchemaId, ExecutorId, FeatureFlag, HlcClockSkew, HlcTimestamp, HybridLogicalClock,
+    NodeId, OrionError, ProtocolVersion, ProviderId, ResourceId, ResourceType, ResourceTypeDef,
+    Revision, RuntimeType, RuntimeTypeDef, WorkloadId, decode_from_slice, decode_from_slice_with,
+    encode_to_vec, hlc_node_tag,
 };
 
 pub mod runtime {
@@ -114,13 +117,17 @@ pub use auth::{
     PeerSecurityMiddleware,
 };
 pub use config::{NodeConfig, NodeProcessConfig, NodeRuntimeThreads};
-pub use peer::{PeerConfig, PeerState, PeerSyncStatus, PeerTrustStatus};
+pub use peer::{
+    PEER_TCP_SCHEME, PeerConfig, PeerState, PeerSyncStatus, PeerTransportKind, PeerTrustStatus,
+};
+#[cfg(feature = "peer-tcp")]
+pub use peer_tcp::PeerTcpError;
 pub use service::{
     Authenticator, AuthorizationMiddleware, Authorizer, ControlMiddleware, ControlOperation,
     ControlPrincipal, ControlRequest, ControlRequestBody, ControlRequestContext, ControlResponse,
     ControlSource, ControlSurface,
 };
-pub use storage::NodeStorage;
+pub use storage::{NodeStorage, StateMigrationReport};
 pub use transport_security::{
     ManagedClientTransportSecurity, ManagedNodeTransportSurface, ManagedServerTransportSecurity,
     ManagedTransportProtocol, NodeTransportSecurityManager, PeerTransportSecurityMode,

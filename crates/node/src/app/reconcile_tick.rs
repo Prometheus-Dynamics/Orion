@@ -39,6 +39,7 @@ impl ReconcileOutcome {
 impl NodeApp {
     pub async fn tick_async(&self) -> Result<NodeTickReport, NodeError> {
         let started = std::time::Instant::now();
+        self.collect_expired_tombstones();
         self.state.reconcile.begin_pass();
         let collected = {
             let _span = info_span!("reconcile", node = %self.config.node_id).entered();
@@ -59,6 +60,7 @@ impl NodeApp {
     pub fn tick(&self) -> Result<NodeTickReport, NodeError> {
         let _span = info_span!("reconcile", node = %self.config.node_id).entered();
         let started = std::time::Instant::now();
+        self.collect_expired_tombstones();
         self.state.reconcile.begin_pass();
         let collected = self.collect_runtime_state()?;
         let runtime_changed = self.apply_runtime_snapshots(&collected)?;

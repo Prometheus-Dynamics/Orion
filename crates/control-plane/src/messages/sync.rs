@@ -1,4 +1,4 @@
-use crate::ClusterStateEnvelope;
+use crate::{ClusterStateEnvelope, DesiredObjectStamps};
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use orion_core::{ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId};
@@ -76,7 +76,16 @@ pub enum DesiredStateObjectSelector {
 }
 
 #[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 pub struct DesiredStateSectionFingerprints {
     pub nodes: u64,
@@ -89,7 +98,16 @@ pub struct DesiredStateSectionFingerprints {
 }
 
 #[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 pub struct DesiredStateSummary {
     pub revision: Revision,
@@ -97,11 +115,14 @@ pub struct DesiredStateSummary {
     pub nodes: BTreeMap<NodeId, u64>,
     pub artifacts: BTreeMap<ArtifactId, u64>,
     pub workloads: BTreeMap<WorkloadId, u64>,
-    pub workload_tombstones: BTreeMap<WorkloadId, Revision>,
     pub resources: BTreeMap<ResourceId, u64>,
     pub providers: BTreeMap<ProviderId, u64>,
     pub executors: BTreeMap<ExecutorId, u64>,
     pub leases: BTreeMap<ResourceId, u64>,
+    /// HLC stamps of the summarized live objects.
+    pub stamps: DesiredObjectStamps,
+    /// HLC stamps of the summarized sections' tombstones.
+    pub tombstones: DesiredObjectStamps,
 }
 
 #[derive(

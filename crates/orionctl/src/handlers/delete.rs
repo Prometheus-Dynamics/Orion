@@ -49,6 +49,7 @@ pub(super) async fn run(command: DeleteCommand) -> Result<(), String> {
                 .apply_mutations(MutationBatch {
                     base_revision: snapshot.state.desired.revision,
                     mutations: vec![DesiredStateMutation::RemoveArtifact(artifact_id.clone())],
+                    stamps: Vec::new(),
                 })
                 .await
                 .map_err(|error| error.to_string())?;
@@ -95,6 +96,7 @@ pub(super) async fn run(command: DeleteCommand) -> Result<(), String> {
                 .apply_mutations(MutationBatch {
                     base_revision: snapshot.state.desired.revision,
                     mutations: vec![DesiredStateMutation::RemoveWorkload(workload_id.clone())],
+                    stamps: Vec::new(),
                 })
                 .await
                 .map_err(|error| error.to_string())?;

@@ -1,19 +1,29 @@
 mod builder;
 mod desired_state;
 mod desired_sync;
+mod desired_writes;
+mod hlc_state;
 #[cfg(feature = "link-gateway")]
 mod link_bridge;
 mod local_clients;
 mod local_control;
 mod maintenance_admin;
 mod observability;
-#[cfg(feature = "transport-http")]
+#[cfg(peer_sync)]
+mod peer_observed;
+#[cfg(peer_sync)]
 mod peer_sync;
 #[cfg(feature = "transport-http")]
 mod peer_sync_client;
 mod peer_sync_parallel;
 mod peer_sync_response;
 mod peer_sync_state;
+#[cfg(feature = "peer-tcp")]
+mod peer_sync_tcp;
+#[cfg(peer_sync)]
+mod peer_transport;
+#[cfg(all(test, peer_sync))]
+pub(crate) use peer_transport::PeerSyncTransport;
 mod persistence;
 mod reconcile;
 mod reconcile_tick;
@@ -29,7 +39,7 @@ mod types;
 pub(crate) use observability::{clear_test_audit_append_delay, set_test_audit_append_delay};
 #[cfg(test)]
 pub(crate) use persistence::{clear_test_persist_delay, set_test_persist_delay};
-#[cfg(feature = "transport-http")]
+#[cfg(any(feature = "transport-http", feature = "peer-tcp"))]
 pub(crate) use task_handle::GracefulTaskHandle;
 pub use types::{
     HttpMutualTlsMode, NodeError, NodeSnapshot, NodeTickReport, PeerSyncExecution,
@@ -45,22 +55,13 @@ use crate::transport_security::{
     ManagedClientTransportSecurity, ManagedNodeTransportSurface, ManagedServerTransportSecurity,
     ManagedTransportProtocol, NodeTransportSecurityManager,
 };
-use desired_sync::diff_desired_against_summary_sections;
-#[cfg(feature = "transport-http")]
-use desired_sync::{all_desired_sections, changed_sections, empty_summary_for_sections};
+pub(crate) use desired_sync::section_fingerprints as desired_section_fingerprints;
 use local_clients::{ClientRegistryTxn, LocalClientState};
-#[cfg(any(
-    test,
-    any(
-        feature = "transport-http",
-        feature = "transport-tcp",
-        feature = "transport-quic"
-    )
-))]
+#[cfg(any(test, net_transport))]
 pub(crate) use observability::CommunicationEndpointRuntime;
 #[cfg(feature = "transport-http")]
 pub(crate) use observability::classify_http_communication_failure;
-#[cfg(feature = "transport-http")]
+#[cfg(peer_sync)]
 use observability::classify_peer_sync_error;
 #[cfg(feature = "transport-quic")]
 pub(crate) use observability::classify_quic_communication_failure;
@@ -74,8 +75,6 @@ use observability::{
     peer_sync_troubleshooting_hint, push_observability_event, write_audit_record,
 };
 pub(crate) use observability::{CommunicationMetrics, CommunicationStageDurations};
-#[cfg(feature = "transport-http")]
-use orion::encode_to_vec;
 #[cfg(any(test, feature = "transport-http"))]
 use orion::transport::http::HttpTransportError;
 #[cfg(feature = "transport-quic")]
@@ -83,11 +82,11 @@ use orion::transport::quic::{QuicClientTlsConfig, QuicServerTlsConfig, QuicTrans
 #[cfg(feature = "transport-tcp")]
 use orion::transport::tcp::{TcpClientTlsConfig, TcpServerTlsConfig, TcpTransport};
 use orion::{
-    ArchiveEncode, ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId,
+    ArchiveEncode, ExecutorId, NodeId, ProviderId, Revision,
     control_plane::{
         AppliedClusterState, DesiredClusterState, DesiredStateMutation, DesiredStateObjectSelector,
         DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary, MutationBatch,
-        ObservabilityEventKind, ObservedClusterState, WorkloadRecord,
+        ObservabilityEventKind, ObservedClusterState,
     },
     runtime::{ExecutorIntegration, ProviderIntegration, Runtime},
     transport::{
@@ -374,7 +373,7 @@ impl NodeApp {
         );
     }
 
-    #[cfg(feature = "transport-http")]
+    #[cfg(peer_sync)]
     fn record_peer_sync_success(
         &self,
         node_id: &NodeId,
@@ -398,7 +397,7 @@ impl NodeApp {
         Ok(())
     }
 
-    #[cfg(feature = "transport-http")]
+    #[cfg(peer_sync)]
     fn record_peer_sync_failure(
         &self,
         node_id: Option<&NodeId>,

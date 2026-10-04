@@ -390,29 +390,45 @@ pub async fn write_control_frame_with_limit_metered<W>(
 where
     W: AsyncWriteExt + Unpin,
 {
-    let max_payload_bytes = max_payload_bytes.max(1);
     let bytes =
         encode_to_vec(envelope).map_err(|err| IpcTransportError::EncodeFailed(err.to_string()))?;
-    if bytes.len() > max_payload_bytes {
+    write_control_payload_frame(writer, &bytes, max_payload_bytes).await
+}
+
+/// Writes one control frame whose payload is already encoded:
+/// `[preamble][payload_len u32 LE][payload]`. Returns the wire bytes written.
+///
+/// Used by protocols that carry their own payload format inside the control frame (the
+/// `orion+tcp` peer transport); read the frames back with
+/// [`ControlFrameReadState::read_payload`].
+pub async fn write_control_payload_frame<W>(
+    writer: &mut W,
+    payload: &[u8],
+    max_payload_bytes: usize,
+) -> Result<usize, IpcTransportError>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    if payload.len() > max_payload_bytes.max(1) {
         return Err(IpcTransportError::EncodeFailed(
             "control frame exceeds maximum transport payload size".into(),
         ));
     }
-    let len = u32::try_from(bytes.len())
+    let len = u32::try_from(payload.len())
         .map_err(|_| IpcTransportError::EncodeFailed("control frame too large".into()))?;
     writer
         .write_all(&stream_frame_header(len))
         .await
         .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
     writer
-        .write_all(&bytes)
+        .write_all(payload)
         .await
         .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
     writer
         .flush()
         .await
         .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?;
-    Ok(bytes.len() + STREAM_FRAME_HEADER_BYTES)
+    Ok(payload.len() + STREAM_FRAME_HEADER_BYTES)
 }
 
 /// Writes a payload-free stream frame carrying only this build's protocol preamble.

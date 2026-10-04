@@ -1,18 +1,110 @@
+//! HTTP(S) implementation of [`PeerSyncTransport`] and the HTTP peer client helpers.
+
+use super::peer_transport::{PeerSyncTransport, unexpected_response};
 use super::tls_bootstrap::{
     build_bootstrap_peer_http_client, build_peer_http_client, stable_fingerprint,
 };
-use super::{
-    CachedPeerClient, HttpMutualTlsMode, NodeApp, NodeError, classify_peer_sync_error,
-    is_https_base_url,
-};
+use super::{CachedPeerClient, HttpMutualTlsMode, NodeApp, NodeError, is_https_base_url};
+use crate::lock::lock_mutex;
 use crate::peer::PeerState;
 use crate::storage_io::blocking_read_file;
 use orion::{
     NodeId,
     control_plane::{ControlMessage, PeerHello},
-    transport::http::{HttpCodec, HttpRequestPayload, HttpResponsePayload, HttpTransportError},
+    transport::http::{
+        HttpClient, HttpCodec, HttpRequestPayload, HttpResponsePayload, HttpTransportError,
+    },
 };
-use std::time::{Duration, Instant};
+use std::{sync::Mutex, time::Instant};
+
+/// A channel to one HTTP(S) peer. HTTPS peers without a trusted TLS root are first contacted
+/// with a bootstrap client that learns the peer's certificate from its signed `Hello`.
+pub(crate) struct HttpPeerChannel {
+    client: Mutex<Option<HttpClient>>,
+    needs_https_bootstrap: bool,
+}
+
+impl HttpPeerChannel {
+    pub(super) fn open(
+        app: &NodeApp,
+        node_id: &NodeId,
+        peer: &PeerState,
+    ) -> Result<Self, NodeError> {
+        let needs_https_bootstrap = NodeApp::is_https_peer(peer)
+            && peer.tls_root_cert_path.is_none()
+            && app
+                .security
+                .trusted_peer_tls_root_cert_pem(node_id)?
+                .is_none();
+        if needs_https_bootstrap && app.http_mutual_tls_mode == HttpMutualTlsMode::Required {
+            return Err(NodeError::Authentication(format!(
+                "HTTPS peer {node_id} requires prior TLS enrollment before mTLS-required sync"
+            )));
+        }
+        let client = if needs_https_bootstrap {
+            None
+        } else {
+            Some(app.peer_client(node_id, &peer.base_url, peer.tls_root_cert_path.as_deref())?)
+        };
+        Ok(Self {
+            client: Mutex::new(client),
+            needs_https_bootstrap,
+        })
+    }
+
+    pub(crate) fn label(&self) -> &'static str {
+        "http"
+    }
+
+    fn client(&self) -> Result<HttpClient, NodeError> {
+        lock_mutex(self.client.lock(), "peer http channel")
+            .clone()
+            .ok_or_else(|| {
+                NodeError::HttpTransport(HttpTransportError::request_failed(
+                    "peer client should exist before peer sync requests",
+                ))
+            })
+    }
+}
+
+impl PeerSyncTransport for HttpPeerChannel {
+    fn label(&self) -> &'static str {
+        "http"
+    }
+
+    async fn exchange(
+        &self,
+        app: &NodeApp,
+        node_id: &NodeId,
+        request: HttpRequestPayload,
+    ) -> Result<HttpResponsePayload, NodeError> {
+        let client = self.client()?;
+        app.send_peer_http_request(node_id, &client, request)
+            .await
+            .map_err(NodeError::HttpTransport)
+    }
+
+    async fn hello(
+        &self,
+        app: &NodeApp,
+        node_id: &NodeId,
+        peer: &PeerState,
+        hello: PeerHello,
+    ) -> Result<PeerHello, NodeError> {
+        let client = if self.needs_https_bootstrap {
+            build_bootstrap_peer_http_client(&peer.base_url)?
+        } else {
+            self.client()?
+        };
+        let remote = app.fetch_peer_hello(node_id, peer, hello, &client).await?;
+        // The hello may have taught us (or changed) the peer's TLS binding; use a client built
+        // for the current trust state from now on.
+        let client =
+            app.peer_client(node_id, &peer.base_url, peer.tls_root_cert_path.as_deref())?;
+        *lock_mutex(self.client.lock(), "peer http channel") = Some(client);
+        Ok(remote)
+    }
+}
 
 fn read_file_bytes(path: &std::path::Path) -> Result<Vec<u8>, NodeError> {
     blocking_read_file(path, "failed to read file")
@@ -75,11 +167,11 @@ impl NodeApp {
             .await
             .map_err(|err| HttpTransportError::request_failed(err.to_string()))?;
         let bytes_sent = encoded_http_request_len(&payload);
-        self.record_peer_http_sent(node_id, bytes_sent);
+        self.record_peer_exchange_sent(node_id, bytes_sent);
         let response = client.send(&payload).await;
         match response {
             Ok(response) => {
-                self.record_peer_http_success(
+                self.record_peer_exchange_success(
                     node_id,
                     encoded_http_response_len(&response),
                     started.elapsed(),
@@ -87,7 +179,12 @@ impl NodeApp {
                 Ok(response)
             }
             Err(err) => {
-                self.record_peer_http_failure(node_id, started.elapsed(), &err);
+                self.record_peer_exchange_failure(
+                    node_id,
+                    started.elapsed(),
+                    super::classify_http_communication_failure(&err),
+                    err.to_string(),
+                );
                 Err(err)
             }
         }
@@ -153,7 +250,6 @@ impl NodeApp {
         peer: &PeerState,
         request_hello: PeerHello,
         client: &orion::transport::http::HttpClient,
-        started: std::time::Instant,
     ) -> Result<PeerHello, NodeError> {
         let response = self
             .send_peer_http_request(
@@ -165,18 +261,7 @@ impl NodeApp {
 
         let remote_hello = match response {
             Ok(HttpResponsePayload::Hello(hello)) => hello,
-            Ok(other) => {
-                let error = NodeError::HttpTransport(HttpTransportError::request_failed(format!(
-                    "expected hello response from peer, got {other:?}"
-                )));
-                let _ = self.record_peer_error_with_kind(
-                    node_id,
-                    error.to_string(),
-                    Some(classify_peer_sync_error(&error)),
-                );
-                self.record_peer_sync_failure(Some(node_id), started.elapsed(), &error);
-                return Err(error);
-            }
+            Ok(other) => return Err(unexpected_response("http", "hello", &other)),
             Err(err) => {
                 if self.http_mutual_tls_mode == HttpMutualTlsMode::Optional
                     && Self::is_https_peer(peer)
@@ -186,14 +271,7 @@ impl NodeApp {
                 {
                     return Ok(hello);
                 }
-                let error = NodeError::HttpTransport(err);
-                let _ = self.record_peer_error_with_kind(
-                    node_id,
-                    error.to_string(),
-                    Some(classify_peer_sync_error(&error)),
-                );
-                self.record_peer_sync_failure(Some(node_id), started.elapsed(), &error);
-                return Err(error);
+                return Err(NodeError::HttpTransport(err));
             }
         };
         self.apply_peer_transport_binding(node_id, peer, &remote_hello)?;
@@ -250,50 +328,6 @@ impl NodeApp {
             }
         }
         Ok(None)
-    }
-
-    fn record_peer_http_sent(&self, node_id: &NodeId, bytes_sent: u64) {
-        self.with_observability_txn(|txn| {
-            txn.state_mut()
-                .peer_http_communication
-                .entry(node_id.clone())
-                .or_default()
-                .record_sent(bytes_sent);
-        });
-    }
-
-    fn record_peer_http_success(&self, node_id: &NodeId, bytes_received: u64, duration: Duration) {
-        let now_ms = Self::current_time_ms();
-        self.with_observability_txn(|txn| {
-            let metrics = txn
-                .state_mut()
-                .peer_http_communication
-                .entry(node_id.clone())
-                .or_default();
-            metrics.record_received(bytes_received);
-            metrics.record_success_exchange(now_ms, duration, 0, bytes_received);
-        });
-    }
-
-    fn record_peer_http_failure(
-        &self,
-        node_id: &NodeId,
-        duration: Duration,
-        error: &HttpTransportError,
-    ) {
-        let now_ms = Self::current_time_ms();
-        self.with_observability_txn(|txn| {
-            txn.state_mut()
-                .peer_http_communication
-                .entry(node_id.clone())
-                .or_default()
-                .record_failure_kind(
-                    now_ms,
-                    Some(duration),
-                    super::classify_http_communication_failure(error),
-                    error.to_string(),
-                );
-        });
     }
 }
 

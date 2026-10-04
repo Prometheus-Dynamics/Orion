@@ -27,6 +27,7 @@ async fn node_http_host_applies_mutations_and_serves_snapshots() {
     let mut mutations = orion::control_plane::MutationBatch {
         base_revision: app.snapshot().desired_revision,
         mutations: Vec::new(),
+        stamps: Vec::new(),
     };
     mutations
         .mutations

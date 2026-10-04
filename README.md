@@ -85,7 +85,8 @@ Important env vars include:
 - `ORION_NODE_ID`
 - `ORION_NODE_HTTP_ADDR`
 - `ORION_NODE_IPC_SOCKET`
-- `ORION_NODE_PEERS`
+- `ORION_NODE_PEERS` (`http://`, `https://`, or `orion+tcp://` peers)
+- `ORION_NODE_PEER_ADDR` (`orion+tcp` peer listener)
 - `ORION_NODE_PEER_AUTH`
 - `ORION_NODE_PEER_SYNC_MODE`
 - `ORION_NODE_STATE_DIR`
@@ -102,6 +103,7 @@ For runtime logging behavior and operator guidance, see [`docs/logging.md`](docs
 For preferred public constructors versus compatibility shims, see [`docs/public-api.md`](docs/public-api.md).
 For the current locking, blocking, and peer-sync concurrency audit, see [`docs/performance-concurrency.md`](docs/performance-concurrency.md).
 For the crate layout and layering, see [`docs/architecture-crate-map.md`](docs/architecture-crate-map.md).
+For peer sync transports, merge rules, tombstones, and the protocol v3 upgrade, see [`docs/peer-sync.md`](docs/peer-sync.md).
 
 ## Features
 
@@ -112,11 +114,17 @@ The facade crate `orion` is feature-gated by subsystem.
 - `service`, `macros`, and `cluster` are explicit opt-ins.
 - Transport layers stay opt-in through `transport-http`, `transport-ipc`, `transport-tcp`, and `transport-quic`.
 - `orion-client` defaults to local IPC support through its `ipc` feature.
-- `orion-node` enables `transport-http`, `transport-tcp`, and `transport-quic` by default. The local
-  IPC control plane is always built. `cargo build -p orion-node --no-default-features` produces an
-  IPC-only node without the HTTP stack (no axum, hyper, reqwest, or rustls). In that build, peer sync,
-  the HTTP control and probe listeners, and HTTP TLS are unavailable, and configuring them fails at
-  startup with an error. You can add back any of the three transport features independently.
+- `orion-node` enables `transport-http`, `peer-tcp`, `transport-tcp`, and `transport-quic` by
+  default. The local IPC control plane is always built. `cargo build -p orion-node
+  --no-default-features` produces an IPC-only node without the HTTP stack (no axum, hyper, reqwest,
+  or rustls). In that build the HTTP control and probe listeners and HTTP TLS are unavailable, and
+  configuring them fails at startup with an error. You can add back any of the transport features
+  independently.
+- `orion-node`'s `peer-tcp` feature syncs desired state with `orion+tcp://` peers over plain TCP
+  with ed25519-signed requests and responses (`ORION_NODE_PEER_ADDR` listener). It needs only
+  tokio, so `--no-default-features --features peer-tcp` gives a small IPC-only node that can still
+  cluster. Concurrent writes from different nodes are merged per object, last writer wins by
+  hybrid logical clock. See [`docs/peer-sync.md`](docs/peer-sync.md).
 - `orion-node`'s opt-in `link-gateway` feature (Linux) serves microcontroller links (serial ports
   and SocketCAN, configured with `ORION_NODE_LINKS`) and bridges each `orion-link` device into the
   node as an ordinary provider. It also works in the IPC-only build
@@ -134,7 +142,8 @@ For production consumers that want a narrow dependency surface, prefer direct cr
 - health and readiness endpoints
 - observability snapshots
 - local IPC control and stream sockets
-- optional HTTP/TCP/QUIC transport security and peer sync support
+- peer sync over HTTP(S) or `orion+tcp`, with per-object conflict resolution (`docs/peer-sync.md`)
+- optional HTTP/TCP/QUIC transport security
 - optional audit logging
 
 Current high-value runtime endpoints and surfaces:

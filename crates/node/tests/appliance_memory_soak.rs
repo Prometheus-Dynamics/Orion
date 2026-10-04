@@ -159,6 +159,7 @@ async fn start_load(runtime: LocalNodeRuntime, config: &SoakConfig) -> Load {
                     )
                 })
                 .collect(),
+            stamps: Vec::new(),
         })
         .await
         .expect("artifacts should apply");
@@ -305,6 +306,7 @@ async fn mutate_once(
         .apply_mutations(MutationBatch {
             base_revision: snapshot.state.desired.revision,
             mutations: vec![mutation],
+            stamps: Vec::new(),
         })
         .await
 }

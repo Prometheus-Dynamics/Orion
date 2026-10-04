@@ -31,7 +31,7 @@ pub use unix::{
     UnixControlClient, UnixControlHandler, UnixControlServer, UnixControlStreamClient,
     read_control_frame, read_control_frame_with_limit, read_control_frame_with_limit_metered,
     write_control_frame, write_control_frame_with_limit, write_control_frame_with_limit_metered,
-    write_control_protocol_mismatch_frame,
+    write_control_payload_frame, write_control_protocol_mismatch_frame,
 };
 
 #[cfg(test)]

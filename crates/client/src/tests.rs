@@ -375,6 +375,7 @@ fn session_receives_messages_for_its_local_address() {
                 mutations: vec![orion_control_plane::DesiredStateMutation::PutNode(
                     NodeRecord::builder(NodeId::new("node-a")).build(),
                 )],
+                stamps: Vec::new(),
             }),
         })
     );

@@ -27,3 +27,16 @@ pub(crate) fn write_rwlock<'a, T>(
         }
     }
 }
+
+pub(crate) fn lock_mutex<'a, T>(
+    lock: LockResult<std::sync::MutexGuard<'a, T>>,
+    name: &'static str,
+) -> std::sync::MutexGuard<'a, T> {
+    match lock {
+        Ok(guard) => guard,
+        Err(err) => {
+            error!(lock = name, "poisoned mutex; recovering inner value");
+            err.into_inner()
+        }
+    }
+}

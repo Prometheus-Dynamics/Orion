@@ -19,12 +19,12 @@ pub use metrics::{
     AuditLogBackpressureMode, ClientSessionMetricsSnapshot, CommunicationEndpointScope,
     CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot, CommunicationFailureKind,
     CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
-    CommunicationStageMetricsSnapshot, CommunicationTransportKind, HostMetricsSnapshot,
-    HttpMutualTlsMode, LatencyMetricsSnapshot, NodeHealthSnapshot, NodeHealthStatus,
-    NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus, ObservabilityEvent,
-    ObservabilityEventKind, OperationFailureCategory, OperationMetricsSnapshot, PeerSyncErrorKind,
-    PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
-    TransportMetricsSnapshot,
+    CommunicationStageMetricsSnapshot, CommunicationTransportKind, DesiredStateMergeSnapshot,
+    HostMetricsSnapshot, HttpMutualTlsMode, LatencyMetricsSnapshot, NodeHealthSnapshot,
+    NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,
+    ObservabilityEvent, ObservabilityEventKind, OperationFailureCategory, OperationMetricsSnapshot,
+    PeerSyncErrorKind, PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot,
+    PersistenceMetricsSnapshot, TransportMetricsSnapshot,
 };
 pub use mutations::{DesiredStateMutation, MutationApplyError, MutationBatch};
 pub use resource_usage::{

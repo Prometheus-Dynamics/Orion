@@ -4,9 +4,11 @@ use crate::{
 };
 use orion_core::NodeId;
 
+mod desired_merge;
 mod format;
 mod resource_usage;
 
+use desired_merge::append_desired_merge_metrics;
 use format::{gauge, metric_help, metric_type, milli_to_f64, optional_gauge, sample, sample_owned};
 use resource_usage::append_resource_usage_metrics;
 pub use resource_usage::render_resource_usage_metrics;
@@ -86,6 +88,7 @@ pub fn render_observability_metrics_with_config(
         &snapshot.mutation_apply,
     );
     append_resource_usage_metrics(&mut out, &snapshot.node_id, &snapshot.resource_usage);
+    append_desired_merge_metrics(&mut out, &snapshot.node_id, &snapshot.desired_merge);
     append_communication_metrics(&mut out, &snapshot.node_id, &snapshot.communication, config);
     out
 }

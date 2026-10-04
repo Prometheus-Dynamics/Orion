@@ -1,4 +1,7 @@
-use super::{NodeApp, NodeError};
+//! Responder side of peer sync: answers `SyncRequest` and `SyncDiffRequest` with the local
+//! object versions that win the merge rule against the requester's summary.
+
+use super::{NodeApp, NodeError, desired_sync::versions_newer_than_summary};
 use orion::{
     control_plane::{SyncDiffRequest, SyncRequest},
     transport::http::HttpResponsePayload,
@@ -9,57 +12,44 @@ impl NodeApp {
         &self,
         request: SyncRequest,
     ) -> Result<HttpResponsePayload, NodeError> {
-        let revisions = self.current_revisions();
         let desired_metadata = self.desired_metadata()?;
-
-        if request.desired_revision == revisions.desired
-            && request.desired_fingerprint == desired_metadata.fingerprint
-        {
+        if request.desired_fingerprint == desired_metadata.fingerprint {
             return Ok(HttpResponsePayload::Accepted);
         }
-
-        if request.desired_revision < revisions.desired
-            && let Some(summary) = request.desired_summary
-        {
-            let local_summary = self.desired_state_summary_for_sections(&request.sections)?;
-            let batch = self.with_desired_state_read(|desired| {
-                super::diff_desired_against_summary_sections(
-                    desired,
-                    &local_summary,
-                    &summary,
-                    &request.sections,
-                    &request.object_selectors,
-                    request.desired_revision,
-                )
-            })?;
-            if batch.mutations.is_empty() {
-                return Ok(HttpResponsePayload::Accepted);
-            }
-            return Ok(HttpResponsePayload::Mutations(batch));
+        let Some(summary) = request.desired_summary else {
+            return Ok(HttpResponsePayload::Snapshot(self.state_snapshot()));
+        };
+        let cutoff = self.tombstone_cutoff_ms(Self::wall_clock_ms());
+        let batch = self.with_desired_state_read(|desired| {
+            versions_newer_than_summary(
+                desired,
+                &summary,
+                &request.sections,
+                &request.object_selectors,
+                cutoff,
+            )
+        });
+        if batch.mutations.is_empty() {
+            Ok(HttpResponsePayload::Accepted)
+        } else {
+            Ok(HttpResponsePayload::Mutations(batch))
         }
-
-        if let Some(batch) = self.mutation_batch_since(request.desired_revision) {
-            return Ok(HttpResponsePayload::Mutations(batch));
-        }
-
-        Ok(HttpResponsePayload::Snapshot(self.state_snapshot()))
     }
 
     pub(super) fn build_sync_diff_response(
         &self,
         request: &SyncDiffRequest,
     ) -> Result<HttpResponsePayload, NodeError> {
-        let local_summary = self.desired_state_summary_for_sections(&request.sections)?;
+        let cutoff = self.tombstone_cutoff_ms(Self::wall_clock_ms());
         let batch = self.with_desired_state_read(|desired| {
-            super::diff_desired_against_summary_sections(
+            versions_newer_than_summary(
                 desired,
-                &local_summary,
                 &request.desired_summary,
                 &request.sections,
                 &request.object_selectors,
-                request.desired_revision,
+                cutoff,
             )
-        })?;
+        });
         if batch.mutations.is_empty() {
             Ok(HttpResponsePayload::Accepted)
         } else {

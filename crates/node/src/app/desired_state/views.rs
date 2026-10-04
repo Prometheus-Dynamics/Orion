@@ -218,10 +218,7 @@ pub(crate) fn diff_desired_cluster_state(
         &mut mutations,
     );
 
-    orion::control_plane::MutationBatch {
-        base_revision,
-        mutations,
-    }
+    orion::control_plane::MutationBatch::new(base_revision, mutations)
 }
 
 fn diff_section<K, V, Put, Remove>(
@@ -287,17 +284,17 @@ pub(crate) fn merge_observed_state(
     changed
 }
 
+/// Replaces `peer_node_id`'s slice of the observed state with `source` (its own report): records
+/// the peer owns that are missing from `source` are pruned, records of other nodes are left
+/// alone. The receiver's observed revision is local; it advances by one when the slice changed.
 pub(crate) fn merge_peer_observed_state(
     target: &mut ObservedClusterState,
     desired: &DesiredClusterState,
     peer_node_id: &NodeId,
-    source: ObservedClusterState,
+    mut source: ObservedClusterState,
 ) -> bool {
     let mut changed = false;
-    if target.revision != source.revision {
-        target.revision = source.revision;
-        changed = true;
-    }
+    source.revision = target.revision;
 
     let source_node_ids: BTreeSet<_> = source.nodes.keys().cloned().collect();
     let source_workload_ids: BTreeSet<_> = source.workloads.keys().cloned().collect();
@@ -351,7 +348,11 @@ pub(crate) fn merge_peer_observed_state(
         !peer_owned || source_lease_ids.contains(resource_id)
     });
 
-    merge_observed_state(target, source) || changed
+    changed |= merge_observed_state(target, source);
+    if changed {
+        target.revision = target.revision.next();
+    }
+    changed
 }
 
 fn retain_with_change<K, V>(map: &mut BTreeMap<K, V>, mut keep: impl FnMut(&K, &V) -> bool) -> bool

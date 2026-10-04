@@ -28,6 +28,8 @@ const DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY: usize = 64;
 const DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY: usize = 128;
 const DEFAULT_AUDIT_LOG_QUEUE_CAPACITY: usize = 1024;
 const DEFAULT_RECONCILE_BACKSTOP_MS: u64 = 5_000;
+const DEFAULT_HLC_MAX_DRIFT_MS: u64 = 300_000;
+const DEFAULT_TOMBSTONE_RETENTION_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
 const MIN_RUNTIME_TUNING_DURATION_MS: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +70,12 @@ pub struct NodeRuntimeTuning {
     /// backstop pass. Values at or below the reconcile interval (`ORION_NODE_RECONCILE_MS`)
     /// restore fixed-interval polling.
     pub reconcile_backstop_interval: Duration,
+    /// Largest distance a remote HLC timestamp may be ahead of the local wall clock before the
+    /// object version carrying it is rejected (`ORION_NODE_HLC_MAX_DRIFT_MS`).
+    pub hlc_max_drift: Duration,
+    /// How long desired-state tombstones are kept before they are collected
+    /// (`ORION_NODE_TOMBSTONE_RETENTION_MS`).
+    pub tombstone_retention: Duration,
 }
 
 impl NodeRuntimeTuning {
@@ -215,6 +223,18 @@ impl NodeRuntimeTuning {
         self
     }
 
+    pub fn with_hlc_max_drift(mut self, max_drift: Duration) -> Self {
+        self.hlc_max_drift = max_drift;
+        self.normalize();
+        self
+    }
+
+    pub fn with_tombstone_retention(mut self, retention: Duration) -> Self {
+        self.tombstone_retention = retention;
+        self.normalize();
+        self
+    }
+
     pub fn try_from_env() -> Result<Self, NodeError> {
         let mut tuning = Self {
             max_mutation_history_batches: parse_env_or(
@@ -327,6 +347,14 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_RECONCILE_BACKSTOP_MS",
                 DEFAULT_RECONCILE_BACKSTOP_MS,
             )?,
+            hlc_max_drift: duration_ms_env_or(
+                "ORION_NODE_HLC_MAX_DRIFT_MS",
+                DEFAULT_HLC_MAX_DRIFT_MS,
+            )?,
+            tombstone_retention: duration_ms_env_or(
+                "ORION_NODE_TOMBSTONE_RETENTION_MS",
+                DEFAULT_TOMBSTONE_RETENTION_MS,
+            )?,
         };
         tuning.normalize();
         Ok(tuning)
@@ -362,6 +390,8 @@ impl NodeRuntimeTuning {
         self.audit_log_queue_capacity = self.audit_log_queue_capacity.max(1);
         self.reconcile_backstop_interval =
             normalize_runtime_tuning_duration(self.reconcile_backstop_interval);
+        self.hlc_max_drift = normalize_runtime_tuning_duration(self.hlc_max_drift);
+        self.tombstone_retention = normalize_runtime_tuning_duration(self.tombstone_retention);
     }
 }
 
@@ -397,6 +427,8 @@ impl Default for NodeRuntimeTuning {
             audit_log_queue_capacity: DEFAULT_AUDIT_LOG_QUEUE_CAPACITY,
             audit_log_overload_policy: AuditLogOverloadPolicy::DropNewest,
             reconcile_backstop_interval: Duration::from_millis(DEFAULT_RECONCILE_BACKSTOP_MS),
+            hlc_max_drift: Duration::from_millis(DEFAULT_HLC_MAX_DRIFT_MS),
+            tombstone_retention: Duration::from_millis(DEFAULT_TOMBSTONE_RETENTION_MS),
         }
     }
 }
@@ -512,6 +544,14 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
         (
             "ORION_NODE_RECONCILE_BACKSTOP_MS",
             tuning.reconcile_backstop_interval.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_HLC_MAX_DRIFT_MS",
+            tuning.hlc_max_drift.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_TOMBSTONE_RETENTION_MS",
+            tuning.tombstone_retention.as_millis().to_string(),
         ),
     ]
 }
