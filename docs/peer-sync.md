@@ -98,7 +98,10 @@ desired-state write in `orion-node` goes through it.
 Consequences worth knowing:
 
 - Concurrent writes to the **same** object: the later HLC timestamp wins; the other write is
-  dropped everywhere (counted as `stale_remote_writes_ignored`).
+  dropped everywhere (counted as `stale_remote_writes_ignored`). "Later" is HLC order: a write
+  made after a node has seen another write is always ordered after it, but two writes on
+  different nodes that have not synced in between are ordered by their wall clocks, and within
+  the same millisecond (or within clock skew) by node tag, not by real time.
 - Concurrent writes to **different** objects never interfere, even inside one section.
 - Delete versus concurrent update: whichever has the later timestamp wins. An update made after
   the delete (in HLC order) brings the object back; an update made before it is discarded.
@@ -303,7 +306,8 @@ Measured on x86_64 Linux with the workspace release profile, stripped:
 ## Upgrading from protocol v2
 
 The changes above alter archived types (`DesiredClusterState`, `DesiredStateSummary`,
-`MutationBatch`, `PeerHello` is unchanged), so `CONTROL_PROTOCOL_VERSION` is 3 and v2 peers,
+`MutationBatch`, `NodeObservabilitySnapshot`; `PeerHello` is unchanged), so they ship in control
+protocol v3 together with the clock facts and status lane changes of the same release. v2 peers,
 `orionctl` builds and client libraries are refused with a `ProtocolMismatch` error. Upgrade every
 node of a cluster, `orionctl`, and providers or executors that embed `orion-client` together.
 
@@ -312,16 +316,21 @@ Persisted state directories are migrated on first start:
 - The snapshot format version goes from 3 to 4. A node that finds a format-3 manifest decodes the
   old desired snapshot, mutation history and history baseline with the v2 layouts, replays the
   history, converts the result and rewrites all desired-state files in format 4 before it serves
-  anything. Every migrated object gets the stamp `(0, 0, local node tag)` and every migrated
-  workload tombstone the stamp `(0, 0, local node tag)`, so any write made after the upgrade wins
-  over pre-upgrade state, and pre-upgrade conflicts between nodes resolve deterministically by
-  node tag and content.
-- Observed and applied snapshots, the trust store, the node identity, maintenance state and
-  artifacts are unchanged.
+  anything. Every migrated object and every migrated workload tombstone gets the stamp
+  `(0, 0, local node tag)`, so any write made after the upgrade wins over pre-upgrade state, and
+  pre-upgrade conflicts between nodes resolve deterministically by node tag and content. The old
+  files are kept in `<state dir>/legacy-format-3/`; an interrupted migration restarts from there.
+- The observed snapshot is reset to an empty state (keeping its revision): observed records are
+  rebuilt from what providers, executors and peers report. The applied snapshot, the trust store,
+  the node identity, maintenance state and artifacts are unchanged.
+- Format-3 node records are read with their old layout (no `clock`); the clock facts are
+  reported again by the running node.
 - If the old files cannot be decoded (for example a state directory written by a different
-  pre-release), startup fails with an error naming the state directory and the files to move
-  aside; nothing is overwritten. Moving `snapshot-*.rkyv` and `mutation-history*.rkyv` out of the
-  state directory starts the node with an empty desired state that it then pulls from its peers.
+  pre-release, or desired state that still uses the removed
+  `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`), startup fails with an error naming the
+  state directory and the files to move aside; nothing is overwritten. Moving `snapshot-*.rkyv`
+  and `mutation-history*.rkyv` out of the state directory starts the node with an empty desired
+  state that it then pulls from its peers.
 - A state directory written by this version cannot be read by an older `orion-node`.
 
 ## Hooks for placement, cross-node binding and discovery
@@ -337,4 +346,9 @@ Persisted state directories are migrated on first start:
 - **Discovery**: a discovered peer only needs a `PeerConfig` with an `orion+tcp://` (or `http(s)`)
   base URL to be added with `NodeApp::register_peer`; `PeerTransportKind::from_base_url` maps a
   URL to its transport. Responses over `orion+tcp` are verified against enrolled keys, so an mDNS
-  announcement alone can never inject state.
+  announcement alone can never inject state. A node without `ORION_NODE_PEER_ADDR` still syncs
+  outbound, so a discovered peer can be added on either side.
+- **Observed facts and the status lane**: each node's observed slice already travels to its peers
+  at the end of every round (`push_observed_slice` in `crates/node/src/app/peer_observed.rs`).
+  The volatile status lane is local-only; replicating it would follow the same per-origin pattern
+  (origin pushes its own entries, receivers replace that origin's set) on the same transport.

@@ -1,4 +1,5 @@
 use crate::NodeError;
+use orion::control_plane::ClockSourceKind;
 use orion_transport_common::{
     DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES, DEFAULT_TRANSPORT_IO_TIMEOUT,
     DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
@@ -30,6 +31,11 @@ const DEFAULT_AUDIT_LOG_QUEUE_CAPACITY: usize = 1024;
 const DEFAULT_RECONCILE_BACKSTOP_MS: u64 = 5_000;
 const DEFAULT_HLC_MAX_DRIFT_MS: u64 = 300_000;
 const DEFAULT_TOMBSTONE_RETENTION_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
+const DEFAULT_CLOCK_REFRESH_MS: u64 = 10_000;
+const DEFAULT_OBSERVED_PERSIST_INTERVAL_MS: u64 = 2_000;
+const DEFAULT_STATUS_MAX_ENTRIES: usize = 4_096;
+const DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER: usize = 256;
+const DEFAULT_STATUS_MAX_TTL_MS: u64 = 300_000;
 const MIN_RUNTIME_TUNING_DURATION_MS: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +82,24 @@ pub struct NodeRuntimeTuning {
     /// How long desired-state tombstones are kept before they are collected
     /// (`ORION_NODE_TOMBSTONE_RETENTION_MS`).
     pub tombstone_retention: Duration,
+    /// How often the node re-reads its clock state (`ORION_NODE_CLOCK_REFRESH_MS`). The observed
+    /// node record is only republished on meaningful change.
+    pub clock_refresh_interval: Duration,
+    /// Operator-declared clock source (`ORION_NODE_CLOCK_SOURCE`), for example PTP or chrony,
+    /// which the kernel cannot report. `None` reports `system` on Linux and `unknown` elsewhere.
+    pub clock_source: Option<ClockSourceKind>,
+    /// Timebase producers on this node stamp in (`ORION_NODE_TIMEBASE`), for example `TAI`.
+    pub clock_timebase: Option<String>,
+    /// Shortest spacing between coalesced observed/applied state writes. `Duration::ZERO` writes
+    /// every change immediately (the pre-coalescing behaviour). Desired-state commits are always
+    /// written immediately.
+    pub observed_persist_interval: Duration,
+    /// Node-wide cap on volatile status lane entries.
+    pub status_max_entries: usize,
+    /// Cap on status lane entries held for one publisher (local client or link device).
+    pub status_max_entries_per_publisher: usize,
+    /// Longest time-to-live of a status entry (also the TTL of entries published with `ttl_ms = 0`).
+    pub status_max_ttl: Duration,
 }
 
 impl NodeRuntimeTuning {
@@ -229,8 +253,43 @@ impl NodeRuntimeTuning {
         self
     }
 
+    pub fn with_clock_refresh_interval(mut self, interval: Duration) -> Self {
+        self.clock_refresh_interval = interval;
+        self.normalize();
+        self
+    }
+
     pub fn with_tombstone_retention(mut self, retention: Duration) -> Self {
         self.tombstone_retention = retention;
+        self.normalize();
+        self
+    }
+
+    pub fn with_observed_persist_interval(mut self, interval: Duration) -> Self {
+        self.observed_persist_interval = interval;
+        self.normalize();
+        self
+    }
+
+    pub fn with_clock_source(mut self, source: Option<ClockSourceKind>) -> Self {
+        self.clock_source = source;
+        self
+    }
+
+    pub fn with_clock_timebase(mut self, timebase: Option<String>) -> Self {
+        self.clock_timebase = timebase;
+        self
+    }
+
+    pub fn with_status_limits(
+        mut self,
+        max_entries: usize,
+        max_entries_per_publisher: usize,
+        max_ttl: Duration,
+    ) -> Self {
+        self.status_max_entries = max_entries;
+        self.status_max_entries_per_publisher = max_entries_per_publisher;
+        self.status_max_ttl = max_ttl;
         self.normalize();
         self
     }
@@ -355,6 +414,30 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_TOMBSTONE_RETENTION_MS",
                 DEFAULT_TOMBSTONE_RETENTION_MS,
             )?,
+            clock_refresh_interval: duration_ms_env_or(
+                "ORION_NODE_CLOCK_REFRESH_MS",
+                DEFAULT_CLOCK_REFRESH_MS,
+            )?,
+            clock_source: optional_label_env("ORION_NODE_CLOCK_SOURCE")?
+                .as_deref()
+                .and_then(ClockSourceKind::from_label),
+            clock_timebase: optional_label_env("ORION_NODE_TIMEBASE")?,
+            observed_persist_interval: duration_ms_env_or(
+                "ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS",
+                DEFAULT_OBSERVED_PERSIST_INTERVAL_MS,
+            )?,
+            status_max_entries: parse_env_or(
+                "ORION_NODE_STATUS_MAX_ENTRIES",
+                DEFAULT_STATUS_MAX_ENTRIES,
+            )?,
+            status_max_entries_per_publisher: parse_env_or(
+                "ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER",
+                DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER,
+            )?,
+            status_max_ttl: duration_ms_env_or(
+                "ORION_NODE_STATUS_MAX_TTL_MS",
+                DEFAULT_STATUS_MAX_TTL_MS,
+            )?,
         };
         tuning.normalize();
         Ok(tuning)
@@ -392,6 +475,13 @@ impl NodeRuntimeTuning {
             normalize_runtime_tuning_duration(self.reconcile_backstop_interval);
         self.hlc_max_drift = normalize_runtime_tuning_duration(self.hlc_max_drift);
         self.tombstone_retention = normalize_runtime_tuning_duration(self.tombstone_retention);
+        self.clock_refresh_interval =
+            normalize_runtime_tuning_duration(self.clock_refresh_interval);
+        self.status_max_entries = self.status_max_entries.max(1);
+        self.status_max_entries_per_publisher = self
+            .status_max_entries_per_publisher
+            .clamp(1, self.status_max_entries);
+        self.status_max_ttl = normalize_runtime_tuning_duration(self.status_max_ttl);
     }
 }
 
@@ -429,6 +519,13 @@ impl Default for NodeRuntimeTuning {
             reconcile_backstop_interval: Duration::from_millis(DEFAULT_RECONCILE_BACKSTOP_MS),
             hlc_max_drift: Duration::from_millis(DEFAULT_HLC_MAX_DRIFT_MS),
             tombstone_retention: Duration::from_millis(DEFAULT_TOMBSTONE_RETENTION_MS),
+            clock_refresh_interval: Duration::from_millis(DEFAULT_CLOCK_REFRESH_MS),
+            clock_source: None,
+            clock_timebase: None,
+            observed_persist_interval: Duration::from_millis(DEFAULT_OBSERVED_PERSIST_INTERVAL_MS),
+            status_max_entries: DEFAULT_STATUS_MAX_ENTRIES,
+            status_max_entries_per_publisher: DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER,
+            status_max_ttl: Duration::from_millis(DEFAULT_STATUS_MAX_TTL_MS),
         }
     }
 }
@@ -553,6 +650,26 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
             "ORION_NODE_TOMBSTONE_RETENTION_MS",
             tuning.tombstone_retention.as_millis().to_string(),
         ),
+        (
+            "ORION_NODE_CLOCK_REFRESH_MS",
+            tuning.clock_refresh_interval.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS",
+            tuning.observed_persist_interval.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_STATUS_MAX_ENTRIES",
+            tuning.status_max_entries.to_string(),
+        ),
+        (
+            "ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER",
+            tuning.status_max_entries_per_publisher.to_string(),
+        ),
+        (
+            "ORION_NODE_STATUS_MAX_TTL_MS",
+            tuning.status_max_ttl.as_millis().to_string(),
+        ),
     ]
 }
 
@@ -602,6 +719,20 @@ pub(crate) fn bool_env_or_false(key: &str) -> Result<bool, NodeError> {
             ))),
         },
         Err(env::VarError::NotPresent) => Ok(false),
+        Err(env::VarError::NotUnicode(_)) => {
+            Err(NodeError::Config(format!("{key} must be valid unicode")))
+        }
+    }
+}
+
+/// A trimmed, non-empty string variable; unset or blank is `None`.
+fn optional_label_env(key: &str) -> Result<Option<String>, NodeError> {
+    match env::var(key) {
+        Ok(value) => {
+            let value = value.trim();
+            Ok((!value.is_empty()).then(|| value.to_owned()))
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => {
             Err(NodeError::Config(format!("{key} must be valid unicode")))
         }

@@ -223,6 +223,9 @@ async fn node_sync_peer_propagates_workload_tombstone_over_existing_record() {
     desired_b.put_workload(workload);
     node_b.replace_desired(desired_b);
 
+    // Writes on different nodes without a sync in between are concurrent for the HLC; within the
+    // same millisecond the node tag decides. Let the wall clock move so the delete is later.
+    std::thread::sleep(std::time::Duration::from_millis(5));
     let mut desired_a = node_a.state_snapshot().state.desired;
     desired_a.remove_workload(&WorkloadId::new("workload.delete"));
     node_a.replace_desired(desired_a);

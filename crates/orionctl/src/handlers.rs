@@ -4,11 +4,12 @@ mod describe;
 mod get;
 mod get_communication;
 mod get_memory;
+mod get_status;
 mod peers;
 mod watch;
 
 use clap::Parser;
-use orion_control_plane::WorkloadRecord;
+use orion_control_plane::{NodeRecord, WorkloadRecord};
 use std::collections::BTreeMap;
 
 use crate::{
@@ -36,6 +37,20 @@ fn effective_workloads(snapshot: &orion_control_plane::StateSnapshot) -> Vec<Wor
             workload
         })
         .collect()
+}
+
+/// Desired node records merged with observed ones: nodes only present in observed state (every
+/// node publishes its own record with clock facts) are listed too, and the observed clock facts
+/// replace the desired record's.
+fn effective_nodes(snapshot: &orion_control_plane::StateSnapshot) -> Vec<NodeRecord> {
+    let mut nodes = snapshot.state.desired.nodes.clone();
+    for (node_id, observed) in &snapshot.state.observed.nodes {
+        nodes
+            .entry(node_id.clone())
+            .and_modify(|node| node.clock = observed.clock.clone())
+            .or_insert_with(|| observed.clone());
+    }
+    nodes.into_values().collect()
 }
 
 pub(crate) async fn run() -> Result<(), String> {

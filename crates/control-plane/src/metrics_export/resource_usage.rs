@@ -2,7 +2,8 @@
 //!
 //! Process counters already exported by the host metrics (`orion_process_rss_bytes`,
 //! `orion_process_pss_bytes`, `orion_process_vm_hwm_bytes`, ...) are not repeated here; this
-//! module adds the RSS/PSS breakdown plus state, history, stream, queue, and registry gauges.
+//! module adds the RSS/PSS breakdown plus state, history, stream, queue, and registry gauges, and
+//! the status-lane and observed-persistence counters.
 
 use super::format::{gauge, metric_help, metric_type, optional_gauge, sample};
 use crate::{NodeResourceUsageSnapshot, StateSectionCounts};
@@ -30,6 +31,7 @@ pub(super) fn append_resource_usage_metrics(
     append_local_stream_metrics(out, node, usage);
     append_worker_queue_metrics(out, node, usage);
     append_registry_metrics(out, node, usage);
+    append_status_and_persistence_metrics(out, node, usage);
 }
 
 fn append_process_breakdown(out: &mut String, node: &str, usage: &NodeResourceUsageSnapshot) {
@@ -350,5 +352,60 @@ fn append_registry_metrics(out: &mut String, node: &str, usage: &NodeResourceUsa
             &[("node_id", node), ("registry", registry)],
             value,
         );
+    }
+}
+
+fn append_status_and_persistence_metrics(
+    out: &mut String,
+    node: &str,
+    usage: &NodeResourceUsageSnapshot,
+) {
+    let labels = [("node_id", node)];
+    let status = &usage.status_lane;
+    gauge(
+        out,
+        "orion_status_lane_entries",
+        "Entries held in the volatile status lane.",
+        &labels,
+        status.entries,
+    );
+    gauge(
+        out,
+        "orion_status_lane_max_entries",
+        "Configured node-wide status lane entry cap.",
+        &labels,
+        status.max_entries,
+    );
+    let persistence = &usage.observed_persistence;
+    for (name, help, value) in [
+        (
+            "orion_status_lane_published_total",
+            "Status entries accepted (new or updated values).",
+            status.published_total,
+        ),
+        (
+            "orion_status_lane_expired_total",
+            "Status entries dropped because their TTL ran out.",
+            status.expired_total,
+        ),
+        (
+            "orion_status_lane_dropped_total",
+            "Status entries refused because a cap was reached or the entry was invalid.",
+            status.dropped_total,
+        ),
+        (
+            "orion_observed_persist_coalesced_total",
+            "Observed or applied state changes deferred to a coalesced write.",
+            persistence.coalesced_changes_total,
+        ),
+        (
+            "orion_observed_persist_flushes_total",
+            "Coalesced observed/applied state writes.",
+            persistence.flushes_total,
+        ),
+    ] {
+        metric_help(out, name, help);
+        metric_type(out, name, "counter");
+        sample(out, name, &labels, value);
     }
 }

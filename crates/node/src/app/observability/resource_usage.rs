@@ -126,6 +126,8 @@ impl NodeApp {
             local_streams,
             worker_queues: self.worker_queue_usage(),
             registries,
+            observed_persistence: self.observed_persistence_usage(),
+            status_lane: self.status_lane_usage(),
         }
     }
 

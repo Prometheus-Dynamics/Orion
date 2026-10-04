@@ -1,3 +1,4 @@
+mod clock;
 mod cluster;
 mod config_decode;
 mod inventory;
@@ -6,6 +7,7 @@ mod resources;
 mod versions;
 mod workloads;
 
+pub use clock::{ClockSourceKind, NodeClockFacts};
 pub use cluster::{
     AppliedClusterState, ClusterStateEnvelope, DesiredClusterState, ObservedClusterState,
 };

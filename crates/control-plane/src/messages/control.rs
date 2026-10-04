@@ -6,6 +6,7 @@ use super::client::{
 use super::maintenance::{MaintenanceCommand, MaintenanceStatus};
 use super::metrics::{NodeObservabilitySnapshot, PeerTrustSnapshot};
 use super::mutations::MutationBatch;
+use super::status::{StatusEntry, StatusQuery};
 use super::sync::{PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest, SyncSummaryRequest};
 use crate::{LeaseRecord, WorkloadRecord};
 use alloc::{boxed::Box, string::String, vec::Vec};
@@ -48,6 +49,13 @@ pub enum ControlMessage {
     WatchState(StateWatch),
     PollClientEvents(ClientEventPoll),
     ClientEvents(Vec<ClientEvent>),
+    /// Publishes a batch of volatile status entries (provider and executor clients only).
+    PublishStatus(Vec<StatusEntry>),
+    /// Queries the node's volatile status lane; answered with [`ControlMessage::Status`].
+    QueryStatus(StatusQuery),
+    /// Subscribes the client stream to coalesced status changes (`ClientEventKind::Status`).
+    WatchStatus(StatusQuery),
+    Status(Vec<StatusEntry>),
     Ping,
     Pong,
     Accepted,

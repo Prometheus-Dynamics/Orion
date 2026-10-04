@@ -1,3 +1,4 @@
+use super::status::StatusChange;
 use super::sync::StateSnapshot;
 use crate::{
     AppliedClusterState, ExecutorRecord, LeaseRecord, ObservedClusterState, ProviderRecord,
@@ -115,6 +116,8 @@ pub enum ClientEventKind {
         provider_id: ProviderId,
         leases: Vec<LeaseRecord>,
     },
+    /// Coalesced volatile status changes for a `WatchStatus` subscription.
+    Status(StatusChange),
 }
 
 #[derive(

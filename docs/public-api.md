@@ -30,9 +30,43 @@ Examples:
 The rkyv control protocol is versioned by `orion_core::CONTROL_PROTOCOL_VERSION`. Clients and
 nodes built from different Orion releases reject each other with a typed `ProtocolMismatch
 { local, remote }` error (`IpcTransportError`, `HttpTransportError`, `ClientError`) before any
-payload is decoded. If you write raw IPC frames yourself, use `control_preamble()` /
+payload is decoded (version 3 adds the status-lane messages). If you write raw IPC frames yourself, use `control_preamble()` /
 `check_control_preamble()` from `orion-transport-ipc`. See
 [protocol-compatibility.md](protocol-compatibility.md).
+
+## Volatile Status Lane
+
+Providers and executors publish fast-moving, non-durable values (latest value per key, with a
+TTL, in node memory only) instead of rewriting observed records:
+
+```rust
+use orion_client::prelude::*;
+
+let camera = LocalProviderService::new(runtime, "camera", provider_record);
+camera.register().await?; // the status publisher must own the provider
+camera
+    .publish_status([
+        camera.status_entry("fps", TypedConfigValue::UInt(30)),
+        camera
+            .status_entry("mode", TypedConfigValue::String("streaming".into()))
+            .with_ttl_ms(10_000),
+    ])
+    .await?;
+
+let entries = camera.query_status(StatusQuery::all().with_key_prefix("fps")).await?;
+let mut watch = camera.watch_status(StatusQuery::all()).await?;
+let change = watch.next().await?; // bootstrap first, then coalesced changes
+```
+
+- `LocalProviderService` / `LocalExecutorService`: `status_entry`, `publish_status`,
+  `query_status`, `watch_status` (returns `StatusWatch`). The same publish/query methods exist on
+  `LocalProviderApp`, `LocalProviderClient`, `LocalExecutorApp`, and `LocalExecutorClient`, and
+  `LocalControlPlaneClient::query_status` reads the lane.
+- Types (re-exported by `orion_client::prelude` and `orion::control_plane`): `StatusSubject`,
+  `StatusEntry`, `StatusKey`, `StatusQuery`, `StatusChange`.
+- A client may publish only for subjects it owns (its provider or executor, their resources, and
+  its executor's assigned workloads); other batches are rejected as a whole. Status is local to
+  the node and not replicated. See `docs/observability.md` ("Volatile Status Lane").
 
 ## Config Decode
 
@@ -99,3 +133,44 @@ let lease = resource.endpoint::<FrameLeaseEndpoint>()?;
 
 `SCHEME` must not be a built-in scheme, because built-in schemes never parse as `Custom`.
 `CustomEndpoint::new` rejects them with `ReservedScheme`.
+
+## Node Clock Facts
+
+`NodeRecord::clock: Option<NodeClockFacts>` carries a node's self-reported clock source
+(`ClockSourceKind`), synchronization state, offset and error estimates, and declared timebase. It
+is only meaningful in observed state, where each node publishes its own record; it is `None` in
+desired records. `NodeObservabilitySnapshot::clock` holds the latest sample and
+`orion::control_plane::render_clock_metrics` renders it as Prometheus gauges. See
+[observability.md](observability.md#clock-facts).
+
+`orion-node` reads the kernel with `KernelClockStatusSource` (read-only `adjtimex`).
+`NodeApp::spawn_clock_facts_loop()` refreshes the facts every
+`NodeRuntimeTuning::clock_refresh_interval`; `NodeApp::refresh_clock_facts_from(&source)` runs one
+check with any `ClockStatusSource` (for example a fake `KernelClockReading` in tests), and
+`NodeApp::published_clock_facts()` returns what the observed record currently holds.
+
+## Peer Sync and Per-Object Versions
+
+See [peer-sync.md](peer-sync.md) for the model. The public surface:
+
+- `orion_core::{HlcTimestamp, HybridLogicalClock, HlcClockSkew, hlc_node_tag}` (`no_std`).
+- `DesiredClusterState::{stamps, tombstones}` (`DesiredObjectStamps`), `version_of`,
+  `apply_stamped` (the merge rule), `force_stamped` (history replay), `stamped_batch`,
+  `stamped_mutation_for`, `max_stamp`, `collect_tombstones`; `DesiredObjectKey` and
+  `DesiredStateMutation::key`. The plain `put_*`/`remove_*` helpers edit records without stamps;
+  `orion-node` stamps every write it commits, so clients keep building states and unstamped
+  `MutationBatch::new(base_revision, mutations)` batches as before.
+- `MutationBatch::{stamps, stamped, is_stamped, check_stamps, versions}`.
+- `orion-node`: `NodeApp::start_peer_tcp_server(addr)` (feature `peer-tcp`), `NodeApp::hlc_now()`,
+  `NodeApp::collect_expired_tombstones()`, `PeerTransportKind`, `PEER_TCP_SCHEME`,
+  `PeerTcpError`, `NodeStorage::migrate_legacy_state` / `StateMigrationReport`, and
+  `NodeRuntimeTuning::{with_hlc_max_drift, with_tombstone_retention}`.
+  `ControlSurface::PeerTcp` (with `ControlSurface::is_peer`) marks requests from `orion+tcp`
+  peers for custom middleware.
+
+## Resource Ownership Modes
+
+`ResourceOwnershipMode` is `Exclusive`, `SharedRead`, or `SharedLimited { max_consumers }`.
+`ExclusiveOwnerPublishesDerived` was removed: it was enforced exactly like `Exclusive`. Use
+`Exclusive` for the source resource and publish derived resources with their own mode (typically
+`SharedRead`) and `source_resource` / `realized_for_workload` links.

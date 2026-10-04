@@ -274,6 +274,7 @@ impl NodeApp {
             recent_events: observability.recent_events.iter().cloned().collect(),
             resource_usage,
             desired_merge,
+            clock: observability.clock.clone(),
         }
     }
 

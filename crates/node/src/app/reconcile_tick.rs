@@ -144,7 +144,7 @@ impl NodeApp {
         let (report, outcome) =
             self.dispatch_reconcile_report(executors, report, runtime_changed)?;
         if outcome.runtime_changed || outcome.applied_revision_changed {
-            self.persist_state_async().await?;
+            self.persist_observed_state_async().await?;
         }
         Ok((report, outcome))
     }
@@ -158,7 +158,7 @@ impl NodeApp {
         let (report, outcome) =
             self.dispatch_reconcile_report(executors, report, runtime_changed)?;
         if outcome.runtime_changed || outcome.applied_revision_changed {
-            self.persist_state()?;
+            self.persist_observed_state()?;
         }
         Ok((report, outcome))
     }

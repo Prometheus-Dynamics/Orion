@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{
     Hello, LeaseRecord, Message, MessageError, ProviderRecord, ProviderState, RejectReason,
-    ResourceRecord, Roles, Welcome, kind,
+    ResourceRecord, Roles, StatusEntry, Welcome, kind,
 };
 use crate::frame::{self, FrameHeader, FrameView};
 
@@ -49,6 +49,13 @@ where
 struct LeasesBody {
     #[serde(deserialize_with = "bounded_vec")]
     leases: Vec<LeaseRecord>,
+}
+
+/// Same wire format as `Vec<StatusEntry>`, decoded with [`bounded_vec`].
+#[derive(Deserialize)]
+struct StatusBody {
+    #[serde(deserialize_with = "bounded_vec")]
+    entries: Vec<StatusEntry>,
 }
 
 /// Borrowed [`Hello`] (same wire format).
@@ -166,6 +173,30 @@ pub fn encode_leases(
     encode_with(kind::LEASES, seq, leases, buf)
 }
 
+/// Encodes a [`kind::STATUS`] frame from borrowed entries, returning the frame length.
+///
+/// # Errors
+///
+/// [`MessageError::BufferTooSmall`] if the frame does not fit in `buf`.
+pub fn encode_status(
+    entries: &[StatusEntry],
+    seq: u16,
+    buf: &mut [u8],
+) -> Result<usize, MessageError> {
+    encode_with(kind::STATUS, seq, entries, buf)
+}
+
+/// Postcard length of a status body, computed without writing it.
+pub(crate) fn status_payload_len(entries: &[StatusEntry]) -> Result<usize, MessageError> {
+    postcard::serialize_with_flavor(entries, postcard::ser_flavors::Size::default())
+        .map_err(|_| MessageError::Encode)
+}
+
+/// Decodes a [`kind::STATUS`] body.
+pub(crate) fn decode_status(payload: &[u8]) -> Result<Vec<StatusEntry>, MessageError> {
+    decode_body::<StatusBody>(kind::STATUS, payload).map(|body| body.entries)
+}
+
 /// Decodes one body type directly. Sessions use this instead of [`Message::decode`] so a device
 /// only links the decoders for the kinds it actually receives.
 pub(crate) fn decode_body<'a, T: Deserialize<'a>>(
@@ -193,6 +224,7 @@ impl Message {
             Self::Leases(_) => kind::LEASES,
             Self::Ping { .. } => kind::PING,
             Self::Pong { .. } => kind::PONG,
+            Self::Status(_) => kind::STATUS,
             Self::Unknown(kind) => *kind,
         }
     }
@@ -216,6 +248,7 @@ impl Message {
             Self::Ack { seq: acked } => encode_with(kind, seq, acked, buf),
             Self::Leases(leases) => encode_leases(leases, seq, buf),
             Self::Ping { now_ms } | Self::Pong { now_ms } => encode_with(kind, seq, now_ms, buf),
+            Self::Status(entries) => encode_status(entries, seq, buf),
             Self::Unknown(_) => Err(MessageError::Encode),
         }
     }
@@ -254,6 +287,7 @@ impl Message {
             kind::PONG => Self::Pong {
                 now_ms: decode_body(kind, payload)?,
             },
+            kind::STATUS => Self::Status(decode_status(payload)?),
             other => Self::Unknown(other),
         })
     }

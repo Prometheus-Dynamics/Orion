@@ -4,6 +4,7 @@ mod maintenance;
 mod metrics;
 mod mutations;
 mod resource_usage;
+mod status;
 mod sync;
 
 pub use client::{
@@ -29,8 +30,11 @@ pub use metrics::{
 pub use mutations::{DesiredStateMutation, MutationApplyError, MutationBatch};
 pub use resource_usage::{
     LocalStreamUsageSnapshot, MutationHistoryUsageSnapshot, NodeResourceUsageSnapshot,
-    ProcessMemorySnapshot, RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot,
-    WorkerQueueUsageSnapshot,
+    ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot, RegistryUsageSnapshot,
+    StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot, WorkerQueueUsageSnapshot,
+};
+pub use status::{
+    StatusChange, StatusEntry, StatusKey, StatusQuery, StatusSubject, StatusSubjectParseError,
 };
 pub use sync::{
     DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,

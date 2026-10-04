@@ -528,7 +528,8 @@ async fn node_ipc_server_queues_state_events_for_registered_watchers() {
                     assert!(snapshot.state.desired.revision > Revision::ZERO);
                 }
                 ClientEventKind::ExecutorWorkloads { .. }
-                | ClientEventKind::ProviderLeases { .. } => {
+                | ClientEventKind::ProviderLeases { .. }
+                | ClientEventKind::Status(_) => {
                     panic!("unexpected non-state event");
                 }
             }

@@ -417,6 +417,8 @@ pub(super) struct NodeState {
     pub(super) observability: std::sync::RwLock<ObservabilityState>,
     pub(super) lifecycle: super::LifecycleState,
     pub(super) reconcile: super::reconcile_trigger::ReconcileTrigger,
+    pub(super) observed_persist: super::observed_persist::ObservedPersistState,
+    pub(super) status: super::status_lane::StatusLaneState,
     #[cfg(feature = "link-gateway")]
     pub(super) links: super::link_bridge::LinkBridgeState,
 }

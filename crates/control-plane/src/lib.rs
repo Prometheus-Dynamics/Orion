@@ -26,18 +26,20 @@ pub use messages::{
     MaintenanceState, MaintenanceStatus, MutationApplyError, MutationBatch,
     MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot,
     NodeReadinessSnapshot, NodeReadinessStatus, NodeResourceUsageSnapshot, ObservabilityEvent,
-    ObservabilityEventKind, ObservedStateUpdate, OperationFailureCategory,
-    OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerSyncErrorKind,
-    PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
-    ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate, RegistryUsageSnapshot,
-    StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch, SyncDiffRequest, SyncRequest,
-    SyncSummaryRequest, TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
+    ObservabilityEventKind, ObservedPersistenceUsageSnapshot, ObservedStateUpdate,
+    OperationFailureCategory, OperationMetricsSnapshot, PeerEnrollment, PeerHello,
+    PeerIdentityUpdate, PeerSyncErrorKind, PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot,
+    PersistenceMetricsSnapshot, ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate,
+    RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch,
+    StatusChange, StatusEntry, StatusKey, StatusLaneUsageSnapshot, StatusQuery, StatusSubject,
+    StatusSubjectParseError, SyncDiffRequest, SyncRequest, SyncSummaryRequest,
+    TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
 };
 #[cfg(feature = "std")]
 pub use metrics_export::{
-    MetricsExportConfig, render_communication_metrics, render_communication_metrics_with_config,
-    render_host_metrics, render_observability_metrics, render_observability_metrics_with_config,
-    render_resource_usage_metrics,
+    MetricsExportConfig, render_clock_metrics, render_communication_metrics,
+    render_communication_metrics_with_config, render_host_metrics, render_observability_metrics,
+    render_observability_metrics_with_config, render_resource_usage_metrics,
 };
 pub use metrics_support::{
     COMMUNICATION_RECENT_SAMPLE_LIMIT, COMMUNICATION_RECENT_WINDOW_MS,
@@ -47,16 +49,16 @@ pub use metrics_support::{
 };
 pub use records::{
     AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, BUILTIN_ENDPOINT_SCHEMES,
-    ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef, CustomEndpoint, CustomEndpointScheme,
-    DesiredClusterState, DesiredObjectKey, DesiredObjectStamps, DesiredObjectVersion,
-    ExecutorRecord, ExecutorRecordBuilder, HttpEndpoint, IpcEndpoint, LeaseRecord,
-    LeaseRecordBuilder, NodeRecord, NodeRecordBuilder, ObservedClusterState, ProviderRecord,
-    ProviderRecordBuilder, ResourceActionResult, ResourceActionStatus, ResourceBinding,
-    ResourceCapability, ResourceConfigState, ResourceEndpoint, ResourceEndpointError,
-    ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder, ResourceState,
-    SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue, TypedResourceEndpoint, UnixEndpoint,
-    WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement, config_json_value,
-    deserialize_config, is_valid_endpoint_scheme,
+    ClockSourceKind, ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef, CustomEndpoint,
+    CustomEndpointScheme, DesiredClusterState, DesiredObjectKey, DesiredObjectStamps,
+    DesiredObjectVersion, ExecutorRecord, ExecutorRecordBuilder, HttpEndpoint, IpcEndpoint,
+    LeaseRecord, LeaseRecordBuilder, NodeClockFacts, NodeRecord, NodeRecordBuilder,
+    ObservedClusterState, ProviderRecord, ProviderRecordBuilder, ResourceActionResult,
+    ResourceActionStatus, ResourceBinding, ResourceCapability, ResourceConfigState,
+    ResourceEndpoint, ResourceEndpointError, ResourceOwnershipMode, ResourceRecord,
+    ResourceRecordBuilder, ResourceState, SharedMemoryEndpoint, TcpEndpoint, TypedConfigValue,
+    TypedResourceEndpoint, UnixEndpoint, WorkloadConfig, WorkloadRecord, WorkloadRecordBuilder,
+    WorkloadRequirement, config_json_value, deserialize_config, is_valid_endpoint_scheme,
 };
 pub use state::{
     AvailabilityState, DesiredState, HealthState, LeaseState, RestartPolicy, WorkloadObservedState,
@@ -130,7 +132,7 @@ mod tests {
         .require_resource_with_ownership(
             ResourceType::new("camera.device"),
             1,
-            ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+            ResourceOwnershipMode::Exclusive,
         )
         .build();
         let derived = ResourceRecord::builder(
@@ -155,7 +157,7 @@ mod tests {
         );
         assert_eq!(
             record.requirements[0].ownership_mode,
-            Some(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
+            Some(ResourceOwnershipMode::Exclusive)
         );
         assert_eq!(
             derived.source_workload_id,
@@ -253,6 +255,10 @@ mod tests {
             | ControlMessage::WatchState(_)
             | ControlMessage::PollClientEvents(_)
             | ControlMessage::ClientEvents(_)
+            | ControlMessage::PublishStatus(_)
+            | ControlMessage::QueryStatus(_)
+            | ControlMessage::WatchStatus(_)
+            | ControlMessage::Status(_)
             | ControlMessage::Ping
             | ControlMessage::Pong
             | ControlMessage::Accepted
@@ -406,6 +412,7 @@ mod tests {
             health: HealthState::Healthy,
             schedulable: true,
             labels: Vec::new(),
+            clock: None,
         });
 
         let result = MutationBatch {
@@ -433,6 +440,7 @@ mod tests {
             health: HealthState::Healthy,
             schedulable: true,
             labels: Vec::new(),
+            clock: None,
         });
 
         let mut applied = AppliedClusterState::default();

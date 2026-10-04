@@ -270,7 +270,7 @@ fn node_tick_allows_consumers_to_bind_executor_published_derived_resources() {
         .require_resource_with_ownership(
             "camera.device",
             1,
-            orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+            orion::control_plane::ResourceOwnershipMode::Exclusive,
         )
         .build(),
     );
@@ -363,7 +363,7 @@ fn node_tick_does_not_start_two_controller_workloads_for_one_exclusive_raw_resou
         .require_resource_with_ownership(
             "camera.device",
             1,
-            orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+            orion::control_plane::ResourceOwnershipMode::Exclusive,
         )
         .build(),
     );
@@ -382,7 +382,7 @@ fn node_tick_does_not_start_two_controller_workloads_for_one_exclusive_raw_resou
         .require_resource_with_ownership(
             "camera.device",
             1,
-            orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+            orion::control_plane::ResourceOwnershipMode::Exclusive,
         )
         .build(),
     );

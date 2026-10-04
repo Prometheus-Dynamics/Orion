@@ -45,9 +45,7 @@ impl ProviderIntegration for CameraProvider {
                     "camera.device",
                     "provider.camera",
                 )
-                .ownership_mode(
-                    orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
-                )
+                .ownership_mode(orion::control_plane::ResourceOwnershipMode::Exclusive)
                 .health(HealthState::Healthy)
                 .availability(AvailabilityState::Available)
                 .lease_state(LeaseState::Unleased)
@@ -130,7 +128,7 @@ impl ExecutorIntegration for CameraPipelineExecutor {
                 .require_resource_with_ownership(
                     "camera.device",
                     1,
-                    orion::control_plane::ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+                    orion::control_plane::ResourceOwnershipMode::Exclusive,
                 )
                 .bind_resource("resource.camera.raw.front", "node-a")
                 .build(),

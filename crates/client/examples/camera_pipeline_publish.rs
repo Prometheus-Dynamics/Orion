@@ -55,7 +55,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .assigned_to(NodeId::new(node_id.clone()))
     .require_claim(
         ResourceClaim::new(ResourceType::new("camera.device"), 1)
-            .ownership_mode(ResourceOwnershipMode::ExclusiveOwnerPublishesDerived)
+            .ownership_mode(ResourceOwnershipMode::Exclusive)
             .build(),
     )
     .bind_resource(

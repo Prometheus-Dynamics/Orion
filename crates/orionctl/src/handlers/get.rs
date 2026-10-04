@@ -9,13 +9,14 @@ use crate::{
     cli::{CommunicationView, GetCommand, ListArgs, OutputFormat, StateQueryArgs},
     render::{
         join_display, join_or_dash, print_observability_event_summary, print_snapshot_summary,
-        print_structured, render_availability_state, render_health_state, render_lease_state,
-        render_observability_event_kind, render_observed_state, render_restart_policy,
+        print_structured, render_availability_state, render_clock_fields, render_health_state,
+        render_lease_state, render_observability_event_kind, render_observed_state,
+        render_restart_policy,
     },
 };
 
 use super::{
-    effective_workloads,
+    effective_nodes, effective_workloads,
     get_communication::{communication_peer_summaries, print_peer_communication_summary},
     get_communication::{filtered_communication, print_communication_summary},
 };
@@ -89,6 +90,7 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
             }
         }
         GetCommand::Memory(args) => super::get_memory::run(args).await,
+        GetCommand::Status(args) => super::get_status::run(args).await,
         GetCommand::Observability(args) => {
             let snapshot = fetch_observability_snapshot(&args).await?;
             match args.output {
@@ -244,24 +246,21 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
         }
         GetCommand::Nodes(args) => {
             let snapshot = args.source.fetch_snapshot().await?;
-            let nodes = snapshot
-                .state
-                .desired
-                .nodes
-                .values()
+            let nodes = effective_nodes(&snapshot)
+                .into_iter()
                 .filter(|node| match_list_filters(&args, None, &node.labels))
-                .cloned()
                 .collect::<Vec<_>>();
             match args.source.output {
                 OutputFormat::Summary => {
                     println!("nodes count={}", nodes.len());
                     for node in nodes {
                         println!(
-                            "node id={} health={} schedulable={} labels={}",
+                            "node id={} health={} schedulable={} labels={} {}",
                             node.node_id,
                             render_health_state(node.health),
                             node.schedulable,
                             join_or_dash(&node.labels),
+                            render_clock_fields(node.clock.as_ref()),
                         );
                     }
                     Ok(())

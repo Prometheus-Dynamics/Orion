@@ -119,6 +119,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     }
     let app = app_builder.try_build()?;
     let reconcile_loop = app.spawn_reconcile_loop(config.reconcile_interval);
+    let clock_facts_loop = app.spawn_clock_facts_loop();
     let peer_sync_loop = (!config.peers.is_empty()).then(|| {
         app.spawn_peer_sync_loop_with_execution(
             config.reconcile_interval,
@@ -243,6 +244,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         info!(node = %snapshot.node_id, "shutting down orion-node after initialization delay");
         link_gateway.shutdown().await;
         reconcile_loop.shutdown().await;
+        clock_facts_loop.shutdown().await;
         if let Some(peer_sync_loop) = peer_sync_loop {
             peer_sync_loop.shutdown().await;
         }
@@ -279,6 +281,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
 
     link_gateway.shutdown().await;
     reconcile_loop.shutdown().await;
+    clock_facts_loop.shutdown().await;
     if let Some(peer_sync_loop) = peer_sync_loop {
         peer_sync_loop.shutdown().await;
     }

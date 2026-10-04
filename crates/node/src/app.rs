@@ -1,4 +1,5 @@
 mod builder;
+mod clock_facts;
 mod desired_state;
 mod desired_sync;
 mod desired_writes;
@@ -9,6 +10,7 @@ mod local_clients;
 mod local_control;
 mod maintenance_admin;
 mod observability;
+mod observed_persist;
 #[cfg(peer_sync)]
 mod peer_observed;
 #[cfg(peer_sync)]
@@ -32,6 +34,7 @@ mod startup;
 mod startup_loops;
 mod state_access;
 mod status_admin;
+mod status_lane;
 mod task_handle;
 mod tls_bootstrap;
 mod types;

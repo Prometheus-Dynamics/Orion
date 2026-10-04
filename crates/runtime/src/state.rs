@@ -79,9 +79,26 @@ impl LocalRuntimeStore {
     }
 
     fn prune_observed_for_desired(&mut self) {
-        self.observed
-            .nodes
-            .retain(|node_id, _| self.desired.nodes.contains_key(node_id));
+        // Observed node records are self-reported facts (health, clock). Keep the local node's
+        // and those of nodes the desired state still references.
+        let desired = &self.desired;
+        let local_node_id = &self.local_node_id;
+        self.observed.nodes.retain(|node_id, _| {
+            node_id == local_node_id
+                || desired.nodes.contains_key(node_id)
+                || desired
+                    .providers
+                    .values()
+                    .any(|provider| &provider.node_id == node_id)
+                || desired
+                    .executors
+                    .values()
+                    .any(|executor| &executor.node_id == node_id)
+                || desired
+                    .workloads
+                    .values()
+                    .any(|workload| workload.assigned_node_id.as_ref() == Some(node_id))
+        });
         self.observed
             .workloads
             .retain(|workload_id, _| self.desired.workloads.contains_key(workload_id));

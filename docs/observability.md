@@ -57,6 +57,7 @@ It currently includes:
 - `resource_usage`: process memory breakdown, cluster-state record counts, mutation-history size
   versus its caps, local stream subscriber backlog, background worker queue depth, and in-memory
   registry sizes (see [Memory And Backlog Diagnostics](#memory-and-backlog-diagnostics))
+- `clock`: the latest sample of the node's clock facts (see [Clock Facts](#clock-facts))
 
 Communication endpoint metrics use one transport-agnostic shape so operator tooling can render a
 single table without each transport inventing its own counters. Each endpoint carries:
@@ -301,6 +302,56 @@ surface. Free-text fallback is intentionally limited to external boundary cases 
 HTTP transport layer still exposes only an unstructured message, such as raw TLS failures or
 untyped request failures.
 
+## Clock Facts
+
+Every node publishes its clock source and synchronization state as a `NodeClockFacts` value in
+its own observed node record (`ObservedClusterState::nodes[<node id>].clock`). Orion only observes
+clocks; it never adjusts or disciplines them. Producers stamp data in the timebase the node
+declares, and consumers use the facts to judge whether timestamps from two nodes are comparable.
+
+| Field | Shape | Notes |
+| --- | --- | --- |
+| `source` | `ClockSourceKind` | `Unknown`, `System`, `Ntp`, `Chrony`, `Ptp`, `Gps`, or `Other(name)`. `System` on Linux unless `ORION_NODE_CLOCK_SOURCE` declares a source; `Unknown` off Linux. |
+| `synchronized` | bool or null | From the kernel: false when `STA_UNSYNC` or `STA_CLOCKERR` is set or `adjtimex` returns `TIME_ERROR`. |
+| `offset_ns` | integer or null | Kernel `offset` (scaled from microseconds unless `STA_NANO`); only while synchronized. |
+| `max_error_ns` | integer or null | Kernel `maxerror`. |
+| `estimated_error_ns` | integer or null | Kernel `esterror`; only while synchronized. |
+| `stratum`, `ptp_grandmaster_id` | null | Not available from the kernel; reserved for richer sources. |
+| `timebase` | string or null | `ORION_NODE_TIMEBASE`, for example `UTC`, `TAI`, or `monotonic`. |
+| `checked_at_ms` | integer | Unix milliseconds of the check that produced the published value. |
+
+Detection is a read-only `adjtimex(2)` call (`modes = 0`, no privileges) every
+`ORION_NODE_CLOCK_REFRESH_MS` (default 10 s). The kernel cannot tell which daemon disciplines the
+clock, so operators running ptp4l/phc2sys, chrony, or a GPS reference declare it with
+`ORION_NODE_CLOCK_SOURCE` (see `docs/node-env.md`).
+
+Churn is bounded: the observed record is replaced only when the source, synchronization,
+stratum, grandmaster, or timebase changes, the offset moves by more than 1 ms, an error bound
+halves or doubles by at least 10 ms, or the published value is 30 refresh intervals old. The
+record is in-memory observed state and is not written to disk on its own. Every sample, including
+jitter that is not republished, updates the observability snapshot's `clock` field and the
+Prometheus gauges:
+
+| Metric | Labels | Notes |
+| --- | --- | --- |
+| `orion_node_clock_info` | `node_id`, `source`, `timebase` | Always `1`. |
+| `orion_node_clock_synchronized` | `node_id` | `1` or `0`; omitted when unknown. |
+| `orion_node_clock_offset_seconds` | `node_id` | Omitted when unknown. |
+| `orion_node_clock_max_error_seconds` | `node_id` | Omitted when unknown. |
+| `orion_node_clock_estimated_error_seconds` | `node_id` | Omitted when unknown. |
+| `orion_node_clock_stratum` | `node_id` | Omitted when unknown. |
+
+`orionctl get nodes` lists desired and observed nodes with `clock_source`, `clock_synced`,
+`clock_offset_ns`, `clock_max_error_ns`, and `timebase` fields, and `orionctl describe node <id>`
+prints every clock field (`-` when unknown). `-o json|yaml|toml` include the full `clock` value.
+
+Peers see each other's clock facts through the observed state that peer sync already carries:
+full state snapshots exchanged during sync, and `ObservedStateUpdate` pushes, where a peer may
+only publish its own node record. Peer sync is driven by desired-state changes, so a peer's copy
+can lag behind its own node's; `checked_at_ms` shows its age. Observed node records are kept for
+the local node and for nodes the desired state still references (a desired node record, or a
+provider, executor, or assigned workload on that node).
+
 ## Memory And Backlog Diagnostics
 
 `orionctl get memory` (alias `orionctl get resource-usage`) prints the `resource_usage` section of
@@ -342,6 +393,8 @@ size is reported as record counts plus the size of the persisted snapshot files 
 | `local_streams.dropped_client_events_total` | integer | Oldest events discarded because a client's pending queue was full, for currently registered clients. |
 | `worker_queues[]` | `{ name, capacity, depth, dropped_total }` | Running bounded workers: `persistence`, `auth_state`, and `audit_log`. `dropped_total` is set only where an overload policy can drop work. |
 | `registries` | `RegistryUsageSnapshot` | Peers, local clients/providers/executors, runtime communication endpoints and their cap, retained recent events and their cap, and peers/nonces held in the replay-protection nonce windows. |
+| `observed_persistence` | `ObservedPersistenceUsageSnapshot` | `interval_ms` (`ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS`), `coalescing` (the coalescer runs), `pending` (a coalesced write is due), `coalesced_changes_total` (observed/applied changes deferred instead of written at once), `flushes_total` (coalesced writes), and `absorbed_flushes_total` (pending changes carried by a desired-state write). See "Observed-state write coalescing" in `docs/node-env.md`. |
+| `status_lane` | `StatusLaneUsageSnapshot` | Volatile status lane: `entries` versus `max_entries`, `max_entries_per_publisher`, `max_ttl_ms`, `publishers`, `watchers`, and the counters `published_total`, `expired_total`, `dropped_total` (refused by caps or validation), and `unauthorized_total` (batches refused because the publisher does not own a subject). |
 
 Reading the numbers when resident memory grows:
 
@@ -361,6 +414,57 @@ Reading the numbers when resident memory grows:
 Structured consumers get additive compatibility: every new section derives defaults, so JSON/YAML
 written by an older node still decodes. The binary control protocol (rkyv) is layout-exact, so
 `orionctl` and `orion-node` must still run matching versions to exchange snapshots.
+
+## Volatile Status Lane
+
+Records carry durable facts only: existence, health, availability, and workload phase. Fast-moving
+values that are useless after a restart (temperature, frame rate, queue depth, exposure, last
+error text) go to the node's volatile status lane instead:
+
+- **Latest value per `(subject, key)`.** A subject is a `StatusSubject`: `provider/<id>`,
+  `executor/<id>`, `resource/<id>`, or `workload/<id>`. A value is a `TypedConfigValue` (`Bool`,
+  `Int`, `UInt`, `String`, `Bytes`). Each entry carries the node's receive time
+  (`published_at_ms`, Unix milliseconds) and its TTL (`ttl_ms`).
+- **In memory only.** Entries are never persisted and are gone after a node restart; publishers
+  republish. They are **not replicated** to peer nodes in this release: each node serves the
+  status of its own local providers, executors, and link devices.
+- **TTL.** Publishers choose a TTL per entry; `0` means the node maximum
+  (`ORION_NODE_STATUS_MAX_TTL_MS`, default 5 minutes), which also caps longer TTLs. Expired
+  entries are dropped by a sweeper that runs with the reconcile loop (and lazily on every publish
+  and query), and watchers are told about the expiry.
+- **Ownership.** A local provider or executor client may publish only for subjects it owns: its
+  own provider or executor (the client that last published that provider's or executor's state),
+  resources of its provider or realized by its executor, and workloads assigned to its executor.
+  Link devices publish under their provider subject. Any local client may query and watch.
+- **Bounded.** `ORION_NODE_STATUS_MAX_ENTRIES` (default 4096) and
+  `ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER` (default 256) cap memory; keys are at most 128
+  bytes and string/byte values at most 1024 bytes. A batch is stored atomically or refused.
+- **Bulk data stays out.** Frames, detections, and other high-rate data belong on resource
+  endpoints, not in the status lane.
+
+Surfaces:
+
+| Surface | Use |
+| --- | --- |
+| `ControlMessage::PublishStatus(Vec<StatusEntry>)` | Provider/executor clients publish a batch (local IPC only). |
+| `ControlMessage::QueryStatus(StatusQuery)` → `Status(Vec<StatusEntry>)` | Any local client; filter by exact subject and key prefix. |
+| `ControlMessage::WatchStatus(StatusQuery)` | Stream subscription; events are `ClientEventKind::Status(StatusChange)`. |
+| `orion-client` | `publish_status`, `query_status`, `watch_status` on `LocalProviderService` / `LocalExecutorService` (plus `status_entry(key, value)` helpers); `LocalControlPlaneClient::query_status`. |
+| `orionctl get status [--subject provider/<id>] [--key-prefix <p>] [-o json\|yaml\|toml]` | Operator view (local socket only). |
+| link protocol `STATUS` (`0x14`) | MCU devices: `DeviceSession::publish_status`, fire-and-forget. |
+
+Watches are coalesced: the first event is a bootstrap (`bootstrap: true`) with every matching
+entry; after that, while a watcher has not read its queued status event, new changes are merged
+into it (newest value per key; an expiry replaces a pending update of the same key), so a slow
+watcher never holds more than one status event. Republishing an unchanged value refreshes its TTL
+without an event.
+
+```text
+orionctl get status --socket /run/orion/control.sock
+status count=2
+status subject=provider/provider.camera key=fps type=uint value=30 age_ms=120 expires_in_ms=29880
+status subject=resource/camera.front key=exposure_us type=uint value=800 age_ms=120 expires_in_ms=299880
+```
 
 ## Queue Pressure
 

@@ -378,6 +378,8 @@ impl NodeAppBuilder {
             )),
             lifecycle: LifecycleState::default(),
             reconcile: Default::default(),
+            observed_persist: Default::default(),
+            status: Default::default(),
             #[cfg(feature = "link-gateway")]
             links: Default::default(),
         });

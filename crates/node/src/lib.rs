@@ -12,6 +12,7 @@ extern crate self as orion;
 mod app;
 mod auth;
 mod blocking;
+mod clock;
 mod config;
 #[cfg(feature = "link-gateway")]
 pub mod link_gateway;
@@ -116,6 +117,7 @@ pub use auth::{
     AuthenticatedPeer, LocalAuthenticationMode, NodeSecurity, PeerAuthenticationMode,
     PeerSecurityMiddleware,
 };
+pub use clock::{ClockStatusSource, KernelClockReading, KernelClockStatusSource};
 pub use config::{NodeConfig, NodeProcessConfig, NodeRuntimeThreads};
 pub use peer::{
     PEER_TCP_SCHEME, PeerConfig, PeerState, PeerSyncStatus, PeerTransportKind, PeerTrustStatus,

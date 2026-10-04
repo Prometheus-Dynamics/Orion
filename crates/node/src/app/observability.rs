@@ -70,6 +70,8 @@ pub(super) struct ObservabilityState {
     pub(super) reconnect_count: u64,
     pub(super) peer_http_communication: BTreeMap<NodeId, CommunicationMetrics>,
     pub(super) communication_endpoints: BTreeMap<String, CommunicationEndpointRuntime>,
+    /// Latest clock sample, refreshed on every clock check.
+    pub(super) clock: Option<orion::control_plane::NodeClockFacts>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

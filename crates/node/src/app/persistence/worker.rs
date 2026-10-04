@@ -474,6 +474,7 @@ mod tests {
             baseline_revision: Revision::ZERO,
             baseline_bytes: None,
             snapshot_rewrite_cadence: 1,
+            observed_generation: 0,
         }
     }
 }

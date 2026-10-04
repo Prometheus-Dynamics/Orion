@@ -108,6 +108,23 @@ impl LinkContext {
                     }
                 }
             }
+            HostEvent::Status {
+                device_name,
+                entries,
+            } => {
+                let count = entries.len();
+                match self
+                    .app
+                    .link_publish_device_status(&self.name, &device_name, entries)
+                {
+                    Ok(()) => self.status.status_batches += 1,
+                    Err(rejection) => {
+                        debug!(link = %self.name, device = %device_name, entries = count, reason = %rejection, "link device status rejected");
+                        self.status.status_rejects += 1;
+                    }
+                }
+                LeaseAction::Keep
+            }
             HostEvent::DeviceLost { device_name } => {
                 info!(link = %self.name, device = %device_name, "link device lost; marking its resources unavailable");
                 self.accepted.remove(&device_name);

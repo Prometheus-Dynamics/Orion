@@ -21,12 +21,13 @@ use orion_auth::{
     canonical_transport_binding_bytes,
 };
 use orion_control_plane::{
-    AppliedClusterState, ArtifactRecord, ClientHello, ClientRole, ClusterStateEnvelope,
-    ControlMessage, DesiredClusterState, DesiredState, DesiredStateMutation,
+    AppliedClusterState, ArtifactRecord, ClientHello, ClientRole, ClockSourceKind,
+    ClusterStateEnvelope, ControlMessage, DesiredClusterState, DesiredState, DesiredStateMutation,
     DesiredStateSectionFingerprints, ExecutorRecord, HealthState, LeaseRecord, LeaseState,
-    MutationBatch, NodeRecord, ObservedClusterState, ObservedStateUpdate, PeerHello,
-    ProviderRecord, ResourceOwnershipMode, ResourceRecord, RestartPolicy, StateSnapshot,
-    TypedConfigValue, WorkloadConfig, WorkloadObservedState, WorkloadRecord,
+    MutationBatch, NodeClockFacts, NodeRecord, ObservedClusterState, ObservedStateUpdate,
+    PeerHello, ProviderRecord, ResourceOwnershipMode, ResourceRecord, RestartPolicy, StateSnapshot,
+    StatusEntry, StatusQuery, StatusSubject, TypedConfigValue, WorkloadConfig,
+    WorkloadObservedState, WorkloadRecord,
 };
 use orion_core::{
     ArtifactId, CapabilityId, ClientName, ConfigSchemaId, ExecutorId, HlcTimestamp, NodeId,
@@ -71,7 +72,7 @@ fn desired_state() -> DesiredClusterState {
         .require_resource_with_ownership(
             ResourceType::new("imu.sample_source"),
             1,
-            ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
+            ResourceOwnershipMode::Exclusive,
         )
         .bind_resource(ResourceId::new("node-a.imu-01"), NodeId::new("node-a"))
         .restart_policy(RestartPolicy::OnFailure)
@@ -129,6 +130,16 @@ fn observed_update() -> ObservedStateUpdate {
     observed.put_node(
         NodeRecord::builder(NodeId::new("node-a"))
             .health(HealthState::Degraded)
+            .clock(
+                NodeClockFacts::unknown(1_759_500_000_000)
+                    .with_source(ClockSourceKind::Ptp)
+                    .with_synchronized(true)
+                    .with_offset_ns(-1_500)
+                    .with_max_error_ns(16_000_000)
+                    .with_estimated_error_ns(2_000)
+                    .with_ptp_grandmaster_id("00:1b:19:ff:fe:00:00:01")
+                    .with_timebase("TAI"),
+            )
             .build(),
     );
     let mut applied = AppliedClusterState::default();
@@ -186,6 +197,29 @@ fn control_messages() -> Vec<(&'static str, ControlMessage)> {
         (
             "control.rejected",
             ControlMessage::Rejected("revision mismatch".into()),
+        ),
+        (
+            "control.publish_status",
+            ControlMessage::PublishStatus(vec![
+                StatusEntry::new(
+                    StatusSubject::Provider(ProviderId::new("provider.camera")),
+                    "fps",
+                    TypedConfigValue::UInt(30),
+                )
+                .with_ttl_ms(5_000),
+                StatusEntry::new(
+                    StatusSubject::Resource(ResourceId::new("resource.camera.front")),
+                    "exposure",
+                    TypedConfigValue::String("auto".into()),
+                ),
+            ]),
+        ),
+        (
+            "control.query_status",
+            ControlMessage::QueryStatus(
+                StatusQuery::subject(StatusSubject::Workload(WorkloadId::new("workload.pose")))
+                    .with_key_prefix("latency."),
+            ),
         ),
     ]
 }
