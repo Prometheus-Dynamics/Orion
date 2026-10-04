@@ -26,12 +26,14 @@ pub use messages::{
     MaintenanceState, MaintenanceStatus, MutationApplyError, MutationBatch,
     MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot,
     NodeReadinessSnapshot, NodeReadinessStatus, NodeResourceUsageSnapshot, ObservabilityEvent,
-    ObservabilityEventKind, ObservedStateUpdate, OperationFailureCategory,
-    OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerSyncErrorKind,
-    PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
-    ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate, RegistryUsageSnapshot,
-    StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch, SyncDiffRequest, SyncRequest,
-    SyncSummaryRequest, TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
+    ObservabilityEventKind, ObservedPersistenceUsageSnapshot, ObservedStateUpdate,
+    OperationFailureCategory, OperationMetricsSnapshot, PeerEnrollment, PeerHello,
+    PeerIdentityUpdate, PeerSyncErrorKind, PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot,
+    PersistenceMetricsSnapshot, ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate,
+    RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch,
+    StatusChange, StatusEntry, StatusKey, StatusLaneUsageSnapshot, StatusQuery, StatusSubject,
+    StatusSubjectParseError, SyncDiffRequest, SyncRequest, SyncSummaryRequest,
+    TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
 };
 #[cfg(feature = "std")]
 pub use metrics_export::{
@@ -252,6 +254,10 @@ mod tests {
             | ControlMessage::WatchState(_)
             | ControlMessage::PollClientEvents(_)
             | ControlMessage::ClientEvents(_)
+            | ControlMessage::PublishStatus(_)
+            | ControlMessage::QueryStatus(_)
+            | ControlMessage::WatchStatus(_)
+            | ControlMessage::Status(_)
             | ControlMessage::Ping
             | ControlMessage::Pong
             | ControlMessage::Accepted

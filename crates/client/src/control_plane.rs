@@ -421,6 +421,22 @@ impl LocalControlPlaneClient {
             .await
     }
 
+    /// Live entries of the node's volatile status lane matching `query`.
+    pub async fn query_status(
+        &self,
+        query: orion_control_plane::StatusQuery,
+    ) -> Result<Vec<orion_control_plane::StatusEntry>, ClientError> {
+        self.send_request_with(
+            ControlMessage::QueryStatus(query),
+            |message| match message {
+                ControlMessage::Status(entries) => Ok(entries),
+                ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
+                _ => Err(ClientError::NoMessageAvailable),
+            },
+        )
+        .await
+    }
+
     pub async fn query_host_metrics(&self) -> Result<HostMetricsSnapshot, ClientError> {
         Ok(self.query_observability().await?.host)
     }

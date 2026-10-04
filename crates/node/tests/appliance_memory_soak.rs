@@ -380,6 +380,17 @@ async fn appliance_memory_soak_stays_flat_under_heartbeat_load() {
 
     let counters = load.counters.clone();
     load.shutdown().await;
+    let persistence = sampler
+        .query_observability()
+        .await
+        .expect("observability snapshot should load")
+        .persistence;
+    println!(
+        "persistence: state_writes={} worker_operations={} elapsed_secs={:.0}",
+        persistence.state_persist.success_count,
+        persistence.worker_operation_count,
+        started.elapsed().as_secs_f64()
+    );
     let load_summary = [
         ("provider_publishes", &counters.provider_publishes),
         ("provider_errors", &counters.provider_errors),

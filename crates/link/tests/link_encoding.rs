@@ -21,7 +21,8 @@ use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, WorkloadId};
 use orion_link::LINK_PROTOCOL_VERSION;
 use orion_link::message::{
     Hello, LeaseRecord, Message, MessageError, ProviderRecord, ProviderState, RejectReason,
-    ResourceRecord, Roles, Welcome, encode_leases, encode_provider_state, kind,
+    ResourceRecord, Roles, StatusEntry, Welcome, encode_leases, encode_provider_state,
+    encode_status, kind,
 };
 
 const FIXTURE: &str = "tests/fixtures/link_encodings.txt";
@@ -127,6 +128,16 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
         ("leases.empty", Message::Leases(Vec::new())),
         ("ping", Message::Ping { now_ms: 1_700_000 }),
         ("pong", Message::Pong { now_ms: 1_700_000 }),
+        // Additive in version 1: appended so the earlier entries keep their sequence numbers.
+        ("status", Message::Status(status_entries())),
+    ]
+}
+
+fn status_entries() -> Vec<StatusEntry> {
+    vec![
+        StatusEntry::new("temperature_mc", TypedConfigValue::Int(41_250)).with_ttl_ms(5_000),
+        StatusEntry::new("mode", TypedConfigValue::String("streaming".into())),
+        StatusEntry::new("calibrated", TypedConfigValue::Bool(true)),
     ]
 }
 
@@ -213,18 +224,16 @@ fn borrowed_encoders_match_owned_messages() {
         &buf[..len],
         encode(&Message::Leases(vec![lease()]), 9).as_slice()
     );
+    let len = encode_status(&status_entries(), 9, &mut buf).unwrap();
+    assert_eq!(
+        &buf[..len],
+        encode(&Message::Status(status_entries()), 9).as_slice()
+    );
 }
 
 #[test]
 fn unknown_kinds_and_reject_codes_decode_without_error() {
-    for kind in [
-        0x00,
-        0x7E,
-        0xFF,
-        kind::EXECUTOR_STATE,
-        kind::WORKLOADS,
-        kind::STATUS,
-    ] {
+    for kind in [0x00, 0x7E, 0xFF, kind::EXECUTOR_STATE, kind::WORKLOADS] {
         assert_eq!(
             Message::decode_payload(kind, b"anything").unwrap(),
             Message::Unknown(kind)
@@ -255,6 +264,7 @@ fn small_buffers_and_garbage_bodies_are_errors_not_panics() {
         kind::ACK,
         kind::LEASES,
         kind::PING,
+        kind::STATUS,
     ] {
         assert!(matches!(
             Message::decode_payload(kind, &[]),

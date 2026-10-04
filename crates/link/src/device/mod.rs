@@ -35,7 +35,8 @@
 //!
 //! Memory is fixed: `RX` bytes of receive buffer, two `TX`-byte buffers (control frames and the
 //! encoded latest snapshot), and a 4-slot event queue. The only heap allocations are decoded
-//! message bodies (the node id in `Welcome`, lease sets) and the device name.
+//! message bodies (the node id in `Welcome`, lease sets), the device name, and the pending
+//! status batch (if [`DeviceSession::publish_status`] is used).
 
 mod core;
 mod events;
@@ -45,7 +46,7 @@ use alloc::string::String;
 pub use events::{DeviceEvent, EVENT_CAPACITY};
 
 use self::core::DeviceCore;
-use crate::message::{NodeId, ProviderRecord, ResourceRecord, Roles};
+use crate::message::{NodeId, ProviderRecord, ResourceRecord, Roles, StatusEntry};
 use crate::packet::Segment;
 use crate::transport::{self, Packet, Stream, Transport};
 
@@ -74,6 +75,9 @@ pub struct DeviceConfig {
     pub state_retry_min_ms: u32,
     /// Heartbeats without any frame from the host before the session is considered lost.
     pub missed_heartbeats: u32,
+    /// Shortest spacing between two `Status` frames. Status published faster is coalesced: only
+    /// the newest batch is sent.
+    pub status_min_interval_ms: u32,
 }
 
 impl DeviceConfig {
@@ -88,6 +92,7 @@ impl DeviceConfig {
             reject_retry_max_ms: 60_000,
             state_retry_min_ms: 200,
             missed_heartbeats: 3,
+            status_min_interval_ms: 100,
         }
     }
 }
@@ -163,6 +168,12 @@ pub struct DeviceStats {
     pub rejects: u32,
     /// Events dropped because the queue was full.
     pub events_dropped: u32,
+    /// `Status` frames sent.
+    pub status_sent: u32,
+    /// Status batches replaced by a newer one before they were sent.
+    pub status_replaced: u32,
+    /// Status batches dropped because they no longer fit the negotiated frame size.
+    pub status_dropped: u32,
 }
 
 /// The device side of a link session. See the [module docs](self).
@@ -216,6 +227,26 @@ impl<T: Transport, const RX: usize, const TX: usize> DeviceSession<T, RX, TX> {
             self.cursor = T::Cursor::default();
         }
         Ok(())
+    }
+
+    /// Publishes volatile status values (the node files them under this device's provider).
+    ///
+    /// Fire-and-forget: nothing is acknowledged or retransmitted. Only the newest batch is kept;
+    /// it is sent once connected, at most every `status_min_interval_ms`, so publishing faster
+    /// than that (or while disconnected) simply replaces the pending batch. Publish every key
+    /// that should stay current in each batch; the node keeps each value for its TTL.
+    ///
+    /// # Errors
+    ///
+    /// [`PublishError::TooLarge`] if the frame exceeds `TX` or the negotiated frame size (the
+    /// pending batch is kept), [`PublishError::Encode`] if the entries cannot be encoded.
+    pub fn publish_status(&mut self, entries: &[StatusEntry]) -> Result<(), PublishError> {
+        self.core.publish_status(entries)
+    }
+
+    /// Whether a status batch is waiting to be sent.
+    pub fn status_pending(&self) -> bool {
+        self.core.status_pending()
     }
 
     /// Connection state.

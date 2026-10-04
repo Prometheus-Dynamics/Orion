@@ -89,6 +89,7 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
             }
         }
         GetCommand::Memory(args) => super::get_memory::run(args).await,
+        GetCommand::Status(args) => super::get_status::run(args).await,
         GetCommand::Observability(args) => {
             let snapshot = fetch_observability_snapshot(&args).await?;
             match args.output {

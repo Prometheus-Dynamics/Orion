@@ -7,6 +7,7 @@ mod local_clients;
 mod local_control;
 mod maintenance_admin;
 mod observability;
+mod observed_persist;
 #[cfg(feature = "transport-http")]
 mod peer_sync;
 #[cfg(feature = "transport-http")]
@@ -22,6 +23,7 @@ mod startup;
 mod startup_loops;
 mod state_access;
 mod status_admin;
+mod status_lane;
 mod task_handle;
 mod tls_bootstrap;
 mod types;

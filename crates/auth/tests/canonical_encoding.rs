@@ -25,8 +25,8 @@ use orion_control_plane::{
     ControlMessage, DesiredClusterState, DesiredState, DesiredStateSectionFingerprints,
     ExecutorRecord, HealthState, LeaseRecord, LeaseState, MutationBatch, NodeRecord,
     ObservedClusterState, ObservedStateUpdate, PeerHello, ProviderRecord, ResourceOwnershipMode,
-    ResourceRecord, RestartPolicy, StateSnapshot, TypedConfigValue, WorkloadConfig,
-    WorkloadObservedState, WorkloadRecord,
+    ResourceRecord, RestartPolicy, StateSnapshot, StatusEntry, StatusQuery, StatusSubject,
+    TypedConfigValue, WorkloadConfig, WorkloadObservedState, WorkloadRecord,
 };
 use orion_core::{
     ArtifactId, CapabilityId, ClientName, ConfigSchemaId, ExecutorId, NodeId, ProviderId,
@@ -176,6 +176,29 @@ fn control_messages() -> Vec<(&'static str, ControlMessage)> {
         (
             "control.rejected",
             ControlMessage::Rejected("revision mismatch".into()),
+        ),
+        (
+            "control.publish_status",
+            ControlMessage::PublishStatus(vec![
+                StatusEntry::new(
+                    StatusSubject::Provider(ProviderId::new("provider.camera")),
+                    "fps",
+                    TypedConfigValue::UInt(30),
+                )
+                .with_ttl_ms(5_000),
+                StatusEntry::new(
+                    StatusSubject::Resource(ResourceId::new("resource.camera.front")),
+                    "exposure",
+                    TypedConfigValue::String("auto".into()),
+                ),
+            ]),
+        ),
+        (
+            "control.query_status",
+            ControlMessage::QueryStatus(
+                StatusQuery::subject(StatusSubject::Workload(WorkloadId::new("workload.pose")))
+                    .with_key_prefix("latency."),
+            ),
         ),
     ]
 }

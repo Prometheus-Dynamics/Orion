@@ -20,7 +20,10 @@ use core::fmt;
 /// History:
 /// - `1`: implicit, unversioned layout before the preamble existed.
 /// - `2`: `NodeObservabilitySnapshot::resource_usage` section; version preamble/header added.
-pub const CONTROL_PROTOCOL_VERSION: u16 = 2;
+/// - `3`: volatile status lane messages (`PublishStatus`, `QueryStatus`, `WatchStatus`, `Status`,
+///   `ClientEventKind::Status`) and the `observed_persistence` / `status_lane` resource-usage
+///   sections.
+pub const CONTROL_PROTOCOL_VERSION: u16 = 3;
 
 /// Fingerprint of the archived layout of the control-protocol types at
 /// [`CONTROL_PROTOCOL_VERSION`].
@@ -28,7 +31,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 2;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x6c28_18a1_3bdd_2f91;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x25bc_f844_3933_d1e6;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

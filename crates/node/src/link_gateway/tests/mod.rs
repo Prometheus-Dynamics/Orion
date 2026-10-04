@@ -4,6 +4,7 @@
 mod can;
 mod config;
 mod serial;
+mod status;
 
 use crate::{NodeApp, NodeConfig};
 use orion::control_plane::{

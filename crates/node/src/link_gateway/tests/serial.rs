@@ -179,7 +179,7 @@ impl Drop for SimDevice {
     }
 }
 
-fn serial_link(pty: &Pty, query: &str) -> LinkConfig {
+pub(super) fn serial_link(pty: &Pty, query: &str) -> LinkConfig {
     let entry = format!(
         "serial:{}?heartbeat_ms={HEARTBEAT_MS}&missed_heartbeats=3{query}",
         pty.slave_path.display()
@@ -187,11 +187,11 @@ fn serial_link(pty: &Pty, query: &str) -> LinkConfig {
     LinkConfig::parse(&entry).expect("link should parse")
 }
 
-fn start(app: &NodeApp, links: Vec<LinkConfig>) -> LinkGatewayHandle {
+pub(super) fn start(app: &NodeApp, links: Vec<LinkConfig>) -> LinkGatewayHandle {
     app.start_link_gateway(links).expect("gateway should start")
 }
 
-const WAIT: Duration = Duration::from_secs(5);
+pub(super) const WAIT: Duration = Duration::from_secs(5);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serial_device_becomes_provider_gets_leases_and_survives_reconnect() {

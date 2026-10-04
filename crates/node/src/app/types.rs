@@ -153,6 +153,8 @@ pub enum NodeError {
     ConfiguredPeerRequired { operation: ControlOperation },
     #[error("authorization failed: {0}")]
     Authorization(String),
+    #[error("status lane: {0}")]
+    Status(String),
 }
 
 #[derive(Clone)]

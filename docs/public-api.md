@@ -30,9 +30,43 @@ Examples:
 The rkyv control protocol is versioned by `orion_core::CONTROL_PROTOCOL_VERSION`. Clients and
 nodes built from different Orion releases reject each other with a typed `ProtocolMismatch
 { local, remote }` error (`IpcTransportError`, `HttpTransportError`, `ClientError`) before any
-payload is decoded. If you write raw IPC frames yourself, use `control_preamble()` /
+payload is decoded (version 3 adds the status-lane messages). If you write raw IPC frames yourself, use `control_preamble()` /
 `check_control_preamble()` from `orion-transport-ipc`. See
 [protocol-compatibility.md](protocol-compatibility.md).
+
+## Volatile Status Lane
+
+Providers and executors publish fast-moving, non-durable values (latest value per key, with a
+TTL, in node memory only) instead of rewriting observed records:
+
+```rust
+use orion_client::prelude::*;
+
+let camera = LocalProviderService::new(runtime, "camera", provider_record);
+camera.register().await?; // the status publisher must own the provider
+camera
+    .publish_status([
+        camera.status_entry("fps", TypedConfigValue::UInt(30)),
+        camera
+            .status_entry("mode", TypedConfigValue::String("streaming".into()))
+            .with_ttl_ms(10_000),
+    ])
+    .await?;
+
+let entries = camera.query_status(StatusQuery::all().with_key_prefix("fps")).await?;
+let mut watch = camera.watch_status(StatusQuery::all()).await?;
+let change = watch.next().await?; // bootstrap first, then coalesced changes
+```
+
+- `LocalProviderService` / `LocalExecutorService`: `status_entry`, `publish_status`,
+  `query_status`, `watch_status` (returns `StatusWatch`). The same publish/query methods exist on
+  `LocalProviderApp`, `LocalProviderClient`, `LocalExecutorApp`, and `LocalExecutorClient`, and
+  `LocalControlPlaneClient::query_status` reads the lane.
+- Types (re-exported by `orion_client::prelude` and `orion::control_plane`): `StatusSubject`,
+  `StatusEntry`, `StatusKey`, `StatusQuery`, `StatusChange`.
+- A client may publish only for subjects it owns (its provider or executor, their resources, and
+  its executor's assigned workloads); other batches are rejected as a whole. Status is local to
+  the node and not replicated. See `docs/observability.md` ("Volatile Status Lane").
 
 ## Config Decode
 

@@ -41,6 +41,8 @@ pub(super) struct EncodedPersistedStateBundle {
     baseline_revision: Revision,
     baseline_bytes: Option<Vec<u8>>,
     snapshot_rewrite_cadence: u64,
+    /// Observed-content generation captured with this bundle (see `observed_persist`).
+    observed_generation: u64,
 }
 
 pub(super) fn persist_bundle_to_storage(
@@ -140,13 +142,18 @@ impl NodeApp {
             .map(NodeStorage::load_snapshot_manifest)
             .transpose()?
             .flatten();
+        let (observed_generation, observed_content_changed) = self.observed_generation_to_capture();
         self.with_persisted_state_read(|store, history, baseline| {
             let encode_all_sections = manifest.is_none();
-            let observed_changed =
-                section_needs_rewrite(self.storage.as_ref(), &manifest, SnapshotSection::Observed)
-                    || manifest.as_ref().is_none_or(|manifest| {
-                        store.observed.revision != manifest.observed_revision
-                    });
+            let observed_changed = observed_content_changed
+                || section_needs_rewrite(
+                    self.storage.as_ref(),
+                    &manifest,
+                    SnapshotSection::Observed,
+                )
+                || manifest
+                    .as_ref()
+                    .is_none_or(|manifest| store.observed.revision != manifest.observed_revision);
             let applied_changed =
                 section_needs_rewrite(self.storage.as_ref(), &manifest, SnapshotSection::Applied)
                     || manifest
@@ -193,6 +200,7 @@ impl NodeApp {
                     Some(encode_archive_to_vec(baseline)?)
                 },
                 snapshot_rewrite_cadence: self.config.runtime_tuning.snapshot_rewrite_cadence,
+                observed_generation,
             })
         })
     }
@@ -325,14 +333,19 @@ impl NodeApp {
         };
         let started = std::time::Instant::now();
         let result = async {
+            self.note_full_state_write();
             let history_compacted = self.compact_mutation_history()?;
             let rewrite_desired = should_capture_desired_snapshot(storage, self)?;
             let bundle =
                 self.capture_encoded_persisted_state_bundle(rewrite_desired, history_compacted)?;
+            let observed_generation = bundle.observed_generation;
             if let Some(worker) = &self.persistence_worker {
-                return worker.persist_bundle_async(bundle).await;
+                worker.persist_bundle_async(bundle).await?;
+            } else {
+                Self::persist_bundle_async(storage.clone(), bundle).await?;
             }
-            Self::persist_bundle_async(storage.clone(), bundle).await
+            self.note_observed_generation_persisted(observed_generation);
+            Ok(())
         }
         .await;
         match &result {
@@ -351,15 +364,20 @@ impl NodeApp {
         };
         let started = std::time::Instant::now();
         let result = (|| {
+            self.note_full_state_write();
             let history_compacted = self.compact_mutation_history()?;
             let rewrite_desired = should_capture_desired_snapshot(storage, self)?;
             let bundle =
                 self.capture_encoded_persisted_state_bundle(rewrite_desired, history_compacted)?;
+            let observed_generation = bundle.observed_generation;
             if let Some(worker) = &self.persistence_worker {
-                return worker.persist_bundle_blocking(bundle);
+                worker.persist_bundle_blocking(bundle)?;
+            } else {
+                let storage = storage.clone();
+                run_possibly_blocking(|| persist_bundle_to_storage(&storage, &bundle))?;
             }
-            let storage = storage.clone();
-            run_possibly_blocking(|| persist_bundle_to_storage(&storage, &bundle))
+            self.note_observed_generation_persisted(observed_generation);
+            Ok(())
         })();
         match &result {
             Ok(()) => self.record_persistence_success(started.elapsed()),
@@ -647,6 +665,7 @@ mod tests {
             baseline_revision: Revision::ZERO,
             baseline_bytes: None,
             snapshot_rewrite_cadence: cadence,
+            observed_generation: 0,
         }
     }
 

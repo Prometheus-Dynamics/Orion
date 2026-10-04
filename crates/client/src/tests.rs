@@ -350,7 +350,9 @@ fn control_plane_client_subscribes_and_polls_state_events() {
         ClientEventKind::StateSnapshot(event_snapshot) => {
             assert_eq!(event_snapshot.as_ref(), &snapshot);
         }
-        ClientEventKind::ExecutorWorkloads { .. } | ClientEventKind::ProviderLeases { .. } => {
+        ClientEventKind::ExecutorWorkloads { .. }
+        | ClientEventKind::ProviderLeases { .. }
+        | ClientEventKind::Status(_) => {
             panic!("unexpected non-control-plane event");
         }
     }

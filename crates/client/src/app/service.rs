@@ -38,7 +38,7 @@ impl LocalServiceRetryPolicy {
         self
     }
 
-    async fn retry<F, Fut, T>(&self, mut operation: F) -> Result<T, ClientError>
+    pub(super) async fn retry<F, Fut, T>(&self, mut operation: F) -> Result<T, ClientError>
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, ClientError>>,
@@ -119,6 +119,10 @@ impl LocalExecutorService {
 
     pub fn executor(&self) -> &ExecutorRecord {
         &self.executor
+    }
+
+    pub fn retry_policy(&self) -> LocalServiceRetryPolicy {
+        self.retry_policy
     }
 
     pub async fn register(&self) -> Result<(), ClientError> {
@@ -261,6 +265,10 @@ impl LocalProviderService {
 
     pub fn provider(&self) -> &ProviderRecord {
         &self.provider
+    }
+
+    pub fn retry_policy(&self) -> LocalServiceRetryPolicy {
+        self.retry_policy
     }
 
     pub async fn register(&self) -> Result<(), ClientError> {

@@ -3,6 +3,7 @@ use super::*;
 mod communication_metrics;
 mod compaction;
 mod observability;
+mod observed_coalescing;
 mod peers;
 mod persistence_basics;
 #[cfg(feature = "transport-http")]

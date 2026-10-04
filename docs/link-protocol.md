@@ -134,7 +134,7 @@ postcard encodings of the listed fields, in order.
 | `0x11` | `Leases` | host → device | `Vec<LeaseRecord>` | Full set for this device's provider. |
 | `0x12` | `ExecutorState` | device → host | | Reserved for the executor role. |
 | `0x13` | `Workloads` | host → device | | Reserved for the executor role. |
-| `0x14` | `Status` | device → host | | Reserved for the volatile status lane (see TODO.md "Decided model"). |
+| `0x14` | `Status` | device → host | `Vec<StatusEntry>`; each `key: String`, `value: TypedConfigValue`, `ttl_ms: u32` | Volatile status values (see "Status" below). Fire-and-forget: never acknowledged or retransmitted. Added in version 1 as an additive kind. |
 
 Reject reasons (one byte; unknown codes are reported as `Other(code)`):
 
@@ -157,6 +157,30 @@ Rules for decoders:
   and ignores every other frame of another version.
 - Sequence lengths in bodies are untrusted: decoders preallocate at most a few elements and grow as
   elements actually decode, so a forged length cannot exhaust a small heap.
+
+### Status
+
+`Status` carries volatile, latest-value data such as a temperature or a mode string. The gateway
+files every entry in the node's in-memory status lane under the device's provider subject
+(`provider/<provider id>`), where local clients read it with `query_status` / `watch_status` and
+operators with `orionctl get status`. Nothing is persisted.
+
+- **Device.** `DeviceSession::publish_status(&[StatusEntry])` keeps only the newest unsent batch
+  (it is cloned; `publish_status` fails with `TooLarge` if the frame cannot fit). The batch is
+  sent once connected, after any due `Pong`, `Ping`, and provider snapshot, and at most every
+  `DeviceConfig::status_min_interval_ms` (default 100 ms); publishing faster, or while
+  disconnected, replaces the pending batch (`DeviceStats::status_replaced`). Batches are not
+  re-sent after a reconnect: publish again, or rely on the next periodic publish. Each batch
+  should contain every key that must stay current.
+- **Host.** `HostSession` reports `HostEvent::Status { device_name, entries }` for every `Status`
+  frame of the current session (sequence-number duplicate suppression applies) and never acks
+  it. Status from a device without a session is answered with `Reject { NoSession }` like any
+  other session traffic.
+- **Gateway.** Status is accepted only after the device's provider snapshot was accepted on that
+  link; otherwise it is dropped and counted in `LinkStatus::status_rejects`. Accepted batches
+  count in `status_batches`. TTL `0` means the node maximum (`ORION_NODE_STATUS_MAX_TTL_MS`),
+  which also caps longer TTLs; node caps on keys, values, and entries per publisher apply (see
+  `docs/node-env.md`), and a batch over a cap is refused whole.
 
 ### Session lifecycle
 
@@ -261,7 +285,7 @@ serial link, `HostSession<Packet>` for a point-to-point CAN link, and `HostBus` 
 one CAN bus. `HostBus` derives each device's identifiers as `CanLinkIds::for_address(base,
 address)` and creates a session when the first frame from an address in its configured range
 arrives. The gateway feeds received bytes or frames, calls `poll(now_ms)`, drains events
-(`DeviceConnected`, `ProviderState`, `DeviceLost`, `DeviceRejected`, `LeasesTooLarge`), sets lease
+(`DeviceConnected`, `ProviderState`, `Status`, `DeviceLost`, `DeviceRejected`, `LeasesTooLarge`), sets lease
 sets with `set_leases`, and writes what `transmit()` / `next_segment()` / `next_frame()` return.
 The node's gateway (next section) is the production driver.
 
@@ -308,9 +332,12 @@ Bridging, kept generic (nothing about the device's resource types is assumed):
   history stay, so a reconnecting device (which always resends its snapshot) restores them in place.
 - **Shutdown.** On node shutdown every link task stops, marks its connected devices lost, and closes
   its port or socket before the reconcile loop and IPC servers stop.
-- **Observability.** No control-protocol change: `NodeApp::link_status()` returns per-link counters
+- **Status.** Device `Status` batches go to the node's volatile status lane under the device's
+  provider subject (see "Status" above).
+- **Observability.** `NodeApp::link_status()` returns per-link counters
   (`frames_rx`/`frames_tx`, bytes, CRC and framing errors, transport drops, decode errors, sessions,
-  device timeouts, hello and snapshot rejects, I/O errors, last error, connected devices), and the
+  device timeouts, hello and snapshot rejects, status batches and rejects, I/O errors, last error,
+  connected devices), and the
   gateway logs device connects, publishes, losses, rejections, I/O errors (once per distinct
   error), and a counter summary when each link closes. The devices' providers and resources are
   visible with `orionctl get providers` / `orionctl get resources` like any other.
@@ -351,4 +378,6 @@ evolve without reflashing devices. `crates/link/tests/link_encoding.rs` compares
 canonical messages with a recorded fixture, so any change to the wire format (frame layout, kind
 numbers, body fields, or the postcard encoding of the shared records) fails until
 `LINK_PROTOCOL_VERSION` is bumped and the fixture is regenerated with
-`ORION_UPDATE_LINK_ENCODINGS=1`. Additive changes (new kinds, appended body fields) need no bump.
+`ORION_UPDATE_LINK_ENCODINGS=1`. Additive changes (new kinds, appended body fields) need no bump:
+the `Status` body was added this way (the `status` fixture entry is appended, earlier entries are
+unchanged, and `LINK_PROTOCOL_VERSION` stays 1). Hosts and devices that predate it ignore the kind.

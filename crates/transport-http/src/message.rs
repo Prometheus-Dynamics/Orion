@@ -83,6 +83,10 @@ impl HttpRequestPayload {
                 | ControlMessage::WatchState(_)
                 | ControlMessage::PollClientEvents(_)
                 | ControlMessage::ClientEvents(_)
+                | ControlMessage::PublishStatus(_)
+                | ControlMessage::QueryStatus(_)
+                | ControlMessage::WatchStatus(_)
+                | ControlMessage::Status(_)
                 | ControlMessage::Ping
                 | ControlMessage::Pong
                 | ControlMessage::Accepted

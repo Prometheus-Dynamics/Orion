@@ -3,9 +3,11 @@
 use crate::crc::crc32c;
 use crate::frame::{self, FRAME_OVERHEAD, FrameHeader, FrameView};
 use crate::message::{
-    self, HelloRef, NodeId, ProviderRecord, RejectReason, ResourceRecord, Welcome, kind,
+    self, HelloRef, NodeId, ProviderRecord, RejectReason, ResourceRecord, StatusEntry, Welcome,
+    kind,
 };
 use crate::transport::seq_newer;
+use alloc::vec::Vec;
 
 use super::events::{DeviceEvent, EventQueue};
 use super::{DeviceConfig, DeviceStats, LinkState, PublishError};
@@ -80,6 +82,9 @@ pub(crate) struct DeviceCore<const TX: usize> {
     pong_due: Option<u64>,
     /// `(len, crc32c)` of the last delivered lease payload, to report each set once.
     leases_digest: Option<(usize, u32)>,
+    /// Newest unsent status batch (fire-and-forget, newest wins).
+    status: Option<Vec<StatusEntry>>,
+    next_status_at: u64,
     events: EventQueue,
     stats: DeviceStats,
 }
@@ -107,6 +112,8 @@ impl<const TX: usize> DeviceCore<TX> {
             ping_due: false,
             pong_due: None,
             leases_digest: None,
+            status: None,
+            next_status_at: 0,
             events: EventQueue::new(),
             stats: DeviceStats::default(),
         }
@@ -151,6 +158,10 @@ impl<const TX: usize> DeviceCore<TX> {
 
     pub(crate) fn state_pending(&self) -> bool {
         self.snapshot.is_some_and(|snapshot| snapshot.pending)
+    }
+
+    pub(crate) fn status_pending(&self) -> bool {
+        self.status.is_some()
     }
 
     pub(crate) fn next_event(&mut self) -> Option<DeviceEvent> {
@@ -431,6 +442,23 @@ impl<const TX: usize> DeviceCore<TX> {
         }
     }
 
+    /// Stores a status batch, replacing an unsent one.
+    pub(crate) fn publish_status(&mut self, entries: &[StatusEntry]) -> Result<(), PublishError> {
+        let payload_len = message::status_payload_len(entries).map_err(|_| PublishError::Encode)?;
+        let frame_len = frame::frame_len(payload_len);
+        let max_frame = self.max_frame().min(TX);
+        if frame_len > max_frame {
+            return Err(PublishError::TooLarge {
+                frame_len,
+                max_frame,
+            });
+        }
+        if self.status.replace(entries.to_vec()).is_some() {
+            self.stats.status_replaced = self.stats.status_replaced.wrapping_add(1);
+        }
+        Ok(())
+    }
+
     // ---- transmit --------------------------------------------------------------------------
 
     /// The frame being transmitted, selecting the next one if idle.
@@ -489,6 +517,7 @@ impl<const TX: usize> DeviceCore<TX> {
                     return self.encode_control(kind::PING, &now_ms, max_frame);
                 }
                 self.select_snapshot()
+                    .or_else(|| self.select_status(max_frame))
             }
             _ => None,
         }
@@ -518,6 +547,34 @@ impl<const TX: usize> DeviceCore<TX> {
             }
             Err(_) => {
                 self.stats.encode_errors = self.stats.encode_errors.wrapping_add(1);
+                None
+            }
+        }
+    }
+
+    fn select_status(&mut self, max_frame: usize) -> Option<Outgoing> {
+        if self.status.is_none() || self.now < self.next_status_at {
+            return None;
+        }
+        let entries = self.status.take()?;
+        let seq = self.seq.wrapping_add(1);
+        let limit = max_frame.min(TX);
+        let buf = self.control.get_mut(..limit).unwrap_or_default();
+        match message::encode_with(kind::STATUS, seq, entries.as_slice(), buf) {
+            Ok(len) => {
+                let _ = self.next_seq();
+                self.stats.status_sent = self.stats.status_sent.wrapping_add(1);
+                self.next_status_at = self
+                    .now
+                    .saturating_add(u64::from(self.config.status_min_interval_ms));
+                Some(Outgoing {
+                    source: Source::Control,
+                    len,
+                })
+            }
+            Err(_) => {
+                // Published before a smaller frame size was negotiated.
+                self.stats.status_dropped = self.stats.status_dropped.wrapping_add(1);
                 None
             }
         }

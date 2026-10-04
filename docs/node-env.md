@@ -187,6 +187,46 @@ Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:
 | `ORION_NODE_AUDIT_LOG` | unset | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_SHUTDOWN_AFTER_INIT_MS` | unset | Integer milliseconds | Invalid integer fails startup. Intended for tests and controlled automation, not steady-state production. |
 
+### Observed-state write coalescing
+
+Desired state is durable: every desired-state commit (local or remote mutations, snapshot
+adoption, provider or executor record changes, leases) writes the state bundle and fsyncs it
+before the commit is acknowledged.
+
+Observed and applied state change far more often (every provider or executor snapshot, peer
+observed updates, reconcile results) and are only a cache of what providers and executors report.
+While the reconcile loop runs (`NodeApp::spawn_reconcile_loop`, which `orion-node` always starts),
+those changes only mark the state dirty, and a background coalescer writes it at most once per
+`ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` (default `2000`):
+
+- the first change after an idle interval is written at once; changes within the interval after a
+  write are collected into one write at the end of the interval;
+- a desired-state commit writes the full bundle, so it also carries any pending observed change;
+- graceful shutdown (stopping the reconcile loop) flushes pending changes;
+- `0` restores the previous behaviour (every observed change is written immediately), and embedded
+  users that never start the reconcile loop also keep immediate writes.
+
+Crash semantics: after an unclean stop (power loss, `SIGKILL`) the persisted observed and applied
+state can be up to one interval stale. Nothing durable is lost: desired state is unaffected,
+providers and executors republish full snapshots when they reconnect (link devices resend theirs
+on every session), and reconcile re-derives applied state. `resource_usage.observed_persistence`
+(`orionctl get memory -o json`) reports the interval, whether a write is pending, and how many
+changes were coalesced.
+
+### Volatile status lane limits
+
+The status lane (see `docs/observability.md`) is in memory only and bounded:
+
+- `ORION_NODE_STATUS_MAX_ENTRIES` (default `4096`) caps entries node-wide;
+- `ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER` (default `256`, at most the node cap) caps the
+  entries one local client or link device holds;
+- `ORION_NODE_STATUS_MAX_TTL_MS` (default `300000`) is the longest TTL; entries published with
+  `ttl_ms = 0` get this TTL, and longer TTLs are capped;
+- keys are at most 128 bytes and string or byte values at most 1024 bytes.
+
+A batch that would exceed a cap, or that has an invalid entry, is rejected as a whole and counted
+in `resource_usage.status_lane.dropped_total`.
+
 ## HTTP TLS
 
 | Variable | Default | Valid values | Failure behavior |
@@ -234,5 +274,9 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY` | `128` | Auth state worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |
 | `ORION_NODE_RECONCILE_BACKSTOP_MS` | `5000` | Longest idle period before the event-driven reconcile loop runs a periodic backstop pass. Clamped to at least `ORION_NODE_RECONCILE_MS`. |
+| `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` | `2000` | Shortest spacing between coalesced observed/applied state writes while the reconcile loop runs. `0` writes every change immediately (not normalized to `1`). Desired-state commits are never delayed. See "Observed-state write coalescing". |
+| `ORION_NODE_STATUS_MAX_ENTRIES` | `4096` | Node-wide cap on volatile status lane entries. |
+| `ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER` | `256` | Status lane entries one local client or link device may hold (clamped to the node-wide cap). |
+| `ORION_NODE_STATUS_MAX_TTL_MS` | `300000` | Longest status entry TTL, also used for entries published with `ttl_ms = 0`. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_INTERVAL_MS` | `5000` | `50` in test builds. IPC stream heartbeat interval. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_TIMEOUT_MS` | `15000` | `125` in test builds. IPC stream heartbeat timeout. |

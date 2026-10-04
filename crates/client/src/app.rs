@@ -3,6 +3,7 @@ mod local_unary;
 mod publish;
 mod runtime;
 mod service;
+mod status;
 mod watch;
 
 pub use local_unary::{
@@ -14,4 +15,5 @@ pub use service::{
     LocalExecutorEvent, LocalExecutorService, LocalExecutorSubscription, LocalProviderEvent,
     LocalProviderService, LocalProviderSubscription, LocalServiceRetryPolicy,
 };
+pub use status::StatusWatch;
 pub use watch::{AssignedWorkloadWatch, AssignedWorkloadsUpdate};

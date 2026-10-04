@@ -2,6 +2,7 @@
 //!
 //! [`HostSession`] serves one device link: it answers `Hello` with `Welcome` or `Reject`
 //! (optionally restricted to an allowlist of device names), acknowledges provider snapshots,
+//! reports status batches (unacknowledged),
 //! answers pings and piggybacks the current lease set on every `Pong`, and reports a device as
 //! lost after missed heartbeats. [`HostBus`] serves many devices on one CAN bus, demultiplexed by
 //! identifier.
@@ -47,6 +48,7 @@ pub use bus::{BusEvent, BusFrame, HostBus};
 use self::core::HostCore;
 use crate::message::{
     LeaseRecord, NodeId, ProviderRecord, ProviderState, RejectReason, ResourceRecord, Roles,
+    StatusEntry,
 };
 use crate::packet::Segment;
 use crate::stream::max_encoded_len;
@@ -132,6 +134,13 @@ pub enum HostEvent {
         /// Full resource set.
         resources: Vec<ResourceRecord>,
     },
+    /// Volatile status values (fire-and-forget; not acknowledged, newest value per key wins).
+    Status {
+        /// The device that sent them.
+        device_name: String,
+        /// The entries, in the order sent.
+        entries: Vec<StatusEntry>,
+    },
     /// The device went silent, was replaced by another device on the link, or was rejected
     /// mid-session. Mark its resources unavailable.
     DeviceLost {
@@ -176,6 +185,8 @@ pub struct HostStats {
     pub frames_dropped: u32,
     /// Events dropped because the gateway did not drain them.
     pub events_dropped: u32,
+    /// `Status` frames received.
+    pub status_received: u32,
 }
 
 /// The host side of one device link. See the [module docs](self).
