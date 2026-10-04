@@ -70,6 +70,38 @@ jobs:
       - name: Build docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
+  link-no-std:
+    # orion-link must stay no_std and allocation-free for microcontroller targets.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          components: clippy
+          targets: thumbv7em-none-eabihf, thumbv8m.main-none-eabihf, riscv32imac-unknown-none-elf
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build and lint orion-link for embedded targets
+        run: |
+          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf; do
+            cargo clippy -p orion-link --no-default-features --target "$target" -- -D warnings
+            cargo clippy -p orion-link --no-default-features --features embedded-io,embedded-io-async,embedded-can,crc-table --target "$target" -- -D warnings
+            cargo build -p orion-link --release --no-default-features --target "$target"
+          done
+
+      - name: Test orion-link feature combinations
+        run: |
+          cargo test -p orion-link --no-default-features
+          cargo test -p orion-link --no-default-features --features crc-table
+          cargo test -p orion-link --all-features
+
   allocator-features:
     # `--all-features` above enables both allocator features at once (jemalloc takes precedence),
     # so each opt-in global allocator is also linted, built, started, and cross-built on its own.

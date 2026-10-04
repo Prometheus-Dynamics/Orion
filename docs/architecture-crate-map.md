@@ -33,6 +33,8 @@ Orion is intentionally layered. Higher-level crates build on shared contracts an
 - `orion-transport-tcp` implements TCP frame transport for data-plane traffic.
 - `orion-transport-quic` implements QUIC transport for data-plane traffic.
 
+- `orion-link` implements the framing layers of the [link protocol](link-protocol.md) for microcontrollers on UART, RS-485, USB-CDC, classic CAN, and CAN FD: CRC-32C message frames, COBS byte streams, and CAN segmentation. It is `no_std`, allocation-free, and depends on no other Orion crate; typed messages, sessions, and the node gateway build on it later.
+
 These crates keep transport-specific codecs, listeners, and TLS behavior local while sharing only the narrow common helpers that are truly transport-agnostic.
 
 ## Node And Operations

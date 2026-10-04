@@ -6,6 +6,7 @@ target_dir="$root_dir/target/package"
 tmp_dir="${ORION_PACKAGE_VERIFY_DIR:-}"
 
 packages=(
+    orion-link
     orion-core
     orion-control-plane
     orion-auth

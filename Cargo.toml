@@ -6,6 +6,7 @@ members = [
     "crates/macros",
     "crates/control-plane",
     "crates/data-plane",
+    "crates/link",
     "crates/cluster",
     "crates/runtime",
     "crates/client",
@@ -37,6 +38,7 @@ orion-cluster = { path = "crates/cluster", version = "1.0.0" }
 orion-control-plane = { path = "crates/control-plane", version = "1.0.0" }
 orion-core = { path = "crates/core", version = "1.0.0" }
 orion-data-plane = { path = "crates/data-plane", version = "1.0.0" }
+orion-link = { path = "crates/link", version = "1.0.0", default-features = false }
 orion-macros = { path = "crates/macros", version = "1.0.0" }
 orion-node = { path = "crates/node", version = "1.0.0" }
 orion = { path = "crates/orion", version = "1.0.0", default-features = false }

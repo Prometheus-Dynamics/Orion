@@ -13,6 +13,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `orion-link` crate: `no_std`, allocation-free, panic-free framing for the MCU link protocol (`docs/link-protocol.md`). CRC-32C message frames (`[version][kind][seq u16 LE][payload][crc32c LE]`, `LINK_PROTOCOL_VERSION = 1`), COBS byte-stream encoding with a byte-at-a-time `StreamEncoder` and a resynchronizing `StreamDecoder<N>` with drop counters, and classic CAN / CAN FD segmentation (`Segmenter`, `Reassembler<N>`, `CanLinkIds`) with unpadded, valid CAN FD segment lengths. Optional `embedded-io`, `embedded-io-async`, and `embedded-can` adapters, and a `crc-table` feature. CI builds it for `thumbv7em-none-eabihf`, `thumbv8m.main-none-eabihf`, and `riscv32imac-unknown-none-elf`.
 - `ORION_NODE_HTTP_ADDR=off` runs `orion-node` without the HTTP control listener for IPC-only appliances.
 - `transport-http` cargo feature for `orion-node`, enabled by default. `cargo build -p orion-node --no-default-features` builds an IPC-only node without axum, hyper, reqwest, or rustls. In that build, `ORION_NODE_PEERS`, HTTP TLS settings, `ORION_NODE_HTTP_PROBE_ADDR`, and an `ORION_NODE_HTTP_ADDR` socket address fail startup with an error that names the missing feature.
 - `orion-transport-http` gains a default `transport` feature. Without it, the crate exposes only the protocol layer: payloads, routes, codec, errors, and handler traits. `orion-transport-common` gates its rustls helpers behind a default `tls` feature.

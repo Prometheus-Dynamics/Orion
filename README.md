@@ -12,6 +12,7 @@ The repository is split into focused crates so runtime, transport, client, and o
 - `crates/orionctl`: operator CLI
 - `crates/runtime`, `crates/cluster`, `crates/control-plane`, `crates/data-plane`: core runtime and protocol crates
 - `crates/transport-*`: HTTP, TCP, QUIC, and IPC transport adapters
+- `crates/link`: `no_std` framing for the MCU link protocol (CRC frames, COBS streams, CAN / CAN FD segmentation)
 - `crates/auth`, `crates/service`, `crates/macros`, `crates/core`: shared support crates
 
 Additional repository notes live under [docs/README.md](docs/README.md).

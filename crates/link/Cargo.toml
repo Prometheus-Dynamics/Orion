@@ -1,0 +1,38 @@
+[package]
+name = "orion-link"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "no_std framing codecs (CRC-32C frames, COBS streams, CAN/CAN FD segmentation) for the Orion link protocol."
+readme = "README.md"
+keywords = ["no-std", "embedded", "cobs", "can", "framing"]
+categories = ["embedded", "no-std", "encoding"]
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# Everything is no_std and allocation-free by default.
+default = []
+# std-only conveniences (`std::error::Error` impls).
+std = ["embedded-io?/std", "embedded-io-async?/std"]
+# 256-entry CRC-32C table (1 KiB of flash) instead of the 16-entry nibble table (64 bytes).
+crc-table = []
+# Blocking byte-stream adapters over `embedded_io::{Read, BufRead, Write}`.
+embedded-io = ["dep:embedded-io"]
+# Async byte-stream adapters over `embedded_io_async::{Read, BufRead, Write}`.
+embedded-io-async = ["dep:embedded-io-async"]
+# Conversions between link segments and `embedded_can::Frame`s.
+embedded-can = ["dep:embedded-can"]
+
+[dependencies]
+embedded-can = { version = "0.4", optional = true }
+embedded-io = { version = "0.6", optional = true }
+embedded-io-async = { version = "0.6", optional = true }
