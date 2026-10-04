@@ -242,9 +242,12 @@ impl HostCore {
 
     fn on_hello(&mut self, seq: u16, hello: Hello) {
         let config = Arc::clone(&self.config);
-        if let Some(allowed) = &config.allowed_devices
-            && !allowed.contains(&hello.device_name)
-        {
+        let unnamed = hello.device_name.trim().is_empty();
+        let not_allowed = config
+            .allowed_devices
+            .as_ref()
+            .is_some_and(|allowed| !allowed.contains(&hello.device_name));
+        if unnamed || not_allowed {
             if self.device_name() != Some(hello.device_name.as_str()) {
                 self.lose();
             }

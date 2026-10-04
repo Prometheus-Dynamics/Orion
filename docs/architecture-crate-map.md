@@ -33,7 +33,7 @@ Orion is intentionally layered. Higher-level crates build on shared contracts an
 - `orion-transport-tcp` implements TCP frame transport for data-plane traffic.
 - `orion-transport-quic` implements QUIC transport for data-plane traffic.
 
-- `orion-link` implements the framing layers of the [link protocol](link-protocol.md) for microcontrollers on UART, RS-485, USB-CDC, classic CAN, and CAN FD: CRC-32C message frames, COBS byte streams, and CAN segmentation. It is `no_std`, allocation-free, and depends on no other Orion crate; typed messages, sessions, and the node gateway build on it later.
+- `orion-link` implements the [link protocol](link-protocol.md) for microcontrollers on UART, RS-485, USB-CDC, classic CAN, and CAN FD. The default build is only the framing layers (CRC-32C message frames, COBS byte streams, CAN segmentation): `no_std`, allocation-free, and independent of other Orion crates. The `alloc` feature adds postcard-encoded link messages and the sans-IO `DeviceSession` (still `no_std`, built on `orion-core` / `orion-control-plane` without `std`); the `std` feature adds the sans-IO `HostSession` / `HostBus` that the node gateway will drive. `examples/mcu-template` (outside the workspace) is the chip-agnostic firmware starting point.
 
 These crates keep transport-specific codecs, listeners, and TLS behavior local while sharing only the narrow common helpers that are truly transport-agnostic.
 
@@ -78,6 +78,12 @@ Dependency notes:
 `scripts/check-no-std.sh` (also the CI `no-std` job) builds each crate separately for
 `thumbv7em-none-eabihf`, `riscv32imac-unknown-none-elf`, and `thumbv8m.main-none-eabihf`, and runs
 clippy plus the host tests without `std`.
+
+`orion-link` has its own CI job (`link-no-std`): it builds and lints the crate for the same targets
+with no features (framing only, no allocator) and with `alloc` (messages and the device session on
+top of the no_std model crates), runs its tests in both the `alloc` and the `std` build, and builds
+`examples/mcu-template` as a bare-metal staticlib. `scripts/mcu-size.sh` reports the template's
+linked flash/RAM footprint.
 
 ## Typical Flow
 

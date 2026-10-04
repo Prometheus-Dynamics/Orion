@@ -51,8 +51,26 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
       layout fingerprint for the messages it encodes).
 - [x] `scripts/check-no-std.sh` + CI `no-std` job (thumbv7em-none-eabihf, riscv32imac-unknown-none-elf;
       thumbv8m.main-none-eabihf locally).
-- [ ] Optional: an example MCU firmware crate (outside the workspace) that links the model crates
-      with a real allocator and decodes a `ControlMessage`, to catch link-time issues a lib check misses.
+- [x] `orion-link` framing layers: CRC-32C frames, COBS streams, CAN / CAN FD segmentation; no
+      allocator, panic-free.
+- [x] `orion-link` `alloc`: postcard link messages with stable kind numbers and a wire fingerprint
+      fixture (`crates/link/tests/link_encoding.rs`); sans-IO `DeviceSession<T, RX, TX>` over
+      `Stream` or `Packet` with fixed buffers (handshake, reliable newest-snapshot publishing,
+      heartbeat, host-loss detection, leases).
+- [x] `orion-link` `std`: sans-IO `HostSession` / `HostBus` (allowlist, acks, lease piggyback,
+      device-loss detection, multi-device CAN demux).
+- [x] Example MCU firmware crate outside the workspace (`examples/mcu-template`): links the device
+      session, postcard, and the model crates with a real allocator into a bare-metal staticlib (CI
+      builds it for thumbv7em-none-eabihf and riscv32imac-unknown-none-elf; `scripts/mcu-size.sh`
+      reports flash/RAM).
+- [ ] Node gateway (`orion-node` `link-gateway` feature): config for serial and SocketCAN links,
+      own the fds/sockets, drive `HostSession` / `HostBus`, map `ProviderState` onto the node's
+      provider path (overwriting `node_id`, prefixing or validating resource ids), mark resources
+      unavailable on `DeviceLost`, and feed each device's leases into `set_leases`.
+- [ ] Executor role on the link (`ExecutorState` / `Workloads`, kinds reserved) and the volatile
+      `Status` lane.
+- [ ] Optional: try the template on real hardware (one Cortex-M and one RISC-V board) and record
+      round-trip timing at 115200 baud and on classic CAN.
 
 ### Bugs fixed (each with a regression test)
 

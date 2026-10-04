@@ -71,9 +71,11 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
   link-no-std:
-    # orion-link must stay no_std and allocation-free for microcontroller targets.
+    # orion-link must stay no_std for microcontroller targets: framing without an allocator,
+    # messages and the device session with `alloc`. The MCU template must link as a bare-metal
+    # staticlib.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -82,25 +84,50 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
-          components: clippy
+          components: clippy, rustfmt
           targets: thumbv7em-none-eabihf, thumbv8m.main-none-eabihf, riscv32imac-unknown-none-elf
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples/mcu-template
 
       - name: Build and lint orion-link for embedded targets
         run: |
           for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf; do
-            cargo clippy -p orion-link --no-default-features --target "$target" -- -D warnings
-            cargo clippy -p orion-link --no-default-features --features embedded-io,embedded-io-async,embedded-can,crc-table --target "$target" -- -D warnings
-            cargo build -p orion-link --release --no-default-features --target "$target"
+            cargo clippy --locked -p orion-link --no-default-features --target "$target" -- -D warnings
+            cargo clippy --locked -p orion-link --no-default-features --features embedded-io,embedded-io-async,embedded-can,crc-table --target "$target" -- -D warnings
+            cargo clippy --locked -p orion-link --no-default-features --features alloc --target "$target" -- -D warnings
+            cargo clippy --locked -p orion-link --no-default-features --features alloc,embedded-io,embedded-can --target "$target" -- -D warnings
+            cargo build --locked -p orion-link --release --no-default-features --target "$target"
+            cargo build --locked -p orion-link --release --no-default-features --features alloc --target "$target"
           done
 
       - name: Test orion-link feature combinations
         run: |
-          cargo test -p orion-link --no-default-features
-          cargo test -p orion-link --no-default-features --features crc-table
-          cargo test -p orion-link --all-features
+          cargo test --locked -p orion-link --no-default-features
+          cargo test --locked -p orion-link --no-default-features --features crc-table
+          cargo test --locked -p orion-link --no-default-features --features alloc
+          cargo clippy --locked -p orion-link --no-default-features --features alloc --all-targets -- -D warnings
+          cargo test --locked -p orion-link --all-features
+          cargo run --locked -p orion-link --example sim_device --features std
+
+      - name: Build the MCU template for bare-metal targets
+        working-directory: examples/mcu-template
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
+          for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
+            cargo clippy --locked --release --target "$target" -- -D warnings
+            cargo build --locked --release --target "$target"
+            cargo build --locked --release --target "$target" --no-default-features --features standalone,ffi-can
+          done
+
+      - name: Report MCU template footprint
+        run: ./scripts/mcu-size.sh
 
   no-std:
     # The model crates (core, data-plane, control-plane, auth, runtime, cluster) and the `orion`

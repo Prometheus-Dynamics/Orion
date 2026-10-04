@@ -358,3 +358,14 @@ fn converges_over_a_noisy_chunked_stream() {
     // Corruption was actually exercised.
     assert!(corrupt_packets > 0);
 }
+
+#[test]
+fn host_rejects_unnamed_devices() {
+    let mut pair = StreamPair::new(" ", host_config(), 13);
+    pair.run(100);
+    assert!(!pair.host.is_connected());
+    assert_eq!(
+        pair.count_device(|e| *e == DeviceEvent::Rejected(RejectReason::UnknownDevice)),
+        1
+    );
+}

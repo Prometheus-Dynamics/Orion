@@ -20,7 +20,7 @@ Goals, in priority order:
 
 | Crate | `std`? | Role |
 | --- | --- | --- |
-| `orion-link` | `no_std` (framing: no `alloc`; messages/session: `alloc`) | Framing codecs, link messages, sans-IO device session, and the std host session (`std` feature). |
+| `orion-link` | `no_std` (framing: no `alloc`; messages and device session: `alloc`; host session: `std`) | Framing codecs, link messages, the sans-IO device session, and the sans-IO host session. |
 | `orion-node` (`link-gateway` feature) | std | Serves configured serial and SocketCAN links and bridges each device session into the node as a provider. |
 
 Optional `orion-link` features add adapters for common trait ecosystems without changing the core:
@@ -119,26 +119,90 @@ them exactly.
 
 ## Messages
 
-| Kind | Direction | Body | Notes |
-| --- | --- | --- | --- |
-| `Hello` | device → host | `link_version`, `device_name`, `roles` (provider/executor), `max_frame` | Opens or reopens a session. |
-| `Welcome` | host → device | `node_id`, `session_id`, `heartbeat_ms`, `max_frame` | Negotiated `max_frame` is the minimum of both sides. |
-| `Reject` | host → device | `reason` (version mismatch, unknown device, ...) | Device backs off and retries. |
-| `ProviderState` | device → host | `ProviderRecord`, `Vec<ResourceRecord>` | Full snapshot; idempotent. |
-| `Ack` | host → device | `seq` | Acknowledges a state message. |
-| `Leases` | host → device | `Vec<LeaseRecord>` | Full set for this device's provider; sent on change and on heartbeat. |
-| `Ping` / `Pong` | both | `now_ms` | Liveness. The host considers a device gone after missed heartbeats and marks its resources unavailable. |
-| `ExecutorState`, `Workloads` | | | Reserved for the executor role. |
-| `Status` | device → host | | Reserved for the volatile status lane (see TODO.md "Decided model"). |
+Kind numbers are stable constants (`orion_link::message::kind`) and are never reused. Bodies are
+postcard encodings of the listed fields, in order.
+
+| Kind | Name | Direction | Body | Notes |
+| --- | --- | --- | --- | --- |
+| `0x01` | `Hello` | device → host | `device_name: String`, `roles: u8` (bit 0 provider, bit 1 executor), `max_frame: u32` | Opens or reopens a session. The protocol version is the frame header's `version`; the body carries no separate copy. |
+| `0x02` | `Welcome` | host → device | `node_id`, `session_id: u32`, `heartbeat_ms: u32`, `max_frame: u32` | `max_frame` is the negotiated minimum of both sides. |
+| `0x03` | `Reject` | host → device | `reason: u8` | See the reject reasons below. |
+| `0x04` | `Ping` | device → host (either direction is answered) | `now_ms: u64` | Sent by the device every heartbeat. |
+| `0x05` | `Pong` | answer to `Ping` | `now_ms: u64` | Echoes the ping's `now_ms`, so the pinging side can measure the round trip. |
+| `0x06` | `Ack` | host → device | `seq: u16` | Acknowledges the `ProviderState` frame sent with `seq`. |
+| `0x10` | `ProviderState` | device → host | `ProviderRecord`, `Vec<ResourceRecord>` | Full snapshot; idempotent. The gateway owns `ProviderRecord::node_id`. |
+| `0x11` | `Leases` | host → device | `Vec<LeaseRecord>` | Full set for this device's provider. |
+| `0x12` | `ExecutorState` | device → host | | Reserved for the executor role. |
+| `0x13` | `Workloads` | host → device | | Reserved for the executor role. |
+| `0x14` | `Status` | device → host | | Reserved for the volatile status lane (see TODO.md "Decided model"). |
+
+Reject reasons (one byte; unknown codes are reported as `Other(code)`):
+
+| Code | Reason | Device reaction |
+| --- | --- | --- |
+| 1 | `VersionMismatch` | Back off and retry. |
+| 2 | `UnknownDevice` (empty name, or not on the link's allowlist) | Back off and retry. |
+| 3 | `UnsupportedRoles` (no role the host serves; v1 hosts serve `provider`) | Back off and retry. |
+| 4 | `FrameTooSmall` (`max_frame` below the host minimum, default 32) | Back off and retry. |
+| 5 | `NoSession` (session traffic from a device the host has no session for, for example after a host restart) | Reconnect immediately, without backoff and without a `Rejected` event. |
+
+Rules for decoders:
+
+- Unknown and reserved kinds are ignored by both sessions (after duplicate suppression they still
+  count as liveness), so new kinds can be added without a version bump.
+- Trailing bytes after a body are ignored, so a later version can append fields compatibly.
+- `Hello` and `Reject` (kind numbers and bodies) are frozen across versions. A host answers a
+  `Hello` of another version with `Reject { VersionMismatch }` in its own version; a device accepts
+  a `Reject` of any version (decoding the reason if it can, otherwise assuming `VersionMismatch`)
+  and ignores every other frame of another version.
+- Sequence lengths in bodies are untrusted: decoders preallocate at most a few elements and grow as
+  elements actually decode, so a forged length cannot exhaust a small heap.
+
+### Session lifecycle
+
+1. The device sends `Hello` at its first `poll`, then retries with exponential backoff (default
+   250 ms doubling to 4 s) until it hears `Welcome`. Its `max_frame` is `min(RX, TX)` of its
+   const-generic buffers.
+2. The host checks the allowlist, roles, and `max_frame`, then answers `Welcome` (negotiated
+   `max_frame = min(device, host)`, host default 4096) followed at once by the current `Leases`.
+   A repeated `Hello` from the same device before it has sent any session traffic repeats the
+   `Welcome` within the same session (the first one was lost). A `Hello` after session traffic,
+   or from a different device name, starts a new session (`session_id` changes); the gateway sees
+   `DeviceConnected` again and replaces what it knew about the device.
+3. On `Welcome` the device sends its latest provider snapshot (if any; it is re-sent on **every**
+   new session, so a device never has to republish after a reconnect) and starts pinging every
+   `heartbeat_ms`. A duplicate `Welcome` (same `session_id`) is ignored; a different `session_id`
+   replaces the session.
+4. After a `Reject` the device stays silent for the reject backoff (default 5 s doubling to 60 s),
+   then starts again at step 1.
+
+Neither side sends a frame larger than the negotiated `max_frame`. A snapshot that no longer fits
+after negotiation is dropped and reported to the device application (`StateTooLarge`); a lease set
+that does not fit is not sent and is reported to the gateway (`LeasesTooLarge`).
 
 ### Reliability
 
-- State messages (`ProviderState`) are retransmitted by the device until acknowledged, with
-  exponential backoff capped at the heartbeat interval. Because they are full snapshots, only the
-  newest pending one is kept.
-- The host resends `Leases` whenever they change and piggybacks the current set after each `Pong`,
-  so a lost `Leases` message is repaired within one heartbeat.
-- Duplicate `seq` values within a session are ignored.
+- Every frame carries a fresh sequence number. Each side accepts only frames whose `seq` is newer
+  than the last one it accepted in the session (wrapping, within half the sequence space); older or
+  equal ones are dropped as duplicates or stale. `Hello`, `Welcome`, and `Reject` are exempt
+  because they open or close sessions. A new session resets the window.
+- `ProviderState` is retransmitted by the device until acknowledged, with exponential backoff
+  (default 200 ms, measured from the end of each transmission) capped at the heartbeat interval.
+  Each retransmission uses a new `seq`; an `Ack` for any transmission of the current snapshot
+  counts, an `Ack` for an older snapshot does not. Because snapshots are full state, only the
+  newest pending one is kept; publishing a new snapshot while the previous one is still being
+  sent aborts that transmission (the receiver drops the partial frame).
+- The host acknowledges every `ProviderState` it receives but reports a snapshot to the gateway
+  only when it differs from the last one in the session, so retransmissions after a lost `Ack` are
+  invisible to the gateway.
+- The host sends `Leases` right after `Welcome`, whenever the set changes, and after every `Pong`,
+  so a lost `Leases` message is repaired within one heartbeat. The device reports a lease set only
+  when it differs from the last one it reported in the session.
+- Liveness: either side considers the session lost after `missed_heartbeats` (default 3) heartbeat
+  intervals without any valid frame from the other. The device then reconnects (step 1); the host
+  reports `DeviceLost` so the gateway marks the device's resources unavailable.
+- Sessions on byte streams send a `0x00` before every frame, so line noise or an aborted frame
+  never corrupts the next one.
 
 ### Trust
 
@@ -155,24 +219,56 @@ A port provides three things:
 3. a monotonic millisecond timestamp passed to `poll`.
 
 ```rust
-let mut session = DeviceSession::<512>::new(DeviceConfig::provider("imu-board", provider_record));
+use orion_link::Stream;
+use orion_link::device::{DeviceConfig, DeviceEvent, StreamDevice};
+
+// 256-byte receive and transmit buffers; the only heap use is message bodies.
+let mut session = StreamDevice::<256, 256>::new(DeviceConfig::provider("imu-board"), Stream);
+session.publish_provider_state(&provider_record, &resources)?;
+let mut tx = [0u8; 32];
 loop {
-    while let Some(byte) = uart.try_read() {
-        if let Some(event) = session.receive_stream_byte(byte) {
-            handle(event); // e.g. LinkEvent::Leases(leases)
+    session.receive(uart.read_available()); // clock-free; may also run in the RX interrupt
+    session.poll(now_ms());
+    while let Some(event) = session.next_event() {
+        if let DeviceEvent::Leases(leases) = event {
+            handle(leases);
         }
     }
-    session.publish_provider_state(&resources_if_changed);
-    while let Some(bytes) = session.poll_stream(now_ms()) {
-        uart.write_all(bytes);
+    loop {
+        let n = session.transmit(&mut tx); // resumable: any FIFO or DMA chunk size
+        if n == 0 {
+            break;
+        }
+        uart.write_all(&tx[..n]);
     }
 }
 ```
 
-A small heap (a few KiB, for example via `embedded-alloc`) is enough for typical record sets.
+CAN ports use `CanDevice::<RX, TX>::new(config, Packet::CLASSIC)` (or `Packet::FD`), feed the data
+of frames carrying the link's host→device identifier to `receive_segment`, and send
+`next_segment()` (or `peek_segment()` + `commit_segment()` when the controller can be busy) with
+the device→host identifier.
+
+`examples/mcu-template` is a complete, chip-agnostic starting point (`embedded-io` UART and
+`embedded-can` ports, a replaceable heap, and C entry points), and
+`crates/link/examples/sim_device.rs` prints a full session timeline on the host. A heap of a few
+KiB is enough for typical record sets.
+
+## Host side
+
+`orion_link::host` (feature `std`) is the gateway's half, also sans-IO: `HostSession<Stream>` for a
+serial link, `HostSession<Packet>` for a point-to-point CAN link, and `HostBus` for many devices on
+one CAN bus. `HostBus` derives each device's identifiers as `CanLinkIds::for_address(base,
+address)` and creates a session when the first frame from an address in its configured range
+arrives. The gateway feeds received bytes or frames, calls `poll(now_ms)`, drains events
+(`DeviceConnected`, `ProviderState`, `DeviceLost`, `DeviceRejected`, `LeasesTooLarge`), sets lease
+sets with `set_leases`, and writes what `transmit()` / `next_segment()` / `next_frame()` return.
 
 ## Versioning
 
 `LINK_PROTOCOL_VERSION` is independent of `CONTROL_PROTOCOL_VERSION`, so the node's IPC protocol can
-evolve without reflashing devices. A layout fingerprint test over the postcard encodings of canonical
-messages forces a version bump when the link wire format changes.
+evolve without reflashing devices. `crates/link/tests/link_encoding.rs` compares complete frames of
+canonical messages with a recorded fixture, so any change to the wire format (frame layout, kind
+numbers, body fields, or the postcard encoding of the shared records) fails until
+`LINK_PROTOCOL_VERSION` is bumped and the fixture is regenerated with
+`ORION_UPDATE_LINK_ENCODINGS=1`. Additive changes (new kinds, appended body fields) need no bump.
