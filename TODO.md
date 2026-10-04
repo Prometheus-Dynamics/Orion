@@ -34,6 +34,26 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 - [x] CI pinned to toolchain 1.94.0; node feature matrix and allocator-feature jobs added.
 - [x] Oversized files split; `scripts/check-file-sizes.sh` is clean.
 
+### no_std / MCU
+
+- [x] `orion-core`, `orion-data-plane`, `orion-control-plane`, `orion-auth`, `orion-runtime`,
+      `orion-cluster` build `no_std` + `alloc` (default `std` feature; `#![cfg_attr(not(feature =
+      "std"), no_std)]`, `core::`/`alloc::` paths). The `orion` facade's model features work with
+      `default-features = false`.
+- [x] Only host-only bits are gated behind `std`: Prometheus metrics export (env-driven config) and
+      the filesystem helpers on `SharedMemoryEndpoint`/`UnixEndpoint`. Typed config decoding keeps
+      `serde_path_to_error` field paths without `std`.
+- [x] Workspace deps use `default-features = false` (model crates, serde, serde_json, thiserror,
+      rkyv, ed25519-dalek); std crates opt into `std` explicitly. rkyv raised to 0.8.16 for 32-bit
+      `pointer_width_64` support; wire layout and `CONTROL_PROTOCOL_VERSION` unchanged.
+- [x] Canonical-encoding fixture test (`crates/auth/tests/canonical_encoding.rs`) runs in std and
+      no_std builds and checks byte-identical archives (also covers the field-reorder gap of the
+      layout fingerprint for the messages it encodes).
+- [x] `scripts/check-no-std.sh` + CI `no-std` job (thumbv7em-none-eabihf, riscv32imac-unknown-none-elf;
+      thumbv8m.main-none-eabihf locally).
+- [ ] Optional: an example MCU firmware crate (outside the workspace) that links the model crates
+      with a real allocator and decodes a `ControlMessage`, to catch link-time issues a lib check misses.
+
 ### Bugs fixed (each with a regression test)
 
 - [x] `send_unix_fd_frame_async` / `recv_unix_fd_frame_async` busy-spun on idle connections.
@@ -116,4 +136,5 @@ none of these are HeliOS-specific features.
 - [ ] Optional blocking client for the fd latest-value channel.
 - [ ] Single multiplexed local IPC socket instead of separate unary and stream sockets.
 - [ ] Field-reorder/same-size type changes are not caught by the protocol layout fingerprint; consider
-      hashing archived fixture bytes as well.
+      hashing archived fixture bytes as well. (Partly covered: `crates/auth/tests/canonical_encoding.rs`
+      pins the bytes of representative control/auth messages; extend it to the remaining types.)

@@ -70,6 +70,33 @@ jobs:
       - name: Build docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
+  no-std:
+    # The model crates (core, data-plane, control-plane, auth, runtime, cluster) and the `orion`
+    # facade's model features must build `no_std` + `alloc` for bare-metal MCU targets. The script
+    # builds each crate in its own cargo invocation (so workspace feature unification cannot hide a
+    # std dependency), runs clippy and the host tests without `std`, and checks that the no_std
+    # build produces the same canonical rkyv bytes as the std build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          components: clippy
+          targets: thumbv7em-none-eabihf, riscv32imac-unknown-none-elf
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check no_std builds
+        env:
+          NO_STD_TARGETS: thumbv7em-none-eabihf riscv32imac-unknown-none-elf
+        run: ./scripts/check-no-std.sh
+
   allocator-features:
     # `--all-features` above enables both allocator features at once (jemalloc takes precedence),
     # so each opt-in global allocator is also linted, built, started, and cross-built on its own.

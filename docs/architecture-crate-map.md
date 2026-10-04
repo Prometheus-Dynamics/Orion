@@ -41,6 +41,42 @@ These crates keep transport-specific codecs, listeners, and TLS behavior local w
 - `orion-perf-check` is a CI helper for perf-threshold enforcement and release validation.
 - `orion-macros` contains optional procedural macros used by public Orion crates.
 
+## no_std support
+
+The foundation/model crates build `no_std` + `alloc`, so the Orion state model, wire messages, and
+auth payloads can run on microcontrollers (any target with a global allocator; no specific chip is
+assumed). Each has a default `std` feature; build with `default-features = false` for bare metal.
+
+| Crate | Without `std` | Needs `std` |
+| --- | --- | --- |
+| `orion-core` | IDs, `Revision`, type names, `OrionError`, protocol constants, rkyv `encode_to_vec`/`decode_from_slice`/length-prefixed helpers | nothing |
+| `orion-data-plane` | link, binding, peer capability and negotiation types | nothing |
+| `orion-control-plane` | records, messages, mutations, cluster state, typed config decoding (`deserialize_config` keeps field-path diagnostics via `serde_path_to_error`, which is itself `no_std`), endpoint parsing, `LatencyMetricBuckets` | Prometheus export (`render_*_metrics`, `MetricsExportConfig`, which reads env vars); filesystem helpers on `SharedMemoryEndpoint` (`path`, `read_*`, `ORION_SHM_ROOT`) and `UnixEndpoint` (`path_buf`, `read_*`) |
+| `orion-auth` | peer request / transport binding types and canonical signing bytes | nothing |
+| `orion-runtime` | reconcile planning, local runtime store, provider/executor integration traits | nothing |
+| `orion-cluster` | membership, admission, assignment helpers | nothing |
+
+The `orion` facade has a default `std` feature too. With `default-features = false` its `core`,
+`auth`, `control-plane`, `data-plane`, `runtime`, `cluster`, and `macros` features work `no_std`;
+`client`, `service`, and every `transport-*` feature imply `std`. `orion-node`, the transports,
+`orion-client`, `orion-service`, `orionctl`, and `orion-perf-check` are std-only.
+
+Dependency notes:
+
+- Workspace dependencies on the model crates and on `serde`, `serde_json`, `thiserror`, `rkyv`, and
+  `ed25519-dalek` are declared with `default-features = false`; every std crate enables
+  `features = ["std"]` explicitly, so std builds are unchanged.
+- rkyv keeps `little_endian` + `pointer_width_64` on every target (requires rkyv >= 0.8.16 on
+  32-bit targets), so archives are byte-identical between hosts and MCUs, and between std and no_std
+  builds. `crates/auth/tests/canonical_encoding.rs` checks canonical messages against a recorded
+  fixture in both the std and the `--no-default-features` build.
+- Signing itself (ed25519) lives in `orion-node`; `orion-auth` only produces the canonical bytes, so
+  MCU code can sign them with any `no_std` ed25519 implementation.
+
+`scripts/check-no-std.sh` (also the CI `no-std` job) builds each crate separately for
+`thumbv7em-none-eabihf`, `riscv32imac-unknown-none-elf`, and `thumbv8m.main-none-eabihf`, and runs
+clippy plus the host tests without `std`.
+
 ## Typical Flow
 
 1. A client or peer sends a typed control or data-plane request through an Orion transport.
