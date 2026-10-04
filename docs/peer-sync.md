@@ -295,13 +295,19 @@ on first contact. Discovering a peer never makes it trusted.
 
 ### Size and dependency cost
 
-Measured on x86_64 Linux with the workspace release profile, stripped:
+Measured on x86_64 Linux with the workspace release profile (`opt-level = "z"`, fat LTO, one
+codegen unit, stripped). Crates are the unique packages in `cargo tree -e normal` for
+`orion-node`, including the workspace's own `orion-*` crates.
 
-| Build | Binary size | Crates in the dependency graph |
+| `orion-node` build | Binary size | Crates (non-Orion) |
 | --- | --- | --- |
-| `--no-default-features` (IPC only) | see `CHANGELOG.md` | see `CHANGELOG.md` |
-| `--no-default-features --features peer-tcp` | see `CHANGELOG.md` | see `CHANGELOG.md` |
-| default (`transport-http`, `transport-tcp`, `transport-quic`) | see `CHANGELOG.md` | see `CHANGELOG.md` |
+| `--no-default-features` (IPC only) | 2.65 MiB (2,782,520 B) | 74 (64) |
+| `--no-default-features --features peer-tcp` | 2.88 MiB (3,019,744 B) | 74 (64) |
+| `--no-default-features --features transport-http` | 5.05 MiB (5,295,056 B) | 151 (141) |
+| default (`transport-http`, `peer-tcp`, `transport-tcp`, `transport-quic`) | 5.74 MiB (6,014,048 B) | 166 (154) |
+
+`peer-tcp` adds about 230 KiB and no crates to the IPC-only build; clustering over HTTP instead
+costs about 2.4 MiB and 77 more crates (axum, hyper, reqwest, rustls and their dependencies).
 
 ## Upgrading from protocol v2
 
