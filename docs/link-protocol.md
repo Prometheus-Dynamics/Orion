@@ -84,6 +84,39 @@ device→host and one for host→device traffic (standard or extended IDs), typi
 `base + device_address`, so many devices share one bus. Lower identifiers win arbitration, so
 deployments can prioritize devices by address.
 
+### Framing rules
+
+These rules pin down details that the layer summaries above leave open. `orion-link` implements
+them exactly.
+
+- **Version check.** Frame decoding validates length and CRC and reports the version byte without
+  rejecting it, so the host can answer `Reject { VersionMismatch }` instead of dropping the frame.
+- **Frame size.** There is no wire-level maximum; frames are bounded by the receiver's
+  const-generic buffer, and oversized frames are dropped and counted as overflows.
+- **COBS.** Canonical COBS: a final full `0xFF` block gets no trailing `0x01`. Empty packets
+  (consecutive `0x00`) are ignored and not counted.
+- **Leading delimiter.** Senders may emit a `0x00` before each frame. It terminates line noise, so
+  noise cannot corrupt the next frame. Without it, garbage between frames costs exactly that frame.
+- **Error accounting.** Each corrupt stream packet is counted once, when its delimiter arrives.
+- **Segment counters** start at 0 on each start segment and increase by one per segment, mod 64.
+  Receivers do not require the start counter to be 0.
+- **No CAN FD padding.** Message frames carry no length field, so padding would be
+  indistinguishable from payload. Full segments use the whole MTU, and the tail is split into
+  segments whose lengths are each a valid CAN FD length (0–8, 12, 16, 20, 24, 32, 48, 64). This
+  sometimes costs one or two extra CAN frames (an 8-byte frame on CAN FD is sent as 8 + 2 bytes).
+  Smaller FD MTUs are allowed.
+- **Duplicate segments.** A segment with the same counter and the same bytes as the previous one is
+  ignored as a CAN-level retransmission. Comparing bytes ensures a new message after a lost tail is
+  not mistaken for a duplicate.
+- **Interrupted messages.** A start segment mid-message drops the partial message (counted as
+  interrupted) and begins the new one.
+- **Discard until end.** After a sequence error, overflow, or orphan segment, the rest of that
+  message's segments are dropped until its end segment or the next start segment.
+- **Duplicate messages.** A duplicated single-segment message is delivered twice by the framing
+  layer; duplicate suppression by `seq` belongs to the session layer.
+- **CAN identifiers.** `CanLinkIds::for_address(base, addr)` adds `addr` to both base identifiers and
+  fails if either result leaves the 11-bit or 29-bit range or if the two collide.
+
 ## Messages
 
 | Kind | Direction | Body | Notes |
