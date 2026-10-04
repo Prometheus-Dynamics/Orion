@@ -6,8 +6,9 @@ use orion_control_plane::{
     CommunicationFailureKind, CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
     CommunicationStageMetricsSnapshot, CommunicationTransportKind, LatencyMetricsSnapshot,
     LocalStreamUsageSnapshot, MetricsExportConfig, MutationHistoryUsageSnapshot,
-    NodeResourceUsageSnapshot, ProcessMemorySnapshot, RegistryUsageSnapshot, StateSectionCounts,
-    StateSizeSnapshot, WorkerQueueUsageSnapshot, render_communication_metrics,
+    NodeResourceUsageSnapshot, ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot,
+    RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot,
+    WorkerQueueUsageSnapshot, render_communication_metrics,
     render_communication_metrics_with_config, render_resource_usage_metrics,
 };
 use orion_core::NodeId;
@@ -301,6 +302,26 @@ fn sample_resource_usage() -> NodeResourceUsageSnapshot {
             recent_event_limit: 128,
             auth_nonce_peers: 2,
             auth_seen_nonces: 64,
+        },
+        observed_persistence: ObservedPersistenceUsageSnapshot {
+            interval_ms: 2_000,
+            coalescing: true,
+            pending: false,
+            coalesced_changes_total: 120,
+            flushes_total: 9,
+            absorbed_flushes_total: 2,
+        },
+        status_lane: StatusLaneUsageSnapshot {
+            entries: 6,
+            max_entries: 4_096,
+            max_entries_per_publisher: 256,
+            max_ttl_ms: 300_000,
+            publishers: 2,
+            watchers: 1,
+            published_total: 50,
+            expired_total: 4,
+            dropped_total: 1,
+            unauthorized_total: 0,
         },
     }
 }

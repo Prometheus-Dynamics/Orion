@@ -94,3 +94,24 @@ orion_registry_entries{node_id="node-a",registry="auth_seen_nonces"} 64
 # TYPE orion_registry_limit gauge
 orion_registry_limit{node_id="node-a",registry="communication_endpoints"} 512
 orion_registry_limit{node_id="node-a",registry="recent_events"} 128
+# HELP orion_status_lane_entries Entries held in the volatile status lane.
+# TYPE orion_status_lane_entries gauge
+orion_status_lane_entries{node_id="node-a"} 6
+# HELP orion_status_lane_max_entries Configured node-wide status lane entry cap.
+# TYPE orion_status_lane_max_entries gauge
+orion_status_lane_max_entries{node_id="node-a"} 4096
+# HELP orion_status_lane_published_total Status entries accepted (new or updated values).
+# TYPE orion_status_lane_published_total counter
+orion_status_lane_published_total{node_id="node-a"} 50
+# HELP orion_status_lane_expired_total Status entries dropped because their TTL ran out.
+# TYPE orion_status_lane_expired_total counter
+orion_status_lane_expired_total{node_id="node-a"} 4
+# HELP orion_status_lane_dropped_total Status entries refused because a cap was reached or the entry was invalid.
+# TYPE orion_status_lane_dropped_total counter
+orion_status_lane_dropped_total{node_id="node-a"} 1
+# HELP orion_observed_persist_coalesced_total Observed or applied state changes deferred to a coalesced write.
+# TYPE orion_observed_persist_coalesced_total counter
+orion_observed_persist_coalesced_total{node_id="node-a"} 120
+# HELP orion_observed_persist_flushes_total Coalesced observed/applied state writes.
+# TYPE orion_observed_persist_flushes_total counter
+orion_observed_persist_flushes_total{node_id="node-a"} 9

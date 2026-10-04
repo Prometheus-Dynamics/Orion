@@ -9,15 +9,20 @@
 //!   local IPC client, another device, or another node, nor resources of another provider (and an
 //!   IPC client cannot overwrite a device's provider);
 //! - a lost device keeps its records, with its resources marked unavailable, so leases and history
-//!   survive a reconnect.
+//!   survive a reconnect;
+//! - device status batches go to the volatile status lane under the device's provider subject.
 
 use super::{NodeApp, NodeError};
 use crate::link_gateway::LinkStatus;
 use orion::{
     ProviderId, ResourceId,
-    control_plane::{AvailabilityState, HealthState, LeaseRecord, ProviderRecord, ResourceRecord},
+    control_plane::{
+        AvailabilityState, HealthState, LeaseRecord, ProviderRecord, ResourceRecord, StatusEntry,
+        StatusSubject,
+    },
     runtime::ProviderSnapshot,
 };
+use orion_link::message::StatusEntry as LinkStatusEntry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, MutexGuard};
 use tracing::warn;
@@ -219,6 +224,44 @@ impl NodeApp {
             }
         }
         Ok(())
+    }
+
+    /// Files a device's status batch in the status lane under the device's provider subject.
+    /// The device must have an accepted provider snapshot on `link`.
+    pub(crate) fn link_publish_device_status(
+        &self,
+        link: &str,
+        device: &str,
+        entries: Vec<LinkStatusEntry>,
+    ) -> Result<(), LinkRejection> {
+        let provider_id = lock(&self.state.links.owners)
+            .iter()
+            .find_map(|(id, owner)| match owner {
+                ProviderOwner::Device(claim)
+                    if claim.connected && claim.link == link && claim.device == device =>
+                {
+                    Some(id.clone())
+                }
+                _ => None,
+            })
+            .ok_or_else(|| {
+                LinkRejection(format!(
+                    "device `{device}` has no accepted provider snapshot on {link}"
+                ))
+            })?;
+        let entries = entries
+            .into_iter()
+            .map(|entry| {
+                StatusEntry::new(
+                    StatusSubject::Provider(provider_id.clone()),
+                    entry.key,
+                    entry.value,
+                )
+                .with_ttl_ms(u64::from(entry.ttl_ms))
+            })
+            .collect();
+        self.publish_status_as(&format!("link:{link}/{device}"), entries)
+            .map_err(|error| LinkRejection(error.to_string()))
     }
 
     /// Marks the resources of `device` on `link` unavailable (the records are kept).

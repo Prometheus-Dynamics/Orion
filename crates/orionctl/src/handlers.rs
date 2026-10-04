@@ -4,6 +4,7 @@ mod describe;
 mod get;
 mod get_communication;
 mod get_memory;
+mod get_status;
 mod peers;
 mod watch;
 

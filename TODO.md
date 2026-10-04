@@ -133,11 +133,12 @@ none of these are HeliOS-specific features.
 
 - [ ] **Durable vs volatile observed state.** Records hold durable facts only (existence,
       health/availability, workload phase).
-  - [ ] Observed-state persistence is coalesced: at most one write per configurable interval, flushed
-        on shutdown. Today every provider or executor state change does an fsynced rewrite
-        (`apply_*_state_update` → `persist_state`).
-  - [ ] New volatile status lane: latest value per (subject, key), in memory only, never persisted,
-        with a TTL, watchable over client streams and queryable via `orionctl`.
+  - [x] Observed-state persistence is coalesced: at most one write per configurable interval
+        (`ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS`), flushed on shutdown and carried by every
+        desired-state commit.
+  - [x] New volatile status lane: latest value per (subject, key), in memory only, never persisted,
+        with a TTL, watchable over client streams and queryable via `orionctl get status`; link
+        devices publish with the `Status` kind. Not replicated to peers yet.
   - [ ] Bulk and high-rate data (frames, detections) stays out of Orion and uses resource endpoints.
 - [ ] **Cross-node binding.** A workload may bind another node's resource. Orion resolves,
       authorizes and leases it; bytes flow over the resource's own endpoint. Orion's generic data

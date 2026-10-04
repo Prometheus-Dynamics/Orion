@@ -67,6 +67,10 @@ pub struct LinkStatus {
     pub hello_rejects: u64,
     /// Provider snapshots refused by the gateway (ownership collisions, invalid records).
     pub snapshot_rejects: u64,
+    /// Status batches accepted into the node's status lane.
+    pub status_batches: u64,
+    /// Status batches refused (no accepted provider snapshot yet, invalid entries, lane caps).
+    pub status_rejects: u64,
     /// Open, read, or write failures of the port or socket.
     pub io_errors: u64,
     /// Most recent I/O error or rejection.

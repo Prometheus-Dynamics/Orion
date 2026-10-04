@@ -3,7 +3,7 @@ use orion::{
     ExecutorId, ProviderId,
     control_plane::{
         ClientEvent, ClientEventKind, ClientSession, LeaseRecord, StateSnapshot, StateWatch,
-        WorkloadRecord,
+        StatusChange, StatusEntry, StatusKey, StatusQuery, WorkloadRecord,
     },
     transport::ipc::{ControlEnvelope, LocalAddress},
 };
@@ -23,6 +23,7 @@ pub(super) struct LocalClientState {
     pub(super) state_watch: Option<StateWatch>,
     pub(super) executor_watch: Option<ExecutorWatchState>,
     pub(super) provider_watch: Option<ProviderWatchState>,
+    pub(super) status_watch: Option<StatusQuery>,
     next_event_sequence: u64,
     max_queued_events: usize,
     pub(super) queued_events: VecDeque<ClientEvent>,
@@ -46,6 +47,7 @@ impl LocalClientState {
             state_watch: None,
             executor_watch: None,
             provider_watch: None,
+            status_watch: None,
             next_event_sequence: 1,
             max_queued_events,
             queued_events: VecDeque::new(),
@@ -87,6 +89,12 @@ impl<'a> ClientRegistryTxn<'a> {
         source: &LocalAddress,
     ) -> Option<&mut LocalClientState> {
         self.clients.get_mut(source)
+    }
+
+    pub(super) fn clients_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&LocalAddress, &mut LocalClientState)> {
+        self.clients.iter_mut()
     }
 
     pub(super) fn remove(&mut self, source: &LocalAddress) -> Option<LocalClientState> {
@@ -156,6 +164,48 @@ pub(super) fn enqueue_provider_leases_event(
             provider_id,
             leases,
         },
+    );
+}
+
+/// Queues a status change, merging it into a status event that is still queued so a slow watcher
+/// holds at most one status event with the newest value per key (bounded by the lane's caps).
+pub(super) fn enqueue_status_event(client: &mut LocalClientState, change: StatusChange) {
+    let mut updated: BTreeMap<StatusKey, StatusEntry> = BTreeMap::new();
+    let mut expired: BTreeMap<StatusKey, ()> = BTreeMap::new();
+    let mut bootstrap = change.bootstrap;
+    if let Some(position) = client
+        .queued_events
+        .iter()
+        .position(|event| matches!(event.event, ClientEventKind::Status(_)))
+        && let Some(ClientEvent {
+            event: ClientEventKind::Status(queued),
+            ..
+        }) = client.queued_events.remove(position)
+    {
+        bootstrap |= queued.bootstrap;
+        for entry in queued.updated {
+            updated.insert(entry.status_key(), entry);
+        }
+        for key in queued.expired {
+            expired.insert(key, ());
+        }
+    }
+    for key in change.expired {
+        updated.remove(&key);
+        expired.insert(key, ());
+    }
+    for entry in change.updated {
+        let key = entry.status_key();
+        expired.remove(&key);
+        updated.insert(key, entry);
+    }
+    enqueue_client_event(
+        client,
+        ClientEventKind::Status(StatusChange {
+            bootstrap,
+            updated: updated.into_values().collect(),
+            expired: expired.into_keys().collect(),
+        }),
     );
 }
 

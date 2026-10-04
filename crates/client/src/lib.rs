@@ -9,6 +9,9 @@
 //! - Use the consumer views ([`AssignedWorkload`], [`BoundResource`], [`assigned_workloads`],
 //!   [`resources_bound_to`], and `LocalExecutorService::watch_assigned_workloads`) instead of
 //!   walking cluster-state envelopes by hand.
+//! - Publish volatile, latest-value status (TTL'd, in node memory only) with
+//!   `LocalProviderService::publish_status` / `LocalExecutorService::publish_status`, and read it
+//!   with `query_status` or `watch_status` ([`StatusWatch`]).
 //! - Import [`prelude`] to get the client API plus the core and control-plane types executor and
 //!   provider apps commonly need, without depending on `orion-core` or `orion-control-plane`.
 
@@ -39,7 +42,7 @@ pub use app::{
     LocalExecutorClient, LocalExecutorEvent, LocalExecutorService, LocalExecutorSubscription,
     LocalNodeRuntime, LocalProviderApp, LocalProviderClient, LocalProviderEvent,
     LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
-    LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp,
+    LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp, StatusWatch,
 };
 #[cfg(feature = "ipc")]
 pub use control_plane::{ControlPlaneClient, ControlPlaneEventStream, LocalControlPlaneClient};

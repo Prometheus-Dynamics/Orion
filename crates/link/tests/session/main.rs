@@ -12,4 +12,6 @@ mod device_scripted;
 #[cfg(feature = "std")]
 mod sim;
 #[cfg(feature = "std")]
+mod status;
+#[cfg(feature = "std")]
 mod stream_e2e;

@@ -24,16 +24,18 @@ use core::fmt;
 // The model types a device needs, re-exported so a port depends on `orion-link` alone.
 pub use orion_control_plane::{
     AvailabilityState, HealthState, LeaseRecord, LeaseState, ProviderRecord, ResourceCapability,
-    ResourceRecord,
+    ResourceRecord, TypedConfigValue,
 };
 pub use orion_core::{CapabilityId, NodeId, ProviderId, ResourceId, ResourceType, WorkloadId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+#[cfg(feature = "std")]
+pub(crate) use codec::decode_status;
 pub(crate) use codec::{
     HelloRef, decode_body, decode_leases, encode_with, provider_state_payload_len,
-    write_provider_state_payload,
+    status_payload_len, write_provider_state_payload,
 };
-pub use codec::{encode_leases, encode_provider_state};
+pub use codec::{encode_leases, encode_provider_state, encode_status};
 
 use crate::frame::FrameError;
 
@@ -62,7 +64,7 @@ pub mod kind {
     pub const EXECUTOR_STATE: u8 = 0x12;
     /// Reserved for the executor role (host → device workload assignments).
     pub const WORKLOADS: u8 = 0x13;
-    /// Reserved for the volatile status lane (device → host).
+    /// `Status(Vec<StatusEntry>)`, device → host: volatile status values, fire-and-forget.
     pub const STATUS: u8 = 0x14;
 }
 
@@ -199,6 +201,40 @@ pub struct ProviderState {
     pub resources: Vec<ResourceRecord>,
 }
 
+/// One volatile status value. Device → host inside a [`kind::STATUS`] frame; the gateway files it
+/// in the node's status lane under the device's provider.
+///
+/// Status is fire-and-forget: it is never acknowledged or retransmitted, and only the newest
+/// value per key matters. The node keeps it in memory only, for `ttl_ms` (`0` means the node's
+/// maximum, which also caps larger values).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusEntry {
+    /// Key, unique per device (at most 128 bytes on the node).
+    pub key: String,
+    /// The value (strings and bytes at most 1024 bytes on the node).
+    pub value: TypedConfigValue,
+    /// Requested time-to-live in milliseconds.
+    pub ttl_ms: u32,
+}
+
+impl StatusEntry {
+    /// A status entry with the node's maximum TTL.
+    pub fn new(key: impl Into<String>, value: TypedConfigValue) -> Self {
+        Self {
+            key: key.into(),
+            value,
+            ttl_ms: 0,
+        }
+    }
+
+    /// Requests a time-to-live.
+    #[must_use]
+    pub fn with_ttl_ms(mut self, ttl_ms: u32) -> Self {
+        self.ttl_ms = ttl_ms;
+        self
+    }
+}
+
 /// A decoded link message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -228,6 +264,8 @@ pub enum Message {
         /// The `now_ms` of the ping being answered.
         now_ms: u64,
     },
+    /// [`kind::STATUS`]: volatile status values of the device's provider.
+    Status(Vec<StatusEntry>),
     /// A kind this build does not handle (including the reserved kinds). Ignored by sessions.
     Unknown(u8),
 }

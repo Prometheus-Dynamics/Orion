@@ -104,6 +104,10 @@ impl NodeApp {
     /// [`NodeApp::request_reconcile`] wake-up (coalesced for up to a few milliseconds and never
     /// sooner than `interval` after the previous pass) or for the backstop
     /// (`NodeRuntimeTuning::reconcile_backstop_interval`, clamped to at least `interval`).
+    ///
+    /// While the loop runs, observed and applied state writes are coalesced (at most one per
+    /// `NodeRuntimeTuning::observed_persist_interval`, flushed when the loop shuts down) and
+    /// expired status-lane entries are swept as they expire.
     pub fn spawn_reconcile_loop(&self, interval: Duration) -> ReconcileLoopHandle {
         let app = self.clone();
         let spacing = normalize_runtime_tuning_duration(interval);
@@ -120,28 +124,39 @@ impl NodeApp {
             .fetch_add(1, Ordering::SeqCst);
         let attached = AttachedLoop(self.state.clone());
 
+        let coalescer_shutdown = shutdown_rx.clone();
+        let expiry_shutdown = shutdown_rx.clone();
         let task = tokio::spawn(async move {
             let _attached = attached;
-            loop {
-                if *shutdown_rx.borrow() {
-                    break;
+            let reconcile = async {
+                loop {
+                    if *shutdown_rx.borrow() {
+                        break;
+                    }
+                    if let Err(err) = app.tick_async().await {
+                        error!(node = %app.config.node_id, task = "reconcile", error = %err, "background loop iteration failed");
+                        // Retry after the normal spacing rather than waiting for the backstop.
+                        app.request_reconcile();
+                    }
+                    let wait = wait_for_next_pass(
+                        &app.state.reconcile,
+                        &mut shutdown_rx,
+                        Instant::now(),
+                        spacing,
+                        backstop,
+                    );
+                    if !wait.await {
+                        break;
+                    }
                 }
-                if let Err(err) = app.tick_async().await {
-                    error!(node = %app.config.node_id, task = "reconcile", error = %err, "background loop iteration failed");
-                    // Retry after the normal spacing rather than waiting for the backstop.
-                    app.request_reconcile();
-                }
-                let wait = wait_for_next_pass(
-                    &app.state.reconcile,
-                    &mut shutdown_rx,
-                    Instant::now(),
-                    spacing,
-                    backstop,
-                );
-                if !wait.await {
-                    break;
-                }
-            }
+            };
+            // The observed-state coalescer and the status-lane sweeper share the loop's
+            // lifetime: both stop (the coalescer after a final flush) when it shuts down.
+            tokio::join!(
+                reconcile,
+                app.run_observed_persist_coalescer(coalescer_shutdown),
+                app.run_status_expiry(expiry_shutdown),
+            );
         });
 
         ReconcileLoopHandle {

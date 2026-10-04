@@ -1,6 +1,7 @@
 use super::*;
 
 mod local_sessions;
+mod status_lane;
 mod stream;
 mod unary;
 

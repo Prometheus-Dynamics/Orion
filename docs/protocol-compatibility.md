@@ -19,7 +19,7 @@ truth. It is a `u16` that changes whenever the archived layout of a protocol typ
 |---|---|
 | 1 | Implicit, unversioned layout before the preamble existed |
 | 2 | `NodeObservabilitySnapshot::resource_usage`; version preamble and header added |
-| 3 | `NodeRecord::clock` and `NodeObservabilitySnapshot::clock` (`NodeClockFacts`, `ClockSourceKind`); `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived` removed |
+| 3 | `NodeRecord::clock` and `NodeObservabilitySnapshot::clock` (`NodeClockFacts`, `ClockSourceKind`); `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived` removed; volatile status lane: `PublishStatus`, `QueryStatus`, `WatchStatus`, `Status` control messages, `ClientEventKind::Status`, and the `observed_persistence` / `status_lane` resource-usage sections |
 
 ## Local IPC
 

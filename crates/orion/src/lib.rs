@@ -56,7 +56,7 @@ pub mod client {
         LocalProviderApp, LocalProviderClient, LocalProviderEvent, LocalProviderService,
         LocalProviderSubscription, LocalRuntimePublisher, LocalRuntimePublisherBuilder,
         LocalServiceRetryPolicy, ProviderApp, ProviderClient, ProviderEventStream,
-        ProviderResource, ResolvedGraphPayload, ResourceClaim, SessionConfig,
+        ProviderResource, ResolvedGraphPayload, ResourceClaim, SessionConfig, StatusWatch,
         default_ipc_socket_path, default_ipc_stream_socket_path, graph_reference_for_workload,
         resolve_graph_reference, resolve_workload_graph,
     };
@@ -81,15 +81,17 @@ pub mod control_plane {
         NodeClockFacts, NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot,
         NodeReadinessSnapshot, NodeReadinessStatus, NodeRecord, NodeRecordBuilder,
         NodeResourceUsageSnapshot, ObservabilityEvent, ObservabilityEventKind,
-        ObservedClusterState, ObservedStateUpdate, OperationFailureCategory,
-        OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerTrustRecord,
-        PeerTrustSnapshot, PersistenceMetricsSnapshot, ProcessMemorySnapshot, ProviderLeaseQuery,
-        ProviderRecord, ProviderRecordBuilder, ProviderStateUpdate, RegistryUsageSnapshot,
-        ResourceActionResult, ResourceActionStatus, ResourceBinding, ResourceCapability,
-        ResourceConfigState, ResourceEndpoint, ResourceEndpointError, ResourceOwnershipMode,
-        ResourceRecord, ResourceRecordBuilder, ResourceState, RestartPolicy, SharedMemoryEndpoint,
-        StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch, SyncDiffRequest,
-        SyncRequest, SyncSummaryRequest, TcpEndpoint, TransportMetricsSnapshot, TypedConfigValue,
+        ObservedClusterState, ObservedPersistenceUsageSnapshot, ObservedStateUpdate,
+        OperationFailureCategory, OperationMetricsSnapshot, PeerEnrollment, PeerHello,
+        PeerIdentityUpdate, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
+        ProcessMemorySnapshot, ProviderLeaseQuery, ProviderRecord, ProviderRecordBuilder,
+        ProviderStateUpdate, RegistryUsageSnapshot, ResourceActionResult, ResourceActionStatus,
+        ResourceBinding, ResourceCapability, ResourceConfigState, ResourceEndpoint,
+        ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
+        ResourceState, RestartPolicy, SharedMemoryEndpoint, StateSectionCounts, StateSizeSnapshot,
+        StateSnapshot, StateWatch, StatusChange, StatusEntry, StatusKey, StatusLaneUsageSnapshot,
+        StatusQuery, StatusSubject, StatusSubjectParseError, SyncDiffRequest, SyncRequest,
+        SyncSummaryRequest, TcpEndpoint, TransportMetricsSnapshot, TypedConfigValue,
         TypedResourceEndpoint, UnixEndpoint, WorkerQueueUsageSnapshot, WorkloadConfig,
         WorkloadObservedState, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
         config_json_value, deserialize_config, duration_ms_u64, estimate_wire_bytes,
@@ -210,8 +212,8 @@ pub mod prelude {
         LocalProviderEvent, LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
         LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp, ProviderClient,
         ProviderEventStream, ProviderResource, ResolvedGraphPayload, ResourceClaim, SessionConfig,
-        default_ipc_socket_path, default_ipc_stream_socket_path, graph_reference_for_workload,
-        resolve_graph_reference, resolve_workload_graph,
+        StatusWatch, default_ipc_socket_path, default_ipc_stream_socket_path,
+        graph_reference_for_workload, resolve_graph_reference, resolve_workload_graph,
     };
     pub use crate::cluster::ClusterCoordinator;
     pub use crate::control_plane::{
@@ -222,7 +224,10 @@ pub mod prelude {
         TcpEndpoint, TypedResourceEndpoint, UnixEndpoint, WorkloadRecord, WorkloadRecordBuilder,
         WorkloadRequirement, config_json_value, deserialize_config,
     };
-    pub use crate::control_plane::{StateSnapshot, TypedConfigValue, WorkloadConfig};
+    pub use crate::control_plane::{
+        StateSnapshot, StatusChange, StatusEntry, StatusQuery, StatusSubject, TypedConfigValue,
+        WorkloadConfig,
+    };
     pub use crate::core::{
         ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, ResourceType, ResourceTypeDef,
         Revision, RuntimeType, RuntimeTypeDef, WorkloadId,

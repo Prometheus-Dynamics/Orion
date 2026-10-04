@@ -17,7 +17,7 @@ pub use crate::{
     LocalExecutorService, LocalExecutorSubscription, LocalNodeRuntime, LocalProviderApp,
     LocalProviderClient, LocalProviderEvent, LocalProviderService, LocalProviderSubscription,
     LocalRuntimePublisher, LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp,
-    ProviderClient, ProviderEventStream, SessionConfig,
+    ProviderClient, ProviderEventStream, SessionConfig, StatusWatch,
 };
 pub use orion_control_plane::{
     AppliedClusterState, AvailabilityState, ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef,
@@ -25,9 +25,9 @@ pub use orion_control_plane::{
     HealthState, HttpEndpoint, IpcEndpoint, LeaseRecord, LeaseState, ObservedClusterState,
     ProviderRecord, ResourceBinding, ResourceCapability, ResourceEndpoint, ResourceEndpointError,
     ResourceOwnershipMode, ResourceRecord, ResourceState, RestartPolicy, SharedMemoryEndpoint,
-    StateSnapshot, TcpEndpoint, TypedConfigValue, TypedResourceEndpoint, UnixEndpoint,
-    WorkloadConfig, WorkloadObservedState, WorkloadRecord, WorkloadRequirement, config_json_value,
-    deserialize_config,
+    StateSnapshot, StatusChange, StatusEntry, StatusKey, StatusQuery, StatusSubject, TcpEndpoint,
+    TypedConfigValue, TypedResourceEndpoint, UnixEndpoint, WorkloadConfig, WorkloadObservedState,
+    WorkloadRecord, WorkloadRequirement, config_json_value, deserialize_config,
 };
 pub use orion_core::{
     ArtifactId, CapabilityId, ConfigSchemaId, ExecutorId, NodeId, ProviderId, ResourceId,

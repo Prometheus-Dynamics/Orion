@@ -71,7 +71,8 @@ async fn node_ipc_stream_server_pushes_state_events_to_live_stream_clients() {
                     );
                 }
                 ClientEventKind::ExecutorWorkloads { .. }
-                | ClientEventKind::ProviderLeases { .. } => {
+                | ClientEventKind::ProviderLeases { .. }
+                | ClientEventKind::Status(_) => {
                     panic!("unexpected non-state event");
                 }
             }

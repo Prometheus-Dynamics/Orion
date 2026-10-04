@@ -5,6 +5,7 @@ use super::{
         enqueue_provider_leases_event, enqueue_state_snapshot_event,
     },
     observability::public_http_mutual_tls_mode,
+    status_lane::OwnedSubject,
 };
 use crate::peer::PeerConfig;
 use orion::{
@@ -128,6 +129,17 @@ impl NodeApp {
             ControlMessage::PollClientEvents(poll) => Ok(ControlMessage::ClientEvents(
                 self.poll_client_events(source, &poll)?,
             )),
+            ControlMessage::PublishStatus(entries) => {
+                self.publish_local_status(source, entries)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::QueryStatus(query) => {
+                Ok(ControlMessage::Status(self.query_status(&query)))
+            }
+            ControlMessage::WatchStatus(query) => {
+                self.subscribe_status_watch(source, query)?;
+                Ok(ControlMessage::Accepted)
+            }
             ControlMessage::Ping => Ok(ControlMessage::Pong),
             ControlMessage::Pong => Ok(ControlMessage::Accepted),
             ControlMessage::Hello(_) => Ok(ControlMessage::Hello(self.peer_hello()?)),
@@ -188,6 +200,7 @@ impl NodeApp {
             | ControlMessage::MaintenanceStatus(_)
             | ControlMessage::Observability(_)
             | ControlMessage::ClientEvents(_)
+            | ControlMessage::Status(_)
             | ControlMessage::Accepted
             | ControlMessage::Rejected(_) => Ok(ControlMessage::Rejected(
                 "response-only control message received as a request".into(),
@@ -571,15 +584,18 @@ impl NodeApp {
 
     fn apply_provider_state_update(
         &self,
-        _source: &LocalAddress,
+        source: &LocalAddress,
         update: ProviderStateUpdate,
     ) -> Result<(), NodeError> {
         #[cfg(feature = "link-gateway")]
         self.claim_provider_for_ipc(&update.provider.provider_id)?;
+        let provider_id = update.provider.provider_id.clone();
         self.apply_local_provider_snapshot(ProviderSnapshot {
             provider: update.provider,
             resources: update.resources,
-        })
+        })?;
+        self.record_status_owner(source, OwnedSubject::Provider(&provider_id));
+        Ok(())
     }
 
     /// The provider path shared by local IPC clients and link devices: registers the provider
@@ -591,7 +607,7 @@ impl NodeApp {
         self.ensure_provider_record(snapshot.provider.clone())?;
         let changed = self.with_store_mut(|store| store.apply_provider_snapshot(snapshot))?;
         if changed {
-            self.persist_state()?;
+            self.persist_observed_state()?;
         }
         self.reconcile_after_change()?;
         Ok(())
@@ -599,10 +615,11 @@ impl NodeApp {
 
     fn apply_executor_state_update(
         &self,
-        _source: &LocalAddress,
+        source: &LocalAddress,
         update: ExecutorStateUpdate,
     ) -> Result<(), NodeError> {
         self.ensure_executor_record(update.executor.clone())?;
+        self.record_status_owner(source, OwnedSubject::Executor(&update.executor.executor_id));
         let changed = self.with_store_mut(|store| {
             store.apply_executor_snapshot(ExecutorSnapshot {
                 executor: update.executor,
@@ -611,7 +628,7 @@ impl NodeApp {
             })
         })?;
         if changed {
-            self.persist_state()?;
+            self.persist_observed_state()?;
         }
         self.reconcile_after_change()?;
         Ok(())

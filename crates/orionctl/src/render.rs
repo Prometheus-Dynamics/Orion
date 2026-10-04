@@ -169,6 +169,15 @@ pub(crate) fn print_event_summary(event: &ClientEvent) {
                 leases.len(),
             );
         }
+        ClientEventKind::Status(change) => {
+            println!(
+                "status seq={} bootstrap={} updated={} expired={}",
+                event.sequence,
+                change.bootstrap,
+                change.updated.len(),
+                change.expired.len(),
+            );
+        }
     }
 }
 

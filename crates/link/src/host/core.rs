@@ -223,6 +223,18 @@ impl HostCore {
                 Ok(Message::ProviderState(state)) => self.on_state(frame.seq(), state, limit),
                 _ => self.decode_error(),
             },
+            kind::STATUS => match message::decode_status(frame.payload()) {
+                Ok(entries) => {
+                    self.stats.status_received = self.stats.status_received.wrapping_add(1);
+                    if let Some(device_name) = self.device_name().map(String::from) {
+                        self.emit(HostEvent::Status {
+                            device_name,
+                            entries,
+                        });
+                    }
+                }
+                Err(_) => self.decode_error(),
+            },
             kind::PING => match Message::decode(frame) {
                 Ok(Message::Ping { now_ms }) => {
                     let _ = self.queue(kind::PONG, &now_ms, limit);

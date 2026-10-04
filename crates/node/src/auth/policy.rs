@@ -289,6 +289,13 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::WatchProviderLeases,
             ) => self.authorize_local_role(source, ClientRole::Provider),
             (
+                ControlPrincipal::Local { .. },
+                ControlOperation::QueryStatus | ControlOperation::WatchStatus,
+            ) => Ok(()),
+            (ControlPrincipal::Local { source, .. }, ControlOperation::PublishStatus) => self
+                .authorize_local_role(source, ClientRole::Provider)
+                .or_else(|_| self.authorize_local_role(source, ClientRole::Executor)),
+            (
                 ControlPrincipal::Local { source, .. },
                 ControlOperation::ExecutorState
                 | ControlOperation::QueryExecutorWorkloads

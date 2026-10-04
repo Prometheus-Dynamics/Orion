@@ -226,6 +226,10 @@ impl NodeApp {
             | ControlMessage::WatchState(_)
             | ControlMessage::PollClientEvents(_)
             | ControlMessage::ClientEvents(_)
+            | ControlMessage::PublishStatus(_)
+            | ControlMessage::QueryStatus(_)
+            | ControlMessage::WatchStatus(_)
+            | ControlMessage::Status(_)
             | ControlMessage::Ping
             | ControlMessage::Pong
             | ControlMessage::Accepted
@@ -595,7 +599,7 @@ impl NodeApp {
             }
         });
         if state_changed {
-            let persisted = self.persist_state();
+            let persisted = self.persist_observed_state();
             self.request_reconcile();
             persisted?;
         }

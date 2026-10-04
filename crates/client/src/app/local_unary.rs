@@ -24,14 +24,14 @@ use crate::{
     },
 };
 
-trait LocalUnaryRole {
+pub(super) trait LocalUnaryRole {
     const ROLE: ClientRole;
 }
 
 #[derive(Clone, Copy, Debug)]
-struct ProviderRole;
+pub(super) struct ProviderRole;
 #[derive(Clone, Copy, Debug)]
-struct ExecutorRole;
+pub(super) struct ExecutorRole;
 
 impl LocalUnaryRole for ProviderRole {
     const ROLE: ClientRole = ClientRole::Provider;
@@ -74,7 +74,7 @@ impl fmt::Debug for LocalTransport {
 }
 
 #[derive(Clone, Debug)]
-struct LocalUnaryClient<Role> {
+pub(super) struct LocalUnaryClient<Role> {
     transport: LocalTransport,
     identity: ClientIdentity,
     config: SessionConfig,
@@ -156,7 +156,10 @@ where
         &self.identity
     }
 
-    async fn send_and_expect_accepted(&self, message: ControlMessage) -> Result<(), ClientError> {
+    pub(super) async fn send_and_expect_accepted(
+        &self,
+        message: ControlMessage,
+    ) -> Result<(), ClientError> {
         match self.request(message).await? {
             ControlMessage::Accepted => Ok(()),
             ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
@@ -164,7 +167,10 @@ where
         }
     }
 
-    async fn request(&self, message: ControlMessage) -> Result<ControlMessage, ClientError> {
+    pub(super) async fn request(
+        &self,
+        message: ControlMessage,
+    ) -> Result<ControlMessage, ClientError> {
         match &self.transport {
             LocalTransport::Unary { socket_path } => self.request_unary(socket_path, message).await,
             LocalTransport::Stream {
@@ -314,12 +320,12 @@ where
 
 #[derive(Clone, Debug)]
 pub struct LocalProviderClient {
-    inner: LocalUnaryClient<ProviderRole>,
+    pub(super) inner: LocalUnaryClient<ProviderRole>,
 }
 
 #[derive(Clone, Debug)]
 pub struct LocalProviderApp {
-    client: LocalProviderClient,
+    pub(super) client: LocalProviderClient,
     provider: ProviderRecord,
 }
 
@@ -511,12 +517,12 @@ impl LocalProviderApp {
 
 #[derive(Clone, Debug)]
 pub struct LocalExecutorClient {
-    inner: LocalUnaryClient<ExecutorRole>,
+    pub(super) inner: LocalUnaryClient<ExecutorRole>,
 }
 
 #[derive(Clone, Debug)]
 pub struct LocalExecutorApp {
-    client: LocalExecutorClient,
+    pub(super) client: LocalExecutorClient,
     executor: ExecutorRecord,
 }
 
