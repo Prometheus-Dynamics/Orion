@@ -3,6 +3,9 @@ use rcgen::generate_simple_self_signed;
 
 #[tokio::test]
 async fn probe_server_exposes_metrics_but_control_server_does_not() {
+    // Raw reqwest clients need a process-wide rustls provider; install it explicitly so the
+    // result does not depend on which test happens to run first.
+    crate::tls::install_crypto_provider();
     let probe_service = std::sync::Arc::new(NetworkLoopbackService);
     let (probe_addr, probe_server, probe_listener) = HttpServer::bind_probe(
         "127.0.0.1:0".parse().expect("address should parse"),
