@@ -1,5 +1,5 @@
 use crate::LatencyMetricsSnapshot;
-use std::time::Duration;
+use core::time::Duration;
 
 pub const LATENCY_BUCKET_LE_1_MS: u64 = 1;
 pub const LATENCY_BUCKET_LE_5_MS: u64 = 5;

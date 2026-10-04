@@ -1,3 +1,7 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 mod error;
 mod executor;
 mod provider;
@@ -18,6 +22,7 @@ pub use state::{LocalRuntimeStore, RuntimeSnapshot};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::{string::ToString, vec, vec::Vec};
     use orion_control_plane::{
         AvailabilityState, DesiredClusterState, DesiredState, ExecutorRecord, HealthState,
         LeaseState, ObservedClusterState, ProviderRecord, ResourceOwnershipMode, ResourceRecord,

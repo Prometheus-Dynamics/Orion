@@ -1,3 +1,4 @@
+use alloc::string::String;
 use orion_control_plane::ResourceOwnershipMode;
 use orion_core::{
     CapabilityId, ConfigSchemaId, ExecutorId, NodeId, ProviderId, ResourceId, ResourceType,

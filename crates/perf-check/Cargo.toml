@@ -19,7 +19,7 @@ name = "orion-perf-check"
 path = "src/main.rs"
 
 [dependencies]
-serde.workspace = true
-serde_json.workspace = true
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
 serde_yaml.workspace = true
 toml.workspace = true

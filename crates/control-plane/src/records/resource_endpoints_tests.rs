@@ -230,6 +230,7 @@ fn record_with_custom_endpoints_round_trips_through_serde_and_rkyv() {
     );
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn shared_memory_endpoint_reads_from_custom_root() {
     let root = std::env::temp_dir().join(format!("orion-shm-test-{}", std::process::id()));
@@ -249,6 +250,7 @@ fn shared_memory_endpoint_reads_from_custom_root() {
     std::fs::remove_dir(&root).expect("temp root should be removable");
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn unix_endpoint_reads_file_payload() {
     let path = std::env::temp_dir().join(format!(

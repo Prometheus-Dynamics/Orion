@@ -2,10 +2,10 @@ use super::{
     ArtifactRecord, ExecutorRecord, LeaseRecord, NodeRecord, ProviderRecord, ResourceRecord,
     WorkloadRecord,
 };
+use alloc::collections::BTreeMap;
 use orion_core::{ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(
     Clone,

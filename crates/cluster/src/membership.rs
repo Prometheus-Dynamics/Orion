@@ -1,8 +1,8 @@
+use alloc::collections::BTreeMap;
 use orion_control_plane::{DesiredClusterState, NodeRecord};
 use orion_core::{CompatibilityState, NodeId, Revision};
 use orion_data_plane::{NegotiationError, PeerCapabilities, PeerLink};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClusterRole {

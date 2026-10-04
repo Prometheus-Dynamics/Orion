@@ -1,4 +1,8 @@
 use crate::OrionError;
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::mem::align_of;
 use rkyv::{
     Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,

@@ -1,11 +1,12 @@
 use crate::{AvailabilityState, HealthState, LeaseState};
+use alloc::collections::BTreeMap;
+use alloc::{string::String, vec::Vec};
 use orion_core::{
     CapabilityDef, CapabilityId, ExecutorId, NodeId, ProviderId, ResourceId, ResourceType,
     ResourceTypeDef, WorkloadId,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 use super::config_decode::ConfigMapRef;
 use super::resource_endpoints::{ResourceEndpoint, ResourceEndpointError, TypedResourceEndpoint};

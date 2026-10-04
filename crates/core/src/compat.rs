@@ -1,4 +1,5 @@
 use crate::OrionError;
+use alloc::string::String;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 

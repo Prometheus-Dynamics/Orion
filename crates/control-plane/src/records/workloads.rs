@@ -1,11 +1,12 @@
 use crate::{DesiredState, RestartPolicy, WorkloadObservedState};
+use alloc::collections::BTreeMap;
+use alloc::{string::String, vec::Vec};
 use orion_core::{
     ArtifactId, CapabilityDef, CapabilityId, ConfigSchemaDef, ConfigSchemaId, NodeId, ResourceType,
     ResourceTypeDef, RuntimeType, RuntimeTypeDef, WorkloadId,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 use super::config_decode::ConfigMapRef;
 use super::resources::ResourceOwnershipMode;

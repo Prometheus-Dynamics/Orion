@@ -8,6 +8,7 @@ use super::metrics::{NodeObservabilitySnapshot, PeerTrustSnapshot};
 use super::mutations::MutationBatch;
 use super::sync::{PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest, SyncSummaryRequest};
 use crate::{LeaseRecord, WorkloadRecord};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use orion_core::NodeId;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};

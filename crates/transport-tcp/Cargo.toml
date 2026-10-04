@@ -17,12 +17,12 @@ workspace = true
 path = "src/lib.rs"
 
 [dependencies]
-orion-data-plane.workspace = true
-orion-core.workspace = true
+orion-data-plane = { workspace = true, features = ["std"] }
+orion-core = { workspace = true, features = ["std"] }
 orion-transport-common = { workspace = true, features = ["tls"] }
-serde.workspace = true
-rkyv.workspace = true
-thiserror.workspace = true
+serde = { workspace = true, features = ["std"] }
+rkyv = { workspace = true, features = ["std"] }
+thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "sync", "time"] }
 rustls = { workspace = true, features = ["ring"] }
 tokio-rustls.workspace = true

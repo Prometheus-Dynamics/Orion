@@ -18,7 +18,11 @@ cargo fmt --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo doc --workspace --no-deps
+./scripts/check-no-std.sh   # needs: rustup target add thumbv7em-none-eabihf riscv32imac-unknown-none-elf thumbv8m.main-none-eabihf
 ```
+
+`check-no-std.sh` covers the `no_std` model crates; see "no_std support" in
+[`architecture-crate-map.md`](architecture-crate-map.md).
 
 Heavier Docker, perf, and soak suites are intentionally separate and are documented in [`testing/README.md`](../testing/README.md).
 See [`testing.md`](testing.md) for the repo-level validation surfaces and suite split.

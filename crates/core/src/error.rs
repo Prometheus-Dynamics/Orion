@@ -1,4 +1,5 @@
 use crate::{ResourceId, ResourceType, RuntimeType, WorkloadId};
+use alloc::string::String;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

@@ -16,6 +16,19 @@ workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+# `std` is on by default. Without it the crate is `no_std` + `alloc`: records, messages, mutations,
+# typed config decoding, and endpoint parsing keep working; the Prometheus metrics export and the
+# filesystem helpers on shared-memory/unix endpoints require `std`.
+default = ["std"]
+std = [
+    "orion-core/std",
+    "rkyv/std",
+    "serde/std",
+    "serde_json/std",
+    "thiserror/std",
+]
+
 [dependencies]
 orion-core.workspace = true
 rkyv.workspace = true
@@ -30,3 +43,4 @@ criterion = { workspace = true, features = ["cargo_bench_support"] }
 [[bench]]
 name = "mutation_apply"
 harness = false
+required-features = ["std"]

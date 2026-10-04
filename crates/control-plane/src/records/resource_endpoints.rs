@@ -10,8 +10,15 @@
 //!
 //! [`ResourceRecord::endpoints`]: super::ResourceRecord::endpoints
 
+use alloc::{
+    borrow::ToOwned,
+    format,
+    string::{String, ToString},
+};
+use core::{fmt, str::FromStr};
 use orion_core::ResourceId;
-use std::{fmt, fs, io, path::PathBuf, str::FromStr};
+#[cfg(feature = "std")]
+use std::{fs, io, path::PathBuf};
 use thiserror::Error;
 
 /// Schemes that always parse into a dedicated built-in [`ResourceEndpoint`] variant.
@@ -22,6 +29,8 @@ pub struct SharedMemoryEndpoint {
     pub name: String,
 }
 
+/// Filesystem access to the shared-memory payload is host-only and requires the `std` feature.
+#[cfg(feature = "std")]
 impl SharedMemoryEndpoint {
     pub fn path(&self) -> PathBuf {
         self.path_in(Self::default_root())
@@ -64,6 +73,8 @@ pub struct UnixEndpoint {
     pub path: String,
 }
 
+/// Filesystem access to the socket/file path is host-only and requires the `std` feature.
+#[cfg(feature = "std")]
 impl UnixEndpoint {
     pub fn path_buf(&self) -> PathBuf {
         PathBuf::from(&self.path)

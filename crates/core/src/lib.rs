@@ -5,6 +5,10 @@
 //! the rest of Orion depends on, not control-plane object graphs or runtime
 //! lifecycle semantics.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 mod archive;
 mod compat;
 mod error;
@@ -36,6 +40,7 @@ pub use version::{ProtocolVersion, Revision};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     #[test]
     fn ids_roundtrip_strings() {

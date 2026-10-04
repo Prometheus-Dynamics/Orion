@@ -32,34 +32,39 @@ rust-version = "1.94"
 authors = ["Mathias Petersen"]
 
 [workspace.dependencies]
-orion-auth = { path = "crates/auth", version = "1.0.0" }
+# The model crates (core, data-plane, control-plane, auth, runtime, cluster) support `no_std` +
+# `alloc`; their default `std` feature is off here, so every std consumer opts in explicitly with
+# `features = ["std"]`.
+orion-auth = { path = "crates/auth", version = "1.0.0", default-features = false }
 orion-client = { path = "crates/client", version = "1.0.0" }
-orion-cluster = { path = "crates/cluster", version = "1.0.0" }
-orion-control-plane = { path = "crates/control-plane", version = "1.0.0" }
-orion-core = { path = "crates/core", version = "1.0.0" }
-orion-data-plane = { path = "crates/data-plane", version = "1.0.0" }
+orion-cluster = { path = "crates/cluster", version = "1.0.0", default-features = false }
+orion-control-plane = { path = "crates/control-plane", version = "1.0.0", default-features = false }
+orion-core = { path = "crates/core", version = "1.0.0", default-features = false }
+orion-data-plane = { path = "crates/data-plane", version = "1.0.0", default-features = false }
 orion-link = { path = "crates/link", version = "1.0.0", default-features = false }
 orion-macros = { path = "crates/macros", version = "1.0.0" }
 orion-node = { path = "crates/node", version = "1.0.0" }
 orion = { path = "crates/orion", version = "1.0.0", default-features = false }
-orion-runtime = { path = "crates/runtime", version = "1.0.0" }
+orion-runtime = { path = "crates/runtime", version = "1.0.0", default-features = false }
 orion-service = { path = "crates/service", version = "1.0.0" }
 orion-transport-common = { path = "crates/transport-common", version = "1.0.0", default-features = false }
 orion-transport-http = { path = "crates/transport-http", version = "1.0.0", default-features = false }
 orion-transport-ipc = { path = "crates/transport-ipc", version = "1.0.0" }
 orion-transport-quic = { path = "crates/transport-quic", version = "1.0.0" }
 orion-transport-tcp = { path = "crates/transport-tcp", version = "1.0.0" }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-serde_path_to_error = "0.1.20"
+# serde, serde_json, thiserror, rkyv, and ed25519-dalek are declared without
+# default features so the model crates stay `no_std`; std consumers add `features = ["std"]`.
+serde = { version = "1.0.228", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0.149", default-features = false, features = ["alloc"] }
+serde_path_to_error = "0.1.20" # always no_std + alloc
 serde_yaml = "0.9.34"
-thiserror = "2.0.18"
+thiserror = { version = "2.0.18", default-features = false }
 tokio = { version = "1.52.1", default-features = false }
 toml = "0.9.8"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 clap = { version = "4.6.1", features = ["derive"] }
 criterion = { version = "0.8.2", default-features = false }
-ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["fast", "rand_core", "zeroize"] }
 hyper = "1.6"
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 libc = "0.2"
@@ -70,7 +75,11 @@ quote = "1.0"
 rand_core = { version = "0.6", features = ["getrandom"] }
 rcgen = "0.14.7"
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls-no-provider"] }
-rkyv = { version = "0.8.15", features = ["uuid-1", "little_endian", "pointer_width_64"] }
+# The layout features (little_endian, pointer_width_64) are fixed for every target, including
+# 32-bit MCUs, so the archived wire layout is byte-identical everywhere. `bytecheck` replaces the
+# default feature set (which also pulled in `std`). 0.8.16 is the first release whose archived
+# string code compiles with `pointer_width_64` on 32-bit targets.
+rkyv = { version = "0.8.16", default-features = false, features = ["alloc", "bytecheck", "uuid-1", "little_endian", "pointer_width_64"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 rustls-pemfile = "2.2"
 rustls-pki-types = "1.14"
