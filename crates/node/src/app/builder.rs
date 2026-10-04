@@ -371,6 +371,8 @@ impl NodeAppBuilder {
             )),
             lifecycle: LifecycleState::default(),
             reconcile: Default::default(),
+            #[cfg(feature = "link-gateway")]
+            links: Default::default(),
         });
         let persistence_worker = storage
             .as_ref()

@@ -391,3 +391,45 @@ mod without_transport_http {
         assert!(tls.to_string().contains("transport-http"), "{tls}");
     }
 }
+
+#[cfg(not(feature = "link-gateway"))]
+#[test]
+fn node_process_config_rejects_links_without_link_gateway_feature() {
+    let err = with_env_vars(
+        &[("ORION_NODE_LINKS", Some("serial:/dev/ttyAMA0"))],
+        crate::NodeProcessConfig::try_from_env,
+    )
+    .expect_err("ORION_NODE_LINKS needs the link-gateway feature");
+    assert!(
+        matches!(&err, crate::NodeError::Config(message) if message.contains("ORION_NODE_LINKS") && message.contains("`link-gateway` feature")),
+        "{err}"
+    );
+}
+
+#[cfg(feature = "link-gateway")]
+#[test]
+fn node_process_config_parses_links_from_env() {
+    let process = with_env_vars(
+        &[(
+            "ORION_NODE_LINKS",
+            Some("serial:/dev/ttyAMA0?baud=9600;can:can0?addresses=1-4"),
+        )],
+        crate::NodeProcessConfig::try_from_env,
+    )
+    .expect("links should parse");
+    let names: Vec<_> = process
+        .links
+        .iter()
+        .map(|link| link.name.as_str())
+        .collect();
+    assert_eq!(names, ["serial:/dev/ttyAMA0", "can:can0"]);
+
+    let err = with_env_vars(
+        &[("ORION_NODE_LINKS", Some("serial:/dev/ttyAMA0?baud=7"))],
+        crate::NodeProcessConfig::try_from_env,
+    )
+    .expect_err("invalid link should fail startup");
+    assert!(
+        matches!(err, crate::NodeError::Config(message) if message.contains("unsupported baud"))
+    );
+}

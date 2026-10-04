@@ -46,6 +46,15 @@ impl DisabledHttpServer {
     }
 }
 
+/// Stand-in for the link gateway in builds without the `link-gateway` feature.
+#[cfg(not(feature = "link-gateway"))]
+struct DisabledLinkGateway;
+
+#[cfg(not(feature = "link-gateway"))]
+impl DisabledLinkGateway {
+    async fn shutdown(self) {}
+}
+
 fn log_shutdown_error(
     node_id: &orion_node::NodeId,
     component: &'static str,
@@ -111,6 +120,24 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     let (ipc_stream_socket, ipc_stream_server) = app
         .start_ipc_stream_server_graceful(&process.ipc_stream_socket_path)
         .await?;
+    #[cfg(feature = "link-gateway")]
+    let link_gateway = app.start_link_gateway(process.links.clone())?;
+    #[cfg(feature = "link-gateway")]
+    let links_summary = process
+        .links
+        .iter()
+        .map(|link| link.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    #[cfg(not(feature = "link-gateway"))]
+    let link_gateway = DisabledLinkGateway;
+    #[cfg(not(feature = "link-gateway"))]
+    let links_summary = String::new();
+    let links_summary = if links_summary.is_empty() {
+        "-".to_owned()
+    } else {
+        links_summary
+    };
     #[cfg(not(feature = "transport-http"))]
     let (http_server, probe_server) = (
         None::<(std::net::SocketAddr, DisabledHttpServer)>,
@@ -150,13 +177,14 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "-".to_owned());
     println!(
-        "orion-node: initialized node={} http={} http_probe={} http_tls_cert={} ipc={} ipc_stream={} peers={} desired_rev={} observed_rev={} applied_rev={}",
+        "orion-node: initialized node={} http={} http_probe={} http_tls_cert={} ipc={} ipc_stream={} links={} peers={} desired_rev={} observed_rev={} applied_rev={}",
         snapshot.node_id,
         http_addr,
         http_probe,
         http_tls_cert,
         ipc_socket.display(),
         ipc_stream_socket.display(),
+        links_summary,
         snapshot.registered_peers,
         snapshot.desired_revision,
         snapshot.observed_revision,
@@ -169,6 +197,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         http_tls_cert = %http_tls_cert,
         ipc_socket = %ipc_socket.display(),
         ipc_stream_socket = %ipc_stream_socket.display(),
+        links = %links_summary,
         peers = snapshot.registered_peers,
         desired_revision = %snapshot.desired_revision,
         observed_revision = %snapshot.observed_revision,
@@ -188,6 +217,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         );
         tokio::time::sleep(shutdown_after_init).await;
         info!(node = %snapshot.node_id, "shutting down orion-node after initialization delay");
+        link_gateway.shutdown().await;
         reconcile_loop.shutdown().await;
         if let Some(peer_sync_loop) = peer_sync_loop {
             peer_sync_loop.shutdown().await;
@@ -218,6 +248,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         })?;
     info!(node = %snapshot.node_id, "received shutdown signal");
 
+    link_gateway.shutdown().await;
     reconcile_loop.shutdown().await;
     if let Some(peer_sync_loop) = peer_sync_loop {
         peer_sync_loop.shutdown().await;

@@ -63,14 +63,21 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
       session, postcard, and the model crates with a real allocator into a bare-metal staticlib (CI
       builds it for thumbv7em-none-eabihf and riscv32imac-unknown-none-elf; `scripts/mcu-size.sh`
       reports flash/RAM).
-- [ ] Node gateway (`orion-node` `link-gateway` feature): config for serial and SocketCAN links,
-      own the fds/sockets, drive `HostSession` / `HostBus`, map `ProviderState` onto the node's
-      provider path (overwriting `node_id`, prefixing or validating resource ids), mark resources
-      unavailable on `DeviceLost`, and feed each device's leases into `set_leases`.
+- [x] Node gateway (`orion-node` `link-gateway` feature): `ORION_NODE_LINKS` serial and SocketCAN
+      links (termios / `PF_CAN` over `libc` + `AsyncFd`), `HostSession` / `HostBus` driven per link,
+      `ProviderState` applied through the IPC provider path (gateway-owned `node_id`, provider and
+      resource ownership checks), resources unavailable on `DeviceLost` and restored on reconnect,
+      leases refreshed on desired commits, `NodeApp::link_status()` counters, pty and in-memory CAN
+      tests, `link_device_sim` example.
+- [ ] Gateway follow-ups: persist which providers belong to link devices, so a node that crashed
+      (no graceful shutdown) can mark them unavailable at startup instead of waiting for the device;
+      expose `link_status` over the control protocol (`orionctl get links`) with the next
+      `CONTROL_PROTOCOL_VERSION` bump; run the `vcan0` test in CI.
 - [ ] Executor role on the link (`ExecutorState` / `Workloads`, kinds reserved) and the volatile
       `Status` lane.
-- [ ] Optional: try the template on real hardware (one Cortex-M and one RISC-V board) and record
-      round-trip timing at 115200 baud and on classic CAN.
+- [ ] Real hardware bring-up: run the template and the gateway on real hardware (one Cortex-M and
+      one RISC-V board, a USB-serial port and a SocketCAN adapter) and record round-trip timing at
+      115200 baud and on classic CAN.
 
 ### Bugs fixed (each with a regression test)
 

@@ -101,6 +101,9 @@ pub struct NodeProcessConfig {
     /// for single-node appliances that only use local IPC.
     pub http_enabled: bool,
     pub runtime_threads: NodeRuntimeThreads,
+    /// Microcontroller links to serve (`ORION_NODE_LINKS`, feature `link-gateway`).
+    #[cfg(feature = "link-gateway")]
+    pub links: Vec<crate::link_gateway::LinkConfig>,
 }
 
 /// Tokio runtime sizing for the node binary.
@@ -400,6 +403,20 @@ impl NodeProcessConfig {
         let shutdown_after_init = NodeConfig::try_shutdown_after_init_from_env()?;
         let http_enabled = NodeConfig::http_enabled_from_env();
         let runtime_threads = NodeRuntimeThreads::try_from_env()?;
+        #[cfg(feature = "link-gateway")]
+        let links = crate::link_gateway::LinkConfig::try_from_env()?;
+        #[cfg(all(feature = "link-gateway", not(target_os = "linux")))]
+        if !links.is_empty() {
+            return Err(NodeError::Config(
+                "ORION_NODE_LINKS is not supported: serial and SocketCAN links are only available on Linux".into(),
+            ));
+        }
+        #[cfg(not(feature = "link-gateway"))]
+        if env::var_os("ORION_NODE_LINKS").is_some_and(|value| !value.is_empty()) {
+            return Err(NodeError::Config(
+                "ORION_NODE_LINKS is not supported: orion-node was built without the `link-gateway` feature; rebuild with `--features link-gateway` or unset it".into(),
+            ));
+        }
 
         #[cfg(not(feature = "transport-http"))]
         if http_tls_cert_path.is_some() || http_tls_key_path.is_some() || auto_http_tls {
@@ -433,6 +450,8 @@ impl NodeProcessConfig {
                 shutdown_after_init,
                 http_enabled,
                 runtime_threads,
+                #[cfg(feature = "link-gateway")]
+                links,
             }),
             _ => Err(NodeError::Config(
                 "ORION_NODE_HTTP_TLS_CERT and ORION_NODE_HTTP_TLS_KEY must either both be set or both be unset".into(),

@@ -574,13 +574,22 @@ impl NodeApp {
         _source: &LocalAddress,
         update: ProviderStateUpdate,
     ) -> Result<(), NodeError> {
-        self.ensure_provider_record(update.provider.clone())?;
-        let changed = self.with_store_mut(|store| {
-            store.apply_provider_snapshot(ProviderSnapshot {
-                provider: update.provider,
-                resources: update.resources,
-            })
-        })?;
+        #[cfg(feature = "link-gateway")]
+        self.claim_provider_for_ipc(&update.provider.provider_id)?;
+        self.apply_local_provider_snapshot(ProviderSnapshot {
+            provider: update.provider,
+            resources: update.resources,
+        })
+    }
+
+    /// The provider path shared by local IPC clients and link devices: registers the provider
+    /// record, applies the snapshot to observed state, persists, and triggers a reconcile.
+    pub(super) fn apply_local_provider_snapshot(
+        &self,
+        snapshot: ProviderSnapshot,
+    ) -> Result<(), NodeError> {
+        self.ensure_provider_record(snapshot.provider.clone())?;
+        let changed = self.with_store_mut(|store| store.apply_provider_snapshot(snapshot))?;
         if changed {
             self.persist_state()?;
         }

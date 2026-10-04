@@ -263,6 +263,86 @@ address)` and creates a session when the first frame from an address in its conf
 arrives. The gateway feeds received bytes or frames, calls `poll(now_ms)`, drains events
 (`DeviceConnected`, `ProviderState`, `DeviceLost`, `DeviceRejected`, `LeasesTooLarge`), sets lease
 sets with `set_leases`, and writes what `transmit()` / `next_segment()` / `next_frame()` return.
+The node's gateway (next section) is the production driver.
+
+## Gateway
+
+`orion-node` serves links with the opt-in `link-gateway` feature (Linux only; it adds no dependency
+beyond `orion-link` itself: serial ports use termios and SocketCAN uses `PF_CAN` raw sockets
+directly through `libc` and tokio's `AsyncFd`). It also works in the IPC-only build
+(`--no-default-features --features link-gateway`). Links are configured with `ORION_NODE_LINKS`, a
+`;`-separated list:
+
+```text
+ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board,motor-a;can:can0?device_base=0x600&host_base=0x680&addresses=1-16&fd=false&extended=false'
+```
+
+Every key (`allow`, `heartbeat_ms`, `missed_heartbeats`, `max_frame`; serial `baud`; CAN
+`device_base`, `host_base`, `addresses`, `fd`, `extended`) is documented in `docs/node-env.md`
+("Link Gateway"). A serial link serves one device (`HostSession<Stream>`); a CAN link serves every
+device address in its range on one interface (`HostBus`), with a kernel receive filter per
+device-to-host identifier. A port or interface that is missing or fails is reopened every second,
+so USB adapters can be unplugged and replugged.
+
+Bridging, kept generic (nothing about the device's resource types is assumed):
+
+- **Provider path.** `ProviderState` goes through the same code path as a `ProviderState` from a
+  local IPC client: the provider record is registered in desired state, the resources are applied to
+  observed state, the change is persisted, and a reconcile is requested. Validation, persistence,
+  reconcile triggering, and observability are therefore identical. The gateway overwrites
+  `ProviderRecord::node_id` with the local node id.
+- **Ownership.** A provider id belongs to one publisher. A device snapshot is ignored (logged,
+  counted as `snapshot_rejects`, lease set cleared) if its provider id is published by a local IPC
+  client, by another device (on any link), or belongs to another node, if a resource names a
+  different provider, or if a resource id already belongs to another provider. Conversely, a local
+  IPC client cannot publish a provider that a device owns. A device that is not on the link's
+  `allow` list never gets a session (`Reject { UnknownDevice }`).
+- **Leases.** A device's lease set is the set `WatchProviderLeases` reports for its provider (leases
+  on desired resources of the provider) plus leases on the resources the device reported. It is
+  recomputed after every desired-state commit (and at least once a second) and handed to
+  `set_leases`, which sends it only when it changed (and after every `Pong`). A reconnecting device
+  is seeded with its leases on `DeviceConnected`, before its first snapshot.
+- **Device loss.** On `DeviceLost` (missed heartbeats, a replaced device, or a port error followed
+  by silence) the device's resources are re-applied with `availability = Unavailable` and
+  `health = Unknown`. The provider record, the resource records, the leases, and the mutation
+  history stay, so a reconnecting device (which always resends its snapshot) restores them in place.
+- **Shutdown.** On node shutdown every link task stops, marks its connected devices lost, and closes
+  its port or socket before the reconcile loop and IPC servers stop.
+- **Observability.** No control-protocol change: `NodeApp::link_status()` returns per-link counters
+  (`frames_rx`/`frames_tx`, bytes, CRC and framing errors, transport drops, decode errors, sessions,
+  device timeouts, hello and snapshot rejects, I/O errors, last error, connected devices), and the
+  gateway logs device connects, publishes, losses, rejections, I/O errors (once per distinct
+  error), and a counter summary when each link closes. The devices' providers and resources are
+  visible with `orionctl get providers` / `orionctl get resources` like any other.
+
+### Try it without hardware
+
+`crates/node/examples/link_device_sim.rs` runs the device side (`StreamDevice`, as on an MCU) on
+the master end of a pseudo-terminal and prints the slave path:
+
+```sh
+cargo build -p orion-node --no-default-features --features link-gateway \
+  --bin orion-node --example link_device_sim
+cargo build -p orionctl
+
+# terminal 1: the simulated device (prints "link_device_sim: pty /dev/pts/N")
+target/debug/examples/link_device_sim --name imu-board
+
+# terminal 2: the node, IPC only (Unix socket paths must stay under 108 bytes)
+ORION_NODE_ID=node-a ORION_NODE_HTTP_ADDR=off \
+  ORION_NODE_IPC_SOCKET=/tmp/orion-a.sock ORION_NODE_IPC_STREAM_SOCKET=/tmp/orion-a-stream.sock \
+  ORION_NODE_LINKS='serial:/dev/pts/N?allow=imu-board&heartbeat_ms=500' \
+  target/debug/orion-node
+
+# terminal 3
+target/debug/orionctl get resources --socket /tmp/orion-a.sock
+# resource id=imu-board.imu-0 type=imu.sample_source provider=provider.imu-board ... health=healthy availability=available
+```
+
+Stop the simulator and the resource turns `health=unknown availability=unavailable` after
+`missed_heartbeats` heartbeats. `link_device_sim --port <path>` drives an existing serial port
+(115200 8N1) instead of a new pty, for example a USB-serial adapter cabled to the gateway's port,
+so the device can be stopped and restarted on a fixed path to see its resources restored.
 
 ## Versioning
 

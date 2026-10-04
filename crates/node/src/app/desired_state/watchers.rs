@@ -12,6 +12,8 @@ impl NodeApp {
         if snapshot.state.desired.revision <= previous_revision {
             return;
         }
+        #[cfg(feature = "link-gateway")]
+        self.notify_link_desired_change();
 
         let client_views: Vec<_> = self
             .clients_read()

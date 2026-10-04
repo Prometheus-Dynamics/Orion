@@ -117,6 +117,10 @@ The facade crate `orion` is feature-gated by subsystem.
   IPC-only node without the HTTP stack (no axum, hyper, reqwest, or rustls). In that build, peer sync,
   the HTTP control and probe listeners, and HTTP TLS are unavailable, and configuring them fails at
   startup with an error. You can add back any of the three transport features independently.
+- `orion-node`'s opt-in `link-gateway` feature (Linux) serves microcontroller links (serial ports
+  and SocketCAN, configured with `ORION_NODE_LINKS`) and bridges each `orion-link` device into the
+  node as an ordinary provider. It also works in the IPC-only build
+  (`--no-default-features --features link-gateway`). See `docs/link-protocol.md`.
 - `orion-transport-http` exposes its protocol types (payloads, routes, codec, errors, and handler
   traits) without the network stack. The HTTP client and server sit behind its default `transport`
   feature.

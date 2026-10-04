@@ -13,6 +13,8 @@ mod app;
 mod auth;
 mod blocking;
 mod config;
+#[cfg(feature = "link-gateway")]
+pub mod link_gateway;
 mod lock;
 #[cfg(any(
     feature = "transport-http",

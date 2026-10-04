@@ -102,9 +102,24 @@ device tests also run without `std`. `tests/link_encoding.rs` pins the wire form
 `tests/fixtures/link_encodings.txt`; refresh it only together with a `LINK_PROTOCOL_VERSION` bump
 (`ORION_UPDATE_LINK_ENCODINGS=1 cargo test -p orion-link --features alloc --test link_encoding`).
 
+## Node Gateway
+
+The `orion-node` `link-gateway` feature (Linux) owns the serial ports and SocketCAN sockets
+configured with `ORION_NODE_LINKS`, drives `HostSession` / `HostBus`, and maps their events onto
+the node's provider path. See the "Gateway" section of
+[`docs/link-protocol.md`](../../docs/link-protocol.md). To try it without hardware, run the
+simulated device on a pseudo-terminal and point a node at it:
+
+```sh
+cargo build -p orion-node --no-default-features --features link-gateway --bin orion-node --example link_device_sim
+target/debug/examples/link_device_sim            # prints "link_device_sim: pty /dev/pts/N"
+ORION_NODE_HTTP_ADDR=off ORION_NODE_IPC_SOCKET=/tmp/orion-a.sock \
+  ORION_NODE_IPC_STREAM_SOCKET=/tmp/orion-a-stream.sock \
+  ORION_NODE_LINKS='serial:/dev/pts/N?allow=imu-board' target/debug/orion-node
+orionctl get resources --socket /tmp/orion-a.sock   # shows imu-board.imu-0
+```
+
 ## What Does Not Live Here (yet)
 
-- The node gateway (`orion-node` `link-gateway` feature) that owns serial ports and SocketCAN
-  sockets, drives `HostSession` / `HostBus`, and maps their events onto the node's provider path.
 - The executor role (`ExecutorState`, `Workloads`) and the volatile `Status` lane; their kind
   numbers are reserved.

@@ -33,6 +33,9 @@ transport-quic = ["dep:orion-transport-quic"]
 # off by default so the binary uses the platform allocator (glibc malloc on Linux). They are meant
 # to be enabled one at a time; if both are enabled (for example by `--all-features`), jemalloc takes
 # precedence and mimalloc is compiled but unused. See docs/node-env.md.
+# Serves microcontroller links (serial and SocketCAN, Linux only) and bridges each device into the
+# node as a provider. Opt-in; configured with ORION_NODE_LINKS. See docs/link-protocol.md.
+link-gateway = ["dep:orion-link"]
 alloc-mimalloc = ["dep:mimalloc"]
 alloc-jemalloc = ["dep:tikv-jemallocator"]
 
@@ -44,6 +47,7 @@ orion-auth = { workspace = true, features = ["std"] }
 orion-control-plane = { workspace = true, features = ["std"] }
 orion-core = { workspace = true, features = ["std"] }
 orion-data-plane = { workspace = true, features = ["std"] }
+orion-link = { workspace = true, features = ["std"], optional = true }
 orion-runtime = { workspace = true, features = ["std"] }
 orion-service.workspace = true
 orion-transport-common.workspace = true
@@ -68,6 +72,10 @@ orion = { workspace = true, features = ["auth", "client", "runtime", "macros", "
 orion-macros.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
+
+[[example]]
+name = "link_device_sim"
+required-features = ["link-gateway"]
 
 # Integration tests that drive the node over its HTTP control plane.
 

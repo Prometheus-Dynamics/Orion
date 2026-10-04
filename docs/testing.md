@@ -66,6 +66,24 @@ MIMALLOC_ALLOW_THP=0 cargo test --release -p orion-node --features alloc-mimallo
 
 To run several variants in parallel without rebuilding, copy each `cargo build --release -p orion-node [--features …]` output aside and point `ORION_SOAK_NODE_BIN` at it. Results and the resulting recommendation (keep glibc, set `MALLOC_ARENA_MAX=2`, check transparent huge pages) are in [`node-env.md`](node-env.md#allocator-measurements). On hosts with THP set to `always`, jemalloc and mimalloc use far more memory unless THP is disabled, so record `/sys/kernel/mm/transparent_hugepage/enabled` with any comparison.
 
+## Link Gateway
+
+`cargo test -p orion-node --no-default-features --features link-gateway` (also part of
+`--all-features`) runs the gateway tests without hardware or root: config parsing, serial end to end
+over pseudo-terminal pairs (`posix_openpt`; a simulated `StreamDevice` on the master, the gateway on
+the slave: the provider appears, leases reach the device, a disconnect marks resources unavailable,
+a reconnect restores them, allowlist and ownership-collision rejection), and CAN bridging of several
+devices through `HostBus` over an in-memory bus.
+
+One test needs a real virtual CAN interface and is `#[ignore]`d; it skips itself when `vcan0` is
+missing:
+
+```sh
+sudo modprobe vcan
+sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
+cargo test -p orion-node --features link-gateway --lib can_gateway_on_vcan0 -- --ignored
+```
+
 ## Additional Coverage
 
 - Perf thresholds and baselines live in `testing/ci/perf-baselines.json`

@@ -141,6 +141,44 @@ switch allocators.
 | `ORION_NODE_HTTP_MTLS` | `disabled` | `disabled`, `optional`, `required` | Invalid mode fails startup. |
 | `ORION_NODE_LOCAL_AUTH` | `same-user` | `disabled`, `same-user`, `same-user-or-group` | Invalid mode fails startup. |
 
+## Link Gateway
+
+Requires the opt-in `link-gateway` cargo feature (`cargo build -p orion-node --features
+link-gateway`, or `--no-default-features --features link-gateway` for an IPC-only appliance) and
+Linux. Setting `ORION_NODE_LINKS` in a build without the feature, or on another OS, fails startup
+with an error that says so. See the "Gateway" section of `docs/link-protocol.md`.
+
+| Variable | Default | Valid values | Failure behavior |
+| --- | --- | --- | --- |
+| `ORION_NODE_LINKS` | unset (no links) | `;`-separated `<kind>:<target>[?key=value&...]` entries, `kind` = `serial` or `can` | Any malformed entry, unknown or misplaced key, out-of-range value, duplicate key, or duplicate link fails startup with `NodeError::Config` naming the entry. A port or interface that cannot be opened does not fail startup; the link retries every second and logs the error. |
+
+Keys for every link:
+
+| Key | Default | Valid values | Meaning |
+| --- | --- | --- | --- |
+| `allow` | unset (any device name) | Comma-separated device names | Only these `Hello` device names are accepted; others get `Reject { UnknownDevice }`. |
+| `heartbeat_ms` | `1000` | `10`-`600000` | Ping interval announced to devices in `Welcome`. |
+| `missed_heartbeats` | `3` | `>= 1` | Heartbeats without traffic before the gateway reports a device lost (its resources become unavailable). |
+| `max_frame` | `4096` | `32`-`4096` | Host frame limit; the negotiated limit is the minimum of this and the device's. |
+
+`serial:<path>` keys (raw mode, 8N1, no flow control, exclusive open):
+
+| Key | Default | Valid values | Meaning |
+| --- | --- | --- | --- |
+| `baud` | `115200` | `1200`, `2400`, `4800`, `9600`, `19200`, `38400`, `57600`, `115200`, `230400`, `460800`, `500000`, `576000`, `921600`, `1000000`, `1152000`, `1500000`, `2000000`, `2500000`, `3000000`, `3500000`, `4000000` | Line rate. Ignored by USB-CDC and pseudo-terminals. |
+
+`can:<interface>` keys (SocketCAN `CAN_RAW`, one kernel receive filter per device address):
+
+| Key | Default | Valid values | Meaning |
+| --- | --- | --- | --- |
+| `device_base` | `0x600` | Decimal or `0x` hex | Device-to-host identifier base; device `a` sends on `device_base + a`. |
+| `host_base` | `0x680` | Decimal or `0x` hex | Host-to-device identifier base; device `a` listens on `host_base + a`. |
+| `addresses` | `1-16` | `N` or `A-B`, at most 512 addresses | Device addresses served. Every identifier must fit 11 bits (29 with `extended`), and the device and host identifier ranges must not overlap. |
+| `fd` | `false` | `true`/`false` (`1`/`0`, `yes`/`no`, `on`/`off`) | CAN FD (64-byte frames, `CAN_RAW_FD_FRAMES`). The interface must be configured for FD. |
+| `extended` | `false` | as `fd` | 29-bit identifiers. |
+
+Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:can0?device_base=0x600&host_base=0x680&addresses=1-16&allow=motor-a,motor-b'`.
+
 ## Persistence and Logging
 
 | Variable | Default | Valid values | Failure behavior |

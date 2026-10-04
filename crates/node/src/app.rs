@@ -1,6 +1,8 @@
 mod builder;
 mod desired_state;
 mod desired_sync;
+#[cfg(feature = "link-gateway")]
+mod link_bridge;
 mod local_clients;
 mod local_control;
 mod maintenance_admin;
