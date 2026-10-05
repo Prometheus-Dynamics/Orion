@@ -166,12 +166,14 @@ impl Wire {
 
 /// A device and a host over a simulated byte stream.
 pub struct StreamPair {
-    pub device: StreamDevice<512, 512>,
+    pub device: StreamDevice<512, 512, String>,
     pub host: HostSession<Stream>,
     pub now: u64,
     pub up: Wire,
     pub down: Wire,
     pub device_events: Vec<(u64, DeviceEvent)>,
+    /// The device's lease set at every `LeasesChanged` event.
+    pub lease_sets: Vec<(u64, Vec<LeaseRecord>)>,
     pub host_events: Vec<(u64, HostEvent)>,
     /// Stop polling/serving the device (simulates a crashed device).
     pub device_frozen: bool,
@@ -180,13 +182,17 @@ pub struct StreamPair {
 impl StreamPair {
     pub fn new(name: &str, config: HostConfig, seed: u64) -> Self {
         Self::with_device(
-            StreamDevice::new(DeviceConfig::provider(name), Stream),
+            StreamDevice::new(DeviceConfig::provider(name.to_owned()), Stream),
             config,
             seed,
         )
     }
 
-    pub fn with_device(device: StreamDevice<512, 512>, config: HostConfig, seed: u64) -> Self {
+    pub fn with_device(
+        device: StreamDevice<512, 512, String>,
+        config: HostConfig,
+        seed: u64,
+    ) -> Self {
         Self {
             device,
             host: HostSession::stream(config),
@@ -194,6 +200,7 @@ impl StreamPair {
             up: Wire::new(seed),
             down: Wire::new(seed ^ 0xA5A5),
             device_events: Vec::new(),
+            lease_sets: Vec::new(),
             host_events: Vec::new(),
             device_frozen: false,
         }
@@ -233,6 +240,10 @@ impl StreamPair {
 
     fn drain(&mut self) {
         while let Some(event) = self.device.next_event() {
+            if event == DeviceEvent::LeasesChanged {
+                self.lease_sets
+                    .push((self.now, self.device.lease_records()));
+            }
             self.device_events.push((self.now, event));
         }
         while let Some(event) = self.host.next_event() {
@@ -274,13 +285,7 @@ impl StreamPair {
     }
 
     pub fn device_leases(&self) -> Vec<&Vec<LeaseRecord>> {
-        self.device_events
-            .iter()
-            .filter_map(|(_, e)| match e {
-                DeviceEvent::Leases(leases) => Some(leases),
-                _ => None,
-            })
-            .collect()
+        self.lease_sets.iter().map(|(_, leases)| leases).collect()
     }
 
     pub fn count_device(&self, pred: impl Fn(&DeviceEvent) -> bool) -> usize {
@@ -296,10 +301,12 @@ impl StreamPair {
 pub struct BusNode {
     pub address: u32,
     pub ids: CanLinkIds,
-    pub device: CanDevice<512, 512>,
+    pub device: CanDevice<512, 512, String>,
     pub up: Wire,
     pub down: Wire,
     pub events: Vec<(u64, DeviceEvent)>,
+    /// The device's lease set at every `LeasesChanged` event.
+    pub lease_sets: Vec<Vec<LeaseRecord>>,
     pub frozen: bool,
 }
 
@@ -324,6 +331,7 @@ impl CanBus {
                 up: Wire::new(seed.wrapping_add(u64::from(address))),
                 down: Wire::new(seed.wrapping_mul(31).wrapping_add(u64::from(address))),
                 events: Vec::new(),
+                lease_sets: Vec::new(),
                 frozen: false,
             })
             .collect();
@@ -384,6 +392,9 @@ impl CanBus {
         }
         for node in &mut self.nodes {
             while let Some(event) = node.device.next_event() {
+                if event == DeviceEvent::LeasesChanged {
+                    node.lease_sets.push(node.device.lease_records());
+                }
                 node.events.push((self.now, event));
             }
         }

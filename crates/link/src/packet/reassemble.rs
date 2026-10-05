@@ -67,6 +67,7 @@ pub struct Reassembler<const N: usize> {
 }
 
 impl<const N: usize> Default for Reassembler<N> {
+    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }
@@ -75,6 +76,7 @@ impl<const N: usize> Default for Reassembler<N> {
 impl<const N: usize> Reassembler<N> {
     /// An idle reassembler.
     #[must_use]
+    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             buf: [0; N],
@@ -241,7 +243,7 @@ impl<const N: usize> Reassembler<N> {
         };
         match self.buf.get_mut(self.len..new_len) {
             Some(dst) => {
-                dst.copy_from_slice(data);
+                frame::copy_prefix(dst, data);
                 self.len = new_len;
                 true
             }

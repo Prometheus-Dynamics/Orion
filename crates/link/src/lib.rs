@@ -7,9 +7,13 @@
 //! - [`stream`]: COBS encoding with `0x00` delimiters for byte streams, plus a resynchronizing
 //!   streaming decoder.
 //! - [`packet`]: segmentation into classic CAN / CAN FD frames and reassembly.
-//! - `message` (feature `alloc`): typed messages with postcard bodies and stable kind numbers.
-//! - `device` (feature `alloc`): the sans-IO device session, generic over `Stream` or
-//!   `Packet` transports, with fixed const-generic buffers.
+//! - `wire` (feature `device`): the minimal device-side message layer: a hand-written
+//!   postcard-compatible codec and borrowed views of every body a device sends or receives. No
+//!   allocator, no serde, no `core::fmt`.
+//! - `device` (feature `device`): the sans-IO device session, generic over `Stream` or `Packet`
+//!   transports, with fixed const-generic buffers and no allocator.
+//! - `message` (feature `alloc`): typed messages over the shared Orion records (postcard + serde),
+//!   used by the host; with `alloc` the device session also accepts the records directly.
 //! - `host` (feature `std`): the sans-IO host session and a multi-device CAN bus, for the node
 //!   gateway.
 //!
@@ -58,14 +62,16 @@ pub mod packet;
 mod source;
 pub mod stream;
 
-#[cfg(feature = "alloc")]
+#[cfg(feature = "device")]
 pub mod device;
 #[cfg(feature = "std")]
 pub mod host;
 #[cfg(feature = "alloc")]
 pub mod message;
-#[cfg(feature = "alloc")]
+#[cfg(feature = "device")]
 pub mod transport;
+#[cfg(feature = "device")]
+pub mod wire;
 
 #[cfg(feature = "embedded-can")]
 mod can;
@@ -89,5 +95,5 @@ pub use stream::{
     StreamDecoder, StreamEncoder, StreamError, StreamStats, encode_frame, encode_message,
     max_encoded_len,
 };
-#[cfg(feature = "alloc")]
+#[cfg(feature = "device")]
 pub use transport::{Packet, Stream, Transport};

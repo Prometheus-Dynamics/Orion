@@ -47,7 +47,7 @@ impl Segment {
 }
 
 /// Progress of a [`Segmenter`] without its borrowed frame (see [`Segmenter::save`]).
-#[cfg(feature = "alloc")]
+#[cfg(feature = "device")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[doc(hidden)]
 pub struct SegmenterState {
@@ -105,7 +105,7 @@ impl<'a> Segmenter<'a> {
     }
 
     /// Progress so far, to continue later with [`Segmenter::resume`].
-    #[cfg(feature = "alloc")]
+    #[cfg(feature = "device")]
     pub(crate) fn save(&self) -> SegmenterState {
         SegmenterState {
             pos: self.pos,
@@ -115,7 +115,7 @@ impl<'a> Segmenter<'a> {
     }
 
     /// Continues segmenting the raw `frame` from a saved state.
-    #[cfg(feature = "alloc")]
+    #[cfg(feature = "device")]
     pub(crate) fn resume(frame: &'a [u8], mtu: SegmentMtu, saved: SegmenterState) -> Self {
         Self {
             src: FrameSource::raw(frame),

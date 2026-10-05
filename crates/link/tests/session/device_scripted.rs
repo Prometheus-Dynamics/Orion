@@ -1,4 +1,6 @@
 //! The device session against a scripted host (runs without `std`: only `alloc` APIs are used).
+//! The device publishes the full records here; `tests/device_views.rs` drives the same session
+//! with the borrowed views and no allocator.
 
 use orion_core::{NodeId, ProviderId, ResourceId};
 use orion_link::device::{
@@ -140,11 +142,9 @@ fn welcome_connects_and_sends_the_snapshot_then_pings() {
     host.send(&mut device, &welcome(7));
     assert_eq!(
         events(&mut device),
-        vec![DeviceEvent::Connected {
-            node_id: NodeId::new("node-a"),
-            session_id: 7
-        }]
+        vec![DeviceEvent::Connected { session_id: 7 }]
     );
+    assert_eq!(device.node_id(), Some("node-a"));
     device.poll(5);
     let frames = host.drain(&mut device);
     let (header, Message::ProviderState(state)) = &frames[0] else {
@@ -210,11 +210,21 @@ fn identical_lease_sets_are_reported_once() {
     host.send(&mut device, &Message::Leases(Vec::new()));
     assert_eq!(
         events(&mut device),
-        // The last two collapse into the newest set while queued.
-        vec![DeviceEvent::Leases(Vec::new())]
+        // The changes collapse while queued; the session holds the newest set.
+        vec![DeviceEvent::LeasesChanged]
     );
+    assert!(device.lease_records().is_empty());
+    assert_eq!(device.leases().len(), 0);
     host.send(&mut device, &Message::Leases(set.clone()));
-    assert_eq!(events(&mut device), vec![DeviceEvent::Leases(set)]);
+    assert_eq!(events(&mut device), vec![DeviceEvent::LeasesChanged]);
+    assert_eq!(device.lease_records(), set);
+    assert_eq!(
+        device.leases().next().map(|l| l.resource_id),
+        Some("dev.r1")
+    );
+    // Leaving the session forgets the set.
+    host.send(&mut device, &Message::Reject(RejectReason::NoSession));
+    assert!(device.lease_records().is_empty());
 }
 
 #[test]

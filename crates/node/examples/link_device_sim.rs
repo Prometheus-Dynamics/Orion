@@ -138,7 +138,7 @@ fn main() -> io::Result<()> {
     .build();
 
     let mut device =
-        StreamDevice::<512, 512>::new(DeviceConfig::provider(args.name.clone()), Stream);
+        StreamDevice::<512, 512, String>::new(DeviceConfig::provider(args.name.clone()), Stream);
     device
         .publish_provider_state(&provider, &[resource])
         .map_err(|error| io::Error::other(format!("{error:?}")))?;
@@ -162,17 +162,14 @@ fn main() -> io::Result<()> {
         device.poll(now_ms);
         while let Some(event) = device.next_event() {
             match event {
-                DeviceEvent::Leases(leases) => {
-                    let held: Vec<String> = leases
-                        .iter()
+                DeviceEvent::LeasesChanged => {
+                    let held: Vec<String> = device
+                        .leases()
                         .map(|lease| {
                             format!(
                                 "{} -> {}",
                                 lease.resource_id,
-                                lease
-                                    .holder_workload_id
-                                    .as_ref()
-                                    .map_or("-".to_owned(), ToString::to_string)
+                                lease.holder_workload_id.unwrap_or("-")
                             )
                         })
                         .collect();

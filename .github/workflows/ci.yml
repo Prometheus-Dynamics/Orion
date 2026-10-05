@@ -113,11 +113,13 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
   link-no-std:
-    # orion-link must stay no_std for microcontroller targets: framing without an allocator,
-    # messages and the device session with `alloc`. The MCU template must link as a bare-metal
-    # staticlib.
+    # orion-link must stay no_std for microcontroller targets: framing and the minimal device path
+    # (`device`) without an allocator or any dependency, the full-record messages and session
+    # conveniences with `alloc`. The MCU template must link as a bare-metal staticlib, including on
+    # cores without compare-and-swap (thumbv6m, riscv32imc), and its minimal UART build must stay
+    # within the flash/RAM budgets in scripts/mcu-size.sh.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -127,7 +129,7 @@ jobs:
         with:
           toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
           components: clippy, rustfmt
-          targets: thumbv7em-none-eabihf, thumbv8m.main-none-eabihf, riscv32imac-unknown-none-elf
+          targets: thumbv6m-none-eabi, thumbv7em-none-eabihf, thumbv8m.main-none-eabihf, riscv32imc-unknown-none-elf, riscv32imac-unknown-none-elf
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -138,20 +140,37 @@ jobs:
 
       - name: Build and lint orion-link for embedded targets
         run: |
-          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf; do
+          for target in thumbv6m-none-eabi thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf; do
             cargo clippy --locked -p orion-link --no-default-features --target "$target" -- -D warnings
             cargo clippy --locked -p orion-link --no-default-features --features embedded-io,embedded-io-async,embedded-can,crc-table --target "$target" -- -D warnings
+            cargo clippy --locked -p orion-link --no-default-features --features device --target "$target" -- -D warnings
+            cargo clippy --locked -p orion-link --no-default-features --features device,embedded-io,embedded-can --target "$target" -- -D warnings
             cargo clippy --locked -p orion-link --no-default-features --features alloc --target "$target" -- -D warnings
             cargo clippy --locked -p orion-link --no-default-features --features alloc,embedded-io,embedded-can --target "$target" -- -D warnings
             cargo build --locked -p orion-link --release --no-default-features --target "$target"
+            cargo build --locked -p orion-link --release --no-default-features --features device --target "$target"
             cargo build --locked -p orion-link --release --no-default-features --features alloc --target "$target"
           done
+
+      - name: Check that the minimal device path has no model, serde, or postcard dependency
+        run: |
+          tree="$(cargo tree --locked -p orion-link --no-default-features \
+            --features device,embedded-io,embedded-io-async,embedded-can,crc-table \
+            --target thumbv6m-none-eabi -e normal --prefix none)"
+          echo "$tree"
+          if grep -E '^(orion-core|orion-control-plane|serde|postcard) ' <<<"$tree"; then
+            echo "error: the no-alloc device path must not depend on the crates above" >&2
+            exit 1
+          fi
 
       - name: Test orion-link feature combinations
         run: |
           cargo test --locked -p orion-link --no-default-features
           cargo test --locked -p orion-link --no-default-features --features crc-table
+          cargo test --locked -p orion-link --no-default-features --features device
+          cargo test --locked -p orion-link --no-default-features --features device,embedded-io,embedded-can
           cargo test --locked -p orion-link --no-default-features --features alloc
+          cargo clippy --locked -p orion-link --no-default-features --features device --all-targets -- -D warnings
           cargo clippy --locked -p orion-link --no-default-features --features alloc --all-targets -- -D warnings
           cargo test --locked -p orion-link --all-features
           cargo run --locked -p orion-link --example sim_device --features std
@@ -161,15 +180,22 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --all-targets --features alloc -- -D warnings
           cargo test --locked
-          for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
+          cargo test --locked --features alloc
+          for target in thumbv6m-none-eabi thumbv7em-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf; do
             cargo clippy --locked --release --target "$target" -- -D warnings
             cargo build --locked --release --target "$target"
             cargo build --locked --release --target "$target" --no-default-features --features standalone,ffi-can
           done
+          # The full-record variant with the example heap (which needs compare-and-swap).
+          for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
+            cargo clippy --locked --release --target "$target" --features global-heap -- -D warnings
+            cargo build --locked --release --target "$target" --features global-heap
+          done
 
-      - name: Report MCU template footprint
-        run: ./scripts/mcu-size.sh
+      - name: MCU template footprint and size budget
+        run: MCU_SIZE_CHECK_BUDGET=1 MCU_SIZE_BREAKDOWN=1 ./scripts/mcu-size.sh
 
   no-std:
     # The model crates (core, data-plane, control-plane, auth, runtime, cluster) and the `orion`

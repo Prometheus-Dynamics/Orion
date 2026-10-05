@@ -5,7 +5,7 @@
 //! ```
 //!
 //! The device side is exactly what an MCU port runs (`StreamDevice` fed with bytes, polled with a
-//! millisecond clock); the host side is what the node gateway runs (`HostSession`). The serial
+//! millisecond clock, publishing borrowed `wire` views with no allocator); the host side is what the node gateway runs (`HostSession`). The serial
 //! line is two byte queues with a 115200-baud delay. A virtual clock drives both, so the
 //! timeline is deterministic and the run takes no real time. Halfway through, the cable is
 //! unplugged for five seconds.
@@ -15,7 +15,20 @@ use std::collections::VecDeque;
 use orion_link::Stream;
 use orion_link::device::{DeviceConfig, DeviceEvent, StreamDevice};
 use orion_link::host::{HostConfig, HostEvent, HostSession};
-use orion_link::message::{LeaseRecord, NodeId, ProviderRecord, ResourceRecord};
+use orion_link::message::{LeaseRecord, NodeId};
+use orion_link::wire::{ProviderView, ResourceView};
+
+/// The device's provider, as it would sit in flash.
+const PROVIDER: ProviderView<'static> = ProviderView::new("provider.imu-board", "unassigned")
+    .with_resource_types(&["imu.sample_source"]);
+
+/// The device's single resource, labelled with its sample rate.
+const fn resource(label: &'static [&'static str]) -> [ResourceView<'static>; 1] {
+    [
+        ResourceView::new("imu-board.imu-0", "imu.sample_source", "provider.imu-board")
+            .with_labels(label),
+    ]
+}
 
 /// One direction of a serial line: bytes become readable after their transmission time.
 struct Line {
@@ -60,17 +73,6 @@ impl Line {
 }
 
 fn main() {
-    let provider = ProviderRecord::builder("provider.imu-board", NodeId::new("unassigned"))
-        .resource_type("imu.sample_source")
-        .build();
-    let resource = |rate: u64| {
-        vec![
-            ResourceRecord::builder("imu-board.imu-0", "imu.sample_source", "provider.imu-board")
-                .label(format!("rate={rate}hz"))
-                .build(),
-        ]
-    };
-
     // Device: 256-byte receive and transmit buffers, as on a small MCU.
     let mut device = StreamDevice::<256, 256>::new(DeviceConfig::provider("imu-board"), Stream);
     let mut host = HostSession::stream(HostConfig::new(NodeId::new("node-a")));
@@ -79,7 +81,7 @@ fn main() {
     let mut uart_fifo = [0u8; 16];
 
     device
-        .publish_provider_state(&provider, &resource(100))
+        .publish_provider_state(&PROVIDER, &resource(&["rate=100hz"]))
         .expect("snapshot fits");
 
     for now in 0..=14_000u64 {
@@ -97,7 +99,7 @@ fn main() {
             3_000 => {
                 println!("{now:>6} ms  device   publish_provider_state(rate=200hz)");
                 device
-                    .publish_provider_state(&provider, &resource(200))
+                    .publish_provider_state(&PROVIDER, &resource(&["rate=200hz"]))
                     .expect("snapshot fits");
             }
             6_000 => println!("{now:>6} ms  -------- cable unplugged --------"),
@@ -110,8 +112,8 @@ fn main() {
         device.poll(now);
         while let Some(event) = device.next_event() {
             match event {
-                DeviceEvent::Leases(leases) => {
-                    let held: Vec<_> = leases.iter().map(|l| l.resource_id.as_str()).collect();
+                DeviceEvent::LeasesChanged => {
+                    let held: Vec<_> = device.leases().map(|l| l.resource_id).collect();
                     println!("{now:>6} ms  device   leases {held:?}");
                 }
                 other => println!("{now:>6} ms  device   {other:?}"),

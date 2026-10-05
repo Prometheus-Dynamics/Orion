@@ -3,7 +3,7 @@
 use embedded_io::{Read, ReadReady, Write};
 use orion_link::Stream;
 use orion_link::device::{DeviceConfig, DeviceEvent, PublishError, StreamDevice};
-use orion_link::message::{ProviderRecord, ResourceRecord};
+use orion_link::wire::{ProviderBody, ResourceBody, StatusBody};
 
 use crate::{RX, TX};
 
@@ -14,11 +14,11 @@ const CHUNK: usize = 32;
 ///
 /// ```ignore
 /// let mut port = UartPort::new(uart, "imu-board");
-/// port.publish(&provider, &resources)?;
+/// port.publish(&PROVIDER, &RESOURCES)?;         // `wire` views, no heap
 /// loop {
 ///     port.service(millis())?;               // RX → session → TX
 ///     while let Some(event) = port.next_event() {
-///         // DeviceEvent::Leases(leases) => start/stop work for leased resources
+///         // DeviceEvent::LeasesChanged => port.session().leases(): start/stop work
 ///     }
 /// }
 /// ```
@@ -29,7 +29,7 @@ pub struct UartPort<U> {
 
 impl<U: Read + ReadReady + Write> UartPort<U> {
     /// Binds `uart` to a new session for `device_name`.
-    pub fn new(uart: U, device_name: &str) -> Self {
+    pub fn new(uart: U, device_name: &'static str) -> Self {
         Self::with_config(uart, DeviceConfig::provider(device_name))
     }
 
@@ -68,17 +68,27 @@ impl<U: Read + ReadReady + Write> UartPort<U> {
         self.uart.flush()
     }
 
-    /// Replaces the provider snapshot (sent and retransmitted until acknowledged).
+    /// Replaces the provider snapshot (sent and retransmitted until acknowledged): `wire` views,
+    /// or the full records with the `alloc` feature.
     ///
     /// # Errors
     ///
     /// [`PublishError::TooLarge`] if it does not fit [`TX`].
-    pub fn publish(
-        &mut self,
-        provider: &ProviderRecord,
-        resources: &[ResourceRecord],
-    ) -> Result<(), PublishError> {
+    pub fn publish<P, R>(&mut self, provider: &P, resources: &[R]) -> Result<(), PublishError>
+    where
+        P: ProviderBody + ?Sized,
+        R: ResourceBody,
+    {
         self.session.publish_provider_state(provider, resources)
+    }
+
+    /// Publishes volatile status values (fire-and-forget, newest batch wins).
+    ///
+    /// # Errors
+    ///
+    /// [`PublishError::TooLarge`] if the batch does not fit [`TX`].
+    pub fn publish_status<S: StatusBody>(&mut self, entries: &[S]) -> Result<(), PublishError> {
+        self.session.publish_status(entries)
     }
 
     /// The next session event.
