@@ -45,6 +45,13 @@ impl NodeApp {
             ControlMessage::QueryObservability => Ok(HttpResponsePayload::Observability(Box::new(
                 self.observability_snapshot(),
             ))),
+            ControlMessage::EnrollmentHello(hello) => Ok(HttpResponsePayload::EnrollmentChallenge(
+                Box::new(self.answer_enrollment_hello(*hello)?),
+            )),
+            ControlMessage::EnrollmentConfirm(confirm) => {
+                self.answer_enrollment_confirm(*confirm)?;
+                Ok(HttpResponsePayload::Accepted)
+            }
             ControlMessage::ClientHello(_)
             | ControlMessage::ClientWelcome(_)
             | ControlMessage::ProviderState(_)
@@ -75,7 +82,12 @@ impl NodeApp {
             | ControlMessage::Ping
             | ControlMessage::Pong
             | ControlMessage::Accepted
-            | ControlMessage::Rejected(_) => Err(NodeError::Storage(
+            | ControlMessage::Rejected(_)
+            | ControlMessage::QueryDiscovery
+            | ControlMessage::Discovery(_)
+            | ControlMessage::EnrollDiscoveredPeer(_)
+            | ControlMessage::RemovePeer(_)
+            | ControlMessage::EnrollmentChallenge(_) => Err(NodeError::Storage(
                 "local-only control message received on a peer transport".into(),
             )),
         }

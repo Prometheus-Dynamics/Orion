@@ -150,8 +150,14 @@ none of these are HeliOS-specific features.
         judge each other (today placement and binding need direct peering).
   - [ ] Fencing for failover: a partitioned former assignee keeps running until it hears of the
         new assignment.
-- [ ] **Discovery.** mDNS for discovery only. Trust stays enrollment-based (ed25519 peer keys or a
-      shared enrollment key); discovered peers are never trusted automatically.
+- [x] **Discovery.** mDNS for discovery only. Trust stays enrollment-based (ed25519 peer keys or a
+      shared enrollment key); discovered peers are never trusted automatically. (Feature
+      `discovery-mdns`: `_orion._tcp` with node id, public key, ports, protocol version and cluster
+      in TXT; `orionctl get discovered-peers`, `orionctl peers enroll <node-id>` with fingerprint
+      confirmation, `orionctl peers remove`; shared-key HMAC + ed25519 handshake over `orion+tcp`;
+      see [docs/discovery.md](docs/discovery.md).)
+  - [ ] Initiate the shared-key handshake over `https://` peers too (served on both transports,
+        initiated over `orion+tcp` only).
 - [x] **Placement.** Node labels plus workload constraints (node selector, co-locate with resource X,
       any eligible node), with a deterministic leaderless choice, owned by `orion-cluster`
       (`ClusterCoordinator`: rendezvous hashing over eligible nodes, chosen node writes its own

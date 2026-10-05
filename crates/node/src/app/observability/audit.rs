@@ -25,6 +25,7 @@ pub(crate) enum AuditEventKind {
     TransportSecurityFailure,
     PeerEnrolled,
     PeerRevoked,
+    PeerRemoved,
     PeerIdentityReplaced,
     PeerTlsPretrusted,
     #[cfg_attr(not(feature = "transport-http"), allow(dead_code))]

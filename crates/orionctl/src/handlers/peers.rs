@@ -26,12 +26,29 @@ pub(super) async fn run(command: PeerCommand) -> Result<(), String> {
                 | OutputFormat::Metrics => print_structured(&snapshot, args.local.output),
             }
         }
+        PeerCommand::Remove(args) => super::discovered::remove_peer(args).await,
         PeerCommand::Enroll(args) => {
             let client = args.local.client()?;
+            let node_id = match (args.discovered, args.node_id) {
+                (Some(_), Some(_)) => {
+                    return Err("give the node id either as an argument or with --node-id".into());
+                }
+                (Some(node_id), None) | (None, Some(node_id)) => node_id,
+                (None, None) => return Err("peers enroll needs a node id".into()),
+            };
+            let Some(base_url) = args.base_url else {
+                return super::discovered::enroll_discovered_peer(
+                    &client,
+                    &node_id,
+                    args.fingerprint,
+                    args.yes,
+                )
+                .await;
+            };
             client
                 .enroll_peer(PeerEnrollment {
-                    node_id: NodeId::new(args.node_id),
-                    base_url: PeerBaseUrl::new(args.base_url),
+                    node_id: NodeId::new(node_id),
+                    base_url: PeerBaseUrl::new(base_url),
                     trusted_public_key_hex: args.public_key.map(PublicKeyHex::new),
                     trusted_tls_root_cert_pem: args
                         .tls_root_cert

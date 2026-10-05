@@ -57,6 +57,45 @@ impl DisabledPeerTcpServer {
     }
 }
 
+/// Stand-in for peer discovery in builds without the `discovery-mdns` feature.
+#[cfg(not(feature = "discovery-mdns"))]
+struct DisabledDiscovery;
+
+#[cfg(not(feature = "discovery-mdns"))]
+impl DisabledDiscovery {
+    async fn shutdown(self) {}
+}
+
+/// Starts mDNS discovery when `ORION_NODE_DISCOVERY=mdns`, advertising the `orion+tcp` listener
+/// (and the HTTP listener when it is reachable from other hosts).
+#[cfg(feature = "discovery-mdns")]
+fn start_discovery(
+    app: &NodeApp,
+    process: &NodeProcessConfig,
+    peer_tcp_addr: Option<std::net::SocketAddr>,
+    http_addr: Option<std::net::SocketAddr>,
+) -> Result<Option<orion_node::discovery::DiscoveryHandle>, orion_node::NodeError> {
+    let (Some(config), Some(peer_tcp_addr)) = (process.discovery.clone(), peer_tcp_addr) else {
+        return Ok(None);
+    };
+    let addresses = if peer_tcp_addr.ip().is_unspecified() {
+        Vec::new()
+    } else {
+        vec![peer_tcp_addr.ip()]
+    };
+    let endpoints = orion_node::discovery::AdvertisedEndpoints {
+        peer_tcp_port: Some(peer_tcp_addr.port()),
+        http_port: http_addr
+            .filter(|addr| !addr.ip().is_loopback())
+            .map(|addr| addr.port()),
+        https: app.http_tls_cert_path().is_some(),
+        addresses,
+    };
+    let backend = orion_node::discovery::MdnsDiscoveryBackend::new(config.interfaces.clone());
+    app.start_discovery(config, Box::new(backend), endpoints)
+        .map(Some)
+}
+
 /// Stand-in for the link gateway in builds without the `link-gateway` feature.
 #[cfg(not(feature = "link-gateway"))]
 struct DisabledLinkGateway;
@@ -118,9 +157,14 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         app_builder = app_builder.with_audit_log_path(path);
     }
     let app = app_builder.try_build()?;
+    // Peers enrolled through discovery are trusted peers like ORION_NODE_PEERS entries.
+    #[cfg(feature = "discovery-mdns")]
+    let dynamic_peers = app.restore_discovered_enrollments()? > 0 || process.discovery.is_some();
+    #[cfg(not(feature = "discovery-mdns"))]
+    let dynamic_peers = false;
     let reconcile_loop = app.spawn_reconcile_loop(config.reconcile_interval);
     let clock_facts_loop = app.spawn_clock_facts_loop();
-    let peer_sync_loop = (!config.peers.is_empty()).then(|| {
+    let peer_sync_loop = (!config.peers.is_empty() || dynamic_peers).then(|| {
         app.spawn_peer_sync_loop_with_execution(
             config.reconcile_interval,
             config.peer_sync_execution,
@@ -171,6 +215,15 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     };
     #[cfg(not(feature = "peer-tcp"))]
     let peer_tcp_server = None::<(std::net::SocketAddr, DisabledPeerTcpServer)>;
+    #[cfg(feature = "discovery-mdns")]
+    let discovery = start_discovery(
+        &app,
+        &process,
+        peer_tcp_server.as_ref().map(|(addr, _)| *addr),
+        http_server.as_ref().map(|(addr, _)| *addr),
+    )?;
+    #[cfg(not(feature = "discovery-mdns"))]
+    let discovery = None::<DisabledDiscovery>;
     #[cfg(feature = "transport-http")]
     let probe_server = if let Some(probe_addr) = process.http_probe_addr {
         Some(app.start_http_probe_server_graceful(probe_addr).await?)
@@ -242,6 +295,9 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         );
         tokio::time::sleep(shutdown_after_init).await;
         info!(node = %snapshot.node_id, "shutting down orion-node after initialization delay");
+        if let Some(discovery) = discovery {
+            discovery.shutdown().await;
+        }
         link_gateway.shutdown().await;
         reconcile_loop.shutdown().await;
         clock_facts_loop.shutdown().await;
@@ -279,6 +335,9 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         })?;
     info!(node = %snapshot.node_id, "received shutdown signal");
 
+    if let Some(discovery) = discovery {
+        discovery.shutdown().await;
+    }
     link_gateway.shutdown().await;
     reconcile_loop.shutdown().await;
     clock_facts_loop.shutdown().await;

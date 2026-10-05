@@ -108,6 +108,9 @@ pub struct NodeProcessConfig {
     /// Microcontroller links to serve (`ORION_NODE_LINKS`, feature `link-gateway`).
     #[cfg(feature = "link-gateway")]
     pub links: Vec<crate::link_gateway::LinkConfig>,
+    /// Peer discovery (`ORION_NODE_DISCOVERY=mdns`, feature `discovery-mdns`).
+    #[cfg(feature = "discovery-mdns")]
+    pub discovery: Option<crate::discovery::DiscoveryConfig>,
 }
 
 /// Tokio runtime sizing for the node binary.
@@ -448,6 +451,35 @@ impl NodeProcessConfig {
             ));
         }
 
+        #[cfg(feature = "discovery-mdns")]
+        let discovery = crate::discovery::DiscoveryConfig::try_from_env()?;
+        #[cfg(feature = "discovery-mdns")]
+        if discovery.is_some() {
+            if node.peer_authentication != PeerAuthenticationMode::Required {
+                return Err(NodeError::Config(
+                    "ORION_NODE_DISCOVERY=mdns requires ORION_NODE_PEER_AUTH=required (discovered peers must never be trusted on first contact)".into(),
+                ));
+            }
+            if peer_tcp_addr.is_none() {
+                return Err(NodeError::Config(
+                    "ORION_NODE_DISCOVERY=mdns requires ORION_NODE_PEER_ADDR (the orion+tcp listener that is advertised)".into(),
+                ));
+            }
+        }
+        #[cfg(not(feature = "discovery-mdns"))]
+        if env::var("ORION_NODE_DISCOVERY").is_ok_and(|value| {
+            !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "" | "off" | "none" | "disabled"
+            )
+        }) || env::var_os("ORION_NODE_ENROLLMENT_KEY").is_some()
+            || env::var_os("ORION_NODE_ENROLLMENT_KEY_FILE").is_some()
+        {
+            return Err(NodeError::Config(
+                "ORION_NODE_DISCOVERY and ORION_NODE_ENROLLMENT_KEY(_FILE) are not supported: orion-node was built without the `discovery-mdns` feature".into(),
+            ));
+        }
+
         #[cfg(not(feature = "transport-http"))]
         if http_tls_cert_path.is_some() || http_tls_key_path.is_some() || auto_http_tls {
             return Err(NodeError::Config(format!(
@@ -490,6 +522,8 @@ impl NodeProcessConfig {
                 peer_tcp_addr,
                 #[cfg(feature = "link-gateway")]
                 links,
+                #[cfg(feature = "discovery-mdns")]
+                discovery,
             }),
             _ => Err(NodeError::Config(
                 "ORION_NODE_HTTP_TLS_CERT and ORION_NODE_HTTP_TLS_KEY must either both be set or both be unset".into(),

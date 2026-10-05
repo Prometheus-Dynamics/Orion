@@ -31,6 +31,8 @@ pub enum ControlRoute {
     Health,
     Readiness,
     ObservedUpdate,
+    /// Shared-key peer enrollment handshake (`docs/discovery.md`).
+    Enroll,
 }
 
 impl ControlRoute {
@@ -44,6 +46,7 @@ impl ControlRoute {
             Self::Health => "/v1/control/health",
             Self::Readiness => "/v1/control/readiness",
             Self::ObservedUpdate => "/v1/control/observed",
+            Self::Enroll => "/v1/control/enroll",
         }
     }
 
@@ -54,7 +57,8 @@ impl ControlRoute {
             | Self::Snapshot
             | Self::Mutations
             | Self::Observability
-            | Self::ObservedUpdate => HttpMethod::Post,
+            | Self::ObservedUpdate
+            | Self::Enroll => HttpMethod::Post,
             Self::Health | Self::Readiness => HttpMethod::Get,
         }
     }
@@ -69,6 +73,7 @@ impl ControlRoute {
             "/v1/control/health" => Self::Health,
             "/v1/control/readiness" => Self::Readiness,
             "/v1/control/observed" => Self::ObservedUpdate,
+            "/v1/control/enroll" => Self::Enroll,
             _ => return None,
         };
 

@@ -40,12 +40,17 @@ transport-quic = ["dep:orion-transport-quic"]
 # Serves microcontroller links (serial and SocketCAN, Linux only) and bridges each device into the
 # node as a provider. Opt-in; configured with ORION_NODE_LINKS. See docs/link-protocol.md.
 link-gateway = ["dep:orion-link"]
+# mDNS/DNS-SD peer discovery (`ORION_NODE_DISCOVERY=mdns`) and shared-key enrollment over
+# `orion+tcp`. Discovery never trusts a peer by itself; see docs/discovery.md.
+discovery-mdns = ["peer-tcp", "dep:mdns-sd", "dep:hmac", "dep:sha2"]
 alloc-mimalloc = ["dep:mimalloc"]
 alloc-jemalloc = ["dep:tikv-jemallocator"]
 
 [dependencies]
 ed25519-dalek = { workspace = true, features = ["std"] }
+hmac = { workspace = true, optional = true }
 libc.workspace = true
+mdns-sd = { workspace = true, optional = true }
 mimalloc = { workspace = true, optional = true }
 orion-auth = { workspace = true, features = ["std"] }
 orion-cluster = { workspace = true, features = ["std"] }
@@ -65,6 +70,7 @@ rcgen = { workspace = true, optional = true }
 rkyv = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
+sha2 = { workspace = true, optional = true }
 thiserror = { workspace = true, features = ["std"] }
 tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time", "sync", "signal", "io-util", "fs"] }

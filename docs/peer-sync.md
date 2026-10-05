@@ -290,8 +290,10 @@ With `ORION_NODE_PEER_AUTH=disabled` nothing is signed in either direction; do n
 outside tests.
 
 Trust is enrollment-based on every transport: a peer is trusted because its public key is
-configured in `ORION_NODE_PEERS`, enrolled with `orionctl`, or (in `optional` mode only) pinned
-on first contact. Discovering a peer never makes it trusted.
+configured in `ORION_NODE_PEERS`, enrolled with `orionctl`, enrolled with a shared enrollment key,
+or (in `optional` mode only) pinned on first contact. Discovering a peer never makes it trusted;
+see [discovery.md](discovery.md) for mDNS discovery, the enrollment handshake and its threat
+model.
 
 ### Size and dependency cost
 
@@ -350,11 +352,12 @@ Persisted state directories are migrated on first start:
   desired-state records with per-holder entries, so no extra RPC is needed; the observed slice now
   carries every resource of a node's providers and executors, and a signed request or sync round
   from a peer counts as proof of liveness.
-- **Discovery**: a discovered peer only needs a `PeerConfig` with an `orion+tcp://` (or `http(s)`)
-  base URL to be added with `NodeApp::register_peer`; `PeerTransportKind::from_base_url` maps a
-  URL to its transport. Responses over `orion+tcp` are verified against enrolled keys, so an mDNS
-  announcement alone can never inject state. A node without `ORION_NODE_PEER_ADDR` still syncs
-  outbound, so a discovered peer can be added on either side.
+- **Discovery**: implemented by the `discovery-mdns` feature ([discovery.md](discovery.md)).
+  An enrolled peer goes through `NodeApp::enroll_peer` with its pinned key, exactly like a peer
+  enrolled with `orionctl peers enroll --base-url`; `PeerTransportKind::from_base_url` maps the
+  advertised URL to its transport. Responses over `orion+tcp` are verified against enrolled keys,
+  so an mDNS announcement alone can never inject state, and discovery requires
+  `ORION_NODE_PEER_AUTH=required` so unenrolled peers are never pinned on first contact.
 - **Observed facts and the status lane**: each node's observed slice already travels to its peers
   at the end of every round (`push_observed_slice` in `crates/node/src/app/peer_observed.rs`).
   The volatile status lane is local-only; replicating it would follow the same per-origin pattern

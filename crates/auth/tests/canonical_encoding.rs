@@ -23,16 +23,16 @@ use orion_auth::{
 use orion_control_plane::{
     AppliedClusterState, ArtifactRecord, ClientHello, ClientRole, ClockSourceKind,
     ClusterStateEnvelope, ControlMessage, DesiredClusterState, DesiredState, DesiredStateMutation,
-    DesiredStateSectionFingerprints, ExecutorRecord, HealthState, LeaseRecord, LeaseState,
-    MutationBatch, NodeClockFacts, NodeRecord, ObservedClusterState, ObservedStateUpdate,
-    PeerHello, ProviderRecord, ResourceOwnershipMode, ResourceRecord, RestartPolicy, StateSnapshot,
-    StatusEntry, StatusQuery, StatusSubject, TypedConfigValue, WorkloadConfig,
-    WorkloadObservedState, WorkloadRecord,
+    DesiredStateSectionFingerprints, ENROLLMENT_PROTOCOL_VERSION, EnrollmentHello, ExecutorRecord,
+    HealthState, LeaseRecord, LeaseState, MutationBatch, NodeClockFacts, NodeRecord,
+    ObservedClusterState, ObservedStateUpdate, PeerHello, ProviderRecord, ResourceOwnershipMode,
+    ResourceRecord, RestartPolicy, StateSnapshot, StatusEntry, StatusQuery, StatusSubject,
+    TypedConfigValue, WorkloadConfig, WorkloadObservedState, WorkloadRecord,
 };
 use orion_core::{
     ArtifactId, CapabilityId, ClientName, ConfigSchemaId, ExecutorId, HlcTimestamp, NodeId,
-    ProviderId, ResourceId, ResourceType, Revision, RuntimeType, WorkloadId, decode_from_slice,
-    decode_length_prefixed, encode_length_prefixed, encode_to_vec, hlc_node_tag,
+    PeerBaseUrl, ProviderId, ResourceId, ResourceType, Revision, RuntimeType, WorkloadId,
+    decode_from_slice, decode_length_prefixed, encode_length_prefixed, encode_to_vec, hlc_node_tag,
 };
 use std::{fmt::Write as _, path::PathBuf};
 
@@ -220,6 +220,18 @@ fn control_messages() -> Vec<(&'static str, ControlMessage)> {
                 StatusQuery::subject(StatusSubject::Workload(WorkloadId::new("workload.pose")))
                     .with_key_prefix("latency."),
             ),
+        ),
+        (
+            "control.enrollment_hello",
+            ControlMessage::EnrollmentHello(Box::new(EnrollmentHello {
+                version: ENROLLMENT_PROTOCOL_VERSION,
+                cluster: "lab".into(),
+                initiator: NodeId::new("node-a"),
+                initiator_public_key: vec![0x11; 32],
+                initiator_nonce: vec![0x22; 32],
+                initiator_url: Some(PeerBaseUrl::new("orion+tcp://10.0.0.1:9200")),
+                responder: NodeId::new("node-b"),
+            })),
         ),
     ]
 }

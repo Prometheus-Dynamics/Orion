@@ -84,6 +84,28 @@ sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
 cargo test -p orion-node --features link-gateway --lib can_gateway_on_vcan0 -- --ignored
 ```
 
+## Peer Discovery
+
+`cargo test -p orion-node --no-default-features --features peer-tcp,discovery-mdns` (also part of
+`--all-features`) runs the discovery and enrollment tests without multicast: announcements travel
+over `MemoryDiscoveryBus`, an in-memory stand-in for an mDNS segment. They cover TXT encoding,
+browsing, TTL expiry and goodbyes, cluster filtering, protocol-version mismatch, the shared-key
+handshake (success, wrong key, replayed confirmation, mismatched node ids, removed peers), operator
+enrollment and removal through the local control path, persistence across a restart, and two
+nodes with real `orion+tcp` listeners on loopback that discover each other and sync only after
+they are enrolled.
+
+One test uses real mDNS (the `mdns-sd` backend) and is `#[ignore]`d, because it needs multicast on
+a network interface, which CI containers usually lack. Run it on a host or VM where mDNS works
+(a firewall must allow UDP 5353):
+
+```sh
+cargo test -p orion-node --features discovery-mdns --lib real_mdns -- --ignored
+```
+
+It starts two nodes on the same host, waits until they discover each other and enroll with a
+shared key, and syncs an artifact between them.
+
 ## Additional Coverage
 
 - Perf thresholds and baselines live in `testing/ci/perf-baselines.json`

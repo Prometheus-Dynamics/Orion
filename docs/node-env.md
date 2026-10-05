@@ -144,6 +144,20 @@ switch allocators.
 | `ORION_NODE_LOCAL_AUTH` | `same-user` | `disabled`, `same-user`, `same-user-or-group` | Invalid mode fails startup. |
 | `ORION_NODE_LABELS` | unset | Comma-separated `key=value` or bare `key` labels, published in the node's observed record and matched by workload node selectors (see `docs/placement.md`). Blank terms are ignored; the last value of a repeated key wins. | Non-UTF-8 value fails startup. |
 
+## Peer Discovery
+
+mDNS/DNS-SD discovery and enrollment (feature `discovery-mdns`, off by default). Discovered peers
+are never trusted automatically; see [discovery.md](discovery.md).
+
+| Variable | Default | Valid values | Failure behavior |
+| --- | --- | --- | --- |
+| `ORION_NODE_DISCOVERY` | `off` | `off`, `mdns` | Invalid value fails startup. `mdns` fails startup without the `discovery-mdns` feature, without `ORION_NODE_PEER_AUTH=required`, or without `ORION_NODE_PEER_ADDR`. |
+| `ORION_NODE_CLUSTER` | `default` | 1-63 characters of `[A-Za-z0-9._-]`; only peers advertising the same name are considered | Invalid name fails startup. |
+| `ORION_NODE_DISCOVERY_TTL_MS` | `120000` | Positive integer milliseconds a discovered peer stays listed without a new announcement | Invalid value fails startup. |
+| `ORION_NODE_DISCOVERY_INTERFACES` | unset (all interfaces) | Comma-separated interface names or addresses | Unknown names are ignored by the mDNS daemon. |
+| `ORION_NODE_ENROLLMENT_KEY` | unset | Shared enrollment key, at least 32 bytes (for example `openssl rand -hex 32`); enables automatic mutual enrollment | Shorter keys, setting it together with `ORION_NODE_ENROLLMENT_KEY_FILE`, or setting it without `ORION_NODE_DISCOVERY=mdns` fails startup. |
+| `ORION_NODE_ENROLLMENT_KEY_FILE` | unset | Path to a file containing the key (surrounding whitespace ignored) | Unreadable file or a short key fails startup. |
+
 ## Link Gateway
 
 Requires the opt-in `link-gateway` cargo feature (`cargo build -p orion-node --features

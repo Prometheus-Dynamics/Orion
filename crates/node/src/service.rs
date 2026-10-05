@@ -173,6 +173,21 @@ pub enum ControlOperation {
     Rejected,
     Health,
     Readiness,
+    QueryDiscovery,
+    Discovery,
+    EnrollDiscoveredPeer,
+    RemovePeer,
+    EnrollmentHello,
+    EnrollmentChallenge,
+    EnrollmentConfirm,
+}
+
+impl ControlOperation {
+    /// Steps of the shared-key enrollment handshake, which peers send before they are trusted
+    /// (the handshake authenticates itself; see `docs/discovery.md`).
+    pub fn is_enrollment_handshake(self) -> bool {
+        matches!(self, Self::EnrollmentHello | Self::EnrollmentConfirm)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -313,6 +328,13 @@ impl ControlRequest {
                 ControlMessage::Pong => ControlOperation::Pong,
                 ControlMessage::Accepted => ControlOperation::Accepted,
                 ControlMessage::Rejected(_) => ControlOperation::Rejected,
+                ControlMessage::QueryDiscovery => ControlOperation::QueryDiscovery,
+                ControlMessage::Discovery(_) => ControlOperation::Discovery,
+                ControlMessage::EnrollDiscoveredPeer(_) => ControlOperation::EnrollDiscoveredPeer,
+                ControlMessage::RemovePeer(_) => ControlOperation::RemovePeer,
+                ControlMessage::EnrollmentHello(_) => ControlOperation::EnrollmentHello,
+                ControlMessage::EnrollmentChallenge(_) => ControlOperation::EnrollmentChallenge,
+                ControlMessage::EnrollmentConfirm(_) => ControlOperation::EnrollmentConfirm,
             },
             ControlRequestBody::ObservedUpdate(_) => ControlOperation::ObservedUpdate,
             ControlRequestBody::Health => ControlOperation::Health,

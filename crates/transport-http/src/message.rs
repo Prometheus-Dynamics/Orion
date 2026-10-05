@@ -1,7 +1,7 @@
 use crate::route::{ControlRoute, HttpMethod};
 use orion_auth::{AuthenticatedPeerRequest, PeerRequestPayload};
 use orion_control_plane::{
-    ControlMessage, DesiredStateSummary, MutationBatch, NodeHealthSnapshot,
+    ControlMessage, DesiredStateSummary, EnrollmentChallenge, MutationBatch, NodeHealthSnapshot,
     NodeObservabilitySnapshot, NodeReadinessSnapshot, ObservedStateUpdate, PeerHello,
     StateSnapshot,
 };
@@ -40,6 +40,8 @@ pub enum HttpResponsePayload {
     Observability(Box<NodeObservabilitySnapshot>),
     Health(NodeHealthSnapshot),
     Readiness(NodeReadinessSnapshot),
+    /// Second step of the shared-key enrollment handshake (`docs/discovery.md`).
+    EnrollmentChallenge(Box<EnrollmentChallenge>),
 }
 
 impl HttpRequestPayload {
@@ -60,6 +62,9 @@ impl HttpRequestPayload {
                 ControlMessage::Snapshot(_) => Ok(ControlRoute::Snapshot),
                 ControlMessage::Mutations(_) => Ok(ControlRoute::Mutations),
                 ControlMessage::QueryObservability => Ok(ControlRoute::Observability),
+                ControlMessage::EnrollmentHello(_) | ControlMessage::EnrollmentConfirm(_) => {
+                    Ok(ControlRoute::Enroll)
+                }
                 ControlMessage::ClientHello(_)
                 | ControlMessage::ClientWelcome(_)
                 | ControlMessage::ProviderState(_)
@@ -90,7 +95,12 @@ impl HttpRequestPayload {
                 | ControlMessage::Ping
                 | ControlMessage::Pong
                 | ControlMessage::Accepted
-                | ControlMessage::Rejected(_) => {
+                | ControlMessage::Rejected(_)
+                | ControlMessage::QueryDiscovery
+                | ControlMessage::Discovery(_)
+                | ControlMessage::EnrollDiscoveredPeer(_)
+                | ControlMessage::RemovePeer(_)
+                | ControlMessage::EnrollmentChallenge(_) => {
                     Err(crate::HttpTransportError::UnsupportedControlMessage)
                 }
             },
