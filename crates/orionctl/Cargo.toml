@@ -33,7 +33,7 @@ toml = ["dep:toml"]
 
 [dependencies]
 clap.workspace = true
-orion-client.workspace = true
+orion-client = { workspace = true, features = ["ipc"] }
 orion-control-plane = { workspace = true, features = ["std"] }
 orion-core = { workspace = true, features = ["std"] }
 orion-transport-http.workspace = true

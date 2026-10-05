@@ -138,6 +138,76 @@ jobs:
       - name: Build docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
+  remote-client-cross-check:
+    # The remote operator client is used by desktop apps (Windows, macOS, Linux). Type-check and
+    # lint it for Windows and macOS without a cross linker (docs/remote-operator.md).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          components: clippy
+          targets: x86_64-pc-windows-gnu, x86_64-apple-darwin
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check and lint the remote client for Windows
+        run: |
+          for features in remote discovery; do
+            cargo clippy -p orion-client --no-default-features --features "$features" --target x86_64-pc-windows-gnu --lib --tests --example remote_operator -- -D warnings
+          done
+          cargo clippy -p orion --no-default-features --features remote --target x86_64-pc-windows-gnu -- -D warnings
+          cargo clippy -p orion-transport-ipc --target x86_64-pc-windows-gnu --lib -- -D warnings
+
+      - name: Check and lint the remote client for macOS
+        # Library only: on Unix targets the orion-client test/example targets also build the HTTP
+        # dev-dependency (ring), which needs a macOS SDK; macos-latest below builds them natively.
+        run: |
+          for features in remote discovery; do
+            cargo clippy -p orion-client --no-default-features --features "$features" --target x86_64-apple-darwin --lib -- -D warnings
+          done
+          cargo clippy -p orion-client --target x86_64-apple-darwin --lib -- -D warnings
+          cargo clippy -p orion-transport-ipc --target x86_64-apple-darwin --lib -- -D warnings
+
+  remote-client-native:
+    # Build and run the remote client unit tests natively (including an orion+tcp loopback
+    # exchange in orion-transport-ipc). Tests that start an orion-node stay in the Linux jobs.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build and test the remote operator client
+        shell: bash
+        run: |
+          cargo build -p orion-client --no-default-features --features discovery --example remote_operator
+          cargo test -p orion-client --no-default-features --features remote
+          cargo test -p orion-client --no-default-features --features discovery
+          # On Windows this is exactly the platform-neutral part (framing, ControlTcpClient). On
+          # macOS it would also run the Linux-oriented Unix socket / fd passing tests.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cargo test -p orion-transport-ipc --lib
+          fi
+
   link-no-std:
     # orion-link must stay no_std for microcontroller targets: framing and the minimal device path
     # (`device`) without an allocator or any dependency, the full-record messages and session

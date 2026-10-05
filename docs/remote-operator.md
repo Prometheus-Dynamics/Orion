@@ -257,6 +257,28 @@ The `orion+tcp` frame payloads, request/response signing, the enrollment proofs 
 `enrollment`, `discovery` modules) and the connection handling in
 `orion_transport_ipc::ControlTcpClient`; `orion-node` and the client share them.
 
+## Platform support
+
+The remote operator client builds and runs on Linux, macOS and Windows. Build it with
+`default-features = false`: the default `ipc` feature is the local Unix-socket client and stays
+Unix-only (it needs Unix sockets, peer credentials and fd passing).
+
+- `orion-transport-ipc` exposes its platform-neutral part on every target: the control frame
+  codec (preamble, `ControlFrameReadState`, `write_control_*` / `read_control_*`), the in-memory
+  transport and `ControlTcpClient`. The Unix socket client/server, fd frames and the fd
+  latest-value channel are `#[cfg(unix)]`. The wire format is the same on every platform.
+- `discovery` uses `mdns-sd`, which supports Windows, macOS and Linux (it picks interfaces itself
+  and needs UDP 5353 to be allowed by the host firewall).
+- CI lints `remote` and `discovery` for `x86_64-pc-windows-gnu` (library, unit tests and
+  `examples/remote_operator.rs`) and `x86_64-apple-darwin` (library) on Linux, builds the example
+  and runs the client unit tests on `windows-latest` and `macos-latest`, and runs the
+  `orion-transport-ipc` unit tests (framing and an `orion+tcp` loopback exchange) on Windows.
+  Tests that start an `orion-node` stay Linux-only.
+- Linking a Windows binary from Linux needs a MinGW toolchain (`x86_64-w64-mingw32-gcc`); native
+  builds on Windows use MSVC as usual. Cross-checking for macOS from Linux works for the library
+  and the example; the `orion-client` test and example targets on Unix also build the HTTP dev
+  dependency (ring), which needs a macOS SDK.
+
 ## Footprint
 
 `orion-client` with only `remote` pulls `orion-auth` (`crypto`, `enrollment`), the protocol layer
@@ -280,7 +302,6 @@ their small helpers (20 crates).
 
 ## Limits and gaps
 
-- The transport is Unix-only today, because the frame code lives in `orion-transport-ipc`.
 - Watches poll; there is no server push over `orion+tcp`.
 - Operator trust is per node; there is no cluster-wide operator directory.
 - Policies restrict action names, not targets; read access is all or nothing.

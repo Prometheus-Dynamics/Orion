@@ -183,3 +183,81 @@ impl ControlTcpClient {
             })
     }
 }
+
+// Runs on every target (including the Windows CI job): the remote operator client depends on it.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    /// Echoes payload frames back: up to `frames` per connection, for `connections` connections.
+    async fn echo_server(
+        connections: usize,
+        frames: usize,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("listener addr").to_string();
+        let task = tokio::spawn(async move {
+            for _ in 0..connections {
+                let (mut stream, _) = listener.accept().await.expect("accept");
+                let mut read_state = ControlFrameReadState::new();
+                for _ in 0..frames {
+                    let Some(payload) = read_state
+                        .read_payload(&mut stream, 1024)
+                        .await
+                        .expect("request frame")
+                    else {
+                        break;
+                    };
+                    write_control_payload_frame(&mut stream, &payload, 1024)
+                        .await
+                        .expect("response frame");
+                }
+            }
+        });
+        (addr, task)
+    }
+
+    #[tokio::test]
+    async fn exchange_reconnects_once_after_the_server_closed_the_connection() {
+        // The first connection answers one request and closes; the second answers the next.
+        let (addr, server) = echo_server(2, 1).await;
+        let client = ControlTcpClient::new(&addr, Duration::from_secs(5), 1024);
+        assert_eq!(client.authority(), addr);
+
+        let (response, bytes) = client.exchange(b"one").await.expect("first exchange");
+        assert_eq!(response, b"one");
+        assert_eq!(bytes.received, 3);
+        assert!(bytes.sent > 3, "sent bytes include the frame header");
+
+        let (response, _) = client.exchange(b"two").await.expect("retried exchange");
+        assert_eq!(response, b"two");
+        server.await.expect("server should finish");
+    }
+
+    #[tokio::test]
+    async fn oversized_requests_and_refused_connections_are_errors() {
+        let (addr, server) = echo_server(1, 1).await;
+        let client = ControlTcpClient::new(&addr, Duration::from_secs(5), 4);
+        let err = client
+            .exchange(b"too large")
+            .await
+            .expect_err("oversized request should fail");
+        assert!(matches!(
+            err,
+            ControlTcpError::Frame(IpcTransportError::EncodeFailed(_))
+        ));
+        server.abort();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let closed = listener.local_addr().expect("addr").to_string();
+        drop(listener);
+        let client = ControlTcpClient::new(&closed, Duration::from_secs(5), 1024);
+        assert!(matches!(
+            client.exchange(b"x").await,
+            Err(ControlTcpError::Connect { .. } | ControlTcpError::Timeout { .. })
+        ));
+    }
+}

@@ -38,7 +38,8 @@ authors = ["Mathias Petersen"]
 # `alloc`; their default `std` feature is off here, so every std consumer opts in explicitly with
 # `features = ["std"]`.
 orion-auth = { path = "crates/auth", version = "1.0.0", default-features = false }
-orion-client = { path = "crates/client", version = "1.0.0" }
+# `ipc` (the Unix-only local client) is opt-in per consumer so `remote` builds stay cross-platform.
+orion-client = { path = "crates/client", version = "1.0.0", default-features = false }
 orion-cluster = { path = "crates/cluster", version = "1.0.0", default-features = false }
 orion-control-plane = { path = "crates/control-plane", version = "1.0.0", default-features = false }
 orion-core = { path = "crates/core", version = "1.0.0", default-features = false }

@@ -103,11 +103,11 @@ fn send_unix_fd_frame_raw(raw_fd: RawFd, frame: &UnixFdFrame, flags: i32) -> io:
     let mut control = control_buffer_for(raw_fds.len());
     let mut msg: libc::msghdr = unsafe { zeroed() };
     msg.msg_iov = iov.as_mut_ptr();
-    msg.msg_iovlen = iov.len();
+    msg.msg_iovlen = iov.len() as _;
 
     if !raw_fds.is_empty() {
         msg.msg_control = control.as_mut_ptr().cast();
-        msg.msg_controllen = control.len();
+        msg.msg_controllen = control.len() as _;
         unsafe {
             let cmsg = libc::CMSG_FIRSTHDR(&msg);
             if cmsg.is_null() {
@@ -118,7 +118,7 @@ fn send_unix_fd_frame_raw(raw_fd: RawFd, frame: &UnixFdFrame, flags: i32) -> io:
             (*cmsg).cmsg_level = libc::SOL_SOCKET;
             (*cmsg).cmsg_type = libc::SCM_RIGHTS;
             (*cmsg).cmsg_len =
-                libc::CMSG_LEN(raw_fds.len() as u32 * size_of::<RawFd>() as u32) as libc::size_t;
+                libc::CMSG_LEN(raw_fds.len() as u32 * size_of::<RawFd>() as u32) as _;
             ptr::copy_nonoverlapping(
                 raw_fds.as_ptr().cast::<u8>(),
                 libc::CMSG_DATA(cmsg).cast(),
@@ -219,10 +219,10 @@ fn recv_unix_fd_frame_raw(
     let mut control = control_buffer_for(max_fds);
     let mut msg: libc::msghdr = unsafe { zeroed() };
     msg.msg_iov = iov.as_mut_ptr();
-    msg.msg_iovlen = iov.len();
+    msg.msg_iovlen = iov.len() as _;
     if max_fds > 0 {
         msg.msg_control = control.as_mut_ptr().cast();
-        msg.msg_controllen = control.len();
+        msg.msg_controllen = control.len() as _;
     }
 
     let received = retry_interrupted(|| unsafe { libc::recvmsg(raw_fd, &mut msg, flags) })
@@ -301,7 +301,7 @@ fn peek_payload_len(raw_fd: RawFd, flags: i32) -> Result<Option<usize>, RawFdFra
     }];
     let mut msg: libc::msghdr = unsafe { zeroed() };
     msg.msg_iov = iov.as_mut_ptr();
-    msg.msg_iovlen = iov.len();
+    msg.msg_iovlen = iov.len() as _;
 
     let received =
         retry_interrupted(|| unsafe { libc::recvmsg(raw_fd, &mut msg, flags | libc::MSG_PEEK) })

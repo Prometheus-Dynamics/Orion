@@ -83,7 +83,7 @@ tracing-subscriber.workspace = true
 criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
 orion = { workspace = true, features = ["auth", "client", "runtime", "macros", "transport-http", "transport-tcp", "transport-quic", "transport-ipc"] }
 # Remote operator tests (src/tests/cluster/remote_operator*.rs) drive nodes with the real client.
-orion-client = { workspace = true, features = ["remote"] }
+orion-client = { workspace = true, features = ["ipc", "remote"] }
 orion-macros.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true

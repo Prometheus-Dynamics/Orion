@@ -1,13 +1,26 @@
+//! Orion's same-device IPC transport, plus the platform-neutral control framing it shares with
+//! the `orion+tcp` transport.
+//!
+//! Unix sockets, peer credentials and fd passing (`Unix*`, `*_unix_fd_*`) are `#[cfg(unix)]`.
+//! The control frame codec (preamble, [`ControlFrameReadState`], `write_control_*` /
+//! `read_control_*`), the in-memory transport and the `orion+tcp` request/response client
+//! ([`ControlTcpClient`]) build on every target, so the remote operator client in
+//! `orion-client` works on Windows too.
+
 mod address;
 mod control;
 mod control_tcp;
 mod data;
 mod error;
+#[cfg(unix)]
 mod fd_frame;
+#[cfg(unix)]
 mod fd_latest;
 mod frame_read;
 mod memory;
 mod preamble;
+mod stream_frame;
+#[cfg(unix)]
 mod unix;
 
 pub use address::LocalAddress;
@@ -15,10 +28,12 @@ pub use control::{ControlEnvelope, LocalControlTransport, UnixPeerIdentity};
 pub use control_tcp::{ControlTcpClient, ControlTcpError, ControlTcpExchangeBytes};
 pub use data::{DataEnvelope, LocalDataTransport};
 pub use error::IpcTransportError;
+#[cfg(unix)]
 pub use fd_frame::{
     DEFAULT_UNIX_FD_FRAME_MAX_FDS, DEFAULT_UNIX_FD_FRAME_MAX_PAYLOAD_BYTES, UnixFdFrame,
     recv_unix_fd_frame, recv_unix_fd_frame_async, send_unix_fd_frame, send_unix_fd_frame_async,
 };
+#[cfg(unix)]
 pub use fd_latest::{
     DEFAULT_UNIX_FD_LATEST_MAX_CLIENTS, DEFAULT_UNIX_FD_LATEST_MAX_WAIT, UnixFdLatestClient,
     UnixFdLatestConfig, UnixFdLatestFrame, UnixFdLatestPublisher, UnixFdLatestReply,
@@ -29,12 +44,13 @@ pub use memory::IpcTransport;
 pub use preamble::{
     CONTROL_PREAMBLE_BYTES, CONTROL_PREAMBLE_MAGIC, check_control_preamble, control_preamble,
 };
-pub use unix::{
-    UnixControlClient, UnixControlHandler, UnixControlServer, UnixControlStreamClient,
+pub use stream_frame::{
     read_control_frame, read_control_frame_with_limit, read_control_frame_with_limit_metered,
     write_control_frame, write_control_frame_with_limit, write_control_frame_with_limit_metered,
     write_control_payload_frame, write_control_protocol_mismatch_frame,
 };
+#[cfg(unix)]
+pub use unix::{UnixControlClient, UnixControlHandler, UnixControlServer, UnixControlStreamClient};
 
 #[cfg(test)]
 mod tests {
@@ -272,6 +288,7 @@ mod tests {
         }));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unix_control_transport_roundtrips_real_messages() {
         use std::sync::Arc;
@@ -340,6 +357,7 @@ mod tests {
         let _ = std::fs::remove_file(socket_path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unix_control_transport_rejects_malformed_frames_without_poisoning_server() {
         use std::sync::Arc;
@@ -430,6 +448,7 @@ mod tests {
         let _ = std::fs::remove_file(socket_path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unix_control_transport_graceful_shutdown_aborts_stalled_connections() {
         use std::sync::Arc;
@@ -480,6 +499,7 @@ mod tests {
         let _ = std::fs::remove_file(socket_path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unix_control_transport_shuts_down_while_connection_limit_is_saturated() {
         use std::sync::Arc;
@@ -533,6 +553,7 @@ mod tests {
         let _ = std::fs::remove_file(socket_path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unix_control_transport_accepts_partial_writes_and_reconnects() {
         use std::sync::Arc;
@@ -630,6 +651,7 @@ mod tests {
         let _ = std::fs::remove_file(socket_path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unix_control_transport_survives_interrupted_clients_and_concurrent_pressure() {
         use std::sync::Arc;

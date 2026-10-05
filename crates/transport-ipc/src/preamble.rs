@@ -79,6 +79,7 @@ mod tests {
         preamble
     }
 
+    #[cfg(unix)]
     fn socket_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("orion-preamble-{name}-{}.sock", std::process::id()))
     }
@@ -122,6 +123,7 @@ mod tests {
         assert_eq!(next, envelope());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn stream_client_reports_mismatch_frame_from_server() {
         let path = socket_path("stream-client");
@@ -150,6 +152,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unary_server_answers_skewed_client_with_its_preamble() {
         use std::sync::Arc;
@@ -194,6 +197,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unary_client_reports_mismatch_from_skewed_server() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};

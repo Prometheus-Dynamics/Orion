@@ -282,9 +282,11 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       an operator principal (no desired-state replica, no placement/liveness role), with
       per-identity action authorization. First consumer: Atlas (`atlas-driver-orion`).
       Done: `docs/remote-operator.md`; status queries are forwarded to the owning node.
-- [ ] Remote operator follow-ups: move the control frame code out of `orion-transport-ipc` so the
-      client builds on non-Unix desktops; push-based watches over `orion+tcp` instead of polling;
-      action policies scoped to targets; optional cluster-wide operator trust (today per node).
+- [x] The remote operator client builds on Windows and macOS (`orion-transport-ipc`'s frame code
+      and `ControlTcpClient` are cross-platform, the Unix socket parts `#[cfg(unix)]`; CI checks
+      the Windows and macOS targets and runs the client unit tests on `windows-latest`).
+- [ ] Remote operator follow-ups: push-based watches over `orion+tcp` instead of polling; action
+      policies scoped to targets; optional cluster-wide operator trust (today per node).
 
 ### Nice to have
 

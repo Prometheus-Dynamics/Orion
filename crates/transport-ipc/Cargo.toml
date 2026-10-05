@@ -21,11 +21,15 @@ orion-control-plane = { workspace = true, features = ["std"] }
 orion-data-plane = { workspace = true, features = ["std"] }
 orion-core = { workspace = true, features = ["std"] }
 orion-transport-common.workspace = true
-libc.workspace = true
 serde = { workspace = true, features = ["std"] }
 rkyv = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync", "time"] }
+
+# Unix sockets, peer credentials and fd passing; the control framing and `orion+tcp` client
+# build on every target.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
