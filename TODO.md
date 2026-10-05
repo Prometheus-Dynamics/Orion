@@ -193,6 +193,15 @@ none of these are HeliOS-specific features.
 - [x] **Remove `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`.** It is enforced exactly
       like `Exclusive` and only appears in two client examples.
 
+### Decisions (2026-10-05)
+
+- Frame leases stay in the producer (Styx `FrameSocket` + its public lease codec). Orion carries
+  only discovery and typed endpoint records (`ResourceEndpoint::Custom`); `UnixFdLatest*` stays a
+  generic latest-value fd channel without hold/release, because buffer-pool reuse and back-pressure
+  are producer-specific.
+- Orion owns the generic systemd unit and an importable Gaia fragment (`packaging/`); images import
+  it rather than each packaging `orion-node` separately.
+
 ### Nice to have
 
 - [ ] Optional blocking client for the fd latest-value channel.
