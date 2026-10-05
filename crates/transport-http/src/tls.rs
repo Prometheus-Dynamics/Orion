@@ -1,18 +1,27 @@
+//! TLS configuration. The client config (`client` feature) is plain PEM bytes handed to reqwest;
+//! the server side (`server` feature) builds rustls acceptors with optional client auth.
+
+#[cfg(feature = "server")]
 use std::{
     hash::{Hash, Hasher},
     path::PathBuf,
     sync::Arc,
 };
 
+use orion_transport_common::install_rustls_crypto_provider;
+#[cfg(feature = "server")]
 use orion_transport_common::{
-    build_client_verifier, fingerprint_file_state, install_rustls_crypto_provider,
-    parse_cert_chain, parse_private_key,
+    build_client_verifier, fingerprint_file_state, parse_cert_chain, parse_private_key,
 };
+#[cfg(feature = "server")]
 use rustls::ServerConfig;
+#[cfg(feature = "server")]
 use tokio_rustls::TlsAcceptor;
 
+#[cfg(feature = "server")]
 use crate::HttpTransportError;
 
+#[cfg(feature = "client")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HttpClientTlsConfig {
     pub root_cert_pem: Vec<u8>,
@@ -20,10 +29,12 @@ pub struct HttpClientTlsConfig {
     pub client_key_pem: Option<Vec<u8>>,
 }
 
+#[cfg(feature = "server")]
 pub trait HttpTlsTrustProvider: Send + Sync {
     fn trusted_client_roots_pem(&self) -> Vec<Vec<u8>>;
 }
 
+#[cfg(feature = "server")]
 #[derive(Clone)]
 pub enum HttpServerClientAuth {
     Disabled,
@@ -41,6 +52,7 @@ pub enum HttpServerClientAuth {
     },
 }
 
+#[cfg(feature = "server")]
 #[derive(Clone)]
 pub struct HttpServerTlsConfig {
     pub cert_pem: Vec<u8>,
@@ -50,12 +62,14 @@ pub struct HttpServerTlsConfig {
     pub client_auth: HttpServerClientAuth,
 }
 
+#[cfg(feature = "server")]
 #[derive(Clone)]
 pub(crate) struct CachedTlsAcceptor {
     pub(crate) fingerprint: u64,
     pub(crate) acceptor: TlsAcceptor,
 }
 
+#[cfg(feature = "server")]
 pub(crate) fn cached_tls_acceptor(
     tls: &HttpServerTlsConfig,
     cached: &mut Option<CachedTlsAcceptor>,
@@ -75,6 +89,7 @@ pub(crate) fn cached_tls_acceptor(
     Ok(acceptor)
 }
 
+#[cfg(feature = "server")]
 pub(crate) fn build_server_tls_config(
     tls: &HttpServerTlsConfig,
 ) -> Result<ServerConfig, HttpTransportError> {
@@ -161,6 +176,7 @@ pub(crate) fn install_crypto_provider() {
     install_rustls_crypto_provider();
 }
 
+#[cfg(feature = "server")]
 fn fingerprint_server_tls_config(tls: &HttpServerTlsConfig) -> Result<u64, HttpTransportError> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     match (&tls.cert_path, &tls.key_path) {

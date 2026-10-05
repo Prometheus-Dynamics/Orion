@@ -6,12 +6,14 @@
 //! a skewed request with `409 Conflict` (still carrying its own header), and the client turns a
 //! skewed response into [`HttpTransportError::ProtocolMismatch`].
 
+#[cfg(feature = "server")]
 use axum::{
     extract::Request,
-    http::{HeaderMap, HeaderValue, StatusCode},
+    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use http::{HeaderMap, HeaderValue};
 use orion_core::{CONTROL_PROTOCOL_HTTP_HEADER, CONTROL_PROTOCOL_VERSION, ControlProtocolMismatch};
 
 use crate::HttpTransportError;
@@ -30,6 +32,7 @@ fn parse_protocol_header(headers: &HeaderMap) -> Option<Result<u16, ()>> {
     })
 }
 
+#[cfg(feature = "server")]
 /// Server side: validates the version announced by a control request before its body is decoded.
 pub(crate) fn check_request_protocol(headers: &HeaderMap) -> Result<(), HttpTransportError> {
     match parse_protocol_header(headers) {
@@ -44,6 +47,7 @@ pub(crate) fn check_request_protocol(headers: &HeaderMap) -> Result<(), HttpTran
     }
 }
 
+#[cfg(feature = "client")]
 /// Client side: validates the version announced by a response before its body is decoded.
 ///
 /// Responses without the header are only accepted when they carry no archived body (non-200), so
@@ -65,6 +69,7 @@ pub(crate) fn check_response_protocol(
     }
 }
 
+#[cfg(feature = "server")]
 /// Response for a request whose protocol check failed.
 pub(crate) fn protocol_rejection(error: &HttpTransportError) -> Response {
     let status = if matches!(error, HttpTransportError::ProtocolMismatch { .. }) {
@@ -75,6 +80,7 @@ pub(crate) fn protocol_rejection(error: &HttpTransportError) -> Response {
     (status, error.to_string()).into_response()
 }
 
+#[cfg(feature = "server")]
 /// Middleware stamping every server response with this build's protocol version.
 pub(crate) async fn stamp_protocol_header(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
@@ -84,7 +90,7 @@ pub(crate) async fn stamp_protocol_header(request: Request, next: Next) -> Respo
     response
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "client", feature = "server"))]
 mod tests {
     use super::*;
 

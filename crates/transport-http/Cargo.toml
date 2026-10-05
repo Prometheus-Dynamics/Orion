@@ -17,14 +17,24 @@ workspace = true
 path = "src/lib.rs"
 
 [features]
-# `transport` enables the network client/server (axum, hyper, reqwest, rustls). Without it the
-# crate only exposes the protocol layer: payload types, routes, codec, errors and handler traits.
+# Without features the crate only exposes the protocol layer: payload types, routes, codec,
+# errors and handler traits.
+# - `client`: `HttpClient` + client TLS config (reqwest over rustls). No axum/hyper server stack,
+#   so operator tools (orionctl) link only this half.
+# - `server`: `HttpServer` + server TLS/client-auth config (axum, hyper, tokio-rustls).
+# - `transport`: both halves; kept for compatibility (orion-node and the `orion` facade use it).
 default = ["transport"]
-transport = [
+transport = ["client", "server"]
+client = [
+    "dep:http",
+    "dep:reqwest",
+    "orion-transport-common/tls",
+]
+server = [
     "dep:axum",
+    "dep:http",
     "dep:hyper",
     "dep:hyper-util",
-    "dep:reqwest",
     "dep:rustls",
     "dep:tokio",
     "dep:tokio-rustls",
@@ -37,6 +47,7 @@ orion-control-plane = { workspace = true, features = ["std"] }
 orion-core = { workspace = true, features = ["std"] }
 orion-transport-common.workspace = true
 axum = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }

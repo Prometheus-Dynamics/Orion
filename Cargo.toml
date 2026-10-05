@@ -68,6 +68,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 clap = { version = "4.6.1", features = ["derive"] }
 criterion = { version = "0.8.2", default-features = false }
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["fast", "rand_core", "zeroize"] }
+http = "1.4"
 hyper = "1.6"
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 libc = "0.2"
@@ -80,7 +81,7 @@ quinn = { version = "0.11", default-features = false, features = ["runtime-tokio
 quote = "1.0"
 rand_core = { version = "0.6", features = ["getrandom"] }
 rcgen = "0.14.7"
-reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls-no-provider"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls-no-provider"] }
 # The layout features (little_endian, pointer_width_64) are fixed for every target, including
 # 32-bit MCUs, so the archived wire layout is byte-identical everywhere. `bytecheck` replaces the
 # default feature set (which also pulled in `std`). 0.8.16 is the first release whose archived
