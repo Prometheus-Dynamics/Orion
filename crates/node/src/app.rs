@@ -1,3 +1,4 @@
+mod actions;
 mod builder;
 mod clock_facts;
 mod cluster_state;
@@ -5,6 +6,7 @@ mod desired_state;
 mod desired_sync;
 mod desired_writes;
 mod hlc_state;
+mod host_facts;
 #[cfg(feature = "link-gateway")]
 mod link_bridge;
 mod local_clients;
@@ -61,6 +63,7 @@ use crate::transport_security::{
     ManagedClientTransportSecurity, ManagedNodeTransportSurface, ManagedServerTransportSecurity,
     ManagedTransportProtocol, NodeTransportSecurityManager,
 };
+pub(crate) use actions::ActionOrigin;
 pub(crate) use desired_sync::section_fingerprints as desired_section_fingerprints;
 use local_clients::{ClientRegistryTxn, LocalClientState};
 #[cfg(any(test, net_transport))]
@@ -715,4 +718,7 @@ pub struct NodeAppBuilder {
     local_authentication_mode: Option<LocalAuthenticationMode>,
     control_middlewares: Vec<ControlMiddlewareHandle>,
     auto_startup_replay: bool,
+    action_handlers: BTreeMap<String, Arc<dyn crate::actions::ActionHandler>>,
+    host_facts_source: Option<Arc<dyn crate::host_facts::HostFactsSource>>,
+    host_facts_overlays: Vec<Arc<dyn crate::host_facts::HostFactsSource>>,
 }

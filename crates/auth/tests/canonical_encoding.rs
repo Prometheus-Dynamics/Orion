@@ -21,6 +21,10 @@ use orion_auth::{
     canonical_transport_binding_bytes,
 };
 use orion_control_plane::{
+    ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
+    HostTemperature, NodeHostFacts,
+};
+use orion_control_plane::{
     AppliedClusterState, ArtifactRecord, ClientHello, ClientRole, ClockSourceKind,
     ClusterStateEnvelope, ControlMessage, DesiredClusterState, DesiredState, DesiredStateMutation,
     DesiredStateSectionFingerprints, ENROLLMENT_PROTOCOL_VERSION, EnrollmentHello, ExecutorRecord,
@@ -140,6 +144,23 @@ fn observed_update() -> ObservedStateUpdate {
                     .with_ptp_grandmaster_id("00:1b:19:ff:fe:00:00:01")
                     .with_timebase("TAI"),
             )
+            .host(NodeHostFacts {
+                hostname: Some("edge-1".into()),
+                os_id: Some("debian".into()),
+                os_name: Some("Debian GNU/Linux".into()),
+                os_version: Some("12".into()),
+                image_name: Some("edge-image".into()),
+                image_version: Some("2024.10.1".into()),
+                kernel_release: Some("6.6.31".into()),
+                architecture: Some("aarch64".into()),
+                boot_id: Some("0d6a3c62-6e1b-4b8e-9df5-3a0c2a4b5c6d".into()),
+                board_serial: Some("10000000abcdef12".into()),
+                board_model: Some("Compute Module 5".into()),
+                machine_id: Some("4f6c2a0e3b8d4c1f9a7e5d2b1c0a9f8e".into()),
+                cpu_count: Some(4),
+                memory_total_bytes: Some(8 << 30),
+                labels: [("asset.tag".to_owned(), "A-17".to_owned())].into(),
+            })
             .build(),
     );
     let mut applied = AppliedClusterState::default();
@@ -220,6 +241,67 @@ fn control_messages() -> Vec<(&'static str, ControlMessage)> {
                 StatusQuery::subject(StatusSubject::Workload(WorkloadId::new("workload.pose")))
                     .with_key_prefix("latency."),
             ),
+        ),
+        (
+            "control.run_action",
+            ControlMessage::RunAction(Box::new(
+                ActionRequest::new(
+                    "update-7",
+                    ActionTarget::Node(NodeId::new("node-a")),
+                    "update",
+                )
+                .with_arg("transfer_id", TypedConfigValue::String("transfer-7".into()))
+                .with_arg("size", TypedConfigValue::UInt(1 << 20))
+                .with_deadline_ms(60_000)
+                .with_requested_by("local:operator"),
+            )),
+        ),
+        (
+            "control.report_action_result",
+            ControlMessage::ReportActionResult(Box::new(
+                ActionReport::new(
+                    "update-7",
+                    ActionState::Running {
+                        progress: Some(250),
+                    },
+                )
+                .with_output("phase", TypedConfigValue::String("download".into())),
+            )),
+        ),
+        (
+            "control.action_results",
+            ControlMessage::ActionResults(vec![
+                ActionResult::new(
+                    "locate-1",
+                    ActionTarget::Resource(ResourceId::new("resource.camera.front")),
+                    "locate",
+                    NodeId::new("node-b"),
+                    ActionState::Failed {
+                        reason: "led broken".into(),
+                    },
+                )
+                .with_output("attempts", TypedConfigValue::UInt(2)),
+            ]),
+        ),
+        (
+            "control.query_actions",
+            ControlMessage::QueryActions(ActionQuery::target(ActionTarget::Executor(
+                ExecutorId::new("executor.engine"),
+            ))),
+        ),
+        (
+            "control.claim_node_actions",
+            ControlMessage::ClaimNodeActions(vec!["update".into(), "reboot".into()]),
+        ),
+        (
+            "control.publish_node_status",
+            ControlMessage::PublishStatus(vec![StatusEntry::new(
+                StatusSubject::Node(NodeId::new("node-a")),
+                "host.temperature.cpu-thermal",
+                TypedConfigValue::Int(i64::from(
+                    HostTemperature::new("cpu-thermal", 48_500).millidegrees_c,
+                )),
+            )]),
         ),
         (
             "control.enrollment_hello",

@@ -377,8 +377,11 @@ Bridging, kept generic (nothing about the device's resource types is assumed):
   device timeouts, hello and snapshot rejects, status batches and rejects, I/O errors, last error,
   connected devices), and the
   gateway logs device connects, publishes, losses, rejections, I/O errors (once per distinct
-  error), and a counter summary when each link closes. The devices' providers and resources are
-  visible with `orionctl get providers` / `orionctl get resources` like any other.
+  error), and a counter summary when each link closes. The same counters are in the
+  observability snapshot's `links` section (control protocol v4): `orionctl get links`
+  (`-o json|yaml|toml|metrics`) and the `orion_link_*` Prometheus families (see
+  `docs/observability.md`). The devices' providers and resources are visible with
+  `orionctl get providers` / `orionctl get resources` like any other.
 
 ### Try it without hardware
 

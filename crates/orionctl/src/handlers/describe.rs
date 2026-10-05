@@ -25,6 +25,8 @@ struct WorkloadDescribeReport {
 struct NodeDescribeReport {
     node: NodeRecord,
     observed: Option<NodeRecord>,
+    /// Volatile host metrics, when the queried node is the described one.
+    host_metrics: Option<orion_control_plane::HostMetricsSample>,
     maintenance_mode: MaintenanceMode,
     peer_sync_paused: bool,
     remote_desired_state_blocked: bool,
@@ -179,9 +181,18 @@ pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
                 })
                 .map(|resource| resource.resource_id.to_string())
                 .collect::<Vec<_>>();
+            let host_metrics = (observability.node_id == node_id)
+                .then(|| {
+                    observability
+                        .host_facts
+                        .as_ref()
+                        .map(|facts| facts.metrics.clone())
+                })
+                .flatten();
             let report = NodeDescribeReport {
                 node,
                 observed,
+                host_metrics,
                 maintenance_mode: if observability.node_id == node_id {
                     observability.maintenance.mode
                 } else {
@@ -514,6 +525,13 @@ fn print_node_describe_summary(report: &NodeDescribeReport) {
             .observed
             .as_ref()
             .and_then(|observed| observed.clock.as_ref()),
+    );
+    crate::render_host::print_host_lines(
+        report
+            .observed
+            .as_ref()
+            .and_then(|observed| observed.host.as_ref()),
+        report.host_metrics.as_ref(),
     );
     println!("maintenance_mode: {}", report.maintenance_mode);
     println!("peer_sync_paused: {}", report.peer_sync_paused);

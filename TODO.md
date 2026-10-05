@@ -79,15 +79,35 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
       resource ownership checks), resources unavailable on `DeviceLost` and restored on reconnect,
       leases refreshed on desired commits, `NodeApp::link_status()` counters, pty and in-memory CAN
       tests, `link_device_sim` example.
+- [x] `link_status` over the control protocol (control protocol v4): `NodeObservabilitySnapshot::links`
+      (`LinkStatusSnapshot`), `orionctl get links`, `orion_link_*` Prometheus families.
 - [ ] Gateway follow-ups: persist which providers belong to link devices, so a node that crashed
       (no graceful shutdown) can mark them unavailable at startup instead of waiting for the device;
-      expose `link_status` over the control protocol (`orionctl get links`) with the next
-      `CONTROL_PROTOCOL_VERSION` bump; run the `vcan0` test in CI.
+      run the `vcan0` test in CI.
 - [ ] Executor role on the link (`ExecutorState` / `Workloads`, kinds reserved) and the volatile
       `Status` lane.
 - [ ] Real hardware bring-up: run the template and the gateway on real hardware (one Cortex-M and
       one RISC-V board, a USB-serial port and a SocketCAN adapter) and record round-trip timing at
       115200 baud and on classic CAN.
+
+### Control plane (control protocol v4)
+
+- [x] Host facts ([docs/host-facts.md](docs/host-facts.md)): injectable `HostFactsSource` (default
+      `LinuxHostFactsSource`; `NodeAppBuilder::with_host_facts_source` / `with_host_facts_overlay`
+      for hardware-abstraction crates); identity facts (incl. board serial/model, machine id) in the
+      observed `NodeRecord::host`, volatile metrics in the status lane under `node/<id>`;
+      `ORION_NODE_HOST_FACTS_REFRESH_MS`, `ORION_NODE_IMAGE_VERSION_FILE`; `orionctl get nodes` /
+      `describe node` host section; `orion_node_host_*` metrics. Snapshot format 4 -> 5 migration.
+- [x] Generic actions ([docs/actions.md](docs/actions.md)): `RunAction` / `QueryActions` /
+      `WatchActions` / `WatchActionRequests` / `ClaimNodeActions` / `ReportActionResult`; in-process
+      node handlers (`NodeAppBuilder::with_action_handler`), out-of-process node action claims,
+      provider/executor/resource handlers over IPC, one-hop forwarding over the signed peer
+      transport, deadlines and a bounded in-memory registry; `orionctl action run`,
+      `orionctl get actions`; well-known names (`reboot`, `restart-unit`, `locate`, `self-test`,
+      `update`) and the `action.<id>.*` status-lane convention.
+- [ ] Actions: an `ActionWatch` for peers (today a forwarding node polls the owner); action counters
+      in `resource_usage`; link devices as action handlers (needs a link message kind).
+- [ ] Host facts: replicate selected volatile host metrics to peers (the status lane is node-local).
 
 ### Bugs fixed (each with a regression test)
 

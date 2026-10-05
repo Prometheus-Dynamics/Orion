@@ -2,8 +2,9 @@ use super::{CommunicationMetrics, NodeError};
 use orion::{
     ExecutorId, ProviderId,
     control_plane::{
-        ClientEvent, ClientEventKind, ClientSession, LeaseRecord, StateSnapshot, StateWatch,
-        StatusChange, StatusEntry, StatusKey, StatusQuery, WorkloadRecord,
+        ActionQuery, ActionRequest, ActionResult, ClientEvent, ClientEventKind, ClientSession,
+        LeaseRecord, StateSnapshot, StateWatch, StatusChange, StatusEntry, StatusKey, StatusQuery,
+        WorkloadRecord,
     },
     transport::ipc::{ControlEnvelope, LocalAddress},
 };
@@ -24,6 +25,7 @@ pub(super) struct LocalClientState {
     pub(super) executor_watch: Option<ExecutorWatchState>,
     pub(super) provider_watch: Option<ProviderWatchState>,
     pub(super) status_watch: Option<StatusQuery>,
+    pub(super) action_watch: Option<ActionQuery>,
     next_event_sequence: u64,
     max_queued_events: usize,
     pub(super) queued_events: VecDeque<ClientEvent>,
@@ -48,6 +50,7 @@ impl LocalClientState {
             executor_watch: None,
             provider_watch: None,
             status_watch: None,
+            action_watch: None,
             next_event_sequence: 1,
             max_queued_events,
             queued_events: VecDeque::new(),
@@ -206,6 +209,41 @@ pub(super) fn enqueue_status_event(client: &mut LocalClientState, change: Status
             updated: updated.into_values().collect(),
             expired: expired.into_keys().collect(),
         }),
+    );
+}
+
+/// Queues an action request for a handler client. Requests are never coalesced or dropped in
+/// favor of newer ones of the same action; the client queue limit still applies.
+pub(super) fn enqueue_action_request_event(client: &mut LocalClientState, request: ActionRequest) {
+    enqueue_client_event(client, ClientEventKind::ActionRequest(Box::new(request)));
+}
+
+/// Queues action results, merging them into a results event that is still queued (newest result
+/// per action), so a slow watcher holds at most one results event.
+pub(super) fn enqueue_action_results_event(
+    client: &mut LocalClientState,
+    results: Vec<ActionResult>,
+) {
+    let mut merged: BTreeMap<String, ActionResult> = BTreeMap::new();
+    if let Some(position) = client
+        .queued_events
+        .iter()
+        .position(|event| matches!(event.event, ClientEventKind::ActionResults(_)))
+        && let Some(ClientEvent {
+            event: ClientEventKind::ActionResults(queued),
+            ..
+        }) = client.queued_events.remove(position)
+    {
+        for result in queued {
+            merged.insert(result.action_id.clone(), result);
+        }
+    }
+    for result in results {
+        merged.insert(result.action_id.clone(), result);
+    }
+    enqueue_client_event(
+        client,
+        ClientEventKind::ActionResults(merged.into_values().collect()),
     );
 }
 

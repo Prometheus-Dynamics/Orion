@@ -158,6 +158,8 @@ pub enum NodeError {
     Authorization(String),
     #[error("status lane: {0}")]
     Status(String),
+    #[error("action: {0}")]
+    Action(String),
 }
 
 #[derive(Clone)]

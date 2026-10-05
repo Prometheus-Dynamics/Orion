@@ -52,6 +52,24 @@ impl NodeApp {
                 self.answer_enrollment_confirm(*confirm)?;
                 Ok(HttpResponsePayload::Accepted)
             }
+            // Forwarded actions; authorization requires an authenticated, enrolled peer.
+            ControlMessage::RunAction(request) => {
+                let peer = peer.ok_or_else(|| {
+                    NodeError::Authorization("actions need an authenticated peer".into())
+                })?;
+                Ok(HttpResponsePayload::Actions(vec![self.submit_action(
+                    *request,
+                    super::ActionOrigin::Peer(peer),
+                )?]))
+            }
+            ControlMessage::QueryActions(query) => {
+                let peer = peer.ok_or_else(|| {
+                    NodeError::Authorization("actions need an authenticated peer".into())
+                })?;
+                Ok(HttpResponsePayload::Actions(
+                    self.query_actions_for_peer(&query, &peer),
+                ))
+            }
             ControlMessage::ClientHello(_)
             | ControlMessage::ClientWelcome(_)
             | ControlMessage::ProviderState(_)
@@ -87,7 +105,12 @@ impl NodeApp {
             | ControlMessage::Discovery(_)
             | ControlMessage::EnrollDiscoveredPeer(_)
             | ControlMessage::RemovePeer(_)
-            | ControlMessage::EnrollmentChallenge(_) => Err(NodeError::Storage(
+            | ControlMessage::EnrollmentChallenge(_)
+            | ControlMessage::WatchActions(_)
+            | ControlMessage::WatchActionRequests(_)
+            | ControlMessage::ReportActionResult(_)
+            | ControlMessage::ActionResults(_)
+            | ControlMessage::ClaimNodeActions(_) => Err(NodeError::Storage(
                 "local-only control message received on a peer transport".into(),
             )),
         }

@@ -14,20 +14,21 @@ mod records;
 mod state;
 
 pub use messages::{
-    AuditLogBackpressureMode, ClientEvent, ClientEventKind, ClientEventPoll, ClientHello,
-    ClientRole, ClientSession, ClientSessionMetricsSnapshot, CommunicationEndpointScope,
-    CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot, CommunicationFailureKind,
-    CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
+    ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
+    ActionTargetParseError, AuditLogBackpressureMode, ClientEvent, ClientEventKind,
+    ClientEventPoll, ClientHello, ClientRole, ClientSession, ClientSessionMetricsSnapshot,
+    CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot,
+    CommunicationFailureKind, CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
     CommunicationStageMetricsSnapshot, CommunicationTransportKind, ControlMessage,
     DesiredStateMergeSnapshot, DesiredStateMutation, DesiredStateObjectSelector,
     DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary,
     DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState, DiscoveryMetricsSnapshot,
     DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
     EnrollmentHello, ExecutorStateUpdate, ExecutorWorkloadQuery, HostMetricsSnapshot,
-    HttpMutualTlsMode, LatencyMetricsSnapshot, LocalStreamUsageSnapshot, MaintenanceAction,
-    MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus, MutationApplyError,
-    MutationBatch, MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus,
-    NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,
+    HttpMutualTlsMode, LatencyMetricsSnapshot, LinkStatusSnapshot, LocalStreamUsageSnapshot,
+    MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
+    MutationApplyError, MutationBatch, MutationHistoryUsageSnapshot, NodeHealthSnapshot,
+    NodeHealthStatus, NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,
     NodeResourceUsageSnapshot, ObservabilityEvent, ObservabilityEventKind,
     ObservedPersistenceUsageSnapshot, ObservedStateUpdate, OperationFailureCategory,
     OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerSyncErrorKind,
@@ -36,13 +37,14 @@ pub use messages::{
     StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch, StatusChange, StatusEntry,
     StatusKey, StatusLaneUsageSnapshot, StatusQuery, StatusSubject, StatusSubjectParseError,
     SyncDiffRequest, SyncRequest, SyncSummaryRequest, TransportMetricsSnapshot,
-    WorkerQueueUsageSnapshot,
+    WorkerQueueUsageSnapshot, action_names, action_status_keys,
 };
 #[cfg(feature = "std")]
 pub use metrics_export::{
     MetricsExportConfig, render_clock_metrics, render_communication_metrics,
-    render_communication_metrics_with_config, render_host_metrics, render_observability_metrics,
-    render_observability_metrics_with_config, render_resource_usage_metrics,
+    render_communication_metrics_with_config, render_host_facts_metrics, render_host_metrics,
+    render_link_metrics, render_observability_metrics, render_observability_metrics_with_config,
+    render_resource_usage_metrics,
 };
 pub use metrics_support::{
     COMMUNICATION_RECENT_SAMPLE_LIMIT, COMMUNICATION_RECENT_WINDOW_MS,
@@ -54,9 +56,10 @@ pub use records::{
     AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, BUILTIN_ENDPOINT_SCHEMES,
     ClockSourceKind, ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef, CustomEndpoint,
     CustomEndpointScheme, DesiredClusterState, DesiredObjectKey, DesiredObjectStamps,
-    DesiredObjectVersion, ExecutorRecord, ExecutorRecordBuilder, HttpEndpoint, IpcEndpoint,
-    LabelRequirement, LeaseHolder, LeaseRecord, LeaseRecordBuilder, NodeClockFacts, NodeRecord,
-    NodeRecordBuilder, ObservedClusterState, PlacementDecision, PlacementReason, ProviderRecord,
+    DesiredObjectVersion, ExecutorRecord, ExecutorRecordBuilder, HostFacts, HostMetricsSample,
+    HostTemperature, HttpEndpoint, IpcEndpoint, LabelRequirement, LeaseHolder, LeaseRecord,
+    LeaseRecordBuilder, NodeClockFacts, NodeHostFacts, NodeRecord, NodeRecordBuilder,
+    ObservedClusterState, PlacementDecision, PlacementReason, ProviderRecord,
     ProviderRecordBuilder, RemoteBinding, ResourceActionResult, ResourceActionStatus,
     ResourceBinding, ResourceCapability, ResourceConfigState, ResourceEndpoint,
     ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
@@ -283,7 +286,14 @@ mod tests {
             | ControlMessage::RemovePeer(_)
             | ControlMessage::EnrollmentHello(_)
             | ControlMessage::EnrollmentChallenge(_)
-            | ControlMessage::EnrollmentConfirm(_) => {
+            | ControlMessage::EnrollmentConfirm(_)
+            | ControlMessage::RunAction(_)
+            | ControlMessage::QueryActions(_)
+            | ControlMessage::WatchActions(_)
+            | ControlMessage::WatchActionRequests(_)
+            | ControlMessage::ReportActionResult(_)
+            | ControlMessage::ActionResults(_)
+            | ControlMessage::ClaimNodeActions(_) => {
                 panic!("unexpected control message")
             }
         }
@@ -425,6 +435,7 @@ mod tests {
             schedulable: true,
             labels: Vec::new(),
             clock: None,
+            host: None,
         });
 
         let result = MutationBatch {
@@ -453,6 +464,7 @@ mod tests {
             schedulable: true,
             labels: Vec::new(),
             clock: None,
+            host: None,
         });
 
         let mut applied = AppliedClusterState::default();

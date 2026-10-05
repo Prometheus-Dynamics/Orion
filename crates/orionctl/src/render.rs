@@ -178,6 +178,20 @@ pub(crate) fn print_event_summary(event: &ClientEvent) {
                 change.expired.len(),
             );
         }
+        ClientEventKind::ActionRequest(request) => {
+            println!(
+                "action-request seq={} id={} target={} name={}",
+                event.sequence, request.action_id, request.target, request.name,
+            );
+        }
+        ClientEventKind::ActionResults(results) => {
+            for result in results {
+                println!(
+                    "action seq={} id={} target={} state={}",
+                    event.sequence, result.action_id, result.target, result.state,
+                );
+            }
+        }
     }
 }
 

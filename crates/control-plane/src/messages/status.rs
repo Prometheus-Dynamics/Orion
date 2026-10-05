@@ -9,13 +9,14 @@
 use crate::TypedConfigValue;
 use alloc::{string::String, vec::Vec};
 use core::{fmt, str::FromStr};
-use orion_core::{ExecutorId, ProviderId, ResourceId, WorkloadId};
+use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, WorkloadId};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
 /// What a status entry describes. Publishers may only publish for subjects they own: their
 /// provider or executor, the resources of their provider (or realized by their executor), and the
-/// workloads their executor runs.
+/// workloads their executor runs. [`StatusSubject::Node`] entries are published by the node
+/// itself (host metrics, see `docs/host-facts.md`); clients cannot publish them.
 #[derive(
     Clone,
     Debug,
@@ -35,17 +36,20 @@ pub enum StatusSubject {
     Executor(ExecutorId),
     Resource(ResourceId),
     Workload(WorkloadId),
+    /// The node itself; only the node publishes for it.
+    Node(NodeId),
 }
 
 impl StatusSubject {
-    /// The subject kind as used in `kind/id` text form: `provider`, `executor`, `resource`, or
-    /// `workload`.
+    /// The subject kind as used in `kind/id` text form: `provider`, `executor`, `resource`,
+    /// `workload`, or `node`.
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Provider(_) => "provider",
             Self::Executor(_) => "executor",
             Self::Resource(_) => "resource",
             Self::Workload(_) => "workload",
+            Self::Node(_) => "node",
         }
     }
 
@@ -56,6 +60,7 @@ impl StatusSubject {
             Self::Executor(id) => id.as_str(),
             Self::Resource(id) => id.as_str(),
             Self::Workload(id) => id.as_str(),
+            Self::Node(id) => id.as_str(),
         }
     }
 }
@@ -74,7 +79,7 @@ impl fmt::Display for StatusSubjectParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid status subject `{}`; expected provider/<id>, executor/<id>, resource/<id>, or workload/<id>",
+            "invalid status subject `{}`; expected provider/<id>, executor/<id>, resource/<id>, workload/<id>, or node/<id>",
             self.0
         )
     }
@@ -94,6 +99,7 @@ impl FromStr for StatusSubject {
             "executor" => Self::Executor(ExecutorId::new(id)),
             "resource" => Self::Resource(ResourceId::new(id)),
             "workload" => Self::Workload(WorkloadId::new(id)),
+            "node" => Self::Node(NodeId::new(id)),
             _ => return Err(error()),
         })
     }
@@ -255,12 +261,13 @@ mod tests {
             "executor/executor.a",
             "resource/resource.camera/front",
             "workload/workload.pose",
+            "node/node-a",
         ] {
             let subject: StatusSubject = text.parse().expect("subject parses");
             assert_eq!(alloc::format!("{subject}"), text);
         }
         assert!("camera".parse::<StatusSubject>().is_err());
-        assert!("node/a".parse::<StatusSubject>().is_err());
+        assert!("host/a".parse::<StatusSubject>().is_err());
         assert!("provider/ ".parse::<StatusSubject>().is_err());
     }
 

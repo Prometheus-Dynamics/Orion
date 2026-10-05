@@ -1,4 +1,5 @@
 use super::clock::NodeClockFacts;
+use super::host::NodeHostFacts;
 use crate::HealthState;
 use alloc::{string::String, vec::Vec};
 use orion_core::{
@@ -20,6 +21,10 @@ pub struct NodeRecord {
     /// observed state; `None` when the node has not reported it.
     #[serde(default)]
     pub clock: Option<NodeClockFacts>,
+    /// Host identity facts (hostname, OS, image, kernel, ...) the node reports about itself. Only
+    /// meaningful in observed state; `None` when the node has not reported them.
+    #[serde(default)]
+    pub host: Option<NodeHostFacts>,
 }
 
 impl NodeRecord {
@@ -30,6 +35,7 @@ impl NodeRecord {
             schedulable: true,
             labels: Vec::new(),
             clock: None,
+            host: None,
         }
     }
 }
@@ -106,6 +112,7 @@ pub struct NodeRecordBuilder {
     schedulable: bool,
     labels: Vec<String>,
     clock: Option<NodeClockFacts>,
+    host: Option<NodeHostFacts>,
 }
 
 impl NodeRecordBuilder {
@@ -129,6 +136,11 @@ impl NodeRecordBuilder {
         self
     }
 
+    pub fn host(mut self, host: NodeHostFacts) -> Self {
+        self.host = Some(host);
+        self
+    }
+
     pub fn build(self) -> NodeRecord {
         NodeRecord {
             node_id: self.node_id,
@@ -136,6 +148,7 @@ impl NodeRecordBuilder {
             schedulable: self.schedulable,
             labels: self.labels,
             clock: self.clock,
+            host: self.host,
         }
     }
 }

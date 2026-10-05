@@ -1,6 +1,7 @@
 mod clock;
 mod cluster;
 mod config_decode;
+mod host;
 mod inventory;
 mod placement;
 mod resource_endpoints;
@@ -13,6 +14,7 @@ pub use cluster::{
     AppliedClusterState, ClusterStateEnvelope, DesiredClusterState, ObservedClusterState,
 };
 pub use config_decode::{ConfigDecodeError, ConfigMapRef, config_json_value, deserialize_config};
+pub use host::{HostFacts, HostMetricsSample, HostTemperature, NodeHostFacts};
 pub use inventory::{
     ArtifactRecord, ArtifactRecordBuilder, ExecutorRecord, ExecutorRecordBuilder, NodeRecord,
     NodeRecordBuilder, ProviderRecord, ProviderRecordBuilder,

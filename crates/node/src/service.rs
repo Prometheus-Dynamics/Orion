@@ -180,6 +180,13 @@ pub enum ControlOperation {
     EnrollmentHello,
     EnrollmentChallenge,
     EnrollmentConfirm,
+    RunAction,
+    QueryActions,
+    WatchActions,
+    WatchActionRequests,
+    ReportActionResult,
+    ActionResults,
+    ClaimNodeActions,
 }
 
 impl ControlOperation {
@@ -335,6 +342,13 @@ impl ControlRequest {
                 ControlMessage::EnrollmentHello(_) => ControlOperation::EnrollmentHello,
                 ControlMessage::EnrollmentChallenge(_) => ControlOperation::EnrollmentChallenge,
                 ControlMessage::EnrollmentConfirm(_) => ControlOperation::EnrollmentConfirm,
+                ControlMessage::RunAction(_) => ControlOperation::RunAction,
+                ControlMessage::QueryActions(_) => ControlOperation::QueryActions,
+                ControlMessage::WatchActions(_) => ControlOperation::WatchActions,
+                ControlMessage::WatchActionRequests(_) => ControlOperation::WatchActionRequests,
+                ControlMessage::ReportActionResult(_) => ControlOperation::ReportActionResult,
+                ControlMessage::ActionResults(_) => ControlOperation::ActionResults,
+                ControlMessage::ClaimNodeActions(_) => ControlOperation::ClaimNodeActions,
             },
             ControlRequestBody::ObservedUpdate(_) => ControlOperation::ObservedUpdate,
             ControlRequestBody::Health => ControlOperation::Health,

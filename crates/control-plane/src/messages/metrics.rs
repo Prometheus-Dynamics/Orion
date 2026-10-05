@@ -1,6 +1,6 @@
 use super::maintenance::MaintenanceState;
 use super::resource_usage::NodeResourceUsageSnapshot;
-use crate::NodeClockFacts;
+use crate::{HostFacts, NodeClockFacts};
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
 use alloc::{string::String, vec::Vec};
@@ -726,4 +726,11 @@ pub struct NodeObservabilitySnapshot {
     /// structured input.
     #[serde(default)]
     pub discovery: super::discovery::DiscoveryMetricsSnapshot,
+    /// Latest host-facts sample (identity and volatile metrics, `docs/host-facts.md`). `None`
+    /// until the first sample.
+    #[serde(default)]
+    pub host_facts: Option<HostFacts>,
+    /// Link gateway counters per configured link; empty without the `link-gateway` feature.
+    #[serde(default)]
+    pub links: Vec<super::links::LinkStatusSnapshot>,
 }

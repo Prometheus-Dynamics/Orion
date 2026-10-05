@@ -278,6 +278,19 @@ impl Authorizer for NodeSecurityAuthorizer {
             (_, ControlOperation::ObservedUpdate) => {
                 self.authorize_authenticated_peer_write(request)
             }
+            // Actions forwarded by peers: always an authenticated, enrolled peer, whatever the
+            // peer authentication mode (`docs/actions.md`).
+            (
+                ControlPrincipal::Peer(peer),
+                ControlOperation::RunAction | ControlOperation::QueryActions,
+            ) if self.lookup.is_configured_peer(&peer.node_id) => Ok(()),
+            (
+                ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
+                ControlOperation::RunAction | ControlOperation::QueryActions,
+            ) => Err(NodeError::Authorization(format!(
+                "{:?} needs an authenticated, enrolled peer",
+                request.operation()
+            ))),
             (
                 ControlPrincipal::Local { .. },
                 ControlOperation::ClientHello
@@ -300,7 +313,13 @@ impl Authorizer for NodeSecurityAuthorizer {
                 ControlPrincipal::Local { .. },
                 ControlOperation::QueryStatus | ControlOperation::WatchStatus,
             ) => Ok(()),
-            (ControlPrincipal::Local { source, .. }, ControlOperation::PublishStatus) => self
+            (
+                ControlPrincipal::Local { source, .. },
+                ControlOperation::PublishStatus
+                | ControlOperation::WatchActionRequests
+                | ControlOperation::ClaimNodeActions
+                | ControlOperation::ReportActionResult,
+            ) => self
                 .authorize_local_role(source, ClientRole::Provider)
                 .or_else(|_| self.authorize_local_role(source, ClientRole::Executor)),
             (
@@ -321,7 +340,10 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::ReplacePeerIdentity
                 | ControlOperation::RotateHttpTlsIdentity
                 | ControlOperation::QueryMaintenance
-                | ControlOperation::UpdateMaintenance,
+                | ControlOperation::UpdateMaintenance
+                | ControlOperation::RunAction
+                | ControlOperation::QueryActions
+                | ControlOperation::WatchActions,
             ) => self.authorize_local_role(source, ClientRole::ControlPlane),
             (
                 ControlPrincipal::Local { source, .. },

@@ -1,6 +1,8 @@
+mod actions;
 mod client;
 mod control;
 mod discovery;
+mod links;
 mod maintenance;
 mod metrics;
 mod mutations;
@@ -8,6 +10,10 @@ mod resource_usage;
 mod status;
 mod sync;
 
+pub use actions::{
+    ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
+    ActionTargetParseError, action_names, action_status_keys,
+};
 pub use client::{
     ClientEvent, ClientEventKind, ClientEventPoll, ClientHello, ClientRole, ClientSession,
     ExecutorStateUpdate, ExecutorWorkloadQuery, ObservedStateUpdate, PeerEnrollment,
@@ -19,6 +25,7 @@ pub use discovery::{
     DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
     EnrollmentHello,
 };
+pub use links::LinkStatusSnapshot;
 pub use maintenance::{
     MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
 };

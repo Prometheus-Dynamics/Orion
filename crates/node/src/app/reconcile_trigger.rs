@@ -126,6 +126,7 @@ impl NodeApp {
 
         let coalescer_shutdown = shutdown_rx.clone();
         let expiry_shutdown = shutdown_rx.clone();
+        let action_shutdown = shutdown_rx.clone();
         let task = tokio::spawn(async move {
             let _attached = attached;
             let reconcile = async {
@@ -150,12 +151,13 @@ impl NodeApp {
                     }
                 }
             };
-            // The observed-state coalescer and the status-lane sweeper share the loop's
-            // lifetime: both stop (the coalescer after a final flush) when it shuts down.
+            // The observed-state coalescer and the status-lane and action sweepers share the
+            // loop's lifetime: they stop (the coalescer after a final flush) when it shuts down.
             tokio::join!(
                 reconcile,
                 app.run_observed_persist_coalescer(coalescer_shutdown),
                 app.run_status_expiry(expiry_shutdown),
+                app.run_action_expiry(action_shutdown),
             );
         });
 

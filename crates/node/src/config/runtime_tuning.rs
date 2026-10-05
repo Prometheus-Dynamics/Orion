@@ -102,6 +102,10 @@ pub struct NodeRuntimeTuning {
     pub status_max_ttl: Duration,
     /// Node labels, peer liveness and placement grace (`docs/placement.md`).
     pub placement: super::placement::PlacementTuning,
+    /// Host facts refresh and image files (`docs/host-facts.md`).
+    pub host_facts: super::host_actions::HostFactsTuning,
+    /// Action deadlines and result registry bounds (`docs/actions.md`).
+    pub actions: super::host_actions::ActionTuning,
 }
 
 impl NodeRuntimeTuning {
@@ -441,6 +445,8 @@ impl NodeRuntimeTuning {
                 DEFAULT_STATUS_MAX_TTL_MS,
             )?,
             placement: super::placement::PlacementTuning::from_env()?,
+            host_facts: super::host_actions::HostFactsTuning::from_env()?,
+            actions: super::host_actions::ActionTuning::from_env()?,
         };
         tuning.normalize();
         Ok(tuning)
@@ -486,6 +492,7 @@ impl NodeRuntimeTuning {
             .clamp(1, self.status_max_entries);
         self.status_max_ttl = normalize_runtime_tuning_duration(self.status_max_ttl);
         self.placement.normalize();
+        self.actions.normalize();
     }
 }
 
@@ -531,6 +538,8 @@ impl Default for NodeRuntimeTuning {
             status_max_entries_per_publisher: DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER,
             status_max_ttl: Duration::from_millis(DEFAULT_STATUS_MAX_TTL_MS),
             placement: super::placement::PlacementTuning::default(),
+            host_facts: Default::default(),
+            actions: Default::default(),
         }
     }
 }
@@ -678,6 +687,10 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
     ]
     .into_iter()
     .chain(super::placement::placement_doc_defaults(&tuning.placement))
+    .chain(super::host_actions::host_actions_doc_defaults(
+        &tuning.host_facts,
+        &tuning.actions,
+    ))
     .collect()
 }
 

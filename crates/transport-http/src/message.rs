@@ -1,9 +1,9 @@
 use crate::route::{ControlRoute, HttpMethod};
 use orion_auth::{AuthenticatedPeerRequest, PeerRequestPayload};
 use orion_control_plane::{
-    ControlMessage, DesiredStateSummary, EnrollmentChallenge, MutationBatch, NodeHealthSnapshot,
-    NodeObservabilitySnapshot, NodeReadinessSnapshot, ObservedStateUpdate, PeerHello,
-    StateSnapshot,
+    ActionResult, ControlMessage, DesiredStateSummary, EnrollmentChallenge, MutationBatch,
+    NodeHealthSnapshot, NodeObservabilitySnapshot, NodeReadinessSnapshot, ObservedStateUpdate,
+    PeerHello, StateSnapshot,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -42,6 +42,8 @@ pub enum HttpResponsePayload {
     Readiness(NodeReadinessSnapshot),
     /// Second step of the shared-key enrollment handshake (`docs/discovery.md`).
     EnrollmentChallenge(Box<EnrollmentChallenge>),
+    /// Results of a forwarded `RunAction` or a `QueryActions` (`docs/actions.md`).
+    Actions(Vec<ActionResult>),
 }
 
 impl HttpRequestPayload {
@@ -64,6 +66,9 @@ impl HttpRequestPayload {
                 ControlMessage::QueryObservability => Ok(ControlRoute::Observability),
                 ControlMessage::EnrollmentHello(_) | ControlMessage::EnrollmentConfirm(_) => {
                     Ok(ControlRoute::Enroll)
+                }
+                ControlMessage::RunAction(_) | ControlMessage::QueryActions(_) => {
+                    Ok(ControlRoute::Actions)
                 }
                 ControlMessage::ClientHello(_)
                 | ControlMessage::ClientWelcome(_)
@@ -100,7 +105,12 @@ impl HttpRequestPayload {
                 | ControlMessage::Discovery(_)
                 | ControlMessage::EnrollDiscoveredPeer(_)
                 | ControlMessage::RemovePeer(_)
-                | ControlMessage::EnrollmentChallenge(_) => {
+                | ControlMessage::EnrollmentChallenge(_)
+                | ControlMessage::WatchActions(_)
+                | ControlMessage::WatchActionRequests(_)
+                | ControlMessage::ReportActionResult(_)
+                | ControlMessage::ActionResults(_)
+                | ControlMessage::ClaimNodeActions(_) => {
                     Err(crate::HttpTransportError::UnsupportedControlMessage)
                 }
             },

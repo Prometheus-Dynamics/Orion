@@ -353,7 +353,9 @@ fn control_plane_client_subscribes_and_polls_state_events() {
         }
         ClientEventKind::ExecutorWorkloads { .. }
         | ClientEventKind::ProviderLeases { .. }
-        | ClientEventKind::Status(_) => {
+        | ClientEventKind::Status(_)
+        | ClientEventKind::ActionRequest(_)
+        | ClientEventKind::ActionResults(_) => {
             panic!("unexpected non-control-plane event");
         }
     }

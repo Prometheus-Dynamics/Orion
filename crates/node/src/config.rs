@@ -1,6 +1,8 @@
+mod host_actions;
 mod placement;
 mod runtime_tuning;
 
+pub use host_actions::{ActionTuning, HostFactsTuning};
 pub use placement::PlacementTuning;
 pub(crate) use runtime_tuning::normalize_runtime_tuning_duration;
 #[cfg(test)]

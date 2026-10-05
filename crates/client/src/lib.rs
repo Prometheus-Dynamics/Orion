@@ -12,6 +12,9 @@
 //! - Publish volatile, latest-value status (TTL'd, in node memory only) with
 //!   `LocalProviderService::publish_status` / `LocalExecutorService::publish_status`, and read it
 //!   with `query_status` or `watch_status` ([`StatusWatch`]).
+//! - Handle actions for a provider or executor with `watch_action_requests`
+//!   ([`ActionRequestWatch`]); submit and follow them with `LocalControlPlaneClient::run_action`,
+//!   `query_actions`, `wait_for_action`, and [`ActionWatch`] (see `docs/actions.md`).
 //! - Import [`prelude`] to get the client API plus the core and control-plane types executor and
 //!   provider apps commonly need, without depending on `orion-core` or `orion-control-plane`.
 
@@ -38,14 +41,16 @@ pub mod prelude;
 
 #[cfg(feature = "ipc")]
 pub use app::{
-    AssignedWorkloadWatch, AssignedWorkloadsUpdate, ExecutorApp, LocalExecutorApp,
-    LocalExecutorClient, LocalExecutorEvent, LocalExecutorService, LocalExecutorSubscription,
-    LocalNodeRuntime, LocalProviderApp, LocalProviderClient, LocalProviderEvent,
-    LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
+    ActionRequestWatch, AssignedWorkloadWatch, AssignedWorkloadsUpdate, ExecutorApp,
+    LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent, LocalExecutorService,
+    LocalExecutorSubscription, LocalNodeRuntime, LocalProviderApp, LocalProviderClient,
+    LocalProviderEvent, LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
     LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp, StatusWatch,
 };
 #[cfg(feature = "ipc")]
-pub use control_plane::{ControlPlaneClient, ControlPlaneEventStream, LocalControlPlaneClient};
+pub use control_plane::{
+    ActionWatch, ControlPlaneClient, ControlPlaneEventStream, LocalControlPlaneClient,
+};
 pub use error::ClientError;
 #[cfg(feature = "ipc")]
 pub use executor::{ExecutorClient, ExecutorEventStream};

@@ -130,6 +130,11 @@ impl NodeApp {
                             .is_some_and(|executor| executors.contains(executor))
                 })
             }
+            // The node publishes host metrics for itself; a client holding a node action claim
+            // may publish `action.*` keys for it (checked per key by `publish_local_status`).
+            StatusSubject::Node(id) => {
+                id == &self.config.node_id && self.client_holds_node_claim(source)
+            }
             StatusSubject::Workload(id) => executors.iter().any(|executor| {
                 self.current_executor_workloads(executor)
                     .is_ok_and(|workloads| workloads.iter().any(|w| &w.workload_id == id))
@@ -145,6 +150,17 @@ impl NodeApp {
     ) -> Result<(), NodeError> {
         let mut checked: Vec<&StatusSubject> = Vec::new();
         for entry in &entries {
+            if matches!(entry.subject, StatusSubject::Node(_)) && !entry.key.starts_with("action.")
+            {
+                self.state
+                    .status
+                    .unauthorized_total
+                    .fetch_add(1, Ordering::Relaxed);
+                return Err(NodeError::Authorization(format!(
+                    "clients may publish only `action.*` keys for {}",
+                    entry.subject
+                )));
+            }
             if checked.contains(&&entry.subject) {
                 continue;
             }

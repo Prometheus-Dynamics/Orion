@@ -4,20 +4,25 @@
 //! and control-plane records those apps commonly handle, so they can depend on `orion-client`
 //! alone.
 
+#[cfg(feature = "ipc")]
+pub use crate::{
+    ActionRequestWatch, ActionWatch, AssignedWorkloadWatch, AssignedWorkloadsUpdate,
+    ClientIdentity, ClientSession, ControlPlaneClient, ControlPlaneEventStream, ExecutorApp,
+    ExecutorClient, ExecutorEventStream, LocalControlPlaneClient, LocalExecutorApp,
+    LocalExecutorClient, LocalExecutorEvent, LocalExecutorService, LocalExecutorSubscription,
+    LocalNodeRuntime, LocalProviderApp, LocalProviderClient, LocalProviderEvent,
+    LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
+    LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp, ProviderClient,
+    ProviderEventStream, SessionConfig, StatusWatch,
+};
 pub use crate::{
     AssignedWorkload, BoundResource, ClientError, ClientRole, DerivedResource, ProviderResource,
     ResourceClaim, assigned_workloads, assigned_workloads_for_executor,
     assigned_workloads_from_records, is_assigned_to, resources_bound_to,
 };
-#[cfg(feature = "ipc")]
-pub use crate::{
-    AssignedWorkloadWatch, AssignedWorkloadsUpdate, ClientIdentity, ClientSession,
-    ControlPlaneClient, ControlPlaneEventStream, ExecutorApp, ExecutorClient, ExecutorEventStream,
-    LocalControlPlaneClient, LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent,
-    LocalExecutorService, LocalExecutorSubscription, LocalNodeRuntime, LocalProviderApp,
-    LocalProviderClient, LocalProviderEvent, LocalProviderService, LocalProviderSubscription,
-    LocalRuntimePublisher, LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp,
-    ProviderClient, ProviderEventStream, SessionConfig, StatusWatch,
+pub use orion_control_plane::{
+    ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
+    action_names, action_status_keys,
 };
 pub use orion_control_plane::{
     AppliedClusterState, AvailabilityState, ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef,

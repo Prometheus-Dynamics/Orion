@@ -5,7 +5,11 @@ use std::{future::Future, sync::Arc, time::Duration};
 use tracing::{debug, error, info};
 
 impl NodeApp {
-    fn spawn_background_loop<F, Fut>(&self, interval: Duration, mut tick: F) -> ReconcileLoopHandle
+    pub(super) fn spawn_background_loop<F, Fut>(
+        &self,
+        interval: Duration,
+        mut tick: F,
+    ) -> ReconcileLoopHandle
     where
         F: FnMut(NodeApp) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,

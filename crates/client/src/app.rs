@@ -1,3 +1,4 @@
+mod actions;
 mod event_pump;
 mod local_unary;
 mod publish;
@@ -6,6 +7,7 @@ mod service;
 mod status;
 mod watch;
 
+pub use actions::ActionRequestWatch;
 pub use local_unary::{
     LocalExecutorApp, LocalExecutorClient, LocalProviderApp, LocalProviderClient,
 };

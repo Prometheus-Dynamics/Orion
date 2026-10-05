@@ -1,3 +1,4 @@
+use super::actions::{ActionRequest, ActionResult};
 use super::status::StatusChange;
 use super::sync::StateSnapshot;
 use crate::{
@@ -118,6 +119,10 @@ pub enum ClientEventKind {
     },
     /// Coalesced volatile status changes for a `WatchStatus` subscription.
     Status(StatusChange),
+    /// An action request for a provider or executor this client handles (`WatchActionRequests`).
+    ActionRequest(Box<ActionRequest>),
+    /// Updated action results for a `WatchActions` subscription (newest result per action).
+    ActionResults(Vec<ActionResult>),
 }
 
 #[derive(

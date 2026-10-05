@@ -1,3 +1,4 @@
+mod action;
 mod apply;
 mod delete;
 mod describe;
@@ -9,6 +10,7 @@ mod get_status;
 mod peers;
 mod watch;
 
+pub(crate) use action::{ActionCommand, ActionListArgs};
 pub(crate) use discovered::PeerRemoveArgs;
 
 use clap::Parser;
@@ -43,14 +45,17 @@ fn effective_workloads(snapshot: &orion_control_plane::StateSnapshot) -> Vec<Wor
 }
 
 /// Desired node records merged with observed ones: nodes only present in observed state (every
-/// node publishes its own record with clock facts) are listed too, and the observed clock facts
-/// replace the desired record's.
+/// node publishes its own record with clock and host facts) are listed too, and the observed clock
+/// and host facts replace the desired record's.
 fn effective_nodes(snapshot: &orion_control_plane::StateSnapshot) -> Vec<NodeRecord> {
     let mut nodes = snapshot.state.desired.nodes.clone();
     for (node_id, observed) in &snapshot.state.observed.nodes {
         nodes
             .entry(node_id.clone())
-            .and_modify(|node| node.clock = observed.clock.clone())
+            .and_modify(|node| {
+                node.clock = observed.clock.clone();
+                node.host = observed.host.clone();
+            })
             .or_insert_with(|| observed.clone());
     }
     nodes.into_values().collect()
@@ -66,5 +71,6 @@ pub(crate) async fn run() -> Result<(), String> {
         Command::Delete { command } => delete::run(command).await,
         Command::Peers { command } => peers::run(command).await,
         Command::Maintenance { command } => run_maintenance(command).await,
+        Command::Action { command } => action::run(command).await,
     }
 }

@@ -30,8 +30,11 @@ use crate::{
 };
 use orion_transport_ipc::{ControlEnvelope, UnixControlClient, UnixControlStreamClient};
 
+mod actions;
 mod discovery;
 mod metrics;
+
+pub use actions::ActionWatch;
 
 use metrics::ClientCommunicationMetrics;
 

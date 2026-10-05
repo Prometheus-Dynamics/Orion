@@ -72,6 +72,8 @@ pub(super) struct ObservabilityState {
     pub(super) communication_endpoints: BTreeMap<String, CommunicationEndpointRuntime>,
     /// Latest clock sample, refreshed on every clock check.
     pub(super) clock: Option<orion::control_plane::NodeClockFacts>,
+    /// Latest host-facts sample, refreshed on every host-facts check.
+    pub(super) host_facts: Option<orion::control_plane::HostFacts>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

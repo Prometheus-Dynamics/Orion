@@ -55,6 +55,9 @@ impl Default for NodeAppBuilder {
             local_authentication_mode: None,
             control_middlewares: Vec::new(),
             auto_startup_replay: true,
+            action_handlers: BTreeMap::new(),
+            host_facts_source: None,
+            host_facts_overlays: Vec::new(),
         }
     }
 }
@@ -250,6 +253,38 @@ impl NodeAppBuilder {
         self
     }
 
+    /// Registers the node-side handler of the action `name` for actions that target this node
+    /// (`docs/actions.md`). Orion registers none by default; a later registration of the same
+    /// name replaces the earlier one.
+    pub fn with_action_handler<H>(mut self, name: impl Into<String>, handler: H) -> Self
+    where
+        H: crate::actions::ActionHandler,
+    {
+        self.action_handlers.insert(name.into(), Arc::new(handler));
+        self
+    }
+
+    /// Replaces the default host-facts source ([`crate::LinuxHostFactsSource`] configured from
+    /// the runtime tuning) with `source` (`docs/host-facts.md`).
+    pub fn with_host_facts_source<S>(mut self, source: S) -> Self
+    where
+        S: crate::host_facts::HostFactsSource + 'static,
+    {
+        self.host_facts_source = Some(Arc::new(source));
+        self
+    }
+
+    /// Merges `overlay`'s facts on top of the host-facts source on every sample: its set fields
+    /// replace the base's, its labels and extra metrics are added, and its temperatures replace
+    /// readings of the same sensor. Overlays apply in registration order.
+    pub fn with_host_facts_overlay<S>(mut self, overlay: S) -> Self
+    where
+        S: crate::host_facts::HostFactsSource + 'static,
+    {
+        self.host_facts_overlays.push(Arc::new(overlay));
+        self
+    }
+
     /// Installs the default HTTP, IPC, TCP, and QUIC transport implementations explicitly.
     ///
     /// Most callers do not need this because [`Self::try_build`] will already fall back to
@@ -341,6 +376,22 @@ impl NodeAppBuilder {
             config.runtime_tuning.persistence_worker_queue_capacity;
         let audit_log_queue_capacity = config.runtime_tuning.audit_log_queue_capacity;
         let audit_log_overload_policy = config.runtime_tuning.audit_log_overload_policy;
+        let base_source: Arc<dyn crate::host_facts::HostFactsSource> =
+            self.host_facts_source.unwrap_or_else(|| {
+                Arc::new(
+                    crate::host_facts::LinuxHostFactsSource::new()
+                        .with_image_files(config.runtime_tuning.host_facts.image_files.clone()),
+                )
+            });
+        let host_facts_source: Arc<dyn crate::host_facts::HostFactsSource> =
+            if self.host_facts_overlays.is_empty() {
+                base_source
+            } else {
+                Arc::new(self.host_facts_overlays.into_iter().fold(
+                    crate::host_facts::LayeredHostFactsSource::new(base_source),
+                    crate::host_facts::LayeredHostFactsSource::with_overlay,
+                ))
+            };
         let state = Arc::new(NodeState {
             persisted: PersistedState {
                 store: RwLock::new(store),
@@ -381,6 +432,10 @@ impl NodeAppBuilder {
             observed_persist: Default::default(),
             cluster: Default::default(),
             status: Default::default(),
+            actions: super::actions::ActionsState::with_handlers(self.action_handlers),
+            host_facts: super::host_facts::HostFactsState {
+                source: host_facts_source,
+            },
             #[cfg(feature = "link-gateway")]
             links: Default::default(),
         });

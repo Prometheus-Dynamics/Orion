@@ -92,6 +92,32 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
         GetCommand::Memory(args) => super::get_memory::run(args).await,
         GetCommand::Status(args) => super::get_status::run(args).await,
         GetCommand::DiscoveredPeers(args) => super::discovered::get_discovered_peers(args).await,
+        GetCommand::Actions(args) => super::action::get_actions(args).await,
+        GetCommand::Links(args) => {
+            let snapshot = fetch_observability_snapshot(&args).await?;
+            match args.output {
+                OutputFormat::Summary => {
+                    print!(
+                        "{}",
+                        crate::render_host::render_links_summary(&snapshot.links)
+                    );
+                    Ok(())
+                }
+                OutputFormat::Metrics => {
+                    print!(
+                        "{}",
+                        orion_control_plane::render_link_metrics(
+                            &snapshot.node_id,
+                            &snapshot.links
+                        )
+                    );
+                    Ok(())
+                }
+                OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
+                    print_structured(&snapshot.links, args.output)
+                }
+            }
+        }
         GetCommand::Observability(args) => {
             let snapshot = fetch_observability_snapshot(&args).await?;
             match args.output {
@@ -259,12 +285,13 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     println!("nodes count={}", nodes.len());
                     for node in nodes {
                         println!(
-                            "node id={} health={} schedulable={} labels={} {}",
+                            "node id={} health={} schedulable={} labels={} {} {}",
                             node.node_id,
                             render_health_state(node.health),
                             node.schedulable,
                             join_or_dash(&node.labels),
                             render_clock_fields(node.clock.as_ref()),
+                            crate::render_host::render_host_fields(node.host.as_ref()),
                         );
                     }
                     Ok(())

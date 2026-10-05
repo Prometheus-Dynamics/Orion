@@ -1,3 +1,4 @@
+use super::actions::{ActionQuery, ActionReport, ActionRequest, ActionResult};
 use super::client::{
     ClientEvent, ClientEventPoll, ClientHello, ClientSession, ExecutorStateUpdate,
     ExecutorWorkloadQuery, PeerEnrollment, PeerIdentityUpdate, ProviderLeaseQuery,
@@ -76,4 +77,22 @@ pub enum ControlMessage {
     EnrollmentHello(Box<EnrollmentHello>),
     EnrollmentChallenge(Box<EnrollmentChallenge>),
     EnrollmentConfirm(Box<EnrollmentConfirm>),
+    /// Submits an action (control-plane clients, and authenticated enrolled peers forwarding an
+    /// action to the node that owns its target); answered with [`ControlMessage::ActionResults`]
+    /// holding the action's current result.
+    RunAction(Box<ActionRequest>),
+    /// Queries tracked actions; answered with [`ControlMessage::ActionResults`].
+    QueryActions(ActionQuery),
+    /// Subscribes the client stream to action result updates (`ClientEventKind::ActionResults`).
+    WatchActions(ActionQuery),
+    /// Registers the client stream as the action handler of the providers or executors the client
+    /// names; requests arrive as `ClientEventKind::ActionRequest`.
+    WatchActionRequests(Vec<super::actions::ActionTarget>),
+    /// Claims node-targeted action names for the client stream (an out-of-process node action
+    /// handler, for example a device manager); requests arrive as
+    /// `ClientEventKind::ActionRequest`. Released when the client's stream disconnects.
+    ClaimNodeActions(Vec<String>),
+    /// A handler's progress or final report for an action it received.
+    ReportActionResult(Box<ActionReport>),
+    ActionResults(Vec<ActionResult>),
 }

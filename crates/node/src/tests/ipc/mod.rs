@@ -1,5 +1,6 @@
 use super::*;
 
+pub(super) mod actions;
 mod local_sessions;
 mod status_lane;
 mod stream;

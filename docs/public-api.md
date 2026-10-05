@@ -30,7 +30,8 @@ Examples:
 The rkyv control protocol is versioned by `orion_core::CONTROL_PROTOCOL_VERSION`. Clients and
 nodes built from different Orion releases reject each other with a typed `ProtocolMismatch
 { local, remote }` error (`IpcTransportError`, `HttpTransportError`, `ClientError`) before any
-payload is decoded (version 3 adds the status-lane messages). If you write raw IPC frames yourself, use `control_preamble()` /
+payload is decoded (version 3 adds the status-lane messages; version 4 host facts, actions, and
+link status). If you write raw IPC frames yourself, use `control_preamble()` /
 `check_control_preamble()` from `orion-transport-ipc`. See
 [protocol-compatibility.md](protocol-compatibility.md).
 
@@ -148,6 +149,40 @@ desired records. `NodeObservabilitySnapshot::clock` holds the latest sample and
 `NodeRuntimeTuning::clock_refresh_interval`; `NodeApp::refresh_clock_facts_from(&source)` runs one
 check with any `ClockStatusSource` (for example a fake `KernelClockReading` in tests), and
 `NodeApp::published_clock_facts()` returns what the observed record currently holds.
+
+## Host Facts
+
+See [host-facts.md](host-facts.md). `orion-control-plane`: `NodeHostFacts`, `HostMetricsSample`,
+`HostTemperature`, `HostFacts` (with `merge`), `NodeRecord::host` (`NodeRecordBuilder::host`),
+`NodeObservabilitySnapshot::host_facts`, `StatusSubject::Node`, `render_host_facts_metrics`.
+`orion-node`: the `HostFactsSource` trait (implemented by external crates to supply facts),
+`LinuxHostFactsSource` (`with_root`, `with_image_files`), `LayeredHostFactsSource`, the
+`host_facts` parsers, `HostFactsTuning` (`NodeRuntimeTuning::host_facts`),
+`NodeAppBuilder::{with_host_facts_source, with_host_facts_overlay}`, and
+`NodeApp::{refresh_host_facts, refresh_host_facts_from, published_host_facts, latest_host_facts,
+spawn_host_facts_loop}`.
+
+## Actions
+
+See [actions.md](actions.md). `orion-control-plane`: `ActionTarget` (`FromStr`/`Display`,
+`status_subject`), `ActionRequest`, `ActionState`, `ActionResult` (`new`, `status_entries`,
+`as_resource_action_result`), `ActionReport`, `ActionQuery`, `action_names`, `action_status_keys`,
+and the control messages `RunAction`, `QueryActions`, `WatchActions`, `WatchActionRequests`,
+`ClaimNodeActions`, `ReportActionResult`, `ActionResults`. `orion-node`: `actions::{ActionHandler,
+ActionContext, ActionOutcome, ActionFuture}`, `NodeAppBuilder::with_action_handler`,
+`NodeApp::{run_action, query_actions, action_handler_names}`, `ActionTuning`
+(`NodeRuntimeTuning::actions`). `orion-client`: `LocalControlPlaneClient::{run_action,
+query_actions, wait_for_action}`, `ControlPlaneEventStream::subscribe_actions`, `ActionWatch`,
+`LocalProviderService` / `LocalExecutorService` `::{watch_action_requests, claim_node_actions}`,
+and `ActionRequestWatch` (`next`, `report`, `progress`, `succeed`, `fail`, `reject`,
+`publish_action_status`).
+
+## Link Gateway Status
+
+`NodeObservabilitySnapshot::links: Vec<LinkStatusSnapshot>` carries `NodeApp::link_status()` over
+the control protocol (empty without the `link-gateway` feature);
+`orion_node::link_gateway::LinkStatus` is an alias of `LinkStatusSnapshot`, and
+`render_link_metrics` renders the per-link Prometheus families.
 
 ## Peer Sync and Per-Object Versions
 

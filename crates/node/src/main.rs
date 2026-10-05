@@ -164,6 +164,7 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     let dynamic_peers = false;
     let reconcile_loop = app.spawn_reconcile_loop(config.reconcile_interval);
     let clock_facts_loop = app.spawn_clock_facts_loop();
+    let host_facts_loop = app.spawn_host_facts_loop();
     let peer_sync_loop = (!config.peers.is_empty() || dynamic_peers).then(|| {
         app.spawn_peer_sync_loop_with_execution(
             config.reconcile_interval,
@@ -301,6 +302,9 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         link_gateway.shutdown().await;
         reconcile_loop.shutdown().await;
         clock_facts_loop.shutdown().await;
+        if let Some(host_facts_loop) = host_facts_loop {
+            host_facts_loop.shutdown().await;
+        }
         if let Some(peer_sync_loop) = peer_sync_loop {
             peer_sync_loop.shutdown().await;
         }
@@ -341,6 +345,9 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     link_gateway.shutdown().await;
     reconcile_loop.shutdown().await;
     clock_facts_loop.shutdown().await;
+    if let Some(host_facts_loop) = host_facts_loop {
+        host_facts_loop.shutdown().await;
+    }
     if let Some(peer_sync_loop) = peer_sync_loop {
         peer_sync_loop.shutdown().await;
     }

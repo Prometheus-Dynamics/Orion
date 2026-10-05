@@ -301,3 +301,96 @@ async fn unreachable_tcp_peer_backs_off_with_a_connectivity_error() {
     );
     node.server.shutdown().await.expect("listener should stop");
 }
+
+#[tokio::test]
+async fn actions_are_forwarded_to_the_owning_node_over_orion_tcp() {
+    use crate::tests::ipc::actions::{
+        hello, polled_requests, publish_provider, wait_final, watch_requests,
+    };
+    use orion::control_plane::{
+        ActionQuery, ActionReport, ActionRequest, ActionState, ActionTarget,
+    };
+
+    let mode = crate::PeerAuthenticationMode::Required;
+    let (a, b) = (
+        tcp_node("node-a", mode).await,
+        tcp_node("node-b", mode).await,
+    );
+    connect(&a, &b);
+    connect(&b, &a);
+    let provider = hello(&b.app, "b-provider", ClientRole::Provider);
+    publish_provider(&b.app, &provider, "provider.b");
+    watch_requests(&b.app, &provider, "provider.b");
+    // node-a learns that provider.b lives on node-b from the replicated desired state.
+    sync(&a, &b).await;
+
+    let accepted = a
+        .app
+        .run_action(
+            ActionRequest::new(
+                "f1",
+                ActionTarget::Provider(ProviderId::new("provider.b")),
+                "locate",
+            )
+            .with_arg("duration_ms", TypedConfigValue::UInt(1_000)),
+            "operator",
+        )
+        .expect("action should be submitted");
+    assert_eq!(accepted.state, ActionState::Accepted);
+    assert_eq!(accepted.handled_by, NodeId::new("node-b"));
+
+    let mut delivered = Vec::new();
+    for _ in 0..500 {
+        delivered = polled_requests(&b.app, &provider);
+        if !delivered.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(delivered.len(), 1, "node-b delivers the forwarded request");
+    assert_eq!(delivered[0].requested_by, "peer:node-a/local:operator");
+    b.app
+        .apply_local_control_message(
+            &provider,
+            ControlMessage::ReportActionResult(Box::new(
+                ActionReport::new("f1", ActionState::Succeeded)
+                    .with_output("blinks", TypedConfigValue::UInt(3)),
+            )),
+        )
+        .expect("the handler reports on node-b");
+    let done = wait_final(&a.app, "f1").await;
+    assert_eq!(done.state, ActionState::Succeeded);
+    assert_eq!(done.output["blinks"], TypedConfigValue::UInt(3));
+
+    // The owner's rejection is mirrored back.
+    a.app
+        .run_action(
+            ActionRequest::new("f2", ActionTarget::Node(NodeId::new("node-b")), "reboot"),
+            "operator",
+        )
+        .expect("submitted");
+    match wait_final(&a.app, "f2").await.state {
+        ActionState::Rejected { reason } => {
+            assert!(reason.contains("node-b has no handler"), "{reason}")
+        }
+        other => panic!("expected the owner's rejection, got {other:?}"),
+    }
+
+    // A peer that node-b has not enrolled cannot submit actions to it.
+    let c = tcp_node("node-c", mode).await;
+    connect(&c, &b);
+    c.app
+        .run_action(
+            ActionRequest::new("f3", ActionTarget::Node(NodeId::new("node-b")), "reboot"),
+            "operator",
+        )
+        .expect("submitted");
+    match wait_final(&c.app, "f3").await.state {
+        ActionState::Failed { reason } => assert!(reason.contains("node-b"), "{reason}"),
+        other => panic!("expected the forward to fail, got {other:?}"),
+    }
+    assert!(b.app.query_actions(&ActionQuery::action("f3")).is_empty());
+    for node in [a, b, c] {
+        node.server.shutdown().await.expect("listener should stop");
+    }
+}

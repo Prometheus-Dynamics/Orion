@@ -30,7 +30,14 @@ use core::fmt;
 ///   Peer discovery and enrollment messages (`QueryDiscovery`, `Discovery`,
 ///   `EnrollDiscoveredPeer`, `RemovePeer`, `EnrollmentHello`/`Challenge`/`Confirm`) and
 ///   `NodeObservabilitySnapshot::discovery`.
-pub const CONTROL_PROTOCOL_VERSION: u16 = 3;
+/// - `4`: host facts (`NodeRecord::host`, `NodeHostFacts`, `NodeObservabilitySnapshot::host_facts`,
+///   `HostFacts`, `HostMetricsSample`, `HostTemperature`, `StatusSubject::Node`); generic actions
+///   (`RunAction`, `QueryActions`, `WatchActions`, `WatchActionRequests`, `ReportActionResult`,
+///   `ActionResults`, `ClientEventKind::ActionRequest`/`ActionResults`, `ActionRequest`,
+///   `ActionResult`, `ActionState`, `ActionTarget`, `ActionQuery`,
+///   `HttpResponsePayload::Actions`); link gateway counters in
+///   `NodeObservabilitySnapshot::links` (`LinkStatusSnapshot`).
+pub const CONTROL_PROTOCOL_VERSION: u16 = 4;
 
 /// Fingerprint of the archived layout of the control-protocol types at
 /// [`CONTROL_PROTOCOL_VERSION`].
@@ -38,7 +45,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 3;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x891f_2c5f_421b_997e;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x32ae_cd3d_26e7_9bf6;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

@@ -210,6 +210,11 @@ the desired state is rewritten with per-object versions, and observed state is r
 reports. If the old files cannot be read, startup fails without overwriting anything. See
 "Upgrading from protocol v2" in `docs/peer-sync.md`.
 
+A state directory written with control protocol v3 (snapshot format 4) is rewritten in snapshot
+format 5 (`NodeRecord::host`) on the first start, keeping every record, stamp, and revision; the
+old files are kept in `<state dir>/legacy-format-4/`. See "Upgrading from protocol v3" in
+`docs/host-facts.md`.
+
 ## Clock Facts
 
 The node reports its clock source and synchronization state in its observed node record (see
@@ -224,6 +229,30 @@ whether the clock is synchronized but not which daemon disciplines it, so operat
 The refresh interval is `ORION_NODE_CLOCK_REFRESH_MS` under Runtime Tuning. Programmatic callers
 set all three through `NodeRuntimeTuning::with_clock_refresh_interval`, `with_clock_source`, and
 `with_clock_timebase`.
+
+## Host Facts
+
+The node samples host facts (hostname, OS, image, kernel, board, CPU count, memory, uptime, load,
+temperatures) every `ORION_NODE_HOST_FACTS_REFRESH_MS` (Runtime Tuning, default `10000`, `0`
+turns host facts off). Identity facts go into the node's observed record, volatile metrics into
+the status lane under `node/<id>`; see [host-facts.md](host-facts.md).
+
+| Variable | Default | Valid values | Failure behavior |
+| --- | --- | --- | --- |
+| `ORION_NODE_IMAGE_VERSION_FILE` | unset (none) | `:`-separated list of files; the first readable one declares the system image (`KEY=value` lines with `IMAGE_ID`/`IMAGE_NAME`/`NAME`/`ID` and `IMAGE_VERSION`/`VERSION_ID`/`VERSION`, or a single version line). Overrides `IMAGE_ID`/`IMAGE_VERSION` from `os-release`. | Invalid Unicode fails startup. Unreadable files are skipped. |
+
+Programmatic callers use `NodeRuntimeTuning::host_facts` (`HostFactsTuning::with_refresh_interval`,
+`with_image_files`) and replace or extend the source with `NodeAppBuilder::with_host_facts_source`
+and `with_host_facts_overlay`.
+
+## Actions
+
+Generic actions (see [actions.md](actions.md)) are tracked in memory only, bounded by
+`ORION_NODE_ACTION_MAX_TRACKED`, and expire `ORION_NODE_ACTION_RESULT_TTL_MS` after they finish.
+A request's `deadline_ms` of `0` uses `ORION_NODE_ACTION_DEFAULT_DEADLINE_MS`; longer deadlines are
+capped at `ORION_NODE_ACTION_MAX_DEADLINE_MS` (all under Runtime Tuning). Programmatic callers use
+`NodeRuntimeTuning::actions` (`ActionTuning`) and register node-side handlers with
+`NodeAppBuilder::with_action_handler`.
 ### Observed-state write coalescing
 
 Desired state is durable: every desired-state commit (local or remote mutations, snapshot
@@ -315,6 +344,11 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_LIVENESS_TIMEOUT_MS` | `5000` | A peer not heard from (sync round, signed request, observed push) for this long is considered gone: placement stops choosing it and cross-node bindings to its resources become unavailable. See `docs/placement.md`. |
 | `ORION_NODE_PLACEMENT_GRACE_MS` | `10000` | How long a workload's assignee (or a cross-node binding's owner) must stay gone or ineligible before the workload moves (or the lease is released and re-resolved). See `docs/placement.md`. |
 | `ORION_NODE_TOMBSTONE_RETENTION_MS` | `604800000` | How long desired-state tombstones (deletes) are kept before collection. A node offline for longer than this can resurrect deleted objects. See `docs/peer-sync.md`. |
+| `ORION_NODE_HOST_FACTS_REFRESH_MS` | `10000` | How often host facts are sampled; `0` turns them off. Status-lane host metrics live three intervals (see `docs/host-facts.md`). |
+| `ORION_NODE_ACTION_DEFAULT_DEADLINE_MS` | `30000` | Deadline of actions submitted with `deadline_ms = 0` (at most the maximum). |
+| `ORION_NODE_ACTION_MAX_DEADLINE_MS` | `600000` | Longest accepted action deadline; longer ones are capped. |
+| `ORION_NODE_ACTION_RESULT_TTL_MS` | `600000` | How long a finished action's result stays queryable. |
+| `ORION_NODE_ACTION_MAX_TRACKED` | `256` | Most actions tracked at once; the oldest finished results are evicted first, and new requests are refused while every tracked action is still running. |
 | `ORION_NODE_CLOCK_REFRESH_MS` | `10000` | How often the node re-reads its clock state. The observed node record is only republished on meaningful change (see `docs/observability.md`, Clock Facts). |
 | `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` | `2000` | Shortest spacing between coalesced observed/applied state writes while the reconcile loop runs. `0` writes every change immediately (not normalized to `1`). Desired-state commits are never delayed. See "Observed-state write coalescing". |
 | `ORION_NODE_STATUS_MAX_ENTRIES` | `4096` | Node-wide cap on volatile status lane entries. |

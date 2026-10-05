@@ -4,6 +4,7 @@ mod features;
 mod handlers;
 mod maintenance;
 mod render;
+mod render_host;
 mod render_placement;
 mod transport;
 

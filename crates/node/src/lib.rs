@@ -9,6 +9,7 @@
 
 extern crate self as orion;
 
+pub mod actions;
 mod app;
 mod auth;
 mod blocking;
@@ -16,6 +17,7 @@ mod clock;
 mod config;
 #[cfg(feature = "discovery-mdns")]
 pub mod discovery;
+pub mod host_facts;
 #[cfg(feature = "link-gateway")]
 pub mod link_gateway;
 mod lock;
@@ -125,7 +127,11 @@ pub use auth::{
     PeerSecurityMiddleware,
 };
 pub use clock::{ClockStatusSource, KernelClockReading, KernelClockStatusSource};
-pub use config::{NodeConfig, NodeProcessConfig, NodeRuntimeThreads, PlacementTuning};
+pub use config::{
+    ActionTuning, HostFactsTuning, NodeConfig, NodeProcessConfig, NodeRuntimeThreads,
+    PlacementTuning,
+};
+pub use host_facts::{HostFactsSource, LayeredHostFactsSource, LinuxHostFactsSource};
 pub use peer::{
     PEER_TCP_SCHEME, PeerConfig, PeerState, PeerSyncStatus, PeerTransportKind, PeerTrustStatus,
 };

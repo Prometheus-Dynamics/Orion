@@ -17,7 +17,9 @@ use orion_transport_tcp::TcpTransportError;
 
 pub(crate) fn classify_node_error(error: &NodeError) -> OperationFailureCategory {
     match error {
-        NodeError::Config(_) | NodeError::Status(_) => OperationFailureCategory::Validation,
+        NodeError::Config(_) | NodeError::Status(_) | NodeError::Action(_) => {
+            OperationFailureCategory::Validation
+        }
         NodeError::LockPoisoned(_) => OperationFailureCategory::Concurrency,
         NodeError::DuplicateProvider(_)
         | NodeError::DuplicateExecutor(_)
@@ -168,7 +170,8 @@ pub(crate) fn classify_peer_sync_error(error: &NodeError) -> PeerSyncErrorKind {
         | NodeError::UnknownClient(_)
         | NodeError::ClientRoleMismatch { .. }
         | NodeError::RateLimitedClient { .. }
-        | NodeError::Status(_) => PeerSyncErrorKind::PeerSync,
+        | NodeError::Status(_)
+        | NodeError::Action(_) => PeerSyncErrorKind::PeerSync,
         NodeError::AuthenticatedPeerRequired {
             operation: ControlOperation::Mutations,
         }

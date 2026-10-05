@@ -32,10 +32,12 @@ const MAINTENANCE_STATE_FILE: &str = "maintenance-state.rkyv";
 const ARTIFACT_METADATA_FILE: &str = "metadata.rkyv";
 const ARTIFACT_PAYLOAD_FILE: &str = "payload.bin";
 /// Snapshot format. `4`: per-object HLC stamps and tombstones in the desired state, stamped
-/// mutation history (format `3` directories are migrated by [`NodeStorage::migrate_legacy_state`]).
-const SNAPSHOT_FORMAT_VERSION: u32 = 4;
+/// mutation history. `5`: `NodeRecord::host` (control protocol v4). Format `3` and `4` directories
+/// are migrated by [`NodeStorage::migrate_legacy_state`].
+const SNAPSHOT_FORMAT_VERSION: u32 = 5;
 
 mod migrate_v3;
+mod migrate_v4;
 pub use migrate_v3::StateMigrationReport;
 
 #[derive(Clone, Debug, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]

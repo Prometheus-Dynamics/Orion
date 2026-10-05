@@ -223,10 +223,13 @@ impl NodeStorage {
         }
         let bytes =
             std::fs::read(&manifest_path).map_err(|err| NodeError::Storage(err.to_string()))?;
-        if decode_from_slice::<SnapshotManifest>(&bytes)
-            .is_ok_and(|manifest| manifest.format_version == SNAPSHOT_FORMAT_VERSION)
-        {
-            return Ok(None);
+        if let Ok(manifest) = decode_from_slice::<SnapshotManifest>(&bytes) {
+            if manifest.format_version == SNAPSHOT_FORMAT_VERSION {
+                return Ok(None);
+            }
+            if manifest.format_version == super::migrate_v4::FORMAT_4 {
+                return self.migrate_format_4(manifest);
+            }
         }
         let Ok(legacy) = decode_from_slice::<LegacySnapshotManifest>(&bytes) else {
             // Neither layout: leave it to replay, which reports the decode error.
@@ -296,11 +299,17 @@ impl NodeStorage {
     /// Copies the format-3 files into the backup directory once (rename makes it atomic), so an
     /// interrupted migration restarts from the untouched originals.
     fn backup_legacy_files(&self) -> Result<PathBuf, NodeError> {
-        let backup_dir = self.root().join(LEGACY_BACKUP_DIR);
+        self.backup_state_files(LEGACY_BACKUP_DIR)
+    }
+
+    /// Copies the snapshot and history files into `<state dir>/<dir>` once (rename makes it
+    /// atomic), so an interrupted migration restarts from the untouched originals.
+    pub(super) fn backup_state_files(&self, dir: &str) -> Result<PathBuf, NodeError> {
+        let backup_dir = self.root().join(dir);
         if backup_dir.exists() {
             return Ok(backup_dir);
         }
-        let staging = self.root().join(format!("{LEGACY_BACKUP_DIR}.tmp"));
+        let staging = self.root().join(format!("{dir}.tmp"));
         if staging.exists() {
             std::fs::remove_dir_all(&staging).map_err(|err| NodeError::Storage(err.to_string()))?;
         }

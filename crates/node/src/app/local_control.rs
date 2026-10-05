@@ -154,6 +154,14 @@ impl NodeApp {
                 self.subscribe_status_watch(source, query)?;
                 Ok(ControlMessage::Accepted)
             }
+            message @ (ControlMessage::RunAction(_)
+            | ControlMessage::QueryActions(_)
+            | ControlMessage::WatchActions(_)
+            | ControlMessage::WatchActionRequests(_)
+            | ControlMessage::ClaimNodeActions(_)
+            | ControlMessage::ReportActionResult(_)) => {
+                self.apply_local_action_message(source, message)
+            }
             ControlMessage::Ping => Ok(ControlMessage::Pong),
             ControlMessage::Pong => Ok(ControlMessage::Accepted),
             ControlMessage::Hello(_) => Ok(ControlMessage::Hello(self.peer_hello()?)),
@@ -182,7 +190,8 @@ impl NodeApp {
                         )
                     }
                     orion::transport::http::HttpResponsePayload::Readiness(_)
-                    | orion::transport::http::HttpResponsePayload::EnrollmentChallenge(_) => {
+                    | orion::transport::http::HttpResponsePayload::EnrollmentChallenge(_)
+                    | orion::transport::http::HttpResponsePayload::Actions(_) => {
                         ControlMessage::Rejected("response is not valid for sync request".into())
                     }
                     orion::transport::http::HttpResponsePayload::Observability(_) => {
@@ -216,6 +225,7 @@ impl NodeApp {
             | ControlMessage::Status(_)
             | ControlMessage::Discovery(_)
             | ControlMessage::EnrollmentChallenge(_)
+            | ControlMessage::ActionResults(_)
             | ControlMessage::Accepted
             | ControlMessage::Rejected(_) => Ok(ControlMessage::Rejected(
                 "response-only control message received as a request".into(),
@@ -385,6 +395,9 @@ impl NodeApp {
                 txn.remove(source);
             }
         });
+        for (source, _) in &expired {
+            self.release_action_handler(source);
+        }
 
         self.with_observability_txn(|txn| {
             for (source, session) in expired {
@@ -508,6 +521,7 @@ impl NodeApp {
             })
             .unwrap_or(false);
         if detached {
+            self.release_action_handler(source);
             self.with_observability_txn(|txn| {
                 let observability = txn.state_mut();
                 observability.client_stream_detaches_total =

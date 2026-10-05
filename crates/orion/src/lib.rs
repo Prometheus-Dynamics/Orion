@@ -44,6 +44,7 @@ pub mod cluster {
 #[cfg(feature = "client")]
 pub mod client {
     pub use orion_client::prelude;
+    pub use orion_client::{ActionRequestWatch, ActionWatch};
     pub use orion_client::{
         AssignedWorkload, AssignedWorkloadWatch, AssignedWorkloadsUpdate, BoundResource,
         assigned_workloads, assigned_workloads_for_executor, assigned_workloads_from_records,
@@ -66,6 +67,11 @@ pub mod client {
 
 #[cfg(feature = "control-plane")]
 pub mod control_plane {
+    pub use orion_control_plane::{
+        ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
+        ActionTargetParseError, HostFacts, HostMetricsSample, HostTemperature, LinkStatusSnapshot,
+        NodeHostFacts, action_names, action_status_keys,
+    };
     pub use orion_control_plane::{
         AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, AvailabilityState, ClientEvent,
         ClientEventKind, ClientEventPoll, ClientHello, ClientRole, ClientSession,
@@ -104,9 +110,9 @@ pub mod control_plane {
     #[cfg(feature = "std")]
     pub use orion_control_plane::{
         MetricsExportConfig, render_clock_metrics, render_communication_metrics,
-        render_communication_metrics_with_config, render_host_metrics,
-        render_observability_metrics, render_observability_metrics_with_config,
-        render_resource_usage_metrics,
+        render_communication_metrics_with_config, render_host_facts_metrics, render_host_metrics,
+        render_link_metrics, render_observability_metrics,
+        render_observability_metrics_with_config, render_resource_usage_metrics,
     };
 }
 

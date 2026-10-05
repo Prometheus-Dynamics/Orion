@@ -58,6 +58,10 @@ It currently includes:
   versus its caps, local stream subscriber backlog, background worker queue depth, and in-memory
   registry sizes (see [Memory And Backlog Diagnostics](#memory-and-backlog-diagnostics))
 - `clock`: the latest sample of the node's clock facts (see [Clock Facts](#clock-facts))
+- `host_facts`: the latest host-facts sample, identity plus volatile metrics (see
+  [Host Facts](#host-facts))
+- `links`: link gateway counters per configured microcontroller link (see
+  [Link Gateway Status](#link-gateway-status))
 
 Communication endpoint metrics use one transport-agnostic shape so operator tooling can render a
 single table without each transport inventing its own counters. Each endpoint carries:
@@ -223,6 +227,8 @@ The most commonly consumed fields are:
 | `communication` | array of `CommunicationEndpointSnapshot` | Endpoint-level communication metrics. |
 | `recent_events` | array of `ObservabilityEvent` | Recent bounded event log. Successful reconcile passes appear only when they changed something (runtime snapshot, applied revision, or commands dispatched to an in-process executor); failed passes always appear. |
 | `resource_usage` | `NodeResourceUsageSnapshot` | Memory, state-size, and backlog diagnostics. Defaults to zeroed/empty values when absent from older structured input. |
+| `host_facts` | `HostFacts` or null | Latest host-facts sample (`identity`, `metrics`, `sampled_at_ms`); see `docs/host-facts.md`. |
+| `links` | array of `LinkStatusSnapshot` | Link gateway counters; empty without the `link-gateway` feature. |
 
 `HostMetricsSnapshot` fields:
 
@@ -352,6 +358,43 @@ can lag behind its own node's; `checked_at_ms` shows its age. Observed node reco
 the local node and for nodes the desired state still references (a desired node record, or a
 provider, executor, or assigned workload on that node).
 
+## Host Facts
+
+Every node samples host facts every `ORION_NODE_HOST_FACTS_REFRESH_MS` (default 10 s). Identity
+facts (hostname, OS, image, kernel, architecture, boot id, board serial and model, machine id, CPU
+count, total memory) go into the node's observed `NodeRecord::host` when they change and reach
+peers with the observed slice; uptime, load, available memory and temperatures go to the status
+lane under `node/<id>` (keys `host.*`) and to the snapshot's `host_facts` field. Prometheus:
+
+| Metric | Labels | Notes |
+| --- | --- | --- |
+| `orion_node_host_info` | `node_id`, `hostname`, `os_id`, `os_version`, `image_name`, `image_version`, `kernel_release`, `architecture`, `board_model` | Always `1`. |
+| `orion_node_host_cpu_count` | `node_id` | Omitted when unknown. |
+| `orion_node_host_temperature_celsius` | `node_id`, `sensor` | One sample per thermal sensor. |
+| `orion_node_host_metric` | `node_id`, `key` | Numeric extra metrics from a custom host-facts source. |
+
+Uptime, load and memory stay in the `orion_host_*` families above (filled from the host-facts
+sample when `/proc` does not report them). The source is replaceable; see `docs/host-facts.md`.
+
+## Link Gateway Status
+
+With the `link-gateway` feature, the snapshot's `links` section carries the counters of every
+configured link (`NodeApp::link_status()`): `name`, `open`, `devices`, `frames_rx`/`frames_tx`,
+`bytes_rx`/`bytes_tx`, `crc_errors`, `framing_errors`, `dropped`, `decode_errors`, `sessions`,
+`device_timeouts`, `hello_rejects`, `snapshot_rejects`, `status_batches`, `status_rejects`,
+`io_errors`, and `last_error`. `orionctl get links` prints one line per link (`-o json|yaml|toml`
+for the structured view, `-o metrics` for Prometheus text). Without the feature the section is
+empty. Prometheus (labels `node_id`, `link`):
+
+| Metric | Type | Extra labels |
+| --- | --- | --- |
+| `orion_link_open` | gauge | |
+| `orion_link_devices` | gauge | |
+| `orion_link_frames_total`, `orion_link_bytes_total` | counter | `direction` (`rx`, `tx`) |
+| `orion_link_errors_total` | counter | `kind` (`crc`, `framing`, `dropped`, `decode`, `io`) |
+| `orion_link_rejects_total` | counter | `kind` (`hello`, `snapshot`, `status`) |
+| `orion_link_sessions_total`, `orion_link_device_timeouts_total`, `orion_link_status_batches_total` | counter | |
+
 ## Memory And Backlog Diagnostics
 
 `orionctl get memory` (alias `orionctl get resource-usage`) prints the `resource_usage` section of
@@ -422,7 +465,9 @@ values that are useless after a restart (temperature, frame rate, queue depth, e
 error text) go to the node's volatile status lane instead:
 
 - **Latest value per `(subject, key)`.** A subject is a `StatusSubject`: `provider/<id>`,
-  `executor/<id>`, `resource/<id>`, or `workload/<id>`. A value is a `TypedConfigValue` (`Bool`,
+  `executor/<id>`, `resource/<id>`, `workload/<id>`, or `node/<id>` (published by the node itself:
+  host metrics under `host.*`, see `docs/host-facts.md`; a client holding a node action claim may
+  publish `action.*` keys, see `docs/actions.md`). A value is a `TypedConfigValue` (`Bool`,
   `Int`, `UInt`, `String`, `Bytes`). Each entry carries the node's receive time
   (`published_at_ms`, Unix milliseconds) and its TTL (`ttl_ms`).
 - **In memory only.** Entries are never persisted and are gone after a node restart; publishers

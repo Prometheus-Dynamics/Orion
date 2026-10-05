@@ -43,7 +43,11 @@ impl NodeApp {
     }
 
     pub fn observability_snapshot(&self) -> NodeObservabilitySnapshot {
-        let (host, process_memory) = sample_host_and_process_memory();
+        let (mut host, process_memory) = sample_host_and_process_memory();
+        #[cfg(feature = "link-gateway")]
+        let links = self.link_status();
+        #[cfg(not(feature = "link-gateway"))]
+        let links = Vec::new();
         let resource_usage = self.resource_usage_snapshot(process_memory);
         let desired_merge = self.desired_merge_snapshot();
         let revisions = self.current_revisions();
@@ -185,7 +189,6 @@ impl NodeApp {
             maintenance: self.maintenance_state_read().clone(),
             peer_sync_paused: self.peer_sync_paused(),
             remote_desired_state_blocked: self.remote_desired_state_blocked(),
-            host,
             configured_peer_count,
             ready_peer_count,
             pending_peer_count,
@@ -276,6 +279,12 @@ impl NodeApp {
             desired_merge,
             discovery: self.discovery_metrics_snapshot(),
             clock: observability.clock.clone(),
+            host_facts: {
+                fill_host_metrics_from_facts(&mut host, observability.host_facts.as_ref());
+                observability.host_facts.clone()
+            },
+            links,
+            host,
         }
     }
 
@@ -629,4 +638,40 @@ fn communication_metrics_degraded(metrics: &CommunicationMetricsSnapshot) -> boo
 
 fn empty_communication_metrics() -> CommunicationMetricsSnapshot {
     super::CommunicationMetrics::default().snapshot()
+}
+
+/// Fills host metrics the host does not expose through `/proc` from the latest host-facts sample
+/// (for example on a platform served by a custom `HostFactsSource`).
+fn fill_host_metrics_from_facts(
+    host: &mut orion::control_plane::HostMetricsSnapshot,
+    facts: Option<&orion::control_plane::HostFacts>,
+) {
+    let Some(facts) = facts else {
+        return;
+    };
+    let metrics = &facts.metrics;
+    for (slot, value) in [
+        (&mut host.uptime_seconds, metrics.uptime_seconds),
+        (&mut host.load_1_milli, metrics.load_1_milli),
+        (&mut host.load_5_milli, metrics.load_5_milli),
+        (&mut host.load_15_milli, metrics.load_15_milli),
+        (
+            &mut host.memory_available_bytes,
+            metrics.memory_available_bytes,
+        ),
+        (
+            &mut host.memory_total_bytes,
+            facts.identity.memory_total_bytes,
+        ),
+    ] {
+        if slot.is_none() {
+            *slot = value;
+        }
+    }
+    if host.hostname.is_none() {
+        host.hostname = facts.identity.hostname.clone();
+    }
+    if host.kernel_version.is_none() {
+        host.kernel_version = facts.identity.kernel_release.clone();
+    }
 }

@@ -8,6 +8,7 @@ mod clock;
 mod desired_merge;
 mod discovery;
 mod format;
+mod host_facts;
 mod resource_usage;
 
 use clock::append_clock_metrics;
@@ -15,6 +16,8 @@ pub use clock::render_clock_metrics;
 use desired_merge::append_desired_merge_metrics;
 use discovery::append_discovery_metrics;
 use format::{gauge, metric_help, metric_type, milli_to_f64, optional_gauge, sample, sample_owned};
+use host_facts::{append_host_facts_metrics, append_link_metrics};
+pub use host_facts::{render_host_facts_metrics, render_link_metrics};
 use resource_usage::append_resource_usage_metrics;
 pub use resource_usage::render_resource_usage_metrics;
 
@@ -72,6 +75,8 @@ pub fn render_observability_metrics_with_config(
     let mut out = String::new();
     append_host_metrics(&mut out, &snapshot.node_id, &snapshot.host);
     append_clock_metrics(&mut out, &snapshot.node_id, snapshot.clock.as_ref());
+    append_host_facts_metrics(&mut out, &snapshot.node_id, snapshot.host_facts.as_ref());
+    append_link_metrics(&mut out, &snapshot.node_id, &snapshot.links);
     append_cluster_gauges(&mut out, snapshot);
     append_operation_metric_headers(&mut out);
     append_operation_metrics(&mut out, &snapshot.node_id, "replay", &snapshot.replay);
