@@ -59,9 +59,9 @@ impl NodeApp {
             ControlMessage::QueryObservability => Ok(HttpResponsePayload::Observability(Box::new(
                 self.observability_snapshot(),
             ))),
-            ControlMessage::QueryStatus(query) => {
-                Ok(HttpResponsePayload::Status(self.query_status(&query)))
-            }
+            ControlMessage::QueryStatus(query) => Ok(HttpResponsePayload::Status(
+                self.query_status_routed(&query)?,
+            )),
             ControlMessage::RunAction(request) => {
                 Ok(HttpResponsePayload::Actions(vec![self.submit_action(
                     *request,

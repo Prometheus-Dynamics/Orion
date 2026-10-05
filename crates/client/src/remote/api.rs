@@ -2,8 +2,8 @@
 
 use super::{RemoteError, RemoteOperator, operator::unexpected};
 use orion_auth::enrollment::{
-    ENROLLMENT_NONCE_LEN, EnrollmentSide, EnrollmentTranscript, enrollment_proof,
-    sign_enrollment, verify_enrollment_proof, verify_enrollment_signature,
+    ENROLLMENT_NONCE_LEN, EnrollmentSide, EnrollmentTranscript, enrollment_proof, sign_enrollment,
+    verify_enrollment_proof, verify_enrollment_signature,
 };
 use orion_control_plane::{
     ActionQuery, ActionRequest, ActionResult, ControlMessage, ENROLLMENT_PROTOCOL_VERSION,
@@ -137,8 +137,10 @@ impl RemoteOperator {
         Ok(effective_nodes(snapshot).remove(node_id))
     }
 
-    /// The node's volatile status lane (its own entries: host metrics, provider and action
-    /// status; the lane is not replicated between nodes).
+    /// Status-lane entries matching `query`. The lane is volatile and node-local; when the query
+    /// names a subject another node owns (`node/<id>`, or a provider, executor, resource or
+    /// workload hosted there), the connected node forwards it once to that node. Queries without a
+    /// subject return the connected node's own entries.
     pub async fn status(&self, query: StatusQuery) -> Result<Vec<StatusEntry>, RemoteError> {
         match self.request(ControlMessage::QueryStatus(query)).await? {
             HttpResponsePayload::Status(entries) => Ok(entries),
@@ -170,7 +172,10 @@ impl RemoteOperator {
     }
 
     /// Tracked actions matching `query` (every action with read access, else the operator's own).
-    pub async fn query_actions(&self, query: ActionQuery) -> Result<Vec<ActionResult>, RemoteError> {
+    pub async fn query_actions(
+        &self,
+        query: ActionQuery,
+    ) -> Result<Vec<ActionResult>, RemoteError> {
         match self.request(ControlMessage::QueryActions(query)).await? {
             HttpResponsePayload::Actions(results) => Ok(results),
             other => Err(unexpected("QueryActions", &other)),
@@ -188,6 +193,11 @@ impl RemoteOperator {
         Ok(results
             .into_iter()
             .find(|result| result.action_id == action_id))
+    }
+
+    /// The current result of one action (the same as [`Self::action`]).
+    pub async fn query_action(&self, action_id: &str) -> Result<Option<ActionResult>, RemoteError> {
+        self.action(action_id).await
     }
 
     /// Polls an action every [`super::RemoteOperatorConfig::poll_interval`] until it is final

@@ -275,12 +275,16 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
 
 ### Remote operator client (next, after protocol v4)
 
-- [ ] Embeddable remote operator client (`orion-client` `remote` feature or `orion-remote` crate)
+- [x] Embeddable remote operator client (`orion-client` `remote` feature or `orion-remote` crate)
       for desktop/fleet tools: ed25519 operator identity, enrollment (operator approval or shared
       key), signed `orion+tcp` requests; list/watch node records and host facts, query/watch status
       lanes, send `ActionRequest` / watch `ActionResult`, optional mDNS discovery. Nodes treat it as
       an operator principal (no desired-state replica, no placement/liveness role), with
       per-identity action authorization. First consumer: Atlas (`atlas-driver-orion`).
+      Done: `docs/remote-operator.md`; status queries are forwarded to the owning node.
+- [ ] Remote operator follow-ups: move the control frame code out of `orion-transport-ipc` so the
+      client builds on non-Unix desktops; push-based watches over `orion+tcp` instead of polling;
+      action policies scoped to targets; optional cluster-wide operator trust (today per node).
 
 ### Nice to have
 

@@ -154,7 +154,7 @@ impl NodeApp {
                 Ok(ControlMessage::Accepted)
             }
             ControlMessage::QueryStatus(query) => {
-                Ok(ControlMessage::Status(self.query_status(&query)))
+                Ok(ControlMessage::Status(self.query_status_routed(&query)?))
             }
             ControlMessage::WatchStatus(query) => {
                 self.subscribe_status_watch(source, query)?;

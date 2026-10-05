@@ -8,10 +8,10 @@ use super::discovery::{
     DiscoveredPeerEnrollment, DiscoverySnapshot, EnrollmentChallenge, EnrollmentConfirm,
     EnrollmentHello,
 };
-use super::operators::{OperatorEnrollment, OperatorId, OperatorsSnapshot};
 use super::maintenance::{MaintenanceCommand, MaintenanceStatus};
 use super::metrics::{NodeObservabilitySnapshot, PeerTrustSnapshot};
 use super::mutations::MutationBatch;
+use super::operators::{OperatorEnrollment, OperatorId, OperatorsSnapshot};
 use super::status::{StatusEntry, StatusQuery};
 use super::sync::{PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest, SyncSummaryRequest};
 use crate::{LeaseRecord, WorkloadRecord};

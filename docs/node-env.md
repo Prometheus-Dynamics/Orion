@@ -397,6 +397,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_ACTION_MAX_DEADLINE_MS` | `600000` | Longest accepted action deadline; longer ones are capped. |
 | `ORION_NODE_ACTION_RESULT_TTL_MS` | `600000` | How long a finished action's result stays queryable. |
 | `ORION_NODE_ACTION_MAX_TRACKED` | `256` | Most actions tracked at once; the oldest finished results are evicted first, and new requests are refused while every tracked action is still running. |
+| `ORION_NODE_OPERATOR_ACTIONS` | unset (none) | Comma-separated action-name patterns (`*`, `prefix*`, exact names) enrolled remote operators may run when their own policy names none (operators enrolled with the shared key, or approved without `--action`/`--no-actions`). Empty makes such operators read-only. See `docs/remote-operator.md`. |
 | `ORION_NODE_CLOCK_REFRESH_MS` | `10000` | How often the node re-reads its clock state. The observed node record is only republished on meaningful change (see `docs/observability.md`, Clock Facts). |
 | `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` | `2000` | Shortest spacing between coalesced observed/applied state writes while the reconcile loop runs. `0` writes every change immediately (not normalized to `1`). Desired-state commits are never delayed. See "Observed-state write coalescing". |
 | `ORION_NODE_STATUS_MAX_ENTRIES` | `4096` | Node-wide cap on volatile status lane entries. |

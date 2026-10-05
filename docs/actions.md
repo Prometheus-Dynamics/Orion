@@ -157,12 +157,16 @@ The owner answers a peer's `QueryActions` only with actions that peer forwarded.
 | --- | --- |
 | Local client, role `ControlPlane` (`orionctl`, operators) | `RunAction`, `QueryActions`, `WatchActions` |
 | Local client, role `Provider` or `Executor` | `WatchActionRequests` (its local providers or executors, matching role), `ClaimNodeActions`, `ReportActionResult` (for actions delivered to it) |
-| Peer node | `RunAction` and `QueryActions` only when the request is **authenticated** (ed25519 signed) **and** the peer is **enrolled** (configured, pinned, or enrolled through discovery), whatever `ORION_NODE_PEER_AUTH` says; with `disabled` peer authentication, peers cannot submit actions. |
-| Anyone else (`orionctl --http`, unauthenticated or unknown peers) | Nothing. |
+| Peer node | `RunAction`, `QueryActions` and (forwarded) `QueryStatus` only when the request is **authenticated** (ed25519 signed) **and** the peer is **enrolled** (configured, pinned, or enrolled through discovery), whatever `ORION_NODE_PEER_AUTH` says; with `disabled` peer authentication, peers cannot submit actions. |
+| Remote operator (`operator:<name>`, [remote-operator.md](remote-operator.md)) | `RunAction` for action names matching its policy (`*`, `prefix*`, exact; the node default is `ORION_NODE_OPERATOR_ACTIONS`, empty by default); `QueryActions` (every action with read access, else its own); `requested_by` is the operator id (`peer:<node>/operator:<name>` on the owner of a forwarded action). Only enrolled operators, over the signed peer transports. |
+| Anyone else (`orionctl --http`, unauthenticated or unknown peers, unenrolled operators) | Nothing. |
 
 Local IPC identity checks (`ORION_NODE_LOCAL_AUTH`) apply as for every local message. Use the
 signed peer transport's integrity guarantees (see "Threat model" in [peer-sync.md](peer-sync.md)):
 `orion+tcp` signs requests and responses but does not encrypt action arguments.
+
+Authorization of a remote operator happens on the node it is connected to; the node that owns a
+forwarded action's target authorizes the forwarding peer, as for every forwarded action.
 
 ## Actions that restart the node
 
@@ -188,6 +192,11 @@ status`, `watch_status`) see it and a handler can republish it after a restart:
 | `action.<action_id>.state` | `String`: `accepted`, `running`, `succeeded`, `failed`, `rejected`, or `timed_out` |
 | `action.<action_id>.progress` | `UInt`: per-mille, 0 to 1000 (like `ActionState::Running`) |
 | `action.<action_id>.error` | `String`: the failure or rejection reason |
+
+The status lane is node-local, but a `QueryStatus` whose subject another node owns is forwarded
+once to that node (from local control-plane clients and remote operators alike; see "Status
+queries across nodes" in [remote-operator.md](remote-operator.md)), so watchers can follow an
+action's keys on its owner through any node.
 
 `ActionResult::status_entries()` builds these entries and `ActionRequestWatch::publish_action_status`
 publishes them. Status-lane ownership applies: a provider publishes for its provider and resources,

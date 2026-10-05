@@ -228,7 +228,7 @@ impl NodeApp {
     }
 
     /// The node that owns `target`.
-    fn action_owner_node(&self, target: &ActionTarget) -> Result<NodeId, String> {
+    pub(super) fn action_owner_node(&self, target: &ActionTarget) -> Result<NodeId, String> {
         let store = self.store_read();
         let provider_node = |provider_id| {
             store

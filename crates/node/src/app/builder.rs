@@ -367,7 +367,8 @@ impl NodeAppBuilder {
                 super::NodeError::Config(format!("failed to initialize node security: {err}"))
             })?,
         );
-        security.set_operator_default_actions(config.runtime_tuning.actions.operator_actions.clone());
+        security
+            .set_operator_default_actions(config.runtime_tuning.actions.operator_actions.clone());
         let transport_security = Arc::new(NodeTransportSecurityManager::new(
             security.clone(),
             http_tls_cert_path.clone(),

@@ -84,6 +84,7 @@ jobs:
         run: cargo test -p orion-node --no-default-features
 
       - name: Test IPC-only orion-node build with orion+tcp peer sync
+        # Includes the remote operator tests (src/tests/cluster/remote_operator*.rs).
         run: cargo test -p orion-node --no-default-features --features peer-tcp
 
       - name: Test orion-node peer discovery build (in-memory multicast, no real mDNS)
@@ -98,6 +99,20 @@ jobs:
         run: |
           cargo test -p orion-node --no-default-features --features link-gateway
           cargo test -p orion-node --features link-gateway --lib link_gateway
+
+      - name: Lint, build and test the remote operator client
+        run: |
+          # The remote operator client alone (no IPC client, no HTTP stack), with mDNS browsing,
+          # through the facade, and orion-auth's shared signing / enrollment code.
+          cargo clippy -p orion-client --no-default-features --features remote --all-targets -- -D warnings
+          cargo clippy -p orion-client --no-default-features --features discovery --all-targets -- -D warnings
+          cargo clippy -p orion --no-default-features --features remote --all-targets -- -D warnings
+          cargo clippy -p orion-auth --features enrollment --all-targets -- -D warnings
+          cargo build -p orion-client --no-default-features --features remote --example remote_operator
+          cargo test -p orion-client --no-default-features --features remote
+          cargo test -p orion-auth --features enrollment
+          # The node side with shared-key operator enrollment (in-memory discovery bus).
+          cargo test -p orion-node --no-default-features --features peer-tcp,discovery-mdns --lib remote_operator
 
       - name: Run clippy on orion-transport-http and orionctl feature matrix
         run: |

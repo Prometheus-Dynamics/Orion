@@ -15,3 +15,6 @@ The default feature set is intentionally narrow for a first public release:
 - The `client` feature remains non-default because it currently implies the local IPC client path;
   consumers that only need the protocol/runtime contracts should not pay for that surface by
   default.
+- The `remote` feature exposes the remote operator client as `orion::remote` (desktop and fleet
+  tools that talk to nodes over signed `orion+tcp`, no HTTP stack; see
+  `docs/remote-operator.md`).

@@ -54,7 +54,7 @@ assumed). Each has a default `std` feature; build with `default-features = false
 | `orion-core` | IDs, `Revision`, type names, `OrionError`, protocol constants, rkyv `encode_to_vec`/`decode_from_slice`/length-prefixed helpers | nothing |
 | `orion-data-plane` | link, binding, peer capability and negotiation types | nothing |
 | `orion-control-plane` | records, messages, mutations, cluster state, typed config decoding (`deserialize_config` keeps field-path diagnostics via `serde_path_to_error`, which is itself `no_std`), endpoint parsing, `LatencyMetricBuckets` | Prometheus export (`render_*_metrics`, `MetricsExportConfig`, which reads env vars); filesystem helpers on `SharedMemoryEndpoint` (`path`, `read_*`, `ORION_SHM_ROOT`) and `UnixEndpoint` (`path_buf`, `read_*`) |
-| `orion-auth` | peer request / transport binding types and canonical signing bytes | nothing |
+| `orion-auth` | peer request / transport binding types and canonical signing bytes, `orion+tcp` frame payloads (`peer_tcp`), the `_orion._tcp` TXT layout (`discovery`), key hex; with the `crypto` / `enrollment` features ed25519 request and response signing, key fingerprints and the enrollment handshake proofs | nothing |
 | `orion-runtime` | reconcile planning, local runtime store, provider/executor integration traits | nothing |
 | `orion-cluster` | membership, admission, assignment helpers | nothing |
 
@@ -72,8 +72,10 @@ Dependency notes:
   32-bit targets), so archives are byte-identical between hosts and MCUs, and between std and no_std
   builds. `crates/auth/tests/canonical_encoding.rs` checks canonical messages against a recorded
   fixture in both the std and the `--no-default-features` build.
-- Signing itself (ed25519) lives in `orion-node`; `orion-auth` only produces the canonical bytes, so
-  MCU code can sign them with any `no_std` ed25519 implementation.
+- Without features `orion-auth` only produces the canonical bytes, so MCU code can sign them with
+  any `no_std` ed25519 implementation. Its optional `crypto` (ed25519-dalek, sha2) and
+  `enrollment` (hmac) features hold the signing, verification and handshake code that
+  `orion-node` and the remote operator client (`orion-client` feature `remote`) share.
 
 `scripts/check-no-std.sh` (also the CI `no-std` job) builds each crate separately for
 `thumbv7em-none-eabihf`, `riscv32imac-unknown-none-elf`, and `thumbv8m.main-none-eabihf`, and runs

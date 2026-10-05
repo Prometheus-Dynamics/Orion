@@ -8,8 +8,8 @@
 
 use super::RemoteError;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
-use orion_auth::{crypto::key_fingerprint, discovery::Advertisement};
 pub use orion_auth::discovery::SERVICE_TYPE;
+use orion_auth::{crypto::key_fingerprint, discovery::Advertisement};
 use orion_core::{CONTROL_PROTOCOL_VERSION, PeerBaseUrl};
 use std::{
     collections::BTreeMap,
@@ -32,9 +32,10 @@ pub struct DiscoveredNode {
 impl DiscoveredNode {
     /// The first `orion+tcp://` URL, which [`super::RemoteOperator::connect`] accepts.
     pub fn orion_tcp_url(&self) -> Option<&PeerBaseUrl> {
-        self.urls
-            .iter()
-            .find(|url| url.as_str().starts_with(orion_auth::peer_tcp::PEER_TCP_SCHEME))
+        self.urls.iter().find(|url| {
+            url.as_str()
+                .starts_with(orion_auth::peer_tcp::PEER_TCP_SCHEME)
+        })
     }
 }
 
@@ -75,11 +76,8 @@ fn browse_blocking(
                 if cluster.is_some_and(|cluster| cluster != advertisement.cluster) {
                     continue;
                 }
-                let addresses: Vec<IpAddr> = service
-                    .addresses
-                    .iter()
-                    .map(|ip| ip.to_ip_addr())
-                    .collect();
+                let addresses: Vec<IpAddr> =
+                    service.addresses.iter().map(|ip| ip.to_ip_addr()).collect();
                 let node = DiscoveredNode {
                     key_fingerprint: key_fingerprint(&advertisement.public_key),
                     urls: advertisement.peer_urls(&addresses),

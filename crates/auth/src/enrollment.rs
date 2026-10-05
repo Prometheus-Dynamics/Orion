@@ -136,19 +136,16 @@ pub fn verify_enrollment_signature(
     transcript: &[u8],
     signature: &[u8],
 ) -> Result<(), AuthProtocolError> {
-    crypto::verify_signature(
-        public_key,
-        &enrollment_message(side, transcript),
-        signature,
+    crypto::verify_signature(public_key, &enrollment_message(side, transcript), signature).map_err(
+        |err| match err {
+            AuthProtocolError::InvalidSignatureLength(len) => {
+                AuthProtocolError::InvalidSignatureLength(len)
+            }
+            _ => AuthProtocolError::InvalidSignature(
+                "enrollment signature does not verify for the key".to_string(),
+            ),
+        },
     )
-    .map_err(|err| match err {
-        AuthProtocolError::InvalidSignatureLength(len) => {
-            AuthProtocolError::InvalidSignatureLength(len)
-        }
-        _ => AuthProtocolError::InvalidSignature(
-            "enrollment signature does not verify for the key".to_string(),
-        ),
-    })
 }
 
 #[cfg(test)]

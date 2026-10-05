@@ -49,3 +49,48 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "fs"
 
 [dev-dependencies]
 orion-transport-http = { workspace = true, features = ["transport"] }
+
+# The local IPC examples need the default `ipc` feature.
+[[example]]
+name = "assigned_workloads_watch"
+required-features = ["ipc"]
+
+[[example]]
+name = "camera_pipeline_publish"
+required-features = ["ipc"]
+
+[[example]]
+name = "camera_provider_publish"
+required-features = ["ipc"]
+
+[[example]]
+name = "control_plane_watch"
+required-features = ["ipc"]
+
+[[example]]
+name = "control_plane_write_watch"
+required-features = ["ipc"]
+
+[[example]]
+name = "executor_register_and_watch"
+required-features = ["ipc"]
+
+[[example]]
+name = "executor_watch"
+required-features = ["ipc"]
+
+[[example]]
+name = "multi_watch"
+required-features = ["ipc"]
+
+[[example]]
+name = "provider_register_and_watch"
+required-features = ["ipc"]
+
+[[example]]
+name = "provider_watch"
+required-features = ["ipc"]
+
+[[example]]
+name = "remote_operator"
+required-features = ["remote"]

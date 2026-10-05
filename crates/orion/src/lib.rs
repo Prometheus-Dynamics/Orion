@@ -82,14 +82,6 @@ pub mod control_plane {
         NodeHostFacts, action_names, action_status_keys,
     };
     pub use orion_control_plane::{
-        DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState,
-        DiscoveryMetricsSnapshot, DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION,
-        EnrollmentChallenge, EnrollmentConfirm, EnrollmentHello, EnrollmentRole,
-        InvalidOperatorId, OPERATOR_ID_PREFIX, OperatorEnrollment, OperatorEnrollmentMethod,
-        OperatorId, OperatorPolicy, OperatorRecord, OperatorTrustState, OperatorWelcome,
-        OperatorsSnapshot, action_pattern_matches, validate_action_patterns,
-    };
-    pub use orion_control_plane::{
         AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, AvailabilityState, ClientEvent,
         ClientEventKind, ClientEventPoll, ClientHello, ClientRole, ClientSession,
         ClientSessionMetricsSnapshot, ClockSourceKind, ClusterStateEnvelope,
@@ -121,6 +113,14 @@ pub mod control_plane {
         TypedResourceEndpoint, UnixEndpoint, WorkerQueueUsageSnapshot, WorkloadConfig,
         WorkloadObservedState, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
         config_json_value, deserialize_config, duration_ms_u64, estimate_wire_bytes,
+    };
+    pub use orion_control_plane::{
+        DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState,
+        DiscoveryMetricsSnapshot, DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION,
+        EnrollmentChallenge, EnrollmentConfirm, EnrollmentHello, EnrollmentRole, InvalidOperatorId,
+        OPERATOR_ID_PREFIX, OperatorEnrollment, OperatorEnrollmentMethod, OperatorId,
+        OperatorPolicy, OperatorRecord, OperatorTrustState, OperatorWelcome, OperatorsSnapshot,
+        action_pattern_matches, validate_action_patterns,
     };
 
     /// Prometheus text rendering is host-only and requires the `std` feature.

@@ -22,7 +22,8 @@ use orion_auth::{
 };
 use orion_control_plane::{
     ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
-    HostTemperature, NodeHostFacts,
+    EnrollmentRole, HostTemperature, NodeHostFacts, OperatorEnrollment, OperatorEnrollmentMethod,
+    OperatorId, OperatorPolicy, OperatorRecord, OperatorTrustState, OperatorsSnapshot,
 };
 use orion_control_plane::{
     AppliedClusterState, ArtifactRecord, ClientHello, ClientRole, ClockSourceKind,
@@ -35,8 +36,9 @@ use orion_control_plane::{
 };
 use orion_core::{
     ArtifactId, CapabilityId, ClientName, ConfigSchemaId, ExecutorId, HlcTimestamp, NodeId,
-    PeerBaseUrl, ProviderId, ResourceId, ResourceType, Revision, RuntimeType, WorkloadId,
-    decode_from_slice, decode_length_prefixed, encode_length_prefixed, encode_to_vec, hlc_node_tag,
+    PeerBaseUrl, ProviderId, PublicKeyHex, ResourceId, ResourceType, Revision, RuntimeType,
+    WorkloadId, decode_from_slice, decode_length_prefixed, encode_length_prefixed, encode_to_vec,
+    hlc_node_tag,
 };
 use std::{fmt::Write as _, path::PathBuf};
 

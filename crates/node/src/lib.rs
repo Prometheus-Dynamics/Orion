@@ -126,8 +126,7 @@ pub use app::{
 };
 pub use auth::{
     AuthenticatedOperator, AuthenticatedPeer, LocalAuthenticationMode, NodeSecurity,
-    PeerAuthenticationMode,
-    PeerSecurityMiddleware,
+    PeerAuthenticationMode, PeerSecurityMiddleware,
 };
 pub use clock::{ClockStatusSource, KernelClockReading, KernelClockStatusSource};
 pub use config::{

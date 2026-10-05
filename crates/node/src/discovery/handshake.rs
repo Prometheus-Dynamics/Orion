@@ -102,12 +102,13 @@ impl NodeApp {
                 self.check_auto_enrollable(&hello.initiator, &initiator_key)?;
             }
             EnrollmentRole::Operator => {
-                let operator_id = OperatorId::from_principal(&hello.initiator).ok_or_else(|| {
-                    NodeError::Authorization(format!(
-                        "operator enrollment from `{}`, which is not an operator id",
-                        hello.initiator
-                    ))
-                })?;
+                let operator_id =
+                    OperatorId::from_principal(&hello.initiator).ok_or_else(|| {
+                        NodeError::Authorization(format!(
+                            "operator enrollment from `{}`, which is not an operator id",
+                            hello.initiator
+                        ))
+                    })?;
                 self.security
                     .check_operator_auto_enrollable(&operator_id, &initiator_key)?;
             }
@@ -179,7 +180,9 @@ impl NodeApp {
             if pending.hello.role == EnrollmentRole::Operator {
                 let operator_id =
                     OperatorId::from_principal(&confirm.initiator).ok_or_else(|| {
-                        NodeError::Authorization("operator enrollment without an operator id".into())
+                        NodeError::Authorization(
+                            "operator enrollment without an operator id".into(),
+                        )
                     })?;
                 self.security
                     .check_operator_auto_enrollable(&operator_id, &initiator_key)?;

@@ -62,6 +62,13 @@ impl NodeApp {
                     super::ActionOrigin::Peer(peer),
                 )?]))
             }
+            // Forwarded status queries: answered from the local lane, never forwarded again.
+            ControlMessage::QueryStatus(query) => {
+                peer.ok_or_else(|| {
+                    NodeError::Authorization("status queries need an authenticated peer".into())
+                })?;
+                Ok(HttpResponsePayload::Status(self.query_status(&query)))
+            }
             ControlMessage::QueryActions(query) => {
                 let peer = peer.ok_or_else(|| {
                     NodeError::Authorization("actions need an authenticated peer".into())
@@ -94,7 +101,6 @@ impl NodeApp {
             | ControlMessage::PollClientEvents(_)
             | ControlMessage::ClientEvents(_)
             | ControlMessage::PublishStatus(_)
-            | ControlMessage::QueryStatus(_)
             | ControlMessage::WatchStatus(_)
             | ControlMessage::Status(_)
             | ControlMessage::Ping

@@ -41,22 +41,21 @@ impl Authenticator for NodeSecurityAuthenticator {
             // trust store, never in the peer trust store, and they never become peers.
             Some(auth) if OperatorId::is_operator_principal(auth.node_id.as_str()) => {
                 let is_hello = request.operation() == ControlOperation::OperatorHello;
-                request.context.principal =
-                    match self
-                        .security
-                        .authenticate_operator(auth, &payload, is_hello)?
-                    {
-                        OperatorAuthentication::Enrolled(operator) => {
-                            ControlPrincipal::Operator(operator)
-                        }
-                        OperatorAuthentication::Unenrolled {
-                            operator_id,
-                            public_key,
-                        } => ControlPrincipal::UnenrolledOperator {
-                            operator_id,
-                            public_key,
-                        },
-                    };
+                request.context.principal = match self
+                    .security
+                    .authenticate_operator(auth, &payload, is_hello)?
+                {
+                    OperatorAuthentication::Enrolled(operator) => {
+                        ControlPrincipal::Operator(operator)
+                    }
+                    OperatorAuthentication::Unenrolled {
+                        operator_id,
+                        public_key,
+                    } => ControlPrincipal::UnenrolledOperator {
+                        operator_id,
+                        public_key,
+                    },
+                };
                 Ok(())
             }
             Some(auth) => {
@@ -327,9 +326,7 @@ impl Authorizer for NodeSecurityAuthorizer {
             self.authorize_peer_message_consistency(peer, message)?;
         }
         match (&request.context.principal, request.operation()) {
-            (ControlPrincipal::Operator(operator), _) => {
-                self.authorize_operator(operator, request)
-            }
+            (ControlPrincipal::Operator(operator), _) => self.authorize_operator(operator, request),
             (ControlPrincipal::UnenrolledOperator { .. }, ControlOperation::OperatorHello) => {
                 Ok(())
             }
@@ -377,11 +374,15 @@ impl Authorizer for NodeSecurityAuthorizer {
             // peer authentication mode (`docs/actions.md`).
             (
                 ControlPrincipal::Peer(peer),
-                ControlOperation::RunAction | ControlOperation::QueryActions,
+                ControlOperation::RunAction
+                | ControlOperation::QueryActions
+                | ControlOperation::QueryStatus,
             ) if self.lookup.is_configured_peer(&peer.node_id) => Ok(()),
             (
                 ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
-                ControlOperation::RunAction | ControlOperation::QueryActions,
+                ControlOperation::RunAction
+                | ControlOperation::QueryActions
+                | ControlOperation::QueryStatus,
             ) => Err(NodeError::Authorization(format!(
                 "{:?} needs an authenticated, enrolled peer",
                 request.operation()

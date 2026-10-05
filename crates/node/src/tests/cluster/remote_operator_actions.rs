@@ -6,12 +6,12 @@ use super::remote_operator::{
     OperatorNode, enrolled_operator, operator_node, operator_node_with, publish_facts,
 };
 use super::*;
-use orion_client::{LocalNodeRuntime, LocalProviderService, LocalServiceRetryPolicy};
 use orion::control_plane::{
     ActionQuery, ActionReport, ActionRequest, ActionState, ActionTarget, OperatorPolicy,
-    ProviderRecord,
+    ProviderRecord, StatusEntry, StatusQuery, StatusSubject,
 };
 use orion_client::remote::{OperatorIdentity, RemoteError};
+use orion_client::{LocalNodeRuntime, LocalProviderService, LocalServiceRetryPolicy};
 
 /// A device-manager client that claimed node actions over real local IPC sockets.
 struct DeviceManager {
@@ -93,7 +93,11 @@ async fn operator_policies_gate_actions_and_claimed_handlers_run_them() {
         matches!(&err, RemoteError::Rejected(message) if message.contains("may not run action `reboot`")),
         "{err}"
     );
-    assert!(node.app.query_actions(&ActionQuery::action("reboot-1")).is_empty());
+    assert!(
+        node.app
+            .query_actions(&ActionQuery::action("reboot-1"))
+            .is_empty()
+    );
 
     // Allowed: delivered to the client that claimed the name, which reports the outcome.
     let accepted = alice
@@ -140,7 +144,10 @@ async fn operator_policies_gate_actions_and_claimed_handlers_run_them() {
         .query_actions(ActionQuery::all())
         .await
         .expect("query");
-    assert!(own.iter().all(|result| result.requested_by == "operator:alice"));
+    assert!(
+        own.iter()
+            .all(|result| result.requested_by == "operator:alice")
+    );
     let bob = enrolled_operator(
         &node,
         OperatorIdentity::generate("bob").expect("identity"),
@@ -157,7 +164,11 @@ async fn operator_policies_gate_actions_and_claimed_handlers_run_them() {
         .await
         .expect("the node default allows self-*");
     let everything = bob.query_actions(ActionQuery::all()).await.expect("query");
-    assert!(everything.iter().any(|result| result.action_id == "local-1"));
+    assert!(
+        everything
+            .iter()
+            .any(|result| result.action_id == "local-1")
+    );
 
     drop(manager);
     node.server.shutdown().await.expect("listener stops");
@@ -208,7 +219,10 @@ async fn operators_reach_other_nodes_through_the_connected_node() {
     .await;
     let nodes = operator.nodes().await.expect("cluster-wide node records");
     let ids: Vec<_> = nodes.iter().map(|node| node.node_id.as_str()).collect();
-    assert!(ids.contains(&"node-a") && ids.contains(&"node-b"), "{ids:?}");
+    assert!(
+        ids.contains(&"node-a") && ids.contains(&"node-b"),
+        "{ids:?}"
+    );
     assert!(
         nodes.iter().all(|node| node.host.is_some()),
         "host facts of every node replicate to node-a"
@@ -249,6 +263,72 @@ async fn operators_reach_other_nodes_through_the_connected_node() {
         .expect("node-a mirrors the owner's result");
     assert_eq!(done.state, ActionState::Succeeded);
     assert_eq!(done.handled_by, NodeId::new("node-b"));
+
+    // The status lane is node-local: queries for subjects owned by node-b are forwarded once.
+    b.app
+        .apply_local_control_message(
+            &provider,
+            ControlMessage::PublishStatus(vec![StatusEntry::new(
+                StatusSubject::Provider(ProviderId::new("provider.b")),
+                "update.phase",
+                TypedConfigValue::String("download".into()),
+            )]),
+        )
+        .expect("publish status");
+    let host = operator
+        .status(StatusQuery::subject(StatusSubject::Node(NodeId::new(
+            "node-b",
+        ))))
+        .await
+        .expect("node-b's host metrics through node-a");
+    assert!(
+        host.iter().any(|entry| entry.key == "host.uptime_seconds"
+            && entry.subject == StatusSubject::Node(NodeId::new("node-b"))),
+        "{host:?}"
+    );
+    let update = operator
+        .status(
+            StatusQuery::subject(StatusSubject::Provider(ProviderId::new("provider.b")))
+                .with_key_prefix("update."),
+        )
+        .await
+        .expect("node-b's provider status through node-a");
+    assert_eq!(update.len(), 1, "{update:?}");
+    assert_eq!(update[0].value, TypedConfigValue::String("download".into()));
+    // Unknown owners are answered locally (nothing), and node-a's own lane stays node-a's.
+    assert!(
+        operator
+            .status(StatusQuery::subject(StatusSubject::Provider(
+                ProviderId::new("provider.nowhere")
+            )))
+            .await
+            .expect("query")
+            .is_empty()
+    );
+    // Local control-plane clients get the same routing.
+    let console = crate::tests::ipc::actions::hello(&a.app, "console", ClientRole::ControlPlane);
+    match a
+        .app
+        .apply_local_control_message(
+            &console,
+            ControlMessage::QueryStatus(
+                StatusQuery::subject(StatusSubject::Provider(ProviderId::new("provider.b")))
+                    .with_key_prefix("update."),
+            ),
+        )
+        .expect("local query")
+    {
+        ControlMessage::Status(entries) => assert_eq!(entries.len(), 1),
+        other => panic!("unexpected response {other:?}"),
+    }
+    assert_eq!(
+        operator
+            .query_action("fwd-1")
+            .await
+            .expect("query")
+            .map(|result| result.state),
+        Some(ActionState::Succeeded)
+    );
 
     // The operator is no peer of node-b, which refuses it directly.
     let direct = orion_client::remote::RemoteOperator::connect(

@@ -117,8 +117,7 @@ async fn enroll(args: OperatorEnrollArgs) -> Result<(), String> {
                 .operators
                 .iter()
                 .find(|record| {
-                    record.operator_id == operator_id
-                        && record.state == OperatorTrustState::Pending
+                    record.operator_id == operator_id && record.state == OperatorTrustState::Pending
                 })
                 .ok_or_else(|| {
                     format!(

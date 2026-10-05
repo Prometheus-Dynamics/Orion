@@ -133,6 +133,14 @@ The facade crate `orion` is feature-gated by subsystem.
   other with a challenge-response handshake. Works in the appliance build
   (`--no-default-features --features peer-tcp,discovery-mdns`). See
   [`docs/discovery.md`](docs/discovery.md).
+- `orion-client`'s `remote` feature is an embeddable **remote operator** client for desktop and
+  fleet tools: an ed25519 operator identity, enrollment (administrator approval with
+  `orionctl operators enroll`, or the shared enrollment key), and signed `orion+tcp` requests to
+  list node records with host facts, read status (forwarded to the owning node), run actions
+  (forwarded to the owning node) and read observability, without running `orion-node` and
+  without an HTTP stack. Nodes treat operators as their own principal kind with per-operator
+  authorization; operators never become cluster members. See
+  [`docs/remote-operator.md`](docs/remote-operator.md).
 - `orion-node`'s opt-in `link-gateway` feature (Linux) serves microcontroller links (serial ports
   and SocketCAN, configured with `ORION_NODE_LINKS`) and bridges each `orion-link` device into the
   node as an ordinary provider. It also works in the IPC-only build

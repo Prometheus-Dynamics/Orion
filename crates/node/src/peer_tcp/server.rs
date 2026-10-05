@@ -1,8 +1,7 @@
 //! Server side of the `orion+tcp` transport (`ORION_NODE_PEER_ADDR`).
 
 use super::{
-    PEER_TCP_IDLE_TIMEOUT, PeerTcpError,
-    RESPONSE_HEADER_MAX_BYTES, ResponseFrame, STATUS_ERROR,
+    PEER_TCP_IDLE_TIMEOUT, PeerTcpError, RESPONSE_HEADER_MAX_BYTES, ResponseFrame, STATUS_ERROR,
 };
 use crate::{
     ControlRequest, NodeApp, NodeError,

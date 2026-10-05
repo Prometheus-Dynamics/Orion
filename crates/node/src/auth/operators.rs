@@ -116,7 +116,9 @@ fn store_path(storage: &NodeStorage) -> PathBuf {
     storage.root().join(OPERATORS_FILE)
 }
 
-pub(super) fn load_operator_trust(storage: Option<&NodeStorage>) -> Result<OperatorTrust, NodeError> {
+pub(super) fn load_operator_trust(
+    storage: Option<&NodeStorage>,
+) -> Result<OperatorTrust, NodeError> {
     let mut trust = OperatorTrust::default();
     let Some(storage) = storage else {
         return Ok(trust);
@@ -137,7 +139,11 @@ pub(super) fn load_operator_trust(storage: Option<&NodeStorage>) -> Result<Opera
     }
     for operator in file.operators {
         let key = parse_key_hex(&operator.public_key_hex).map_err(|err| {
-            NodeError::Storage(format!("{}: {}: {err}", path.display(), operator.operator_id))
+            NodeError::Storage(format!(
+                "{}: {}: {err}",
+                path.display(),
+                operator.operator_id
+            ))
         })?;
         trust.enrolled.insert(
             operator.operator_id,
@@ -160,8 +166,9 @@ impl OperatorTrust {
     }
 
     fn record_pending(&mut self, operator_id: &OperatorId, key: [u8; 32], now_ms: u64) {
-        self.pending
-            .retain(|_, pending| now_ms.saturating_sub(pending.last_seen_ms) < PENDING_OPERATOR_TTL_MS);
+        self.pending.retain(|_, pending| {
+            now_ms.saturating_sub(pending.last_seen_ms) < PENDING_OPERATOR_TTL_MS
+        });
         match self.pending.get_mut(operator_id) {
             // A different key replaces the pending one: the newest request is what an
             // administrator compares fingerprints against.
@@ -365,6 +372,7 @@ impl NodeSecurity {
     }
 
     /// The trust state of `operator_id` and the key it is known by.
+    #[cfg_attr(not(feature = "discovery-mdns"), allow(dead_code))]
     pub(crate) fn operator_state(
         &self,
         operator_id: &OperatorId,
@@ -384,6 +392,7 @@ impl NodeSecurity {
 
     /// Shared-key enrollment never overrides an administrator: it is refused for revoked
     /// operators and for operators enrolled with another key.
+    #[cfg_attr(not(feature = "discovery-mdns"), allow(dead_code))]
     pub(crate) fn check_operator_auto_enrollable(
         &self,
         operator_id: &OperatorId,

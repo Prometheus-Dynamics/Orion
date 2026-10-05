@@ -28,7 +28,10 @@ pub enum NodeTrust {
     /// from a discovery advertisement whose fingerprint was checked).
     Key([u8; 32]),
     /// Only this node id with this public key.
-    Node { node_id: NodeId, public_key: [u8; 32] },
+    Node {
+        node_id: NodeId,
+        public_key: [u8; 32],
+    },
 }
 
 /// Client settings.
@@ -331,7 +334,8 @@ async fn exchange(client: &ControlTcpClient, request: &[u8]) -> Result<Vec<u8>, 
 }
 
 fn decode_payload(body: &[u8]) -> Result<HttpResponsePayload, RemoteError> {
-    decode_from_slice::<HttpResponsePayload>(body).map_err(|err| RemoteError::Decode(err.to_string()))
+    decode_from_slice::<HttpResponsePayload>(body)
+        .map_err(|err| RemoteError::Decode(err.to_string()))
 }
 
 pub(crate) fn unexpected(request: &str, response: &HttpResponsePayload) -> RemoteError {

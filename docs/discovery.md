@@ -145,13 +145,14 @@ not enrolled yet, over `orion+tcp`. Failures are retried with exponential backof
 5 minutes) and shown as `last_enrollment_error`.
 
 ```text
-I -> R  EnrollmentHello     { version, cluster, I, pk_I, n_I, url_I, R }
+I -> R  EnrollmentHello     { version, role, cluster, I, pk_I, n_I, url_I, R }
 R -> I  EnrollmentChallenge { R, pk_R, n_R, HMAC(K, "responder\0" || T), Sig_R("responder\0" || T) }
 I -> R  EnrollmentConfirm   { I, R, n_R, HMAC(K, "initiator\0" || T), Sig_I("initiator\0" || T) }
 R -> I  Accepted            R has pinned pk_I and registered I at url_I; I then pins pk_R
 
-T = "orion-enroll-v1" || version || cluster || I || pk_I || n_I || url_I || R || pk_R || n_R
-    (every field length-prefixed; n_I and n_R are 32 random bytes; K is the enrollment key)
+T = "orion-enroll-v1" || version || role || cluster || I || pk_I || n_I || url_I || R || pk_R || n_R
+    (every field length-prefixed; n_I and n_R are 32 random bytes; K is the enrollment key;
+     version is ENROLLMENT_PROTOCOL_VERSION = 2; role is 0 for nodes, 1 for remote operators)
 ```
 
 - The enrollment key never crosses the wire; the HMAC-SHA256 proofs show that each side knows it.
@@ -168,6 +169,15 @@ T = "orion-enroll-v1" || version || cluster || I || pk_I || n_I || url_I || R ||
 
 `url_I` is the initiator's `orion+tcp` port on the address the responder sees the connection come
 from, so the responder can sync back without having discovered the initiator itself.
+
+**Remote operators** use the same handshake with `role = operator`, an `operator:<name>` initiator
+id and no URL ([remote-operator.md](remote-operator.md)). The role is bound into the transcript,
+so a node's proof never enrolls an operator and an operator's proof never enrolls a node. An
+operator enrolled this way is pinned in the operator trust store (`trusted-operators.json`), not
+the peer trust store: it is never synced with, gets read access and the node's default action
+patterns (`ORION_NODE_OPERATOR_ACTIONS`), and shared-key enrollment never overrides an
+administrator's removal or an operator enrolled with another key. A holder of the enrollment key
+can therefore also enroll operators; keep the default action patterns narrow.
 
 The handshake is served on both peer transports (the `/v1/control/enroll` HTTP route exists too),
 but nodes only *initiate* it over `orion+tcp`.
@@ -266,6 +276,10 @@ the audit log (`peer_enrolled`, `peer_removed`).
 - Live peers are re-reported by restarting the mDNS browse every 30 seconds, which returns the
   daemon's cached instances and re-queries the network; records that expire in the mDNS cache are
   reported as withdrawn.
+- The TXT layout and parser (`orion_auth::discovery`), the handshake proofs
+  (`orion_auth::enrollment`) and the fingerprint (`orion_auth::crypto::key_fingerprint`) live in
+  `orion-auth`, shared with the remote operator client, which can browse `_orion._tcp` with its
+  `discovery` feature.
 - Control messages (control protocol v3): `QueryDiscovery` / `Discovery`, `EnrollDiscoveredPeer`,
   `RemovePeer` on the local socket, and `EnrollmentHello` / `EnrollmentChallenge` /
   `EnrollmentConfirm` between peers (`HttpResponsePayload::EnrollmentChallenge`). `orion-client`

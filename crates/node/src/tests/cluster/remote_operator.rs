@@ -5,8 +5,7 @@
 use super::*;
 use crate::HostFactsSource;
 use orion::control_plane::{
-    HostFacts, NodeHostFacts, OperatorEnrollment, OperatorId, OperatorPolicy, OperatorTrustState,
-    StatusQuery,
+    HostFacts, NodeHostFacts, OperatorEnrollment, OperatorPolicy, OperatorTrustState, StatusQuery,
 };
 use orion_client::remote::{NodeTrust, OperatorIdentity, RemoteError, RemoteOperator};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -29,7 +28,10 @@ impl OperatorNode {
     }
 }
 
-pub(super) async fn operator_node(node_id: &'static str, state_dir: Option<PathBuf>) -> OperatorNode {
+pub(super) async fn operator_node(
+    node_id: &'static str,
+    state_dir: Option<PathBuf>,
+) -> OperatorNode {
     operator_node_with(node_id, state_dir, Vec::new()).await
 }
 
@@ -97,6 +99,10 @@ impl HostFactsSource for EdgeHost {
                 hostname: Some("edge-1".into()),
                 image_version: Some("2026.10.1".into()),
                 ..NodeHostFacts::default()
+            },
+            metrics: orion::control_plane::HostMetricsSample {
+                uptime_seconds: Some(42),
+                ..Default::default()
             },
             ..HostFacts::default()
         }
@@ -212,8 +218,15 @@ async fn read_access_can_be_withheld_and_removed_operators_are_refused() {
     let err = operator.nodes().await.expect_err("no read access");
     assert!(err.to_string().contains("no read access"), "{err}");
 
-    assert!(node.app.remove_operator(identity.operator_id()).expect("remove"));
-    let err = operator.hello().await.expect_err("removed operators are refused");
+    assert!(
+        node.app
+            .remove_operator(identity.operator_id())
+            .expect("remove")
+    );
+    let err = operator
+        .hello()
+        .await
+        .expect_err("removed operators are refused");
     assert!(err.to_string().contains("was removed"), "{err}");
     let record = node
         .app
@@ -232,7 +245,10 @@ async fn read_access_can_be_withheld_and_removed_operators_are_refused() {
             policy: OperatorPolicy::default(),
         })
         .expect("re-approval");
-    operator.nodes().await.expect("read access after re-approval");
+    operator
+        .nodes()
+        .await
+        .expect("read access after re-approval");
     node.server.shutdown().await.expect("listener stops");
 }
 
@@ -295,8 +311,20 @@ async fn operators_cannot_sync_or_write_and_are_never_peers() {
             .contains(&identity.principal())
     );
     let snapshot = node.app.state_snapshot();
-    assert!(!snapshot.state.observed.nodes.contains_key(&identity.principal()));
-    assert!(!snapshot.state.desired.nodes.contains_key(&identity.principal()));
+    assert!(
+        !snapshot
+            .state
+            .observed
+            .nodes
+            .contains_key(&identity.principal())
+    );
+    assert!(
+        !snapshot
+            .state
+            .desired
+            .nodes
+            .contains_key(&identity.principal())
+    );
     assert_eq!(node.app.observability_snapshot().configured_peer_count, 0);
 
     // A peer id with the operator prefix cannot be configured either.
@@ -468,7 +496,14 @@ async fn operators_enroll_with_the_shared_enrollment_key() {
         .await
         .expect_err("a wrong key fails");
     assert!(matches!(err, RemoteError::Enrollment(_)), "{err}");
-    assert!(!operator.hello().await.expect("hello").state.eq(&OperatorTrustState::Enrolled));
+    assert!(
+        !operator
+            .hello()
+            .await
+            .expect("hello")
+            .state
+            .eq(&OperatorTrustState::Enrolled)
+    );
 
     let welcome = operator
         .enroll_with_key(KEY.as_bytes())
@@ -494,7 +529,6 @@ async fn operators_enroll_with_the_shared_enrollment_key() {
         .enroll_with_key(KEY.as_bytes())
         .await
         .expect("other operators still enroll");
-    let _ = OperatorId::try_new("grace").expect("valid id");
     discovery.shutdown().await;
     node.server.shutdown().await.expect("listener stops");
 }

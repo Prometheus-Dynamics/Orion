@@ -63,8 +63,8 @@ let done = operator.wait_for_action("reboot-42", std::time::Duration::from_secs(
 | `node_id`, `node_public_key`, `node_fingerprint`, `welcome`, `is_enrolled`, `hello` | Who the node is and what the operator may do there (`OperatorWelcome`). |
 | `enroll_with_key(&[u8])` | Shared-key enrollment (below). |
 | `state_snapshot`, `nodes`, `node(id)` | Converged cluster state of the connected node; node records merged like `orionctl get nodes`. |
-| `status(StatusQuery)`, `watch_status(StatusQuery)` | The connected node's volatile status lane. |
-| `run_action`, `action(id)`, `query_actions`, `wait_for_action(id, timeout)`, `watch_actions(query)` | Actions ([actions.md](actions.md)). |
+| `status(StatusQuery)`, `watch_status(StatusQuery)` | Status-lane entries; queries for a subject another node owns are forwarded to it (below). |
+| `run_action`, `action(id)` / `query_action(id)`, `query_actions`, `wait_for_action(id, timeout)`, `watch_actions(query)` | Actions ([actions.md](actions.md)). |
 | `observability()` | `NodeObservabilitySnapshot` of the connected node. |
 | `discovery::browse_nodes(duration, cluster)` (feature `discovery`) | mDNS browse of `_orion._tcp`; returns `DiscoveredNode { advertisement, key_fingerprint, urls, compatible }`. |
 | `RemoteError` | `Transport`, `ProtocolMismatch`, `NodeAuthentication`, `Rejected` (signed refusal; `is_not_enrolled()`), `Enrollment`, `ActionTimeout`, ... |
@@ -75,11 +75,63 @@ yield when something changed: `RemoteStatusWatch::next` returns the full matchin
 differs from the previous poll, `RemoteActionWatch::next` returns the results that are new or
 changed. `wait_for_action` polls the same way. Each poll is one signed request.
 
+A transport adapter for a consumer with a `nodes() / status(query) / run_action(request) /
+query_action(id)` interface maps one to one onto `RemoteOperator` (each wrapped in
+`Result<_, RemoteError>`).
+
 **Cross-node.** The connected node answers with its own converged view: `nodes()` lists every
 node it syncs with (their observed records, host and clock facts replicate with each node's
 observed slice). An action whose target another node owns is forwarded once over the signed peer
-transport; that node sees `requested_by = peer:<connected node>/operator:<name>`. The status lane
-and observability are per node: connect to a node to read its own.
+transport; that node sees `requested_by = peer:<connected node>/operator:<name>`. Observability
+is per node: connect to a node to read its own.
+
+### Status queries across nodes
+
+The status lane is volatile and **node-local**: entries live only on the node they were published
+on (host metrics on the node itself, provider and action keys on the node that hosts the provider).
+So a `QueryStatus` whose subject another node owns is **forwarded once** over the signed peer
+transport, the same way as a cross-node action:
+
+| Subject | Owner |
+| --- | --- |
+| `node/<id>` | that node |
+| `provider/<id>`, `executor/<id>` | the node of the provider or executor record |
+| `resource/<id>` | the node of the resource's provider (or of the executor that realizes it) |
+| `workload/<id>` | the node the workload is assigned to |
+
+The owner answers from its own lane and never forwards again; peers' `QueryStatus` needs an
+authenticated, enrolled peer. A query without a subject, or for a subject the connected node owns,
+is answered locally. A subject whose owner is unknown in the connected node's converged state, or
+whose owner is not a configured peer of it, is also answered locally, which normally yields **no
+entries** (not an error). The same routing applies to `QueryStatus` from local control-plane
+clients (`orionctl get status --subject node/<other node>`). Operators need read access.
+`watch_status` polls through the same path. Forwarding needs the multi-threaded runtime that
+`orion-node` uses; an embedder that serves requests on a current-thread runtime gets an error for
+remote subjects.
+
+### How fresh node records are
+
+Each node publishes its own `NodeRecord` (health, clock and host facts) in its observed slice.
+Host facts are sampled immediately when the node starts, then every
+`ORION_NODE_HOST_FACTS_REFRESH_MS`; the record is republished only when an identity fact changes
+(for example `boot_id` or `image_version` after a reboot into a new image). Observed slices reach
+other nodes only through **direct** peers: at the end of each sync round (every
+`ORION_NODE_RECONCILE_MS`) a node pushes its own slice to the peer it synced with when it changed,
+and at least every 30 seconds. Slices are **not relayed**, so a node only knows the records of nodes
+it peers with directly.
+
+What an operator sees right after a node reboots:
+
+- connected to the rebooted node: its own record (new `boot_id`, image version) is fresh as soon as
+  the node serves requests;
+- connected to another node that peers directly with it: the new record arrives within about one
+  sync round after the rebooted node is back (its first round pushes the changed slice), and
+  until then the old record is shown;
+- connected to a node that does not peer with it directly: the record does not arrive there at
+  all; connect to a node that peers with it.
+
+Status-lane keys of the rebooted node are gone with its memory until its handlers republish them
+(see "Actions that restart the node" in [actions.md](actions.md)).
 
 `examples/remote_operator.rs` in `crates/client` enrolls, lists nodes with host facts, runs an
 action and waits for it.
@@ -209,14 +261,28 @@ The `orion+tcp` frame payloads, request/response signing, the enrollment proofs 
 
 `orion-client` with only `remote` pulls `orion-auth` (`crypto`, `enrollment`), the protocol layer
 of `orion-transport-http` (no reqwest, axum or hyper), `orion-transport-ipc` (frame code),
-`ed25519-dalek`, `hmac`, `sha2`, `rand_core` and tokio; no rustls and no node internals. Measured
-on x86_64 Linux, release profile (`opt-level = "z"`, fat LTO, stripped), a minimal binary that
-connects, lists nodes and runs an action: see the table in the CHANGELOG entry and
-[architecture-crate-map.md](architecture-crate-map.md).
+`ed25519-dalek`, `hmac`, `sha2`, `rand_core` and tokio; no rustls, no mDNS and no node internals.
+Measured on x86_64 Linux with the workspace release profile (`opt-level = "z"`, fat LTO, one
+codegen unit, stripped); crates are the unique packages of `cargo tree -e normal`:
+
+| Build | Crates (Orion) | Binary |
+| --- | --- | --- |
+| `orion-client --no-default-features --features ipc` (local IPC client, for comparison) | 41 (7) | - |
+| `orion-client --no-default-features --features remote` | 61 (9) | - |
+| `orion-client --no-default-features --features discovery` (adds `mdns-sd`) | 70 (9) | - |
+| tokio-only baseline binary (current-thread runtime, one TCP connect) | - | 0.44 MiB (465,408 B) |
+| `examples/remote_operator.rs` (connect, enroll, list nodes, run and wait for an action) | - | 1.00 MiB (1,043,232 B) |
+
+So the remote operator client adds about 565 KiB to a tokio binary. Against the IPC-only client
+it adds `orion-auth`, `orion-transport-http` (protocol layer only), `ed25519-dalek`,
+`curve25519-dalek`, `sha2`, `hmac`, `digest`, `rand_core` / `getrandom`, `subtle`, `zeroize` and
+their small helpers (20 crates).
 
 ## Limits and gaps
 
 - The transport is Unix-only today, because the frame code lives in `orion-transport-ipc`.
 - Watches poll; there is no server push over `orion+tcp`.
 - Operator trust is per node; there is no cluster-wide operator directory.
-- Policies restrict action names, not targets.
+- Policies restrict action names, not targets; read access is all or nothing.
+- Status forwarding is one hop and only to configured peers of the connected node; node records
+  are not relayed beyond direct peers.

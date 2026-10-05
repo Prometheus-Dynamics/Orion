@@ -4,17 +4,16 @@
 
 use crate::{
     AuthProtocolError, AuthenticatedPeerRequest, PEER_REQUEST_AUTH_VERSION,
-    PEER_RESPONSE_AUTH_VERSION, PeerRequestAuth, PeerRequestPayload,
-    canonical_peer_request_bytes, canonical_peer_response_bytes, hex::encode_hex,
-    peer_tcp::PeerResponseSignature,
+    PEER_RESPONSE_AUTH_VERSION, PeerRequestAuth, PeerRequestPayload, canonical_peer_request_bytes,
+    canonical_peer_response_bytes, hex::encode_hex, peer_tcp::PeerResponseSignature,
 };
 use alloc::{
     format,
     string::{String, ToString},
     vec::Vec,
 };
-pub use ed25519_dalek::{SigningKey, VerifyingKey};
 use ed25519_dalek::{Signature, Signer, Verifier};
+pub use ed25519_dalek::{SigningKey, VerifyingKey};
 use orion_core::NodeId;
 use sha2::{Digest, Sha256};
 
