@@ -149,6 +149,25 @@ impl NodeSecurity {
         self.mode
     }
 
+    /// This node's ed25519 public key.
+    pub fn public_key_bytes(&self) -> [u8; 32] {
+        self.identity.verifying_key().to_bytes()
+    }
+
+    /// Signs `message` with this node's identity key (used by the enrollment handshake, whose
+    /// messages are domain-separated by their own prefix).
+    #[cfg_attr(not(feature = "discovery-mdns"), allow(dead_code))]
+    pub(crate) fn sign_bytes(&self, message: &[u8]) -> Vec<u8> {
+        self.identity.sign(message).to_bytes().to_vec()
+    }
+
+    /// Forgets the configured key of `node_id` (set from `ORION_NODE_PEERS` or an enrollment).
+    pub fn unconfigure_peer(&self, node_id: &NodeId) -> Result<bool, NodeError> {
+        let configured = self.configured_peer_keys.write();
+        let mut configured = write_rwlock(configured, "configured_peer_keys");
+        Ok(configured.remove(node_id).is_some())
+    }
+
     pub fn public_key_hex(&self) -> PublicKeyHex {
         PublicKeyHex::new(encode_hex(&self.identity.verifying_key().to_bytes()))
     }

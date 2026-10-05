@@ -27,6 +27,9 @@ use core::fmt;
 ///   Per-object HLC versions (`DesiredClusterState::stamps`/`tombstones`,
 ///   `DesiredStateSummary::stamps`/`tombstones`, `MutationBatch::stamps`, `HlcTimestamp`,
 ///   `DesiredObjectStamps`), `NodeObservabilitySnapshot::desired_merge`; `orion+tcp` peer frames.
+///   Peer discovery and enrollment messages (`QueryDiscovery`, `Discovery`,
+///   `EnrollDiscoveredPeer`, `RemovePeer`, `EnrollmentHello`/`Challenge`/`Confirm`) and
+///   `NodeObservabilitySnapshot::discovery`.
 pub const CONTROL_PROTOCOL_VERSION: u16 = 3;
 
 /// Fingerprint of the archived layout of the control-protocol types at
@@ -35,7 +38,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 3;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x20cb_568c_ed93_88a5;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x0ede_8f74_34e1_7961;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

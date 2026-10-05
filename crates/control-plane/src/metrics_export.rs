@@ -6,12 +6,14 @@ use orion_core::NodeId;
 
 mod clock;
 mod desired_merge;
+mod discovery;
 mod format;
 mod resource_usage;
 
 use clock::append_clock_metrics;
 pub use clock::render_clock_metrics;
 use desired_merge::append_desired_merge_metrics;
+use discovery::append_discovery_metrics;
 use format::{gauge, metric_help, metric_type, milli_to_f64, optional_gauge, sample, sample_owned};
 use resource_usage::append_resource_usage_metrics;
 pub use resource_usage::render_resource_usage_metrics;
@@ -93,6 +95,7 @@ pub fn render_observability_metrics_with_config(
     );
     append_resource_usage_metrics(&mut out, &snapshot.node_id, &snapshot.resource_usage);
     append_desired_merge_metrics(&mut out, &snapshot.node_id, &snapshot.desired_merge);
+    append_discovery_metrics(&mut out, &snapshot.node_id, &snapshot.discovery);
     append_communication_metrics(&mut out, &snapshot.node_id, &snapshot.communication, config);
     out
 }

@@ -3,6 +3,10 @@ use super::client::{
     ExecutorWorkloadQuery, PeerEnrollment, PeerIdentityUpdate, ProviderLeaseQuery,
     ProviderStateUpdate, StateWatch,
 };
+use super::discovery::{
+    DiscoveredPeerEnrollment, DiscoverySnapshot, EnrollmentChallenge, EnrollmentConfirm,
+    EnrollmentHello,
+};
 use super::maintenance::{MaintenanceCommand, MaintenanceStatus};
 use super::metrics::{NodeObservabilitySnapshot, PeerTrustSnapshot};
 use super::mutations::MutationBatch;
@@ -60,4 +64,16 @@ pub enum ControlMessage {
     Pong,
     Accepted,
     Rejected(String),
+    /// Queries the node's discovered peers and discovery counters (local control only);
+    /// answered with [`ControlMessage::Discovery`].
+    QueryDiscovery,
+    Discovery(Box<DiscoverySnapshot>),
+    /// Operator approval of a discovered peer: pins its advertised key and registers it.
+    EnrollDiscoveredPeer(DiscoveredPeerEnrollment),
+    /// Revokes a peer's key, stops syncing with it and forgets its enrollment.
+    RemovePeer(NodeId),
+    /// Shared-key enrollment handshake between nodes (peer transports only).
+    EnrollmentHello(Box<EnrollmentHello>),
+    EnrollmentChallenge(Box<EnrollmentChallenge>),
+    EnrollmentConfirm(Box<EnrollmentConfirm>),
 }

@@ -48,7 +48,7 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: DeleteCommand,
     },
-    #[command(alias = "trust")]
+    #[command(visible_alias = "peer", alias = "trust")]
     Peers {
         #[command(subcommand)]
         command: PeerCommand,
@@ -84,6 +84,8 @@ pub(crate) enum GetCommand {
     Events(ListArgs),
     /// Volatile status lane entries (local socket only; never persisted or replicated).
     Status(StatusArgs),
+    /// Peers found by mDNS discovery, their key fingerprints and trust state (local socket).
+    DiscoveredPeers(LocalControlArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -115,7 +117,10 @@ pub(crate) enum DeleteCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum PeerCommand {
     List(PeerListArgs),
+    /// Enroll a discovered peer (`peers enroll <node-id>`) or a known peer (`--base-url`).
     Enroll(PeerEnrollArgs),
+    /// Revoke a peer's key, stop syncing with it and forget its discovery enrollment.
+    Remove(crate::handlers::PeerRemoveArgs),
     Revoke(PeerNodeArgs),
     ReplaceKey(PeerReplaceKeyArgs),
     RotateHttpTls(LocalControlArgs),
@@ -464,10 +469,18 @@ pub(crate) struct PeerListArgs {
 pub(crate) struct PeerEnrollArgs {
     #[command(flatten)]
     pub(crate) local: LocalControlArgs,
+    /// A discovered peer to enroll (its advertised key is pinned after confirmation).
+    pub(crate) discovered: Option<String>,
     #[arg(long)]
-    pub(crate) node_id: String,
+    pub(crate) node_id: Option<String>,
     #[arg(long)]
-    pub(crate) base_url: String,
+    pub(crate) base_url: Option<String>,
+    /// Discovered peers: the key fingerprint verified out of band (skips the prompt).
+    #[arg(long)]
+    pub(crate) fingerprint: Option<String>,
+    /// Discovered peers: trust the advertised key without prompting.
+    #[arg(long)]
+    pub(crate) yes: bool,
     #[arg(long)]
     pub(crate) public_key: Option<String>,
     #[arg(long)]

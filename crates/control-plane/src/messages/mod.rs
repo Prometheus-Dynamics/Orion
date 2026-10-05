@@ -1,5 +1,6 @@
 mod client;
 mod control;
+mod discovery;
 mod maintenance;
 mod metrics;
 mod mutations;
@@ -13,6 +14,11 @@ pub use client::{
     PeerIdentityUpdate, ProviderLeaseQuery, ProviderStateUpdate, StateWatch,
 };
 pub use control::ControlMessage;
+pub use discovery::{
+    DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState, DiscoveryMetricsSnapshot,
+    DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
+    EnrollmentHello,
+};
 pub use maintenance::{
     MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
 };

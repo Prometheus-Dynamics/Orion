@@ -104,6 +104,20 @@ impl NodeApp {
                 self.revoke_peer_identity(&node_id)?;
                 Ok(ControlMessage::Accepted)
             }
+            ControlMessage::QueryDiscovery => {
+                Ok(ControlMessage::Discovery(Box::new(self.query_discovery())))
+            }
+            ControlMessage::EnrollDiscoveredPeer(request) => {
+                self.approve_discovered_peer(request)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::RemovePeer(node_id) => {
+                self.remove_peer(&node_id)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::EnrollmentHello(_) | ControlMessage::EnrollmentConfirm(_) => Ok(
+                ControlMessage::Rejected("enrollment handshakes are only served to peers".into()),
+            ),
             ControlMessage::ReplacePeerIdentity(update) => {
                 self.replace_peer_identity_hex(&update.node_id, &update.public_key_hex)?;
                 Ok(ControlMessage::Accepted)
@@ -167,10 +181,9 @@ impl NodeApp {
                             "health response is not valid for sync request".into(),
                         )
                     }
-                    orion::transport::http::HttpResponsePayload::Readiness(_) => {
-                        ControlMessage::Rejected(
-                            "readiness response is not valid for sync request".into(),
-                        )
+                    orion::transport::http::HttpResponsePayload::Readiness(_)
+                    | orion::transport::http::HttpResponsePayload::EnrollmentChallenge(_) => {
+                        ControlMessage::Rejected("response is not valid for sync request".into())
                     }
                     orion::transport::http::HttpResponsePayload::Observability(_) => {
                         ControlMessage::Rejected(
@@ -201,6 +214,8 @@ impl NodeApp {
             | ControlMessage::Observability(_)
             | ControlMessage::ClientEvents(_)
             | ControlMessage::Status(_)
+            | ControlMessage::Discovery(_)
+            | ControlMessage::EnrollmentChallenge(_)
             | ControlMessage::Accepted
             | ControlMessage::Rejected(_) => Ok(ControlMessage::Rejected(
                 "response-only control message received as a request".into(),

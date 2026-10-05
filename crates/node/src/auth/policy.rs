@@ -43,6 +43,9 @@ impl Authenticator for NodeSecurityAuthenticator {
                 request.context.authenticated_peer = Some(authenticated);
                 Ok(())
             }
+            // The enrollment handshake is how an unknown peer becomes trusted; it carries its
+            // own proofs and is answered only when an enrollment key is configured.
+            None if request.operation().is_enrollment_handshake() => Ok(()),
             None if self.security.mode() == PeerAuthenticationMode::Required => {
                 Err(NodeError::Authorization(format!(
                     "peer authentication required for {:?}",
@@ -258,6 +261,10 @@ impl Authorizer for NodeSecurityAuthorizer {
                 ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
                 ControlOperation::Snapshot | ControlOperation::Mutations,
             ) => self.authorize_authenticated_peer_write(request),
+            (
+                ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
+                ControlOperation::EnrollmentHello | ControlOperation::EnrollmentConfirm,
+            ) => Ok(()),
             (ControlPrincipal::Peer(peer), ControlOperation::ObservedUpdate) => {
                 self.authorize_authenticated_peer_write(request)?;
                 let crate::service::ControlRequestBody::ObservedUpdate(update) = &request.body
@@ -277,6 +284,7 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::QueryStateSnapshot
                 | ControlOperation::QueryObservability
                 | ControlOperation::QueryPeerTrust
+                | ControlOperation::QueryDiscovery
                 | ControlOperation::Ping
                 | ControlOperation::Pong
                 | ControlOperation::Hello
@@ -307,6 +315,8 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::WatchState
                 | ControlOperation::PollClientEvents
                 | ControlOperation::EnrollPeer
+                | ControlOperation::EnrollDiscoveredPeer
+                | ControlOperation::RemovePeer
                 | ControlOperation::RevokePeer
                 | ControlOperation::ReplacePeerIdentity
                 | ControlOperation::RotateHttpTlsIdentity

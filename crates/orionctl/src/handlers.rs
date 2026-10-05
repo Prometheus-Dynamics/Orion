@@ -1,12 +1,15 @@
 mod apply;
 mod delete;
 mod describe;
+mod discovered;
 mod get;
 mod get_communication;
 mod get_memory;
 mod get_status;
 mod peers;
 mod watch;
+
+pub(crate) use discovered::PeerRemoveArgs;
 
 use clap::Parser;
 use orion_control_plane::{NodeRecord, WorkloadRecord};

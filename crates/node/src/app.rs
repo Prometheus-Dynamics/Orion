@@ -11,6 +11,7 @@ mod local_control;
 mod maintenance_admin;
 mod observability;
 mod observed_persist;
+mod peer_admin;
 #[cfg(peer_sync)]
 mod peer_observed;
 #[cfg(peer_sync)]
@@ -172,6 +173,9 @@ pub struct NodeApp {
     http_mutual_tls_mode: HttpMutualTlsMode,
     transport_security: Arc<NodeTransportSecurityManager>,
     audit_log: Option<Arc<AuditLogSink>>,
+    /// Peer discovery state, set once by `NodeApp::start_discovery`.
+    #[cfg(feature = "discovery-mdns")]
+    pub(crate) discovery: Arc<std::sync::OnceLock<Arc<crate::discovery::DiscoveryState>>>,
     pub(crate) security: Arc<NodeSecurity>,
     pub(crate) control_middlewares: Arc<[ControlMiddlewareHandle]>,
     pub http: HttpTransport,

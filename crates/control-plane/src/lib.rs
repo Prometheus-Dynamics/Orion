@@ -20,20 +20,23 @@ pub use messages::{
     CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
     CommunicationStageMetricsSnapshot, CommunicationTransportKind, ControlMessage,
     DesiredStateMergeSnapshot, DesiredStateMutation, DesiredStateObjectSelector,
-    DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary, ExecutorStateUpdate,
-    ExecutorWorkloadQuery, HostMetricsSnapshot, HttpMutualTlsMode, LatencyMetricsSnapshot,
-    LocalStreamUsageSnapshot, MaintenanceAction, MaintenanceCommand, MaintenanceMode,
-    MaintenanceState, MaintenanceStatus, MutationApplyError, MutationBatch,
-    MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot,
-    NodeReadinessSnapshot, NodeReadinessStatus, NodeResourceUsageSnapshot, ObservabilityEvent,
-    ObservabilityEventKind, ObservedPersistenceUsageSnapshot, ObservedStateUpdate,
-    OperationFailureCategory, OperationMetricsSnapshot, PeerEnrollment, PeerHello,
-    PeerIdentityUpdate, PeerSyncErrorKind, PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot,
-    PersistenceMetricsSnapshot, ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate,
-    RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch,
-    StatusChange, StatusEntry, StatusKey, StatusLaneUsageSnapshot, StatusQuery, StatusSubject,
-    StatusSubjectParseError, SyncDiffRequest, SyncRequest, SyncSummaryRequest,
-    TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
+    DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary,
+    DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState, DiscoveryMetricsSnapshot,
+    DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
+    EnrollmentHello, ExecutorStateUpdate, ExecutorWorkloadQuery, HostMetricsSnapshot,
+    HttpMutualTlsMode, LatencyMetricsSnapshot, LocalStreamUsageSnapshot, MaintenanceAction,
+    MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus, MutationApplyError,
+    MutationBatch, MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus,
+    NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,
+    NodeResourceUsageSnapshot, ObservabilityEvent, ObservabilityEventKind,
+    ObservedPersistenceUsageSnapshot, ObservedStateUpdate, OperationFailureCategory,
+    OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerSyncErrorKind,
+    PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
+    ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate, RegistryUsageSnapshot,
+    StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch, StatusChange, StatusEntry,
+    StatusKey, StatusLaneUsageSnapshot, StatusQuery, StatusSubject, StatusSubjectParseError,
+    SyncDiffRequest, SyncRequest, SyncSummaryRequest, TransportMetricsSnapshot,
+    WorkerQueueUsageSnapshot,
 };
 #[cfg(feature = "std")]
 pub use metrics_export::{
@@ -271,7 +274,14 @@ mod tests {
             | ControlMessage::QueryMaintenance
             | ControlMessage::UpdateMaintenance(_)
             | ControlMessage::MaintenanceStatus(_)
-            | ControlMessage::Rejected(_) => {
+            | ControlMessage::Rejected(_)
+            | ControlMessage::QueryDiscovery
+            | ControlMessage::Discovery(_)
+            | ControlMessage::EnrollDiscoveredPeer(_)
+            | ControlMessage::RemovePeer(_)
+            | ControlMessage::EnrollmentHello(_)
+            | ControlMessage::EnrollmentChallenge(_)
+            | ControlMessage::EnrollmentConfirm(_) => {
                 panic!("unexpected control message")
             }
         }

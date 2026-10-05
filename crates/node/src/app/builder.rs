@@ -418,6 +418,8 @@ impl NodeAppBuilder {
                 .transpose()?
                 .map(Arc::new),
             security,
+            #[cfg(feature = "discovery-mdns")]
+            discovery: Arc::default(),
             control_middlewares: Arc::from(Vec::<ControlMiddlewareHandle>::new()),
             http: self.http.unwrap_or_default(),
             ipc: self.ipc.unwrap_or_default(),

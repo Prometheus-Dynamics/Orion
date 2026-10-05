@@ -14,6 +14,8 @@ mod auth;
 mod blocking;
 mod clock;
 mod config;
+#[cfg(feature = "discovery-mdns")]
+pub mod discovery;
 #[cfg(feature = "link-gateway")]
 pub mod link_gateway;
 mod lock;

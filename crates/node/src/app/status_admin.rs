@@ -274,6 +274,7 @@ impl NodeApp {
             recent_events: observability.recent_events.iter().cloned().collect(),
             resource_usage,
             desired_merge,
+            discovery: self.discovery_metrics_snapshot(),
             clock: observability.clock.clone(),
         }
     }
@@ -516,7 +517,7 @@ impl NodeApp {
         Ok(())
     }
 
-    pub(super) fn current_time_ms() -> u64 {
+    pub(crate) fn current_time_ms() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()

@@ -73,6 +73,7 @@ pub(super) fn unexpected_response(
         HttpResponsePayload::Observability(_) => "observability",
         HttpResponsePayload::Health(_) => "health",
         HttpResponsePayload::Readiness(_) => "readiness",
+        HttpResponsePayload::EnrollmentChallenge(_) => "enrollment challenge",
     };
     NodeError::Storage(format!(
         "unexpected {kind} response to peer {request} request over {transport}"

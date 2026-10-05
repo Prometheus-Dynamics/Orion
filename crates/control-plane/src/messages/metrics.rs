@@ -722,4 +722,8 @@ pub struct NodeObservabilitySnapshot {
     /// input.
     #[serde(default)]
     pub desired_merge: DesiredStateMergeSnapshot,
+    /// Peer discovery and enrollment counters (`docs/discovery.md`). Defaults when absent from
+    /// structured input.
+    #[serde(default)]
+    pub discovery: super::discovery::DiscoveryMetricsSnapshot,
 }
