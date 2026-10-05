@@ -253,6 +253,15 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
 - [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
       MCU with an A/B bootloader over UART and CAN.
 
+### Remote operator client (next, after protocol v4)
+
+- [ ] Embeddable remote operator client (`orion-client` `remote` feature or `orion-remote` crate)
+      for desktop/fleet tools: ed25519 operator identity, enrollment (operator approval or shared
+      key), signed `orion+tcp` requests; list/watch node records and host facts, query/watch status
+      lanes, send `ActionRequest` / watch `ActionResult`, optional mDNS discovery. Nodes treat it as
+      an operator principal (no desired-state replica, no placement/liveness role), with
+      per-identity action authorization. First consumer: Atlas (`atlas-driver-orion`).
+
 ### Nice to have
 
 - [ ] Optional blocking client for the fd latest-value channel.
