@@ -13,7 +13,7 @@
 //! Every field is optional: a source fills in what its platform reports.
 
 use crate::TypedConfigValue;
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -201,6 +201,26 @@ impl HostFacts {
         self.identity.merge(other.identity);
         self.metrics.merge(other.metrics);
         self.sampled_at_ms = self.sampled_at_ms.max(other.sampled_at_ms);
+    }
+}
+
+/// Where a node reads host facts from. Implement it to supply facts from another platform or a
+/// hardware-abstraction layer; fields a source cannot report stay `None`. Lives here (not in
+/// `orion-node`) so adapter crates only need the `no_std` model crate.
+pub trait HostFactsSource: Send + Sync {
+    /// Takes one sample. `sampled_at_ms` may be left `0`; the node stamps it.
+    fn sample(&self) -> HostFacts;
+}
+
+impl<T: HostFactsSource + ?Sized> HostFactsSource for Arc<T> {
+    fn sample(&self) -> HostFacts {
+        (**self).sample()
+    }
+}
+
+impl<T: HostFactsSource + ?Sized> HostFactsSource for Box<T> {
+    fn sample(&self) -> HostFacts {
+        (**self).sample()
     }
 }
 
