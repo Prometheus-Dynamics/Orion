@@ -19,6 +19,8 @@ pub struct ExecutorSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+// `Start` carries the whole plan; commands are short-lived and never stored in bulk.
+#[allow(clippy::large_enum_variant)]
 pub enum ExecutorCommand {
     Start(WorkloadPlan),
     Stop {

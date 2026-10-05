@@ -22,12 +22,13 @@ pub use crate::{
 pub use orion_control_plane::{
     AppliedClusterState, AvailabilityState, ClusterStateEnvelope, ConfigDecodeError, ConfigMapRef,
     CustomEndpoint, CustomEndpointScheme, DesiredClusterState, DesiredState, ExecutorRecord,
-    HealthState, HttpEndpoint, IpcEndpoint, LeaseRecord, LeaseState, ObservedClusterState,
-    ProviderRecord, ResourceBinding, ResourceCapability, ResourceEndpoint, ResourceEndpointError,
-    ResourceOwnershipMode, ResourceRecord, ResourceState, RestartPolicy, SharedMemoryEndpoint,
-    StateSnapshot, StatusChange, StatusEntry, StatusKey, StatusQuery, StatusSubject, TcpEndpoint,
+    HealthState, HttpEndpoint, IpcEndpoint, LabelRequirement, LeaseHolder, LeaseRecord, LeaseState,
+    ObservedClusterState, PlacementReason, ProviderRecord, RemoteBinding, ResourceBinding,
+    ResourceCapability, ResourceEndpoint, ResourceEndpointError, ResourceOwnershipMode,
+    ResourceRecord, ResourceState, RestartPolicy, SharedMemoryEndpoint, StateSnapshot,
+    StatusChange, StatusEntry, StatusKey, StatusQuery, StatusSubject, TcpEndpoint,
     TypedConfigValue, TypedResourceEndpoint, UnixEndpoint, WorkloadConfig, WorkloadObservedState,
-    WorkloadRecord, WorkloadRequirement, config_json_value, deserialize_config,
+    WorkloadPlacement, WorkloadRecord, WorkloadRequirement, config_json_value, deserialize_config,
 };
 pub use orion_core::{
     ArtifactId, CapabilityId, ConfigSchemaId, ExecutorId, NodeId, ProviderId, ResourceId,

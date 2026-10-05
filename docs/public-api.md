@@ -168,6 +168,35 @@ See [peer-sync.md](peer-sync.md) for the model. The public surface:
   `ControlSurface::PeerTcp` (with `ControlSurface::is_peer`) marks requests from `orion+tcp`
   peers for custom middleware.
 
+## Placement and Cross-Node Binding
+
+See [placement.md](placement.md). The public surface:
+
+- `orion_control_plane`: `WorkloadRecord::placement` (`Option<WorkloadPlacement>`, `#[serde(default)]`),
+  `WorkloadRecordBuilder::placement`, `WorkloadRecord::{has_explicit_assignment,
+  is_placement_managed}`, `WorkloadPlacement::{any, require_label, colocate_with}`,
+  `LabelRequirement::{equals, exists, parse, matches}`, `PlacementDecision`, `PlacementReason`,
+  `parse_node_labels`, `split_label`; `ResourceBinding::remote` (`Option<RemoteBinding>`,
+  `#[serde(default)]`), `ResourceBinding::{remote(..), is_remote, is_available}`,
+  `RemoteBinding { endpoints, available }`; `LeaseRecord::holders` (`Vec<LeaseHolder>`, rkyv only:
+  `#[serde(skip)]` so the postcard MCU link wire is unchanged), `LeaseRecord::{held_by,
+  all_holders, is_held_by}`, `LeaseHolder`.
+- `orion-cluster` (`no_std`, re-exported as `orion::cluster` and `orion_node::cluster`):
+  `ClusterView`, `NodeCandidate`, `eligibility`, `eligible_nodes`, `Ineligibility`,
+  `choose_node`, `rendezvous_score`, `rendezvous_choice`, `resource_host`,
+  `ClusterCoordinator::{new, plan, status, assign_in_place}` (replaces the unused unit struct and
+  its `assign`), `PlacementStatus`, and the `leases` module (`LeaseEdit`, `capacity`,
+  `resource_matches`, `remote_candidates`, `arbitrate_owned_leases`, `with_holder`,
+  `without_holders`, ...).
+- `orion-runtime`: `ReconcileReport::unsatisfied` (`UnsatisfiedRequirement`),
+  `LocalRuntimeStore::{unreachable_nodes, remote_leases_for, resource_owner}`, `RemoteLease`.
+- `orion-client`: `AssignedWorkload::{remote_bindings, placement, has_explicit_assignment}`,
+  `BoundResource::{from_binding, is_remote, is_available}`; prelude exports `LabelRequirement`,
+  `LeaseHolder`, `PlacementReason`, `RemoteBinding`, `WorkloadPlacement`.
+- `orion-node`: `PlacementTuning` (`NodeRuntimeTuning::placement`: `labels`,
+  `liveness_timeout`, `grace`, with `with_labels` / `with_liveness_timeout` / `with_grace`),
+  `NodeApp::cluster_view()`, `NodeApp::unreachable_peers()`.
+
 ## Resource Ownership Modes
 
 `ResourceOwnershipMode` is `Exclusive`, `SharedRead`, or `SharedLimited { max_consumers }`.

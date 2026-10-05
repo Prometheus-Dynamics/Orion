@@ -100,6 +100,8 @@ pub struct NodeRuntimeTuning {
     pub status_max_entries_per_publisher: usize,
     /// Longest time-to-live of a status entry (also the TTL of entries published with `ttl_ms = 0`).
     pub status_max_ttl: Duration,
+    /// Node labels, peer liveness and placement grace (`docs/placement.md`).
+    pub placement: super::placement::PlacementTuning,
 }
 
 impl NodeRuntimeTuning {
@@ -438,6 +440,7 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_STATUS_MAX_TTL_MS",
                 DEFAULT_STATUS_MAX_TTL_MS,
             )?,
+            placement: super::placement::PlacementTuning::from_env()?,
         };
         tuning.normalize();
         Ok(tuning)
@@ -482,6 +485,7 @@ impl NodeRuntimeTuning {
             .status_max_entries_per_publisher
             .clamp(1, self.status_max_entries);
         self.status_max_ttl = normalize_runtime_tuning_duration(self.status_max_ttl);
+        self.placement.normalize();
     }
 }
 
@@ -526,6 +530,7 @@ impl Default for NodeRuntimeTuning {
             status_max_entries: DEFAULT_STATUS_MAX_ENTRIES,
             status_max_entries_per_publisher: DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER,
             status_max_ttl: Duration::from_millis(DEFAULT_STATUS_MAX_TTL_MS),
+            placement: super::placement::PlacementTuning::default(),
         }
     }
 }
@@ -671,6 +676,9 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
             tuning.status_max_ttl.as_millis().to_string(),
         ),
     ]
+    .into_iter()
+    .chain(super::placement::placement_doc_defaults(&tuning.placement))
+    .collect()
 }
 
 pub(crate) fn min_runtime_tuning_duration() -> Duration {

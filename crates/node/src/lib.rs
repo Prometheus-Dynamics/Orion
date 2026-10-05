@@ -35,6 +35,11 @@ pub mod control_plane {
     pub use orion_control_plane::*;
 }
 
+/// Leaderless placement and cross-node lease helpers (`docs/placement.md`).
+pub mod cluster {
+    pub use orion_cluster::*;
+}
+
 pub mod data_plane {
     pub use orion_data_plane::*;
 }
@@ -51,8 +56,8 @@ pub mod runtime {
     pub use orion_runtime::{
         ExecutorCommand, ExecutorDescriptor, ExecutorIntegration, ExecutorSnapshot,
         LocalRuntimeStore, ProviderDescriptor, ProviderIntegration, ProviderSnapshot,
-        ReconcileReport, Runtime, RuntimeError, RuntimeSnapshot, WorkloadPlan,
-        validate_requirement_against_resource,
+        ReconcileReport, RemoteLease, Runtime, RuntimeError, RuntimeSnapshot,
+        UnsatisfiedRequirement, WorkloadPlan, validate_requirement_against_resource,
     };
 }
 
@@ -118,7 +123,7 @@ pub use auth::{
     PeerSecurityMiddleware,
 };
 pub use clock::{ClockStatusSource, KernelClockReading, KernelClockStatusSource};
-pub use config::{NodeConfig, NodeProcessConfig, NodeRuntimeThreads};
+pub use config::{NodeConfig, NodeProcessConfig, NodeRuntimeThreads, PlacementTuning};
 pub use peer::{
     PEER_TCP_SCHEME, PeerConfig, PeerState, PeerSyncStatus, PeerTransportKind, PeerTrustStatus,
 };

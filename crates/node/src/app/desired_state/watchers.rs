@@ -14,7 +14,16 @@ impl NodeApp {
         }
         #[cfg(feature = "link-gateway")]
         self.notify_link_desired_change();
+        self.notify_client_watchers_with(snapshot);
+    }
 
+    /// Re-evaluates executor and provider watches without a desired-state change (cross-node
+    /// binding availability depends on peer liveness).
+    pub(in crate::app) fn notify_client_watchers(&self) {
+        self.notify_client_watchers_with(self.state_snapshot());
+    }
+
+    fn notify_client_watchers_with(&self, snapshot: orion::control_plane::StateSnapshot) {
         let client_views: Vec<_> = self
             .clients_read()
             .iter()

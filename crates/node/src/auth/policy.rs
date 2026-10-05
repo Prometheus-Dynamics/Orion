@@ -212,8 +212,8 @@ impl NodeSecurityAuthorizer {
                 }
             }
         }
-        for resource_id in update.observed.resources.keys() {
-            if !scope.resource_ids.contains(resource_id) {
+        for (resource_id, resource) in &update.observed.resources {
+            if !scope.resource_ids.contains(resource_id) && !scope.owns(resource) {
                 return Err(NodeError::Authorization(format!(
                     "peer {} cannot publish observed resource {}",
                     peer.node_id, resource_id

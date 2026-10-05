@@ -1,5 +1,6 @@
 mod builder;
 mod clock_facts;
+mod cluster_state;
 mod desired_state;
 mod desired_sync;
 mod desired_writes;
@@ -27,6 +28,7 @@ mod peer_transport;
 #[cfg(all(test, peer_sync))]
 pub(crate) use peer_transport::PeerSyncTransport;
 mod persistence;
+mod placement;
 mod reconcile;
 mod reconcile_tick;
 mod reconcile_trigger;

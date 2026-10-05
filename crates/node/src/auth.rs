@@ -65,6 +65,20 @@ impl<T> AuthorizationLookup for T where T: LocalSessionLookup + PeerPolicyLookup
 pub struct PeerObservedScope {
     pub executor_ids: BTreeSet<ExecutorId>,
     pub resource_ids: BTreeSet<ResourceId>,
+    /// Providers registered on the peer's node.
+    pub provider_ids: BTreeSet<orion::ProviderId>,
+}
+
+impl PeerObservedScope {
+    /// Whether the peer may report `resource`: it belongs to one of the peer's providers or is
+    /// realized by one of its executors.
+    pub fn owns(&self, resource: &orion::control_plane::ResourceRecord) -> bool {
+        self.provider_ids.contains(&resource.provider_id)
+            || resource
+                .realized_by_executor_id
+                .as_ref()
+                .is_some_and(|executor_id| self.executor_ids.contains(executor_id))
+    }
 }
 
 #[derive(Clone)]

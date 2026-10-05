@@ -81,6 +81,7 @@ impl NodeApp {
             .hello(self, node_id, peer, self.peer_hello()?)
             .await?;
         self.record_peer_hello(node_id, &remote, CompatibilityState::Preferred)?;
+        self.note_peer_heard(node_id);
         self.set_peer_sync_status(node_id, PeerSyncStatus::Syncing)?;
 
         let local = self.desired_metadata()?;

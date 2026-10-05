@@ -679,15 +679,18 @@ impl NodeApp {
         Ok(self.current_provider_leases(&query.provider_id))
     }
 
-    pub(super) fn current_provider_leases(
+    pub(crate) fn current_provider_leases(
         &self,
         provider_id: &ProviderId,
     ) -> Vec<orion::control_plane::LeaseRecord> {
         let store = self.store_read();
+        // Leases on the provider's resources, including cross-node leases held by workloads on
+        // other nodes (`docs/placement.md`).
         let resource_ids: std::collections::BTreeSet<_> = store
             .desired
             .resources
             .values()
+            .chain(store.observed.resources.values())
             .filter(|resource| &resource.provider_id == provider_id)
             .map(|resource| resource.resource_id.clone())
             .collect();
@@ -700,7 +703,7 @@ impl NodeApp {
             .collect()
     }
 
-    pub(super) fn current_executor_workloads(
+    pub(crate) fn current_executor_workloads(
         &self,
         executor_id: &ExecutorId,
     ) -> Result<Vec<WorkloadRecord>, NodeError> {
@@ -720,7 +723,34 @@ impl NodeApp {
                 workload.assigned_node_id.as_ref() == Some(&self.config.node_id)
                     && runtime_types.contains(&workload.runtime_type)
             })
-            .cloned()
+            .map(|workload| with_remote_bindings(&store, workload))
             .collect())
     }
+}
+
+/// `workload` with its cross-node bindings appended (resolved from the leases it holds), so
+/// executors see remote resources with their owner node, endpoints and availability.
+fn with_remote_bindings(
+    store: &orion::runtime::LocalRuntimeStore,
+    workload: &WorkloadRecord,
+) -> WorkloadRecord {
+    let mut workload = workload.clone();
+    for lease in store.remote_leases_for(&workload.workload_id) {
+        if workload
+            .resource_bindings
+            .iter()
+            .any(|binding| binding.resource_id == lease.resource.resource_id)
+        {
+            continue;
+        }
+        workload
+            .resource_bindings
+            .push(orion::control_plane::ResourceBinding::remote(
+                lease.resource.resource_id.clone(),
+                lease.owner,
+                lease.resource.endpoints.clone(),
+                lease.available,
+            ));
+    }
+    workload
 }

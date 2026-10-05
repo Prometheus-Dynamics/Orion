@@ -22,7 +22,7 @@ pub(crate) const OBSERVED_REFRESH_INTERVAL_MS: u64 = 30_000;
 
 impl NodeApp {
     /// This node's observed slice: its node record, its assigned workloads, and the resources
-    /// (and their leases) of its providers and executors that are part of the desired state.
+    /// (and their leases) of its providers and executors.
     pub(crate) fn local_observed_slice(&self) -> ObservedClusterState {
         let store = self.store_read();
         let local = &self.config.node_id;
@@ -40,9 +40,12 @@ impl NodeApp {
             .filter(|executor| &executor.node_id == local)
             .map(|executor| executor.executor_id.clone())
             .collect();
+        // Every resource of a local provider or executor, whether or not it is also in the
+        // desired state, so peers can resolve cross-node bindings to it (`docs/placement.md`).
         let local_resources: BTreeSet<_> = desired
             .resources
             .values()
+            .chain(observed.resources.values())
             .filter(|resource| {
                 providers.contains(&resource.provider_id)
                     || resource

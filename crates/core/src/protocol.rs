@@ -35,7 +35,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 3;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x20cb_568c_ed93_88a5;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x7dc0_a424_edca_7e3a;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

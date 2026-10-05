@@ -10,10 +10,10 @@ use std::collections::BTreeMap;
 
 use orion_control_plane::{
     AvailabilityState, ConfigDecodeError, ConfigMapRef, DesiredState, ExecutorRecord, HealthState,
-    LeaseState, ResourceBinding, ResourceCapability, ResourceEndpoint, ResourceEndpointError,
-    ResourceOwnershipMode, ResourceRecord, ResourceState, StateSnapshot, TypedConfigValue,
-    TypedResourceEndpoint, WorkloadObservedState, WorkloadRecord, WorkloadRequirement,
-    deserialize_config,
+    LeaseState, RemoteBinding, ResourceBinding, ResourceCapability, ResourceEndpoint,
+    ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceState, StateSnapshot,
+    TypedConfigValue, TypedResourceEndpoint, WorkloadObservedState, WorkloadPlacement,
+    WorkloadRecord, WorkloadRequirement, deserialize_config,
 };
 use orion_core::{
     ArtifactId, ConfigSchemaId, ExecutorId, NodeId, ProviderId, ResourceId, ResourceType, Revision,
@@ -80,6 +80,24 @@ impl AssignedWorkload {
         &self.record.resource_bindings
     }
 
+    /// Cross-node bindings: resources owned by another node, reached over their own endpoints.
+    pub fn remote_bindings(&self) -> impl Iterator<Item = &ResourceBinding> {
+        self.record
+            .resource_bindings
+            .iter()
+            .filter(|binding| binding.is_remote())
+    }
+
+    /// Placement constraints, when the placement engine manages this workload.
+    pub fn placement(&self) -> Option<&WorkloadPlacement> {
+        self.record.placement.as_ref()
+    }
+
+    /// `true` when a user assigned the node explicitly (placement never moves it).
+    pub fn has_explicit_assignment(&self) -> bool {
+        self.record.has_explicit_assignment()
+    }
+
     /// Ids of the resources this workload is bound to, in binding order.
     pub fn bound_resource_ids(&self) -> impl Iterator<Item = &ResourceId> {
         self.record
@@ -139,6 +157,7 @@ impl AssignedWorkload {
 pub struct BoundResource {
     record: ResourceRecord,
     bound_node_id: NodeId,
+    remote: Option<RemoteBinding>,
 }
 
 impl BoundResource {
@@ -146,6 +165,31 @@ impl BoundResource {
         Self {
             record,
             bound_node_id: bound_node_id.into(),
+            remote: None,
+        }
+    }
+
+    /// A bound resource described by its `binding` (cross-node details included).
+    pub fn from_binding(record: ResourceRecord, binding: &ResourceBinding) -> Self {
+        Self {
+            record,
+            bound_node_id: binding.node_id.clone(),
+            remote: binding.remote.clone(),
+        }
+    }
+
+    /// `true` for a cross-node binding: the resource is owned by [`Self::bound_node_id`], another
+    /// node, and is reached over its own endpoints (Orion does not proxy the data).
+    pub fn is_remote(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    /// `false` while a cross-node binding's owner is unreachable (or reports the resource
+    /// unavailable); local bindings follow the resource's availability.
+    pub fn is_available(&self) -> bool {
+        match self.remote.as_ref() {
+            Some(remote) => remote.available,
+            None => self.record.availability == AvailabilityState::Available,
         }
     }
 
@@ -313,7 +357,7 @@ fn bound_resources_for_bindings(
                 .resources
                 .get(&binding.resource_id)
                 .or_else(|| state.observed.resources.get(&binding.resource_id))
-                .map(|record| BoundResource::new(record.clone(), binding.node_id.clone()))
+                .map(|record| BoundResource::from_binding(record.clone(), binding))
         })
         .collect()
 }

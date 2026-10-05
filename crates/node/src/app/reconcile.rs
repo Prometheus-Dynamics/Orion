@@ -21,6 +21,9 @@ impl NodeApp {
         peer: Option<NodeId>,
         message: ControlMessage,
     ) -> Result<HttpResponsePayload, NodeError> {
+        if let Some(peer) = peer.as_ref() {
+            self.note_peer_heard(peer);
+        }
         match message {
             ControlMessage::Hello(_) => Ok(HttpResponsePayload::Hello(self.peer_hello()?)),
             ControlMessage::SyncRequest(request) => self.build_sync_response(request),
@@ -287,6 +290,9 @@ impl NodeApp {
 
                     if let Some(resource_id) = selected_resource_id {
                         *claim_counts.entry(resource_id).or_default() += 1;
+                    } else if self.remote_resource_could_satisfy(desired, requirement) {
+                        // Cross-node binding resolves it against another node's resource.
+                        continue;
                     } else if let Some(err) = validation_error {
                         return Err(err.into());
                     } else {
@@ -300,6 +306,21 @@ impl NodeApp {
         }
 
         Ok(())
+    }
+
+    /// Whether a resource owned by another node matches `requirement` (type, ownership mode,
+    /// capabilities), so a local workload may bind it across nodes (`docs/placement.md`).
+    fn remote_resource_could_satisfy(
+        &self,
+        desired: &DesiredClusterState,
+        requirement: &orion::control_plane::WorkloadRequirement,
+    ) -> bool {
+        let store = self.store_read();
+        orion::cluster::leases::known_resources(desired, &store.observed).any(|resource| {
+            orion::cluster::leases::resource_matches(resource, requirement)
+                && orion::cluster::resource_host(desired, resource)
+                    .is_some_and(|owner| owner != self.config.node_id)
+        })
     }
 
     #[cfg(test)]
@@ -333,6 +354,9 @@ impl NodeApp {
         peer_node_id: Option<&NodeId>,
         update: ObservedStateUpdate,
     ) -> Result<HttpResponsePayload, NodeError> {
+        if let Some(peer) = peer_node_id {
+            self.note_peer_heard(peer);
+        }
         let mut state_changed = self.with_store_mut(|store| match peer_node_id {
             Some(peer_node_id) => merge_peer_observed_state(
                 &mut store.observed,

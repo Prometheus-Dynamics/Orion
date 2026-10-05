@@ -1,29 +1,34 @@
-//! Cluster membership, admission, replication, and assignment helpers for
-//! Orion.
+//! Cluster membership, admission, replication, leaderless placement and cross-node lease
+//! helpers for Orion (`docs/placement.md`).
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
 mod assignment;
+pub mod leases;
 mod membership;
+mod placement;
+#[cfg(test)]
+mod placement_tests;
 
-pub use assignment::ClusterCoordinator;
+pub use assignment::{ClusterCoordinator, PlacementStatus};
+pub use leases::LeaseEdit;
 pub use membership::{
     AdmissionDecision, AdmissionRejection, ClusterMembership, ClusterPeer, ClusterRole,
     ReplicationState, ensure_node_present, negotiation_error_kind,
+};
+pub use placement::{
+    ClusterView, Ineligibility, NodeCandidate, choose_node, eligibility, eligible_nodes,
+    rendezvous_choice, rendezvous_score, resource_host,
 };
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::{vec, vec::Vec};
-    use orion_control_plane::{DesiredClusterState, DesiredState, NodeRecord, WorkloadRecord};
-    use orion_control_plane::{HealthState, RestartPolicy, WorkloadObservedState};
-    use orion_core::{
-        ArtifactId, CompatibilityState, NodeId, ProtocolVersion, ResourceType, RuntimeType,
-        WorkloadId,
-    };
+    use orion_control_plane::{DesiredClusterState, HealthState, NodeRecord};
+    use orion_core::{CompatibilityState, NodeId, ProtocolVersion};
     use orion_data_plane::{LinkType, PeerCapabilities, TransportType};
 
     fn peer(node_id: &str) -> PeerCapabilities {
@@ -69,44 +74,6 @@ mod tests {
                 reason: AdmissionRejection::DuplicateNodeId(NodeId::new("node-b")),
             }
         );
-    }
-
-    #[test]
-    fn coordinator_assigns_workload_inside_desired_state() {
-        let coordinator = ClusterCoordinator;
-        let workload_id = WorkloadId::new("workload.pose");
-        let mut state = DesiredClusterState::default();
-        state.put_workload(WorkloadRecord {
-            workload_id: workload_id.clone(),
-            runtime_type: RuntimeType::new("graph.exec.v1"),
-            artifact_id: ArtifactId::new("artifact.pose"),
-            config: None,
-            desired_state: DesiredState::Running,
-            observed_state: WorkloadObservedState::Pending,
-            assigned_node_id: None,
-            requirements: vec![orion_control_plane::WorkloadRequirement {
-                resource_type: ResourceType::new("imu.sample_source"),
-                count: 1,
-                ownership_mode: None,
-                required_capabilities: Vec::new(),
-            }],
-            resource_bindings: Vec::new(),
-            restart_policy: RestartPolicy::OnFailure,
-        });
-        let previous_revision = state.revision;
-
-        let assigned = coordinator.assign(&mut state, &workload_id, NodeId::new("node-a"));
-
-        assert!(assigned);
-        assert_eq!(
-            state.workloads[&workload_id].assigned_node_id,
-            Some(NodeId::new("node-a"))
-        );
-        assert_eq!(
-            state.workloads[&workload_id].observed_state,
-            WorkloadObservedState::Pending
-        );
-        assert!(state.revision > previous_revision);
     }
 
     #[test]

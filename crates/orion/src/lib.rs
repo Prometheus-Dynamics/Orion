@@ -35,7 +35,9 @@ pub mod auth {
 pub mod cluster {
     pub use orion_cluster::{
         AdmissionDecision, AdmissionRejection, ClusterCoordinator, ClusterMembership, ClusterPeer,
-        ClusterRole, ReplicationState, ensure_node_present,
+        ClusterRole, ClusterView, Ineligibility, LeaseEdit, NodeCandidate, PlacementStatus,
+        ReplicationState, choose_node, eligibility, eligible_nodes, ensure_node_present, leases,
+        rendezvous_choice, rendezvous_score, resource_host,
     };
 }
 
@@ -320,7 +322,7 @@ mod tests {
     fn prelude_exposes_common_orion_surface() {
         let _node_id = prelude::NodeId::new("node-a");
         let _runtime = prelude::Runtime::new(prelude::NodeId::new("node-a"));
-        let _coordinator = prelude::ClusterCoordinator;
+        let _coordinator = prelude::ClusterCoordinator::new(prelude::NodeId::new("node-a"), 1_000);
         let _assigned: fn(
             &prelude::StateSnapshot,
             &control_plane::ExecutorRecord,

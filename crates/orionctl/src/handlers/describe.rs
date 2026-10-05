@@ -399,11 +399,22 @@ fn print_workload_describe_summary(workload: &WorkloadRecord, blockers: &[String
             .unwrap_or_else(|| "-".to_owned())
     );
     println!(
+        "assignment: {}",
+        crate::render_placement::render_assignment(workload)
+    );
+    println!(
+        "placement: {}",
+        crate::render_placement::render_placement(workload)
+    );
+    println!(
         "restart_policy: {}",
         render_restart_policy(workload.restart_policy)
     );
     println!("requirements: {}", workload.requirements.len());
     println!("bindings: {}", workload.resource_bindings.len());
+    for binding in &workload.resource_bindings {
+        println!("  {}", crate::render_placement::render_binding(binding));
+    }
     if let Some(config) = workload.config.as_ref() {
         println!("config_schema: {}", config.schema_id);
         if let Some(summary) = typed_workload_config_summary(workload) {

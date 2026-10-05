@@ -9,6 +9,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
 use super::config_decode::ConfigMapRef;
+use super::placement::LeaseHolder;
 use super::resource_endpoints::{ResourceEndpoint, ResourceEndpointError, TypedResourceEndpoint};
 use super::workloads::TypedConfigValue;
 
@@ -200,6 +201,15 @@ pub struct LeaseRecord {
     pub lease_state: LeaseState,
     pub holder_node_id: Option<NodeId>,
     pub holder_workload_id: Option<WorkloadId>,
+    /// Cross-node lease holders, sorted. Written by the nodes whose workloads bind the resource
+    /// (see `docs/placement.md`); `holder_*` mirror the first holder. Empty for leases written
+    /// by clients.
+    ///
+    /// Carried by the rkyv control protocol, peer sync and persistence, but skipped by serde:
+    /// the MCU link protocol encodes `LeaseRecord` with postcard, and its wire stays unchanged
+    /// (devices see the first holder in `holder_*`).
+    #[serde(skip)]
+    pub holders: Vec<LeaseHolder>,
 }
 
 impl LeaseRecord {
@@ -210,6 +220,45 @@ impl LeaseRecord {
             holder_node_id: None,
             holder_workload_id: None,
         }
+    }
+
+    /// A cross-node lease held by `holders` (sorted and deduplicated here).
+    pub fn held_by(resource_id: impl Into<ResourceId>, mut holders: Vec<LeaseHolder>) -> Self {
+        holders.sort();
+        holders.dedup();
+        let first = holders.first().cloned();
+        Self {
+            resource_id: resource_id.into(),
+            lease_state: if first.is_some() {
+                LeaseState::Leased
+            } else {
+                LeaseState::Unleased
+            },
+            holder_node_id: first.as_ref().map(|holder| holder.node_id.clone()),
+            holder_workload_id: first.map(|holder| holder.workload_id),
+            holders,
+        }
+    }
+
+    /// Every holder of this lease: the cross-node `holders`, or the single `holder_*` pair of a
+    /// client-written lease.
+    pub fn all_holders(&self) -> Vec<LeaseHolder> {
+        if !self.holders.is_empty() {
+            return self.holders.clone();
+        }
+        match (&self.holder_node_id, &self.holder_workload_id) {
+            (Some(node_id), Some(workload_id)) if self.lease_state != LeaseState::Unleased => {
+                alloc::vec![LeaseHolder::new(node_id.clone(), workload_id.clone())]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Whether `node_id`'s workload `workload_id` holds this lease.
+    pub fn is_held_by(&self, node_id: &NodeId, workload_id: &WorkloadId) -> bool {
+        self.all_holders()
+            .iter()
+            .any(|holder| &holder.node_id == node_id && &holder.workload_id == workload_id)
     }
 }
 
@@ -360,6 +409,7 @@ impl LeaseRecordBuilder {
             lease_state: self.lease_state,
             holder_node_id: self.holder_node_id,
             holder_workload_id: self.holder_workload_id,
+            holders: Vec::new(),
         }
     }
 }

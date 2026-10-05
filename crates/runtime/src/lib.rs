@@ -16,8 +16,8 @@ pub use provider::{
     ProviderDescriptor, ProviderIntegration, ProviderSnapshot,
     validate_requirement_against_resource,
 };
-pub use reconcile::{ReconcileReport, Runtime};
-pub use state::{LocalRuntimeStore, RuntimeSnapshot};
+pub use reconcile::{ReconcileReport, Runtime, UnsatisfiedRequirement};
+pub use state::{LocalRuntimeStore, RemoteLease, RuntimeSnapshot};
 
 #[cfg(test)]
 mod tests {
@@ -97,6 +97,7 @@ mod tests {
             }],
             resource_bindings: Vec::new(),
             restart_policy: RestartPolicy::OnFailure,
+            placement: None,
         }
     }
 
@@ -150,10 +151,10 @@ mod tests {
         let mut store = runtime_store();
         let mut workload = workload_record(DesiredState::Running);
         workload.observed_state = WorkloadObservedState::Running;
-        workload.resource_bindings = vec![orion_control_plane::ResourceBinding {
-            resource_id: ResourceId::new("resource.imu-1"),
-            node_id: NodeId::new("node-a"),
-        }];
+        workload.resource_bindings = vec![orion_control_plane::ResourceBinding::new(
+            ResourceId::new("resource.imu-1"),
+            NodeId::new("node-a"),
+        )];
         store.desired.put_workload(workload.clone());
         store.observed.put_workload(workload);
 

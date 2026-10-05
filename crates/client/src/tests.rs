@@ -214,6 +214,7 @@ fn executor_client_publishes_executor_snapshot() {
                 requirements: Vec::new(),
                 resource_bindings: Vec::new(),
                 restart_policy: orion_control_plane::RestartPolicy::Always,
+                placement: None,
             }],
             resources: Vec::new(),
         })

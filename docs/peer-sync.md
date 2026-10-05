@@ -341,14 +341,15 @@ Persisted state directories are migrated on first start:
 
 ## Hooks for placement, cross-node binding and discovery
 
-- **Placement** (`orion-cluster`): placement decisions are ordinary desired-state writes, so two
-  nodes that run a deterministic leaderless placement and write the same assignment converge
-  without flapping (identical content, the later stamp wins), and differing decisions resolve by
-  the merge rule. `DesiredClusterState::version_of` exposes the stamp, including the writer's node
-  tag, for "who decided" diagnostics.
-- **Cross-node binding**: `PeerSyncTransport` is a generic signed request/response channel over
-  `ControlMessage`; lease and binding RPCs between nodes can use the same transports and the same
-  authentication without a new listener.
+- **Placement** (`orion-cluster`, implemented, see [placement.md](placement.md)): placement
+  decisions are ordinary desired-state writes, so two nodes that run the deterministic
+  leaderless placement and write the same assignment converge without flapping, and differing
+  decisions resolve by the merge rule. `DesiredClusterState::version_of` exposes the stamp,
+  including the writer's node tag, for "who decided" diagnostics.
+- **Cross-node binding** (implemented, see [placement.md](placement.md)): leases are HLC-merged
+  desired-state records with per-holder entries, so no extra RPC is needed; the observed slice now
+  carries every resource of a node's providers and executors, and a signed request or sync round
+  from a peer counts as proof of liveness.
 - **Discovery**: a discovered peer only needs a `PeerConfig` with an `orion+tcp://` (or `http(s)`)
   base URL to be added with `NodeApp::register_peer`; `PeerTransportKind::from_base_url` maps a
   URL to its transport. Responses over `orion+tcp` are verified against enrolled keys, so an mDNS

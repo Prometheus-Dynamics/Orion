@@ -62,6 +62,7 @@ impl PeerPolicyLookup for AppLocalSessionLookup {
             .desired
             .resources
             .values()
+            .chain(store.observed.resources.values())
             .filter(|resource| {
                 provider_ids.contains(&resource.provider_id)
                     || resource
@@ -75,6 +76,7 @@ impl PeerPolicyLookup for AppLocalSessionLookup {
         PeerObservedScope {
             executor_ids,
             resource_ids,
+            provider_ids,
         }
     }
 }
@@ -419,6 +421,7 @@ pub(super) struct NodeState {
     pub(super) reconcile: super::reconcile_trigger::ReconcileTrigger,
     pub(super) observed_persist: super::observed_persist::ObservedPersistState,
     pub(super) status: super::status_lane::StatusLaneState,
+    pub(super) cluster: super::cluster_state::ClusterRuntimeState,
     #[cfg(feature = "link-gateway")]
     pub(super) links: super::link_bridge::LinkBridgeState,
 }

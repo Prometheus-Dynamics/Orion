@@ -2,8 +2,9 @@ use crate::{ExecutorSnapshot, ProviderSnapshot, RuntimeError};
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 use orion_control_plane::{
-    AppliedClusterState, DesiredClusterState, ExecutorRecord, MaintenanceMode, MaintenanceState,
-    ObservedClusterState, ProviderRecord, ResourceRecord, WorkloadRecord,
+    AppliedClusterState, AvailabilityState, DesiredClusterState, ExecutorRecord, MaintenanceMode,
+    MaintenanceState, ObservedClusterState, ProviderRecord, ResourceRecord, WorkloadRecord,
+    WorkloadRequirement,
 };
 use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId};
 
@@ -26,6 +27,9 @@ pub struct LocalRuntimeStore {
     pub desired: DesiredClusterState,
     pub observed: ObservedClusterState,
     pub applied: AppliedClusterState,
+    /// Peers the node currently cannot reach. Cross-node bindings to their resources are planned
+    /// as unavailable (`docs/placement.md`).
+    pub unreachable_nodes: BTreeSet<NodeId>,
     maintenance: MaintenanceState,
     provider_sync_revisions: BTreeMap<ProviderId, Revision>,
     executor_sync_revisions: BTreeMap<ExecutorId, Revision>,
@@ -38,6 +42,7 @@ impl LocalRuntimeStore {
             desired: DesiredClusterState::default(),
             observed: ObservedClusterState::default(),
             applied: AppliedClusterState::default(),
+            unreachable_nodes: BTreeSet::new(),
             maintenance: MaintenanceState::default(),
             provider_sync_revisions: BTreeMap::new(),
             executor_sync_revisions: BTreeMap::new(),
@@ -219,7 +224,13 @@ impl LocalRuntimeStore {
         self.observed.workloads.retain(|_, workload| {
             let retain = workload.assigned_node_id.as_ref() != Some(&self.local_node_id)
                 || workload_ids.contains(&workload.workload_id)
-                || self.desired.workloads.contains_key(&workload.workload_id);
+                || self
+                    .desired
+                    .workloads
+                    .get(&workload.workload_id)
+                    .is_some_and(|desired| {
+                        desired.assigned_node_id.as_ref() == Some(&self.local_node_id)
+                    });
             if !retain {
                 changed = true;
             }
@@ -409,6 +420,50 @@ impl LocalRuntimeStore {
         self.observed.workloads.get(workload_id)
     }
 
+    /// Remote resources `workload_id` holds a cross-node lease on, with their owner and whether
+    /// they are usable now (owner reachable, resource available). Resources whose record or owner
+    /// is unknown are skipped.
+    pub fn remote_leases_for(&self, workload_id: &WorkloadId) -> Vec<RemoteLease<'_>> {
+        self.desired
+            .leases
+            .values()
+            .filter(|lease| {
+                lease.holders.iter().any(|holder| {
+                    holder.node_id == self.local_node_id && &holder.workload_id == workload_id
+                })
+            })
+            .filter_map(|lease| {
+                let resource = self
+                    .observed
+                    .resources
+                    .get(&lease.resource_id)
+                    .or_else(|| self.desired.resources.get(&lease.resource_id))?;
+                let owner = self.resource_owner(resource)?;
+                (owner != self.local_node_id).then(|| RemoteLease {
+                    resource,
+                    available: resource.availability == AvailabilityState::Available
+                        && !self.unreachable_nodes.contains(&owner),
+                    owner,
+                })
+            })
+            .collect()
+    }
+
+    /// Node owning `resource`: the node of the executor realizing it, else its provider's node.
+    pub fn resource_owner(&self, resource: &ResourceRecord) -> Option<NodeId> {
+        resource
+            .realized_by_executor_id
+            .as_ref()
+            .and_then(|executor_id| self.desired.executors.get(executor_id))
+            .map(|executor| executor.node_id.clone())
+            .or_else(|| {
+                self.desired
+                    .providers
+                    .get(&resource.provider_id)
+                    .map(|provider| provider.node_id.clone())
+            })
+    }
+
     pub fn snapshot(&self) -> RuntimeSnapshot {
         RuntimeSnapshot {
             local_node_id: self.local_node_id.clone(),
@@ -438,4 +493,34 @@ impl LocalResourceSelectors {
                 .as_ref()
                 .is_some_and(|executor_id| self.executor_ids.contains(executor_id))
     }
+}
+
+/// A remote resource a local workload holds a cross-node lease on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteLease<'a> {
+    pub resource: &'a ResourceRecord,
+    pub owner: NodeId,
+    pub available: bool,
+}
+
+/// Whether a leased remote resource satisfies `requirement` (type, ownership mode,
+/// capabilities). Capacity was checked when the lease was taken.
+pub(crate) fn remote_lease_matches(
+    resource: &ResourceRecord,
+    requirement: &WorkloadRequirement,
+) -> bool {
+    resource.resource_type == requirement.resource_type
+        && requirement
+            .ownership_mode
+            .as_ref()
+            .is_none_or(|mode| mode == &resource.ownership_mode)
+        && requirement
+            .required_capabilities
+            .iter()
+            .all(|capability_id| {
+                resource
+                    .capabilities
+                    .iter()
+                    .any(|capability| &capability.capability_id == capability_id)
+            })
 }

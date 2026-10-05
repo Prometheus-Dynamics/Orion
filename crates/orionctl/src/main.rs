@@ -3,6 +3,7 @@ mod cli;
 mod handlers;
 mod maintenance;
 mod render;
+mod render_placement;
 mod transport;
 
 use std::process::ExitCode;

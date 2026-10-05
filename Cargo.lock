@@ -1347,6 +1347,7 @@ dependencies = [
  "mimalloc",
  "orion",
  "orion-auth",
+ "orion-cluster",
  "orion-control-plane",
  "orion-core",
  "orion-data-plane",

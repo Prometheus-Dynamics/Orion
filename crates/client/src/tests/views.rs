@@ -368,3 +368,54 @@ async fn serve_flaky_watch_stream(
         // Dropping the stream closes the connection, forcing the client to reconnect.
     }
 }
+
+#[test]
+fn remote_bindings_resolve_with_owner_node_endpoints_and_availability() {
+    let mut snapshot = snapshot();
+    let remote_camera: ResourceRecord = ProviderResource::new(
+        "resource.camera.b",
+        "camera.device",
+        ProviderId::new("provider.cameras-b"),
+    )
+    .endpoint("tcp://10.0.0.2:5000")
+    .health(HealthState::Healthy)
+    .build();
+    snapshot
+        .state
+        .observed
+        .resources
+        .insert(remote_camera.resource_id.clone(), remote_camera);
+    let mut workload = WorkloadRecord::builder(
+        WorkloadId::new("workload.viewer"),
+        RuntimeType::new("graph.exec.v1"),
+        ArtifactId::new("artifact.viewer"),
+    )
+    .assigned_to(NodeId::new("node-a"))
+    .build();
+    workload.resource_bindings = vec![
+        ResourceBinding::new(ResourceId::new("resource.camera"), NodeId::new("node-a")),
+        ResourceBinding::remote(
+            ResourceId::new("resource.camera.b"),
+            NodeId::new("node-b"),
+            vec!["tcp://10.0.0.2:5000".into()],
+            false,
+        ),
+    ];
+    let assigned = AssignedWorkload::new(workload, None);
+    assert_eq!(assigned.remote_bindings().count(), 1);
+
+    let bound = assigned.bound_resources(&snapshot);
+    assert_eq!(bound.len(), 2);
+    assert!(!bound[0].is_remote());
+    let remote = &bound[1];
+    assert!(remote.is_remote());
+    assert!(!remote.is_available(), "the owner is unreachable");
+    assert_eq!(remote.bound_node_id(), &NodeId::new("node-b"));
+    assert_eq!(
+        remote
+            .endpoint::<TcpEndpoint>()
+            .expect("tcp endpoint")
+            .address,
+        "10.0.0.2:5000"
+    );
+}

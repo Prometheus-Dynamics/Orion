@@ -11,11 +11,17 @@ use orion::{
     control_plane::{DesiredObjectKey, DesiredStateMutation},
 };
 
+#[cfg(feature = "peer-tcp")]
+mod binding;
 mod conflicts;
+#[cfg(feature = "peer-tcp")]
+mod fixtures;
 #[cfg(all(feature = "transport-http", feature = "peer-tcp"))]
 mod mixed;
 #[cfg(feature = "peer-tcp")]
 mod peer_tcp;
+#[cfg(feature = "peer-tcp")]
+mod placement;
 
 /// Delivers peer requests by calling the remote node's control pipeline directly (including
 /// peer authentication), so the sync engine runs without sockets.

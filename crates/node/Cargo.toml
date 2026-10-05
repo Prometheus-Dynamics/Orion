@@ -48,6 +48,7 @@ ed25519-dalek = { workspace = true, features = ["std"] }
 libc.workspace = true
 mimalloc = { workspace = true, optional = true }
 orion-auth = { workspace = true, features = ["std"] }
+orion-cluster = { workspace = true, features = ["std"] }
 orion-control-plane = { workspace = true, features = ["std"] }
 orion-core = { workspace = true, features = ["std"] }
 orion-data-plane = { workspace = true, features = ["std"] }

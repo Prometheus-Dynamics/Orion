@@ -2,6 +2,7 @@ mod clock;
 mod cluster;
 mod config_decode;
 mod inventory;
+mod placement;
 mod resource_endpoints;
 mod resources;
 mod versions;
@@ -15,6 +16,10 @@ pub use config_decode::{ConfigDecodeError, ConfigMapRef, config_json_value, dese
 pub use inventory::{
     ArtifactRecord, ArtifactRecordBuilder, ExecutorRecord, ExecutorRecordBuilder, NodeRecord,
     NodeRecordBuilder, ProviderRecord, ProviderRecordBuilder,
+};
+pub use placement::{
+    LabelRequirement, LeaseHolder, PlacementDecision, PlacementReason, RemoteBinding,
+    WorkloadPlacement, parse_node_labels, split_label,
 };
 pub use resource_endpoints::{
     BUILTIN_ENDPOINT_SCHEMES, CustomEndpoint, CustomEndpointScheme, HttpEndpoint, IpcEndpoint,

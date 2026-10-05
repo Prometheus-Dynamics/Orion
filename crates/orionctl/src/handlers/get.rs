@@ -221,7 +221,7 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
             match args.source.output {
                 OutputFormat::Summary => {
                     println!(
-                        "workload id={} runtime={} artifact={} desired={} observed={} assigned_node={} restart_policy={} requirements={} bindings={}",
+                        "workload id={} runtime={} artifact={} desired={} observed={} assigned_node={} restart_policy={} requirements={} bindings={} assignment={} placement={} bound={}",
                         workload.workload_id,
                         workload.runtime_type,
                         workload.artifact_id,
@@ -235,6 +235,9 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                         render_restart_policy(workload.restart_policy),
                         workload.requirements.len(),
                         workload.resource_bindings.len(),
+                        crate::render_placement::render_assignment(&workload),
+                        crate::render_placement::render_placement(&workload),
+                        crate::render_placement::render_binding_list(&workload.resource_bindings),
                     );
                     Ok(())
                 }
@@ -338,7 +341,7 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                     println!("workloads count={}", workloads.len());
                     for workload in workloads {
                         println!(
-                            "workload id={} runtime={} artifact={} desired={} observed={} assigned_node={} restart_policy={} requirements={} bindings={}",
+                            "workload id={} runtime={} artifact={} desired={} observed={} assigned_node={} restart_policy={} requirements={} bindings={} assignment={} placement={} bound={}",
                             workload.workload_id,
                             workload.runtime_type,
                             workload.artifact_id,
@@ -352,6 +355,11 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
                             render_restart_policy(workload.restart_policy),
                             workload.requirements.len(),
                             workload.resource_bindings.len(),
+                            crate::render_placement::render_assignment(&workload),
+                            crate::render_placement::render_placement(&workload),
+                            crate::render_placement::render_binding_list(
+                                &workload.resource_bindings
+                            ),
                         );
                     }
                     Ok(())

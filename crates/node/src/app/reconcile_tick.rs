@@ -41,15 +41,17 @@ impl NodeApp {
         let started = std::time::Instant::now();
         self.collect_expired_tombstones();
         self.state.reconcile.begin_pass();
+        let cluster_changed = self.run_placement_pass();
         let collected = {
             let _span = info_span!("reconcile", node = %self.config.node_id).entered();
             self.collect_runtime_state()?
         };
-        let runtime_changed = self.apply_runtime_snapshots(&collected)?;
+        let runtime_changed = self.apply_runtime_snapshots(&collected)? || cluster_changed;
         let reconcile = {
             let store = self.store_read();
             self.runtime.reconcile(&store)?
         };
+        self.run_lease_pass(&reconcile.unsatisfied);
 
         let result = self
             .apply_reconcile_report_async(&collected.executors, reconcile, runtime_changed)
@@ -62,13 +64,15 @@ impl NodeApp {
         let started = std::time::Instant::now();
         self.collect_expired_tombstones();
         self.state.reconcile.begin_pass();
+        let cluster_changed = self.run_placement_pass();
         let collected = self.collect_runtime_state()?;
-        let runtime_changed = self.apply_runtime_snapshots(&collected)?;
+        let runtime_changed = self.apply_runtime_snapshots(&collected)? || cluster_changed;
 
         let reconcile = {
             let store = self.store_read();
             self.runtime.reconcile(&store)?
         };
+        self.run_lease_pass(&reconcile.unsatisfied);
 
         let result = self.apply_reconcile_report(&collected.executors, reconcile, runtime_changed);
         self.finish_reconcile_pass(started, result)

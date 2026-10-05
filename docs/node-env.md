@@ -142,6 +142,7 @@ switch allocators.
 | `ORION_NODE_PEER_SYNC_MAX_IN_FLIGHT` | `4` | Integer, minimum effective value `1` | Invalid integer fails startup. |
 | `ORION_NODE_HTTP_MTLS` | `disabled` | `disabled`, `optional`, `required` | Invalid mode fails startup. |
 | `ORION_NODE_LOCAL_AUTH` | `same-user` | `disabled`, `same-user`, `same-user-or-group` | Invalid mode fails startup. |
+| `ORION_NODE_LABELS` | unset | Comma-separated `key=value` or bare `key` labels, published in the node's observed record and matched by workload node selectors (see `docs/placement.md`). Blank terms are ignored; the last value of a repeated key wins. | Non-UTF-8 value fails startup. |
 
 ## Link Gateway
 
@@ -297,6 +298,8 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |
 | `ORION_NODE_RECONCILE_BACKSTOP_MS` | `5000` | Longest idle period before the event-driven reconcile loop runs a periodic backstop pass. Clamped to at least `ORION_NODE_RECONCILE_MS`. |
 | `ORION_NODE_HLC_MAX_DRIFT_MS` | `300000` | Largest distance a peer's hybrid-logical-clock timestamp may be ahead of the local wall clock; desired-state versions stamped further ahead are rejected and counted (`desired_merge.clock_skew_rejections`). See `docs/peer-sync.md`. |
+| `ORION_NODE_LIVENESS_TIMEOUT_MS` | `5000` | A peer not heard from (sync round, signed request, observed push) for this long is considered gone: placement stops choosing it and cross-node bindings to its resources become unavailable. See `docs/placement.md`. |
+| `ORION_NODE_PLACEMENT_GRACE_MS` | `10000` | How long a workload's assignee (or a cross-node binding's owner) must stay gone or ineligible before the workload moves (or the lease is released and re-resolved). See `docs/placement.md`. |
 | `ORION_NODE_TOMBSTONE_RETENTION_MS` | `604800000` | How long desired-state tombstones (deletes) are kept before collection. A node offline for longer than this can resurrect deleted objects. See `docs/peer-sync.md`. |
 | `ORION_NODE_CLOCK_REFRESH_MS` | `10000` | How often the node re-reads its clock state. The observed node record is only republished on meaningful change (see `docs/observability.md`, Clock Facts). |
 | `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` | `2000` | Shortest spacing between coalesced observed/applied state writes while the reconcile loop runs. `0` writes every change immediately (not normalized to `1`). Desired-state commits are never delayed. See "Observed-state write coalescing". |

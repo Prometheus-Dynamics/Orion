@@ -9,6 +9,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
 use super::config_decode::ConfigMapRef;
+use super::placement::{RemoteBinding, WorkloadPlacement};
 use super::resources::ResourceOwnershipMode;
 
 #[derive(
@@ -56,7 +57,12 @@ impl WorkloadRequirement {
 )]
 pub struct ResourceBinding {
     pub resource_id: orion_core::ResourceId,
+    /// Node that owns the resource. For bindings planned by Orion this is the local node, or the
+    /// owning node of a cross-node binding.
     pub node_id: NodeId,
+    /// Set for cross-node bindings: the remote resource's endpoints and whether it is reachable.
+    #[serde(default)]
+    pub remote: Option<RemoteBinding>,
 }
 
 impl ResourceBinding {
@@ -64,7 +70,35 @@ impl ResourceBinding {
         Self {
             resource_id: resource_id.into(),
             node_id: node_id.into(),
+            remote: None,
         }
+    }
+
+    /// A cross-node binding to a resource owned by `node_id`.
+    pub fn remote(
+        resource_id: impl Into<orion_core::ResourceId>,
+        node_id: impl Into<NodeId>,
+        endpoints: Vec<String>,
+        available: bool,
+    ) -> Self {
+        Self {
+            resource_id: resource_id.into(),
+            node_id: node_id.into(),
+            remote: Some(RemoteBinding {
+                endpoints,
+                available,
+            }),
+        }
+    }
+
+    pub fn is_remote(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    /// `false` only for a cross-node binding whose owner is unreachable or whose resource is
+    /// unavailable.
+    pub fn is_available(&self) -> bool {
+        self.remote.as_ref().is_none_or(|remote| remote.available)
     }
 }
 
@@ -194,9 +228,29 @@ pub struct WorkloadRecord {
     pub requirements: Vec<WorkloadRequirement>,
     pub resource_bindings: Vec<ResourceBinding>,
     pub restart_policy: RestartPolicy,
+    /// Placement constraints; `None` means manual placement (see `docs/placement.md`).
+    #[serde(default)]
+    pub placement: Option<WorkloadPlacement>,
 }
 
 impl WorkloadRecord {
+    /// `true` when `assigned_node_id` was set explicitly (by a user, not the placement engine).
+    /// Explicit assignments are authoritative and never moved by placement.
+    pub fn has_explicit_assignment(&self) -> bool {
+        let Some(assigned) = self.assigned_node_id.as_ref() else {
+            return false;
+        };
+        self.placement
+            .as_ref()
+            .and_then(|placement| placement.decision.as_ref())
+            .is_none_or(|decision| &decision.node_id != assigned)
+    }
+
+    /// `true` when the placement engine manages this workload's assignment.
+    pub fn is_placement_managed(&self) -> bool {
+        self.placement.is_some() && !self.has_explicit_assignment()
+    }
+
     pub fn builder(
         workload_id: impl Into<WorkloadId>,
         runtime_type: impl Into<RuntimeType>,
@@ -213,6 +267,7 @@ impl WorkloadRecord {
             requirements: Vec::new(),
             resource_bindings: Vec::new(),
             restart_policy: RestartPolicy::Never,
+            placement: None,
         }
     }
 }
@@ -229,9 +284,16 @@ pub struct WorkloadRecordBuilder {
     requirements: Vec<WorkloadRequirement>,
     resource_bindings: Vec<ResourceBinding>,
     restart_policy: RestartPolicy,
+    placement: Option<WorkloadPlacement>,
 }
 
 impl WorkloadRecordBuilder {
+    /// Lets the placement engine choose the node (see `docs/placement.md`).
+    pub fn placement(mut self, placement: WorkloadPlacement) -> Self {
+        self.placement = Some(placement);
+        self
+    }
+
     pub fn with_runtime<T: RuntimeTypeDef>(mut self) -> Self {
         self.runtime_type = RuntimeType::of::<T>();
         self
@@ -338,6 +400,7 @@ impl WorkloadRecordBuilder {
             requirements: self.requirements,
             resource_bindings: self.resource_bindings,
             restart_policy: self.restart_policy,
+            placement: self.placement,
         }
     }
 }

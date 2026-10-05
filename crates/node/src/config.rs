@@ -1,5 +1,7 @@
+mod placement;
 mod runtime_tuning;
 
+pub use placement::PlacementTuning;
 pub(crate) use runtime_tuning::normalize_runtime_tuning_duration;
 #[cfg(test)]
 pub(crate) use runtime_tuning::parse_config_value;

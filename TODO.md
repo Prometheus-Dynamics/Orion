@@ -140,14 +140,25 @@ none of these are HeliOS-specific features.
         with a TTL, watchable over client streams and queryable via `orionctl get status`; link
         devices publish with the `Status` kind. Not replicated to peers yet.
   - [ ] Bulk and high-rate data (frames, detections) stays out of Orion and uses resource endpoints.
-- [ ] **Cross-node binding.** A workload may bind another node's resource. Orion resolves,
+- [x] **Cross-node binding.** A workload may bind another node's resource. Orion resolves,
       authorizes and leases it; bytes flow over the resource's own endpoint. Orion's generic data
-      plane (`RemoteBinding`, TCP/QUIC frames) is not on the main path.
+      plane (`RemoteBinding`, TCP/QUIC frames) is not on the main path. (Leases with per-holder
+      entries in the HLC-merged desired state, owner-side capacity arbitration, `RemoteBinding`
+      endpoints/availability on `ResourceBinding`, unavailable on owner loss, re-resolved after
+      the grace period. See `docs/placement.md`.)
+  - [ ] Replicate node liveness or relay observed slices so nodes that are not directly peered can
+        judge each other (today placement and binding need direct peering).
+  - [ ] Fencing for failover: a partitioned former assignee keeps running until it hears of the
+        new assignment.
 - [ ] **Discovery.** mDNS for discovery only. Trust stays enrollment-based (ed25519 peer keys or a
       shared enrollment key); discovered peers are never trusted automatically.
-- [ ] **Placement.** Node labels plus workload constraints (node selector, co-locate with resource X,
+- [x] **Placement.** Node labels plus workload constraints (node selector, co-locate with resource X,
       any eligible node), with a deterministic leaderless choice, owned by `orion-cluster`
-      (`ClusterCoordinator` is currently unused).
+      (`ClusterCoordinator`: rendezvous hashing over eligible nodes, chosen node writes its own
+      assignment, grace-period hysteresis, explicit assignments authoritative;
+      `ORION_NODE_LABELS`, `ORION_NODE_LIVENESS_TIMEOUT_MS`, `ORION_NODE_PLACEMENT_GRACE_MS`. See
+      `docs/placement.md`.)
+  - [ ] Capacity-aware placement (resource counts, load) instead of hash spreading only.
 - [x] **Timebase.** Nodes publish their clock source and sync state (PTP/chrony, offset estimate) as an
       observed node fact. Orion does not discipline clocks; producers timestamp in a declared
       timebase. (`NodeRecord::clock` / `NodeClockFacts` from read-only `adjtimex`, declared with
