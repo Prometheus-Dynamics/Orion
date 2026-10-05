@@ -3,7 +3,7 @@ use orion_auth::{AuthenticatedPeerRequest, PeerRequestPayload};
 use orion_control_plane::{
     ActionResult, ControlMessage, DesiredStateSummary, EnrollmentChallenge, MutationBatch,
     NodeHealthSnapshot, NodeObservabilitySnapshot, NodeReadinessSnapshot, ObservedStateUpdate,
-    PeerHello, StateSnapshot,
+    OperatorWelcome, PeerHello, StateSnapshot, StatusEntry,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,10 @@ pub enum HttpResponsePayload {
     EnrollmentChallenge(Box<EnrollmentChallenge>),
     /// Results of a forwarded `RunAction` or a `QueryActions` (`docs/actions.md`).
     Actions(Vec<ActionResult>),
+    /// Answer to a remote operator's `OperatorHello` (`docs/remote-operator.md`).
+    OperatorWelcome(Box<OperatorWelcome>),
+    /// Status-lane entries for a remote operator's `QueryStatus`.
+    Status(Vec<StatusEntry>),
 }
 
 impl HttpRequestPayload {
@@ -70,6 +74,9 @@ impl HttpRequestPayload {
                 ControlMessage::RunAction(_) | ControlMessage::QueryActions(_) => {
                     Ok(ControlRoute::Actions)
                 }
+                ControlMessage::OperatorHello | ControlMessage::QueryStatus(_) => {
+                    Ok(ControlRoute::Operator)
+                }
                 ControlMessage::ClientHello(_)
                 | ControlMessage::ClientWelcome(_)
                 | ControlMessage::ProviderState(_)
@@ -94,7 +101,6 @@ impl HttpRequestPayload {
                 | ControlMessage::PollClientEvents(_)
                 | ControlMessage::ClientEvents(_)
                 | ControlMessage::PublishStatus(_)
-                | ControlMessage::QueryStatus(_)
                 | ControlMessage::WatchStatus(_)
                 | ControlMessage::Status(_)
                 | ControlMessage::Ping
@@ -110,7 +116,11 @@ impl HttpRequestPayload {
                 | ControlMessage::WatchActionRequests(_)
                 | ControlMessage::ReportActionResult(_)
                 | ControlMessage::ActionResults(_)
-                | ControlMessage::ClaimNodeActions(_) => {
+                | ControlMessage::ClaimNodeActions(_)
+                | ControlMessage::QueryOperators
+                | ControlMessage::Operators(_)
+                | ControlMessage::EnrollOperator(_)
+                | ControlMessage::RemoveOperator(_) => {
                     Err(crate::HttpTransportError::UnsupportedControlMessage)
                 }
             },

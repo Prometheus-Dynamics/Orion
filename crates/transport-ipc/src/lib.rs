@@ -1,5 +1,6 @@
 mod address;
 mod control;
+mod control_tcp;
 mod data;
 mod error;
 mod fd_frame;
@@ -11,6 +12,7 @@ mod unix;
 
 pub use address::LocalAddress;
 pub use control::{ControlEnvelope, LocalControlTransport, UnixPeerIdentity};
+pub use control_tcp::{ControlTcpClient, ControlTcpError, ControlTcpExchangeBytes};
 pub use data::{DataEnvelope, LocalDataTransport};
 pub use error::IpcTransportError;
 pub use fd_frame::{

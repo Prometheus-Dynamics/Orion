@@ -42,7 +42,7 @@ transport-quic = ["dep:orion-transport-quic"]
 link-gateway = ["dep:orion-link"]
 # mDNS/DNS-SD peer discovery (`ORION_NODE_DISCOVERY=mdns`) and shared-key enrollment over
 # `orion+tcp`. Discovery never trusts a peer by itself; see docs/discovery.md.
-discovery-mdns = ["peer-tcp", "dep:mdns-sd", "dep:hmac", "dep:sha2"]
+discovery-mdns = ["peer-tcp", "dep:mdns-sd", "orion-auth/enrollment"]
 # sd_notify readiness/status/stopping notifications and the systemd service watchdog, spoken
 # directly over $NOTIFY_SOCKET (no libsystemd). A no-op unless systemd sets NOTIFY_SOCKET /
 # WATCHDOG_USEC. See docs/node-env.md ("Running under systemd") and packaging/systemd/.
@@ -52,11 +52,10 @@ alloc-jemalloc = ["dep:tikv-jemallocator"]
 
 [dependencies]
 ed25519-dalek = { workspace = true, features = ["std"] }
-hmac = { workspace = true, optional = true }
 libc.workspace = true
 mdns-sd = { workspace = true, optional = true }
 mimalloc = { workspace = true, optional = true }
-orion-auth = { workspace = true, features = ["std"] }
+orion-auth = { workspace = true, features = ["std", "crypto"] }
 orion-cluster = { workspace = true, features = ["std"] }
 orion-control-plane = { workspace = true, features = ["std"] }
 orion-core = { workspace = true, features = ["std"] }
@@ -74,7 +73,6 @@ rcgen = { workspace = true, optional = true }
 rkyv = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
-sha2 = { workspace = true, optional = true }
 thiserror = { workspace = true, features = ["std"] }
 tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time", "sync", "signal", "io-util", "fs"] }
@@ -84,6 +82,8 @@ tracing-subscriber.workspace = true
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
 orion = { workspace = true, features = ["auth", "client", "runtime", "macros", "transport-http", "transport-tcp", "transport-quic", "transport-ipc"] }
+# Remote operator tests (src/tests/cluster/remote_operator*.rs) drive nodes with the real client.
+orion-client = { workspace = true, features = ["remote"] }
 orion-macros.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true

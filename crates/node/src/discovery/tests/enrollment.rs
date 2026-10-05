@@ -37,11 +37,13 @@ impl Initiator {
             initiator_nonce: self.nonce.to_vec(),
             initiator_url: Some(PeerBaseUrl::new(INITIATOR_URL)),
             responder: responder.config.node_id.clone(),
+            role: orion::control_plane::EnrollmentRole::Node,
         }
     }
 
     fn transcript(&self, challenge: &EnrollmentChallenge) -> Vec<u8> {
         Transcript {
+            role: orion::control_plane::EnrollmentRole::Node,
             cluster: CLUSTER,
             initiator: &self.app.config.node_id,
             initiator_key: &self.app.security.public_key_bytes(),
@@ -241,6 +243,7 @@ fn pending_challenges_expire_and_are_bounded() {
         initiator_nonce: vec![2; 32],
         initiator_url: None,
         responder: NodeId::new("node-r"),
+        role: orion::control_plane::EnrollmentRole::Node,
     };
     let mut pending = PendingChallenges::default();
     let mut nonces = Vec::new();

@@ -1,4 +1,4 @@
-use crate::{AuthenticatedPeer, NodeApp, NodeError};
+use crate::{AuthenticatedOperator, AuthenticatedPeer, NodeApp, NodeError};
 #[cfg(feature = "transport-http")]
 use orion::transport::http::HttpTransportError;
 use orion::{
@@ -23,6 +23,14 @@ pub(crate) use adapters::{HttpControlServiceAdapter, HttpProbeServiceAdapter};
 pub enum ControlPrincipal {
     Anonymous,
     Peer(AuthenticatedPeer),
+    /// An enrolled remote operator (`docs/remote-operator.md`). Never a cluster member.
+    Operator(AuthenticatedOperator),
+    /// A remote operator whose signature verified but that is not enrolled; only its
+    /// `OperatorHello` is answered.
+    UnenrolledOperator {
+        operator_id: orion::control_plane::OperatorId,
+        public_key: [u8; 32],
+    },
     Local {
         source: LocalAddress,
         destination: LocalAddress,
@@ -187,6 +195,11 @@ pub enum ControlOperation {
     ReportActionResult,
     ActionResults,
     ClaimNodeActions,
+    OperatorHello,
+    QueryOperators,
+    Operators,
+    EnrollOperator,
+    RemoveOperator,
 }
 
 impl ControlOperation {
@@ -349,6 +362,11 @@ impl ControlRequest {
                 ControlMessage::ReportActionResult(_) => ControlOperation::ReportActionResult,
                 ControlMessage::ActionResults(_) => ControlOperation::ActionResults,
                 ControlMessage::ClaimNodeActions(_) => ControlOperation::ClaimNodeActions,
+                ControlMessage::OperatorHello => ControlOperation::OperatorHello,
+                ControlMessage::QueryOperators => ControlOperation::QueryOperators,
+                ControlMessage::Operators(_) => ControlOperation::Operators,
+                ControlMessage::EnrollOperator(_) => ControlOperation::EnrollOperator,
+                ControlMessage::RemoveOperator(_) => ControlOperation::RemoveOperator,
             },
             ControlRequestBody::ObservedUpdate(_) => ControlOperation::ObservedUpdate,
             ControlRequestBody::Health => ControlOperation::Health,
@@ -473,6 +491,16 @@ impl RequestService<ControlRequest> for NodeControlService {
 
         match body {
             ControlRequestBody::Control(message) => match context.surface {
+                ControlSurface::PeerHttp | ControlSurface::PeerTcp
+                    if matches!(
+                        context.principal,
+                        ControlPrincipal::Operator(_) | ControlPrincipal::UnenrolledOperator { .. }
+                    ) =>
+                {
+                    self.app
+                        .apply_operator_control_message(&context.principal, *message)
+                        .map(|response| ControlResponse::Http(Box::new(response)))
+                }
                 ControlSurface::PeerHttp | ControlSurface::PeerTcp => self
                     .app
                     .apply_control_message(

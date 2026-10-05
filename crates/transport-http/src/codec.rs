@@ -169,7 +169,8 @@ impl HttpCodec {
             | Some(ControlRoute::Observability)
             | Some(ControlRoute::Mutations)
             | Some(ControlRoute::Enroll)
-            | Some(ControlRoute::Actions) => {
+            | Some(ControlRoute::Actions)
+            | Some(ControlRoute::Operator) => {
                 let route = ControlRoute::parse(&request.path, request.method)
                     .expect("already matched a concrete control route");
                 match kind {
@@ -244,7 +245,9 @@ impl HttpCodec {
             | HttpResponsePayload::Health(_)
             | HttpResponsePayload::Readiness(_)
             | HttpResponsePayload::EnrollmentChallenge(_)
-            | HttpResponsePayload::Actions(_)) => Ok(HttpResponse {
+            | HttpResponsePayload::Actions(_)
+            | HttpResponsePayload::OperatorWelcome(_)
+            | HttpResponsePayload::Status(_)) => Ok(HttpResponse {
                 status: 200,
                 body: encode_to_vec(payload)
                     .map_err(|err| HttpTransportError::EncodeResponse(err.to_string()))?,

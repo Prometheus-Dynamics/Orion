@@ -125,7 +125,8 @@ pub use app::{
     ReconcileLoopHandle,
 };
 pub use auth::{
-    AuthenticatedPeer, LocalAuthenticationMode, NodeSecurity, PeerAuthenticationMode,
+    AuthenticatedOperator, AuthenticatedPeer, LocalAuthenticationMode, NodeSecurity,
+    PeerAuthenticationMode,
     PeerSecurityMiddleware,
 };
 pub use clock::{ClockStatusSource, KernelClockReading, KernelClockStatusSource};

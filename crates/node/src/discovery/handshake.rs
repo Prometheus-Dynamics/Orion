@@ -4,7 +4,7 @@ use super::{
     config::EnrollmentKey,
     enrollment::{
         NONCE_LEN, PendingChallenge, Role, Transcript, key_array, proof, random_nonce,
-        signed_message, verify_proof, verify_signature,
+        signed_message, transcript_url, verify_proof, verify_signature,
     },
     registry::DiscoveredPeer,
     runtime::DiscoveryState,
@@ -19,7 +19,7 @@ use orion::{
 };
 use orion_control_plane::{
     ControlMessage, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
-    EnrollmentHello,
+    EnrollmentHello, EnrollmentRole, OperatorEnrollmentMethod, OperatorId, OperatorPolicy,
 };
 use orion_core::PeerBaseUrl;
 use orion_transport_ipc::{ControlFrameReadState, write_control_payload_frame};
@@ -86,21 +86,42 @@ impl NodeApp {
         if hello.initiator_nonce.len() != NONCE_LEN {
             return reject("enrollment nonce must be 32 bytes".into());
         }
-        let initiator_url = hello
-            .initiator_url
-            .as_ref()
-            .ok_or_else(|| NodeError::Authorization("enrollment hello lacks a peer URL".into()))?;
-        PeerTransportKind::check_supported(initiator_url.as_str()).map_err(NodeError::Config)?;
-        self.check_auto_enrollable(&hello.initiator, &initiator_key)?;
+        match hello.role {
+            EnrollmentRole::Node => {
+                if OperatorId::is_operator_principal(hello.initiator.as_str()) {
+                    return reject(format!(
+                        "{} is an operator id; operators enroll with the operator role",
+                        hello.initiator
+                    ));
+                }
+                let initiator_url = hello.initiator_url.as_ref().ok_or_else(|| {
+                    NodeError::Authorization("enrollment hello lacks a peer URL".into())
+                })?;
+                PeerTransportKind::check_supported(initiator_url.as_str())
+                    .map_err(NodeError::Config)?;
+                self.check_auto_enrollable(&hello.initiator, &initiator_key)?;
+            }
+            EnrollmentRole::Operator => {
+                let operator_id = OperatorId::from_principal(&hello.initiator).ok_or_else(|| {
+                    NodeError::Authorization(format!(
+                        "operator enrollment from `{}`, which is not an operator id",
+                        hello.initiator
+                    ))
+                })?;
+                self.security
+                    .check_operator_auto_enrollable(&operator_id, &initiator_key)?;
+            }
+        }
 
         let responder_key = self.security.public_key_bytes();
         let responder_nonce = random_nonce();
         let transcript = Transcript {
+            role: hello.role,
             cluster: &hello.cluster,
             initiator: &hello.initiator,
             initiator_key: &initiator_key,
             initiator_nonce: &hello.initiator_nonce,
-            initiator_url: initiator_url.as_str(),
+            initiator_url: transcript_url(&hello),
             responder: &self.config.node_id,
             responder_key: &responder_key,
             responder_nonce: &responder_nonce,
@@ -155,6 +176,20 @@ impl NodeApp {
                 &pending.transcript,
                 &confirm.signature,
             )?;
+            if pending.hello.role == EnrollmentRole::Operator {
+                let operator_id =
+                    OperatorId::from_principal(&confirm.initiator).ok_or_else(|| {
+                        NodeError::Authorization("operator enrollment without an operator id".into())
+                    })?;
+                self.security
+                    .check_operator_auto_enrollable(&operator_id, &initiator_key)?;
+                return self.enroll_operator_key(
+                    &operator_id,
+                    initiator_key,
+                    OperatorEnrollmentMethod::EnrollmentKey,
+                    OperatorPolicy::default(),
+                );
+            }
             let url = pending.hello.initiator_url.clone().ok_or_else(|| {
                 NodeError::Authorization("enrollment hello lacks a peer URL".into())
             })?;
@@ -241,6 +276,7 @@ impl NodeApp {
             initiator_nonce: initiator_nonce.to_vec(),
             initiator_url: Some(initiator_url.clone()),
             responder: peer.node_id().clone(),
+            role: EnrollmentRole::Node,
         };
         let challenge = match connection
             .exchange(ControlMessage::EnrollmentHello(Box::new(hello)))
@@ -272,6 +308,7 @@ impl NodeApp {
             ));
         }
         let transcript = Transcript {
+            role: EnrollmentRole::Node,
             cluster: &state.config.cluster,
             initiator: &self.config.node_id,
             initiator_key: &initiator_key,
@@ -396,7 +433,7 @@ impl EnrollmentConnection {
         .ok_or_else(|| PeerTcpError::Closed {
             addr: self.addr.clone(),
         })?;
-        let frame = ResponseFrame::decode(&response)?;
+        let frame = ResponseFrame::decode(&response).map_err(PeerTcpError::from)?;
         if frame.status != STATUS_OK {
             return Err(
                 PeerTcpError::Remote(String::from_utf8_lossy(&frame.body).into_owned()).into(),

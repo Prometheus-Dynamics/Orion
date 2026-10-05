@@ -7,11 +7,13 @@ mod get;
 mod get_communication;
 mod get_memory;
 mod get_status;
+mod operators;
 mod peers;
 mod watch;
 
 pub(crate) use action::{ActionCommand, ActionListArgs};
 pub(crate) use discovered::PeerRemoveArgs;
+pub(crate) use operators::OperatorCommand;
 
 use clap::Parser;
 use orion_control_plane::{NodeRecord, WorkloadRecord};
@@ -70,6 +72,7 @@ pub(crate) async fn run() -> Result<(), String> {
         Command::Apply { command } => apply::run(*command).await,
         Command::Delete { command } => delete::run(command).await,
         Command::Peers { command } => peers::run(command).await,
+        Command::Operators { command } => operators::run(command).await,
         Command::Maintenance { command } => run_maintenance(command).await,
         Command::Action { command } => action::run(command).await,
     }

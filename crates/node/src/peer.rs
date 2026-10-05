@@ -295,7 +295,7 @@ impl PeerState {
 }
 
 /// URL scheme of peers reached over the plain TCP peer transport (feature `peer-tcp`).
-pub const PEER_TCP_SCHEME: &str = "orion+tcp";
+pub use orion_auth::peer_tcp::PEER_TCP_SCHEME;
 
 /// Transport a peer is synced over, chosen by the scheme of its base URL. See
 /// `docs/peer-sync.md`.
@@ -372,18 +372,7 @@ impl PeerTransportKind {
 /// Splits an `orion+tcp://host:port[/]` URL into its `host:port` authority.
 #[cfg(any(test, feature = "peer-tcp"))]
 pub(crate) fn peer_tcp_authority(base_url: &str) -> Result<&str, String> {
-    let rest = base_url
-        .split_once("://")
-        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case(PEER_TCP_SCHEME))
-        .map(|(_, rest)| rest)
-        .ok_or_else(|| format!("`{base_url}` is not an {PEER_TCP_SCHEME}:// URL"))?;
-    let authority = rest.trim_end_matches('/');
-    if authority.is_empty() || authority.contains('/') || !authority.contains(':') {
-        return Err(format!(
-            "`{base_url}` must have the form {PEER_TCP_SCHEME}://host:port"
-        ));
-    }
-    Ok(authority)
+    orion_auth::peer_tcp::peer_tcp_authority(base_url)
 }
 
 #[cfg(test)]

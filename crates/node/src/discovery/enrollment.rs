@@ -1,103 +1,44 @@
 //! Shared-key enrollment handshake (`docs/discovery.md`, "Shared-key enrollment").
 //!
-//! ```text
-//! I -> R  EnrollmentHello     { cluster, I, pk_I, n_I (32 B), url_I, R }
-//! R -> I  EnrollmentChallenge { R, pk_R, n_R (32 B),
-//!                               HMAC(K, "responder" || T), Sig_R("responder" || T) }
-//! I -> R  EnrollmentConfirm   { I, R, n_R, HMAC(K, "initiator" || T), Sig_I("initiator" || T) }
-//! R -> I  Accepted            (R has enrolled I; I then enrolls R)
-//!
-//! T = "orion-enroll-v1" || version || cluster || I || pk_I || n_I || url_I
-//!                        || R || pk_R || n_R                    (length-prefixed fields)
-//! ```
-//!
-//! The enrollment key `K` never crosses the wire. The HMACs prove knowledge of `K`, the
-//! signatures prove possession of the private key behind the key being pinned, and both are
-//! bound to both node ids, both keys, the initiator's URL and two fresh nonces, so a proof cannot be
-//! replayed into another handshake. `n_R` is single-use: the responder forgets it when the
-//! confirmation arrives or after [`PENDING_TTL_MS`].
+//! The transcript, HMAC proofs and signatures are implemented once in
+//! `orion_auth::enrollment` (shared with the remote operator client); this module adapts them to
+//! the node's error type and keeps the responder's single-use challenges. `n_R` is single-use:
+//! the responder forgets it when the confirmation arrives or after [`PENDING_TTL_MS`].
 
 use super::config::EnrollmentKey;
 use crate::NodeError;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use hmac::{Hmac, Mac};
-use orion::NodeId;
-use orion_control_plane::{ENROLLMENT_PROTOCOL_VERSION, EnrollmentHello};
+use orion_auth::enrollment::{
+    ENROLLMENT_NONCE_LEN, EnrollmentSide, EnrollmentTranscript, enrollment_message,
+    enrollment_proof, verify_enrollment_proof, verify_enrollment_signature,
+};
+use orion_control_plane::{EnrollmentHello, EnrollmentRole};
 use rand_core::{OsRng, RngCore};
-use sha2::Sha256;
 use std::collections::VecDeque;
 
-pub(crate) const NONCE_LEN: usize = 32;
+pub(crate) const NONCE_LEN: usize = ENROLLMENT_NONCE_LEN;
 /// How long a responder waits for the confirmation of a challenge.
 pub(crate) const PENDING_TTL_MS: u64 = 30_000;
 /// Most outstanding challenges; the oldest is dropped beyond this.
 const MAX_PENDING: usize = 64;
-const DOMAIN: &[u8] = b"orion-enroll-v1";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Role {
-    Initiator,
-    Responder,
-}
-
-impl Role {
-    fn label(self) -> &'static [u8] {
-        match self {
-            Self::Initiator => b"initiator\0",
-            Self::Responder => b"responder\0",
-        }
-    }
-}
+/// Which side of the handshake produces a proof.
+pub(crate) type Role = EnrollmentSide;
 
 /// The fields both sides bind their proofs to.
-pub(crate) struct Transcript<'a> {
-    pub(crate) cluster: &'a str,
-    pub(crate) initiator: &'a NodeId,
-    pub(crate) initiator_key: &'a [u8],
-    pub(crate) initiator_nonce: &'a [u8],
-    pub(crate) initiator_url: &'a str,
-    pub(crate) responder: &'a NodeId,
-    pub(crate) responder_key: &'a [u8],
-    pub(crate) responder_nonce: &'a [u8],
-}
+pub(crate) type Transcript<'a> = EnrollmentTranscript<'a>;
 
-impl Transcript<'_> {
-    pub(crate) fn bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(256);
-        let mut field = |bytes: &[u8]| {
-            out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-            out.extend_from_slice(bytes);
-        };
-        field(DOMAIN);
-        field(&ENROLLMENT_PROTOCOL_VERSION.to_le_bytes());
-        field(self.cluster.as_bytes());
-        field(self.initiator.as_str().as_bytes());
-        field(self.initiator_key);
-        field(self.initiator_nonce);
-        field(self.initiator_url.as_bytes());
-        field(self.responder.as_str().as_bytes());
-        field(self.responder_key);
-        field(self.responder_nonce);
-        out
+fn auth_error(err: orion_auth::AuthProtocolError) -> NodeError {
+    match err {
+        orion_auth::AuthProtocolError::InvalidSignatureLength(_) => {
+            NodeError::InvalidSignatureLength
+        }
+        other => NodeError::Authentication(other.to_string()),
     }
-}
-
-fn labelled(role: Role, transcript: &[u8]) -> Vec<u8> {
-    let mut message = role.label().to_vec();
-    message.extend_from_slice(transcript);
-    message
-}
-
-fn mac(key: &EnrollmentKey) -> Hmac<Sha256> {
-    // HMAC accepts keys of any length.
-    <Hmac<Sha256> as Mac>::new_from_slice(key.as_bytes()).expect("HMAC accepts any key length")
 }
 
 /// `HMAC-SHA256(K, role || transcript)`.
 pub(crate) fn proof(key: &EnrollmentKey, role: Role, transcript: &[u8]) -> Vec<u8> {
-    let mut mac = mac(key);
-    mac.update(&labelled(role, transcript));
-    mac.finalize().into_bytes().to_vec()
+    enrollment_proof(key.as_bytes(), role, transcript)
 }
 
 /// Constant-time check of a peer's proof.
@@ -107,20 +48,12 @@ pub(crate) fn verify_proof(
     transcript: &[u8],
     proof: &[u8],
 ) -> Result<(), NodeError> {
-    let mut mac = mac(key);
-    mac.update(&labelled(role, transcript));
-    mac.verify_slice(proof).map_err(|_| {
-        NodeError::Authentication(
-            "enrollment proof does not verify (different enrollment key, or a tampered or \
-             replayed handshake)"
-                .into(),
-        )
-    })
+    verify_enrollment_proof(key.as_bytes(), role, transcript, proof).map_err(auth_error)
 }
 
 /// The message a node signs with its identity key.
 pub(crate) fn signed_message(role: Role, transcript: &[u8]) -> Vec<u8> {
-    labelled(role, transcript)
+    enrollment_message(role, transcript)
 }
 
 pub(crate) fn verify_signature(
@@ -129,18 +62,7 @@ pub(crate) fn verify_signature(
     transcript: &[u8],
     signature: &[u8],
 ) -> Result<(), NodeError> {
-    let signature: [u8; 64] = signature
-        .try_into()
-        .map_err(|_| NodeError::InvalidSignatureLength)?;
-    VerifyingKey::from_bytes(public_key)
-        .map_err(|err| NodeError::Authentication(err.to_string()))?
-        .verify(
-            &signed_message(role, transcript),
-            &Signature::from_bytes(&signature),
-        )
-        .map_err(|_| {
-            NodeError::Authentication("enrollment signature does not verify for the key".into())
-        })
+    verify_enrollment_signature(public_key, role, transcript, signature).map_err(auth_error)
 }
 
 pub(crate) fn random_nonce() -> [u8; NONCE_LEN] {
@@ -153,6 +75,18 @@ pub(crate) fn key_array(bytes: &[u8], what: &str) -> Result<[u8; 32], NodeError>
     bytes
         .try_into()
         .map_err(|_| NodeError::Authentication(format!("{what} must be a 32-byte ed25519 key")))
+}
+
+/// The URL bound into the transcript of `hello` (empty for operators, which do not listen).
+pub(crate) fn transcript_url(hello: &EnrollmentHello) -> &str {
+    match hello.role {
+        EnrollmentRole::Node => hello
+            .initiator_url
+            .as_ref()
+            .map(|url| url.as_str())
+            .unwrap_or(""),
+        EnrollmentRole::Operator => "",
+    }
 }
 
 /// A challenge the responder issued and has not seen confirmed yet.

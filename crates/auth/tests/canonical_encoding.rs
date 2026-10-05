@@ -313,6 +313,52 @@ fn control_messages() -> Vec<(&'static str, ControlMessage)> {
                 initiator_nonce: vec![0x22; 32],
                 initiator_url: Some(PeerBaseUrl::new("orion+tcp://10.0.0.1:9200")),
                 responder: NodeId::new("node-b"),
+                role: EnrollmentRole::Node,
+            })),
+        ),
+        (
+            "control.operator_enrollment_hello",
+            ControlMessage::EnrollmentHello(Box::new(EnrollmentHello {
+                version: ENROLLMENT_PROTOCOL_VERSION,
+                cluster: "lab".into(),
+                initiator: NodeId::new("operator:alice"),
+                initiator_public_key: vec![0x11; 32],
+                initiator_nonce: vec![0x22; 32],
+                initiator_url: None,
+                responder: NodeId::new("node-b"),
+                role: EnrollmentRole::Operator,
+            })),
+        ),
+        ("control.operator_hello", ControlMessage::OperatorHello),
+        (
+            "control.enroll_operator",
+            ControlMessage::EnrollOperator(Box::new(OperatorEnrollment {
+                operator_id: OperatorId::try_new("alice").expect("valid operator id"),
+                public_key_hex: Some(PublicKeyHex::new("ab".repeat(32))),
+                expected_key_fingerprint: Some("sha256:0011".into()),
+                policy: OperatorPolicy {
+                    read: true,
+                    actions: Some(vec!["locate".into(), "self-*".into()]),
+                },
+            })),
+        ),
+        (
+            "control.operators",
+            ControlMessage::Operators(Box::new(OperatorsSnapshot {
+                local_key_fingerprint: "sha256:aa".into(),
+                default_actions: vec!["locate".into()],
+                enrollment_key_configured: true,
+                operators: vec![OperatorRecord {
+                    operator_id: OperatorId::try_new("operator:bob").expect("valid operator id"),
+                    state: OperatorTrustState::Enrolled,
+                    public_key_hex: Some(PublicKeyHex::new("cd".repeat(32))),
+                    key_fingerprint: Some("sha256:bb".into()),
+                    method: Some(OperatorEnrollmentMethod::EnrollmentKey),
+                    policy: OperatorPolicy::default(),
+                    effective_actions: vec!["locate".into()],
+                    since_ms: 1_700_000_000_000,
+                    last_seen_ms: 1_700_000_005_000,
+                }],
             })),
         ),
     ]

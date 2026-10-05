@@ -1,6 +1,6 @@
 use super::{
-    AuthenticatedPeer, AuthorizationLookup, LocalAuthenticationMode, NodeSecurity,
-    PeerAuthenticationMode, PeerObservedScope,
+    AuthenticatedOperator, AuthenticatedPeer, AuthorizationLookup, LocalAuthenticationMode,
+    NodeSecurity, OperatorAuthentication, PeerAuthenticationMode, PeerObservedScope,
     crypto::{current_effective_gid, current_effective_uid},
     transport_binding_from_hello,
 };
@@ -10,7 +10,7 @@ use crate::service::{
     ControlRequest,
 };
 use orion::{
-    control_plane::{ClientRole, ControlMessage, ObservedStateUpdate},
+    control_plane::{ClientRole, ControlMessage, ObservedStateUpdate, OperatorId},
     transport::ipc::LocalAddress,
 };
 use std::sync::Arc;
@@ -37,6 +37,28 @@ impl Authenticator for NodeSecurityAuthenticator {
         };
 
         match request.context.peer_auth.as_ref() {
+            // Remote operators are a principal kind of their own: their keys live in the operator
+            // trust store, never in the peer trust store, and they never become peers.
+            Some(auth) if OperatorId::is_operator_principal(auth.node_id.as_str()) => {
+                let is_hello = request.operation() == ControlOperation::OperatorHello;
+                request.context.principal =
+                    match self
+                        .security
+                        .authenticate_operator(auth, &payload, is_hello)?
+                    {
+                        OperatorAuthentication::Enrolled(operator) => {
+                            ControlPrincipal::Operator(operator)
+                        }
+                        OperatorAuthentication::Unenrolled {
+                            operator_id,
+                            public_key,
+                        } => ControlPrincipal::UnenrolledOperator {
+                            operator_id,
+                            public_key,
+                        },
+                    };
+                Ok(())
+            }
             Some(auth) => {
                 let authenticated = self.security.authenticate_request(auth, &payload)?;
                 request.context.principal = ControlPrincipal::Peer(authenticated.clone());
@@ -184,6 +206,65 @@ impl NodeSecurityAuthorizer {
         Ok(())
     }
 
+    /// What an enrolled operator may do: read (with `read`), run the actions its policy allows,
+    /// and query actions (all with `read`, else only its own). Nothing else: operators are not
+    /// cluster members, so sync, desired-state writes and observed updates are refused.
+    fn authorize_operator(
+        &self,
+        operator: &AuthenticatedOperator,
+        request: &ControlRequest,
+    ) -> Result<(), NodeError> {
+        let operation = request.operation();
+        let refuse = |why: &str| {
+            Err(NodeError::Authorization(format!(
+                "operator {} may not perform {operation:?}: {why}",
+                operator.operator_id
+            )))
+        };
+        match operation {
+            ControlOperation::OperatorHello => Ok(()),
+            ControlOperation::QueryStateSnapshot
+            | ControlOperation::QueryObservability
+            | ControlOperation::QueryStatus => {
+                if operator.policy.read {
+                    Ok(())
+                } else {
+                    refuse("its policy grants no read access")
+                }
+            }
+            ControlOperation::QueryActions => {
+                if operator.policy.read || !operator.allowed_actions.is_empty() {
+                    Ok(())
+                } else {
+                    refuse("its policy grants neither read access nor actions")
+                }
+            }
+            ControlOperation::RunAction => {
+                let crate::service::ControlRequestBody::Control(message) = &request.body else {
+                    return refuse("malformed request");
+                };
+                let ControlMessage::RunAction(action) = message.as_ref() else {
+                    return refuse("malformed request");
+                };
+                if operator.allows_action(&action.name) {
+                    Ok(())
+                } else {
+                    Err(NodeError::Authorization(format!(
+                        "operator {} may not run action `{}` (allowed: {})",
+                        operator.operator_id,
+                        action.name,
+                        if operator.allowed_actions.is_empty() {
+                            "none".to_owned()
+                        } else {
+                            operator.allowed_actions.join(", ")
+                        }
+                    )))
+                }
+            }
+            _ => refuse("operators are not cluster members"),
+        }
+    }
+
     fn authorize_observed_update_scope(
         &self,
         peer: &AuthenticatedPeer,
@@ -246,6 +327,20 @@ impl Authorizer for NodeSecurityAuthorizer {
             self.authorize_peer_message_consistency(peer, message)?;
         }
         match (&request.context.principal, request.operation()) {
+            (ControlPrincipal::Operator(operator), _) => {
+                self.authorize_operator(operator, request)
+            }
+            (ControlPrincipal::UnenrolledOperator { .. }, ControlOperation::OperatorHello) => {
+                Ok(())
+            }
+            (ControlPrincipal::UnenrolledOperator { operator_id, .. }, operation) => {
+                Err(NodeError::Authorization(format!(
+                    "operator {operator_id} is not enrolled and may not perform {operation:?}"
+                )))
+            }
+            (_, ControlOperation::OperatorHello) => Err(NodeError::Authorization(
+                "OperatorHello needs a request signed by an `operator:<name>` principal".into(),
+            )),
             (
                 ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
                 ControlOperation::Hello
@@ -343,7 +438,10 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::UpdateMaintenance
                 | ControlOperation::RunAction
                 | ControlOperation::QueryActions
-                | ControlOperation::WatchActions,
+                | ControlOperation::WatchActions
+                | ControlOperation::QueryOperators
+                | ControlOperation::EnrollOperator
+                | ControlOperation::RemoveOperator,
             ) => self.authorize_local_role(source, ClientRole::ControlPlane),
             (
                 ControlPrincipal::Local { source, .. },

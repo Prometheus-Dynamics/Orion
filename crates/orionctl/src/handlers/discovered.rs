@@ -99,7 +99,7 @@ pub(super) async fn enroll_discovered_peer(
     Ok(())
 }
 
-fn confirm(prompt: &str) -> Result<(), String> {
+pub(super) fn confirm(prompt: &str) -> Result<(), String> {
     if !std::io::stdin().is_terminal() {
         return Err(
             "refusing to trust a key without confirmation; pass --fingerprint <sha256:...> or --yes"

@@ -46,6 +46,8 @@ pub(crate) enum ActionOrigin {
     Local(String),
     /// An authenticated, enrolled peer forwarding the action to the target's owner.
     Peer(NodeId),
+    /// An enrolled remote operator (`docs/remote-operator.md`), authorized for the action name.
+    Operator(orion::control_plane::OperatorId),
 }
 
 #[derive(Default)]
@@ -126,6 +128,7 @@ impl NodeApp {
         request.requested_by = match &origin {
             ActionOrigin::Local(client) => format!("local:{client}"),
             ActionOrigin::Peer(node) => format!("peer:{node}/{}", request.requested_by),
+            ActionOrigin::Operator(operator) => operator.to_string(),
         };
         let tuning = &self.config.runtime_tuning.actions;
         request.deadline_ms = match request.deadline_ms {
@@ -188,7 +191,7 @@ impl NodeApp {
                 route: route.clone(),
                 origin_peer: match &origin {
                     ActionOrigin::Peer(node) => Some(node.clone()),
-                    ActionOrigin::Local(_) => None,
+                    ActionOrigin::Local(_) | ActionOrigin::Operator(_) => None,
                 },
                 task: None,
             });

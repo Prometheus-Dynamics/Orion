@@ -6,6 +6,7 @@ mod links;
 mod maintenance;
 mod metrics;
 mod mutations;
+mod operators;
 mod resource_usage;
 mod status;
 mod sync;
@@ -23,7 +24,7 @@ pub use control::ControlMessage;
 pub use discovery::{
     DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState, DiscoveryMetricsSnapshot,
     DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
-    EnrollmentHello,
+    EnrollmentHello, EnrollmentRole,
 };
 pub use links::LinkStatusSnapshot;
 pub use maintenance::{
@@ -41,6 +42,12 @@ pub use metrics::{
     PersistenceMetricsSnapshot, TransportMetricsSnapshot,
 };
 pub use mutations::{DesiredStateMutation, MutationApplyError, MutationBatch};
+pub use operators::{
+    InvalidOperatorId, MAX_OPERATOR_ACTION_PATTERNS, MAX_OPERATOR_NAME_LEN, OPERATOR_ID_PREFIX,
+    OperatorEnrollment, OperatorEnrollmentMethod, OperatorId, OperatorPolicy, OperatorRecord,
+    OperatorTrustState, OperatorWelcome, OperatorsSnapshot, action_pattern_matches,
+    validate_action_patterns,
+};
 pub use resource_usage::{
     LocalStreamUsageSnapshot, MutationHistoryUsageSnapshot, NodeResourceUsageSnapshot,
     ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot, RegistryUsageSnapshot,

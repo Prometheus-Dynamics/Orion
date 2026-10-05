@@ -30,6 +30,8 @@ pub(crate) enum AuditEventKind {
     PeerTlsPretrusted,
     #[cfg_attr(not(feature = "transport-http"), allow(dead_code))]
     HttpTlsRotated,
+    OperatorEnrolled,
+    OperatorRemoved,
 }
 
 #[derive(Debug, Serialize)]

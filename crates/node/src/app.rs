@@ -14,6 +14,7 @@ mod local_control;
 mod maintenance_admin;
 mod observability;
 mod observed_persist;
+mod operators;
 mod peer_admin;
 #[cfg(peer_sync)]
 mod peer_observed;

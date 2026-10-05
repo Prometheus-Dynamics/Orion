@@ -264,6 +264,7 @@ async fn protocol_version_skew_is_reported_on_both_sides() {
     let err = client
         .exchange(b"\x01request")
         .await
+        .map_err(PeerTcpError::from)
         .expect_err("a skewed listener must be reported");
     assert!(
         matches!(

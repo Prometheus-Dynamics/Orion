@@ -12,7 +12,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
 /// Version of the shared-key enrollment handshake.
-pub const ENROLLMENT_PROTOCOL_VERSION: u16 = 1;
+pub const ENROLLMENT_PROTOCOL_VERSION: u16 = 2;
 
 /// Trust state of a discovered peer, as seen by the local node.
 #[derive(
@@ -145,6 +145,40 @@ pub struct DiscoveredPeerEnrollment {
     pub expected_key_fingerprint: Option<String>,
 }
 
+/// What the initiator of a shared-key enrollment wants to become on the responder.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrollmentRole {
+    /// A peer node (a sync peer and cluster member).
+    #[default]
+    Node,
+    /// A remote operator (`operator:<name>`): never a cluster member, see
+    /// `docs/remote-operator.md`.
+    Operator,
+}
+
+impl EnrollmentRole {
+    /// The byte bound into the handshake transcript.
+    pub fn wire_byte(self) -> u8 {
+        match self {
+            Self::Node => 0,
+            Self::Operator => 1,
+        }
+    }
+}
+
 /// Shared-key enrollment, step 1 (initiator → responder).
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
@@ -160,6 +194,8 @@ pub struct EnrollmentHello {
     pub initiator_url: Option<PeerBaseUrl>,
     /// The node the initiator wants to enroll with.
     pub responder: NodeId,
+    /// Whether the initiator enrolls as a peer node or as a remote operator.
+    pub role: EnrollmentRole,
 }
 
 /// Shared-key enrollment, step 2 (responder → initiator): the responder's key, nonce, and proofs

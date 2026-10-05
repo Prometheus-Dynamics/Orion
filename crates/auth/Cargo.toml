@@ -25,9 +25,19 @@ std = [
     "rkyv/std",
     "serde/std",
     "thiserror/std",
+    "ed25519-dalek?/std",
+    "sha2?/std",
 ]
+# ed25519 signing/verification of peer requests and `orion+tcp` responses, and key fingerprints
+# (`crypto` module). Shared by orion-node and the remote operator client in orion-client.
+crypto = ["dep:ed25519-dalek", "dep:sha2"]
+# Shared-key enrollment handshake proofs (HMAC-SHA256, `enrollment` module).
+enrollment = ["crypto", "dep:hmac"]
 
 [dependencies]
+ed25519-dalek = { workspace = true, optional = true }
+hmac = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 orion-control-plane.workspace = true
 orion-core.workspace = true
 rkyv.workspace = true

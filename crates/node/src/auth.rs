@@ -1,5 +1,6 @@
 mod crypto;
 mod modes;
+mod operators;
 #[cfg(feature = "peer-tcp")]
 mod peer_response;
 mod policy;
@@ -30,8 +31,8 @@ pub use orion_auth::{
     AuthenticatedPeerRequest, NodeTransportBinding, PEER_REQUEST_AUTH_VERSION, PeerRequestAuth,
     PeerRequestPayload, TRANSPORT_BINDING_VERSION,
 };
-#[cfg(feature = "peer-tcp")]
-pub(crate) use peer_response::PeerResponseSignature;
+pub use operators::AuthenticatedOperator;
+pub(crate) use operators::OperatorAuthentication;
 pub use policy::PeerSecurityMiddleware;
 use store::{
     AuthStateWorker, load_next_outbound_nonce, load_or_create_identity, load_seen_nonces,
@@ -92,6 +93,8 @@ pub struct NodeSecurity {
     trusted_peer_state: Arc<RwLock<TrustedPeerState>>,
     seen_nonces: Arc<RwLock<BTreeMap<NodeId, VecDeque<u64>>>>,
     next_nonce: Arc<AtomicU64>,
+    /// Remote operators (`docs/remote-operator.md`), persisted in `trusted-operators.json`.
+    operators: Arc<RwLock<operators::OperatorTrust>>,
 }
 
 // Security-state locking contract:
@@ -140,6 +143,9 @@ impl NodeSecurity {
         let trusted_peer_state = Arc::new(RwLock::new(load_trusted_peer_state(storage.as_ref())?));
         let seen_nonces = Arc::new(RwLock::new(load_seen_nonces(storage.as_ref())?));
         let next_nonce = Arc::new(AtomicU64::new(load_next_outbound_nonce(storage.as_ref())?));
+        let operators = Arc::new(RwLock::new(operators::load_operator_trust(
+            storage.as_ref(),
+        )?));
         let auth_state_worker = storage
             .as_ref()
             .map(|storage| AuthStateWorker::new(storage.clone(), auth_state_worker_queue_capacity))
@@ -156,6 +162,7 @@ impl NodeSecurity {
             trusted_peer_state,
             seen_nonces,
             next_nonce,
+            operators,
         })
     }
 
@@ -381,6 +388,14 @@ impl NodeSecurity {
     }
 
     pub fn configure_peer(&self, peer: &PeerConfig) -> Result<(), NodeError> {
+        if orion::control_plane::OperatorId::is_operator_principal(peer.node_id.as_str()) {
+            return Err(NodeError::Config(format!(
+                "peer id `{}` uses the reserved `{}` prefix of remote operators; enroll operators \
+                 with `orionctl operators enroll`",
+                peer.node_id,
+                orion::control_plane::OPERATOR_ID_PREFIX
+            )));
+        }
         let parsed = peer
             .trusted_public_key_hex
             .as_deref()

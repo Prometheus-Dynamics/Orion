@@ -8,6 +8,7 @@ use super::discovery::{
     DiscoveredPeerEnrollment, DiscoverySnapshot, EnrollmentChallenge, EnrollmentConfirm,
     EnrollmentHello,
 };
+use super::operators::{OperatorEnrollment, OperatorId, OperatorsSnapshot};
 use super::maintenance::{MaintenanceCommand, MaintenanceStatus};
 use super::metrics::{NodeObservabilitySnapshot, PeerTrustSnapshot};
 use super::mutations::MutationBatch;
@@ -95,4 +96,16 @@ pub enum ControlMessage {
     /// A handler's progress or final report for an action it received.
     ReportActionResult(Box<ActionReport>),
     ActionResults(Vec<ActionResult>),
+    /// A remote operator introduces itself (signed, peer transports only); answered with
+    /// `HttpResponsePayload::OperatorWelcome`. An unknown operator's hello is recorded as a
+    /// pending enrollment (`docs/remote-operator.md`).
+    OperatorHello,
+    /// Lists enrolled, pending and revoked operators (local control only); answered with
+    /// [`ControlMessage::Operators`].
+    QueryOperators,
+    Operators(Box<OperatorsSnapshot>),
+    /// Administrator approval of a remote operator (local control only).
+    EnrollOperator(Box<OperatorEnrollment>),
+    /// Revokes a remote operator (local control only).
+    RemoveOperator(OperatorId),
 }

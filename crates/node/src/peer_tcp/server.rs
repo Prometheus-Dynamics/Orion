@@ -2,7 +2,7 @@
 
 use super::{
     PEER_TCP_IDLE_TIMEOUT, PeerTcpError,
-    wire::{RESPONSE_HEADER_MAX_BYTES, ResponseFrame, STATUS_ERROR},
+    RESPONSE_HEADER_MAX_BYTES, ResponseFrame, STATUS_ERROR,
 };
 use crate::{
     ControlRequest, NodeApp, NodeError,
@@ -230,7 +230,7 @@ async fn serve_connection(app: NodeApp, mut stream: TcpStream, remote: SocketAdd
         let encoded = match response.encode() {
             Ok(encoded) => encoded,
             Err(err) => {
-                app.record_peer_tcp_server_failure(remote, &err);
+                app.record_peer_tcp_server_failure(remote, &PeerTcpError::from(err));
                 return;
             }
         };

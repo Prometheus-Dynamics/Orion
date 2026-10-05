@@ -6,15 +6,22 @@
 //! HTTP); responses are signed by the responder and bound to the request they answer. There is no
 //! TLS: the transport provides authenticity, integrity and replay protection, not confidentiality.
 //! See `docs/peer-sync.md`.
+//!
+//! The frame payload layout lives in `orion_auth::peer_tcp` and the connection handling in
+//! `orion_transport_ipc::ControlTcpClient`, shared with the remote operator client
+//! (`orion-client`, feature `remote`).
 
-mod client;
 mod server;
-mod wire;
 
-pub(crate) use client::PeerTcpClient;
-pub(crate) use wire::{ResponseFrame, STATUS_OK};
+pub(crate) use orion_auth::peer_tcp::{
+    PEER_TCP_RESPONSE_HEADER_MAX_BYTES as RESPONSE_HEADER_MAX_BYTES,
+    PEER_TCP_STATUS_ERROR as STATUS_ERROR, PEER_TCP_STATUS_OK as STATUS_OK, PeerTcpFrameError,
+    PeerTcpResponseFrame as ResponseFrame,
+};
+pub(crate) use orion_transport_ipc::ControlTcpClient as PeerTcpClient;
 
 use orion::{control_plane::CommunicationFailureKind, transport::ipc::IpcTransportError};
+use orion_transport_ipc::ControlTcpError;
 use thiserror::Error;
 
 /// Idle server connections are closed after this long without a request.
@@ -47,17 +54,33 @@ pub enum PeerTcpError {
     Remote(String),
 }
 
-impl PeerTcpError {
-    /// Errors that a fresh connection may fix (the cached connection was closed by the peer).
-    pub(crate) fn is_retryable_connection_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Connection { .. }
-                | Self::Closed { .. }
-                | Self::Frame(IpcTransportError::ReadFailed(_) | IpcTransportError::WriteFailed(_))
-        )
+impl From<ControlTcpError> for PeerTcpError {
+    fn from(error: ControlTcpError) -> Self {
+        match error {
+            ControlTcpError::Connect { addr, message } => Self::Connect { addr, message },
+            ControlTcpError::Timeout {
+                addr,
+                operation,
+                timeout_ms,
+            } => Self::Timeout {
+                addr,
+                operation,
+                timeout_ms,
+            },
+            ControlTcpError::Connection { addr, message } => Self::Connection { addr, message },
+            ControlTcpError::Closed { addr } => Self::Closed { addr },
+            ControlTcpError::Frame(frame) => Self::Frame(frame),
+        }
     }
+}
 
+impl From<PeerTcpFrameError> for PeerTcpError {
+    fn from(error: PeerTcpFrameError) -> Self {
+        Self::Decode(error.0)
+    }
+}
+
+impl PeerTcpError {
     pub(crate) fn communication_failure_kind(&self) -> CommunicationFailureKind {
         match self {
             Self::Timeout { .. } => CommunicationFailureKind::Timeout,

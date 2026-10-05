@@ -53,6 +53,12 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: PeerCommand,
     },
+    /// Remote operators (desktop and fleet tools over `orion+tcp`, `docs/remote-operator.md`).
+    #[command(visible_alias = "operator")]
+    Operators {
+        #[command(subcommand)]
+        command: crate::handlers::OperatorCommand,
+    },
     Maintenance {
         #[command(subcommand)]
         command: MaintenanceCommand,
@@ -91,6 +97,8 @@ pub(crate) enum GetCommand {
     Status(StatusArgs),
     /// Peers found by mDNS discovery, their key fingerprints and trust state (local socket).
     DiscoveredPeers(LocalControlArgs),
+    /// Enrolled, pending and revoked remote operators (local socket).
+    Operators(LocalControlArgs),
     /// Actions the node tracks, with their state and output (local socket).
     Actions(crate::handlers::ActionListArgs),
     /// Link gateway counters per microcontroller link (empty without `link-gateway`).

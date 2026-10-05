@@ -32,6 +32,7 @@ use orion_transport_ipc::{ControlEnvelope, UnixControlClient, UnixControlStreamC
 
 mod actions;
 mod discovery;
+mod operators;
 mod metrics;
 
 pub use actions::ActionWatch;

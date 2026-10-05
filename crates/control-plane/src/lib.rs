@@ -24,7 +24,7 @@ pub use messages::{
     DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary,
     DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState, DiscoveryMetricsSnapshot,
     DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
-    EnrollmentHello, ExecutorStateUpdate, ExecutorWorkloadQuery, HostMetricsSnapshot,
+    EnrollmentHello, EnrollmentRole, ExecutorStateUpdate, ExecutorWorkloadQuery, HostMetricsSnapshot,
     HttpMutualTlsMode, LatencyMetricsSnapshot, LinkStatusSnapshot, LocalStreamUsageSnapshot,
     MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
     MutationApplyError, MutationBatch, MutationHistoryUsageSnapshot, NodeHealthSnapshot,
@@ -38,6 +38,12 @@ pub use messages::{
     StatusKey, StatusLaneUsageSnapshot, StatusQuery, StatusSubject, StatusSubjectParseError,
     SyncDiffRequest, SyncRequest, SyncSummaryRequest, TransportMetricsSnapshot,
     WorkerQueueUsageSnapshot, action_names, action_status_keys,
+};
+pub use messages::{
+    InvalidOperatorId, MAX_OPERATOR_ACTION_PATTERNS, MAX_OPERATOR_NAME_LEN, OPERATOR_ID_PREFIX,
+    OperatorEnrollment, OperatorEnrollmentMethod, OperatorId, OperatorPolicy, OperatorRecord,
+    OperatorTrustState, OperatorWelcome, OperatorsSnapshot, action_pattern_matches,
+    validate_action_patterns,
 };
 #[cfg(feature = "std")]
 pub use metrics_export::{
@@ -293,7 +299,12 @@ mod tests {
             | ControlMessage::WatchActionRequests(_)
             | ControlMessage::ReportActionResult(_)
             | ControlMessage::ActionResults(_)
-            | ControlMessage::ClaimNodeActions(_) => {
+            | ControlMessage::ClaimNodeActions(_)
+            | ControlMessage::OperatorHello
+            | ControlMessage::QueryOperators
+            | ControlMessage::Operators(_)
+            | ControlMessage::EnrollOperator(_)
+            | ControlMessage::RemoveOperator(_) => {
                 panic!("unexpected control message")
             }
         }

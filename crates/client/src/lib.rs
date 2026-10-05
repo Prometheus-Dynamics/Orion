@@ -15,6 +15,8 @@
 //! - Handle actions for a provider or executor with `watch_action_requests`
 //!   ([`ActionRequestWatch`]); submit and follow them with `LocalControlPlaneClient::run_action`,
 //!   `query_actions`, `wait_for_action`, and [`ActionWatch`] (see `docs/actions.md`).
+//! - Talk to nodes over the network as a remote operator (desktop and fleet tools) with
+//!   [`remote::RemoteOperator`] (feature `remote`, `docs/remote-operator.md`).
 //! - Import [`prelude`] to get the client API plus the core and control-plane types executor and
 //!   provider apps commonly need, without depending on `orion-core` or `orion-control-plane`.
 
@@ -28,6 +30,8 @@ mod executor;
 mod graph;
 #[cfg(feature = "ipc")]
 mod provider;
+#[cfg(feature = "remote")]
+pub mod remote;
 mod resource;
 #[cfg(feature = "ipc")]
 mod response;

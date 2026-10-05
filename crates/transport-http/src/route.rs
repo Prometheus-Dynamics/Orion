@@ -35,6 +35,9 @@ pub enum ControlRoute {
     Enroll,
     /// Actions forwarded between nodes and their results (`docs/actions.md`).
     Actions,
+    /// Remote operator requests that have no peer route of their own (`OperatorHello`,
+    /// `QueryStatus`; `docs/remote-operator.md`).
+    Operator,
 }
 
 impl ControlRoute {
@@ -50,6 +53,7 @@ impl ControlRoute {
             Self::ObservedUpdate => "/v1/control/observed",
             Self::Enroll => "/v1/control/enroll",
             Self::Actions => "/v1/control/actions",
+            Self::Operator => "/v1/control/operator",
         }
     }
 
@@ -62,7 +66,8 @@ impl ControlRoute {
             | Self::Observability
             | Self::ObservedUpdate
             | Self::Enroll
-            | Self::Actions => HttpMethod::Post,
+            | Self::Actions
+            | Self::Operator => HttpMethod::Post,
             Self::Health | Self::Readiness => HttpMethod::Get,
         }
     }
@@ -79,6 +84,7 @@ impl ControlRoute {
             "/v1/control/observed" => Self::ObservedUpdate,
             "/v1/control/enroll" => Self::Enroll,
             "/v1/control/actions" => Self::Actions,
+            "/v1/control/operator" => Self::Operator,
             _ => return None,
         };
 

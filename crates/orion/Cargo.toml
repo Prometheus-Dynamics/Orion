@@ -56,6 +56,8 @@ client = [
     "orion-client/ipc",
     "std",
 ]
+# Remote operator client (`orion::remote`, docs/remote-operator.md). No HTTP stack.
+remote = ["dep:orion-client", "orion-client/remote", "control-plane", "std"]
 
 [dependencies]
 orion-auth = { workspace = true, optional = true }

@@ -75,6 +75,8 @@ pub(super) fn unexpected_response(
         HttpResponsePayload::Readiness(_) => "readiness",
         HttpResponsePayload::EnrollmentChallenge(_) => "enrollment challenge",
         HttpResponsePayload::Actions(_) => "actions",
+        HttpResponsePayload::OperatorWelcome(_) => "operator welcome",
+        HttpResponsePayload::Status(_) => "status",
     };
     NodeError::Storage(format!(
         "unexpected {kind} response to peer {request} request over {transport}"

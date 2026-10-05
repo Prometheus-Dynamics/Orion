@@ -29,6 +29,8 @@ pub mod auth {
         PeerRequestPayload, TRANSPORT_BINDING_SIGNING_DOMAIN, TRANSPORT_BINDING_VERSION,
         canonical_peer_request_bytes, canonical_transport_binding_bytes,
     };
+    /// `_orion._tcp` advertisement layout, key hex helpers and `orion+tcp` frame payloads.
+    pub use orion_auth::{discovery, hex, peer_tcp};
 }
 
 #[cfg(feature = "cluster")]
@@ -65,12 +67,27 @@ pub mod client {
     };
 }
 
+/// Remote operator client (`docs/remote-operator.md`): talk to nodes over the signed `orion+tcp`
+/// transport without running `orion-node`.
+#[cfg(feature = "remote")]
+pub mod remote {
+    pub use orion_client::remote::*;
+}
+
 #[cfg(feature = "control-plane")]
 pub mod control_plane {
     pub use orion_control_plane::{
         ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
         ActionTargetParseError, HostFacts, HostMetricsSample, HostTemperature, LinkStatusSnapshot,
         NodeHostFacts, action_names, action_status_keys,
+    };
+    pub use orion_control_plane::{
+        DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState,
+        DiscoveryMetricsSnapshot, DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION,
+        EnrollmentChallenge, EnrollmentConfirm, EnrollmentHello, EnrollmentRole,
+        InvalidOperatorId, OPERATOR_ID_PREFIX, OperatorEnrollment, OperatorEnrollmentMethod,
+        OperatorId, OperatorPolicy, OperatorRecord, OperatorTrustState, OperatorWelcome,
+        OperatorsSnapshot, action_pattern_matches, validate_action_patterns,
     };
     pub use orion_control_plane::{
         AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, AvailabilityState, ClientEvent,

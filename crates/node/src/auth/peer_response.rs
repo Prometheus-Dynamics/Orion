@@ -2,21 +2,10 @@
 //! `docs/peer-sync.md`). Requests are authenticated by [`super::AuthenticatedPeerRequest`]; over
 //! plain TCP the responder additionally signs every response, bound to the request it answers.
 
-use super::{
-    NodeSecurity, PeerAuthenticationMode,
-    crypto::{parse_public_key_bytes, parse_signature_bytes},
-};
+use super::{NodeSecurity, PeerAuthenticationMode, crypto::parse_public_key_bytes};
 use crate::NodeError;
-use ed25519_dalek::{Signer, Verifier, VerifyingKey};
-use orion_auth::{PEER_RESPONSE_AUTH_VERSION, canonical_peer_response_bytes};
+pub(crate) use orion_auth::peer_tcp::PeerResponseSignature;
 use orion_core::NodeId;
-
-/// Signature and public key attached to a signed response.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PeerResponseSignature {
-    pub(crate) signature: Vec<u8>,
-    pub(crate) public_key: Vec<u8>,
-}
 
 impl NodeSecurity {
     /// Signs a response to `request` with this node's identity. Returns `None` when peer
@@ -30,20 +19,15 @@ impl NodeSecurity {
         if self.mode == PeerAuthenticationMode::Disabled {
             return Ok(None);
         }
-        let public_key = self.identity.verifying_key().to_bytes();
-        let message = canonical_peer_response_bytes(
-            PEER_RESPONSE_AUTH_VERSION,
+        orion_auth::crypto::sign_peer_response(
+            &self.identity,
             &self.local_node_id,
-            &public_key,
             request,
             status,
             body,
         )
-        .map_err(|err| NodeError::Authentication(err.to_string()))?;
-        Ok(Some(PeerResponseSignature {
-            signature: self.identity.sign(&message).to_bytes().to_vec(),
-            public_key: public_key.to_vec(),
-        }))
+        .map(Some)
+        .map_err(|err| NodeError::Authentication(err.to_string()))
     }
 
     /// Verifies the response of peer `responder` to `request`.
@@ -71,26 +55,21 @@ impl NodeSecurity {
             return Ok(());
         };
         let public_key = parse_public_key_bytes(&signature.public_key)?;
-        let parsed_signature = parse_signature_bytes(&signature.signature)?;
         self.ensure_peer_is_not_revoked(responder)?;
         self.validate_configured_or_trusted_peer_key(responder, public_key)?;
-        let message = canonical_peer_response_bytes(
-            PEER_RESPONSE_AUTH_VERSION,
+        orion_auth::crypto::verify_peer_response(
             responder,
             &public_key,
             request,
             status,
             body,
+            signature,
         )
-        .map_err(|err| NodeError::Authentication(err.to_string()))?;
-        VerifyingKey::from_bytes(&public_key)
-            .map_err(|err| NodeError::Authentication(err.to_string()))?
-            .verify(&message, &parsed_signature)
-            .map_err(|err| {
-                NodeError::Authentication(format!(
-                    "response signature from peer {responder} did not verify: {err}"
-                ))
-            })
+        .map_err(|err| {
+            NodeError::Authentication(format!(
+                "response signature from peer {responder} did not verify: {err}"
+            ))
+        })
     }
 }
 

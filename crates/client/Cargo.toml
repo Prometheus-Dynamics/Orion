@@ -19,12 +19,30 @@ path = "src/lib.rs"
 [features]
 default = ["ipc"]
 ipc = ["dep:orion-transport-ipc"]
+# Remote operator client (`orion_client::remote`, docs/remote-operator.md): an ed25519 operator
+# identity, enrollment, and signed `orion+tcp` requests to nodes, without running orion-node.
+# Pulls in no HTTP stack (only the protocol layer of orion-transport-http) and no node internals.
+remote = [
+    "dep:ed25519-dalek",
+    "dep:orion-auth",
+    "dep:orion-transport-http",
+    "dep:orion-transport-ipc",
+    "dep:rand_core",
+    "orion-auth/enrollment",
+]
+# Browse `_orion._tcp` nodes with mDNS (`orion_client::remote::discovery`).
+discovery = ["remote", "dep:mdns-sd"]
 
 [dependencies]
+ed25519-dalek = { workspace = true, features = ["std"], optional = true }
+mdns-sd = { workspace = true, optional = true }
+orion-auth = { workspace = true, features = ["std"], optional = true }
 orion-core = { workspace = true, features = ["std"] }
 orion-control-plane = { workspace = true, features = ["std"] }
 orion-runtime = { workspace = true, features = ["std"] }
+orion-transport-http = { workspace = true, optional = true }
 orion-transport-ipc = { workspace = true, optional = true }
+rand_core = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "fs", "sync", "time"] }

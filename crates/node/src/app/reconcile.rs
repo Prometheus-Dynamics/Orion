@@ -110,7 +110,12 @@ impl NodeApp {
             | ControlMessage::WatchActionRequests(_)
             | ControlMessage::ReportActionResult(_)
             | ControlMessage::ActionResults(_)
-            | ControlMessage::ClaimNodeActions(_) => Err(NodeError::Storage(
+            | ControlMessage::ClaimNodeActions(_)
+            | ControlMessage::OperatorHello
+            | ControlMessage::QueryOperators
+            | ControlMessage::Operators(_)
+            | ControlMessage::EnrollOperator(_)
+            | ControlMessage::RemoveOperator(_) => Err(NodeError::Storage(
                 "local-only control message received on a peer transport".into(),
             )),
         }

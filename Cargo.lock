@@ -1312,10 +1312,13 @@ dependencies = [
 name = "orion-auth"
 version = "1.0.0"
 dependencies = [
+ "ed25519-dalek",
+ "hmac",
  "orion-control-plane",
  "orion-core",
  "rkyv",
  "serde",
+ "sha2",
  "thiserror 2.0.18",
 ]
 
@@ -1323,11 +1326,15 @@ dependencies = [
 name = "orion-client"
 version = "1.0.0"
 dependencies = [
+ "ed25519-dalek",
+ "mdns-sd",
+ "orion-auth",
  "orion-control-plane",
  "orion-core",
  "orion-runtime",
  "orion-transport-http",
  "orion-transport-ipc",
+ "rand_core 0.6.4",
  "serde",
  "thiserror 2.0.18",
  "tokio",
@@ -1402,12 +1409,12 @@ version = "1.0.0"
 dependencies = [
  "criterion",
  "ed25519-dalek",
- "hmac",
  "libc",
  "mdns-sd",
  "mimalloc",
  "orion",
  "orion-auth",
+ "orion-client",
  "orion-cluster",
  "orion-control-plane",
  "orion-core",
@@ -1427,7 +1434,6 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
- "sha2",
  "thiserror 2.0.18",
  "tikv-jemallocator",
  "tokio",

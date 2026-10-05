@@ -53,9 +53,13 @@ impl TcpPeerChannel {
     ) -> Result<HttpResponsePayload, NodeError> {
         let payload = app.security.wrap_http_payload_async(request).await?;
         let request = HttpCodec.encode_request(&payload)?.body;
-        let (response, bytes) = self.client.exchange(&request).await?;
+        let (response, bytes) = self
+            .client
+            .exchange(&request)
+            .await
+            .map_err(PeerTcpError::from)?;
         app.record_peer_exchange_sent(node_id, bytes.sent);
-        let frame = ResponseFrame::decode(&response)?;
+        let frame = ResponseFrame::decode(&response).map_err(PeerTcpError::from)?;
         app.security.verify_peer_response(
             node_id,
             &request,

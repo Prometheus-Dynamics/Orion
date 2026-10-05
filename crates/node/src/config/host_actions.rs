@@ -84,6 +84,10 @@ pub struct ActionTuning {
     /// Most actions tracked at once (`ORION_NODE_ACTION_MAX_TRACKED`). The oldest final results
     /// are evicted first; requests are rejected while every tracked action is still running.
     pub max_tracked: usize,
+    /// Action-name patterns enrolled remote operators may run when their policy names none
+    /// (`ORION_NODE_OPERATOR_ACTIONS`, comma-separated `*`, `prefix*` or exact names). Empty by
+    /// default: operators are read-only unless granted actions (`docs/remote-operator.md`).
+    pub operator_actions: Vec<String>,
 }
 
 impl Default for ActionTuning {
@@ -93,6 +97,7 @@ impl Default for ActionTuning {
             max_deadline: Duration::from_millis(DEFAULT_ACTION_MAX_DEADLINE_MS),
             result_ttl: Duration::from_millis(DEFAULT_ACTION_RESULT_TTL_MS),
             max_tracked: DEFAULT_ACTION_MAX_TRACKED,
+            operator_actions: Vec::new(),
         }
     }
 }
@@ -113,6 +118,7 @@ impl ActionTuning {
                 DEFAULT_ACTION_RESULT_TTL_MS,
             )?,
             max_tracked: parse_env_or("ORION_NODE_ACTION_MAX_TRACKED", DEFAULT_ACTION_MAX_TRACKED)?,
+            operator_actions: operator_actions_from_env()?,
         };
         tuning.normalize();
         Ok(tuning)
@@ -149,6 +155,33 @@ impl ActionTuning {
         self.normalize();
         self
     }
+
+    /// Default action patterns of remote operators (see [`Self::operator_actions`]).
+    pub fn with_operator_actions(mut self, patterns: impl IntoIterator<Item = String>) -> Self {
+        self.operator_actions = patterns.into_iter().collect();
+        self
+    }
+}
+
+fn operator_actions_from_env() -> Result<Vec<String>, NodeError> {
+    let raw = match env::var("ORION_NODE_OPERATOR_ACTIONS") {
+        Ok(raw) => raw,
+        Err(env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(env::VarError::NotUnicode(_)) => {
+            return Err(NodeError::Config(
+                "ORION_NODE_OPERATOR_ACTIONS must be valid unicode".into(),
+            ));
+        }
+    };
+    let patterns: Vec<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .map(str::to_owned)
+        .collect();
+    orion::control_plane::validate_action_patterns(&patterns)
+        .map_err(|err| NodeError::Config(format!("ORION_NODE_OPERATOR_ACTIONS: {err}")))?;
+    Ok(patterns)
 }
 
 #[cfg(test)]

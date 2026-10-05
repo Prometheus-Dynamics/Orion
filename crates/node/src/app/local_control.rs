@@ -118,6 +118,12 @@ impl NodeApp {
             ControlMessage::EnrollmentHello(_) | ControlMessage::EnrollmentConfirm(_) => Ok(
                 ControlMessage::Rejected("enrollment handshakes are only served to peers".into()),
             ),
+            message @ (ControlMessage::QueryOperators
+            | ControlMessage::EnrollOperator(_)
+            | ControlMessage::RemoveOperator(_)) => self.apply_local_operator_message(message),
+            ControlMessage::OperatorHello => Ok(ControlMessage::Rejected(
+                "OperatorHello is only served to remote operators".into(),
+            )),
             ControlMessage::ReplacePeerIdentity(update) => {
                 self.replace_peer_identity_hex(&update.node_id, &update.public_key_hex)?;
                 Ok(ControlMessage::Accepted)
@@ -191,7 +197,9 @@ impl NodeApp {
                     }
                     orion::transport::http::HttpResponsePayload::Readiness(_)
                     | orion::transport::http::HttpResponsePayload::EnrollmentChallenge(_)
-                    | orion::transport::http::HttpResponsePayload::Actions(_) => {
+                    | orion::transport::http::HttpResponsePayload::Actions(_)
+                    | orion::transport::http::HttpResponsePayload::OperatorWelcome(_)
+                    | orion::transport::http::HttpResponsePayload::Status(_) => {
                         ControlMessage::Rejected("response is not valid for sync request".into())
                     }
                     orion::transport::http::HttpResponsePayload::Observability(_) => {
@@ -226,6 +234,7 @@ impl NodeApp {
             | ControlMessage::Discovery(_)
             | ControlMessage::EnrollmentChallenge(_)
             | ControlMessage::ActionResults(_)
+            | ControlMessage::Operators(_)
             | ControlMessage::Accepted
             | ControlMessage::Rejected(_) => Ok(ControlMessage::Rejected(
                 "response-only control message received as a request".into(),

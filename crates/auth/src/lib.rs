@@ -2,6 +2,14 @@
 
 extern crate alloc;
 
+#[cfg(feature = "crypto")]
+pub mod crypto;
+pub mod discovery;
+#[cfg(feature = "enrollment")]
+pub mod enrollment;
+pub mod hex;
+pub mod peer_tcp;
+
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -21,7 +29,7 @@ pub const TRANSPORT_BINDING_SIGNING_DOMAIN: &[u8] = b"orion.transport.binding";
 pub const PEER_RESPONSE_AUTH_VERSION: u16 = 1;
 pub const PEER_RESPONSE_SIGNING_DOMAIN: &[u8] = b"orion.peer.tcp.response";
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum AuthProtocolError {
     #[error("unsupported peer auth version {0}")]
     UnsupportedVersion(u16),
@@ -31,6 +39,8 @@ pub enum AuthProtocolError {
     Encode(String),
     #[error("invalid signature length {0}, expected 64 bytes")]
     InvalidSignatureLength(usize),
+    #[error("signature does not verify: {0}")]
+    InvalidSignature(String),
 }
 
 #[derive(

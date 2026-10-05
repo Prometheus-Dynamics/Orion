@@ -106,7 +106,8 @@ impl HttpServer {
                     post(handle_http_request),
                 )
                 .route(ControlRoute::Enroll.path(), post(handle_http_request))
-                .route(ControlRoute::Actions.path(), post(handle_http_request)),
+                .route(ControlRoute::Actions.path(), post(handle_http_request))
+                .route(ControlRoute::Operator.path(), post(handle_http_request)),
             HttpServerSurface::Probe => {
                 Router::new().route(METRICS_PATH, get(handle_metrics_request))
             }

@@ -309,6 +309,13 @@ impl NodeAppBuilder {
             Some(config) => config,
             None => NodeConfig::try_from_env()?,
         };
+        if orion::control_plane::OperatorId::is_operator_principal(config.node_id.as_str()) {
+            return Err(super::NodeError::Config(format!(
+                "node id `{}` uses the reserved `{}` prefix of remote operators",
+                config.node_id,
+                orion::control_plane::OPERATOR_ID_PREFIX
+            )));
+        }
         let runtime = Runtime::new(config.node_id.clone());
         let mut store = LocalRuntimeStore::new(config.node_id.clone());
         store.replace_desired(self.desired.unwrap_or_default());
@@ -360,6 +367,7 @@ impl NodeAppBuilder {
                 super::NodeError::Config(format!("failed to initialize node security: {err}"))
             })?,
         );
+        security.set_operator_default_actions(config.runtime_tuning.actions.operator_actions.clone());
         let transport_security = Arc::new(NodeTransportSecurityManager::new(
             security.clone(),
             http_tls_cert_path.clone(),
