@@ -14,6 +14,18 @@ const RECV_CLOEXEC_FLAG: i32 = libc::MSG_CMSG_CLOEXEC;
 #[cfg(not(target_os = "linux"))]
 const RECV_CLOEXEC_FLAG: i32 = 0;
 
+#[cfg(not(target_os = "linux"))]
+fn set_cloexec(fd: RawFd) {
+    // SAFETY: `fd` was just received and is owned by the caller; F_GETFD/F_SETFD only touch its
+    // descriptor flags. A failure leaves the descriptor usable, just inheritable.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFD);
+        if flags >= 0 {
+            libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+        }
+    }
+}
+
 /// A single Unix-domain socket frame containing a small payload plus optional file descriptors.
 ///
 /// This helper is intentionally transport-generic: callers own the payload schema and the meaning
@@ -365,6 +377,10 @@ unsafe fn collect_fds(
             for index in 0..count {
                 let fd = unsafe { *data.add(index) };
                 fds.push(unsafe { OwnedFd::from_raw_fd(fd) });
+                // Only Linux has `MSG_CMSG_CLOEXEC`; elsewhere mark received descriptors
+                // close-on-exec here so they never leak into spawned processes.
+                #[cfg(not(target_os = "linux"))]
+                set_cloexec(fd);
             }
         }
         cmsg = unsafe { libc::CMSG_NXTHDR(msg, cmsg) };
