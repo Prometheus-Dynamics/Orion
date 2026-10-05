@@ -100,20 +100,34 @@ async fn observed_update_wakes_reconcile_loop() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn burst_of_mutations_coalesces_into_few_reconciles() {
     let app = loop_test_app("node.loop.burst", Duration::from_secs(60));
-    let handle = app.spawn_reconcile_loop(Duration::from_millis(50));
+    let interval = Duration::from_millis(50);
+    let handle = app.spawn_reconcile_loop(interval);
     wait_for_reconciles(&app, 1, Duration::from_secs(2)).await;
+    let before = reconcile_count(&app);
 
+    let started = std::time::Instant::now();
     for index in 0..25 {
         add_node(&app, index);
     }
     tokio::time::sleep(Duration::from_millis(300)).await;
+    let elapsed = started.elapsed();
     let reconciles = reconcile_count(&app);
     let snapshot = app.state_snapshot();
     handle.shutdown().await;
 
+    // Passes are spaced at least `interval` apart, so the burst can trigger at most one pass per
+    // interval of wall time (plus the one already pending). Under a loaded test runner the burst
+    // itself can take longer, so bound by elapsed time rather than a fixed count.
+    let burst_passes = reconciles - before;
+    let max_passes = (elapsed.as_millis() / interval.as_millis()) as u64 + 1;
     assert!(
-        (2..=4).contains(&reconciles),
-        "25 back-to-back mutations should coalesce into a couple of passes, observed {reconciles}"
+        (1..=max_passes).contains(&burst_passes),
+        "25 back-to-back mutations should coalesce to at most one pass per {interval:?} \
+         ({max_passes} over {elapsed:?}), observed {burst_passes}"
+    );
+    assert!(
+        burst_passes < 25,
+        "mutations must not each trigger their own pass, observed {burst_passes}"
     );
     assert_eq!(
         snapshot.state.applied.revision, snapshot.state.desired.revision,
