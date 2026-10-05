@@ -73,6 +73,12 @@ jobs:
           # MCU link gateway, in the IPC-only appliance build and on top of the defaults.
           cargo clippy -p orion-node --no-default-features --features link-gateway --all-targets -- -D warnings
           cargo clippy -p orion-node --features link-gateway --all-targets -- -D warnings
+          # sd_notify + watchdog: alone, in the packaged appliance build (packaging/), and on the defaults.
+          cargo clippy -p orion-node --no-default-features --features systemd-notify --all-targets -- -D warnings
+          cargo clippy -p orion-node --no-default-features --features peer-tcp,systemd-notify --all-targets -- -D warnings
+          cargo clippy -p orion-node --no-default-features --features peer-tcp,discovery-mdns,systemd-notify --all-targets -- -D warnings
+          cargo clippy -p orion-node --no-default-features --features peer-tcp,discovery-mdns,systemd-notify,link-gateway --all-targets -- -D warnings
+          cargo clippy -p orion-node --features systemd-notify --all-targets -- -D warnings
 
       - name: Test IPC-only orion-node build
         run: cargo test -p orion-node --no-default-features
@@ -82,6 +88,11 @@ jobs:
 
       - name: Test orion-node peer discovery build (in-memory multicast, no real mDNS)
         run: cargo test -p orion-node --no-default-features --features peer-tcp,discovery-mdns
+
+      - name: Test orion-node systemd-notify builds (fake NOTIFY_SOCKET)
+        run: |
+          cargo test -p orion-node --no-default-features --features systemd-notify
+          cargo test -p orion-node --no-default-features --features peer-tcp,systemd-notify
 
       - name: Test orion-node link gateway builds
         run: |
@@ -278,6 +289,58 @@ jobs:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
         run: cargo build -p orion-node --features ${{ matrix.feature }} --target aarch64-unknown-linux-gnu
+
+  appliance-aarch64:
+    # The packaged appliance build (packaging/README.md, packaging/gaia/orion-node.toml) for
+    # aarch64-unknown-linux-gnu: type-check without a cross linker, then cross-link it, check that
+    # the ELF segments are 64 KiB aligned (16 KiB / 64 KiB page kernels), and verify the unit.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check the appliance build for aarch64 (no cross linker needed)
+        run: |
+          cargo check -p orion-node --target aarch64-unknown-linux-gnu --no-default-features --features peer-tcp,discovery-mdns,systemd-notify
+          cargo check -p orion-node --target aarch64-unknown-linux-gnu --no-default-features --features peer-tcp,discovery-mdns,systemd-notify,link-gateway
+
+      - name: Install aarch64 cross compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Cross-link the appliance release build and check page alignment
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+        run: |
+          cargo build --release -p orion-node --target aarch64-unknown-linux-gnu --no-default-features --features peer-tcp,discovery-mdns,systemd-notify
+          bin=target/aarch64-unknown-linux-gnu/release/orion-node
+          ls -l "$bin"
+          aligns="$(aarch64-linux-gnu-readelf -lW "$bin" | awk '$1 == "LOAD" { print $NF }')"
+          echo "PT_LOAD alignments: $aligns"
+          test -n "$aligns"
+          for align in $aligns; do
+            if (( align < 65536 )); then
+              echo "error: PT_LOAD aligned to $align; 16 KiB / 64 KiB page kernels need 0x10000" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify the systemd unit
+        run: |
+          cargo build -p orion-node --no-default-features --features systemd-notify
+          sed "s#/usr/bin/orion-node#$PWD/target/debug/orion-node#" packaging/systemd/orion-node.service > "$RUNNER_TEMP/orion-node.service"
+          systemd-analyze verify "$RUNNER_TEMP/orion-node.service"
 
   dependency-audit:
     runs-on: ubuntu-latest

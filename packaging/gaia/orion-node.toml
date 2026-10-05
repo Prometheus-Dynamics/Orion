@@ -1,0 +1,110 @@
+# orion-node as a managed systemd service: Gaia layer (Gaia >= 2.1).
+#
+# Builds orion-node for aarch64-unknown-linux-gnu, installs it as /usr/bin/orion-node, and stages
+# the systemd unit, the default environment file, a systemd-sysusers entry and a preset that
+# enables the unit. An image build imports this file from a pinned Orion checkout:
+#
+#   [[sources]]
+#   id = "orion"                      # this id is required: the artifact below builds from it
+#   kind = "git"
+#   repo = "https://github.com/Prometheus-Dynamics/Orion.git"
+#   rev = "<pinned commit>"
+#
+#   imports = [
+#     ...base layers...,
+#     { source = "orion", path = "packaging/gaia/orion-node.toml" },
+#     ...layers that override orion-node defaults...,
+#   ]
+#
+# For local development use `--set sources.orion.path=/abs/path/to/Orion`.
+#
+# Paths use @self (this file's directory), so the layer works from a git source, a path override,
+# or a vendored copy. Items merge by id and a later layer replaces a whole item, so an image
+# changes a default by redeclaring that id after this import, for example:
+#   - `orion-node`: another feature set (see the link-gateway variant below) or build image;
+#   - `orion-node-env`: its own /etc/default/orion-node.env (keep `dest`, change `src`). Do not
+#     also declare a [[stage.env_sets]] named "orion-node": both write the same file;
+#   - unit changes: prefer a drop-in staged to /etc/systemd/system/orion-node.service.d/*.conf.
+# See packaging/README.md for what the image itself must provide (the `orion` user on read-only
+# root filesystems, systemd, glibc >= 2.34).
+
+gaia_version = ">=2.1.0"
+
+# The rust provider only runs cargo when nested builds are allowed.
+[providers.rust]
+allow_nested_build = true
+
+[[artifacts]]
+id = "orion-node"
+kind = "rust"
+source = "orion"
+package = "orion-node"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+# Appliance build: IPC control plane, orion+tcp peer sync, mDNS discovery, sd_notify + watchdog.
+# No HTTP stack and no TCP/QUIC data-plane transports.
+no_default_features = true
+features = ["peer-tcp", "discovery-mdns", "systemd-notify"]
+# Variant with microcontroller links (serial / SocketCAN), configured by ORION_NODE_LINKS:
+# features = ["peer-tcp", "discovery-mdns", "systemd-notify", "link-gateway"]
+target_name = "orion-node"
+install_name = "orion-node"
+install_class = "binary"
+install_dest_hint = "/usr/bin/orion-node"
+output_path = "${workspace.out_dir}/artifacts/orion-node/orion-node"
+
+# Gaia has no RUSTFLAGS field: the cross linker comes from this image, and the 64 KiB ELF segment
+# alignment (16 KiB / 64 KiB page kernels) from Orion's .cargo/config.toml.
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "orion-aarch64-cross"
+dockerfile = "@self/docker/aarch64-cross.Dockerfile"
+context = "@self/docker"
+
+[[install]]
+id = "install-orion-node"
+artifact = "orion-node"
+dest = "/usr/bin/orion-node"
+replace = true
+mode = 493 # 0755
+
+[[stage.services]]
+id = "orion-node-service"
+name = "orion-node.service"
+unit_path = "@self/../systemd/orion-node.service"
+
+[[stage.files]]
+id = "orion-node-env"
+src = "@self/../systemd/orion-node.env.example"
+dest = "/etc/default/orion-node.env"
+mode = 420 # 0644
+origin = "static-asset"
+
+# Creates the orion user (member of dialout) through systemd-sysusers. Images with a read-only
+# root filesystem must create the user at build time instead: see packaging/README.md.
+[[stage.files]]
+id = "orion-node-sysusers"
+src = "@self/../systemd/orion.sysusers"
+dest = "/usr/lib/sysusers.d/orion.conf"
+mode = 420
+origin = "static-asset"
+
+# Gaia stages units but does not enable them; images that run `systemctl preset-all` (Buildroot
+# does) enable orion-node.service through this preset.
+[[stage.files]]
+id = "orion-node-preset"
+src = "@self/../systemd/orion-node.preset"
+dest = "/usr/lib/systemd/system-preset/80-orion-node.preset"
+mode = 420
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+
+# Once any layer lists feed ids, only listed ids are fed: name every item above.
+[image.feed]
+install_entries = ["install-orion-node"]
+stage_files = ["orion-node-env", "orion-node-sysusers", "orion-node-preset"]
+stage_services = ["orion-node-service"]

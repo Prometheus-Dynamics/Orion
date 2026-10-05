@@ -30,6 +30,19 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 - [x] Opt-in `alloc-jemalloc` / `alloc-mimalloc` features (measured; glibc + `MALLOC_ARENA_MAX=2` stays
       the recommendation).
 
+### Packaging (owned by Orion)
+
+- [x] `systemd-notify` node feature: `READY=1` after every listener, `STATUS=`, `STOPPING=1`, and a
+      watchdog tied to reconcile-loop progress; no libsystemd. `orion-node` handles `SIGTERM`.
+- [x] `packaging/`: systemd unit, environment file (appliance profile), sysusers entry, Buildroot
+      users table, preset, and the importable Gaia layer `packaging/gaia/orion-node.toml`
+      ([packaging/README.md](packaging/README.md)). Images such as HeliOS import the layer instead of
+      carrying their own orion-node artifact, unit and env file (HeliOS side tracked below).
+- [x] aarch64 release link verified locally (Fedora aarch64 glibc sysroot, LLVM libunwind standing
+      in for `libgcc_s`): 3.07 MiB stripped appliance build, runs under qemu-user, 64 KiB `PT_LOAD`
+      alignment pinned by `.cargo/config.toml` for 16 KiB page kernels. CI cross-links it and checks
+      the alignment (`appliance-aarch64` job).
+
 ### Compatibility and CI
 
 - [x] Control-protocol version preamble on IPC and HTTP (`CONTROL_PROTOCOL_VERSION = 2`) with clear
@@ -110,13 +123,16 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 - [ ] Check transparent huge pages on the device (prime suspect for the anonymous-memory gap):
       `/sys/kernel/mm/transparent_hugepage/enabled`, `getconf PAGESIZE`, and `AnonHugePages` in
       `/proc/$(pidof orion-node)/smaps_rollup`. If large, set THP to `madvise` in the Gaia image.
-- [ ] Verify an aarch64 release link locally (missing aarch64 `libgcc_s` in the installed sysroot) or
-      via `cross`.
+- [ ] Install the packaged service on the CM5 image (16 KiB pages) and confirm `READY=1`, watchdog
+      pings and a watchdog restart (`kill -STOP $(pidof orion-node)`) under the real systemd.
 
 ### CI
 
 - [ ] Watch the first GitHub run of the new jobs: node feature matrix, IPC-only tests, allocator
-      features with the aarch64 cross-build, appliance soak.
+      features with the aarch64 cross-build, appliance soak, `appliance-aarch64` (cross-link,
+      alignment check, `systemd-analyze verify`).
+- [ ] Build the Gaia layer's docker image (`packaging/gaia/docker/aarch64-cross.Dockerfile`) once in
+      a real Gaia run; it was only validated with `gaia validate` / `gaia plan`, not built.
 - [ ] Timing-sensitive tests (`control_queries_remain_fast_*`,
       `concurrent_peer_sync_*_remains_responsive`, `audit_log_drops_newest_when_queue_is_full`) can
       fail on heavily loaded machines; relax or restructure if they flake in CI.
@@ -129,8 +145,12 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 
 - [ ] Pin `orion` by `rev`/tag for both the backend crates and the Gaia `orion-node` artifact (same rev:
       the control-protocol layout must match).
-- [ ] Build `orion-node` for the image with `--no-default-features`; set `ORION_NODE_HTTP_ADDR=off`,
-      `MALLOC_ARENA_MAX=2`, worker threads, and lower history/queue caps in the systemd unit.
+- [ ] Import `packaging/gaia/orion-node.toml` from the pinned Orion source (source id `orion`) and drop
+      the HeliOS-side `orion-node` artifact, install, unit and env file; keep device-specific
+      settings in a later layer (its own `orion-node-env` file or unit drop-ins). Create the `orion`
+      user at build time (squashfs root: add `packaging/buildroot/orion-users.table` to
+      `BR2_ROOTFS_USERS_TABLES`) or override `User=root` in a drop-in, and give IPC clients
+      `Group=orion` with `ORION_NODE_LOCAL_AUTH=same-user-or-group`.
 - [ ] Replace hand-rolled frame-lease servers with `UnixFdLatestServer`/`UnixFdLatestClient`, and the
       `shm://` metadata file (per-frame write) with a typed custom endpoint.
 - [ ] Use `watch_assigned_workloads` in the engine instead of its own retry loop.

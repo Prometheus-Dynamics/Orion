@@ -65,6 +65,35 @@ cargo build -p orion-node --release --no-default-features --features transport-q
 Do not publish a release binary built with a reduced transport profile unless the artifact name or
 release notes make that limitation explicit.
 
+### Packaged appliance build
+
+The systemd packaging (`packaging/README.md`, `packaging/gaia/orion-node.toml`) ships a separate
+appliance profile for Linux images:
+
+```bash
+cargo build -p orion-node --release --target aarch64-unknown-linux-gnu \
+  --no-default-features --features peer-tcp,discovery-mdns,systemd-notify
+```
+
+Before tagging a release that images will pin, check:
+
+- `cargo test -p orion-node --no-default-features --features peer-tcp,systemd-notify` passes. The
+  `systemd_notify` integration test runs the binary against a fake `NOTIFY_SOCKET` (`READY=1`
+  only after the listeners accept, watchdog pings, `STOPPING=1` on timer and `SIGTERM` shutdown,
+  `WATCHDOG_PID` handling) and the `systemd::tests` unit tests cover abstract sockets and a
+  wedged reconcile loop.
+- The aarch64 build links and every `PT_LOAD` segment is aligned to `0x10000`
+  (`readelf -lW orion-node | grep LOAD`), so it loads on 16 KiB and 64 KiB page kernels. The CI
+  `appliance-aarch64` job checks both and runs `systemd-analyze verify` on the unit.
+- On a device or VM with systemd: `systemctl start orion-node` reaches `active (running)` with the
+  `serving ...` status line, `systemctl show -p WatchdogTimestamp orion-node` advances, and
+  `kill -STOP $(pidof orion-node)` leads to a watchdog restart within `WatchdogSec=`.
+- `gaia validate` of an image build that imports `packaging/gaia/orion-node.toml` reports no errors.
+
+Without a device, `qemu-aarch64-static -L <aarch64 sysroot>` runs the aarch64 binary (with
+`ORION_NODE_HTTP_ADDR=off`, IPC sockets under a short `/tmp` path, and
+`ORION_NODE_SHUTDOWN_AFTER_INIT_MS`); memory numbers from qemu-user include the emulator itself.
+
 ## Package And Publish Validation
 
 Orion crates are versioned together and publish in dependency order when targeting crates.io. CI

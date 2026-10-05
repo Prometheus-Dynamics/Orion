@@ -71,6 +71,7 @@ Heavier Docker, perf, and soak suites are intentionally separate and are documen
 - [testing/README.md](testing/README.md): local and CI validation entry points
 - [scripts/repo-clean.sh](scripts/repo-clean.sh): pre-commit cleanup and verification entry point
 - [docs/node-env.md](docs/node-env.md): runtime environment contract
+- [packaging/README.md](packaging/README.md): run `orion-node` as a systemd service on Linux images (unit, env file, Gaia layer)
 - [docs/release-validation.md](docs/release-validation.md): release validation checklist
 - [docs/observability.md](docs/observability.md): health, readiness, and observability notes
 - [docs/logging.md](docs/logging.md): runtime logging behavior

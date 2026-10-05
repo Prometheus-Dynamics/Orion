@@ -1,0 +1,5 @@
+# systemd-sysusers(8) entries for orion-node.service. Install as /usr/lib/sysusers.d/orion.conf.
+# The orion system user and group own /var/lib/orion and /run/orion; membership in dialout gives
+# access to serial MCU links. `m` also creates dialout if the image has no such group.
+u orion - "Orion node" /var/lib/orion
+m orion dialout

@@ -31,6 +31,8 @@ mod peer_tcp;
 mod service;
 mod storage;
 mod storage_io;
+#[cfg(all(feature = "systemd-notify", unix))]
+pub mod systemd;
 mod transport_security;
 
 pub mod control_plane {

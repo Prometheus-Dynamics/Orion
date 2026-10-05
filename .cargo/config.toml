@@ -1,0 +1,8 @@
+# arm64 Linux kernels run with 4 KiB, 16 KiB (for example Raspberry Pi 5 / CM5 kernels) or 64 KiB
+# pages, and the kernel refuses to map an ELF whose PT_LOAD segments are aligned to less than its
+# page size. Align to 64 KiB so one aarch64 binary runs on all three. GNU ld and LLD already
+# default to this for aarch64; this pins it for toolchains configured otherwise. Note that a
+# RUSTFLAGS or CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS environment variable replaces
+# these flags; carry them over when you set one. See packaging/README.md.
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-z", "-C", "link-arg=max-page-size=65536"]

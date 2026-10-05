@@ -113,6 +113,41 @@ fn log_shutdown_error(
     warn!(node = %node_id, component, error = %error, "graceful shutdown reported an error");
 }
 
+/// Waits for the configured post-init delay (`ORION_NODE_SHUTDOWN_AFTER_INIT_MS`) or, without one,
+/// for SIGINT or (on Unix) SIGTERM, the signal systemd and container runtimes stop services with.
+async fn wait_for_shutdown(
+    node_id: &orion_node::NodeId,
+    shutdown_after_init: Option<std::time::Duration>,
+) -> Result<(), orion_node::NodeError> {
+    if let Some(shutdown_after_init) = shutdown_after_init {
+        info!(
+            node = %node_id,
+            shutdown_after_init_ms = shutdown_after_init.as_millis(),
+            "scheduled automatic shutdown after initialization"
+        );
+        tokio::time::sleep(shutdown_after_init).await;
+        info!(node = %node_id, "shutting down orion-node after initialization delay");
+        return Ok(());
+    }
+    let signal_error = |err: io::Error| orion_node::NodeError::StartupSignalListener {
+        message: err.to_string(),
+    };
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .map_err(signal_error)?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.map_err(signal_error)?,
+            _ = terminate.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await.map_err(signal_error)?;
+    info!(node = %node_id, "received shutdown signal");
+    Ok(())
+}
+
 fn main() -> Result<(), orion_node::NodeError> {
     init_tracing();
     let process = NodeProcessConfig::try_from_env()?;
@@ -287,54 +322,46 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         "orion-node initialized"
     );
 
-    if let Some(shutdown_after_init) = process.shutdown_after_init {
-        info!(
-            node = %snapshot.node_id,
-            shutdown_after_init_ms = shutdown_after_init.as_millis(),
-            "scheduled automatic shutdown after initialization"
-        );
-        tokio::time::sleep(shutdown_after_init).await;
-        info!(node = %snapshot.node_id, "shutting down orion-node after initialization delay");
-        if let Some(discovery) = discovery {
-            discovery.shutdown().await;
+    // Every listener is up: tell systemd (Type=notify) and start petting its watchdog.
+    #[cfg(all(feature = "systemd-notify", unix))]
+    let (notifier, watchdog) = {
+        let notifier = orion_node::systemd::Notifier::from_env().map(std::sync::Arc::new);
+        let watchdog = notifier.as_ref().and_then(|notifier| {
+            notifier.ready(&format!(
+                "serving node={} ipc={} peer_tcp={} http={} links={} peers={}",
+                snapshot.node_id,
+                ipc_socket.display(),
+                peer_tcp,
+                http_addr,
+                links_summary,
+                snapshot.registered_peers,
+            ));
+            let interval = orion_node::systemd::watchdog_interval_from_env()?;
+            info!(
+                node = %snapshot.node_id,
+                watchdog_interval_ms = interval.as_millis(),
+                "systemd watchdog enabled"
+            );
+            Some(orion_node::systemd::spawn_watchdog(
+                notifier.clone(),
+                interval,
+                std::sync::Arc::new(app.clone()),
+            ))
+        });
+        (notifier, watchdog)
+    };
+
+    wait_for_shutdown(&snapshot.node_id, process.shutdown_after_init).await?;
+
+    #[cfg(all(feature = "systemd-notify", unix))]
+    {
+        if let Some(notifier) = notifier {
+            notifier.stopping("shutting down");
         }
-        link_gateway.shutdown().await;
-        reconcile_loop.shutdown().await;
-        clock_facts_loop.shutdown().await;
-        if let Some(peer_sync_loop) = peer_sync_loop {
-            peer_sync_loop.shutdown().await;
+        if let Some(watchdog) = watchdog {
+            watchdog.shutdown().await;
         }
-        if let Err(err) = ipc_server.shutdown().await {
-            log_shutdown_error(&snapshot.node_id, "ipc", &err);
-        }
-        if let Err(err) = ipc_stream_server.shutdown().await {
-            log_shutdown_error(&snapshot.node_id, "ipc_stream", &err);
-        }
-        if let Some((_, http_server)) = http_server
-            && let Err(err) = http_server.shutdown().await
-        {
-            log_shutdown_error(&snapshot.node_id, "http", &err);
-        }
-        if let Some((_, probe_server)) = probe_server
-            && let Err(err) = probe_server.shutdown().await
-        {
-            log_shutdown_error(&snapshot.node_id, "http_probe", &err);
-        }
-        if let Some((_, peer_tcp_server)) = peer_tcp_server
-            && let Err(err) = peer_tcp_server.shutdown().await
-        {
-            log_shutdown_error(&snapshot.node_id, "peer_tcp", &err);
-        }
-        return Ok(());
     }
-
-    tokio::signal::ctrl_c()
-        .await
-        .map_err(|err| orion_node::NodeError::StartupSignalListener {
-            message: err.to_string(),
-        })?;
-    info!(node = %snapshot.node_id, "received shutdown signal");
-
     if let Some(discovery) = discovery {
         discovery.shutdown().await;
     }
