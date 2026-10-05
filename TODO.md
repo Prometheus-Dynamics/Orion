@@ -30,6 +30,19 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 - [x] Opt-in `alloc-jemalloc` / `alloc-mimalloc` features (measured; glibc + `MALLOC_ARENA_MAX=2` stays
       the recommendation).
 
+### Packaging (owned by Orion)
+
+- [x] `systemd-notify` node feature: `READY=1` after every listener, `STATUS=`, `STOPPING=1`, and a
+      watchdog tied to reconcile-loop progress; no libsystemd. `orion-node` handles `SIGTERM`.
+- [x] `packaging/`: systemd unit, environment file (appliance profile), sysusers entry, Buildroot
+      users table, preset, and the importable Gaia layer `packaging/gaia/orion-node.toml`
+      ([packaging/README.md](packaging/README.md)). Images such as HeliOS import the layer instead of
+      carrying their own orion-node artifact, unit and env file (HeliOS side tracked below).
+- [x] aarch64 release link verified locally (Fedora aarch64 glibc sysroot, LLVM libunwind standing
+      in for `libgcc_s`): 3.07 MiB stripped appliance build, runs under qemu-user, 64 KiB `PT_LOAD`
+      alignment pinned by `.cargo/config.toml` for 16 KiB page kernels. CI cross-links it and checks
+      the alignment (`appliance-aarch64` job).
+
 ### Compatibility and CI
 
 - [x] Control-protocol version preamble on IPC and HTTP (`CONTROL_PROTOCOL_VERSION = 2`) with clear
@@ -130,13 +143,16 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 - [ ] Check transparent huge pages on the device (prime suspect for the anonymous-memory gap):
       `/sys/kernel/mm/transparent_hugepage/enabled`, `getconf PAGESIZE`, and `AnonHugePages` in
       `/proc/$(pidof orion-node)/smaps_rollup`. If large, set THP to `madvise` in the Gaia image.
-- [ ] Verify an aarch64 release link locally (missing aarch64 `libgcc_s` in the installed sysroot) or
-      via `cross`.
+- [ ] Install the packaged service on the CM5 image (16 KiB pages) and confirm `READY=1`, watchdog
+      pings and a watchdog restart (`kill -STOP $(pidof orion-node)`) under the real systemd.
 
 ### CI
 
 - [ ] Watch the first GitHub run of the new jobs: node feature matrix, IPC-only tests, allocator
-      features with the aarch64 cross-build, appliance soak.
+      features with the aarch64 cross-build, appliance soak, `appliance-aarch64` (cross-link,
+      alignment check, `systemd-analyze verify`).
+- [ ] Build the Gaia layer's docker image (`packaging/gaia/docker/aarch64-cross.Dockerfile`) once in
+      a real Gaia run; it was only validated with `gaia validate` / `gaia plan`, not built.
 - [ ] Timing-sensitive tests (`control_queries_remain_fast_*`,
       `concurrent_peer_sync_*_remains_responsive`, `audit_log_drops_newest_when_queue_is_full`) can
       fail on heavily loaded machines; relax or restructure if they flake in CI.
@@ -149,8 +165,12 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 
 - [ ] Pin `orion` by `rev`/tag for both the backend crates and the Gaia `orion-node` artifact (same rev:
       the control-protocol layout must match).
-- [ ] Build `orion-node` for the image with `--no-default-features`; set `ORION_NODE_HTTP_ADDR=off`,
-      `MALLOC_ARENA_MAX=2`, worker threads, and lower history/queue caps in the systemd unit.
+- [ ] Import `packaging/gaia/orion-node.toml` from the pinned Orion source (source id `orion`) and drop
+      the HeliOS-side `orion-node` artifact, install, unit and env file; keep device-specific
+      settings in a later layer (its own `orion-node-env` file or unit drop-ins). Create the `orion`
+      user at build time (squashfs root: add `packaging/buildroot/orion-users.table` to
+      `BR2_ROOTFS_USERS_TABLES`) or override `User=root` in a drop-in, and give IPC clients
+      `Group=orion` with `ORION_NODE_LOCAL_AUTH=same-user-or-group`.
 - [ ] Replace hand-rolled frame-lease servers with `UnixFdLatestServer`/`UnixFdLatestClient`, and the
       `shm://` metadata file (per-frame write) with a typed custom endpoint.
 - [ ] Use `watch_assigned_workloads` in the engine instead of its own retry loop.
@@ -212,6 +232,55 @@ none of these are HeliOS-specific features.
         sync stale nodes (last successful sync older than the retention) until they are reset.
 - [x] **Remove `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`.** It is enforced exactly
       like `Exclusive` and only appears in two client examples.
+
+### Decisions (2026-10-05)
+
+- Frame leases stay in the producer (Styx `FrameSocket` + its public lease codec). Orion carries
+  only discovery and typed endpoint records (`ResourceEndpoint::Custom`); `UnixFdLatest*` stays a
+  generic latest-value fd channel without hold/release, because buffer-pool reuse and back-pressure
+  are producer-specific.
+- Orion owns the generic systemd unit and an importable Gaia fragment (`packaging/`); images import
+  it rather than each packaging `orion-node` separately.
+
+### Update / recovery
+
+Design only so far: [docs/update-recovery.md](docs/update-recovery.md). Orion carries update
+intents and progress; the writer (A/B slots, verification, bootloader) is an external device
+manager, which keeps out-of-band paths that never depend on Orion. Milestones in order:
+
+- [ ] **U0 Prerequisites** (parallel work): generic action mechanism (`ActionRequest` /
+      `ActionResult`); host facts with OS / image version on the observed `NodeRecord`.
+- [ ] **U1 Supervision**: feature `systemd` with `READY=1`, `WATCHDOG=1` from the reconcile loop and
+      `STATUS=`; example unit (watchdog, restart limits, `OnFailure=` safe mode); wedged-loop test.
+- [ ] **U2 Safe mode**: `ORION_NODE_SAFE_MODE`; quarantine undecodable or newer-format state instead
+      of failing startup; no workloads, receive-only sync, health reason, `orion_safe_mode` metric.
+- [ ] **U3 Data model**: `UpdateIntentRecord` desired section and `UpdateStatusRecord` in the
+      observed slice (protocol bump, batched with other layout changes); `orionctl get updates`;
+      requester authorization (`ORION_NODE_UPDATE_REQUESTERS`); audit records.
+- [ ] **U4 Delivery and resume**: deliver intents as actions keyed by
+      `(intent, version, generation)`, re-delivery with backoff, immediate persistence of phase
+      transitions, status-lane progress keys, drain integration, fake device manager example and
+      kill-at-every-phase tests.
+- [ ] **U5 External rollout controller**: `RolloutRecord` with waves, `max_unavailable`, health
+      gates and monotonic halt; `orionctl rollout`.
+- [ ] **U6 Cross-version rollouts**: frozen rollout beacon readable across one protocol bump; keep
+      the legacy state-dir copy until commit and use it on downgrade; N / N+1 rollout test.
+- [ ] **U7 Leaderless rollouts** in `orion-cluster`: rendezvous wave order, own-intent writes,
+      convergent halt, property tests.
+- [ ] **U8 MCU firmware over the link**: reserve link kinds `0x20`–`0x2F`; `DeviceInfo`, chunked
+      transfer with CRC and resume (`xfer` feature), A/B trial + confirm or bootloader handoff,
+      `link.release` / `link.attach` actions, simulator test, size budget.
+- [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
+      MCU with an A/B bootloader over UART and CAN.
+
+### Remote operator client (next, after protocol v4)
+
+- [ ] Embeddable remote operator client (`orion-client` `remote` feature or `orion-remote` crate)
+      for desktop/fleet tools: ed25519 operator identity, enrollment (operator approval or shared
+      key), signed `orion+tcp` requests; list/watch node records and host facts, query/watch status
+      lanes, send `ActionRequest` / watch `ActionResult`, optional mDNS discovery. Nodes treat it as
+      an operator principal (no desired-state replica, no placement/liveness role), with
+      per-identity action authorization. First consumer: Atlas (`atlas-driver-orion`).
 
 ### Nice to have
 

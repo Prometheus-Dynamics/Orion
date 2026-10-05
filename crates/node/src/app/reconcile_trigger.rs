@@ -30,6 +30,9 @@ pub(super) struct ReconcileTrigger {
     requested: AtomicU64,
     served: AtomicU64,
     attached_loops: AtomicUsize,
+    /// Passes completed by background loops (successful or failed). A liveness heartbeat: it
+    /// only stops advancing when the loop is wedged or gone.
+    completed_passes: AtomicU64,
     notify: Notify,
 }
 
@@ -76,6 +79,18 @@ impl NodeApp {
     /// bookkeeping.
     pub fn request_reconcile(&self) {
         self.state.reconcile.request();
+    }
+
+    /// Number of passes the background reconcile loop has finished, whether they succeeded or
+    /// failed.
+    ///
+    /// This is a liveness heartbeat for supervisors such as the systemd watchdog: while a loop
+    /// spawned by [`NodeApp::spawn_reconcile_loop`] runs, the value advances at least once per
+    /// backstop interval, and promptly after [`NodeApp::request_reconcile`]. It stops advancing
+    /// when a pass never returns or the loop has stopped. Synchronous [`NodeApp::tick`] calls do
+    /// not count.
+    pub fn reconcile_loop_heartbeat(&self) -> u64 {
+        self.state.reconcile.completed_passes.load(Ordering::SeqCst)
     }
 
     /// Reconciles after a committed local change: defers to the background loop when one is
@@ -139,6 +154,10 @@ impl NodeApp {
                         // Retry after the normal spacing rather than waiting for the backstop.
                         app.request_reconcile();
                     }
+                    app.state
+                        .reconcile
+                        .completed_passes
+                        .fetch_add(1, Ordering::SeqCst);
                     let wait = wait_for_next_pass(
                         &app.state.reconcile,
                         &mut shutdown_rx,

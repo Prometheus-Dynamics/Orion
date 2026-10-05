@@ -1,0 +1,4 @@
+# systemd.preset(5): enables orion-node.service on images that apply presets
+# (`systemctl preset-all`, as Buildroot does at image build time).
+# Install as /usr/lib/systemd/system-preset/80-orion-node.preset.
+enable orion-node.service
