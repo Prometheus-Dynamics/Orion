@@ -1,0 +1,4 @@
+# Buildroot makeusers table for orion-node.service: add this file to BR2_ROOTFS_USERS_TABLES on
+# images whose root filesystem is read-only at runtime (systemd-sysusers cannot add users there).
+# Columns: username uid group gid password home shell groups comment (see Buildroot's makeusers).
+orion -1 orion -1 * - /bin/false dialout Orion node

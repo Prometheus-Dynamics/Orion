@@ -1,0 +1,100 @@
+# orion-node as a managed systemd service.
+#
+# Needs an orion-node built with the `systemd-notify` feature (Type=notify and the watchdog depend
+# on it), installed as /usr/bin/orion-node, and the `orion` system user from orion.sysusers.
+# Configuration goes in /etc/default/orion-node.env (see orion-node.env.example); local changes to
+# this unit belong in drop-ins (`systemctl edit orion-node`, or files in
+# /etc/systemd/system/orion-node.service.d/*.conf), not in an edited copy. See packaging/README.md.
+
+[Unit]
+Description=Orion node
+Documentation=https://github.com/Prometheus-Dynamics/Orion/blob/main/packaging/README.md
+After=network.target
+# Never give up restarting: no start rate limit, so a crash loop keeps retrying with the backoff
+# below instead of leaving the unit in a permanent `failed` state.
+StartLimitIntervalSec=0
+
+[Service]
+# READY=1 is sent once the IPC, peer, link-gateway and discovery listeners are all up, so units
+# ordered After=orion-node.service start against a node that accepts connections.
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/orion-node
+
+# Watchdog: the node pings every WatchdogSec/2, and only while its reconcile loop keeps finishing
+# passes. A pass that hangs for about WatchdogSec/2, or a starved runtime, stops the pings and
+# systemd restarts the node (SIGABRT, then Restart=always). Raise it on slow storage or very large
+# state (state replay happens before READY and is covered by TimeoutStartSec, not this);
+# WatchdogSec=0 in a drop-in disables it.
+WatchdogSec=30s
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+
+Restart=always
+# Exponential restart backoff from 1s to 30s (systemd >= 254; older versions ignore the two Step
+# keys and restart every RestartSec).
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=30s
+
+# Settings. Assignments in the EnvironmentFile override the Environment= defaults below.
+Environment=ORION_NODE_STATE_DIR=/var/lib/orion
+Environment=ORION_NODE_IPC_SOCKET=/run/orion/control.sock
+Environment=ORION_NODE_IPC_STREAM_SOCKET=/run/orion/control-stream.sock
+Environment=ORION_NODE_HTTP_ADDR=off
+# Limit glibc malloc arenas; see docs/node-env.md ("Single-node appliance profile").
+Environment=MALLOC_ARENA_MAX=2
+EnvironmentFile=-/etc/default/orion-node.env
+
+# Identity. A fixed system user (orion.sysusers) rather than DynamicUser=, so IPC clients can be
+# granted access through the `orion` group and the state directory keeps a stable owner.
+# dialout gives access to serial MCU links (/dev/ttyS*, ttyAMA*, ttyUSB*, ttyACM* on most images);
+# SocketCAN needs no group. Add groups with a drop-in, for example `SupplementaryGroups=gpio`
+# (SupplementaryGroups= accumulates across drop-ins; an empty assignment resets it).
+User=orion
+Group=orion
+SupplementaryGroups=dialout
+
+# /var/lib/orion (state) and /run/orion (IPC sockets) are created and owned by systemd. The
+# runtime directory is group-traversable and UMask=0007 makes the sockets group-connectable, so a
+# client service with Group=orion (primary group) can connect when the node runs with
+# ORION_NODE_LOCAL_AUTH=same-user-or-group. With the default `same-user`, clients must run as the
+# orion user.
+StateDirectory=orion
+StateDirectoryMode=0750
+RuntimeDirectory=orion
+RuntimeDirectoryMode=0750
+UMask=0007
+
+# Hardening. Nothing below blocks IPC sockets, the peer/discovery listeners, serial or CAN links.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectProc=invisible
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+# AF_NETLINK: interface enumeration for mDNS discovery. AF_CAN: SocketCAN links.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_CAN
+# adjtimex is read-only here (no CAP_SYS_TIME): the node reports kernel clock sync status. This is
+# also why ProtectClock= is not set; it would deny that read.
+SystemCallFilter=@system-service adjtimex
+SystemCallErrorNumber=EPERM
+# Not set on purpose: PrivateDevices= (hides serial ports), PrivateNetwork=/IPAddressDeny= (peer
+# sync and discovery), PrivateUsers= (breaks the orion group for IPC clients). If the audit log
+# (ORION_NODE_AUDIT_LOG) lives outside /var/lib/orion, add ReadWritePaths= for it.
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target
