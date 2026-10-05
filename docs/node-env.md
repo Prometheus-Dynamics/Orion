@@ -44,7 +44,9 @@ snapshot change, schedules a follow-up pass so in-process integrations keep conv
 
 ### Single-node appliance profile
 
-A standalone node that only serves local IPC clients can shed most of its network surface:
+A standalone node that only serves local IPC clients can shed most of its network surface. The
+settings below are collected in `packaging/systemd/orion-node.env.example`, and "Running under
+systemd" below covers the service side:
 
 - build with `cargo build -p orion-node --release --no-default-features` to get an IPC-only binary. This build drops the HTTP stack (the `transport-http` feature: axum, hyper, reqwest, and rustls), the `orion+tcp` peer transport, and the TCP and QUIC data-plane transports. Add `--features transport-http`, `peer-tcp`, `transport-tcp`, or `transport-quic` to keep any of them.
 - to cluster such appliances without the HTTP stack, build with `--no-default-features --features peer-tcp`, set `ORION_NODE_PEER_ADDR`, and list peers as `node-id=orion+tcp://host:port|<public-key-hex>` (see `docs/peer-sync.md` for the threat model: requests and responses are signed, traffic is not encrypted).
@@ -131,6 +133,52 @@ Stripped `opt-level = "z"` binary sizes were 5.39 MiB for glibc, 5.50 MiB for mi
 These measurements were taken on x86_64, not on the CM5. On the device, compare `RssAnon` and
 `AnonHugePages` with and without `MALLOC_ARENA_MAX=2` and with THP set to `madvise` before you
 switch allocators.
+
+## Running under systemd
+
+The `systemd-notify` cargo feature (off by default, Unix only, no libsystemd dependency) makes
+`orion-node` a `Type=notify` service with a working watchdog. `packaging/systemd/` has the unit,
+the environment file, and the user and preset files that go with it; `packaging/README.md`
+explains how to install them and `packaging/gaia/orion-node.toml` packages them for Gaia images.
+
+```sh
+cargo build -p orion-node --release --no-default-features --features peer-tcp,discovery-mdns,systemd-notify
+```
+
+The node reads the variables systemd sets; it does not need any `ORION_NODE_*` setting for this.
+
+| Variable | Set by | Effect |
+| --- | --- | --- |
+| `NOTIFY_SOCKET` | systemd (`Type=notify`) | Notification socket: an absolute path or an `@abstract` name (Linux). Unset or empty: no notifications. Other forms (for example `vsock:`) are ignored with a warning. |
+| `WATCHDOG_USEC` | systemd (`WatchdogSec=`) | Enables watchdog pings every `WATCHDOG_USEC / 2`. Invalid values are ignored with a warning. |
+| `WATCHDOG_PID` | systemd | When set to another PID than the node's, the node does not ping. |
+
+What the node sends:
+
+- `READY=1` with `STATUS=serving node=... ipc=... peer_tcp=... http=... links=... peers=...`, once
+  state replay is done and every listener accepts connections: IPC and IPC stream sockets, the
+  HTTP and probe listeners, the `orion+tcp` peer listener, the link gateway, and mDNS discovery.
+  Units ordered `After=orion-node.service` therefore start against a node that answers.
+- `WATCHDOG=1` every `WATCHDOG_USEC / 2`, but only while the node is live. Liveness is the
+  background reconcile loop finishing passes (`NodeApp::reconcile_loop_heartbeat()`). At every
+  ping interval the node checks that the loop completed a pass since the previous check, pings if
+  it did, and then asks the loop for another pass (`NodeApp::request_reconcile()`), so an idle
+  node still proves liveness without waiting for the reconcile backstop. A pass that never
+  returns, a loop that stopped, or a runtime too starved to run the check stops the pings; the
+  status line then reads `reconcile loop stalled; withholding watchdog pings`, and systemd kills
+  and restarts the node once `WatchdogSec=` has passed since the last ping. Pings resume if the
+  loop recovers first. The check costs at most one extra reconcile pass per ping interval.
+- `STOPPING=1` when shutdown starts (`SIGTERM`, `SIGINT`, or `ORION_NODE_SHUTDOWN_AFTER_INIT_MS`),
+  before the listeners close.
+
+`orion-node` handles `SIGTERM` (the signal systemd and container runtimes stop services with) like
+`SIGINT` in every build: it stops the loops, flushes coalesced observed state, and closes the
+listeners before it exits.
+
+Tuning `WatchdogSec=` (default `30s` in the unit): a reconcile pass must complete within about
+half of it. Raise it on slow storage or very large desired state, or set `WatchdogSec=0` in a
+drop-in to disable the watchdog. Start-up (state replay) is not covered by the watchdog but by
+`TimeoutStartSec=` (`120s` in the unit).
 
 ## Peer and Auth Controls
 
