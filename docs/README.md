@@ -14,6 +14,7 @@ This directory holds repository-level documentation for the Orion workspace.
 - [public-api.md](public-api.md): preferred constructors and compatibility shims
 - [protocol-compatibility.md](protocol-compatibility.md): control-protocol wire version, IPC preamble / HTTP header handshake, and how to bump it
 - [placement.md](placement.md): node labels, leaderless workload placement, and cross-node binding (leases)
+- [update-recovery.md](update-recovery.md): design (not implemented) for software update intents, progress, staged rollouts, rollback, and recovery paths that never depend on Orion
 - [link-protocol.md](link-protocol.md): MCU link protocol (UART/CAN framing, link messages, device bring-up) for no_std devices
 
 ## Where To Start
