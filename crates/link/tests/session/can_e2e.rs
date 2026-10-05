@@ -16,10 +16,7 @@ fn host_state(bus: &CanBus, address: u32) -> Option<Vec<orion_link::message::Res
 
 fn last_leases(bus: &CanBus, address: u32) -> Option<Vec<orion_link::message::LeaseRecord>> {
     let node = bus.nodes.iter().find(|n| n.address == address)?;
-    node.events.iter().rev().find_map(|(_, e)| match e {
-        DeviceEvent::Leases(l) => Some(l.clone()),
-        _ => None,
-    })
+    node.lease_sets.last().cloned()
 }
 
 fn publish(bus: &mut CanBus, address: u32, generation: u64) {
@@ -146,14 +143,11 @@ fn several_devices_share_one_bus() {
     }));
     // Every device only ever saw its own leases.
     for node in &bus.nodes {
-        for (_, event) in &node.events {
-            if let DeviceEvent::Leases(set) = event {
-                assert!(
-                    set.is_empty()
-                        || *set
-                            == leases(&format!("dev-{}", node.address), u64::from(node.address))
-                );
-            }
+        for set in &node.lease_sets {
+            assert!(
+                set.is_empty()
+                    || *set == leases(&format!("dev-{}", node.address), u64::from(node.address))
+            );
         }
     }
 

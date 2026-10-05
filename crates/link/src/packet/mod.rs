@@ -14,7 +14,7 @@ use core::fmt;
 
 pub use ids::CanLinkIds;
 pub use reassemble::{PacketStats, Reassembler};
-#[cfg(feature = "alloc")]
+#[cfg(feature = "device")]
 pub(crate) use segment::SegmenterState;
 pub use segment::{Segment, Segmenter};
 

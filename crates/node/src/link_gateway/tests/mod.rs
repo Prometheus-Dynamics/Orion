@@ -88,8 +88,8 @@ pub(super) async fn wait_until(timeout: Duration, mut condition: impl FnMut() ->
     }
 }
 
-pub(super) fn fast_device(name: &str) -> orion_link::device::DeviceConfig {
-    let mut config = orion_link::device::DeviceConfig::provider(name);
+pub(super) fn fast_device(name: &str) -> orion_link::device::DeviceConfig<String> {
+    let mut config = orion_link::device::DeviceConfig::provider(name.to_owned());
     config.hello_retry_min_ms = 20;
     config.hello_retry_max_ms = 200;
     config.reject_retry_min_ms = 200;

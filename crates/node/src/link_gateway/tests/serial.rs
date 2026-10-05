@@ -78,7 +78,7 @@ fn write_master(fd: &OwnedFd, mut bytes: &[u8]) {
 
 /// A simulated MCU on the master side of a pty.
 pub(crate) struct SimDevice {
-    pub(crate) device: Arc<Mutex<StreamDevice<512, 512>>>,
+    pub(crate) device: Arc<Mutex<StreamDevice<512, 512, String>>>,
     pub(crate) events: Arc<Mutex<Vec<DeviceEvent>>>,
     /// While set, the "cable" is pulled: nothing is sent or received.
     pub(crate) unplugged: Arc<AtomicBool>,
@@ -87,7 +87,7 @@ pub(crate) struct SimDevice {
 
 impl SimDevice {
     pub(crate) fn start(name: &str, pty: Pty) -> Self {
-        let device = Arc::new(Mutex::new(StreamDevice::<512, 512>::new(
+        let device = Arc::new(Mutex::new(StreamDevice::<512, 512, String>::new(
             fast_device(name),
             Stream,
         )));
@@ -152,12 +152,8 @@ impl SimDevice {
         self.events
             .lock()
             .expect("events lock")
-            .iter()
-            .rev()
-            .find_map(|event| match event {
-                DeviceEvent::Leases(leases) => Some(leases.clone()),
-                _ => None,
-            })
+            .contains(&DeviceEvent::LeasesChanged)
+            .then(|| self.device.lock().expect("device lock").lease_records())
     }
 
     pub(crate) fn saw(&self, predicate: impl Fn(&DeviceEvent) -> bool) -> bool {

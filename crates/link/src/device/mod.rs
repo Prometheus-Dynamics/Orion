@@ -1,9 +1,9 @@
-//! Sans-IO device session (feature `alloc`, `no_std`).
+//! Sans-IO device session (feature `device`): `no_std`, no allocator, fixed buffers only.
 //!
 //! [`DeviceSession`] runs the device side of the link protocol: it sends `Hello` until the host
 //! answers `Welcome`, publishes provider snapshots reliably, pings on the negotiated heartbeat,
-//! notices when the host goes away, and reports leases. It never performs I/O and never reads a
-//! clock. A port does three things in its main loop:
+//! notices when the host goes away, and reports lease changes. It never performs I/O and never
+//! reads a clock. A port does three things in its main loop:
 //!
 //! 1. feed received bytes ([`DeviceSession::receive`]) or CAN frame data
 //!    ([`DeviceSession::receive_segment`]); this is clock-free, so it may run in an RX interrupt;
@@ -13,19 +13,28 @@
 //!    segments) hands out.
 //!
 //! ```
+//! use orion_link::Stream;
 //! use orion_link::device::{DeviceConfig, DeviceEvent, StreamDevice};
-//! use orion_link::message::{NodeId, ProviderRecord};
+//! use orion_link::wire::{Health, ProviderView, ResourceView};
 //!
-//! let mut device = StreamDevice::<256, 256>::new(DeviceConfig::provider("imu-board"), Default::default());
-//! let provider = ProviderRecord::builder("provider.imu-board", NodeId::new("pending")).build();
-//! device.publish_provider_state(&provider, &[]).unwrap();
+//! // The snapshot can live in flash: views are `const`.
+//! const PROVIDER: ProviderView<'static> =
+//!     ProviderView::new("provider.imu-board", "unassigned").with_resource_types(&["imu.sample_source"]);
+//! const RESOURCES: [ResourceView<'static>; 1] =
+//!     [ResourceView::new("imu-board.imu-0", "imu.sample_source", "provider.imu-board")
+//!         .with_health(Health::Healthy)];
+//!
+//! let mut device = StreamDevice::<128, 128>::new(DeviceConfig::provider("imu-board"), Stream);
+//! device.publish_provider_state(&PROVIDER, &RESOURCES).unwrap();
 //!
 //! let mut uart_tx = [0u8; 64];
 //! for now_ms in 0..3 {
 //!     // device.receive(&bytes_from_uart);
 //!     device.poll(now_ms);
 //!     while let Some(event) = device.next_event() {
-//!         if let DeviceEvent::Leases(leases) = event { /* apply */ let _ = leases; }
+//!         if event == DeviceEvent::LeasesChanged {
+//!             for lease in device.leases() { /* start or stop work */ let _ = lease.resource_id; }
+//!         }
 //!     }
 //!     let n = device.transmit(&mut uart_tx);
 //!     // uart.write_all(&uart_tx[..n]);
@@ -33,33 +42,44 @@
 //! }
 //! ```
 //!
-//! Memory is fixed: `RX` bytes of receive buffer, two `TX`-byte buffers (control frames and the
-//! encoded latest snapshot), and a 4-slot event queue. The only heap allocations are decoded
-//! message bodies (the node id in `Welcome`, lease sets), the device name, and the pending
-//! status batch (if [`DeviceSession::publish_status`] is used).
+//! Memory is fixed (`2 * RX + 2 * TX` plus about 350 bytes on 32-bit targets): the `RX`-byte
+//! receive decoder, an `RX`-byte copy of the current lease set (which also holds the outgoing
+//! `Hello` outside a session), two `TX`-byte buffers (the encoded latest snapshot and the newest
+//! status batch), an 18-byte ping/pong buffer, the node id ([`NODE_ID_CAPACITY`] bytes), a 4-slot
+//! event queue, counters, and timers. Nothing allocates, panics, or formats. With feature
+//! `alloc`, the same session also accepts the full Orion records (`ProviderRecord`,
+//! `ResourceRecord`, `StatusEntry`) and decodes the lease set into `LeaseRecord`s
+//! (`DeviceSession::lease_records`).
 
 mod core;
 mod events;
 
-use alloc::string::String;
-
 pub use events::{DeviceEvent, EVENT_CAPACITY};
 
 use self::core::DeviceCore;
-use crate::message::{NodeId, ProviderRecord, ResourceRecord, Roles, StatusEntry};
 use crate::packet::Segment;
 use crate::transport::{self, Packet, Stream, Transport};
+use crate::wire::{Leases, ProviderBody, ProviderStateView, ResourceBody, Roles, StatusBody};
+
+/// Longest node id kept from `Welcome` (longer ones are not reported by
+/// [`DeviceSession::node_id`]; the session works the same).
+pub const NODE_ID_CAPACITY: usize = 32;
 
 /// A device session over a COBS byte stream.
-pub type StreamDevice<const RX: usize, const TX: usize> = DeviceSession<Stream, RX, TX>;
+pub type StreamDevice<const RX: usize, const TX: usize, N = &'static str> =
+    DeviceSession<Stream, RX, TX, N>;
 /// A device session over classic CAN or CAN FD.
-pub type CanDevice<const RX: usize, const TX: usize> = DeviceSession<Packet, RX, TX>;
+pub type CanDevice<const RX: usize, const TX: usize, N = &'static str> =
+    DeviceSession<Packet, RX, TX, N>;
 
 /// Device identity and timing. Timing defaults suit links from 9600 baud UART to CAN FD.
+///
+/// `N` holds the device name: `&'static str` by default, any `AsRef<str>` (for example a
+/// `String` with `alloc`, or a fixed inline buffer filled from a serial number).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeviceConfig {
+pub struct DeviceConfig<N = &'static str> {
     /// Stable name announced in `Hello` (the host may allowlist names).
-    pub device_name: String,
+    pub device_name: N,
     /// Announced roles.
     pub roles: Roles,
     /// First `Hello` retry interval; doubles per attempt up to `hello_retry_max_ms`.
@@ -80,11 +100,11 @@ pub struct DeviceConfig {
     pub status_min_interval_ms: u32,
 }
 
-impl DeviceConfig {
+impl<N> DeviceConfig<N> {
     /// A provider device with default timing.
-    pub fn provider(device_name: impl Into<String>) -> Self {
+    pub const fn provider(device_name: N) -> Self {
         Self {
-            device_name: device_name.into(),
+            device_name,
             roles: Roles::PROVIDER,
             hello_retry_min_ms: 250,
             hello_retry_max_ms: 4_000,
@@ -108,8 +128,8 @@ pub enum LinkState {
     Connected,
 }
 
-/// Why [`DeviceSession::publish_provider_state`] failed. The previous snapshot is kept unless
-/// stated otherwise.
+/// Why a publish failed. The previous snapshot (or status batch) is kept. No `Display` outside
+/// `std`, so the device path links no formatting code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PublishError {
@@ -120,21 +140,16 @@ pub enum PublishError {
         /// Current limit.
         max_frame: usize,
     },
-    /// The records could not be encoded (the previous snapshot may be lost).
-    Encode,
 }
 
+#[cfg(feature = "std")]
 impl ::core::fmt::Display for PublishError {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         match self {
             Self::TooLarge {
                 frame_len,
                 max_frame,
-            } => write!(
-                f,
-                "provider snapshot needs {frame_len} bytes, limit is {max_frame}"
-            ),
-            Self::Encode => f.write_str("provider snapshot could not be encoded"),
+            } => write!(f, "frame needs {frame_len} bytes, limit is {max_frame}"),
         }
     }
 }
@@ -158,7 +173,7 @@ pub struct DeviceStats {
     pub encode_errors: u32,
     /// Snapshot retransmissions.
     pub state_retransmits: u32,
-    /// Snapshot transmissions cut short by a newer publish.
+    /// Snapshot or status transmissions cut short by a newer publish.
     pub aborted_frames: u32,
     /// Sessions established.
     pub connects: u32,
@@ -179,23 +194,28 @@ pub struct DeviceStats {
 /// The device side of a link session. See the [module docs](self).
 ///
 /// `T` is [`Stream`] or [`Packet`]; `RX` bounds received frames and `TX` bounds sent frames (both
-/// header + payload + CRC). The device announces `min(RX, TX)` as its `max_frame`.
-pub struct DeviceSession<T: Transport, const RX: usize, const TX: usize> {
+/// header + payload + CRC); `N` holds the device name. The device announces `min(RX, TX)` as its
+/// `max_frame`.
+pub struct DeviceSession<T: Transport, const RX: usize, const TX: usize, N = &'static str> {
     transport: T,
     rx: T::Decoder<RX>,
     cursor: T::Cursor,
-    core: DeviceCore<TX>,
+    core: DeviceCore<N, RX, TX>,
 }
 
-impl<T: Transport, const RX: usize, const TX: usize> DeviceSession<T, RX, TX> {
+impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<T, RX, TX, N> {
     /// A new session, initially [`LinkState::Connecting`]. Nothing is sent before the first
     /// [`DeviceSession::poll`].
-    pub fn new(config: DeviceConfig, transport: T) -> Self {
+    ///
+    /// Always inlined, so `slot.write(DeviceSession::new(..))` into a static `MaybeUninit`
+    /// builds the session in place rather than on the stack.
+    #[inline(always)]
+    pub fn new(config: DeviceConfig<N>, transport: T) -> Self {
         Self {
             transport,
             rx: T::Decoder::<RX>::default(),
             cursor: T::Cursor::default(),
-            core: DeviceCore::new(config, RX),
+            core: DeviceCore::new(config),
         }
     }
 
@@ -210,43 +230,64 @@ impl<T: Transport, const RX: usize, const TX: usize> DeviceSession<T, RX, TX> {
         self.core.next_event()
     }
 
-    /// Replaces the provider snapshot. It is encoded immediately into the snapshot buffer (the
-    /// records can be dropped afterwards), sent as soon as connected, retransmitted until the
-    /// host acknowledges it, and re-sent automatically after every reconnect. Only the newest
-    /// snapshot is kept; if an older one is mid-transmission, that transmission is aborted.
+    /// Replaces the provider snapshot: [`crate::wire::ProviderView`] and
+    /// [`crate::wire::ResourceView`]s (or, with `alloc`, `ProviderRecord` and `ResourceRecord`s).
+    /// It is encoded immediately into the snapshot buffer (the inputs can be dropped afterwards),
+    /// sent as soon as connected, retransmitted until the host acknowledges it, and re-sent
+    /// automatically after every reconnect. Only the newest snapshot is kept; if an older one is
+    /// mid-transmission, that transmission is aborted.
     ///
     /// # Errors
     ///
     /// [`PublishError::TooLarge`] if the frame exceeds `TX` or the negotiated frame size.
-    pub fn publish_provider_state(
+    pub fn publish_provider_state<P, R>(
         &mut self,
-        provider: &ProviderRecord,
-        resources: &[ResourceRecord],
-    ) -> Result<(), PublishError> {
-        if self.core.publish(provider, resources)? {
+        provider: &P,
+        resources: &[R],
+    ) -> Result<(), PublishError>
+    where
+        P: ProviderBody + ?Sized,
+        R: ResourceBody,
+    {
+        let body = ProviderStateView {
+            provider,
+            resources,
+        };
+        if self.core.publish(&body)? {
             self.cursor = T::Cursor::default();
         }
         Ok(())
     }
 
-    /// Publishes volatile status values (the node files them under this device's provider).
+    /// Publishes volatile status values ([`crate::wire::StatusView`]s, or `StatusEntry`s with
+    /// `alloc`); the node files them under this device's provider.
     ///
-    /// Fire-and-forget: nothing is acknowledged or retransmitted. Only the newest batch is kept;
-    /// it is sent once connected, at most every `status_min_interval_ms`, so publishing faster
-    /// than that (or while disconnected) simply replaces the pending batch. Publish every key
-    /// that should stay current in each batch; the node keeps each value for its TTL.
+    /// Fire-and-forget: nothing is acknowledged or retransmitted. Only the newest batch is kept
+    /// (encoded at once into the status buffer); it is sent once connected, at most every
+    /// `status_min_interval_ms`, so publishing faster than that (or while disconnected) simply
+    /// replaces the pending batch. Publish every key that should stay current in each batch; the
+    /// node keeps each value for its TTL.
     ///
     /// # Errors
     ///
     /// [`PublishError::TooLarge`] if the frame exceeds `TX` or the negotiated frame size (the
-    /// pending batch is kept), [`PublishError::Encode`] if the entries cannot be encoded.
-    pub fn publish_status(&mut self, entries: &[StatusEntry]) -> Result<(), PublishError> {
-        self.core.publish_status(entries)
+    /// pending batch is kept).
+    pub fn publish_status<S: StatusBody>(&mut self, entries: &[S]) -> Result<(), PublishError> {
+        if self.core.publish_status(&entries)? {
+            self.cursor = T::Cursor::default();
+        }
+        Ok(())
     }
 
     /// Whether a status batch is waiting to be sent.
     pub fn status_pending(&self) -> bool {
         self.core.status_pending()
+    }
+
+    /// The current lease set (empty when not connected or before the host sent one). Strings
+    /// borrow from the session.
+    pub fn leases(&self) -> Leases<'_> {
+        self.core.leases()
     }
 
     /// Connection state.
@@ -259,8 +300,8 @@ impl<T: Transport, const RX: usize, const TX: usize> DeviceSession<T, RX, TX> {
         self.link_state() == LinkState::Connected
     }
 
-    /// The host node, while connected.
-    pub fn node_id(&self) -> Option<&NodeId> {
+    /// The host node, while connected (`None` if its id is longer than [`NODE_ID_CAPACITY`]).
+    pub fn node_id(&self) -> Option<&str> {
         self.core.node_id()
     }
 
@@ -281,7 +322,7 @@ impl<T: Transport, const RX: usize, const TX: usize> DeviceSession<T, RX, TX> {
     }
 
     /// The configuration.
-    pub fn config(&self) -> &DeviceConfig {
+    pub fn config(&self) -> &DeviceConfig<N> {
         self.core.config()
     }
 
@@ -301,7 +342,15 @@ impl<T: Transport, const RX: usize, const TX: usize> DeviceSession<T, RX, TX> {
     }
 }
 
-impl<const RX: usize, const TX: usize> DeviceSession<Stream, RX, TX> {
+#[cfg(feature = "alloc")]
+impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<T, RX, TX, N> {
+    /// The current lease set as `LeaseRecord`s (empty when there is none). Allocates.
+    pub fn lease_records(&self) -> alloc::vec::Vec<crate::message::LeaseRecord> {
+        crate::message::decode_leases(self.core.leases_payload()).unwrap_or_default()
+    }
+}
+
+impl<const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<Stream, RX, TX, N> {
     /// Feeds received stream bytes, in chunks of any size (one byte from an RX interrupt is
     /// fine). Corrupt frames are dropped and counted by the decoder. Clock-free.
     pub fn receive(&mut self, bytes: &[u8]) {
@@ -343,7 +392,7 @@ impl<const RX: usize, const TX: usize> DeviceSession<Stream, RX, TX> {
     }
 }
 
-impl<const RX: usize, const TX: usize> DeviceSession<Packet, RX, TX> {
+impl<const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<Packet, RX, TX, N> {
     /// Feeds the data of one received CAN frame. The caller filters by identifier (the link's
     /// host→device id) and skips remote frames. Clock-free.
     pub fn receive_segment(&mut self, data: &[u8]) {
@@ -369,6 +418,27 @@ impl<const RX: usize, const TX: usize> DeviceSession<Packet, RX, TX> {
         self.segment(true)
     }
 
+    /// Writes the data of the next segment into `out` and returns its length (0 when idle). Send
+    /// it as one CAN frame with the link's device→host identifier. `out` must hold a full segment
+    /// (8 bytes for classic CAN, the MTU for CAN FD; 64 always suffices). Equivalent to
+    /// [`DeviceSession::next_segment`] without building a [`Segment`] value, which saves a copy
+    /// (and the `memcpy` routine) on small cores.
+    pub fn transmit_segment(&mut self, out: &mut [u8]) -> usize {
+        let mtu = self.transport.mtu;
+        let Some(frame) = self.core.next_frame() else {
+            return 0;
+        };
+        match transport::segment_into(frame, mtu, &mut self.cursor, out) {
+            Some((len, done)) => {
+                if done {
+                    self.core.frame_sent();
+                }
+                len
+            }
+            None => 0,
+        }
+    }
+
     fn segment(&mut self, commit: bool) -> Option<Segment> {
         let mtu = self.transport.mtu;
         let frame = self.core.next_frame()?;
@@ -389,7 +459,7 @@ impl<const RX: usize, const TX: usize> DeviceSession<Packet, RX, TX> {
 }
 
 #[cfg(feature = "embedded-can")]
-impl<const RX: usize, const TX: usize> DeviceSession<Packet, RX, TX> {
+impl<const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<Packet, RX, TX, N> {
     /// Feeds a received [`embedded_can::Frame`] if it carries `ids.host_to_device`; other
     /// identifiers and remote frames are ignored. Returns whether the frame was for this link.
     pub fn receive_can_frame<F: embedded_can::Frame>(

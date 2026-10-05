@@ -172,7 +172,7 @@ pub fn encode(header: FrameHeader, payload: &[u8], out: &mut [u8]) -> Result<usi
                 needed: len,
                 available,
             })?;
-    body.copy_from_slice(payload);
+    copy_prefix(body, payload);
     encode_in_place(header, payload.len(), out)
 }
 
@@ -194,16 +194,25 @@ pub fn encode_in_place(
         needed: len,
         available,
     };
-    if payload_len > usize::MAX - FRAME_OVERHEAD || len > available {
+    if payload_len > usize::MAX - FRAME_OVERHEAD {
         return Err(too_small);
     }
-    let (body, rest) = buf.split_at_mut(len - CRC_LEN);
-    let (head, _) = body.split_at_mut(HEADER_LEN);
-    head.copy_from_slice(&header.to_bytes());
-    let crc = crc32c(body).to_le_bytes();
-    let trailer = rest.get_mut(..CRC_LEN).ok_or(too_small)?;
-    trailer.copy_from_slice(&crc);
+    // Checked splits and prefix copies only: no panic path (and so no formatting code) is linked.
+    let (body, trailer) = buf
+        .get_mut(..len)
+        .and_then(|frame| frame.split_at_mut_checked(HEADER_LEN + payload_len))
+        .ok_or(too_small)?;
+    copy_prefix(body, &header.to_bytes());
+    copy_prefix(trailer, &crc32c(body).to_le_bytes());
     Ok(len)
+}
+
+/// Copies `src` into the start of `dst`, up to the shorter length. Unlike `copy_from_slice` it
+/// has no length assertion, so no panic path is linked into firmware.
+pub(crate) fn copy_prefix(dst: &mut [u8], src: &[u8]) {
+    for (d, s) in dst.iter_mut().zip(src) {
+        *d = *s;
+    }
 }
 
 /// The region of `buf` where a payload goes before [`encode_in_place`]: everything after the
@@ -226,7 +235,9 @@ pub fn decode(bytes: &[u8]) -> Result<FrameView<'_>, FrameError> {
     if len < FRAME_OVERHEAD {
         return Err(FrameError::TooShort { len });
     }
-    let (body, trailer) = bytes.split_at(len - CRC_LEN);
+    let (body, trailer) = bytes
+        .split_at_checked(len - CRC_LEN)
+        .ok_or(FrameError::TooShort { len })?;
     let received = u32::from_le_bytes(take_array(trailer).ok_or(FrameError::TooShort { len })?);
     let mut crc = Crc32c::new();
     crc.update(body);

@@ -63,6 +63,7 @@ pub struct StreamDecoder<const N: usize> {
 }
 
 impl<const N: usize> Default for StreamDecoder<N> {
+    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }
@@ -71,6 +72,7 @@ impl<const N: usize> Default for StreamDecoder<N> {
 impl<const N: usize> StreamDecoder<N> {
     /// An idle decoder.
     #[must_use]
+    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             buf: [0; N],

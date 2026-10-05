@@ -1,4 +1,4 @@
-//! Transport selection for the sessions (feature `alloc`): [`Stream`] (COBS byte streams) or
+//! Transport selection for the sessions (feature `device`): [`Stream`] (COBS byte streams) or
 //! [`Packet`] (CAN / CAN FD segments).
 //!
 //! The device and host sessions are generic over a [`Transport`]. Everything above the transport
@@ -112,6 +112,26 @@ pub(crate) fn segment_step(
         };
     }
     Some((segment, done))
+}
+
+/// Writes the next segment of `frame` from `cursor` into `out` (at least the MTU's frame length)
+/// and advances the cursor (resetting it when the frame is complete). Returns the segment length
+/// and whether it was the frame's last; `None` if the frame is done or `out` is too short.
+pub(crate) fn segment_into(
+    frame: &[u8],
+    mtu: SegmentMtu,
+    cursor: &mut SegmenterState,
+    out: &mut [u8],
+) -> Option<(usize, bool)> {
+    let mut segmenter = Segmenter::resume(frame, mtu, *cursor);
+    let len = segmenter.next_into(out).ok()??;
+    let done = segmenter.is_done();
+    *cursor = if done {
+        SegmenterState::default()
+    } else {
+        segmenter.save()
+    };
+    Some((len, done))
 }
 
 /// Whether `seq` is newer than `last` in wrapping sequence order (within half the space).

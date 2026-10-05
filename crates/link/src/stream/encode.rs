@@ -37,7 +37,7 @@ enum BlockEnd {
 
 /// Progress of a [`StreamEncoder`] without its borrowed frame, so a session can store it and resume
 /// the encoding on a later call (see [`StreamEncoder::save`] / [`StreamEncoder::resume`]).
-#[cfg(feature = "alloc")]
+#[cfg(feature = "device")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct EncoderState {
@@ -104,7 +104,7 @@ impl<'a> StreamEncoder<'a> {
     }
 
     /// Progress so far, to continue later over the same frame with [`StreamEncoder::resume`].
-    #[cfg(feature = "alloc")]
+    #[cfg(feature = "device")]
     pub(crate) fn save(&self) -> EncoderState {
         EncoderState {
             pos: self.pos,
@@ -116,7 +116,7 @@ impl<'a> StreamEncoder<'a> {
 
     /// Continues encoding the raw `frame` from a saved state. `frame` must be the same bytes the
     /// state was saved from.
-    #[cfg(feature = "alloc")]
+    #[cfg(feature = "device")]
     pub(crate) fn resume(frame: &'a [u8], saved: EncoderState) -> Self {
         Self {
             src: FrameSource::raw(frame),

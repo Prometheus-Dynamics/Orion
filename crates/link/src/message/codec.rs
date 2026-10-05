@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{
     Hello, LeaseRecord, Message, MessageError, ProviderRecord, ProviderState, RejectReason,
-    ResourceRecord, Roles, StatusEntry, Welcome, kind,
+    ResourceRecord, StatusEntry, Welcome, kind,
 };
 use crate::frame::{self, FrameHeader, FrameView};
 
@@ -56,14 +56,6 @@ struct LeasesBody {
 struct StatusBody {
     #[serde(deserialize_with = "bounded_vec")]
     entries: Vec<StatusEntry>,
-}
-
-/// Borrowed [`Hello`] (same wire format).
-#[derive(Serialize)]
-pub(crate) struct HelloRef<'a> {
-    pub(crate) device_name: &'a str,
-    pub(crate) roles: Roles,
-    pub(crate) max_frame: u32,
 }
 
 /// Borrowed [`ProviderState`] (same wire format).
@@ -130,36 +122,6 @@ pub fn encode_provider_state(
     )
 }
 
-/// Postcard length of a provider-state body, computed without writing it.
-pub(crate) fn provider_state_payload_len(
-    provider: &ProviderRecord,
-    resources: &[ResourceRecord],
-) -> Result<usize, MessageError> {
-    postcard::serialize_with_flavor(
-        &ProviderStateRef {
-            provider,
-            resources,
-        },
-        postcard::ser_flavors::Size::default(),
-    )
-    .map_err(|_| MessageError::Encode)
-}
-
-/// Writes a provider-state body into the payload area of `buf`, returning the payload length.
-pub(crate) fn write_provider_state_payload(
-    provider: &ProviderRecord,
-    resources: &[ResourceRecord],
-    buf: &mut [u8],
-) -> Result<usize, MessageError> {
-    encode_payload(
-        &ProviderStateRef {
-            provider,
-            resources,
-        },
-        buf,
-    )
-}
-
 /// Encodes a [`kind::LEASES`] frame from a borrowed lease set, returning the frame length.
 ///
 /// # Errors
@@ -184,12 +146,6 @@ pub fn encode_status(
     buf: &mut [u8],
 ) -> Result<usize, MessageError> {
     encode_with(kind::STATUS, seq, entries, buf)
-}
-
-/// Postcard length of a status body, computed without writing it.
-pub(crate) fn status_payload_len(entries: &[StatusEntry]) -> Result<usize, MessageError> {
-    postcard::serialize_with_flavor(entries, postcard::ser_flavors::Size::default())
-        .map_err(|_| MessageError::Encode)
 }
 
 /// Decodes a [`kind::STATUS`] body.

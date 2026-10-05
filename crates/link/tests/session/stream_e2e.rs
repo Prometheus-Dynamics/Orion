@@ -21,10 +21,10 @@ fn handshake_publish_and_ack() {
         .unwrap();
     assert!(pair.run_until(1_000, |p| !p.device.state_pending()));
 
-    assert_eq!(pair.device.node_id().map(|n| n.as_str()), Some("node-a"));
+    assert_eq!(pair.device.node_id(), Some("node-a"));
     assert!(matches!(
         pair.device_events[0].1,
-        DeviceEvent::Connected { ref node_id, .. } if node_id.as_str() == "node-a"
+        DeviceEvent::Connected { .. }
     ));
     assert!(matches!(
         &pair.host_events[0].1,
@@ -141,7 +141,7 @@ fn leases_are_delivered_and_repaired_within_one_heartbeat() {
             == 3)
     );
     assert_eq!(pair.device_leases()[2], &leases("imu-board", 2));
-    let repaired_at = pair.device_events.last().unwrap().0;
+    let repaired_at = pair.lease_sets.last().unwrap().0;
     assert!(repaired_at - changed_at <= u64::from(HEARTBEAT_MS) + 10);
 
     // The piggybacked copies after every Pong are not re-reported.

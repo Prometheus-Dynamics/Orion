@@ -62,7 +62,7 @@ impl CanIo for MemoryPort {
 
 /// A simulated CAN device at `address`.
 struct BusDevice {
-    device: Arc<Mutex<CanDevice<256, 256>>>,
+    device: Arc<Mutex<CanDevice<256, 256, String>>>,
     events: Arc<Mutex<Vec<DeviceEvent>>>,
     unplugged: Arc<AtomicBool>,
     task: JoinHandle<()>,
@@ -70,7 +70,7 @@ struct BusDevice {
 
 impl BusDevice {
     fn start<P: CanIo>(name: &str, ids: CanLinkIds, transport: Packet, port: P) -> Self {
-        let device = Arc::new(Mutex::new(CanDevice::<256, 256>::new(
+        let device = Arc::new(Mutex::new(CanDevice::<256, 256, String>::new(
             fast_device(name),
             transport,
         )));
@@ -134,12 +134,8 @@ impl BusDevice {
         self.events
             .lock()
             .expect("events lock")
-            .iter()
-            .rev()
-            .find_map(|event| match event {
-                DeviceEvent::Leases(leases) => Some(leases.clone()),
-                _ => None,
-            })
+            .contains(&DeviceEvent::LeasesChanged)
+            .then(|| self.device.lock().expect("device lock").lease_records())
     }
 }
 
