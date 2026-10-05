@@ -278,6 +278,9 @@ Unix-only (it needs Unix sockets, peer credentials and fd passing).
   builds on Windows use MSVC as usual. Cross-checking for macOS from Linux works for the library
   and the example; the `orion-client` test and example targets on Unix also build the HTTP dev
   dependency (ring), which needs a macOS SDK.
+- Verified downstream (2026-10-05): a consumer workspace depending on `orion-client` with
+  `features = ["remote"]` built, passed clippy and linked natively with MSVC on GitHub's
+  `windows-latest` runner, and passed fully on `macos-latest`.
 
 ## Footprint
 
