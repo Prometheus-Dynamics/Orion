@@ -148,6 +148,27 @@ them on a blocking thread once per refresh interval.
 returns the identity in the observed record and `NodeApp::latest_host_facts()` the last sample.
 `orion-node` runs `NodeApp::spawn_host_facts_loop()`.
 
+### Naming extra metrics and labels
+
+Status entries carry no unit metadata, so the unit goes in the key, as the built-in keys do
+(`host.load1_milli`, `host.memory_available_bytes`, `host.uptime_seconds`):
+
+- Values are fixed-point integers (`Int` / `UInt`); the suffix names unit and scale: `_uv`, `_ua`,
+  `_uw`, `_mv`, `_mg`, `_mdps`, `_rpm`, `_hz`, `_bytes`, `_seconds`, `_ms`. Dimensionless ratios
+  and duty cycles use `_milli` (0..1000).
+- Keys are lowercase, dot-separated paths with the axis or index last:
+  `imu.acceleration.x_mg`, `power.bus_voltage_uv`, `fan.duty_milli`.
+- A key never changes unit; add a new key instead.
+- Temperatures belong in `temperatures` (typed, millidegrees) with stable sensor labels such as
+  `imu0` or `hwmon:<name>`, not in `extra`. Reusing a `/sys/class/thermal` label replaces that
+  reading on purpose.
+- `labels` are replicated on the node record and usable in placement selectors, so keep them
+  low-churn (board, revision, attached hardware); prefix them with the source's name
+  (`<source>.board`).
+
+`HostFactsSource` lives in `orion-control-plane` (`no_std` + `alloc`), so an adapter crate needs
+only the model crate; `orion_node::HostFactsSource` re-exports it.
+
 ## Configuration
 
 | Variable | Default | Meaning |

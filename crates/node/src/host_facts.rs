@@ -9,6 +9,7 @@
 //!
 //! Sources must be cheap: the node calls them on a blocking thread once per refresh interval.
 
+pub use orion::control_plane::HostFactsSource;
 use orion::control_plane::{HostFacts, HostMetricsSample, HostTemperature, NodeHostFacts};
 use std::{
     fs,
@@ -18,19 +19,6 @@ use std::{
 
 /// Most temperature sensors reported per sample (also bounds status-lane entries).
 pub const MAX_HOST_TEMPERATURES: usize = 32;
-
-/// Where the node reads host facts from. Implement it to supply facts from another platform or a
-/// hardware-abstraction layer; fields a source cannot report stay `None`.
-pub trait HostFactsSource: Send + Sync {
-    /// Takes one sample. `sampled_at_ms` may be left `0`; the node stamps it.
-    fn sample(&self) -> HostFacts;
-}
-
-impl<T: HostFactsSource + ?Sized> HostFactsSource for Arc<T> {
-    fn sample(&self) -> HostFacts {
-        (**self).sample()
-    }
-}
 
 /// A base source with overlays merged on top ([`HostFacts::merge`]): set fields of an overlay
 /// replace the base's, labels and extra metrics are added, temperatures replace readings of the
