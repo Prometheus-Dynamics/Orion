@@ -11,19 +11,30 @@
 //! void orion_can_rx(const uint8_t *data, size_t len); // ffi-can: data of a host->device frame
 //! size_t orion_can_tx(uint8_t *out64);                // ffi-can: next device->host frame data
 //! uint32_t orion_poll(uint64_t now_ms);               // returns ORION_EVENT_* bits
-//! uint32_t orion_lease_count(void);                   // leases held after the last lease event
+//! uint32_t orion_lease_count(void);                   // leases currently held
 //! ```
 //!
+//! No allocator is used: the session and the provider id `provider.<name>` (whose suffix is the
+//! device name) live in one zero-initialized static.
 //! With `ffi-can`, the CAN identifiers are the caller's business: send `orion_can_tx` data with
 //! the link's device→host id and pass only frames with its host→device id to `orion_can_rx`.
 
-use alloc::string::String;
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering, compiler_fence};
 
 use orion_link::device::{DeviceConfig, DeviceEvent};
+use orion_link::wire::str_from_utf8;
 
-use crate::{RX, TX, provider_record, resource_record};
+use crate::{RX, TX};
+#[cfg(not(feature = "alloc"))]
+use crate::{provider_view, resource_view};
+
+/// Longest device name `orion_init` accepts.
+pub const NAME_CAPACITY: usize = 32;
+
+const PROVIDER_PREFIX: &[u8] = b"provider.";
+const PREFIX_LEN: usize = PROVIDER_PREFIX.len();
 
 /// `orion_poll` bit: a session was established.
 pub const ORION_EVENT_CONNECTED: u32 = 1 << 0;
@@ -37,37 +48,96 @@ pub const ORION_EVENT_REJECTED: u32 = 1 << 3;
 pub const ORION_EVENT_STATE_ACKED: u32 = 1 << 4;
 
 #[cfg(feature = "ffi-can")]
-type Session = orion_link::device::CanDevice<RX, TX>;
+type Session = orion_link::device::CanDevice<RX, TX, StoredName>;
 #[cfg(all(feature = "ffi-uart", not(feature = "ffi-can")))]
-type Session = orion_link::device::StreamDevice<RX, TX>;
+type Session = orion_link::device::StreamDevice<RX, TX, StoredName>;
 
-struct Port {
-    session: Session,
-    device_name: String,
-    lease_count: u32,
+/// The session's device name: a view of the name stored in [`PORT`], so the session holds no
+/// copy of it.
+#[derive(Debug, Clone, Copy)]
+pub struct StoredName;
+
+impl AsRef<str> for StoredName {
+    fn as_ref(&self) -> &str {
+        PORT.provider_id().get(PREFIX_LEN..).unwrap_or_default()
+    }
 }
 
-/// A global slot guarded by a busy flag, so re-entrant calls fail instead of aliasing.
-struct Global(UnsafeCell<Option<Port>>, AtomicBool);
+/// The global session with a busy flag, so a re-entrant call (for example from a callback) fails
+/// instead of aliasing. Only atomic loads and stores are used, so this also builds for cores
+/// without compare-and-swap (Cortex-M0/M0+, RV32 without the A extension). It is not a lock: do
+/// not call the C API from interrupt handlers.
+///
+/// The session is `MaybeUninit` so the static is zero-initialized (`.bss`): an `Option<Session>`
+/// would put a full initialized copy of the session into `.data`, which costs flash.
+struct Global {
+    slot: UnsafeCell<MaybeUninit<Session>>,
+    /// `provider.<device name>`; written only by `orion_init`.
+    name: UnsafeCell<[u8; PREFIX_LEN + NAME_CAPACITY]>,
+    name_len: UnsafeCell<usize>,
+    ready: AtomicBool,
+    busy: AtomicBool,
+}
 
-// SAFETY: access to the cell is serialized by the busy flag.
+// SAFETY: access to the cell is serialized by the busy flag under the single-main-loop contract
+// documented above.
 unsafe impl Sync for Global {}
 
-static PORT: Global = Global(UnsafeCell::new(None), AtomicBool::new(false));
+static PORT: Global = Global {
+    slot: UnsafeCell::new(MaybeUninit::uninit()),
+    name: UnsafeCell::new([0; PREFIX_LEN + NAME_CAPACITY]),
+    name_len: UnsafeCell::new(0),
+    ready: AtomicBool::new(false),
+    busy: AtomicBool::new(false),
+};
 
 impl Global {
-    fn with<R>(&self, f: impl FnOnce(&mut Option<Port>) -> R) -> Option<R> {
-        if self
-            .1
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
+    /// Runs `f` with exclusive access to the slot; `None` on re-entry.
+    fn lock<R>(&self, f: impl FnOnce(&mut MaybeUninit<Session>) -> R) -> Option<R> {
+        if self.busy.load(Ordering::Relaxed) {
             return None;
         }
-        // SAFETY: the busy flag gives this call exclusive access.
-        let result = f(unsafe { &mut *self.0.get() });
-        self.1.store(false, Ordering::Release);
+        self.busy.store(true, Ordering::Relaxed);
+        compiler_fence(Ordering::Acquire);
+        // SAFETY: the busy flag gives this call exclusive access (single main loop).
+        let result = f(unsafe { &mut *self.slot.get() });
+        compiler_fence(Ordering::Release);
+        self.busy.store(false, Ordering::Relaxed);
         Some(result)
+    }
+
+    /// `provider.<device name>` (empty before `orion_init`).
+    fn provider_id(&self) -> &str {
+        // SAFETY: the name is written only by `orion_init`, under the busy flag, and no string
+        // borrowed from it outlives a C API call.
+        let (name, len) = unsafe { (&*self.name.get(), *self.name_len.get()) };
+        name.get(..len)
+            .and_then(|bytes| str_from_utf8(bytes).ok())
+            .unwrap_or_default()
+    }
+
+    /// Stores `provider.<name>`. Call only under the busy flag.
+    fn set_name(&self, name: &str) {
+        // SAFETY: the caller holds the busy flag; nothing borrows the name between calls.
+        let (buf, len) = unsafe { (&mut *self.name.get(), &mut *self.name_len.get()) };
+        for (dst, src) in buf
+            .iter_mut()
+            .zip(PROVIDER_PREFIX.iter().chain(name.as_bytes()))
+        {
+            *dst = *src;
+        }
+        *len = PREFIX_LEN + name.len();
+    }
+
+    /// Runs `f` on the session; `None` before `orion_init` or on re-entry.
+    fn with<R>(&self, f: impl FnOnce(&mut Session) -> R) -> Option<R> {
+        self.lock(|slot| {
+            // SAFETY: `ready` is only set after the slot was written by `orion_init`.
+            self.ready
+                .load(Ordering::Relaxed)
+                .then(|| f(unsafe { slot.assume_init_mut() }))
+        })
+        .flatten()
     }
 }
 
@@ -82,35 +152,38 @@ unsafe fn bytes<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
     }
 }
 
-/// Creates the session. Returns `false` if the name is not UTF-8 or empty, or on re-entry.
+/// Creates the session. Returns `false` if the name is not UTF-8, empty, longer than
+/// [`NAME_CAPACITY`] bytes, or on re-entry.
 ///
 /// # Safety
 /// `device_name` must be valid for `len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn orion_init(device_name: *const u8, len: usize) -> bool {
     // SAFETY: forwarded caller guarantee.
-    let Ok(name) = core::str::from_utf8(unsafe { bytes(device_name, len) }) else {
+    let Ok(name) = str_from_utf8(unsafe { bytes(device_name, len) }) else {
         return false;
     };
-    if name.trim().is_empty() {
+    if name.is_empty() || name.len() > NAME_CAPACITY {
         return false;
     }
     #[cfg(feature = "ffi-can")]
     let transport = orion_link::Packet::CLASSIC;
     #[cfg(all(feature = "ffi-uart", not(feature = "ffi-can")))]
     let transport = orion_link::Stream;
-    PORT.with(|slot| {
-        *slot = Some(Port {
-            session: Session::new(DeviceConfig::provider(name), transport),
-            device_name: String::from(name),
-            lease_count: 0,
-        });
+    PORT.lock(|slot| {
+        PORT.set_name(name);
+        // The session owns nothing that needs dropping, so a previous one is simply overwritten.
+        // `new` is inlined, so the session is built in place rather than on the stack.
+        slot.write(Session::new(DeviceConfig::provider(StoredName), transport));
+        PORT.ready.store(true, Ordering::Relaxed);
     })
     .is_some()
 }
 
 /// Publishes a snapshot with one resource. Returns 0 on success, -1 if not initialized or on
 /// re-entry, -2 for invalid strings, -3 if it does not fit the transmit buffer.
+///
+/// The strings are encoded at once and need not outlive the call.
 ///
 /// # Safety
 /// The pointers must be valid for their lengths.
@@ -124,23 +197,35 @@ pub unsafe extern "C" fn orion_publish(
 ) -> i32 {
     // SAFETY: forwarded caller guarantees.
     let (id, kind) = unsafe { (bytes(resource_id, id_len), bytes(resource_type, type_len)) };
-    let (Ok(id), Ok(kind)) = (core::str::from_utf8(id), core::str::from_utf8(kind)) else {
+    let (Ok(id), Ok(kind)) = (str_from_utf8(id), str_from_utf8(kind)) else {
         return -2;
     };
-    PORT.with(|slot| {
-        let Some(port) = slot else {
-            return -1;
+    if id.is_empty() || kind.is_empty() {
+        return -2;
+    }
+    PORT.with(|session| {
+        let provider_id = PORT.provider_id();
+        // The minimal path: borrowed views, encoded at once, no allocation.
+        #[cfg(not(feature = "alloc"))]
+        let published = {
+            let types = [kind];
+            let provider = provider_view(provider_id, &types);
+            let resource = resource_view(provider_id, id, kind, healthy);
+            session.publish_provider_state(&provider, &[resource])
         };
-        let (Some(provider), Some(resource)) = (
-            provider_record(&port.device_name, kind),
-            resource_record(&port.device_name, id, kind, healthy),
-        ) else {
-            return -2;
+        // The `alloc` variant publishes the full records (postcard + serde, heap).
+        #[cfg(feature = "alloc")]
+        let published = {
+            let name = provider_id.get(PREFIX_LEN..).unwrap_or_default();
+            let (Some(provider), Some(resource)) = (
+                crate::provider_record(name, kind),
+                crate::resource_record(name, id, kind, healthy),
+            ) else {
+                return -2;
+            };
+            session.publish_provider_state(&provider, core::slice::from_ref(&resource))
         };
-        match port
-            .session
-            .publish_provider_state(&provider, core::slice::from_ref(&resource))
-        {
+        match published {
             Ok(()) => 0,
             Err(_) => -3,
         }
@@ -152,23 +237,14 @@ pub unsafe extern "C" fn orion_publish(
 /// call.
 #[unsafe(no_mangle)]
 pub extern "C" fn orion_poll(now_ms: u64) -> u32 {
-    PORT.with(|slot| {
-        let Some(port) = slot else {
-            return 0;
-        };
-        port.session.poll(now_ms);
+    PORT.with(|session| {
+        session.poll(now_ms);
         let mut bits = 0;
-        while let Some(event) = port.session.next_event() {
+        while let Some(event) = session.next_event() {
             bits |= match event {
                 DeviceEvent::Connected { .. } => ORION_EVENT_CONNECTED,
-                DeviceEvent::Leases(leases) => {
-                    port.lease_count = u32::try_from(leases.len()).unwrap_or(u32::MAX);
-                    ORION_EVENT_LEASES
-                }
-                DeviceEvent::Disconnected => {
-                    port.lease_count = 0;
-                    ORION_EVENT_DISCONNECTED
-                }
+                DeviceEvent::LeasesChanged => ORION_EVENT_LEASES,
+                DeviceEvent::Disconnected => ORION_EVENT_DISCONNECTED,
                 DeviceEvent::Rejected(_) => ORION_EVENT_REJECTED,
                 DeviceEvent::StateAcked => ORION_EVENT_STATE_ACKED,
                 _ => 0,
@@ -179,10 +255,10 @@ pub extern "C" fn orion_poll(now_ms: u64) -> u32 {
     .unwrap_or(0)
 }
 
-/// Leases currently held (after the last `ORION_EVENT_LEASES`).
+/// Leases currently held (0 while disconnected).
 #[unsafe(no_mangle)]
 pub extern "C" fn orion_lease_count() -> u32 {
-    PORT.with(|slot| slot.as_ref().map_or(0, |port| port.lease_count))
+    PORT.with(|session| u32::try_from(session.leases().len()).unwrap_or(u32::MAX))
         .unwrap_or(0)
 }
 
@@ -195,11 +271,7 @@ pub extern "C" fn orion_lease_count() -> u32 {
 pub unsafe extern "C" fn orion_rx(data: *const u8, len: usize) {
     // SAFETY: forwarded caller guarantee.
     let data = unsafe { bytes(data, len) };
-    let _ = PORT.with(|slot| {
-        if let Some(port) = slot {
-            port.session.receive(data);
-        }
-    });
+    let _ = PORT.with(|session| session.receive(data));
 }
 
 /// Writes up to `cap` bytes to send into `out`; returns how many. Call until it returns 0.
@@ -214,8 +286,7 @@ pub unsafe extern "C" fn orion_tx(out: *mut u8, cap: usize) -> usize {
     }
     // SAFETY: guaranteed by the caller.
     let out = unsafe { core::slice::from_raw_parts_mut(out, cap) };
-    PORT.with(|slot| slot.as_mut().map_or(0, |port| port.session.transmit(out)))
-        .unwrap_or(0)
+    PORT.with(|session| session.transmit(out)).unwrap_or(0)
 }
 
 /// Feeds the data of one received host→device CAN frame.
@@ -227,11 +298,7 @@ pub unsafe extern "C" fn orion_tx(out: *mut u8, cap: usize) -> usize {
 pub unsafe extern "C" fn orion_can_rx(data: *const u8, len: usize) {
     // SAFETY: forwarded caller guarantee.
     let data = unsafe { bytes(data, len) };
-    let _ = PORT.with(|slot| {
-        if let Some(port) = slot {
-            port.session.receive_segment(data);
-        }
-    });
+    let _ = PORT.with(|session| session.receive_segment(data));
 }
 
 /// Writes the data of the next device→host CAN frame into `out` (64 bytes) and returns its
@@ -247,15 +314,6 @@ pub unsafe extern "C" fn orion_can_tx(out: *mut u8) -> usize {
     }
     // SAFETY: guaranteed by the caller.
     let out = unsafe { core::slice::from_raw_parts_mut(out, 64) };
-    PORT.with(|slot| {
-        let Some(segment) = slot.as_mut().and_then(|port| port.session.next_segment()) else {
-            return 0;
-        };
-        let data = segment.as_bytes();
-        out.get_mut(..data.len()).map_or(0, |dst| {
-            dst.copy_from_slice(data);
-            data.len()
-        })
-    })
-    .unwrap_or(0)
+    PORT.with(|session| session.transmit_segment(out))
+        .unwrap_or(0)
 }

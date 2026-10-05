@@ -60,9 +60,16 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 - [x] `orion-link` `std`: sans-IO `HostSession` / `HostBus` (allowlist, acks, lease piggyback,
       device-loss detection, multi-device CAN demux).
 - [x] Example MCU firmware crate outside the workspace (`examples/mcu-template`): links the device
-      session, postcard, and the model crates with a real allocator into a bare-metal staticlib (CI
-      builds it for thumbv7em-none-eabihf and riscv32imac-unknown-none-elf; `scripts/mcu-size.sh`
-      reports flash/RAM).
+      session into a bare-metal staticlib (CI builds it for thumbv6m, thumbv7em, riscv32imc, and
+      riscv32imac; `scripts/mcu-size.sh` reports flash/RAM).
+- [x] `orion-link` minimal device path (`device`): hand-written postcard-compatible codec with
+      borrowed views (byte-identical to the records, checked against the fixture and by property
+      tests), no allocator, no `core::fmt`, no atomics; the template's UART device is about 8 KB
+      flash and 0.9 KB RAM on Cortex-M0+, with a CI size budget.
+- [ ] Go smaller: drop the `memcpy` the CAN reassembler pulls in (1 KB of compiler-builtins on
+      Cortex-M0+), make the status buffer optional for devices that never publish status (`TX`
+      bytes of RAM), and put `DeviceStats` behind a feature (56 bytes of RAM, about 100 bytes of
+      flash).
 - [x] Node gateway (`orion-node` `link-gateway` feature): `ORION_NODE_LINKS` serial and SocketCAN
       links (termios / `PF_CAN` over `libc` + `AsyncFd`), `HostSession` / `HostBus` driven per link,
       `ProviderState` applied through the IPC provider path (gateway-owned `node_id`, provider and

@@ -33,7 +33,7 @@ Orion is intentionally layered. Higher-level crates build on shared contracts an
 - `orion-transport-tcp` implements TCP frame transport for data-plane traffic.
 - `orion-transport-quic` implements QUIC transport for data-plane traffic.
 
-- `orion-link` implements the [link protocol](link-protocol.md) for microcontrollers on UART, RS-485, USB-CDC, classic CAN, and CAN FD. The default build is only the framing layers (CRC-32C message frames, COBS byte streams, CAN segmentation): `no_std`, allocation-free, and independent of other Orion crates. The `alloc` feature adds postcard-encoded link messages and the sans-IO `DeviceSession` (still `no_std`, built on `orion-core` / `orion-control-plane` without `std`); the `std` feature adds the sans-IO `HostSession` / `HostBus` that the node gateway will drive. `examples/mcu-template` (outside the workspace) is the chip-agnostic firmware starting point.
+- `orion-link` implements the [link protocol](link-protocol.md) for microcontrollers on UART, RS-485, USB-CDC, classic CAN, and CAN FD. The default build is only the framing layers (CRC-32C message frames, COBS byte streams, CAN segmentation): `no_std`, allocation-free, and independent of other Orion crates. The `device` feature adds the minimal device path, still without an allocator or any dependency: `wire`, a hand-written postcard-compatible codec with borrowed views of every link message (byte-identical to the records' postcard encoding), and the sans-IO `DeviceSession` with fixed buffers (about 8 KB of flash and 0.9 KB of RAM for a UART device on Cortex-M0+). The `alloc` feature adds the postcard + serde link messages over `orion-core` / `orion-control-plane` (built without `std`) and lets the same `DeviceSession` take the full records; the `std` feature adds the sans-IO `HostSession` / `HostBus` that the node gateway drives. `examples/mcu-template` (outside the workspace) is the chip-agnostic firmware starting point.
 
 These crates keep transport-specific codecs, listeners, and TLS behavior local while sharing only the narrow common helpers that are truly transport-agnostic.
 
@@ -80,10 +80,13 @@ Dependency notes:
 clippy plus the host tests without `std`.
 
 `orion-link` has its own CI job (`link-no-std`): it builds and lints the crate for the same targets
-with no features (framing only, no allocator) and with `alloc` (messages and the device session on
-top of the no_std model crates), runs its tests in both the `alloc` and the `std` build, and builds
-`examples/mcu-template` as a bare-metal staticlib. `scripts/mcu-size.sh` reports the template's
-linked flash/RAM footprint.
+plus `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf` (no compare-and-swap) with no features
+(framing only), with `device` (the minimal device path, no allocator), and with `alloc` (serde
+messages and record conveniences on top of the no_std model crates); checks with `cargo tree` that
+the `device` build pulls in no Orion model crate, serde, or postcard; runs its tests in the
+framing-only, `device`, `alloc`, and `std` builds; and builds `examples/mcu-template` as a
+bare-metal staticlib. `scripts/mcu-size.sh` reports the template's linked flash/RAM per target and
+fails CI if the minimal UART build exceeds its budget.
 
 ## Typical Flow
 

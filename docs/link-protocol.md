@@ -10,17 +10,21 @@ Goals, in priority order:
 
 1. **Any MCU, minimal bring-up.** No chip, HAL, RTOS, or async runtime is assumed. A port supplies
    bytes in, bytes out, and a millisecond clock.
-2. **Minimal footprint.** The framing layer needs no allocator. Only typed messages use `alloc`.
+2. **Minimal footprint.** Framing and the device session need no allocator: a complete UART
+   device fits in about 8 KB of flash and under 1 KB of RAM. Only the host side and optional
+   full-record conveniences on the device use `alloc`.
 3. **Robust on lossy links.** Every frame is CRC-checked. Every state message is an idempotent full
    snapshot, so loss is repaired by retransmission, never by replaying deltas.
-4. **Same model as the rest of Orion.** Devices use the shared `orion-core` / `orion-control-plane`
-   types (built `no_std` + `alloc`). The gateway maps them onto the node's normal provider path.
+4. **Same model as the rest of Orion.** Devices publish the shared `orion-core` /
+   `orion-control-plane` records: either as borrowed `orion_link::wire` views that encode to the
+   same bytes (no allocator), or as the records themselves (built `no_std` + `alloc`). The gateway
+   maps them onto the node's normal provider path.
 
 ## Crates
 
 | Crate | `std`? | Role |
 | --- | --- | --- |
-| `orion-link` | `no_std` (framing: no `alloc`; messages and device session: `alloc`; host session: `std`) | Framing codecs, link messages, the sans-IO device session, and the sans-IO host session. |
+| `orion-link` | `no_std` (framing and the device path with its hand-written codec, feature `device`: no `alloc`, no dependencies; serde messages over the records: `alloc`; host session: `std`) | Framing codecs, link messages, the sans-IO device session, and the sans-IO host session. |
 | `orion-node` (`link-gateway` feature) | std | Serves configured serial and SocketCAN links and bridges each device session into the node as a provider. |
 
 Optional `orion-link` features add adapters for common trait ecosystems without changing the core:
@@ -30,7 +34,8 @@ API is sans-IO: the session never performs I/O and never reads a clock itself.
 ## Layering
 
 ```
- typed messages (postcard, LINK_PROTOCOL_VERSION)      ← orion-link::message
+ typed messages (postcard, LINK_PROTOCOL_VERSION)      ← orion-link::wire (device, no alloc)
+                                                         orion-link::message (host, serde)
  ───────────────────────────────────────────────
  message frame: [header][payload][crc32c]              ← orion-link::frame
  ───────────────────────────────────────────────
@@ -165,8 +170,9 @@ files every entry in the node's in-memory status lane under the device's provide
 (`provider/<provider id>`), where local clients read it with `query_status` / `watch_status` and
 operators with `orionctl get status`. Nothing is persisted.
 
-- **Device.** `DeviceSession::publish_status(&[StatusEntry])` keeps only the newest unsent batch
-  (it is cloned; `publish_status` fails with `TooLarge` if the frame cannot fit). The batch is
+- **Device.** `DeviceSession::publish_status(&[StatusView])` (or `&[StatusEntry]` with `alloc`)
+  keeps only the newest unsent batch (encoded at once into the status buffer; `publish_status`
+  fails with `TooLarge` if the frame cannot fit). The batch is
   sent once connected, after any due `Pong`, `Ping`, and provider snapshot, and at most every
   `DeviceConfig::status_min_interval_ms` (default 100 ms); publishing faster, or while
   disconnected, replaces the pending batch (`DeviceStats::status_replaced`). Batches are not
@@ -240,22 +246,40 @@ A port provides three things:
 
 1. a way to write bytes or CAN frames,
 2. a way to feed received bytes or CAN frames into the session, and
-3. a monotonic millisecond timestamp passed to `poll`.
+3. a monotonic millisecond timestamp passed to `poll` (any start value; it may wrap).
+
+The minimal device path (`orion-link` feature `device`) needs no allocator, no heap, and no other
+crate: the session has fixed const-generic buffers, the provider snapshot is described with
+borrowed `orion_link::wire` views, and lease sets are read as borrowed views straight from the
+session. The views encode to exactly the bytes postcard produces for the `orion-control-plane`
+records (`crates/link/tests/wire.rs` checks every message against the recorded fixture, and
+`tests/wire_property.rs` against postcard for random records), so hosts cannot tell the two
+paths apart.
 
 ```rust
 use orion_link::Stream;
 use orion_link::device::{DeviceConfig, DeviceEvent, StreamDevice};
+use orion_link::wire::{Health, ProviderView, ResourceView};
 
-// 256-byte receive and transmit buffers; the only heap use is message bodies.
-let mut session = StreamDevice::<256, 256>::new(DeviceConfig::provider("imu-board"), Stream);
-session.publish_provider_state(&provider_record, &resources)?;
+// `const`: the snapshot lives in flash. The gateway owns `node_id`; any placeholder works.
+const PROVIDER: ProviderView<'static> =
+    ProviderView::new("provider.imu-board", "unassigned").with_resource_types(&["imu.sample_source"]);
+const RESOURCES: [ResourceView<'static>; 1] =
+    [ResourceView::new("imu-board.imu-0", "imu.sample_source", "provider.imu-board")
+        .with_health(Health::Healthy)];
+
+// 128-byte receive and transmit buffers: about 0.9 KB of RAM in total, no heap.
+let mut session = StreamDevice::<128, 128>::new(DeviceConfig::provider("imu-board"), Stream);
+session.publish_provider_state(&PROVIDER, &RESOURCES)?;
 let mut tx = [0u8; 32];
 loop {
     session.receive(uart.read_available()); // clock-free; may also run in the RX interrupt
     session.poll(now_ms());
     while let Some(event) = session.next_event() {
-        if let DeviceEvent::Leases(leases) = event {
-            handle(leases);
+        if event == DeviceEvent::LeasesChanged {
+            for lease in session.leases() {
+                handle(lease.resource_id, lease.holder_workload_id);
+            }
         }
     }
     loop {
@@ -268,15 +292,29 @@ loop {
 }
 ```
 
+Snapshots and status batches are encoded into the session's buffers when published, so views
+built at run time (from sensor state, a serial number, ...) may be dropped right after the call.
+`publish_status(&[StatusView])` works the same way. Events are small `Copy` values; the data that
+goes with them is read from the session (`leases()`, `node_id()`, `session_id()`).
+
+Firmware that already has an allocator can enable `alloc` and pass the full records instead
+(`publish_provider_state(&ProviderRecord, &[ResourceRecord])`, `publish_status(&[StatusEntry])`,
+`lease_records() -> Vec<LeaseRecord>`); it is the same session and the same bytes on the wire.
+
 CAN ports use `CanDevice::<RX, TX>::new(config, Packet::CLASSIC)` (or `Packet::FD`), feed the data
 of frames carrying the link's host→device identifier to `receive_segment`, and send
-`next_segment()` (or `peek_segment()` + `commit_segment()` when the controller can be busy) with
-the device→host identifier.
+`transmit_segment(&mut buf)` / `next_segment()` (or `peek_segment()` + `commit_segment()` when
+the controller can be busy) with the device→host identifier.
+
+Footprint (the `examples/mcu-template` staticlib with its C entry points, `RX = TX = 128`,
+release, LTO, `--gc-sections`): about 8.0 KB of flash and 0.9 KB of static RAM on Cortex-M0+
+(`thumbv6m-none-eabi`) for UART, 9.2 KB for CAN; 7.9 KB on Cortex-M4F; 9.9 KB on RV32IMC. No
+`core::fmt`, no panic machinery, and no atomics are linked, so cores without compare-and-swap work
+as well. `scripts/mcu-size.sh` reports every target, and CI enforces a size budget.
 
 `examples/mcu-template` is a complete, chip-agnostic starting point (`embedded-io` UART and
-`embedded-can` ports, a replaceable heap, and C entry points), and
-`crates/link/examples/sim_device.rs` prints a full session timeline on the host. A heap of a few
-KiB is enough for typical record sets.
+`embedded-can` ports and C entry points, no allocator by default), and
+`crates/link/examples/sim_device.rs` prints a full session timeline on the host.
 
 ## Host side
 
@@ -381,3 +419,9 @@ numbers, body fields, or the postcard encoding of the shared records) fails unti
 `ORION_UPDATE_LINK_ENCODINGS=1`. Additive changes (new kinds, appended body fields) need no bump:
 the `Status` body was added this way (the `status` fixture entry is appended, earlier entries are
 unchanged, and `LINK_PROTOCOL_VERSION` stays 1). Hosts and devices that predate it ignore the kind.
+
+The device's hand-written codec (`orion_link::wire`) is held to the same fixture:
+`crates/link/tests/wire.rs` encodes every device → host message from views and compares the frames
+byte for byte, and decodes every host → device message from it; `tests/wire_property.rs` compares
+the views with postcard for random records and lease sets. A wire change therefore has to update
+the records, the views, and the fixture together.

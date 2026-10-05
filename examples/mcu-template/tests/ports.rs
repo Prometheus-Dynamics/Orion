@@ -8,7 +8,7 @@ use orion_link::device::DeviceEvent;
 use orion_link::host::{HostBus, HostConfig, HostEvent, HostSession};
 use orion_link::message::{LeaseRecord, NodeId};
 use orion_link::{CanLinkIds, Packet};
-use orion_mcu_template::{CanPort, UartPort, provider_record, resource_record};
+use orion_mcu_template::{CanPort, UartPort, provider_view, resource_view};
 
 /// A loopback UART: `rx` is what the device reads, `tx` what it wrote.
 #[derive(Default)]
@@ -59,9 +59,13 @@ fn lease() -> Vec<LeaseRecord> {
 #[test]
 fn uart_port_connects_publishes_and_receives_leases() {
     let mut port = UartPort::new(MockUart::default(), "imu-board");
-    let provider = provider_record("imu-board", "imu.sample_source").unwrap();
-    let resource =
-        resource_record("imu-board", "imu-board.imu-0", "imu.sample_source", true).unwrap();
+    let provider = provider_view("provider.imu-board", &["imu.sample_source"]);
+    let resource = resource_view(
+        "provider.imu-board",
+        "imu-board.imu-0",
+        "imu.sample_source",
+        true,
+    );
     port.publish(&provider, &[resource]).unwrap();
 
     let mut host = HostSession::stream(HostConfig::new(NodeId::new("node-a")));
@@ -80,7 +84,8 @@ fn uart_port_connects_publishes_and_receives_leases() {
             got_state |= matches!(event, HostEvent::ProviderState { .. });
         }
         while let Some(event) = port.next_event() {
-            got_leases |= event == DeviceEvent::Leases(lease());
+            got_leases |=
+                event == DeviceEvent::LeasesChanged && port.session().lease_records() == lease();
         }
     }
     assert!(port.session().is_connected());
@@ -156,8 +161,9 @@ fn can_port_connects_through_a_host_bus() {
     let base = CanLinkIds::new(0x100, 0x180, false);
     let ids = CanLinkIds::for_address(base, 5).unwrap();
     let mut port = CanPort::new(MockCan::default(), ids, Packet::CLASSIC, "can-board");
-    let provider = provider_record("can-board", "imu.sample_source").unwrap();
-    port.publish(&provider, &[]).unwrap();
+    let provider = provider_view("provider.can-board", &["imu.sample_source"]);
+    port.publish(&provider, &[] as &[orion_link::wire::ResourceView<'_>])
+        .unwrap();
     let mut bus = HostBus::new(
         HostConfig::new(NodeId::new("node-a")),
         base,

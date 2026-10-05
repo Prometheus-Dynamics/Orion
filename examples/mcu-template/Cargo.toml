@@ -18,14 +18,18 @@ crate-type = ["staticlib", "rlib"]
 
 [features]
 default = ["standalone", "ffi-uart"]
-# Everything a standalone staticlib needs: the example heap as `#[global_allocator]` and a
-# `#[panic_handler]` (both only on bare-metal targets). Rust firmware that has its own allocator
-# and panic handler depends on this crate with `default-features = false`.
-standalone = ["global-heap", "panic-handler"]
-# The inline first-fit heap type (`heap::FreeListHeap`). Replaceable by any `GlobalAlloc`.
+# Everything a standalone staticlib needs: a `#[panic_handler]` (only on bare-metal targets). The
+# default build uses no allocator at all. Rust firmware that has its own panic handler depends on
+# this crate with `default-features = false`.
+standalone = ["panic-handler"]
+# The full-record variant: the ports also accept `ProviderRecord` / `ResourceRecord` /
+# `StatusEntry`, and `provider_record` / `resource_record` are available. Needs a global allocator.
+alloc = ["orion-link/alloc"]
+# The inline first-fit heap type (`heap::FreeListHeap`). Replaceable by any `GlobalAlloc`. Uses
+# compare-and-swap, so it needs a core that has it (not Cortex-M0/M0+ or RV32 without `A`).
 heap = []
-# Install an 8 KiB `FreeListHeap` as `#[global_allocator]` on bare-metal targets.
-global-heap = ["heap"]
+# The `alloc` variant with an 8 KiB `FreeListHeap` as `#[global_allocator]` on bare-metal targets.
+global-heap = ["heap", "alloc"]
 # Install a spin-loop `#[panic_handler]` on bare-metal targets.
 panic-handler = []
 # C entry points (`orion_init`, `orion_rx`, `orion_tx`, ...) over a byte-stream link.
@@ -37,7 +41,7 @@ ffi-can = []
 embedded-can = "0.4"
 embedded-io = "0.6"
 nb = "1"
-orion-link = { path = "../../crates/link", default-features = false, features = ["alloc", "embedded-can"] }
+orion-link = { path = "../../crates/link", default-features = false, features = ["device", "embedded-can"] }
 
 [dev-dependencies]
 orion-link = { path = "../../crates/link", features = ["std"] }

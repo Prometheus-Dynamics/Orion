@@ -3,7 +3,7 @@
 use embedded_can::Frame;
 use embedded_can::nb::Can;
 use orion_link::device::{CanDevice, DeviceConfig, DeviceEvent, PublishError};
-use orion_link::message::{ProviderRecord, ResourceRecord};
+use orion_link::wire::{ProviderBody, ResourceBody, StatusBody};
 use orion_link::{CanLinkIds, Packet};
 
 use crate::{RX, TX};
@@ -38,7 +38,7 @@ pub struct CanPort<C> {
 impl<C: Can> CanPort<C> {
     /// Binds `can` to a new session for `device_name` on the link `ids`. Use [`Packet::FD`] (or a
     /// custom MTU) only with a CAN FD controller whose frame type accepts FD lengths.
-    pub fn new(can: C, ids: CanLinkIds, transport: Packet, device_name: &str) -> Self {
+    pub fn new(can: C, ids: CanLinkIds, transport: Packet, device_name: &'static str) -> Self {
         Self {
             can,
             ids,
@@ -83,17 +83,27 @@ impl<C: Can> CanPort<C> {
         Ok(())
     }
 
-    /// Replaces the provider snapshot.
+    /// Replaces the provider snapshot: `wire` views, or the full records with the `alloc`
+    /// feature.
     ///
     /// # Errors
     ///
     /// [`PublishError::TooLarge`] if it does not fit [`TX`].
-    pub fn publish(
-        &mut self,
-        provider: &ProviderRecord,
-        resources: &[ResourceRecord],
-    ) -> Result<(), PublishError> {
+    pub fn publish<P, R>(&mut self, provider: &P, resources: &[R]) -> Result<(), PublishError>
+    where
+        P: ProviderBody + ?Sized,
+        R: ResourceBody,
+    {
         self.session.publish_provider_state(provider, resources)
+    }
+
+    /// Publishes volatile status values (fire-and-forget, newest batch wins).
+    ///
+    /// # Errors
+    ///
+    /// [`PublishError::TooLarge`] if the batch does not fit [`TX`].
+    pub fn publish_status<S: StatusBody>(&mut self, entries: &[S]) -> Result<(), PublishError> {
+        self.session.publish_status(entries)
     }
 
     /// The next session event.
