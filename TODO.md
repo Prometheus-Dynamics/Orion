@@ -202,6 +202,37 @@ none of these are HeliOS-specific features.
 - Orion owns the generic systemd unit and an importable Gaia fragment (`packaging/`); images import
   it rather than each packaging `orion-node` separately.
 
+### Update / recovery
+
+Design only so far: [docs/update-recovery.md](docs/update-recovery.md). Orion carries update
+intents and progress; the writer (A/B slots, verification, bootloader) is an external device
+manager, which keeps out-of-band paths that never depend on Orion. Milestones in order:
+
+- [ ] **U0 Prerequisites** (parallel work): generic action mechanism (`ActionRequest` /
+      `ActionResult`); host facts with OS / image version on the observed `NodeRecord`.
+- [ ] **U1 Supervision**: feature `systemd` with `READY=1`, `WATCHDOG=1` from the reconcile loop and
+      `STATUS=`; example unit (watchdog, restart limits, `OnFailure=` safe mode); wedged-loop test.
+- [ ] **U2 Safe mode**: `ORION_NODE_SAFE_MODE`; quarantine undecodable or newer-format state instead
+      of failing startup; no workloads, receive-only sync, health reason, `orion_safe_mode` metric.
+- [ ] **U3 Data model**: `UpdateIntentRecord` desired section and `UpdateStatusRecord` in the
+      observed slice (protocol bump, batched with other layout changes); `orionctl get updates`;
+      requester authorization (`ORION_NODE_UPDATE_REQUESTERS`); audit records.
+- [ ] **U4 Delivery and resume**: deliver intents as actions keyed by
+      `(intent, version, generation)`, re-delivery with backoff, immediate persistence of phase
+      transitions, status-lane progress keys, drain integration, fake device manager example and
+      kill-at-every-phase tests.
+- [ ] **U5 External rollout controller**: `RolloutRecord` with waves, `max_unavailable`, health
+      gates and monotonic halt; `orionctl rollout`.
+- [ ] **U6 Cross-version rollouts**: frozen rollout beacon readable across one protocol bump; keep
+      the legacy state-dir copy until commit and use it on downgrade; N / N+1 rollout test.
+- [ ] **U7 Leaderless rollouts** in `orion-cluster`: rendezvous wave order, own-intent writes,
+      convergent halt, property tests.
+- [ ] **U8 MCU firmware over the link**: reserve link kinds `0x20`–`0x2F`; `DeviceInfo`, chunked
+      transfer with CRC and resume (`xfer` feature), A/B trial + confirm or bootloader handoff,
+      `link.release` / `link.attach` actions, simulator test, size budget.
+- [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
+      MCU with an A/B bootloader over UART and CAN.
+
 ### Nice to have
 
 - [ ] Optional blocking client for the fd latest-value channel.
