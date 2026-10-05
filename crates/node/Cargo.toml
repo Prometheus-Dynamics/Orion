@@ -43,6 +43,10 @@ link-gateway = ["dep:orion-link"]
 # mDNS/DNS-SD peer discovery (`ORION_NODE_DISCOVERY=mdns`) and shared-key enrollment over
 # `orion+tcp`. Discovery never trusts a peer by itself; see docs/discovery.md.
 discovery-mdns = ["peer-tcp", "dep:mdns-sd", "dep:hmac", "dep:sha2"]
+# sd_notify readiness/status/stopping notifications and the systemd service watchdog, spoken
+# directly over $NOTIFY_SOCKET (no libsystemd). A no-op unless systemd sets NOTIFY_SOCKET /
+# WATCHDOG_USEC. See docs/node-env.md ("Running under systemd") and packaging/systemd/.
+systemd-notify = []
 alloc-mimalloc = ["dep:mimalloc"]
 alloc-jemalloc = ["dep:tikv-jemallocator"]
 
@@ -87,6 +91,11 @@ reqwest.workspace = true
 [[example]]
 name = "link_device_sim"
 required-features = ["link-gateway"]
+
+# Drives the binary with a fake NOTIFY_SOCKET.
+[[test]]
+name = "systemd_notify"
+required-features = ["systemd-notify"]
 
 # Integration tests that drive the node over its HTTP control plane.
 
