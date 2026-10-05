@@ -320,12 +320,24 @@ fn load_structured_file<T: serde::de::DeserializeOwned>(
                 path.display()
             )
         }),
+        #[cfg(feature = "yaml")]
         StructuredFormat::Yaml => serde_yaml::from_slice(&bytes).map_err(|error| {
             format!(
                 "failed to parse {label} {} as YAML: {error}",
                 path.display()
             )
         }),
+        #[cfg(not(feature = "yaml"))]
+        StructuredFormat::Yaml => Err(crate::features::disabled(
+            &format!("YAML {label} {}", path.display()),
+            "yaml",
+        )),
+        #[cfg(not(feature = "toml"))]
+        StructuredFormat::Toml => Err(crate::features::disabled(
+            &format!("TOML {label} {}", path.display()),
+            "toml",
+        )),
+        #[cfg(feature = "toml")]
         StructuredFormat::Toml => {
             let text = std::str::from_utf8(&bytes).map_err(|error| {
                 format!(

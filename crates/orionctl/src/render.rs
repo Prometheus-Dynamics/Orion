@@ -209,6 +209,7 @@ pub(crate) fn print_observability_event_summary(event: &ObservabilityEvent) {
     );
 }
 
+#[cfg(feature = "toml")]
 #[derive(serde::Serialize)]
 struct TomlEnvelope<'a, T> {
     value: &'a T,
@@ -225,10 +226,16 @@ pub(crate) fn print_structured<T: serde::Serialize>(
         OutputFormat::Json => {
             serde_json::to_string_pretty(value).map_err(|error| error.to_string())?
         }
+        #[cfg(feature = "yaml")]
         OutputFormat::Yaml => serde_yaml::to_string(value).map_err(|error| error.to_string())?,
+        #[cfg(not(feature = "yaml"))]
+        OutputFormat::Yaml => return Err(crate::features::disabled("YAML output", "yaml")),
+        #[cfg(feature = "toml")]
         OutputFormat::Toml => {
             toml::to_string_pretty(&TomlEnvelope { value }).map_err(|error| error.to_string())?
         }
+        #[cfg(not(feature = "toml"))]
+        OutputFormat::Toml => return Err(crate::features::disabled("TOML output", "toml")),
         OutputFormat::Metrics => {
             return Err("metrics output is supported only for observability views".to_owned());
         }

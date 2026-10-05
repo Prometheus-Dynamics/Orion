@@ -1,15 +1,20 @@
 use orion_client::LocalControlPlaneClient;
-use orion_control_plane::{ControlMessage, StateSnapshot, SyncRequest};
+#[cfg(feature = "http")]
+use orion_control_plane::SyncRequest;
+use orion_control_plane::{ControlMessage, StateSnapshot};
+#[cfg(feature = "http")]
 use orion_core::{NodeId, Revision};
+use orion_transport_http::{ControlRoute, HttpResponsePayload};
+#[cfg(feature = "http")]
 use orion_transport_http::{
-    ControlRoute, HttpClient, HttpClientTlsConfig, HttpRequestPayload, HttpResponsePayload,
-    HttpTransportError,
+    HttpClient, HttpClientTlsConfig, HttpRequestPayload, HttpTransportError,
 };
 
-use crate::cli::{
-    HttpTargetArgs, HttpTargetScheme, LocalControlArgs, StateQueryArgs, preferred_ipc_socket_path,
-};
+#[cfg(feature = "http")]
+use crate::cli::HttpTargetScheme;
+use crate::cli::{HttpTargetArgs, LocalControlArgs, StateQueryArgs, preferred_ipc_socket_path};
 
+#[cfg(feature = "http")]
 pub(crate) trait HttpTargetExt {
     fn client(&self) -> Result<HttpClient, String>;
     fn scheme(&self) -> Result<HttpTargetScheme, String>;
@@ -17,6 +22,7 @@ pub(crate) trait HttpTargetExt {
     fn map_client_construction_error(&self, scheme: HttpTargetScheme, error: &str) -> String;
 }
 
+#[cfg(feature = "http")]
 impl HttpTargetExt for HttpTargetArgs {
     fn client(&self) -> Result<HttpClient, String> {
         let scheme = self.scheme()?;
@@ -121,6 +127,7 @@ impl HttpTargetExt for HttpTargetArgs {
     }
 }
 
+#[cfg(feature = "http")]
 impl HttpTargetArgs {
     /// Renders HTTP errors, spelling out control-protocol skew in orionctl terms.
     fn describe_http_error(&self, error: HttpTransportError) -> String {
@@ -170,6 +177,35 @@ impl HttpTargetArgs {
             HttpResponsePayload::Snapshot(snapshot) => Ok(snapshot),
             other => Err(format!("expected snapshot response, got {other:?}")),
         }
+    }
+}
+
+/// IPC-only build: every `--http` request fails with an error naming the `http` feature.
+#[cfg(not(feature = "http"))]
+impl HttpTargetArgs {
+    fn disabled(&self) -> String {
+        crate::features::disabled(
+            &format!("`--http {}` (remote HTTP targets)", self.http),
+            "http",
+        )
+    }
+
+    pub(crate) async fn get_route(
+        &self,
+        _route: ControlRoute,
+    ) -> Result<HttpResponsePayload, String> {
+        Err(self.disabled())
+    }
+
+    pub(crate) async fn send_control(
+        &self,
+        _message: ControlMessage,
+    ) -> Result<HttpResponsePayload, String> {
+        Err(self.disabled())
+    }
+
+    pub(crate) async fn fetch_snapshot(&self) -> Result<StateSnapshot, String> {
+        Err(self.disabled())
     }
 }
 

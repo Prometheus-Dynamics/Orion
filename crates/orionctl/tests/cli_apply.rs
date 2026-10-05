@@ -340,6 +340,7 @@ async fn orionctl_apply_workload_accepts_json_spec_file() {
     let _ = std::fs::remove_file(spec_path);
 }
 
+#[cfg(feature = "yaml")]
 #[tokio::test(flavor = "multi_thread")]
 async fn orionctl_apply_workload_accepts_yaml_spec_file() {
     let harness = TestHarness::start("node.orionctl.spec.yaml").await;
@@ -396,6 +397,7 @@ async fn orionctl_apply_workload_accepts_yaml_spec_file() {
     let _ = std::fs::remove_file(spec_path);
 }
 
+#[cfg(feature = "toml")]
 #[tokio::test(flavor = "multi_thread")]
 async fn orionctl_apply_workload_accepts_toml_spec_file() {
     let harness = TestHarness::start("node.orionctl.spec.toml").await;

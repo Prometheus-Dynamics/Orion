@@ -251,6 +251,7 @@ impl From<CliRestartPolicy> for RestartPolicy {
     }
 }
 
+#[cfg(feature = "http")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HttpTargetScheme {
     Http,
@@ -663,14 +664,18 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    #[cfg(feature = "http")]
+    use super::{HttpTargetArgs, HttpTargetScheme, OutputFormat};
     use super::{
-        HttpTargetArgs, HttpTargetScheme, OutputFormat, StructuredFormat, TypedConfigValue,
-        parse_binding, parse_bool_config, parse_bytes_hex_config, parse_requirement,
-        parse_string_config, parse_uint_config, preferred_runtime_path,
+        StructuredFormat, TypedConfigValue, parse_binding, parse_bool_config,
+        parse_bytes_hex_config, parse_requirement, parse_string_config, parse_uint_config,
+        preferred_runtime_path,
     };
     use crate::build_info;
+    #[cfg(feature = "http")]
     use crate::transport::HttpTargetExt;
 
+    #[cfg(feature = "http")]
     fn target(http: &str) -> HttpTargetArgs {
         HttpTargetArgs {
             http: http.to_owned(),
@@ -682,6 +687,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn plain_http_targets_reject_tls_material_early() {
         let mut args = target("http://127.0.0.1:9100");
@@ -692,6 +698,7 @@ mod tests {
         assert!(error.contains("plain http:// targets do not use TLS material"));
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn client_identity_requires_matching_key() {
         let mut args = target("https://127.0.0.1:9100");

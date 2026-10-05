@@ -137,8 +137,14 @@ The facade crate `orion` is feature-gated by subsystem.
   node as an ordinary provider. It also works in the IPC-only build
   (`--no-default-features --features link-gateway`). See `docs/link-protocol.md`.
 - `orion-transport-http` exposes its protocol types (payloads, routes, codec, errors, and handler
-  traits) without the network stack. The HTTP client and server sit behind its default `transport`
-  feature.
+  traits) without the network stack. `client` adds `HttpClient` (reqwest over rustls, no
+  axum/hyper server), `server` adds `HttpServer` (axum, hyper, tokio-rustls), and the default
+  `transport` feature enables both.
+- `orionctl` features `http` (`--http` remote targets, HTTP client only), `yaml` and `toml`
+  (output formats and workload spec files) are all on by default. `cargo build -p orionctl
+  --no-default-features` gives an IPC-only CLI with JSON output (1.80 MiB stripped, against
+  4.38 MiB for the default build); requesting a disabled transport or format fails with an error
+  that names the feature. See [`crates/orionctl/README.md`](crates/orionctl/README.md).
 
 For production consumers that want a narrow dependency surface, prefer direct crate dependencies or disable default features on the facade and opt in explicitly.
 

@@ -1,5 +1,6 @@
 mod build_info;
 mod cli;
+mod features;
 mod handlers;
 mod maintenance;
 mod render;

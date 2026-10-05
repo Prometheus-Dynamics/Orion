@@ -88,6 +88,27 @@ jobs:
           cargo test -p orion-node --no-default-features --features link-gateway
           cargo test -p orion-node --features link-gateway --lib link_gateway
 
+      - name: Run clippy on orion-transport-http and orionctl feature matrix
+        run: |
+          # Protocol layer only, the HTTP client alone (no axum/hyper server), the server alone.
+          cargo clippy -p orion-transport-http --no-default-features --all-targets -- -D warnings
+          cargo clippy -p orion-transport-http --no-default-features --features client --all-targets -- -D warnings
+          cargo clippy -p orion-transport-http --no-default-features --features server --all-targets -- -D warnings
+          cargo clippy -p orion-transport-http --all-targets -- -D warnings
+          # orionctl: IPC-only + JSON, IPC-only with YAML/TOML, HTTP client + JSON, defaults.
+          cargo clippy -p orionctl --no-default-features --all-targets -- -D warnings
+          cargo clippy -p orionctl --no-default-features --features yaml,toml --all-targets -- -D warnings
+          cargo clippy -p orionctl --no-default-features --features http --all-targets -- -D warnings
+          cargo clippy -p orionctl --all-targets -- -D warnings
+
+      - name: Build and test slim orionctl builds
+        run: |
+          cargo build -p orion-transport-http --no-default-features --features client
+          cargo build -p orion-transport-http --no-default-features --features server
+          cargo build -p orionctl --no-default-features
+          cargo build -p orionctl --no-default-features --features http
+          cargo test -p orionctl --no-default-features
+
       - name: Build docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 

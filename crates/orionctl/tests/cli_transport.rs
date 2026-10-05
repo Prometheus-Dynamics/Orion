@@ -1,3 +1,6 @@
+//! `--http` argument validation; needs the `http` feature (see `cli_features.rs` otherwise).
+#![cfg(feature = "http")]
+
 mod support;
 
 use support::run_orionctl;

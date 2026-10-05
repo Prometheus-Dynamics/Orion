@@ -38,21 +38,25 @@ async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
     );
     harness._app.replace_desired(desired);
 
-    let health = run_orionctl(["get", "health", "--http", &harness.http_base()]);
-    assert!(health.status.success(), "{}", output_text(&health));
-    assert!(String::from_utf8_lossy(&health.stdout).contains("status=Healthy"));
+    // Remote reads over `--http` (the `http` feature); everything below uses the local socket.
+    #[cfg(feature = "http")]
+    {
+        let health = run_orionctl(["get", "health", "--http", &harness.http_base()]);
+        assert!(health.status.success(), "{}", output_text(&health));
+        assert!(String::from_utf8_lossy(&health.stdout).contains("status=Healthy"));
 
-    let readiness = run_orionctl(["get", "readiness", "--http", &harness.http_base()]);
-    assert!(readiness.status.success(), "{}", output_text(&readiness));
-    assert!(String::from_utf8_lossy(&readiness.stdout).contains("status=Ready"));
+        let readiness = run_orionctl(["get", "readiness", "--http", &harness.http_base()]);
+        assert!(readiness.status.success(), "{}", output_text(&readiness));
+        assert!(String::from_utf8_lossy(&readiness.stdout).contains("status=Ready"));
 
-    let observability = run_orionctl(["get", "observability", "--http", &harness.http_base()]);
-    assert!(
-        observability.status.success(),
-        "{}",
-        output_text(&observability)
-    );
-    assert!(String::from_utf8_lossy(&observability.stdout).contains("mutation_success="));
+        let observability = run_orionctl(["get", "observability", "--http", &harness.http_base()]);
+        assert!(
+            observability.status.success(),
+            "{}",
+            output_text(&observability)
+        );
+        assert!(String::from_utf8_lossy(&observability.stdout).contains("mutation_success="));
+    }
 
     let observability_metrics = run_orionctl([
         "get",
@@ -505,9 +509,10 @@ async fn orionctl_local_commands_default_to_ipc_when_http_is_omitted() {
     assert_eq!(maintenance_json["state"]["mode"], "normal");
 }
 
+#[cfg(feature = "yaml")]
 #[tokio::test(flavor = "multi_thread")]
-async fn orionctl_supports_yaml_and_toml_structured_output() {
-    let harness = TestHarness::start("node.orionctl.output").await;
+async fn orionctl_supports_yaml_structured_output() {
+    let harness = TestHarness::start("node.orionctl.output.yaml").await;
 
     let yaml_output = run_orionctl([
         "get",
@@ -525,6 +530,12 @@ async fn orionctl_supports_yaml_and_toml_structured_output() {
     let yaml: serde_yaml::Value =
         serde_yaml::from_slice(&yaml_output.stdout).expect("yaml output should parse");
     assert!(yaml.get("state").is_some());
+}
+
+#[cfg(feature = "toml")]
+#[tokio::test(flavor = "multi_thread")]
+async fn orionctl_supports_toml_structured_output() {
+    let harness = TestHarness::start("node.orionctl.output.toml").await;
 
     let toml_output = run_orionctl([
         "peers",

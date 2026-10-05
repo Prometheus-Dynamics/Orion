@@ -18,6 +18,9 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 - [x] Memory/backlog diagnostics: `resource_usage` observability section, `orionctl get memory`,
       Prometheus families.
 - [x] Appliance memory soak (`crates/node/tests/appliance_memory_soak.rs`, nightly in `ci-soak.yml`).
+- [x] Slim `orionctl`: `orion-transport-http` split into `client` / `server` features; `orionctl`
+      features `http`, `yaml`, `toml` (default on). IPC + JSON build is 1.80 MiB / 57 crates vs
+      4.38 MiB / 139 crates default (2.65 MiB with YAML + TOML).
 
 ### Efficiency
 
@@ -187,6 +190,10 @@ none of these are HeliOS-specific features.
 
 - [ ] Optional blocking client for the fd latest-value channel.
 - [ ] Single multiplexed local IPC socket instead of separate unary and stream sockets.
+- [ ] Default `orionctl` is still 4.38 MiB, almost all reqwest + rustls + hyper client for `--http`.
+      A smaller HTTP/1.1 client (hyper-util client or a hand-rolled one over tokio-rustls) could
+      replace reqwest if the CLI size matters; trimming clap's `color` / `suggestions` would also
+      save a little but changes help/error output.
 - [ ] Field-reorder/same-size type changes are not caught by the protocol layout fingerprint; consider
       hashing archived fixture bytes as well. (Partly covered: `crates/auth/tests/canonical_encoding.rs`
       pins the bytes of representative control/auth messages; extend it to the remaining types.)
