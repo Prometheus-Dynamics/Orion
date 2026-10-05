@@ -125,6 +125,13 @@ The facade crate `orion` is feature-gated by subsystem.
   tokio, so `--no-default-features --features peer-tcp` gives a small IPC-only node that can still
   cluster. Concurrent writes from different nodes are merged per object, last writer wins by
   hybrid logical clock. See [`docs/peer-sync.md`](docs/peer-sync.md).
+- `orion-node`'s opt-in `discovery-mdns` feature finds the peers of a cluster with mDNS/DNS-SD
+  (`ORION_NODE_DISCOVERY=mdns`, `ORION_NODE_CLUSTER`). Discovered peers are never trusted on their
+  own: an operator enrolls them after comparing key fingerprints (`orionctl get discovered-peers`,
+  `orionctl peers enroll <node-id>`), or nodes sharing `ORION_NODE_ENROLLMENT_KEY` enroll each
+  other with a challenge-response handshake. Works in the appliance build
+  (`--no-default-features --features peer-tcp,discovery-mdns`). See
+  [`docs/discovery.md`](docs/discovery.md).
 - `orion-node`'s opt-in `link-gateway` feature (Linux) serves microcontroller links (serial ports
   and SocketCAN, configured with `ORION_NODE_LINKS`) and bridges each `orion-link` device into the
   node as an ordinary provider. It also works in the IPC-only build

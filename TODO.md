@@ -143,8 +143,14 @@ none of these are HeliOS-specific features.
 - [ ] **Cross-node binding.** A workload may bind another node's resource. Orion resolves,
       authorizes and leases it; bytes flow over the resource's own endpoint. Orion's generic data
       plane (`RemoteBinding`, TCP/QUIC frames) is not on the main path.
-- [ ] **Discovery.** mDNS for discovery only. Trust stays enrollment-based (ed25519 peer keys or a
-      shared enrollment key); discovered peers are never trusted automatically.
+- [x] **Discovery.** mDNS for discovery only. Trust stays enrollment-based (ed25519 peer keys or a
+      shared enrollment key); discovered peers are never trusted automatically. (Feature
+      `discovery-mdns`: `_orion._tcp` with node id, public key, ports, protocol version and cluster
+      in TXT; `orionctl get discovered-peers`, `orionctl peers enroll <node-id>` with fingerprint
+      confirmation, `orionctl peers remove`; shared-key HMAC + ed25519 handshake over `orion+tcp`;
+      see [docs/discovery.md](docs/discovery.md).)
+  - [ ] Initiate the shared-key handshake over `https://` peers too (served on both transports,
+        initiated over `orion+tcp` only).
 - [ ] **Placement.** Node labels plus workload constraints (node selector, co-locate with resource X,
       any eligible node), with a deterministic leaderless choice, owned by `orion-cluster`
       (`ClusterCoordinator` is currently unused).
