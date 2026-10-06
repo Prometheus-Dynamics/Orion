@@ -13,7 +13,10 @@
 //! Every field is optional: a source fills in what its platform reports.
 
 use crate::TypedConfigValue;
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+// `Arc` needs pointer-width atomics (absent on thumbv6m and riscv32imc).
+#[cfg(target_has_atomic = "ptr")]
+use alloc::sync::Arc;
+use alloc::{boxed::Box, collections::BTreeMap, string::String, vec::Vec};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -212,6 +215,7 @@ pub trait HostFactsSource: Send + Sync {
     fn sample(&self) -> HostFacts;
 }
 
+#[cfg(target_has_atomic = "ptr")]
 impl<T: HostFactsSource + ?Sized> HostFactsSource for Arc<T> {
     fn sample(&self) -> HostFacts {
         (**self).sample()
