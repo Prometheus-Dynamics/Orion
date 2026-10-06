@@ -38,7 +38,7 @@ repository and edit it.
    USB-CDC) uses `UartPort`; a CAN controller uses `CanPort` with `Packet::CLASSIC`, `Packet::FD`,
    or a custom `SegmentMtu`.
 
-2. **Provide the byte or frame driver.** If your HAL implements `embedded-io` 0.6
+2. **Provide the byte or frame driver.** If your HAL implements `embedded-io` 0.7
    (`Read + ReadReady + Write`) or `embedded-can` 0.4 (`nb::Can`), you are done. Otherwise write a
    ten-line adapter around your driver's "bytes available / read / write" or "receive / transmit
    frame" calls. Interrupt-driven receive works too: push bytes into a ring buffer in the ISR and

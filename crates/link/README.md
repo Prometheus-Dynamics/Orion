@@ -108,8 +108,8 @@ carries the node id, read it with `node_id()`), `DeviceConfig` is generic over t
 | `alloc` | `message` and the record conveniences on the device session; implies `device`; pulls `orion-core` and `orion-control-plane` (`default-features = false`), `postcard` (`alloc`), and `serde`. |
 | `std` | `host`, `Display`, and `std::error::Error` impls; implies `alloc` and enables `std` on those dependencies. |
 | `crc-table` | 1 KiB CRC table instead of 64 bytes, for roughly twice the CRC throughput. |
-| `embedded-io` | `io::{write_stream, read_frame, read_frame_buffered}` over `embedded-io` 0.6. |
-| `embedded-io-async` | The same over `embedded-io-async` 0.6. |
+| `embedded-io` | `io::{write_stream, read_frame, read_frame_buffered}` over `embedded-io` 0.7. |
+| `embedded-io-async` | The same over `embedded-io-async` 0.7. |
 | `embedded-can` | `Segment::to_can_frame`, `Reassembler::push_can_frame`, `embedded_can::Id` helpers on `CanLinkIds`, `CanDevice::{receive_can_frame, peek_can_frame}`, and `HostBus::receive_can_frame` / `BusFrame::to_can_frame`. |
 
 ## Getting Started

@@ -7,12 +7,15 @@
 
 use super::config::EnrollmentKey;
 use crate::NodeError;
+use getrandom::{
+    SysRng,
+    rand_core::{Rng, UnwrapErr},
+};
 use orion_auth::enrollment::{
     ENROLLMENT_NONCE_LEN, EnrollmentSide, EnrollmentTranscript, enrollment_message,
     enrollment_proof, verify_enrollment_proof, verify_enrollment_signature,
 };
 use orion_control_plane::{EnrollmentHello, EnrollmentRole};
-use rand_core::{OsRng, RngCore};
 use std::collections::VecDeque;
 
 pub(crate) const NONCE_LEN: usize = ENROLLMENT_NONCE_LEN;
@@ -67,7 +70,7 @@ pub(crate) fn verify_signature(
 
 pub(crate) fn random_nonce() -> [u8; NONCE_LEN] {
     let mut nonce = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
+    UnwrapErr(SysRng).fill_bytes(&mut nonce);
     nonce
 }
 

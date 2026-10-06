@@ -2,10 +2,10 @@
 
 use super::RemoteError;
 use ed25519_dalek::SigningKey;
+use getrandom::{SysRng, rand_core::UnwrapErr};
 use orion_auth::{crypto::key_fingerprint, hex::encode_hex};
 use orion_control_plane::OperatorId;
 use orion_core::NodeId;
-use rand_core::OsRng;
 use std::fmt;
 
 /// An operator's identity: its id (`operator:<name>`) and ed25519 signing key.
@@ -24,7 +24,7 @@ impl OperatorIdentity {
     pub fn generate(name: &str) -> Result<Self, RemoteError> {
         Ok(Self {
             operator_id: parse_id(name)?,
-            signing_key: SigningKey::generate(&mut OsRng),
+            signing_key: SigningKey::generate(&mut UnwrapErr(SysRng)),
         })
     }
 

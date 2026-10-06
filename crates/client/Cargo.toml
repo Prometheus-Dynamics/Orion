@@ -29,14 +29,14 @@ remote = [
     "dep:orion-auth",
     "dep:orion-transport-http",
     "dep:orion-transport-ipc",
-    "dep:rand_core",
+    "dep:getrandom",
     "orion-auth/enrollment",
 ]
 # Browse `_orion._tcp` nodes with mDNS (`orion_client::remote::discovery`).
 discovery = ["remote", "dep:mdns-sd"]
 
 [dependencies]
-ed25519-dalek = { workspace = true, features = ["std"], optional = true }
+ed25519-dalek = { workspace = true, optional = true }
 mdns-sd = { workspace = true, optional = true }
 orion-auth = { workspace = true, features = ["std"], optional = true }
 orion-core = { workspace = true, features = ["std"] }
@@ -44,7 +44,7 @@ orion-control-plane = { workspace = true, features = ["std"] }
 orion-runtime = { workspace = true, features = ["std"] }
 orion-transport-http = { workspace = true, optional = true }
 orion-transport-ipc = { workspace = true, optional = true }
-rand_core = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "fs", "sync", "time"] }

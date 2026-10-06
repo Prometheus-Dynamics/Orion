@@ -286,7 +286,7 @@ Unix-only (it needs Unix sockets, peer credentials and fd passing).
 
 `orion-client` with only `remote` pulls `orion-auth` (`crypto`, `enrollment`), the protocol layer
 of `orion-transport-http` (no reqwest, axum or hyper), `orion-transport-ipc` (frame code),
-`ed25519-dalek`, `hmac`, `sha2`, `rand_core` and tokio; no rustls, no mDNS and no node internals.
+`ed25519-dalek`, `hmac`, `sha2`, `getrandom` and tokio; no rustls, no mDNS and no node internals.
 Measured on x86_64 Linux with the workspace release profile (`opt-level = "z"`, fat LTO, one
 codegen unit, stripped); crates are the unique packages of `cargo tree -e normal`:
 

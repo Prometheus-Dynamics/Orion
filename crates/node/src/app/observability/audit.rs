@@ -273,6 +273,9 @@ pub(crate) fn write_audit_record(
     audit_log.append_for_current_runtime(record)
 }
 
+// `fetch_update` is deprecated in favour of `try_update` (Rust 1.99), which is newer than the
+// workspace MSRV (1.94).
+#[allow(deprecated)]
 fn saturating_decrement(counter: &AtomicU64) {
     let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
         Some(value.saturating_sub(1))

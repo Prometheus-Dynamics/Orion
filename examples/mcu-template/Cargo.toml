@@ -39,7 +39,7 @@ ffi-can = []
 
 [dependencies]
 embedded-can = "0.4"
-embedded-io = "0.6"
+embedded-io = "0.7"
 nb = "1"
 orion-link = { path = "../../crates/link", default-features = false, features = ["device", "embedded-can"] }
 

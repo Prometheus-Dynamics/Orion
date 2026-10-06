@@ -18,7 +18,7 @@
 
 use crate::{AuthProtocolError, crypto};
 use alloc::{string::ToString, vec::Vec};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use orion_control_plane::{ENROLLMENT_PROTOCOL_VERSION, EnrollmentRole};
 use orion_core::NodeId;
 use sha2::Sha256;
@@ -89,7 +89,7 @@ pub fn enrollment_message(side: EnrollmentSide, transcript: &[u8]) -> Vec<u8> {
 
 fn mac(key: &[u8]) -> Hmac<Sha256> {
     // HMAC accepts keys of any length, so this never fails.
-    match <Hmac<Sha256> as Mac>::new_from_slice(key) {
+    match <Hmac<Sha256> as KeyInit>::new_from_slice(key) {
         Ok(mac) => mac,
         Err(_) => unreachable!("HMAC accepts any key length"),
     }

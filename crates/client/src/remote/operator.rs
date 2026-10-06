@@ -1,6 +1,10 @@
 //! [`RemoteOperator`]: one signed `orion+tcp` session with one node.
 
 use super::{OperatorIdentity, RemoteError};
+use getrandom::{
+    SysRng,
+    rand_core::{Rng, UnwrapErr},
+};
 use orion_auth::{
     PeerRequestPayload,
     crypto::{key_fingerprint, public_key_array, sign_peer_request, verify_peer_response},
@@ -10,7 +14,6 @@ use orion_control_plane::{ControlMessage, OperatorTrustState, OperatorWelcome};
 use orion_core::{NodeId, decode_from_slice};
 use orion_transport_http::{HttpCodec, HttpRequestPayload, HttpResponsePayload};
 use orion_transport_ipc::{ControlTcpClient, ControlTcpError, IpcTransportError};
-use rand_core::{OsRng, RngCore};
 use std::{
     sync::{Arc, RwLock},
     time::Duration,
@@ -309,7 +312,7 @@ fn encode_signed(
 ) -> Result<Vec<u8>, RemoteError> {
     // Nodes remember a window of recent nonces per principal; random 64-bit nonces need no
     // client-side state and do not repeat in practice.
-    let nonce = OsRng.next_u64();
+    let nonce = UnwrapErr(SysRng).next_u64();
     let request = sign_peer_request(
         identity.signing_key(),
         &identity.principal(),

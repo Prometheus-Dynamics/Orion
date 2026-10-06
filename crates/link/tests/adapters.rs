@@ -184,6 +184,10 @@ mod nonblocking {
             self.data.extend_from_slice(&buf[..n]);
             Ok(n)
         }
+
+        async fn flush(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
     }
 
     #[test]

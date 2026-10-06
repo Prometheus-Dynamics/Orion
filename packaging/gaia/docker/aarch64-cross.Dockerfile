@@ -5,7 +5,7 @@
 # built against an older glibc runs on newer ones, not the other way round. The linker is
 # configured here; the 64 KiB segment alignment for 16 KiB / 64 KiB page kernels comes from the
 # workspace .cargo/config.toml.
-FROM rust:1.94.0-slim-bookworm
+FROM rust:1.99.0-slim-bookworm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross \

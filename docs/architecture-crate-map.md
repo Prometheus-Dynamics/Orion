@@ -67,7 +67,8 @@ Dependency notes:
 
 - Workspace dependencies on the model crates and on `serde`, `serde_json`, `thiserror`, `rkyv`, and
   `ed25519-dalek` are declared with `default-features = false`; every std crate enables
-  `features = ["std"]` explicitly, so std builds are unchanged.
+  `features = ["std"]` explicitly, so std builds are unchanged. `ed25519-dalek` 3 and `sha2` 0.11
+  have no `std` feature.
 - rkyv keeps `little_endian` + `pointer_width_64` on every target (requires rkyv >= 0.8.16 on
   32-bit targets), so archives are byte-identical between hosts and MCUs, and between std and no_std
   builds. `crates/auth/tests/canonical_encoding.rs` checks canonical messages against a recorded

@@ -50,8 +50,8 @@ pub(super) fn parse_hex_public_key(value: &str) -> Result<[u8; 32], NodeError> {
         )));
     }
     let mut bytes = [0_u8; 32];
-    for (index, chunk) in trimmed.as_bytes().chunks_exact(2).enumerate() {
-        bytes[index] = decode_hex_pair(chunk[0], chunk[1])?;
+    for (index, [high, low]) in trimmed.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        bytes[index] = decode_hex_pair(*high, *low)?;
     }
     Ok(bytes)
 }

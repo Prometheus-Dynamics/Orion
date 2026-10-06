@@ -51,7 +51,7 @@ alloc-mimalloc = ["dep:mimalloc"]
 alloc-jemalloc = ["dep:tikv-jemallocator"]
 
 [dependencies]
-ed25519-dalek = { workspace = true, features = ["std"] }
+ed25519-dalek.workspace = true
 libc.workspace = true
 mdns-sd = { workspace = true, optional = true }
 mimalloc = { workspace = true, optional = true }
@@ -68,7 +68,7 @@ orion-transport-http.workspace = true
 orion-transport-ipc.workspace = true
 orion-transport-quic = { workspace = true, optional = true }
 orion-transport-tcp = { workspace = true, optional = true }
-rand_core.workspace = true
+getrandom.workspace = true
 rcgen = { workspace = true, optional = true }
 rkyv = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["std"] }

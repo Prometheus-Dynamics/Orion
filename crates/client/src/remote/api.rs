@@ -1,6 +1,10 @@
 //! Read, action and enrollment calls of [`RemoteOperator`].
 
 use super::{RemoteError, RemoteOperator, operator::unexpected};
+use getrandom::{
+    SysRng,
+    rand_core::{Rng, UnwrapErr},
+};
 use orion_auth::enrollment::{
     ENROLLMENT_NONCE_LEN, EnrollmentSide, EnrollmentTranscript, enrollment_proof, sign_enrollment,
     verify_enrollment_proof, verify_enrollment_signature,
@@ -12,7 +16,6 @@ use orion_control_plane::{
 };
 use orion_core::NodeId;
 use orion_transport_http::HttpResponsePayload;
-use rand_core::{OsRng, RngCore};
 use std::{collections::BTreeMap, time::Duration};
 use tokio::time::Instant;
 
@@ -30,7 +33,7 @@ impl RemoteOperator {
         let initiator = identity.principal();
         let initiator_key = identity.public_key();
         let mut initiator_nonce = [0u8; ENROLLMENT_NONCE_LEN];
-        OsRng.fill_bytes(&mut initiator_nonce);
+        UnwrapErr(SysRng).fill_bytes(&mut initiator_nonce);
         let responder = self.node_id().clone();
         let responder_key = self.node_public_key();
         let hello = EnrollmentHello {

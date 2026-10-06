@@ -105,10 +105,7 @@ pub(super) async fn run<P: CanIo>(
         if failure.is_none()
             && let Some(open_socket) = socket.as_ref()
         {
-            loop {
-                let Some(frame) = pending.take().or_else(|| bus.next_frame()) else {
-                    break;
-                };
+            while let Some(frame) = pending.take().or_else(|| bus.next_frame()) {
                 let out = CanFrame {
                     id: frame.id,
                     extended: frame.extended,

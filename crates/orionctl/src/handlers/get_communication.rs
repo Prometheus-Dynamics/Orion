@@ -50,13 +50,13 @@ pub(super) fn print_communication_summary(communication: &[CommunicationEndpoint
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "-".to_owned()),
             endpoint.metrics.latency.samples_total,
-            if endpoint.metrics.latency.samples_total == 0 {
-                "-".to_owned()
-            } else {
-                (endpoint.metrics.latency.total_duration_ms
-                    / endpoint.metrics.latency.samples_total)
-                    .to_string()
-            },
+            endpoint
+                .metrics
+                .latency
+                .total_duration_ms
+                .checked_div(endpoint.metrics.latency.samples_total)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_owned()),
             endpoint
                 .metrics
                 .latency
@@ -272,11 +272,11 @@ impl PeerAccumulator {
             bytes_received: self.bytes_received,
             recent_successes: self.recent_successes,
             recent_failures: self.recent_failures,
-            recent_failure_rate_per_mille: if recent_total == 0 {
-                0
-            } else {
-                self.recent_failures.saturating_mul(1_000) / recent_total
-            },
+            recent_failure_rate_per_mille: self
+                .recent_failures
+                .saturating_mul(1_000)
+                .checked_div(recent_total)
+                .unwrap_or(0),
             max_latency_ms: self.max_latency_ms,
             worst_endpoint: self.worst_endpoint,
             last_error: self.last_error,

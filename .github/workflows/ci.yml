@@ -21,7 +21,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: rustfmt, clippy
 
       - name: Cache Rust artifacts
@@ -46,7 +46,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: rustfmt, clippy
 
       - name: Cache Rust artifacts
@@ -150,7 +150,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: clippy
           targets: x86_64-pc-windows-gnu, x86_64-apple-darwin
 
@@ -191,7 +191,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -223,7 +223,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: clippy, rustfmt
           targets: thumbv6m-none-eabi, thumbv7em-none-eabihf, thumbv8m.main-none-eabihf, riscv32imc-unknown-none-elf, riscv32imac-unknown-none-elf
 
@@ -308,7 +308,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: clippy
           targets: thumbv7em-none-eabihf, riscv32imac-unknown-none-elf
 
@@ -338,7 +338,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: clippy
           targets: aarch64-unknown-linux-gnu
 
@@ -388,7 +388,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           targets: aarch64-unknown-linux-gnu
 
       - name: Cache Rust artifacts
@@ -437,7 +437,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: rustfmt, clippy
 
       - name: Cache Rust artifacts
@@ -459,7 +459,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: rustfmt, clippy
 
       - name: Cache Rust artifacts
@@ -479,7 +479,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.94.0 # keep in sync with rust-toolchain.toml
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           components: rustfmt, clippy
 
       - name: Cache Rust artifacts

@@ -290,9 +290,7 @@ fn record_nonzero_duration(
 }
 
 fn update_max(max: &SharedAtomicU64, value: u64) {
-    let _ = max.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        Some(current.max(value))
-    });
+    max.fetch_max(value, Ordering::Relaxed);
 }
 
 fn duration_ms(duration: Duration) -> u64 {

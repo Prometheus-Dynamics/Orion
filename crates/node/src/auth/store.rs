@@ -10,8 +10,8 @@ use crate::lock::read_rwlock;
 use crate::storage_io::{atomic_write_file, storage_path_error};
 use crate::{NodeError, NodeStorage};
 use ed25519_dalek::SigningKey;
+use getrandom::{SysRng, rand_core::UnwrapErr};
 use orion::{NodeId, encode_to_vec};
-use rand_core::OsRng;
 use std::{
     collections::{BTreeMap, VecDeque},
     path::PathBuf,
@@ -168,7 +168,7 @@ pub(super) fn load_or_create_identity(
     storage: Option<&NodeStorage>,
 ) -> Result<SigningKey, NodeError> {
     let Some(storage) = storage else {
-        return Ok(SigningKey::generate(&mut OsRng));
+        return Ok(SigningKey::generate(&mut UnwrapErr(SysRng)));
     };
 
     let path = storage.identity_path();
@@ -186,7 +186,7 @@ pub(super) fn load_or_create_identity(
         return Ok(SigningKey::from_bytes(&secret));
     }
 
-    let signing_key = SigningKey::generate(&mut OsRng);
+    let signing_key = SigningKey::generate(&mut UnwrapErr(SysRng));
     atomic_write_file(
         &path,
         &signing_key.to_bytes(),

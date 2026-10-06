@@ -186,7 +186,7 @@ impl LinuxHostFactsSource {
                 Some((zone, kind, temp))
             })
             .collect();
-        zones.sort_by(|a, b| zone_order(&a.0).cmp(&zone_order(&b.0)));
+        zones.sort_by_key(|a| zone_order(&a.0));
         thermal_readings(
             zones
                 .iter()
