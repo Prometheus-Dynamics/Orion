@@ -1,10 +1,12 @@
 //! A device agent on Orion's local IPC (`docs/device-agent.md`).
 //!
-//! It claims the node actions `update`, `reboot` and `locate`, runs them with an [`Updater`]
-//! (the device package's writer, LEDs and reboot), mirrors progress into the action and the
-//! status lane, and keeps the `update.*` status keys under `node/<id>` published: once after it
-//! connects (after every boot) and then every [`REPUBLISH_INTERVAL`], which also restores them
-//! after `orion-node` restarts.
+//! It claims the node actions `update`, `update.cancel`, `update.rollback`, `reboot` and
+//! `locate`, and runs them with an [`Updater`] (the device package's writer, LEDs and reboot).
+//! `update` is asynchronous: the action succeeds with `phase = "staging"` once the download and
+//! stage have started, and the stage then runs in the background, reporting only through the
+//! `update.*` status keys under `node/<id>`. The agent keeps those keys published: once after it
+//! connects (after every boot), on every change, and every [`REPUBLISH_INTERVAL`], which also
+//! restores them after `orion-node` restarts.
 //!
 //! The example binary and `crates/node/tests/device_agent.rs` share this file.
 
@@ -17,11 +19,13 @@ use orion_client::{ActionReporter, ClientError, LocalProviderService};
 use orion_control_plane::{
     ActionRequest, StatusEntry, TypedConfigValue, action_names, action_status_keys, update_action,
 };
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Notify, mpsc, oneshot};
 
 /// The node actions the agent claims.
-pub const CLAIMED_ACTIONS: [&str; 3] = [
+pub const CLAIMED_ACTIONS: [&str; 5] = [
     action_names::UPDATE,
+    action_names::UPDATE_CANCEL,
+    action_names::UPDATE_ROLLBACK,
     action_names::REBOOT,
     action_names::LOCATE,
 ];
@@ -34,7 +38,7 @@ pub const REPUBLISH_INTERVAL: Duration = Duration::from_secs(30);
 /// What the device's updater reports (`update status`), published as the `update.*` keys.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UpdaterStatus {
-    /// `idle`, `staging`, `staged`, `trying`, `confirmed`, `rolled-back`, ...
+    /// One of the `update_action::STATE_*` values.
     pub state: String,
     pub slot_active: Option<String>,
     pub slot_staged: Option<String>,
@@ -86,8 +90,7 @@ pub trait Updater: Send + Sync + 'static {
     /// Current state (`update status`).
     fn status(&self) -> UpdaterStatus;
     /// Downloads `image_url`, checks it and writes the inactive slot, sending progress (per
-    /// mille) as it goes; returns the staged version. Must be idempotent: a request for an image
-    /// that is already staged (same digest) succeeds at once.
+    /// mille) as it goes; returns the staged version. The agent drops the future to cancel it.
     fn stage(
         &self,
         request: StageRequest,
@@ -95,6 +98,11 @@ pub trait Updater: Send + Sync + 'static {
     ) -> impl Future<Output = Result<String, String>> + Send;
     /// Points the next boot at the staged slot (trial boot) and reboots (`update apply`).
     fn apply(&self) -> impl Future<Output = Result<(), String>> + Send;
+    /// Cleans up after a cancelled stage, or forgets a staged update; `Ok(false)` when there was
+    /// nothing to cancel. Leaves the state `cancelled` when it cancelled something.
+    fn cancel(&self) -> impl Future<Output = Result<bool, String>> + Send;
+    /// Points the next boot at the previous confirmed slot; `Err` when there is none.
+    fn prepare_rollback(&self) -> impl Future<Output = Result<(), String>> + Send;
     /// Reboots after `delay_ms`.
     fn reboot(&self, delay_ms: u64) -> impl Future<Output = Result<(), String>> + Send;
     /// Starts (`enabled`) or stops identifying the device for `duration_ms`.
@@ -135,220 +143,337 @@ pub fn update_status_entries(
     ]
 }
 
-/// `action.<id>.{state,progress,error}` entries under `node/<id>`.
-fn action_entries(
-    reporter: &ActionReporter,
-    action_id: &str,
-    state: &str,
-    progress: Option<u16>,
-    error: Option<&str>,
-) -> Vec<StatusEntry> {
-    let mut entries = vec![reporter.node_status_entry(
-        action_status_keys::key(action_id, action_status_keys::STATE),
-        TypedConfigValue::String(state.into()),
-    )];
-    if let Some(progress) = progress {
-        entries.push(reporter.node_status_entry(
-            action_status_keys::key(action_id, action_status_keys::PROGRESS),
-            TypedConfigValue::UInt(u64::from(progress)),
-        ));
-    }
-    if let Some(error) = error {
-        entries.push(reporter.node_status_entry(
-            action_status_keys::key(action_id, action_status_keys::ERROR),
-            TypedConfigValue::String(error.into()),
-        ));
-    }
-    entries
+fn phase(value: &str) -> BTreeMap<String, TypedConfigValue> {
+    BTreeMap::from([(
+        update_action::OUTPUT_PHASE.to_owned(),
+        TypedConfigValue::String(value.into()),
+    )])
 }
 
-/// Publishes the updater's status; failures (no claim yet after a reconnect, node restarting)
-/// are retried by the next republish.
-async fn publish_update_status<U: Updater>(reporter: &ActionReporter, updater: &U) {
-    let _ = reporter
-        .publish_status(update_status_entries(reporter, &updater.status()))
-        .await;
+/// A stage running in the background.
+struct Staging {
+    generation: u64,
+    sha256: String,
+    cancel: oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+/// The agent: one per connection to the node.
+pub struct Agent<U: Updater> {
+    updater: Arc<U>,
+    reporter: ActionReporter,
+    staging: Mutex<Option<Staging>>,
+    generation: Mutex<u64>,
+}
+
+impl<U: Updater> Agent<U> {
+    pub fn new(updater: Arc<U>, reporter: ActionReporter) -> Arc<Self> {
+        Arc::new(Self {
+            updater,
+            reporter,
+            staging: Mutex::new(None),
+            generation: Mutex::new(0),
+        })
+    }
+
+    /// Publishes `status` as the `update.*` keys. Failures (no claim yet after a reconnect, node
+    /// restarting) are retried by the next republish.
+    async fn publish(&self, status: &UpdaterStatus) {
+        let _ = self
+            .reporter
+            .publish_status(update_status_entries(&self.reporter, status))
+            .await;
+    }
+
+    /// Publishes the updater's current status.
+    pub async fn publish_current(&self) {
+        self.publish(&self.updater.status()).await;
+    }
+
+    /// Mirrors a final action state into `action.<id>.*`.
+    async fn publish_action(&self, action_id: &str, state: &str, error: Option<&str>) {
+        let mut entries = vec![self.reporter.node_status_entry(
+            action_status_keys::key(action_id, action_status_keys::STATE),
+            TypedConfigValue::String(state.into()),
+        )];
+        if let Some(error) = error {
+            entries.push(self.reporter.node_status_entry(
+                action_status_keys::key(action_id, action_status_keys::ERROR),
+                TypedConfigValue::String(error.into()),
+            ));
+        }
+        let _ = self.reporter.publish_status(entries).await;
+    }
+
+    async fn reject(&self, action_id: &str, reason: String) {
+        self.publish_action(action_id, "rejected", Some(&reason))
+            .await;
+        let _ = self.reporter.reject(action_id, reason).await;
+    }
+
+    async fn succeed(&self, action_id: &str, phase_value: &str) {
+        self.publish_action(action_id, "succeeded", None).await;
+        let _ = self.reporter.succeed(action_id, phase(phase_value)).await;
+    }
+
+    /// Runs one claimed action and reports its outcome.
+    pub async fn handle(self: &Arc<Self>, request: ActionRequest) {
+        let id = request.action_id.clone();
+        let uint = |key: &str, default: u64| match request.args.get(key) {
+            Some(TypedConfigValue::UInt(value)) => *value,
+            _ => default,
+        };
+        match request.name.as_str() {
+            action_names::UPDATE => self.start_update(&id, &request.args).await,
+            action_names::UPDATE_CANCEL => self.cancel_update(&id).await,
+            action_names::UPDATE_ROLLBACK => self.rollback(&id).await,
+            action_names::REBOOT => {
+                // Report first: the reboot ends this process and the node's action record.
+                self.succeed(&id, update_action::PHASE_REBOOTING).await;
+                let _ = self.updater.reboot(uint("delay_ms", 0)).await;
+            }
+            action_names::LOCATE => {
+                let enabled = !matches!(
+                    request.args.get("enabled"),
+                    Some(TypedConfigValue::Bool(false))
+                );
+                match self
+                    .updater
+                    .locate(enabled, uint("duration_ms", 10_000))
+                    .await
+                {
+                    Ok(()) => {
+                        let _ = self.reporter.succeed(&id, BTreeMap::new()).await;
+                    }
+                    Err(error) => {
+                        let _ = self.reporter.fail(&id, error).await;
+                    }
+                }
+            }
+            other => {
+                self.reject(&id, format!("unsupported action `{other}`"))
+                    .await
+            }
+        }
+    }
+
+    /// `update`: starts the stage in the background and succeeds with `phase = "staging"`.
+    async fn start_update(self: &Arc<Self>, id: &str, args: &BTreeMap<String, TypedConfigValue>) {
+        let request = match StageRequest::from_args(args) {
+            Ok(request) => request,
+            Err(reason) => return self.reject(id, reason).await,
+        };
+        let refused = {
+            let mut staging = self.staging.lock().expect("agent staging");
+            match staging.as_ref() {
+                // A retry of the running update (same image): already started.
+                Some(running) if running.sha256 == request.sha256 => false,
+                Some(_) => true,
+                None => {
+                    let generation = {
+                        let mut next = self.generation.lock().expect("agent generation");
+                        *next += 1;
+                        *next
+                    };
+                    let (cancel, cancelled) = oneshot::channel();
+                    let sha256 = request.sha256.clone();
+                    let task = tokio::spawn(self.clone().run_stage(generation, request, cancelled));
+                    *staging = Some(Staging {
+                        generation,
+                        sha256,
+                        cancel,
+                        task,
+                    });
+                    false
+                }
+            }
+        };
+        if refused {
+            return self
+                .reject(
+                    id,
+                    "another update is staging; cancel it with `update.cancel` first".into(),
+                )
+                .await;
+        }
+        let mut status = self.updater.status();
+        status.state = update_action::STATE_STAGING.into();
+        status.error = None;
+        status.progress = Some(status.progress.unwrap_or(0));
+        self.publish(&status).await;
+        self.succeed(id, update_action::PHASE_STAGING).await;
+    }
+
+    /// The background stage: progress into `update.progress`, then `staged`, `rebooting` and
+    /// `apply`, or `error`. Returns early (without touching the state) when cancelled; the
+    /// canceller reports that.
+    async fn run_stage(
+        self: Arc<Self>,
+        generation: u64,
+        request: StageRequest,
+        mut cancelled: oneshot::Receiver<()>,
+    ) {
+        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
+        let updater = self.updater.clone();
+        let staging = updater.stage(request, progress_tx);
+        tokio::pin!(staging);
+        let result = loop {
+            tokio::select! {
+                // A cancel request, or the agent went away (the sender was dropped).
+                _ = &mut cancelled => return,
+                result = &mut staging => break result,
+                Some(progress) = progress_rx.recv() => {
+                    let mut status = self.updater.status();
+                    status.state = update_action::STATE_STAGING.into();
+                    status.progress = Some(progress.min(1000));
+                    self.publish(&status).await;
+                }
+            }
+        };
+        {
+            let mut staging = self.staging.lock().expect("agent staging");
+            if staging
+                .as_ref()
+                .is_some_and(|running| running.generation == generation)
+            {
+                *staging = None;
+            }
+        }
+        match result {
+            Ok(_version) => {
+                let mut status = self.updater.status();
+                status.state = update_action::STATE_STAGED.into();
+                self.publish(&status).await;
+                status.state = update_action::STATE_REBOOTING.into();
+                self.publish(&status).await;
+                if let Err(error) = self.updater.apply().await {
+                    // Still staged (for example a `pre-reboot` hook refused).
+                    let mut status = self.updater.status();
+                    status.state = update_action::STATE_STAGED.into();
+                    status.error = Some(error);
+                    self.publish(&status).await;
+                }
+            }
+            Err(error) => {
+                let mut status = self.updater.status();
+                status.state = update_action::STATE_ERROR.into();
+                status.error = Some(error);
+                self.publish(&status).await;
+            }
+        }
+    }
+
+    /// `update.cancel`: stops a running stage, or forgets a staged update.
+    async fn cancel_update(&self, id: &str) {
+        let running = self.staging.lock().expect("agent staging").take();
+        let had_stage = running.is_some();
+        if let Some(running) = running {
+            let _ = running.cancel.send(());
+            let _ = running.task.await;
+        }
+        match self.updater.cancel().await {
+            Ok(cancelled) => {
+                self.publish_current().await;
+                let phase_value = if cancelled || had_stage {
+                    update_action::PHASE_CANCELLED
+                } else {
+                    update_action::PHASE_IDLE
+                };
+                self.succeed(id, phase_value).await;
+            }
+            Err(error) => {
+                self.publish_action(id, "failed", Some(&error)).await;
+                let _ = self.reporter.fail(id, error).await;
+            }
+        }
+    }
+
+    /// `update.rollback`: switch to the previous confirmed slot and reboot.
+    async fn rollback(&self, id: &str) {
+        let staging = self.staging.lock().expect("agent staging").is_some();
+        if staging {
+            return self
+                .reject(
+                    id,
+                    "an update is staging; cancel it with `update.cancel` first".into(),
+                )
+                .await;
+        }
+        if let Err(reason) = self.updater.prepare_rollback().await {
+            return self.reject(id, reason).await;
+        }
+        let mut status = self.updater.status();
+        status.state = update_action::STATE_REBOOTING.into();
+        self.publish(&status).await;
+        // Report first: the reboot ends this process and the node's action record.
+        self.succeed(id, update_action::PHASE_REBOOTING).await;
+        let _ = self.updater.reboot(0).await;
+    }
 }
 
 /// Claims the actions and serves them until the connection fails for good (the service's retry
-/// policy gives up).
+/// policy gives up). Dropping the returned future stops a running stage too, like the agent
+/// process exiting.
 pub async fn run<U: Updater>(
     service: &LocalProviderService,
     updater: Arc<U>,
     republish_every: Duration,
 ) -> Result<(), ClientError> {
     let mut watch = service.claim_node_actions(CLAIMED_ACTIONS).await?;
-    let reporter = watch.reporter();
+    let agent = Agent::new(updater, watch.reporter());
     // After every boot: the durable view of the last update.
-    reporter
-        .publish_status(update_status_entries(&reporter, &updater.status()))
+    watch
+        .publish_status(update_status_entries(
+            &watch.reporter(),
+            &agent.updater.status(),
+        ))
         .await?;
     let republisher = {
-        let reporter = reporter.clone();
-        let updater = updater.clone();
+        let agent = agent.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(republish_every);
             tick.tick().await;
             loop {
                 tick.tick().await;
-                publish_update_status(&reporter, updater.as_ref()).await;
+                agent.publish_current().await;
             }
         })
     };
-    let _republisher = AbortOnDrop(republisher);
+    let _stop = StopOnDrop {
+        republisher,
+        agent: agent.clone(),
+    };
     loop {
         let request = watch.next().await?;
-        handle(&reporter, updater.as_ref(), request).await;
+        agent.handle(request).await;
     }
 }
 
-struct AbortOnDrop(tokio::task::JoinHandle<()>);
+struct StopOnDrop<U: Updater> {
+    republisher: tokio::task::JoinHandle<()>,
+    agent: Arc<Agent<U>>,
+}
 
-impl Drop for AbortOnDrop {
+impl<U: Updater> Drop for StopOnDrop<U> {
     fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
-/// Runs one claimed action and reports its outcome.
-pub async fn handle<U: Updater>(reporter: &ActionReporter, updater: &U, request: ActionRequest) {
-    let id = request.action_id.clone();
-    let uint = |key: &str, default: u64| match request.args.get(key) {
-        Some(TypedConfigValue::UInt(value)) => *value,
-        _ => default,
-    };
-    let outcome = match request.name.as_str() {
-        action_names::UPDATE => return handle_update(reporter, updater, request).await,
-        action_names::REBOOT => {
-            // Report first: the reboot ends this process and the node's action record.
-            let _ = reporter
-                .succeed(
-                    &id,
-                    BTreeMap::from([(
-                        update_action::OUTPUT_PHASE.to_owned(),
-                        TypedConfigValue::String(update_action::PHASE_REBOOTING.into()),
-                    )]),
-                )
-                .await;
-            updater.reboot(uint("delay_ms", 0)).await.err()
-        }
-        action_names::LOCATE => {
-            let enabled = !matches!(
-                request.args.get("enabled"),
-                Some(TypedConfigValue::Bool(false))
-            );
-            match updater.locate(enabled, uint("duration_ms", 10_000)).await {
-                Ok(()) => {
-                    let _ = reporter.succeed(&id, BTreeMap::new()).await;
-                    None
-                }
-                Err(error) => Some(error),
-            }
-        }
-        other => {
-            let _ = reporter
-                .reject(&id, format!("unsupported action `{other}`"))
-                .await;
-            None
-        }
-    };
-    if let Some(error) = outcome {
-        // For `reboot` the result is already final; the error only reaches the logs.
-        let _ = reporter.fail(&id, error).await;
-    }
-}
-
-async fn handle_update<U: Updater>(reporter: &ActionReporter, updater: &U, request: ActionRequest) {
-    let id = request.action_id.as_str();
-    let stage = match StageRequest::from_args(&request.args) {
-        Ok(stage) => stage,
-        Err(reason) => {
-            let _ = reporter
-                .publish_status(action_entries(
-                    reporter,
-                    id,
-                    "rejected",
-                    None,
-                    Some(&reason),
-                ))
-                .await;
-            let _ = reporter.reject(id, reason).await;
-            return;
-        }
-    };
-    let _ = reporter.progress(id, Some(0)).await;
-    let _ = reporter
-        .publish_status(action_entries(reporter, id, "running", Some(0), None))
-        .await;
-    publish_update_status(reporter, updater).await;
-
-    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
-    let staging = updater.stage(stage, progress_tx);
-    tokio::pin!(staging);
-    let staged = loop {
-        tokio::select! {
-            result = &mut staging => break result,
-            Some(progress) = progress_rx.recv() => {
-                let progress = progress.min(1000);
-                let _ = reporter.progress(id, Some(progress)).await;
-                let mut entries = action_entries(reporter, id, "running", Some(progress), None);
-                entries.push(reporter.node_status_entry(
-                    update_action::KEY_PROGRESS,
-                    TypedConfigValue::UInt(u64::from(progress)),
-                ));
-                let _ = reporter.publish_status(entries).await;
-            }
-        }
-    };
-    match staged {
-        Ok(version) => {
-            publish_update_status(reporter, updater).await;
-            let _ = reporter
-                .publish_status(action_entries(reporter, id, "succeeded", Some(1000), None))
-                .await;
-            // "Staged and apply issued": report before `apply` reboots into the trial slot.
-            let _ = reporter
-                .succeed(
-                    id,
-                    BTreeMap::from([
-                        (
-                            update_action::OUTPUT_PHASE.to_owned(),
-                            TypedConfigValue::String(update_action::PHASE_REBOOTING.into()),
-                        ),
-                        (
-                            update_action::OUTPUT_VERSION_STAGED.to_owned(),
-                            TypedConfigValue::String(version),
-                        ),
-                    ]),
-                )
-                .await;
-            if let Err(error) = updater.apply().await {
-                // Still staged (for example a `pre-reboot` hook refused); the keys say so.
-                let mut status = updater.status();
-                status.error = Some(error);
-                let _ = reporter
-                    .publish_status(update_status_entries(reporter, &status))
-                    .await;
-            }
-        }
-        Err(error) => {
-            publish_update_status(reporter, updater).await;
-            let _ = reporter
-                .publish_status(action_entries(reporter, id, "failed", None, Some(&error)))
-                .await;
-            let _ = reporter.fail(id, error).await;
+        self.republisher.abort();
+        let running = self.agent.staging.lock().expect("agent staging").take();
+        if let Some(running) = running {
+            running.task.abort();
         }
     }
 }
 
 /// An in-memory updater for the example and tests: staging takes `steps` progress steps of
-/// `step` each, `apply` and `reboot` only record that they were called, and staging can be held
-/// at its first step with [`FakeUpdater::hold_staging`].
+/// `step` each (an `image_url` containing `corrupt` fails the checksum), `apply`, `reboot` and
+/// `prepare_rollback` only record that they were called, and staging or locating can be held
+/// with [`FakeUpdater::hold_staging`] / [`FakeUpdater::hold_locate`].
 pub struct FakeUpdater {
     status: Mutex<UpdaterStatus>,
     steps: u16,
     step: Duration,
-    hold: Mutex<Option<Arc<Notify>>>,
+    hold_stage: Mutex<Option<Arc<Notify>>>,
+    hold_locate: Mutex<Option<Arc<Notify>>>,
     calls: Mutex<Vec<String>>,
 }
 
@@ -358,20 +483,28 @@ impl FakeUpdater {
             status: Mutex::new(status),
             steps: steps.max(1),
             step,
-            hold: Mutex::new(None),
+            hold_stage: Mutex::new(None),
+            hold_locate: Mutex::new(None),
             calls: Mutex::new(Vec::new()),
         }
     }
 
-    /// Makes the next stages wait after their first progress step until the returned notify
-    /// fires.
+    /// Makes later stages wait after their first progress step until the notify fires.
     pub fn hold_staging(&self) -> Arc<Notify> {
         let notify = Arc::new(Notify::new());
-        *self.hold.lock().expect("fake updater") = Some(notify.clone());
+        *self.hold_stage.lock().expect("fake updater") = Some(notify.clone());
         notify
     }
 
-    /// `stage <url>`, `apply`, `reboot <delay>`, `locate <enabled> <duration>`, in call order.
+    /// Makes later `locate` calls wait until the notify fires.
+    pub fn hold_locate(&self) -> Arc<Notify> {
+        let notify = Arc::new(Notify::new());
+        *self.hold_locate.lock().expect("fake updater") = Some(notify.clone());
+        notify
+    }
+
+    /// `stage <url>`, `apply`, `cancel`, `rollback`, `reboot <delay>`, `locate <enabled>
+    /// <duration>`, in call order.
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().expect("fake updater").clone()
     }
@@ -400,18 +533,19 @@ impl Updater for FakeUpdater {
         progress: mpsc::UnboundedSender<u16>,
     ) -> Result<String, String> {
         self.record(format!("stage {}", request.image_url));
+        self.update(|status| {
+            status.state = update_action::STATE_STAGING.into();
+            status.error = None;
+            status.progress = Some(0);
+        });
         if request.image_url.contains("corrupt") {
             self.update(|status| {
-                status.state = "idle".into();
+                status.state = update_action::STATE_ERROR.into();
                 status.error = Some("sha256 mismatch".into());
             });
             return Err("sha256 mismatch".into());
         }
-        self.update(|status| {
-            status.state = "staging".into();
-            status.error = None;
-        });
-        let hold = self.hold.lock().expect("fake updater").clone();
+        let hold = self.hold_stage.lock().expect("fake updater").clone();
         for step in 1..=self.steps {
             let per_mille =
                 u16::try_from(u32::from(step) * 1000 / u32::from(self.steps)).unwrap_or(1000);
@@ -433,7 +567,7 @@ impl Updater for FakeUpdater {
             .unwrap_or("unknown")
             .to_owned();
         self.update(|status| {
-            status.state = "staged".into();
+            status.state = update_action::STATE_STAGED.into();
             status.slot_staged = Some(match status.slot_active.as_deref() {
                 Some("A") => "B".into(),
                 _ => "A".into(),
@@ -446,7 +580,34 @@ impl Updater for FakeUpdater {
 
     async fn apply(&self) -> Result<(), String> {
         self.record("apply".into());
-        self.update(|status| status.state = "trying".into());
+        // A real updater reboots here; the fake jumps to the trial boot.
+        self.update(|status| status.state = update_action::STATE_TRYING.into());
+        Ok(())
+    }
+
+    async fn cancel(&self) -> Result<bool, String> {
+        self.record("cancel".into());
+        let mut cancelled = false;
+        self.update(|status| {
+            if matches!(
+                status.state.as_str(),
+                update_action::STATE_STAGING | update_action::STATE_STAGED
+            ) {
+                status.state = update_action::STATE_CANCELLED.into();
+                status.slot_staged = None;
+                status.version_staged = None;
+                status.progress = None;
+                cancelled = true;
+            }
+        });
+        Ok(cancelled)
+    }
+
+    async fn prepare_rollback(&self) -> Result<(), String> {
+        if self.status().state == update_action::STATE_ROLLED_BACK {
+            return Err("no previous confirmed slot".into());
+        }
+        self.record("rollback".into());
         Ok(())
     }
 
@@ -457,6 +618,10 @@ impl Updater for FakeUpdater {
 
     async fn locate(&self, enabled: bool, duration_ms: u64) -> Result<(), String> {
         self.record(format!("locate {enabled} {duration_ms}"));
+        let hold = self.hold_locate.lock().expect("fake updater").clone();
+        if let Some(hold) = hold {
+            hold.notified().await;
+        }
         Ok(())
     }
 }

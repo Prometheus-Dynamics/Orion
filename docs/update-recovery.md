@@ -6,7 +6,8 @@ deliberately does not own, and the order in which to build them. Open items are 
 [TODO.md](../TODO.md) under "Update / recovery".
 
 What works today, without the records below, is the action-only path (option B): a device agent
-claims the node action `update`, reports "staged and apply issued", and republishes `update.*`
+claims the node action `update` (plus `update.cancel` and `update.rollback`), reports "staging
+started", and republishes `update.*`
 status keys after every boot. Its contract, and how U3 builds on it, is in
 [device-agent.md](device-agent.md).
 

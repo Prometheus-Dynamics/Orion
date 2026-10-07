@@ -1,9 +1,10 @@
 //! The device-agent contract (`docs/device-agent.md`) against real IPC servers: the example
 //! agent (`crates/client/examples/device_agent/agent.rs`) with a fake updater claims `update`,
-//! `reboot` and `locate`, reports progress, ends `update` with "staged and apply issued",
-//! republishes the `update.*` keys after a simulated reboot, and fails in-flight actions when it
-//! disconnects. Also covers the claim-scoped status keys and `ControlPlaneEventStream` status
-//! subscriptions.
+//! `update.cancel`, `update.rollback`, `reboot` and `locate`; `update` succeeds with
+//! `phase = "staging"` once the stage started and reports the outcome only through the
+//! `update.*` keys; cancel, rollback, the republish after a simulated reboot, and failing
+//! in-flight actions on disconnect. Also covers the claim-scoped status keys and
+//! `ControlPlaneEventStream` status subscriptions.
 
 #![cfg(unix)]
 
@@ -18,7 +19,8 @@ use orion::client::{
 };
 use orion::control_plane::{
     ActionRequest, ActionState, ActionTarget, ClientEventKind, HostFacts, HostMetricsSample,
-    ProviderRecord, StatusEntry, StatusQuery, StatusSubject, TypedConfigValue, update_action,
+    ProviderRecord, StatusEntry, StatusQuery, StatusSubject, TypedConfigValue, action_names,
+    update_action,
 };
 use orion_node::{HostFactsSource, NodeApp, NodeConfig, NodeId};
 use std::path::PathBuf;
@@ -119,11 +121,32 @@ fn text(value: &str) -> TypedConfigValue {
 }
 
 fn update_request(id: &str, image_url: &str) -> ActionRequest {
+    update_request_with(id, image_url, SHA)
+}
+
+fn update_request_with(id: &str, image_url: &str, sha256: &str) -> ActionRequest {
     ActionRequest::new(id, ActionTarget::Node(NodeId::new("node-a")), "update")
         .with_arg(update_action::ARG_IMAGE_URL, text(image_url))
-        .with_arg(update_action::ARG_SHA256, text(SHA))
+        .with_arg(update_action::ARG_SHA256, text(sha256))
         .with_arg(update_action::ARG_SIZE, TypedConfigValue::UInt(1 << 20))
-        .with_deadline_ms(60_000)
+}
+
+fn node_action(id: &str, name: &str) -> ActionRequest {
+    ActionRequest::new(id, ActionTarget::Node(NodeId::new("node-a")), name)
+}
+
+fn phase_of(result: &orion::control_plane::ActionResult) -> Option<&TypedConfigValue> {
+    result.output.get(update_action::OUTPUT_PHASE)
+}
+
+async fn wait_calls(updater: &FakeUpdater, call: &str) {
+    for _ in 0..500 {
+        if updater.calls().iter().any(|c| c == call) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("updater never saw `{call}`: {:?}", updater.calls());
 }
 
 async fn wait_final(
@@ -160,14 +183,14 @@ fn booted(version: &str, slot: &str, state: &str, boot: &str) -> UpdaterStatus {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn device_agent_updates_reboots_and_republishes_after_boot() {
+async fn device_agent_updates_asynchronously_and_republishes_after_boot() {
     let node = start_node("contract").await;
     let operator =
         LocalControlPlaneClient::connect_at(&node.socket, "operator").expect("operator client");
 
     // Boot 1: the agent claims its actions and publishes the updater's state.
     let updater = Arc::new(FakeUpdater::new(
-        booted("1.0", "A", "idle", "boot-1"),
+        booted("1.0", "A", update_action::STATE_IDLE, "boot-1"),
         4,
         Duration::from_millis(20),
     ));
@@ -192,36 +215,31 @@ async fn device_agent_updates_reboots_and_republishes_after_boot() {
         ActionState::Rejected { reason } if reason.contains("sha256")
     ));
 
-    // A good update: progress while staging, then "staged and apply issued".
+    // `update` succeeds as soon as staging started; the rest is in the `update.*` keys.
     let accepted = operator
         .run_action(update_request("update-1", "http://atlas/image-2.0.img.xz"))
         .await
         .expect("run");
     assert_eq!(accepted.state, ActionState::Accepted);
-    let done = wait_final(&operator, "update-1").await;
-    assert_eq!(done.state, ActionState::Succeeded, "{done:?}");
+    let started = wait_final(&operator, "update-1").await;
+    assert_eq!(started.state, ActionState::Succeeded, "{started:?}");
     assert_eq!(
-        done.output[update_action::OUTPUT_PHASE],
-        text(update_action::PHASE_REBOOTING)
-    );
-    assert_eq!(
-        done.output[update_action::OUTPUT_VERSION_STAGED],
-        text("2.0")
+        phase_of(&started),
+        Some(&text(update_action::PHASE_STAGING))
     );
     node.wait_value("action.update-1.state", text("succeeded"))
         .await;
+    // staging -> staged -> rebooting -> apply (the fake then sits in its trial boot).
+    node.wait_value(update_action::KEY_STATE, text(update_action::STATE_TRYING))
+        .await;
     assert_eq!(
-        node.node_value("action.update-1.progress"),
+        node.node_value(update_action::KEY_VERSION_STAGED),
+        Some(text("2.0"))
+    );
+    assert_eq!(
+        node.node_value(update_action::KEY_PROGRESS),
         Some(TypedConfigValue::UInt(1000))
     );
-    node.wait_value(update_action::KEY_VERSION_STAGED, text("2.0"))
-        .await;
-    for _ in 0..200 {
-        if updater.calls().contains(&"apply".to_owned()) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
     assert_eq!(
         updater.calls(),
         vec![
@@ -230,29 +248,107 @@ async fn device_agent_updates_reboots_and_republishes_after_boot() {
         ]
     );
 
-    // A failing stage fails the action and leaves the error in the durable keys.
+    // A failing stage: the action still succeeded (it started); the keys carry the error.
     operator
         .run_action(update_request("update-2", "http://atlas/corrupt.img.xz"))
         .await
         .expect("run");
     assert_eq!(
         wait_final(&operator, "update-2").await.state,
-        ActionState::Failed {
-            reason: "sha256 mismatch".into()
-        }
+        ActionState::Succeeded
     );
+    node.wait_value(update_action::KEY_STATE, text(update_action::STATE_ERROR))
+        .await;
     node.wait_value(update_action::KEY_ERROR, text("sha256 mismatch"))
         .await;
+
+    // Cancel a stage in progress. A retry of the same image is "already started"; another
+    // image is refused while one stages.
+    let hold = updater.hold_staging();
+    operator
+        .run_action(update_request("update-3", "http://atlas/image-3.0.img.xz"))
+        .await
+        .expect("run");
+    assert_eq!(
+        wait_final(&operator, "update-3").await.state,
+        ActionState::Succeeded
+    );
+    node.wait_value(update_action::KEY_STATE, text(update_action::STATE_STAGING))
+        .await;
+    operator
+        .run_action(update_request(
+            "update-3-retry",
+            "http://atlas/image-3.0.img.xz",
+        ))
+        .await
+        .expect("run");
+    let retry = wait_final(&operator, "update-3-retry").await;
+    assert_eq!(phase_of(&retry), Some(&text(update_action::PHASE_STAGING)));
+    let other_sha = "a".repeat(64);
+    operator
+        .run_action(update_request_with(
+            "update-other",
+            "http://atlas/image-4.0.img.xz",
+            &other_sha,
+        ))
+        .await
+        .expect("run");
+    assert!(matches!(
+        wait_final(&operator, "update-other").await.state,
+        ActionState::Rejected { reason } if reason.contains("update.cancel")
+    ));
+    operator
+        .run_action(node_action("cancel-1", action_names::UPDATE_CANCEL))
+        .await
+        .expect("run");
+    let cancelled = wait_final(&operator, "cancel-1").await;
+    assert_eq!(cancelled.state, ActionState::Succeeded, "{cancelled:?}");
+    assert_eq!(
+        phase_of(&cancelled),
+        Some(&text(update_action::PHASE_CANCELLED))
+    );
+    node.wait_value(
+        update_action::KEY_STATE,
+        text(update_action::STATE_CANCELLED),
+    )
+    .await;
+    assert_eq!(
+        node.node_value(update_action::KEY_VERSION_STAGED),
+        Some(text(""))
+    );
+    hold.notify_waiters();
+    // Nothing left to cancel: idempotent.
+    operator
+        .run_action(node_action("cancel-2", action_names::UPDATE_CANCEL))
+        .await
+        .expect("run");
+    let idle = wait_final(&operator, "cancel-2").await;
+    assert_eq!(phase_of(&idle), Some(&text(update_action::PHASE_IDLE)));
+
+    // Roll back to the previous slot: reported before the reboot.
+    operator
+        .run_action(node_action("rollback-1", action_names::UPDATE_ROLLBACK))
+        .await
+        .expect("run");
+    let rolled = wait_final(&operator, "rollback-1").await;
+    assert_eq!(rolled.state, ActionState::Succeeded, "{rolled:?}");
+    assert_eq!(
+        phase_of(&rolled),
+        Some(&text(update_action::PHASE_REBOOTING))
+    );
+    wait_calls(&updater, "reboot 0").await;
+    let calls = updater.calls();
+    let rollback_at = calls
+        .iter()
+        .position(|c| c == "rollback")
+        .expect("rollback");
+    assert_eq!(calls[rollback_at + 1], "reboot 0");
 
     // Locate and reboot.
     operator
         .run_action(
-            ActionRequest::new(
-                "locate-1",
-                ActionTarget::Node(NodeId::new("node-a")),
-                "locate",
-            )
-            .with_arg("duration_ms", TypedConfigValue::UInt(500)),
+            node_action("locate-1", action_names::LOCATE)
+                .with_arg("duration_ms", TypedConfigValue::UInt(500)),
         )
         .await
         .expect("run");
@@ -261,11 +357,7 @@ async fn device_agent_updates_reboots_and_republishes_after_boot() {
         ActionState::Succeeded
     );
     operator
-        .run_action(ActionRequest::new(
-            "reboot-1",
-            ActionTarget::Node(NodeId::new("node-a")),
-            "reboot",
-        ))
+        .run_action(node_action("reboot-1", action_names::REBOOT))
         .await
         .expect("run");
     assert_eq!(
@@ -278,7 +370,7 @@ async fn device_agent_updates_reboots_and_republishes_after_boot() {
     agent_task.abort();
     let _ = agent_task.await;
     let updater = Arc::new(FakeUpdater::new(
-        booted("2.0", "B", "confirmed", "boot-2"),
+        booted("2.0", "B", update_action::STATE_CONFIRMED, "boot-2"),
         4,
         Duration::from_millis(20),
     ));
@@ -298,38 +390,45 @@ async fn device_agent_updates_reboots_and_republishes_after_boot() {
         Some(text("boot-2"))
     );
     // The keys are republished periodically, so a changed updater state shows up unprompted.
-    updater.set_status(booted("2.0", "B", "idle", "boot-2"));
+    updater.set_status(booted("2.0", "B", update_action::STATE_IDLE, "boot-2"));
     node.wait_value(update_action::KEY_STATE, text("idle"))
         .await;
 
-    // Disconnect with an update in flight: the action fails, the claim is released.
-    let hold = updater.hold_staging();
+    // Disconnect with an action in flight: it fails, the claims are released.
+    let hold = updater.hold_locate();
     operator
-        .run_action(update_request("update-3", "http://atlas/image-3.0.img.xz"))
+        .run_action(node_action("locate-2", action_names::LOCATE))
         .await
         .expect("run");
-    node.wait_value("action.update-3.state", text("running"))
-        .await;
+    wait_calls(&updater, "locate true 10000").await;
     agent_task.abort();
     let _ = agent_task.await;
-    let failed = wait_final(&operator, "update-3").await;
+    let failed = wait_final(&operator, "locate-2").await;
     assert_eq!(
         failed.state,
         ActionState::Failed {
             reason: "handler disconnected".into()
         }
     );
-    hold.notify_one();
+    hold.notify_waiters();
     // Its status entries stay until their TTL; the next agent republishes them.
     assert!(node.node_value(update_action::KEY_STATE).is_some());
-    let rejected = operator
-        .run_action(update_request("update-4", "http://atlas/image-3.0.img.xz"))
-        .await
-        .expect("run");
-    assert!(
-        matches!(&rejected.state, ActionState::Rejected { .. }),
-        "without a claimant `update` is rejected: {rejected:?}"
-    );
+    for (id, name) in [
+        ("update-5", action_names::UPDATE),
+        ("cancel-3", action_names::UPDATE_CANCEL),
+        ("rollback-2", action_names::UPDATE_ROLLBACK),
+    ] {
+        let request = if name == action_names::UPDATE {
+            update_request(id, "http://atlas/image-3.0.img.xz")
+        } else {
+            node_action(id, name)
+        };
+        let rejected = operator.run_action(request).await.expect("run");
+        assert!(
+            matches!(&rejected.state, ActionState::Rejected { .. }),
+            "without a claimant `{name}` is rejected: {rejected:?}"
+        );
+    }
 
     node.stop().await;
 }
@@ -376,6 +475,25 @@ async fn node_status_keys_follow_the_claimed_action_names() {
     assert!(
         runtime_client
             .publish_status([watch.node_status_entry("action.t2.state", text("x"))])
+            .await
+            .is_err()
+    );
+    drop(watch);
+
+    // Holding only `update.cancel` grants `update.cancel.*`, not the `update.*` keys of the
+    // `update` holder.
+    let canceller = node.service("canceller");
+    let watch = canceller
+        .claim_node_actions([action_names::UPDATE_CANCEL])
+        .await
+        .expect("claim update.cancel");
+    watch
+        .publish_status([watch.node_status_entry("update.cancel.last", text("x"))])
+        .await
+        .expect("keys of the claimed name");
+    assert!(
+        watch
+            .publish_status([watch.node_status_entry(update_action::KEY_STATE, text("x"))])
             .await
             .is_err()
     );

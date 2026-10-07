@@ -27,15 +27,21 @@ pub mod action_names {
     pub const LOCATE: &str = "locate";
     /// Run a self-test. Optional args: `level` (`String`, handler-defined).
     pub const SELF_TEST: &str = "self-test";
-    /// Install a software update (typically handled by a device agent that claimed the node
-    /// action). Args ([`update_action`](super::update_action)): `image_url` (`String`, the handler downloads
-    /// it; image bytes never travel over Orion) or `transfer_id` (`String`, reserved for
-    /// in-band transfers), `sha256` (`String`, hex digest of the file as served), `size`
-    /// (`UInt`, bytes). A handler that must reboot to finish reports `Succeeded` with output
-    /// `phase = "rebooting"` first, meaning only "staged and apply issued"; the durable outcome
-    /// is the `update.*` status keys it republishes after the reboot and the node's image
-    /// version. See `docs/device-agent.md`.
+    /// Install a software update, asynchronously (typically handled by a device agent that
+    /// claimed the node action). Args ([`update_action`](super::update_action)): `image_url`
+    /// (`String`, the handler downloads it; image bytes never travel over Orion) or `transfer_id`
+    /// (`String`, reserved for in-band transfers), `sha256` (`String`, hex digest of the file as
+    /// served), `size` (`UInt`, bytes). The action reports `Succeeded` with output
+    /// `phase = "staging"` once the download and stage have **started**; the outcome comes only
+    /// from the `update.*` status keys and the node's host facts. See `docs/device-agent.md`.
     pub const UPDATE: &str = "update";
+    /// Abort an `update` download or stage in progress, or forget a staged update. No args.
+    /// `Succeeded` with `phase = "cancelled"`, or `phase = "idle"` when there was nothing to
+    /// cancel. Claimed by the handler of `update`.
+    pub const UPDATE_CANCEL: &str = "update.cancel";
+    /// Boot back to the previous confirmed slot. No args. `Succeeded` with
+    /// `phase = "rebooting"` before the reboot; `Rejected` when there is no previous slot.
+    pub const UPDATE_ROLLBACK: &str = "update.rollback";
 }
 
 /// Argument, output and status-key names of the well-known `update` action
@@ -50,16 +56,39 @@ pub mod update_action {
     /// Arg: size of the file as served, in bytes (`UInt`).
     pub const ARG_SIZE: &str = "size";
 
-    /// Output: `"rebooting"` when the update is staged and the switch was issued.
+    /// Output: where the handler is when the action ends (`PHASE_*`).
     pub const OUTPUT_PHASE: &str = "phase";
-    /// Output value of [`OUTPUT_PHASE`] before the handler reboots.
+    /// `update`: the download and stage have started; follow [`KEY_STATE`].
+    pub const PHASE_STAGING: &str = "staging";
+    /// `update.rollback`, `reboot`: reported just before the handler reboots.
     pub const PHASE_REBOOTING: &str = "rebooting";
-    /// Output: version of the staged image (`String`).
-    pub const OUTPUT_VERSION_STAGED: &str = "version_staged";
+    /// `update.cancel`: a download, stage, or staged update was cancelled.
+    pub const PHASE_CANCELLED: &str = "cancelled";
+    /// `update.cancel`: there was nothing to cancel.
+    pub const PHASE_IDLE: &str = "idle";
 
-    /// Status key under `node/<id>`: the updater's state (`String`, handler vocabulary, for
-    /// example `idle`, `staging`, `staged`, `trying`, `confirmed`, `rolled-back`).
+    /// Status key under `node/<id>`: the updater's state (`String`, one of the `STATE_*`
+    /// values).
     pub const KEY_STATE: &str = "update.state";
+    /// [`KEY_STATE`]: nothing in progress.
+    pub const STATE_IDLE: &str = "idle";
+    /// [`KEY_STATE`]: downloading, verifying and writing the inactive slot.
+    pub const STATE_STAGING: &str = "staging";
+    /// [`KEY_STATE`]: written and verified, not switched to yet.
+    pub const STATE_STAGED: &str = "staged";
+    /// [`KEY_STATE`]: the switch was issued and the device is rebooting.
+    pub const STATE_REBOOTING: &str = "rebooting";
+    /// [`KEY_STATE`]: booted the new slot on trial, not confirmed yet.
+    pub const STATE_TRYING: &str = "trying";
+    /// [`KEY_STATE`]: the new slot passed its health check and is kept (success).
+    pub const STATE_CONFIRMED: &str = "confirmed";
+    /// [`KEY_STATE`]: the trial was not confirmed (or `update.rollback` ran) and the previous
+    /// slot runs again.
+    pub const STATE_ROLLED_BACK: &str = "rolled-back";
+    /// [`KEY_STATE`]: `update.cancel` stopped a download or stage, or forgot a staged update.
+    pub const STATE_CANCELLED: &str = "cancelled";
+    /// [`KEY_STATE`]: the update failed before the switch; see [`KEY_ERROR`].
+    pub const STATE_ERROR: &str = "error";
     /// Status key: version of the running image (`String`).
     pub const KEY_VERSION_ACTIVE: &str = "update.version_active";
     /// Status key: version of the staged image (`String`).

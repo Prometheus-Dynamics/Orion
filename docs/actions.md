@@ -215,7 +215,9 @@ Orion implements none of these; handlers that implement one follow its conventio
 | `restart-unit` | `unit` (`String`, required) |
 | `locate` | optional `duration_ms` (`UInt`), `enabled` (`Bool`, `false` stops it) |
 | `self-test` | optional `level` (`String`, handler-defined) |
-| `update` | `image_url` (`String`, downloaded by the handler) or `transfer_id` (`String`, reserved), `sha256` (`String`, hex digest), `size` (`UInt`, bytes). Typically claimed by a device agent; reports `Succeeded` with `phase = "rebooting"` and `version_staged` before rebooting ("staged and apply issued"), and the `update.*` status keys plus the image version in the host facts are the durable outcome. The full contract is in [device-agent.md](device-agent.md). |
+| `update` | `image_url` (`String`, downloaded by the handler) or `transfer_id` (`String`, reserved), `sha256` (`String`, hex digest), `size` (`UInt`, bytes). Typically claimed by a device agent. Asynchronous: reports `Succeeded` with `phase = "staging"` once the download and stage started; the `update.*` status keys plus the image version in the host facts are the outcome. The full contract is in [device-agent.md](device-agent.md). |
+| `update.cancel` | none. Aborts a download or stage in progress, or forgets a staged update; `phase = "cancelled"` (or `"idle"` when nothing was cancelled). |
+| `update.rollback` | none. Boots back to the previous confirmed slot; `Succeeded` with `phase = "rebooting"` before rebooting. |
 
 ## Limits
 

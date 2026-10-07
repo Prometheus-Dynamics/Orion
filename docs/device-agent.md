@@ -1,7 +1,8 @@
 # Device Agents
 
 A device agent is a small daemon shipped by a device package (not by Orion) that connects to
-`orion-node`'s local IPC, claims node-level actions such as `update`, `reboot` and `locate`, runs
+`orion-node`'s local IPC, claims node-level actions such as `update`, `update.cancel`,
+`update.rollback`, `reboot` and `locate`, runs
 them with the package's own tools, and keeps the durable outcome of the last update visible on the
 status lane. Atlas's `pd-device-agent` (Atlas `docs/ota.md`) is the first one. This page is the
 contract between such an agent, `orion-node` (control protocol v4), and the tools that drive it
@@ -31,7 +32,9 @@ An example agent with a fake updater is in
 let service = LocalProviderService::new(runtime, "pd-device-agent",
         ProviderRecord::builder(ProviderId::new("pd-device-agent"), node_id).build())
     .with_retry_policy(LocalServiceRetryPolicy::fixed_delay(Duration::from_secs(1)));
-let mut watch = service.claim_node_actions(["update", "reboot", "locate"]).await?;
+let mut watch = service
+    .claim_node_actions(["update", "update.cancel", "update.rollback", "reboot", "locate"])
+    .await?;
 let reporter = watch.reporter();      // clone into tasks; reports while `next()` waits
 loop {
     let request = watch.next().await?; // reconnects and re-claims by itself
@@ -56,59 +59,82 @@ Constants in `orion_control_plane::{action_names, update_action}`.
 
 | Action | Arguments | Result |
 | --- | --- | --- |
-| `update` | `image_url` (`String`, required: the agent downloads it), `sha256` (`String`, 64 hex digits, of the file as served), `size` (`UInt`, bytes). `transfer_id` (`String`) is reserved for in-band transfers. | `Succeeded` with output `phase = "rebooting"` and `version_staged` (`String`) once the image is staged **and** the switch to it was issued. `Rejected` for invalid arguments, `Failed { reason }` when staging fails. |
+| `update` | `image_url` (`String`, required: the agent downloads it), `sha256` (`String`, 64 hex digits, of the file as served), `size` (`UInt`, bytes). `transfer_id` (`String`) is reserved for in-band transfers. | **Asynchronous.** `Succeeded` with output `phase = "staging"` once the download and stage have **started**. `Rejected` for invalid arguments, or while another image (other `sha256`) is staging. A request for the image already staging succeeds the same way (a retry). |
+| `update.cancel` | none | Aborts a download or stage in progress, or forgets a staged update: `Succeeded` with `phase = "cancelled"` (`update.state` becomes `cancelled`), or `phase = "idle"` when there was nothing to cancel. |
+| `update.rollback` | none | Boots back to the previous confirmed slot: `Succeeded` with `phase = "rebooting"`, reported **before** rebooting. `Rejected` while an update is staging (cancel it first) or when there is no previous confirmed slot. |
 | `reboot` | optional `delay_ms` (`UInt`), `reason` (`String`) | `Succeeded` with `phase = "rebooting"`, reported **before** rebooting. |
 | `locate` | optional `duration_ms` (`UInt`), `enabled` (`Bool`, `false` stops it) | `Succeeded` once the LED pattern is running (or stopped). |
+
+The agent claims all five (the example does); `update.cancel` and `update.rollback` belong with
+`update`, because only the `update` holder knows what is staging.
 
 `orionctl` passes them with `--arg`:
 
 ```text
 orionctl action run node/raze-1 update --arg image_url=http://10.0.0.5:8080/raze-2.0.img.xz \
-    --arg sha256=string:<64 hex digits> --arg size=734003200 --deadline-ms 900000 --wait
+    --arg sha256=string:<64 hex digits> --arg size=734003200 --wait
+orionctl get status --subject node/raze-1 --key-prefix update.     # follow the outcome
+orionctl action run node/raze-1 update.cancel --wait
+orionctl action run node/raze-1 update.rollback --wait
 ```
 
-### Result semantics: "staged and apply issued"
+### Result semantics: `update` is asynchronous
 
-Action records live in `orion-node`'s memory and do not survive the reboot that finishes an
-update. So `update` ends `Succeeded` just before the agent reboots into the trial slot, and that
-means only: the image was downloaded, verified, written to the inactive slot, and the trial boot
-was issued. It does **not** mean the new image booted or was confirmed. The outcome comes from
-durable facts after the reboot:
+A large image over a slow link can take longer than the longest action deadline the node accepts
+(`ORION_NODE_ACTION_MAX_DEADLINE_MS`, 10 minutes by default), and action records live in
+`orion-node`'s memory, so they would not survive the reboot that finishes an update anyway. So
+`update` ends `Succeeded` with `phase = "staging"` as soon as the agent has started the download
+and stage in the background. That means only "started"; it says nothing about the image. The
+outcome comes only from durable facts:
 
-1. the node's host facts (`NodeRecord::host`: `boot_id` changes, `image_version` / `os_version`
-   show the running image; replicated to peers, see [host-facts.md](host-facts.md));
-2. the `update.*` status keys the agent republishes after every boot (below):
-   `update.state = confirmed` with the new `update.version_active` means success,
-   `rolled-back` means the trial boot was not confirmed and the old slot runs again.
+1. the `update.*` status keys (below), which the agent publishes on every change and republishes
+   after every boot. `update.state` moves through
 
-If the switch fails after `Succeeded` was reported (for example a `pre-reboot` hook refuses), the
-image stays staged and the agent publishes `update.state = staged` with `update.error`.
+   ```text
+   staging -> staged -> rebooting -> trying -> confirmed      (success)
+                                            -> rolled-back    (trial not confirmed)
+   staging | staged -> cancelled                              (update.cancel)
+   staging -> error                                           (download, checksum or write failed; update.error)
+   ```
+
+   `update.version_active` is the running image's version and `update.error` the last error;
+2. the node's host facts (`NodeRecord::host`: `boot_id` changes on the reboot, `image_version` /
+   `os_version` show the running image; replicated to peers, see [host-facts.md](host-facts.md)).
+
+A requester such as Atlas therefore treats the action result as "accepted for staging", then
+follows `update.state` (status-lane watch or periodic `QueryStatus`) until `confirmed`,
+`rolled-back`, `cancelled` or `error`, and matches `update.boot_id` against the host facts'
+`boot_id` to know the keys describe the current boot.
+
+If the switch fails after staging (for example a `pre-reboot` hook refuses), the image stays staged
+and the agent publishes `update.state = staged` with `update.error`.
 
 ### Deadlines
 
-The node default deadline is 30 s (`ORION_NODE_ACTION_DEFAULT_DEADLINE_MS`); an `update` that
-downloads and writes an image needs minutes. Requesters set `deadline_ms` on the request (Atlas:
-the expected transfer time plus margin), capped by `ORION_NODE_ACTION_MAX_DEADLINE_MS` (default
-10 minutes; raise it in the image's environment file for slow links). When the deadline passes the
-action becomes `TimedOut` and later reports are ignored, but the agent keeps going: the `update.*`
-keys still show the real progress and outcome.
+All five actions finish quickly (`update` only starts the work), so the node default deadline
+(`ORION_NODE_ACTION_DEFAULT_DEADLINE_MS`, 30 s) is enough and requesters need not set
+`deadline_ms`. Time limits for the transfer itself belong to the agent's writer and the requester's
+watch on `update.state`.
 
 ### Idempotency
 
 Resubmitting the same `action_id` with the same arguments returns the existing record while the
 node remembers it (`ORION_NODE_ACTION_RESULT_TTL_MS`). After a reboot or node restart the record is
-gone, so a requester that retries sends a new request; the agent's writer must treat a request for
-an image that is already staged (same `sha256`) or already running as done and succeed at once.
+gone, so a requester that retries sends a new request. The agent treats an `update` for the image
+that is already staging (same `sha256`) as started, and its writer should treat an image that is
+already staged or running as done. `update.cancel` with nothing to cancel succeeds with
+`phase = "idle"`.
 
 ## Progress while an action runs
 
-Three channels, all optional for the agent, all used by the example:
+The actions themselves are short; the long-running work (the stage) reports through the status
+lane:
 
 | Channel | Content | Who sees it |
 | --- | --- | --- |
-| `ActionState::Running { progress }` (`reporter.progress(id, Some(per_mille))`) | per mille, 0 to 1000 | `QueryActions`, `WatchActions`, `orionctl get actions`, remote operators (`RemoteOperator::query_action`) |
-| `node/<id>` keys `action.<action_id>.state` (`accepted`, `running`, `succeeded`, `failed`, `rejected`, `timed_out`), `action.<action_id>.progress` (`UInt` per mille), `action.<action_id>.error` (`String`) | the action's lifecycle, the [actions.md](actions.md) convention | status-lane queries and watches |
-| `node/<id>` key `update.progress` | progress of the updater's current step | same |
+| `node/<id>` keys `update.state` and `update.progress` (`UInt` per mille of the current step) | the stage's progress and outcome | status-lane queries and watches, through any node (`QueryStatus` is forwarded to the owner) |
+| `node/<id>` keys `action.<action_id>.state` (`accepted`, `running`, `succeeded`, `failed`, `rejected`, `timed_out`), `action.<action_id>.progress`, `action.<action_id>.error` | each action's lifecycle, the [actions.md](actions.md) convention | same |
+| `ActionState::Running { progress }` (`reporter.progress(id, Some(per_mille))`) | optional, for handlers of other long actions | `QueryActions`, `WatchActions`, `orionctl get actions`, remote operators |
 
 ## Status keys under the Node subject
 
@@ -116,7 +142,9 @@ A client that holds a node action claim may publish, for the subject `node/<this
 
 - `action.*` keys (any action id), and
 - `<name>.*` keys for every node action `<name>` it claimed: the holder of `update` owns
-  `update.*`, the holder of `locate` owns `locate.*`, and so on.
+  `update.*` (which includes `update.cancel.*` and `update.rollback.*`), the holder of `locate`
+  owns `locate.*`, and so on. Holding only `update.cancel` grants `update.cancel.*`, not
+  `update.state`.
 
 Everything else under `node/<id>` (for example the node's own `host.*` metrics) is refused with an
 authorization error. Publish with `ActionReporter::publish_status` /
@@ -129,7 +157,7 @@ forwards them; it does not interpret them.
 
 | Key | Value |
 | --- | --- |
-| `update.state` | `String`, the writer's state: `idle`, `staging`, `staged`, `trying`, `confirmed`, `rolled-back` (Atlas's `pd-device-update` vocabulary) |
+| `update.state` | `String`: `idle`, `staging`, `staged`, `rebooting`, `trying`, `confirmed`, `rolled-back`, `cancelled`, `error` (`update_action::STATE_*`) |
 | `update.version_active` | `String`, version of the running image |
 | `update.version_staged` | `String`, version in the staged slot (empty when none) |
 | `update.slot_active` | `String`, for example `A` |
@@ -173,7 +201,8 @@ restart):
 - its claims are released, so new requests for those names are `Rejected` ("no handler") until it
   claims again;
 - actions delivered to it and not yet final become `Failed { reason: "handler disconnected" }`
-  (an `update` that already reported `Succeeded` before rebooting is unaffected);
+  (an `update` has already reported `Succeeded` once staging started; whether the stage survives
+  an agent restart is up to the writer, and `update.state` tells);
 - its status entries stay until their TTL runs out; they are not removed on disconnect, so the
   last known `update.*` state remains readable for up to `ORION_NODE_STATUS_MAX_TTL_MS` while the
   device reboots. Compare `update.boot_id` with the node's current `boot_id` to tell them apart
