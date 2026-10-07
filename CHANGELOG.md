@@ -8,6 +8,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- The Gaia layer `packaging/gaia/orion-node.toml` requires `gaia_version >= 2.0.0` (was `>= 2.1.0`): Gaia's development line is versioned 2.0.0 again, so the old bound failed every importing build.
 - Toolchain pin (rust-toolchain.toml, CI, the Gaia aarch64 cross image) moved to Rust 1.99.0; MSRV stays 1.94.
 - Dependencies upgraded to their newest releases. Major jumps: `ed25519-dalek` 3, `hmac` 0.13, `sha2` 0.11, `toml` 1, `syn` 3, and `embedded-io` / `embedded-io-async` 0.7 (the `orion-link` adapters and the MCU template). Wire formats and signatures are unchanged.
 - `rand_core::OsRng` is gone upstream: `orion-node` and `orion-client` draw keys and nonces from `getrandom::SysRng` instead of depending on `rand_core`.

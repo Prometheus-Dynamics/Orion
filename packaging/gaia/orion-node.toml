@@ -1,4 +1,4 @@
-# orion-node as a managed systemd service: Gaia layer (Gaia >= 2.1).
+# orion-node as a managed systemd service: Gaia layer (Gaia >= 2.0).
 #
 # Builds orion-node for aarch64-unknown-linux-gnu, installs it as /usr/bin/orion-node, and stages
 # the systemd unit, the default environment file, a systemd-sysusers entry and a preset that
@@ -28,7 +28,7 @@
 # See packaging/README.md for what the image itself must provide (the `orion` user on read-only
 # root filesystems, systemd, glibc >= 2.34).
 
-gaia_version = ">=2.1.0"
+gaia_version = ">=2.0.0"
 
 # The rust provider only runs cargo when nested builds are allowed.
 [providers.rust]

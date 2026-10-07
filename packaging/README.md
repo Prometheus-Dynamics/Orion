@@ -11,7 +11,7 @@ image runs.
 | `systemd/orion.sysusers` | `/usr/lib/sysusers.d/orion.conf` | Creates the `orion` user and group (member of `dialout`) at boot through `systemd-sysusers`. |
 | `buildroot/orion-users.table` | `BR2_ROOTFS_USERS_TABLES` entry | The same user, created at image build time (read-only root filesystems). |
 | `systemd/orion-node.preset` | `/usr/lib/systemd/system-preset/80-orion-node.preset` | Enables the unit on images that apply presets (`systemctl preset-all`). |
-| `gaia/orion-node.toml` | imported by a Gaia build | Builds, installs and stages all of the above in a Gaia image (Gaia >= 2.1). |
+| `gaia/orion-node.toml` | imported by a Gaia build | Builds, installs and stages all of the above in a Gaia image (Gaia >= 2.0). |
 | `gaia/docker/aarch64-cross.Dockerfile` | used by the Gaia layer | Cross-build environment for `aarch64-unknown-linux-gnu`. |
 
 ## Build
