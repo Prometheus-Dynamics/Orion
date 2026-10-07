@@ -1,0 +1,62 @@
+# orionctl, the operator CLI, for images that run orion-node: optional Gaia layer (Gaia >= 2.0).
+#
+# Import it after orion-node.toml, from the same pinned Orion source:
+#
+#   imports = [
+#     ...base layers...,
+#     { source = "orion", path = "packaging/gaia/orion-node.toml" },
+#     { source = "orion", path = "packaging/gaia/orionctl.toml" },
+#   ]
+#
+# It is a separate layer instead of an unfed item in orion-node.toml because Gaia builds every
+# declared artifact whether or not an image feeds it; images that do not import this file never
+# build orionctl.
+#
+# Builds the IPC-only CLI (no HTTP client, JSON and summary output; about 1.8 MiB) for
+# aarch64-unknown-linux-gnu in the same cross image as orion-node and installs it as
+# /usr/bin/orionctl. It finds the packaged node's socket (/run/orion/control.sock) by itself. To
+# use it from a root shell, run the node with ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root
+# (or list root in ORION_NODE_LOCAL_AUTH_ALLOW); see "Local IPC access" in docs/node-env.md.
+# Redeclare the `orionctl` artifact after this import for another feature set, for example
+# features = ["yaml", "toml"] for YAML/TOML output and workload specs.
+
+gaia_version = ">=2.0.0"
+
+[providers.rust]
+allow_nested_build = true
+
+[[artifacts]]
+id = "orionctl"
+kind = "rust"
+source = "orion"
+package = "orionctl"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+no_default_features = true
+target_name = "orionctl"
+install_name = "orionctl"
+install_class = "binary"
+install_dest_hint = "/usr/bin/orionctl"
+output_path = "${workspace.out_dir}/artifacts/orionctl/orionctl"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "orion-aarch64-cross"
+dockerfile = "@self/docker/aarch64-cross.Dockerfile"
+context = "@self/docker"
+
+[[install]]
+id = "install-orionctl"
+artifact = "orionctl"
+dest = "/usr/bin/orionctl"
+replace = true
+mode = 493 # 0755
+
+# Same image kind as orion-node.toml (Gaia requires it next to a feed list); feed lists merge.
+[image]
+kind = "buildroot"
+
+[image.feed]
+install_entries = ["install-orionctl"]
