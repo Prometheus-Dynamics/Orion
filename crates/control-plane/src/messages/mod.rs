@@ -13,7 +13,7 @@ mod sync;
 
 pub use actions::{
     ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
-    ActionTargetParseError, action_names, action_status_keys,
+    ActionTargetParseError, action_names, action_status_keys, update_action,
 };
 pub use client::{
     ClientEvent, ClientEventKind, ClientEventPoll, ClientHello, ClientRole, ClientSession,

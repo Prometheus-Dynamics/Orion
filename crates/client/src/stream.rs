@@ -3,7 +3,7 @@ use crate::{
     session::{ClientIdentity, SessionConfig, ensure_client_role},
 };
 use orion_control_plane::{ClientEvent, ClientHello, ClientRole, ControlMessage};
-use orion_core::ClientName;
+use orion_core::{ClientName, NodeId};
 use orion_transport_ipc::{ControlEnvelope, LocalAddress, UnixControlStreamClient};
 use std::path::Path;
 
@@ -11,6 +11,7 @@ pub(crate) struct ClientEventStreamSession {
     client: UnixControlStreamClient,
     local_address: LocalAddress,
     daemon_address: LocalAddress,
+    node_id: NodeId,
 }
 
 impl ClientEventStreamSession {
@@ -37,14 +38,20 @@ impl ClientEventStreamSession {
             return Err(ClientError::NoMessageAvailable);
         };
         match response.message {
-            ControlMessage::ClientWelcome(_) => Ok(Self {
+            ControlMessage::ClientWelcome(session) => Ok(Self {
                 client,
                 local_address: config.local_address,
                 daemon_address: config.daemon_address,
+                node_id: session.node_id,
             }),
             ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
             _ => Err(ClientError::NoMessageAvailable),
         }
+    }
+
+    /// The node that welcomed this session.
+    pub(crate) fn node_id(&self) -> &NodeId {
+        &self.node_id
     }
 
     pub(crate) async fn send(&mut self, message: ControlMessage) -> Result<(), ClientError> {

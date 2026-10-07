@@ -7,7 +7,9 @@ use super::{
     },
 };
 use crate::app::tls_bootstrap::resolve_http_server_tls_paths;
-use crate::auth::{LocalAuthenticationMode, NodeSecurity, PeerSecurityMiddleware};
+use crate::auth::{
+    LocalAccessAllowList, LocalAuthenticationMode, NodeSecurity, PeerSecurityMiddleware,
+};
 use crate::config::{NodeConfig, NodeRuntimeTuning, normalize_runtime_tuning_duration};
 use crate::peer::{PeerConfig, PeerState};
 use crate::service::{ControlMiddleware, ControlMiddlewareHandle};
@@ -53,6 +55,7 @@ impl Default for NodeAppBuilder {
             http_mutual_tls_mode: None,
             audit_log_path: None,
             local_authentication_mode: None,
+            local_access_allow: None,
             control_middlewares: Vec::new(),
             auto_startup_replay: true,
             action_handlers: BTreeMap::new(),
@@ -215,6 +218,13 @@ impl NodeAppBuilder {
         self
     }
 
+    /// Admits these local users and groups on top of the local authentication mode, instead of
+    /// reading `ORION_NODE_LOCAL_AUTH_ALLOW`.
+    pub fn with_local_access_allow(mut self, allow: LocalAccessAllowList) -> Self {
+        self.local_access_allow = Some(allow);
+        self
+    }
+
     pub fn with_http_tls_files(
         mut self,
         cert_path: impl Into<PathBuf>,
@@ -351,6 +361,10 @@ impl NodeAppBuilder {
             .local_authentication_mode
             .map(Ok)
             .unwrap_or_else(LocalAuthenticationMode::try_from_env)?;
+        let local_access_allow = match self.local_access_allow {
+            Some(list) => list,
+            None => LocalAccessAllowList::try_from_env()?,
+        };
         let http_mutual_tls_mode = self
             .http_mutual_tls_mode
             .map(Ok)
@@ -442,9 +456,7 @@ impl NodeAppBuilder {
             cluster: Default::default(),
             status: Default::default(),
             actions: super::actions::ActionsState::with_handlers(self.action_handlers),
-            host_facts: super::host_facts::HostFactsState {
-                source: host_facts_source,
-            },
+            host_facts: super::host_facts::HostFactsState::new(host_facts_source),
             #[cfg(feature = "link-gateway")]
             links: Default::default(),
         });
@@ -493,9 +505,10 @@ impl NodeAppBuilder {
             #[cfg(feature = "transport-quic")]
             quic: self.quic.unwrap_or_default(),
         };
-        let mut control_middlewares = vec![Arc::new(PeerSecurityMiddleware::new(
+        let mut control_middlewares = vec![Arc::new(PeerSecurityMiddleware::with_local_allow(
             &app.security,
             local_authentication_mode,
+            local_access_allow,
             local_sessions,
         )) as ControlMiddlewareHandle];
         control_middlewares.extend(self.control_middlewares);

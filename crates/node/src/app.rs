@@ -718,6 +718,7 @@ pub struct NodeAppBuilder {
     http_mutual_tls_mode: Option<HttpMutualTlsMode>,
     audit_log_path: Option<PathBuf>,
     local_authentication_mode: Option<LocalAuthenticationMode>,
+    local_access_allow: Option<crate::auth::LocalAccessAllowList>,
     control_middlewares: Vec<ControlMiddlewareHandle>,
     auto_startup_replay: bool,
     action_handlers: BTreeMap<String, Arc<dyn crate::actions::ActionHandler>>,

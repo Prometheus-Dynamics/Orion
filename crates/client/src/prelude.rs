@@ -6,14 +6,14 @@
 
 #[cfg(feature = "ipc")]
 pub use crate::{
-    ActionRequestWatch, ActionWatch, AssignedWorkloadWatch, AssignedWorkloadsUpdate,
-    ClientIdentity, ClientSession, ControlPlaneClient, ControlPlaneEventStream, ExecutorApp,
-    ExecutorClient, ExecutorEventStream, LocalControlPlaneClient, LocalExecutorApp,
-    LocalExecutorClient, LocalExecutorEvent, LocalExecutorService, LocalExecutorSubscription,
-    LocalNodeRuntime, LocalProviderApp, LocalProviderClient, LocalProviderEvent,
-    LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
-    LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp, ProviderClient,
-    ProviderEventStream, SessionConfig, StatusWatch,
+    ActionReporter, ActionRequestWatch, ActionWatch, AssignedWorkloadWatch,
+    AssignedWorkloadsUpdate, ClientIdentity, ClientSession, ControlPlaneClient,
+    ControlPlaneEventStream, ExecutorApp, ExecutorClient, ExecutorEventStream,
+    LocalControlPlaneClient, LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent,
+    LocalExecutorService, LocalExecutorSubscription, LocalNodeRuntime, LocalProviderApp,
+    LocalProviderClient, LocalProviderEvent, LocalProviderService, LocalProviderSubscription,
+    LocalRuntimePublisher, LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp,
+    ProviderClient, ProviderEventStream, SessionConfig, StatusWatch,
 };
 pub use crate::{
     AssignedWorkload, BoundResource, ClientError, ClientRole, DerivedResource, ProviderResource,

@@ -13,8 +13,9 @@ use std::path::PathBuf;
 
 use orion_control_plane::{
     ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget, ClientEventKind,
-    ClientRole, ControlMessage, TypedConfigValue,
+    ClientRole, ControlMessage, StatusEntry, StatusSubject, TypedConfigValue,
 };
+use orion_core::NodeId;
 
 use super::local_unary::{LocalUnaryClient, LocalUnaryRole};
 use crate::{
@@ -89,73 +90,24 @@ impl HandlerTarget {
     }
 }
 
-/// Action requests for a provider or executor, from
-/// [`LocalProviderService::watch_action_requests`] or
-/// [`LocalExecutorService::watch_action_requests`].
-pub struct ActionRequestWatch {
-    target: HandlerTarget,
-    stream: ClientEventStreamSession,
+/// Reports and status publishing for actions delivered to an [`ActionRequestWatch`], usable
+/// while the watch waits in [`ActionRequestWatch::next`] (from [`ActionRequestWatch::reporter`];
+/// cheap to clone, for example into a task that republishes status keys).
+#[derive(Clone, Debug)]
+pub struct ActionReporter {
     reporter: Reporter,
-    pending: VecDeque<ActionRequest>,
+    node_id: NodeId,
 }
 
-impl ActionRequestWatch {
-    async fn connect(target: HandlerTarget, reporter: Reporter) -> Result<Self, ClientError> {
-        let stream = target.subscribe().await?;
-        Ok(Self {
-            target,
-            stream,
-            reporter,
-            pending: VecDeque::new(),
-        })
-    }
-
-    /// The providers or executors this watch handles actions for.
-    pub fn targets(&self) -> &[ActionTarget] {
-        &self.target.targets
-    }
-
-    /// The node action names this watch claimed.
-    pub fn node_actions(&self) -> &[String] {
-        &self.target.node_actions
-    }
-
-    /// Mirrors `result` into the status lane under the `action.<action_id>.*` key convention
-    /// (`ActionResult::status_entries`), for example after a restart so watchers learn the
-    /// outcome of an action whose in-memory record was lost. Needs a registration or claim that
-    /// covers the result's target.
-    pub async fn publish_action_status(&self, result: &ActionResult) -> Result<(), ClientError> {
-        let entries = result.status_entries();
-        match &self.reporter {
-            Reporter::Provider(client) => client.publish_status(entries).await,
-            Reporter::Executor(client) => client.publish_status(entries).await,
-        }
-    }
-
-    /// Waits for the next action request. Reconnects (and re-registers) per the service's retry
-    /// policy when the stream drops.
-    pub async fn next(&mut self) -> Result<ActionRequest, ClientError> {
-        loop {
-            if let Some(request) = self.pending.pop_front() {
-                return Ok(request);
-            }
-            match self.stream.next_client_events().await {
-                Ok(events) => {
-                    for event in events {
-                        if let ClientEventKind::ActionRequest(request) = event.event {
-                            self.pending.push_back(*request);
-                        }
-                    }
-                }
-                Err(_) => {
-                    self.stream = self.target.subscribe().await?;
-                }
-            }
-        }
+impl ActionReporter {
+    /// The node the watch is connected to (from its session welcome); node-targeted requests and
+    /// `node/<id>` status keys use it.
+    pub fn node_id(&self) -> &NodeId {
+        &self.node_id
     }
 
     /// Reports progress or the outcome (`Running`, `Succeeded`, `Failed`, or `Rejected`) of an
-    /// action this watch received. Reports after the action finished (for example after its
+    /// action the watch received. Reports after the action finished (for example after its
     /// deadline) are ignored by the node.
     pub async fn report(&self, result: ActionReport) -> Result<(), ClientError> {
         self.reporter.report(result).await
@@ -213,6 +165,178 @@ impl ActionRequestWatch {
             },
         ))
         .await
+    }
+
+    /// Publishes status entries with the watch's client name. Besides the subjects a provider
+    /// or executor owns, a node action claim allows `node/<local node>` keys under `action.*`
+    /// and under `<name>.*` for every claimed name (for example `update.state` for the holder of
+    /// `update`; see `docs/device-agent.md`).
+    pub async fn publish_status<I>(&self, entries: I) -> Result<(), ClientError>
+    where
+        I: IntoIterator<Item = StatusEntry>,
+    {
+        let entries: Vec<StatusEntry> = entries.into_iter().collect();
+        match &self.reporter {
+            Reporter::Provider(client) => client.publish_status(entries).await,
+            Reporter::Executor(client) => client.publish_status(entries).await,
+        }
+    }
+
+    /// Mirrors `result` into the status lane under the `action.<action_id>.*` key convention
+    /// (`ActionResult::status_entries`), for example after a restart so watchers learn the
+    /// outcome of an action whose in-memory record was lost. Needs a registration or claim that
+    /// covers the result's target.
+    pub async fn publish_action_status(&self, result: &ActionResult) -> Result<(), ClientError> {
+        self.publish_status(result.status_entries()).await
+    }
+
+    /// A status entry for this node's `node/<id>` subject.
+    pub fn node_status_entry(
+        &self,
+        key: impl Into<String>,
+        value: TypedConfigValue,
+    ) -> StatusEntry {
+        StatusEntry::new(StatusSubject::Node(self.node_id.clone()), key, value)
+    }
+}
+
+/// Action requests for a provider or executor, from
+/// [`LocalProviderService::watch_action_requests`] or
+/// [`LocalExecutorService::watch_action_requests`], or for claimed node actions.
+pub struct ActionRequestWatch {
+    target: HandlerTarget,
+    stream: ClientEventStreamSession,
+    reporter: ActionReporter,
+    pending: VecDeque<ActionRequest>,
+    reconnects: u64,
+}
+
+impl ActionRequestWatch {
+    async fn connect(target: HandlerTarget, reporter: Reporter) -> Result<Self, ClientError> {
+        let stream = target.subscribe().await?;
+        let node_id = stream.node_id().clone();
+        Ok(Self {
+            target,
+            stream,
+            reporter: ActionReporter { reporter, node_id },
+            pending: VecDeque::new(),
+            reconnects: 0,
+        })
+    }
+
+    /// The providers or executors this watch handles actions for.
+    pub fn targets(&self) -> &[ActionTarget] {
+        &self.target.targets
+    }
+
+    /// The node action names this watch claimed.
+    pub fn node_actions(&self) -> &[String] {
+        &self.target.node_actions
+    }
+
+    /// The node this watch is connected to.
+    pub fn node_id(&self) -> &NodeId {
+        self.reporter.node_id()
+    }
+
+    /// A handle that reports and publishes status for this watch while it waits in
+    /// [`Self::next`].
+    pub fn reporter(&self) -> ActionReporter {
+        self.reporter.clone()
+    }
+
+    /// How many times [`Self::next`] reconnected and re-registered after the stream dropped (for
+    /// example because `orion-node` restarted). Status entries live in the node's memory, so a
+    /// handler that keeps durable keys on the status lane republishes them when this changes,
+    /// or periodically.
+    pub fn reconnects(&self) -> u64 {
+        self.reconnects
+    }
+
+    /// See [`ActionReporter::publish_action_status`].
+    pub async fn publish_action_status(&self, result: &ActionResult) -> Result<(), ClientError> {
+        self.reporter.publish_action_status(result).await
+    }
+
+    /// See [`ActionReporter::publish_status`].
+    pub async fn publish_status<I>(&self, entries: I) -> Result<(), ClientError>
+    where
+        I: IntoIterator<Item = StatusEntry>,
+    {
+        self.reporter.publish_status(entries).await
+    }
+
+    /// See [`ActionReporter::node_status_entry`].
+    pub fn node_status_entry(
+        &self,
+        key: impl Into<String>,
+        value: TypedConfigValue,
+    ) -> StatusEntry {
+        self.reporter.node_status_entry(key, value)
+    }
+
+    /// Waits for the next action request. Reconnects (and re-registers) per the service's retry
+    /// policy when the stream drops.
+    pub async fn next(&mut self) -> Result<ActionRequest, ClientError> {
+        loop {
+            if let Some(request) = self.pending.pop_front() {
+                return Ok(request);
+            }
+            match self.stream.next_client_events().await {
+                Ok(events) => {
+                    for event in events {
+                        if let ClientEventKind::ActionRequest(request) = event.event {
+                            self.pending.push_back(*request);
+                        }
+                    }
+                }
+                Err(_) => {
+                    self.stream = self.target.subscribe().await?;
+                    self.reconnects = self.reconnects.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    /// See [`ActionReporter::report`].
+    pub async fn report(&self, result: ActionReport) -> Result<(), ClientError> {
+        self.reporter.report(result).await
+    }
+
+    /// See [`ActionReporter::progress`].
+    pub async fn progress(
+        &self,
+        action_id: impl Into<String>,
+        progress: Option<u16>,
+    ) -> Result<(), ClientError> {
+        self.reporter.progress(action_id, progress).await
+    }
+
+    /// See [`ActionReporter::succeed`].
+    pub async fn succeed(
+        &self,
+        action_id: impl Into<String>,
+        output: BTreeMap<String, TypedConfigValue>,
+    ) -> Result<(), ClientError> {
+        self.reporter.succeed(action_id, output).await
+    }
+
+    /// See [`ActionReporter::fail`].
+    pub async fn fail(
+        &self,
+        action_id: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Result<(), ClientError> {
+        self.reporter.fail(action_id, reason).await
+    }
+
+    /// See [`ActionReporter::reject`].
+    pub async fn reject(
+        &self,
+        action_id: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Result<(), ClientError> {
+        self.reporter.reject(action_id, reason).await
     }
 }
 

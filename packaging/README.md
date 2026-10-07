@@ -12,6 +12,7 @@ image runs.
 | `buildroot/orion-users.table` | `BR2_ROOTFS_USERS_TABLES` entry | The same user, created at image build time (read-only root filesystems). |
 | `systemd/orion-node.preset` | `/usr/lib/systemd/system-preset/80-orion-node.preset` | Enables the unit on images that apply presets (`systemctl preset-all`). |
 | `gaia/orion-node.toml` | imported by a Gaia build | Builds, installs and stages all of the above in a Gaia image (Gaia >= 2.0). |
+| `gaia/orionctl.toml` | optionally imported after `orion-node.toml` | Builds the IPC-only `orionctl` and installs it as `/usr/bin/orionctl`. |
 | `gaia/docker/aarch64-cross.Dockerfile` | used by the Gaia layer | Cross-build environment for `aarch64-unknown-linux-gnu`. |
 
 ## Build
@@ -102,9 +103,13 @@ the unit starts, or it fails with `status=217/USER`:
 The node listens on `/run/orion/control.sock` and `/run/orion/control-stream.sock`
 (`RuntimeDirectory=orion`, mode 0750, sockets created with `UMask=0007`). With the default
 `ORION_NODE_LOCAL_AUTH=same-user`, clients must run as `orion`. To admit other services, set
-`ORION_NODE_LOCAL_AUTH=same-user-or-group` in the environment file and give each client service
-`Group=orion` as its primary group (the node checks the peer's primary GID, not supplementary
-groups). Order clients after the node with `After=orion-node.service` and `Wants=` or `Requires=`.
+`ORION_NODE_LOCAL_AUTH=same-user-or-group` in the environment file and put each client service in
+the `orion` group (`Group=orion`, or `SupplementaryGroups=orion`; the node checks the primary and,
+on Linux 4.13 and newer, the supplementary groups). Appliances whose operators use a root shell
+set `ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root` so `orionctl` works as root;
+`ORION_NODE_LOCAL_AUTH_ALLOW` admits further users or groups (see "Local IPC access" in
+`docs/node-env.md`). Order clients after the node with `After=orion-node.service` and `Wants=` or
+`Requires=`.
 
 ## The unit
 
@@ -185,6 +190,29 @@ The layer declares (all ids can be replaced by a later layer that declares the s
 
 It also sets `[providers.rust] allow_nested_build = true` (otherwise Gaia does not run cargo),
 `[image] kind = "buildroot"`, and lists its ids in `[image.feed]`.
+
+### `orionctl` on the image
+
+Images that want the operator CLI import `gaia/orionctl.toml` right after the node layer instead of
+building `orionctl` themselves:
+
+```toml
+imports = [
+  { source = "orion", path = "packaging/gaia/orion-node.toml" },
+  { source = "orion", path = "packaging/gaia/orionctl.toml" },
+]
+```
+
+| Id | Kind | What |
+| --- | --- | --- |
+| `orionctl` | `[[artifacts]]`, `kind = "rust"` | `package = "orionctl"`, `no_default_features = true` (local IPC, JSON and summary output, about 1.8 MiB), same target, profile and cross image as `orion-node`. |
+| `install-orionctl` | `[[install]]` | `/usr/bin/orionctl`, mode 0755; the layer adds it to `[image.feed] install_entries` (feed lists of all layers are merged). |
+
+It is a separate file because Gaia builds every declared artifact, fed or not; images that do not
+import it never build `orionctl`. Redeclare `orionctl` after the import for YAML/TOML output
+(`features = ["yaml", "toml"]`). `orionctl` uses `/run/orion/control.sock` when it exists; for a
+root shell, run the node with `ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root` (see "IPC
+clients").
 
 Things the image provides:
 

@@ -76,6 +76,10 @@ name = "control_plane_write_watch"
 required-features = ["ipc"]
 
 [[example]]
+name = "device_agent"
+required-features = ["ipc"]
+
+[[example]]
 name = "executor_register_and_watch"
 required-features = ["ipc"]
 

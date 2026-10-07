@@ -5,6 +5,11 @@ software updates and recovery flow through Orion, which pieces Orion owns, which
 deliberately does not own, and the order in which to build them. Open items are tracked in
 [TODO.md](../TODO.md) under "Update / recovery".
 
+What works today, without the records below, is the action-only path (option B): a device agent
+claims the node action `update`, reports "staged and apply issued", and republishes `update.*`
+status keys after every boot. Its contract, and how U3 builds on it, is in
+[device-agent.md](device-agent.md).
+
 Orion stays generic. It does not know what an OS image, a partition, a bootloader or a firmware
 blob is. Component names, version strings and handler arguments are opaque strings to it, the same
 way labels and resource types are (see [placement.md](placement.md)).

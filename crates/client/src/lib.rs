@@ -45,8 +45,8 @@ pub mod prelude;
 
 #[cfg(feature = "ipc")]
 pub use app::{
-    ActionRequestWatch, AssignedWorkloadWatch, AssignedWorkloadsUpdate, ExecutorApp,
-    LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent, LocalExecutorService,
+    ActionReporter, ActionRequestWatch, AssignedWorkloadWatch, AssignedWorkloadsUpdate,
+    ExecutorApp, LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent, LocalExecutorService,
     LocalExecutorSubscription, LocalNodeRuntime, LocalProviderApp, LocalProviderClient,
     LocalProviderEvent, LocalProviderService, LocalProviderSubscription, LocalRuntimePublisher,
     LocalRuntimePublisherBuilder, LocalServiceRetryPolicy, ProviderApp, StatusWatch,

@@ -138,6 +138,12 @@ pub struct HostMetricsSample {
     pub load_5_milli: Option<u64>,
     pub load_15_milli: Option<u64>,
     pub memory_available_bytes: Option<u64>,
+    /// Busy share of all CPUs, per mille (0 to 1000), since the source's previous sample.
+    #[serde(default)]
+    pub cpu_busy_milli: Option<u32>,
+    /// Busy share of each CPU, per mille, in kernel CPU order, over the same window.
+    #[serde(default)]
+    pub cpu_core_busy_milli: Vec<u32>,
     #[serde(default)]
     pub temperatures: Vec<HostTemperature>,
     /// Extra metrics from a host-facts source (for example fan speed or supply voltage).
@@ -146,8 +152,8 @@ pub struct HostMetricsSample {
 }
 
 impl HostMetricsSample {
-    /// Overlays `other`: set fields replace, temperatures replace readings of the same sensor,
-    /// and extra metrics are added.
+    /// Overlays `other`: set fields (and a non-empty per-core CPU list) replace, temperatures
+    /// replace readings of the same sensor, and extra metrics are added.
     pub fn merge(&mut self, other: HostMetricsSample) {
         macro_rules! take {
             ($($field:ident),*) => {$(
@@ -161,8 +167,12 @@ impl HostMetricsSample {
             load_1_milli,
             load_5_milli,
             load_15_milli,
-            memory_available_bytes
+            memory_available_bytes,
+            cpu_busy_milli
         );
+        if !other.cpu_core_busy_milli.is_empty() {
+            self.cpu_core_busy_milli = other.cpu_core_busy_milli;
+        }
         for reading in other.temperatures {
             match self
                 .temperatures

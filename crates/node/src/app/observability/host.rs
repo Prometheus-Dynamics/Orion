@@ -42,6 +42,11 @@ pub(crate) fn sample_host_and_process_memory() -> (HostMetricsSnapshot, ProcessM
         process_vm_hwm_bytes: status.vm_hwm_bytes,
         process_threads: status.threads,
         process_fd_count: process_fd_count(),
+        // Filled by `NodeApp::fill_live_host_metrics` (shared CPU baseline) and from host facts.
+        cpu_busy_milli: None,
+        cpu_core_busy_milli: Vec::new(),
+        cpu_window_ms: None,
+        temperatures: Vec::new(),
     };
     let process = ProcessMemorySnapshot {
         vm_rss_bytes: status.vm_rss_bytes,

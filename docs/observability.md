@@ -133,6 +133,8 @@ Exported metric families:
 | `orion_host_load1`, `orion_host_load5`, `orion_host_load15` | gauge | `node_id` | Load averages from `/proc/loadavg`. |
 | `orion_host_memory_total_bytes`, `orion_host_memory_available_bytes` | gauge | `node_id` | Host memory from `/proc/meminfo`. |
 | `orion_host_swap_total_bytes`, `orion_host_swap_free_bytes` | gauge | `node_id` | Host swap from `/proc/meminfo`. |
+| `orion_host_cpu_busy_ratio` | gauge | `node_id` | Busy share of all CPUs (0 to 1) over the latest window (`/proc/stat`, see `docs/host-facts.md`). |
+| `orion_host_cpu_core_busy_ratio` | gauge | `node_id`, `cpu` | The same per CPU. |
 | `orion_process_id` | gauge | `node_id` | Current Orion process id. |
 | `orion_process_rss_bytes` | gauge | `node_id` | Process RSS when `/proc/self/statm` is available. |
 | `orion_peer_count` | gauge | `node_id`, `status` | `status` is `configured`, `ready`, `pending`, or `degraded`. |
@@ -242,6 +244,10 @@ The most commonly consumed fields are:
 | `swap_total_bytes`, `swap_free_bytes` | integer or null | `/proc/meminfo`. |
 | `process_id` | integer | Orion process id. |
 | `process_rss_bytes` | integer or null | Process resident set size. |
+| `cpu_busy_milli` | integer or null | Busy share of all CPUs, per mille, over `cpu_window_ms` (one shared `/proc/stat` baseline, windows of at least 250 ms). |
+| `cpu_core_busy_milli` | array of integers | The same per CPU. |
+| `cpu_window_ms` | integer or null | Length of the CPU window. |
+| `temperatures` | array of `{sensor, millidegrees_c}` | `/sys/class/thermal` zones plus sensors only a custom host-facts source reports. |
 
 `CommunicationEndpointSnapshot` fields:
 

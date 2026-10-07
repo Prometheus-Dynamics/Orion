@@ -9,12 +9,16 @@
 //!
 //! Sources must be cheap: the node calls them on a blocking thread once per refresh interval.
 
+mod cpu;
+
+pub use cpu::{CpuTimes, CpuUsage, CpuUsageTracker, ProcStat, parse_proc_stat};
 pub use orion::control_plane::HostFactsSource;
 use orion::control_plane::{HostFacts, HostMetricsSample, HostTemperature, NodeHostFacts};
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 /// Most temperature sensors reported per sample (also bounds status-lane entries).
@@ -61,12 +65,16 @@ impl HostFactsSource for LayeredHostFactsSource {
 ///   `/proc/device-tree/serial-number` (or DMI `product_serial` / `board_serial`),
 ///   `/proc/device-tree/model` (or DMI `product_name`), `/etc/machine-id`,
 ///   `/sys/devices/system/cpu/online`, `MemTotal` from `/proc/meminfo`;
-/// - metrics: `/proc/uptime`, `/proc/loadavg`, `MemAvailable`, and every
+/// - metrics: `/proc/uptime`, `/proc/loadavg`, `MemAvailable`, CPU utilisation since the
+///   previous sample from `/proc/stat` (none on the first sample), and every
 ///   `/sys/class/thermal/thermal_zone*/temp` labeled by its `type`.
+///
+/// Clones share the CPU baseline.
 #[derive(Clone, Debug)]
 pub struct LinuxHostFactsSource {
     root: PathBuf,
     image_files: Vec<PathBuf>,
+    cpu: Arc<Mutex<CpuUsageTracker>>,
 }
 
 impl Default for LinuxHostFactsSource {
@@ -86,6 +94,7 @@ impl LinuxHostFactsSource {
         Self {
             root: root.into(),
             image_files: Vec::new(),
+            cpu: Arc::new(Mutex::new(CpuUsageTracker::new(Duration::ZERO))),
         }
     }
 
@@ -169,30 +178,47 @@ impl LinuxHostFactsSource {
         facts
     }
 
-    fn temperatures(&self) -> Vec<HostTemperature> {
-        let Ok(entries) = fs::read_dir(self.path("/sys/class/thermal")) else {
-            return Vec::new();
-        };
-        let mut zones: Vec<(String, Option<String>, String)> = entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                let zone = entry.file_name().to_string_lossy().into_owned();
-                if !zone.starts_with("thermal_zone") {
-                    return None;
-                }
-                let dir = entry.path();
-                let temp = fs::read_to_string(dir.join("temp")).ok()?;
-                let kind = fs::read_to_string(dir.join("type")).ok();
-                Some((zone, kind, temp))
-            })
-            .collect();
-        zones.sort_by_key(|a| zone_order(&a.0));
-        thermal_readings(
-            zones
-                .iter()
-                .map(|(zone, kind, temp)| (zone.as_str(), kind.as_deref(), temp.as_str())),
-        )
+    /// CPU utilisation since the previous call (`None` on the first).
+    fn cpu_usage(&self) -> Option<CpuUsage> {
+        let reading = parse_proc_stat(&self.read("/proc/stat")?)?;
+        let mut tracker = self
+            .cpu
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        tracker.update(reading, Instant::now())
     }
+
+    /// Temperatures from every `/sys/class/thermal/thermal_zone*` (see [`thermal_readings`]).
+    pub fn temperatures(&self) -> Vec<HostTemperature> {
+        thermal_zone_temperatures(&self.path("/sys/class/thermal"))
+    }
+}
+
+/// Temperatures of every `thermal_zone*` below `dir` (normally `/sys/class/thermal`), labeled as
+/// [`thermal_readings`] describes, in zone order.
+pub fn thermal_zone_temperatures(dir: &Path) -> Vec<HostTemperature> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut zones: Vec<(String, Option<String>, String)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let zone = entry.file_name().to_string_lossy().into_owned();
+            if !zone.starts_with("thermal_zone") {
+                return None;
+            }
+            let dir = entry.path();
+            let temp = fs::read_to_string(dir.join("temp")).ok()?;
+            let kind = fs::read_to_string(dir.join("type")).ok();
+            Some((zone, kind, temp))
+        })
+        .collect();
+    zones.sort_by_key(|a| zone_order(&a.0));
+    thermal_readings(
+        zones
+            .iter()
+            .map(|(zone, kind, temp)| (zone.as_str(), kind.as_deref(), temp.as_str())),
+    )
 }
 
 fn zone_order(zone: &str) -> (u64, String) {
@@ -208,6 +234,7 @@ impl HostFactsSource for LinuxHostFactsSource {
         let meminfo = self.read("/proc/meminfo");
         let loadavg = self.read("/proc/loadavg").map(|text| parse_loadavg(&text));
         let (load_1, load_5, load_15) = loadavg.unwrap_or_default();
+        let cpu = self.cpu_usage();
         HostFacts {
             identity: self.identity(meminfo.as_deref()),
             metrics: HostMetricsSample {
@@ -220,6 +247,8 @@ impl HostFactsSource for LinuxHostFactsSource {
                 memory_available_bytes: meminfo
                     .as_deref()
                     .and_then(|contents| meminfo_bytes(contents, "MemAvailable")),
+                cpu_busy_milli: cpu.as_ref().map(|usage| usage.busy_milli),
+                cpu_core_busy_milli: cpu.map(|usage| usage.core_busy_milli).unwrap_or_default(),
                 temperatures: self.temperatures(),
                 extra: Default::default(),
             },

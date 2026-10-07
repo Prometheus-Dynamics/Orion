@@ -3,7 +3,7 @@ use orion_control_plane::{
     CommunicationEndpointSnapshot, CommunicationFailureKind, CommunicationTransportKind,
     ControlMessage, HostMetricsSnapshot, MaintenanceCommand, MaintenanceStatus, MutationBatch,
     NodeObservabilitySnapshot, PeerEnrollment, PeerIdentityUpdate, PeerTrustSnapshot,
-    StateSnapshot, StateWatch, duration_ms_u64,
+    StateSnapshot, StateWatch, StatusQuery, duration_ms_u64,
 };
 use orion_core::{ClientName, NodeId, Revision};
 use orion_transport_ipc::LocalControlTransport;
@@ -252,6 +252,22 @@ impl ControlPlaneEventStream {
                 desired_revision,
             }))
             .await
+    }
+
+    /// Subscribes this stream to status-lane entries matching `query`: a first
+    /// `ClientEventKind::Status` change with every matching entry, then coalesced changes (newest
+    /// value per key). One stream can carry state, status and action subscriptions together; for
+    /// example the host metrics of this node are `StatusQuery` subject `node/<id>`, key prefix
+    /// `host.` (see `docs/host-facts.md`).
+    pub async fn subscribe_status(&mut self, query: StatusQuery) -> Result<(), ClientError> {
+        self.session
+            .subscribe_and_expect_accepted(ControlMessage::WatchStatus(query))
+            .await
+    }
+
+    /// The node this stream is connected to.
+    pub fn node_id(&self) -> &NodeId {
+        self.session.node_id()
     }
 
     pub async fn next_events(&mut self) -> Result<Vec<ClientEvent>, ClientError> {

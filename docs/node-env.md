@@ -189,8 +189,44 @@ drop-in to disable the watchdog. Start-up (state replay) is not covered by the w
 | `ORION_NODE_PEER_SYNC_MODE` | `parallel` | `serial`, `parallel` | Invalid mode fails startup. |
 | `ORION_NODE_PEER_SYNC_MAX_IN_FLIGHT` | `4` | Integer, minimum effective value `1` | Invalid integer fails startup. |
 | `ORION_NODE_HTTP_MTLS` | `disabled` | `disabled`, `optional`, `required` | Invalid mode fails startup. |
-| `ORION_NODE_LOCAL_AUTH` | `same-user` | `disabled`, `same-user`, `same-user-or-group` | Invalid mode fails startup. |
+| `ORION_NODE_LOCAL_AUTH` | `same-user` | `disabled`, `same-user`, `same-user-or-group`, `same-user-or-group-or-root` (see "Local IPC access" below) | Invalid mode fails startup. |
+| `ORION_NODE_LOCAL_AUTH_ALLOW` | unset | Comma-separated extra callers admitted in every mode but `disabled`: `root`, `uid:<n>`, `gid:<n>`, `user:<name>`, `group:<name>` | A malformed entry or an unknown user or group name fails startup. |
 | `ORION_NODE_LABELS` | unset | Comma-separated `key=value` or bare `key` labels, published in the node's observed record and matched by workload node selectors (see `docs/placement.md`). Blank terms are ignored; the last value of a repeated key wins. | Non-UTF-8 value fails startup. |
+
+### Local IPC access
+
+Every local IPC connection carries the caller's Unix credentials (`SO_PEERCRED`: uid and primary
+gid; on Linux 4.13 and newer also the supplementary groups, `SO_PEERGROUPS`). The node admits a
+caller when `ORION_NODE_LOCAL_AUTH` or `ORION_NODE_LOCAL_AUTH_ALLOW` says so:
+
+| `ORION_NODE_LOCAL_AUTH` | Admits |
+| --- | --- |
+| `disabled` | anyone who can open the socket (file permissions are the only check) |
+| `same-user` (default) | callers running as the node's user |
+| `same-user-or-group` | also callers whose primary **or supplementary** groups include the node's primary group |
+| `same-user-or-group-or-root` | also root (uid 0), for appliances where operators work in a root shell |
+
+`ORION_NODE_LOCAL_AUTH_ALLOW` admits more callers on top of the mode (ignored with `disabled`):
+`root` (uid 0), `uid:<n>`, `user:<name>`, and `gid:<n>` / `group:<name>` (members by primary or
+supplementary group). Names are resolved once at startup from the system user database
+(`getpwnam_r` / `getgrnam_r`), so the user or group must exist before the node starts.
+
+The socket's file permissions still apply before any of this: the packaged service creates
+`/run/orion` with mode 0750 and the sockets group-connectable (`UMask=0007`), so callers other
+than root also need to be in the `orion` group, or the image adds an ACL. Typical settings:
+
+```sh
+# Appliance (HeliOS, PhotonVision images): services in the orion group, operators as root.
+ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root
+# The same with an explicit allow-list (for example an operator group that is also given
+# access to /run/orion):
+ORION_NODE_LOCAL_AUTH=same-user-or-group
+ORION_NODE_LOCAL_AUTH_ALLOW=root,group:wheel
+```
+
+A refused caller gets an authorization error naming its uid, gid and groups and these two
+variables. Embedders set the same with `NodeAppBuilder::with_local_authentication_mode` and
+`with_local_access_allow(LocalAccessAllowList::new().allow_uid(0).allow_gid(..))`.
 
 ## Peer Discovery
 

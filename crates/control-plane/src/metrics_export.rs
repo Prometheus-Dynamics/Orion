@@ -268,6 +268,31 @@ fn append_host_metrics(out: &mut String, node_id: &NodeId, host: &HostMetricsSna
     );
     optional_gauge(
         out,
+        "orion_host_cpu_busy_ratio",
+        "Busy share of all host CPUs (0 to 1) over the latest sampling window.",
+        &[("node_id", node)],
+        host.cpu_busy_milli
+            .map(|milli| milli_to_f64(u64::from(milli))),
+    );
+    if !host.cpu_core_busy_milli.is_empty() {
+        metric_help(
+            out,
+            "orion_host_cpu_core_busy_ratio",
+            "Busy share of each host CPU (0 to 1) over the latest sampling window.",
+        );
+        metric_type(out, "orion_host_cpu_core_busy_ratio", "gauge");
+        for (index, milli) in host.cpu_core_busy_milli.iter().enumerate() {
+            let cpu = index.to_string();
+            sample(
+                out,
+                "orion_host_cpu_core_busy_ratio",
+                &[("node_id", node), ("cpu", cpu.as_str())],
+                milli_to_f64(u64::from(*milli)),
+            );
+        }
+    }
+    optional_gauge(
+        out,
         "orion_host_memory_total_bytes",
         "Host total memory in bytes.",
         &[("node_id", node)],

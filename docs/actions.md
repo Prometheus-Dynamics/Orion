@@ -201,7 +201,8 @@ action's keys on its owner through any node.
 `ActionResult::status_entries()` builds these entries and `ActionRequestWatch::publish_action_status`
 publishes them. Status-lane ownership applies: a provider publishes for its provider and resources,
 an executor for its executor; a client that holds a node action claim may publish `action.*` keys
-(only those) for `node/<local node>`. The keys live for their TTL like any status entry.
+and `<claimed name>.*` keys (for example `update.state` for the holder of `update`) for
+`node/<local node>`, and nothing else there (see [device-agent.md](device-agent.md)). The keys live for their TTL like any status entry.
 
 ## Well-known action names
 
@@ -214,7 +215,7 @@ Orion implements none of these; handlers that implement one follow its conventio
 | `restart-unit` | `unit` (`String`, required) |
 | `locate` | optional `duration_ms` (`UInt`), `enabled` (`Bool`, `false` stops it) |
 | `self-test` | optional `level` (`String`, handler-defined) |
-| `update` | `bundle_url` (`String`) or `transfer_id` (`String`) naming the bundle, `sha256` (`String`, hex digest), `size` (`UInt`, bytes). Typically claimed by a device-manager client; reports `Succeeded` with `phase = "rebooting"` before rebooting, and the image version in the host facts is the durable outcome. |
+| `update` | `image_url` (`String`, downloaded by the handler) or `transfer_id` (`String`, reserved), `sha256` (`String`, hex digest), `size` (`UInt`, bytes). Typically claimed by a device agent; reports `Succeeded` with `phase = "rebooting"` and `version_staged` before rebooting ("staged and apply issued"), and the `update.*` status keys plus the image version in the host facts are the durable outcome. The full contract is in [device-agent.md](device-agent.md). |
 
 ## Limits
 
@@ -233,7 +234,7 @@ output entries; string and byte values at most 1024 bytes. Larger output entries
 ```text
 orionctl action run node/node-a reboot --arg delay_ms=5000 --wait
 orionctl action run resource/camera.front locate --arg duration_ms=10000
-orionctl action run node/node-b update --arg transfer_id=t-17 --arg sha256=string:ab12... --wait -o json
+orionctl action run node/node-b update --arg image_url=http://host/image.img.xz --arg sha256=string:ab12... --arg size=1048576 --wait -o json
 orionctl get actions [--target resource/camera.front] [--id <action id>] [-o json|yaml|toml]
 ```
 
@@ -245,7 +246,9 @@ and exits non-zero unless it succeeded. Both commands use the local socket only.
 
 - control plane: `LocalControlPlaneClient::{run_action, query_actions, wait_for_action}`,
   `ControlPlaneEventStream::subscribe_actions`, `ActionWatch::connect_at(..).next()`;
-- providers and executors: `watch_action_requests`, `claim_node_actions`, `ActionRequestWatch`.
+- providers and executors: `watch_action_requests`, `claim_node_actions`, `ActionRequestWatch`
+  (`reporter()` returns a cloneable `ActionReporter` that reports and publishes status while the
+  watch waits in `next()`; `node_id()`, `reconnects()`, `publish_status`, `node_status_entry`).
 
 `orion-node`: `NodeAppBuilder::with_action_handler`, `NodeApp::{run_action, query_actions,
 action_handler_names}`, `orion_node::actions::{ActionHandler, ActionContext, ActionOutcome,

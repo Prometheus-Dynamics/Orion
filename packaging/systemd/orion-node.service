@@ -57,9 +57,10 @@ SupplementaryGroups=dialout
 
 # /var/lib/orion (state) and /run/orion (IPC sockets) are created and owned by systemd. The
 # runtime directory is group-traversable and UMask=0007 makes the sockets group-connectable, so a
-# client service with Group=orion (primary group) can connect when the node runs with
-# ORION_NODE_LOCAL_AUTH=same-user-or-group. With the default `same-user`, clients must run as the
-# orion user.
+# client service in the orion group (Group=orion or SupplementaryGroups=orion) can connect when
+# the node runs with ORION_NODE_LOCAL_AUTH=same-user-or-group (or same-user-or-group-or-root,
+# which also admits root shells). With the default `same-user`, clients must run as the orion
+# user.
 StateDirectory=orion
 StateDirectoryMode=0750
 RuntimeDirectory=orion

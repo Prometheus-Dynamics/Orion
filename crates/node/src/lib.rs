@@ -96,7 +96,7 @@ pub mod transport {
             UnixFdLatestClient, UnixFdLatestConfig, UnixFdLatestFrame, UnixFdLatestPublisher,
             UnixFdLatestReply, UnixFdLatestServer, UnixPeerIdentity, read_control_frame,
             read_control_frame_with_limit, recv_unix_fd_frame, recv_unix_fd_frame_async,
-            send_unix_fd_frame, send_unix_fd_frame_async, write_control_frame,
+            send_unix_fd_frame, send_unix_fd_frame_async, unix_peer_identity, write_control_frame,
             write_control_frame_with_limit,
         };
     }
@@ -125,8 +125,8 @@ pub use app::{
     ReconcileLoopHandle,
 };
 pub use auth::{
-    AuthenticatedOperator, AuthenticatedPeer, LocalAuthenticationMode, NodeSecurity,
-    PeerAuthenticationMode, PeerSecurityMiddleware,
+    AuthenticatedOperator, AuthenticatedPeer, LOCAL_AUTH_ALLOW_ENV, LocalAccessAllowList,
+    LocalAuthenticationMode, NodeSecurity, PeerAuthenticationMode, PeerSecurityMiddleware,
 };
 pub use clock::{ClockStatusSource, KernelClockReading, KernelClockStatusSource};
 pub use config::{

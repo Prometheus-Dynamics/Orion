@@ -18,6 +18,8 @@ mod fd_frame;
 mod fd_latest;
 mod frame_read;
 mod memory;
+#[cfg(unix)]
+mod peer_identity;
 mod preamble;
 mod stream_frame;
 #[cfg(unix)]
@@ -41,6 +43,8 @@ pub use fd_latest::{
 };
 pub use frame_read::ControlFrameReadState;
 pub use memory::IpcTransport;
+#[cfg(unix)]
+pub use peer_identity::unix_peer_identity;
 pub use preamble::{
     CONTROL_PREAMBLE_BYTES, CONTROL_PREAMBLE_MAGIC, check_control_preamble, control_preamble,
 };

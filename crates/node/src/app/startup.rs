@@ -338,14 +338,7 @@ impl NodeApp {
         stream: tokio::net::UnixStream,
     ) -> Result<(), IpcTransportError> {
         info!(node = %self.config.node_id, "client stream session opened");
-        let peer_identity = stream
-            .peer_cred()
-            .map(|cred| orion::transport::ipc::UnixPeerIdentity {
-                pid: cred.pid().and_then(|pid| u32::try_from(pid).ok()),
-                uid: cred.uid(),
-                gid: cred.gid(),
-            })
-            .ok();
+        let peer_identity = orion::transport::ipc::unix_peer_identity(&stream);
         let max_payload_bytes = self.config.runtime_tuning.transport_max_payload_bytes;
         let (mut reader, mut writer) = stream.into_split();
         // The frame read below is raced against the heartbeat tick, so partial-frame state must

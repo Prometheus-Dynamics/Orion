@@ -7,7 +7,7 @@ mod service;
 mod status;
 mod watch;
 
-pub use actions::ActionRequestWatch;
+pub use actions::{ActionReporter, ActionRequestWatch};
 pub use local_unary::{
     LocalExecutorApp, LocalExecutorClient, LocalProviderApp, LocalProviderClient,
 };

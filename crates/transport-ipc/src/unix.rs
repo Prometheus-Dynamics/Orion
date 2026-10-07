@@ -366,14 +366,7 @@ async fn handle_stream(
     io_timeout: Duration,
 ) -> Result<(), IpcTransportError> {
     let max_payload_bytes = max_payload_bytes.max(1);
-    let identity = stream
-        .peer_cred()
-        .map(|cred| UnixPeerIdentity {
-            pid: cred.pid().and_then(|pid| u32::try_from(pid).ok()),
-            uid: cred.uid(),
-            gid: cred.gid(),
-        })
-        .ok();
+    let identity = crate::unix_peer_identity(&stream);
     let request = match timeout_ipc(
         io_timeout,
         read_unary_message(&mut stream, max_payload_bytes, "control envelope"),

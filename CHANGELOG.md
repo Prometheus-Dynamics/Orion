@@ -6,9 +6,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- Operator access on appliances: `ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root` also admits root (so `orionctl` works from a root shell), and `ORION_NODE_LOCAL_AUTH_ALLOW` admits further callers in every mode but `disabled` (`root`, `uid:<n>`, `gid:<n>`, `user:<name>`, `group:<name>`; names resolved at startup, unknown names fail startup). The default stays `same-user`. `orion_node::LocalAccessAllowList`, `NodeAppBuilder::with_local_access_allow`, `PeerSecurityMiddleware::with_local_allow`. See "Local IPC access" in `docs/node-env.md`.
+- `packaging/gaia/orionctl.toml`: an optional Gaia layer, imported after `orion-node.toml`, that builds the IPC-only `orionctl` and installs it as `/usr/bin/orionctl`, so images stop building it themselves.
+- Device agents (`docs/device-agent.md`): the contract for an out-of-process agent that claims the node actions `update`, `reboot` and `locate` (action names, `update` arguments `image_url`, `sha256`, `size`, the "staged and apply issued" result, progress keys, the `update.*` status keys it republishes after every boot, disconnect behaviour, and the path to milestone U3). A client holding a node action claim may now publish `<claimed name>.*` keys for `node/<local node>` in addition to `action.*` keys. `orion_control_plane::update_action` names the arguments, outputs and keys. `orion-client`: `ActionReporter` (from `ActionRequestWatch::reporter()`, reports and publishes while the watch waits), `ActionRequestWatch::{node_id, reconnects, publish_status, node_status_entry}`. Example agent with a fake updater: `crates/client/examples/device_agent/`, tested against a real node in `crates/node/tests/device_agent.rs`.
+- CPU utilisation and temperatures in `HostMetricsSnapshot` (`cpu_busy_milli`, `cpu_core_busy_milli`, `cpu_window_ms`, `temperatures`), sampled when the observability snapshot is taken with one shared `/proc/stat` baseline (minimum window 250 ms), and in `HostMetricsSample` (`cpu_busy_milli`, `cpu_core_busy_milli`, since the previous host-facts sample) with the status keys `host.cpu_busy_milli` and `host.cpu<N>_busy_milli`. Prometheus: `orion_host_cpu_busy_ratio`, `orion_host_cpu_core_busy_ratio`. `orion_node::host_facts::{parse_proc_stat, CpuUsageTracker, thermal_zone_temperatures}`.
+- `ControlPlaneEventStream::subscribe_status` and `ControlPlaneEventStream::node_id`, so control-plane clients follow host metrics and other status keys on the same stream as state and action changes instead of polling (`docs/host-facts.md`, "Following host metrics without polling").
+- `orion_transport_ipc::unix_peer_identity` and `UnixPeerIdentity::{groups, is_member_of}`: supplementary groups of local IPC callers (`SO_PEERGROUPS`, Linux 4.13 and newer).
+
 ### Changed
 
 - The Gaia layer `packaging/gaia/orion-node.toml` requires `gaia_version >= 2.0.0` (was `>= 2.1.0`): Gaia's development line is versioned 2.0.0 again, so the old bound failed every importing build.
+- `ORION_NODE_LOCAL_AUTH=same-user-or-group` now also admits callers whose **supplementary** groups include the node's group (before: primary group only), so `SupplementaryGroups=orion` works.
+- The well-known `update` action takes `image_url` instead of `bundle_url` (Atlas's argument name); no handler in Orion used it.
+- `HostMetricsSnapshot`, `HostMetricsSample` and `UnixPeerIdentity` gained fields, which changes the archived control-protocol layout. `CONTROL_PROTOCOL_VERSION` stays 4 (unreleased); the layout fingerprint is updated, so `orionctl`, client libraries and `orion-node` must come from the same commit.
 - Toolchain pin (rust-toolchain.toml, CI, the Gaia aarch64 cross image) moved to Rust 1.99.0; MSRV stays 1.94.
 - Dependencies upgraded to their newest releases. Major jumps: `ed25519-dalek` 3, `hmac` 0.13, `sha2` 0.11, `toml` 1, `syn` 3, and `embedded-io` / `embedded-io-async` 0.7 (the `orion-link` adapters and the MCU template). Wire formats and signatures are unchanged.
 - `rand_core::OsRng` is gone upstream: `orion-node` and `orion-client` draw keys and nonces from `getrandom::SysRng` instead of depending on `rand_core`.

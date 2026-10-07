@@ -27,12 +27,54 @@ pub mod action_names {
     pub const LOCATE: &str = "locate";
     /// Run a self-test. Optional args: `level` (`String`, handler-defined).
     pub const SELF_TEST: &str = "self-test";
-    /// Install a software update (typically handled by a device-manager client that claimed the
-    /// node action). Args: `bundle_url` (`String`) or `transfer_id` (`String`) naming the
-    /// update bundle, `sha256` (`String`, hex digest of the bundle), `size` (`UInt`, bytes).
-    /// A handler that must reboot to finish reports `Succeeded` with output
-    /// `phase = "rebooting"` first; the durable outcome is the node's image version afterwards.
+    /// Install a software update (typically handled by a device agent that claimed the node
+    /// action). Args ([`update_action`](super::update_action)): `image_url` (`String`, the handler downloads
+    /// it; image bytes never travel over Orion) or `transfer_id` (`String`, reserved for
+    /// in-band transfers), `sha256` (`String`, hex digest of the file as served), `size`
+    /// (`UInt`, bytes). A handler that must reboot to finish reports `Succeeded` with output
+    /// `phase = "rebooting"` first, meaning only "staged and apply issued"; the durable outcome
+    /// is the `update.*` status keys it republishes after the reboot and the node's image
+    /// version. See `docs/device-agent.md`.
     pub const UPDATE: &str = "update";
+}
+
+/// Argument, output and status-key names of the well-known `update` action
+/// (`docs/device-agent.md`). Orion does not interpret them.
+pub mod update_action {
+    /// Arg: URL the handler downloads the image from (`String`).
+    pub const ARG_IMAGE_URL: &str = "image_url";
+    /// Arg: an in-band transfer naming the image (`String`; reserved).
+    pub const ARG_TRANSFER_ID: &str = "transfer_id";
+    /// Arg: hex SHA-256 of the file as served (`String`).
+    pub const ARG_SHA256: &str = "sha256";
+    /// Arg: size of the file as served, in bytes (`UInt`).
+    pub const ARG_SIZE: &str = "size";
+
+    /// Output: `"rebooting"` when the update is staged and the switch was issued.
+    pub const OUTPUT_PHASE: &str = "phase";
+    /// Output value of [`OUTPUT_PHASE`] before the handler reboots.
+    pub const PHASE_REBOOTING: &str = "rebooting";
+    /// Output: version of the staged image (`String`).
+    pub const OUTPUT_VERSION_STAGED: &str = "version_staged";
+
+    /// Status key under `node/<id>`: the updater's state (`String`, handler vocabulary, for
+    /// example `idle`, `staging`, `staged`, `trying`, `confirmed`, `rolled-back`).
+    pub const KEY_STATE: &str = "update.state";
+    /// Status key: version of the running image (`String`).
+    pub const KEY_VERSION_ACTIVE: &str = "update.version_active";
+    /// Status key: version of the staged image (`String`).
+    pub const KEY_VERSION_STAGED: &str = "update.version_staged";
+    /// Status key: the running slot (`String`, for example `A`).
+    pub const KEY_SLOT_ACTIVE: &str = "update.slot_active";
+    /// Status key: the staged slot (`String`).
+    pub const KEY_SLOT_STAGED: &str = "update.slot_staged";
+    /// Status key: progress of the current step, per mille (`UInt`, 0 to 1000).
+    pub const KEY_PROGRESS: &str = "update.progress";
+    /// Status key: the last error (`String`, empty when none).
+    pub const KEY_ERROR: &str = "update.error";
+    /// Status key: the kernel boot id the keys were published in (`String`), so readers can
+    /// tell keys of this boot from leftovers.
+    pub const KEY_BOOT_ID: &str = "update.boot_id";
 }
 
 /// Status-lane key convention for action progress (`docs/actions.md`).

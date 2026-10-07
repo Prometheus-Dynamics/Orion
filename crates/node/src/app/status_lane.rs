@@ -131,7 +131,8 @@ impl NodeApp {
                 })
             }
             // The node publishes host metrics for itself; a client holding a node action claim
-            // may publish `action.*` keys for it (checked per key by `publish_local_status`).
+            // may publish `action.*` and `<claimed name>.*` keys for it (checked per key by
+            // `publish_local_status`).
             StatusSubject::Node(id) => {
                 id == &self.config.node_id && self.client_holds_node_claim(source)
             }
@@ -150,15 +151,17 @@ impl NodeApp {
     ) -> Result<(), NodeError> {
         let mut checked: Vec<&StatusSubject> = Vec::new();
         for entry in &entries {
-            if matches!(entry.subject, StatusSubject::Node(_)) && !entry.key.starts_with("action.")
+            if matches!(entry.subject, StatusSubject::Node(_))
+                && !self.node_status_key_allowed(source, &entry.key)
             {
                 self.state
                     .status
                     .unauthorized_total
                     .fetch_add(1, Ordering::Relaxed);
                 return Err(NodeError::Authorization(format!(
-                    "clients may publish only `action.*` keys for {}",
-                    entry.subject
+                    "clients may publish for {} only `action.*` keys and `<name>.*` keys of node \
+                     actions they claimed; `{}` is neither",
+                    entry.subject, entry.key
                 )));
             }
             if checked.contains(&&entry.subject) {

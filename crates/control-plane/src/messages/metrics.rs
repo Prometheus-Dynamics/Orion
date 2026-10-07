@@ -1,6 +1,6 @@
 use super::maintenance::MaintenanceState;
 use super::resource_usage::NodeResourceUsageSnapshot;
-use crate::{HostFacts, NodeClockFacts};
+use crate::{HostFacts, HostTemperature, NodeClockFacts};
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
 use alloc::{string::String, vec::Vec};
@@ -453,6 +453,22 @@ pub struct HostMetricsSnapshot {
     pub process_vm_hwm_bytes: Option<u64>,
     pub process_threads: Option<u64>,
     pub process_fd_count: Option<u64>,
+    /// Busy share of all CPUs, per mille (0 to 1000), over the `cpu_window_ms` that ended when
+    /// the snapshot was taken (`/proc/stat`). The node keeps one baseline for all readers and
+    /// starts a new window only when the previous one is at least 250 ms old, so readers polling
+    /// faster than that see the same value. `None` until a window exists.
+    #[serde(default)]
+    pub cpu_busy_milli: Option<u32>,
+    /// Busy share of each CPU, per mille, in kernel CPU order, over the same window.
+    #[serde(default)]
+    pub cpu_core_busy_milli: Vec<u32>,
+    /// Length of the window the CPU figures cover, in milliseconds.
+    #[serde(default)]
+    pub cpu_window_ms: Option<u64>,
+    /// Temperatures in millidegrees Celsius: `/sys/class/thermal` read when the snapshot was
+    /// taken, plus sensors only a custom host-facts source reports (from its latest sample).
+    #[serde(default)]
+    pub temperatures: Vec<HostTemperature>,
 }
 
 #[derive(

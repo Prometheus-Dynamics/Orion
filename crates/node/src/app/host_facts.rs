@@ -2,23 +2,52 @@
 //! the status lane under `node/<id>` (`docs/host-facts.md`).
 
 use super::{NodeApp, ReconcileLoopHandle};
-use crate::host_facts::HostFactsSource;
+use crate::host_facts::{CpuUsageTracker, HostFactsSource, thermal_zone_temperatures};
 use orion::control_plane::{
-    HostFacts, NodeHostFacts, NodeRecord, StatusEntry, StatusSubject, TypedConfigValue,
+    HostFacts, HostMetricsSnapshot, NodeHostFacts, NodeRecord, StatusEntry, StatusSubject,
+    TypedConfigValue,
 };
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 /// Status-lane publisher name of the node's own host metrics.
 const HOST_STATUS_PUBLISHER: &str = "node:host-facts";
 /// Status entries live this many refresh intervals, so a stalled sampler lets them expire.
 const HOST_STATUS_TTL_INTERVALS: u32 = 3;
+/// Most per-CPU utilisation entries published to the status lane per sample.
+pub(crate) const MAX_CPU_STATUS_ENTRIES: usize = 64;
 /// Most extra metrics published to the status lane per sample.
 const MAX_EXTRA_STATUS_METRICS: usize = 64;
 
-/// The host-facts source a node samples, set by the builder.
+/// Shortest CPU window reported in observability snapshots: readers polling faster share the
+/// previous window's figures instead of shrinking it.
+const SNAPSHOT_CPU_MIN_WINDOW: Duration = Duration::from_millis(250);
+
+/// The host-facts source a node samples, set by the builder, and the CPU baseline shared by
+/// observability snapshots.
 pub(super) struct HostFactsState {
     pub(super) source: Arc<dyn HostFactsSource>,
+    snapshot_cpu: Mutex<CpuUsageTracker>,
+}
+
+impl HostFactsState {
+    pub(super) fn new(source: Arc<dyn HostFactsSource>) -> Self {
+        let mut tracker = CpuUsageTracker::new(SNAPSHOT_CPU_MIN_WINDOW);
+        // Set the baseline now, so the first snapshot already covers a window.
+        if let Some(reading) = read_proc_stat() {
+            tracker.update(reading, Instant::now());
+        }
+        Self {
+            source,
+            snapshot_cpu: Mutex::new(tracker),
+        }
+    }
+}
+
+fn read_proc_stat() -> Option<crate::host_facts::ProcStat> {
+    crate::host_facts::parse_proc_stat(&std::fs::read_to_string("/proc/stat").ok()?)
 }
 
 impl NodeApp {
@@ -44,6 +73,27 @@ impl NodeApp {
     pub fn refresh_host_facts(&self) -> bool {
         let source = self.state.host_facts.source.clone();
         self.refresh_host_facts_from(source.as_ref())
+    }
+
+    /// Fills the CPU utilisation (shared baseline, see `HostMetricsSnapshot::cpu_busy_milli`) and
+    /// the `/sys/class/thermal` temperatures of an observability snapshot.
+    pub(super) fn fill_live_host_metrics(&self, host: &mut HostMetricsSnapshot) {
+        if let Some(reading) = read_proc_stat() {
+            let usage = self
+                .state
+                .host_facts
+                .snapshot_cpu
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .update(reading, Instant::now());
+            if let Some(usage) = usage {
+                host.cpu_busy_milli = Some(usage.busy_milli);
+                host.cpu_core_busy_milli = usage.core_busy_milli;
+                host.cpu_window_ms =
+                    Some(u64::try_from(usage.window.as_millis()).unwrap_or(u64::MAX));
+            }
+        }
+        host.temperatures = thermal_zone_temperatures(Path::new("/sys/class/thermal"));
     }
 
     /// Host identity facts currently published in this node's observed record.
@@ -136,7 +186,8 @@ impl NodeApp {
 
 /// Status-lane entries for one sample: `host.uptime_seconds`, `host.load1_milli`,
 /// `host.load5_milli`, `host.load15_milli`, `host.memory_available_bytes`,
-/// `host.memory_total_bytes`, `host.temperature.<sensor>` (millidegrees Celsius), and
+/// `host.memory_total_bytes`, `host.cpu_busy_milli`, `host.cpu<N>_busy_milli` (per CPU, at most
+/// [`MAX_CPU_STATUS_ENTRIES`]), `host.temperature.<sensor>` (millidegrees Celsius), and
 /// `host.extra.<key>` for extra metrics.
 pub(crate) fn host_status_entries(subject: &StatusSubject, facts: &HostFacts) -> Vec<StatusEntry> {
     let metrics = &facts.metrics;
@@ -152,12 +203,26 @@ pub(crate) fn host_status_entries(subject: &StatusSubject, facts: &HostFacts) ->
             metrics.memory_available_bytes,
         ),
         ("host.memory_total_bytes", facts.identity.memory_total_bytes),
+        ("host.cpu_busy_milli", metrics.cpu_busy_milli.map(u64::from)),
     ]
     .into_iter()
     .filter_map(|(key, value)| {
         value.map(|value| entry(key.to_owned(), TypedConfigValue::UInt(value)))
     })
     .collect();
+    entries.extend(
+        metrics
+            .cpu_core_busy_milli
+            .iter()
+            .take(MAX_CPU_STATUS_ENTRIES)
+            .enumerate()
+            .map(|(index, milli)| {
+                entry(
+                    format!("host.cpu{index}_busy_milli"),
+                    TypedConfigValue::UInt(u64::from(*milli)),
+                )
+            }),
+    );
     entries.extend(metrics.temperatures.iter().map(|reading| {
         entry(
             format!("host.temperature.{}", reading.sensor),

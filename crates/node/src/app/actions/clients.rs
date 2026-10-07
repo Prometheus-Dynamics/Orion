@@ -187,6 +187,28 @@ impl NodeApp {
         registered.then_some(address)
     }
 
+    /// Whether `source` may publish the status key `key` for this node's `node/<id>` subject:
+    /// `action.*` keys while it holds any node action claim, and `<name>.*` keys for every node
+    /// action `<name>` it claimed (for example `update.state` for the holder of `update`).
+    pub(crate) fn node_status_key_allowed(&self, source: &LocalAddress, key: &str) -> bool {
+        let claims = lock(&self.state.actions.node_claims);
+        let mut held = claims
+            .iter()
+            .filter(|(_, holder)| *holder == source)
+            .map(|(name, _)| name.as_str())
+            .peekable();
+        if held.peek().is_none() {
+            return false;
+        }
+        if key.starts_with("action.") {
+            return true;
+        }
+        held.any(|name| {
+            key.strip_prefix(name)
+                .is_some_and(|rest| rest.len() > 1 && rest.starts_with('.'))
+        })
+    }
+
     /// Whether `source` holds a node action claim (it may then publish `action.*` status keys
     /// for the node subject).
     pub(crate) fn client_holds_node_claim(&self, source: &LocalAddress) -> bool {

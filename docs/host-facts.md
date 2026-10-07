@@ -50,6 +50,8 @@ pub struct HostMetricsSample {
     pub load_5_milli: Option<u64>,
     pub load_15_milli: Option<u64>,
     pub memory_available_bytes: Option<u64>,
+    pub cpu_busy_milli: Option<u32>,    // all CPUs, per mille, since the previous sample
+    pub cpu_core_busy_milli: Vec<u32>,  // per CPU, same window
     pub temperatures: Vec<HostTemperature>,
     pub extra: BTreeMap<String, TypedConfigValue>, // extra metrics from a custom source
 }
@@ -78,11 +80,14 @@ publisher `node:host-facts`, with a TTL of three refresh intervals (capped by
 | `host.uptime_seconds` | `UInt` |
 | `host.load1_milli`, `host.load5_milli`, `host.load15_milli` | `UInt` (load x 1000) |
 | `host.memory_available_bytes`, `host.memory_total_bytes` | `UInt` |
+| `host.cpu_busy_milli` | `UInt`, busy share of all CPUs per mille (0 to 1000) since the previous sample |
+| `host.cpu<N>_busy_milli` | `UInt`, the same per CPU (`host.cpu0_busy_milli`, ...; at most 64) |
 | `host.temperature.<sensor>` | `Int` (millidegrees Celsius) |
 | `host.extra.<key>` | the source's value, for the first 64 extra metrics |
 
-Unknown values are left out. Local clients cannot publish for `node/<id>`, except `action.*`
-keys by a client that holds a node action claim (see [actions.md](actions.md)).
+Unknown values are left out. Local clients cannot publish for `node/<id>`, except a client that
+holds a node action claim: `action.*` keys and `<claimed name>.*` keys (see
+[device-agent.md](device-agent.md)); `host.*` stays the node's own.
 
 ## The default Linux source
 
@@ -103,6 +108,7 @@ keys by a client that holds a node action claim (see [actions.md](actions.md)).
 | `memory_total_bytes`, `memory_available_bytes` | `MemTotal`, `MemAvailable` in `/proc/meminfo` |
 | `uptime_seconds` | `/proc/uptime` |
 | load averages | `/proc/loadavg` |
+| CPU utilisation | `/proc/stat` deltas between two samples (`user`..`steal`, idle = `idle + iowait`); none on the first sample |
 | temperatures | every `/sys/class/thermal/thermal_zone*/temp`, labeled by the zone's `type` (`<type>/<zone>` when several zones share a type), at most 32 |
 
 An image file is either os-release style `KEY=value` lines (`IMAGE_ID`, `IMAGE_NAME`, `NAME`, or
@@ -113,6 +119,52 @@ holding the version.
 the host file system elsewhere); the parsers (`parse_os_release`, `parse_image_file`,
 `parse_uptime_seconds`, `parse_loadavg`, `meminfo_bytes`, `parse_cpu_list`, `thermal_readings`,
 `firmware_string`) are public for fixture tests.
+
+## Live host metrics in observability snapshots
+
+`NodeObservabilitySnapshot::host` (`HostMetricsSnapshot`, also `query_host_metrics`) is sampled
+when the snapshot is taken, and carries, besides uptime, load, memory, swap and process counters:
+
+| Field | Meaning |
+| --- | --- |
+| `cpu_busy_milli` | Busy share of all CPUs, per mille, over `cpu_window_ms` (`/proc/stat`). |
+| `cpu_core_busy_milli` | The same per CPU, in kernel CPU order. |
+| `cpu_window_ms` | The window those figures cover. The node keeps one baseline for every reader and starts a new window only when the previous one is at least 250 ms old, so a reader polling every second sees the last second, and two readers do not shrink each other's window. The baseline is set when the node starts, so the first snapshot already has figures. |
+| `temperatures` | Every `/sys/class/thermal` zone (same labels as the host-facts source), plus sensors only a custom host-facts source reports (from its latest sample). |
+
+Where `/proc` or `/sys` do not report them (another platform, a custom source), the fields are
+filled from the latest host-facts sample. Prometheus gains `orion_host_cpu_busy_ratio` and
+`orion_host_cpu_core_busy_ratio{cpu}` (0 to 1).
+
+### Following host metrics without polling
+
+A control-plane client (for example a device's web API) that today re-reads `/proc` and
+`/sys` every second can follow the node instead:
+
+```rust
+let mut events = ControlPlaneEventStream::connect_default("helios-api").await?;
+let node = events.node_id().clone();
+events.subscribe_state(Revision::ZERO).await?;          // desired/observed changes
+events.subscribe_status(
+    StatusQuery::subject(StatusSubject::Node(node)).with_key_prefix("host."),
+).await?;                                                // host.* metrics
+loop {
+    for event in events.next_events().await? {
+        match event.event {
+            ClientEventKind::Status(change) => { /* change.updated: host.cpu_busy_milli, ... */ }
+            _ => { /* state changes */ }
+        }
+    }
+}
+```
+
+The first status event is a bootstrap with every matching key; later ones carry only changed
+keys (coalesced, newest value per key). Keys arrive once per host-facts sample, so set
+`ORION_NODE_HOST_FACTS_REFRESH_MS` to the rate the UI needs (for example `2000`); a sample reads a
+handful of small `/proc` and `/sys` files. For an on-demand value with a fresh CPU window, call
+`LocalControlPlaneClient::query_host_metrics()` instead. One stream can carry the state, status
+and action subscriptions together, and `orion-client` reconnect is the caller's: after
+`next_events` fails, connect and subscribe again (the next status event is a new bootstrap).
 
 ## Custom sources
 

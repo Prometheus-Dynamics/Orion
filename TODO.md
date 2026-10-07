@@ -118,6 +118,13 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
       transport, deadlines and a bounded in-memory registry; `orionctl action run`,
       `orionctl get actions`; well-known names (`reboot`, `restart-unit`, `locate`, `self-test`,
       `update`) and the `action.<id>.*` status-lane convention.
+- [x] Operator access: `same-user-or-group-or-root`, `ORION_NODE_LOCAL_AUTH_ALLOW`, supplementary
+      groups via `SO_PEERGROUPS`; optional `packaging/gaia/orionctl.toml` layer.
+- [x] Device-agent contract ([docs/device-agent.md](docs/device-agent.md)): claim-scoped
+      `<name>.*` node status keys, `update_action` names, `ActionReporter`, example agent with a
+      fake updater and contract tests. Atlas's `pd-device-agent` implements it.
+- [x] CPU utilisation and temperatures in `HostMetricsSnapshot` / `HostMetricsSample`,
+      `ControlPlaneEventStream::subscribe_status` (HeliOS can drop its `/proc` polling).
 - [ ] Actions: an `ActionWatch` for peers (today a forwarding node polls the owner); action counters
       in `resource_usage`; link devices as action handlers (needs a link message kind).
 - [ ] Host facts: replicate selected volatile host metrics to peers (the status lane is node-local).
@@ -254,7 +261,8 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       `STATUS=`; example unit (watchdog, restart limits, `OnFailure=` safe mode); wedged-loop test.
 - [ ] **U2 Safe mode**: `ORION_NODE_SAFE_MODE`; quarantine undecodable or newer-format state instead
       of failing startup; no workloads, receive-only sync, health reason, `orion_safe_mode` metric.
-- [ ] **U3 Data model**: `UpdateIntentRecord` desired section and `UpdateStatusRecord` in the
+- [ ] **U3 Data model** (scoped against the device-agent contract in
+      [docs/device-agent.md](docs/device-agent.md), "From here to durable update records"): `UpdateIntentRecord` desired section and `UpdateStatusRecord` in the
       observed slice (protocol bump, batched with other layout changes); `orionctl get updates`;
       requester authorization (`ORION_NODE_UPDATE_REQUESTERS`); audit records.
 - [ ] **U4 Delivery and resume**: deliver intents as actions keyed by

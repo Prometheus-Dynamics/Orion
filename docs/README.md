@@ -17,6 +17,7 @@ This directory holds repository-level documentation for the Orion workspace.
 - [placement.md](placement.md): node labels, leaderless workload placement, and cross-node binding (leases)
 - [host-facts.md](host-facts.md): host identity facts and volatile host metrics, the replaceable host-facts source
 - [actions.md](actions.md): generic actions on nodes, providers, resources, and executors (routing, authorization, handlers)
+- [device-agent.md](device-agent.md): the device-agent contract: claiming node actions (`update`, `reboot`, `locate`) over local IPC, progress, `update.*` status keys that survive reboots, result semantics, disconnects
 - [remote-operator.md](remote-operator.md): the embeddable remote operator client (`orion-client` feature `remote`), operator enrollment, per-operator authorization, threat model
 - [update-recovery.md](update-recovery.md): design (not implemented) for software update intents, progress, staged rollouts, rollback, and recovery paths that never depend on Orion
 - [link-protocol.md](link-protocol.md): MCU link protocol (UART/CAN framing, link messages, device bring-up) for no_std devices

@@ -1,6 +1,7 @@
 use super::{
-    AuthenticatedOperator, AuthenticatedPeer, AuthorizationLookup, LocalAuthenticationMode,
-    NodeSecurity, OperatorAuthentication, PeerAuthenticationMode, PeerObservedScope,
+    AuthenticatedOperator, AuthenticatedPeer, AuthorizationLookup, LOCAL_AUTH_ALLOW_ENV,
+    LocalAccessAllowList, LocalAuthenticationMode, NodeSecurity, OperatorAuthentication,
+    PeerAuthenticationMode, PeerObservedScope,
     crypto::{current_effective_gid, current_effective_uid},
     transport_binding_from_hello,
 };
@@ -83,6 +84,7 @@ struct NodeSecurityAuthorizer {
     security: Arc<NodeSecurity>,
     peer_authentication: PeerAuthenticationMode,
     local_authentication: LocalAuthenticationMode,
+    local_allow: LocalAccessAllowList,
     local_uid: u32,
     local_gid: u32,
     lookup: Arc<dyn AuthorizationLookup>,
@@ -93,6 +95,7 @@ impl NodeSecurityAuthorizer {
         security: &Arc<NodeSecurity>,
         peer_authentication: PeerAuthenticationMode,
         local_authentication: LocalAuthenticationMode,
+        local_allow: LocalAccessAllowList,
         local_uid: u32,
         local_gid: u32,
         lookup: Arc<dyn AuthorizationLookup>,
@@ -101,6 +104,7 @@ impl NodeSecurityAuthorizer {
             security: security.clone(),
             peer_authentication,
             local_authentication,
+            local_allow,
             local_uid,
             local_gid,
             lookup,
@@ -114,18 +118,24 @@ impl NodeSecurityAuthorizer {
         let Some(identity) = request.context.local_identity.as_ref() else {
             return Ok(());
         };
+        let same_user = identity.uid == self.local_uid;
+        let same_group = identity.is_member_of(self.local_gid);
         let allowed = match self.local_authentication {
             LocalAuthenticationMode::Disabled => true,
-            LocalAuthenticationMode::SameUser => identity.uid == self.local_uid,
-            LocalAuthenticationMode::SameUserOrGroup => {
-                identity.uid == self.local_uid || identity.gid == self.local_gid
+            LocalAuthenticationMode::SameUser => same_user,
+            LocalAuthenticationMode::SameUserOrGroup => same_user || same_group,
+            LocalAuthenticationMode::SameUserOrGroupOrRoot => {
+                same_user || same_group || identity.uid == 0
             }
-        };
+        } || self.local_allow.admits(identity);
         if !allowed {
             return Err(NodeError::Authorization(format!(
-                "local caller uid {} gid {} does not satisfy {:?} policy for node uid {} gid {}",
+                "local caller uid {} gid {} (groups {:?}) does not satisfy {:?} policy for node \
+                 uid {} gid {}; admit it with ORION_NODE_LOCAL_AUTH (same-user-or-group, \
+                 same-user-or-group-or-root) or {LOCAL_AUTH_ALLOW_ENV} (see docs/node-env.md)",
                 identity.uid,
                 identity.gid,
+                identity.groups,
                 self.local_authentication,
                 self.local_uid,
                 self.local_gid
@@ -467,6 +477,21 @@ impl PeerSecurityMiddleware {
         local_authentication: LocalAuthenticationMode,
         lookup: Arc<dyn AuthorizationLookup>,
     ) -> Self {
+        Self::with_local_allow(
+            security,
+            local_authentication,
+            LocalAccessAllowList::new(),
+            lookup,
+        )
+    }
+
+    /// Like [`Self::new`], admitting `local_allow` on top of `local_authentication`.
+    pub fn with_local_allow(
+        security: &Arc<NodeSecurity>,
+        local_authentication: LocalAuthenticationMode,
+        local_allow: LocalAccessAllowList,
+        lookup: Arc<dyn AuthorizationLookup>,
+    ) -> Self {
         let local_uid = current_effective_uid();
         let local_gid = current_effective_gid();
         Self {
@@ -476,6 +501,7 @@ impl PeerSecurityMiddleware {
                     security,
                     security.mode(),
                     local_authentication,
+                    local_allow,
                     local_uid,
                     local_gid,
                     lookup,

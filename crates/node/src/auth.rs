@@ -1,4 +1,5 @@
 mod crypto;
+mod local_access;
 mod modes;
 mod operators;
 #[cfg(feature = "peer-tcp")]
@@ -14,6 +15,7 @@ use crypto::{
     parse_public_key_bytes, parse_signature_bytes,
 };
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+pub use local_access::{LOCAL_AUTH_ALLOW_ENV, LocalAccessAllowList};
 pub use modes::{LocalAuthenticationMode, PeerAuthenticationMode};
 use orion_control_plane::{ClientSession, PeerHello};
 use orion_core::{ExecutorId, NodeId, PublicKeyHex, ResourceId};

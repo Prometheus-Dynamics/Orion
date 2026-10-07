@@ -46,7 +46,7 @@ pub mod cluster {
 #[cfg(feature = "client")]
 pub mod client {
     pub use orion_client::prelude;
-    pub use orion_client::{ActionRequestWatch, ActionWatch};
+    pub use orion_client::{ActionReporter, ActionRequestWatch, ActionWatch};
     pub use orion_client::{
         AssignedWorkload, AssignedWorkloadWatch, AssignedWorkloadsUpdate, BoundResource,
         assigned_workloads, assigned_workloads_for_executor, assigned_workloads_from_records,
@@ -79,7 +79,7 @@ pub mod control_plane {
     pub use orion_control_plane::{
         ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
         ActionTargetParseError, HostFacts, HostMetricsSample, HostTemperature, LinkStatusSnapshot,
-        NodeHostFacts, action_names, action_status_keys,
+        NodeHostFacts, action_names, action_status_keys, update_action,
     };
     pub use orion_control_plane::{
         AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, AvailabilityState, ClientEvent,
@@ -190,7 +190,7 @@ pub mod transport {
             UnixFdLatestClient, UnixFdLatestConfig, UnixFdLatestFrame, UnixFdLatestPublisher,
             UnixFdLatestReply, UnixFdLatestServer, UnixPeerIdentity, read_control_frame,
             read_control_frame_with_limit, recv_unix_fd_frame, recv_unix_fd_frame_async,
-            send_unix_fd_frame, send_unix_fd_frame_async, write_control_frame,
+            send_unix_fd_frame, send_unix_fd_frame_async, unix_peer_identity, write_control_frame,
             write_control_frame_with_limit,
         };
     }

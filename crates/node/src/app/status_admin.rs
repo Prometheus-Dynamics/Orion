@@ -44,6 +44,7 @@ impl NodeApp {
 
     pub fn observability_snapshot(&self) -> NodeObservabilitySnapshot {
         let (mut host, process_memory) = sample_host_and_process_memory();
+        self.fill_live_host_metrics(&mut host);
         #[cfg(feature = "link-gateway")]
         let links = self.link_status();
         #[cfg(not(feature = "link-gateway"))]
@@ -666,6 +667,20 @@ fn fill_host_metrics_from_facts(
     ] {
         if slot.is_none() {
             *slot = value;
+        }
+    }
+    if host.cpu_busy_milli.is_none() && metrics.cpu_busy_milli.is_some() {
+        host.cpu_busy_milli = metrics.cpu_busy_milli;
+        host.cpu_core_busy_milli = metrics.cpu_core_busy_milli.clone();
+    }
+    // Sensors only the host-facts source knows (for example a PMIC from an overlay).
+    for reading in &metrics.temperatures {
+        if !host
+            .temperatures
+            .iter()
+            .any(|existing| existing.sensor == reading.sensor)
+        {
+            host.temperatures.push(reading.clone());
         }
     }
     if host.hostname.is_none() {
