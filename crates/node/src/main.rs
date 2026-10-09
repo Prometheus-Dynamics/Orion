@@ -356,11 +356,13 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
 
     #[cfg(all(feature = "systemd-notify", unix))]
     {
-        if let Some(notifier) = notifier {
-            notifier.stopping("shutting down");
-        }
+        // Stop the watchdog task first: it runs on another worker, so a tick between the two
+        // would send WATCHDOG=1 after STOPPING=1.
         if let Some(watchdog) = watchdog {
             watchdog.shutdown().await;
+        }
+        if let Some(notifier) = notifier {
+            notifier.stopping("shutting down");
         }
     }
     if let Some(discovery) = discovery {
