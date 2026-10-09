@@ -27,16 +27,13 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Run file-size lint
-        run: ./scripts/check-file-sizes.sh
-
-      - name: Run workspace tests
-        run: cargo test --workspace --all-features
+      - name: fmt, file sizes, workspace tests (scripts/ci-jobs.sh workspace)
+        run: ./scripts/ci-jobs.sh workspace
 
   docs-and-lints:
+    # Clippy everywhere, the orion-node / orionctl / transport-http / remote-client feature matrix,
+    # the orion-node test builds the all-features run cannot stand for, and the docs. The matrix
+    # and what it deliberately leaves out are documented in docs/development.md ("CI jobs").
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -52,91 +49,8 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      - name: Run clippy on orion-node feature matrix
-        run: |
-          # IPC-only appliance build (no HTTP stack) and each transport on its own.
-          cargo clippy -p orion-node --no-default-features --all-targets -- -D warnings
-          cargo clippy -p orion-node --no-default-features --features transport-http --all-targets -- -D warnings
-          cargo clippy -p orion-node --no-default-features --features transport-tcp --all-targets -- -D warnings
-          cargo clippy -p orion-node --no-default-features --features transport-quic --all-targets -- -D warnings
-          # IPC-only appliance build that clusters over orion+tcp (no HTTP stack), and with HTTP.
-          cargo clippy -p orion-node --no-default-features --features peer-tcp --all-targets -- -D warnings
-          cargo clippy -p orion-node --no-default-features --features peer-tcp,transport-http --all-targets -- -D warnings
-          cargo clippy -p orion-node --no-default-features --features peer-tcp,link-gateway --all-targets -- -D warnings
-          # mDNS discovery and shared-key enrollment, in the appliance build and on the defaults.
-          cargo clippy -p orion-node --no-default-features --features peer-tcp,discovery-mdns --all-targets -- -D warnings
-          cargo clippy -p orion-node --features discovery-mdns --all-targets -- -D warnings
-          cargo clippy -p orion-node --all-targets -- -D warnings
-          # MCU link gateway, in the IPC-only appliance build and on top of the defaults.
-          cargo clippy -p orion-node --no-default-features --features link-gateway --all-targets -- -D warnings
-          cargo clippy -p orion-node --features link-gateway --all-targets -- -D warnings
-          # sd_notify + watchdog: alone, in the packaged appliance build (packaging/), and on the defaults.
-          cargo clippy -p orion-node --no-default-features --features systemd-notify --all-targets -- -D warnings
-          cargo clippy -p orion-node --no-default-features --features peer-tcp,systemd-notify --all-targets -- -D warnings
-          cargo clippy -p orion-node --no-default-features --features peer-tcp,discovery-mdns,systemd-notify --all-targets -- -D warnings
-          cargo clippy -p orion-node --no-default-features --features peer-tcp,discovery-mdns,systemd-notify,link-gateway --all-targets -- -D warnings
-          cargo clippy -p orion-node --features systemd-notify --all-targets -- -D warnings
-
-      - name: Test IPC-only orion-node build
-        run: cargo test -p orion-node --no-default-features
-
-      - name: Test IPC-only orion-node build with orion+tcp peer sync
-        # Includes the remote operator tests (src/tests/cluster/remote_operator*.rs).
-        run: cargo test -p orion-node --no-default-features --features peer-tcp
-
-      - name: Test orion-node peer discovery build (in-memory multicast, no real mDNS)
-        run: cargo test -p orion-node --no-default-features --features peer-tcp,discovery-mdns
-
-      - name: Test orion-node systemd-notify builds (fake NOTIFY_SOCKET)
-        run: |
-          cargo test -p orion-node --no-default-features --features systemd-notify
-          cargo test -p orion-node --no-default-features --features peer-tcp,systemd-notify
-
-      - name: Test orion-node link gateway builds
-        run: |
-          cargo test -p orion-node --no-default-features --features link-gateway
-          cargo test -p orion-node --features link-gateway --lib link_gateway
-
-      - name: Lint, build and test the remote operator client
-        run: |
-          # The remote operator client alone (no IPC client, no HTTP stack), with mDNS browsing,
-          # through the facade, and orion-auth's shared signing / enrollment code.
-          cargo clippy -p orion-client --no-default-features --features remote --all-targets -- -D warnings
-          cargo clippy -p orion-client --no-default-features --features discovery --all-targets -- -D warnings
-          cargo clippy -p orion --no-default-features --features remote --all-targets -- -D warnings
-          cargo clippy -p orion-auth --features enrollment --all-targets -- -D warnings
-          cargo build -p orion-client --no-default-features --features remote --example remote_operator
-          cargo test -p orion-client --no-default-features --features remote
-          cargo test -p orion-auth --features enrollment
-          # The node side with shared-key operator enrollment (in-memory discovery bus).
-          cargo test -p orion-node --no-default-features --features peer-tcp,discovery-mdns --lib remote_operator
-
-      - name: Run clippy on orion-transport-http and orionctl feature matrix
-        run: |
-          # Protocol layer only, the HTTP client alone (no axum/hyper server), the server alone.
-          cargo clippy -p orion-transport-http --no-default-features --all-targets -- -D warnings
-          cargo clippy -p orion-transport-http --no-default-features --features client --all-targets -- -D warnings
-          cargo clippy -p orion-transport-http --no-default-features --features server --all-targets -- -D warnings
-          cargo clippy -p orion-transport-http --all-targets -- -D warnings
-          # orionctl: IPC-only + JSON, IPC-only with YAML/TOML, HTTP client + JSON, defaults.
-          cargo clippy -p orionctl --no-default-features --all-targets -- -D warnings
-          cargo clippy -p orionctl --no-default-features --features yaml,toml --all-targets -- -D warnings
-          cargo clippy -p orionctl --no-default-features --features http --all-targets -- -D warnings
-          cargo clippy -p orionctl --all-targets -- -D warnings
-
-      - name: Build and test slim orionctl builds
-        run: |
-          cargo build -p orion-transport-http --no-default-features --features client
-          cargo build -p orion-transport-http --no-default-features --features server
-          cargo build -p orionctl --no-default-features
-          cargo build -p orionctl --no-default-features --features http
-          cargo test -p orionctl --no-default-features
-
-      - name: Build docs
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+      - name: Lints, feature matrix, docs (scripts/ci-jobs.sh lints)
+        run: ./scripts/ci-jobs.sh lints
 
   remote-client-cross-check:
     # The remote operator client is used by desktop apps (Windows, macOS, Linux). Type-check and
@@ -234,64 +148,8 @@ jobs:
             .
             examples/mcu-template
 
-      - name: Build and lint orion-link for embedded targets
-        run: |
-          for target in thumbv6m-none-eabi thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf; do
-            cargo clippy --locked -p orion-link --no-default-features --target "$target" -- -D warnings
-            cargo clippy --locked -p orion-link --no-default-features --features embedded-io,embedded-io-async,embedded-can,crc-table --target "$target" -- -D warnings
-            cargo clippy --locked -p orion-link --no-default-features --features device --target "$target" -- -D warnings
-            cargo clippy --locked -p orion-link --no-default-features --features device,embedded-io,embedded-can --target "$target" -- -D warnings
-            cargo clippy --locked -p orion-link --no-default-features --features alloc --target "$target" -- -D warnings
-            cargo clippy --locked -p orion-link --no-default-features --features alloc,embedded-io,embedded-can --target "$target" -- -D warnings
-            cargo build --locked -p orion-link --release --no-default-features --target "$target"
-            cargo build --locked -p orion-link --release --no-default-features --features device --target "$target"
-            cargo build --locked -p orion-link --release --no-default-features --features alloc --target "$target"
-          done
-
-      - name: Check that the minimal device path has no model, serde, or postcard dependency
-        run: |
-          tree="$(cargo tree --locked -p orion-link --no-default-features \
-            --features device,embedded-io,embedded-io-async,embedded-can,crc-table \
-            --target thumbv6m-none-eabi -e normal --prefix none)"
-          echo "$tree"
-          if grep -E '^(orion-core|orion-control-plane|serde|postcard) ' <<<"$tree"; then
-            echo "error: the no-alloc device path must not depend on the crates above" >&2
-            exit 1
-          fi
-
-      - name: Test orion-link feature combinations
-        run: |
-          cargo test --locked -p orion-link --no-default-features
-          cargo test --locked -p orion-link --no-default-features --features crc-table
-          cargo test --locked -p orion-link --no-default-features --features device
-          cargo test --locked -p orion-link --no-default-features --features device,embedded-io,embedded-can
-          cargo test --locked -p orion-link --no-default-features --features alloc
-          cargo clippy --locked -p orion-link --no-default-features --features device --all-targets -- -D warnings
-          cargo clippy --locked -p orion-link --no-default-features --features alloc --all-targets -- -D warnings
-          cargo test --locked -p orion-link --all-features
-          cargo run --locked -p orion-link --example sim_device --features std
-
-      - name: Build the MCU template for bare-metal targets
-        working-directory: examples/mcu-template
-        run: |
-          cargo fmt --check
-          cargo clippy --locked --all-targets -- -D warnings
-          cargo clippy --locked --all-targets --features alloc -- -D warnings
-          cargo test --locked
-          cargo test --locked --features alloc
-          for target in thumbv6m-none-eabi thumbv7em-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf; do
-            cargo clippy --locked --release --target "$target" -- -D warnings
-            cargo build --locked --release --target "$target"
-            cargo build --locked --release --target "$target" --no-default-features --features standalone,ffi-can
-          done
-          # The full-record variant with the example heap (which needs compare-and-swap).
-          for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
-            cargo clippy --locked --release --target "$target" --features global-heap -- -D warnings
-            cargo build --locked --release --target "$target" --features global-heap
-          done
-
-      - name: MCU template footprint and size budget
-        run: MCU_SIZE_CHECK_BUDGET=1 MCU_SIZE_BREAKDOWN=1 ./scripts/mcu-size.sh
+      - name: orion-link and the MCU template (scripts/ci-jobs.sh link)
+        run: ./scripts/ci-jobs.sh link
 
   no-std:
     # The model crates (core, data-plane, control-plane, auth, runtime, cluster) and the `orion`
@@ -315,22 +173,17 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Check no_std builds
+      - name: Check no_std builds (scripts/ci-jobs.sh no-std)
         env:
           NO_STD_TARGETS: thumbv7em-none-eabihf riscv32imac-unknown-none-elf
-        run: ./scripts/check-no-std.sh
+        run: ./scripts/ci-jobs.sh no-std
 
   allocator-features:
-    # `--all-features` above enables both allocator features at once (jemalloc takes precedence),
-    # so each opt-in global allocator is also linted, built, started, and cross-built on its own.
+    # `--all-features` enables both opt-in global allocators at once (jemalloc takes precedence),
+    # so each is also linted, built, started, and cross-built on its own, in the appliance feature
+    # set they are meant for. One job: the two builds share every other dependency.
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        feature:
-          - alloc-mimalloc
-          - alloc-jemalloc
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -347,38 +200,19 @@ jobs:
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.feature }}
 
-      - name: Run clippy
-        run: cargo clippy -p orion-node --all-targets --features ${{ matrix.feature }} -- -D warnings
-
-      - name: Build orion-node
-        run: cargo build -p orion-node --features ${{ matrix.feature }}
-
-      - name: Start and stop orion-node
-        env:
-          ORION_NODE_ID: node.alloc-smoke
-          ORION_NODE_HTTP_ADDR: "off"
-          ORION_NODE_PEER_AUTH: disabled
-          ORION_NODE_SHUTDOWN_AFTER_INIT_MS: "200"
-          RUST_LOG: warn
-        run: |
-          ORION_NODE_IPC_SOCKET="$RUNNER_TEMP/c.sock" \
-          ORION_NODE_IPC_STREAM_SOCKET="$RUNNER_TEMP/s.sock" \
-          ./target/debug/orion-node
-
-      - name: Cross-build orion-node for aarch64-unknown-linux-gnu
+      - name: Allocators (scripts/ci-jobs.sh allocators)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-        run: cargo build -p orion-node --features ${{ matrix.feature }} --target aarch64-unknown-linux-gnu
+        run: ./scripts/ci-jobs.sh allocators
 
   appliance-aarch64:
     # The packaged appliance build (packaging/README.md, packaging/gaia/orion-node.toml) for
-    # aarch64-unknown-linux-gnu: type-check without a cross linker, then cross-link it, check that
-    # the ELF segments are 64 KiB aligned (16 KiB / 64 KiB page kernels), and verify the unit.
+    # aarch64-unknown-linux-gnu: cross-link the release build, check that the ELF segments are
+    # 64 KiB aligned (16 KiB / 64 KiB page kernels), type-check the link-gateway variant, and
+    # verify the unit.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -391,41 +225,18 @@ jobs:
           toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
           targets: aarch64-unknown-linux-gnu
 
-      - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@v2
-
-      - name: Check the appliance build for aarch64 (no cross linker needed)
-        run: |
-          cargo check -p orion-node --target aarch64-unknown-linux-gnu --no-default-features --features peer-tcp,discovery-mdns,systemd-notify
-          cargo check -p orion-node --target aarch64-unknown-linux-gnu --no-default-features --features peer-tcp,discovery-mdns,systemd-notify,link-gateway
-
       - name: Install aarch64 cross compiler
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Cross-link the appliance release build and check page alignment
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Appliance build (scripts/ci-jobs.sh appliance)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-        run: |
-          cargo build --release -p orion-node --target aarch64-unknown-linux-gnu --no-default-features --features peer-tcp,discovery-mdns,systemd-notify
-          bin=target/aarch64-unknown-linux-gnu/release/orion-node
-          ls -l "$bin"
-          aligns="$(aarch64-linux-gnu-readelf -lW "$bin" | awk '$1 == "LOAD" { print $NF }')"
-          echo "PT_LOAD alignments: $aligns"
-          test -n "$aligns"
-          for align in $aligns; do
-            if (( align < 65536 )); then
-              echo "error: PT_LOAD aligned to $align; 16 KiB / 64 KiB page kernels need 0x10000" >&2
-              exit 1
-            fi
-          done
-
-      - name: Verify the systemd unit
-        run: |
-          cargo build -p orion-node --no-default-features --features systemd-notify
-          sed "s#/usr/bin/orion-node#$PWD/target/debug/orion-node#" packaging/systemd/orion-node.service > "$RUNNER_TEMP/orion-node.service"
-          systemd-analyze verify "$RUNNER_TEMP/orion-node.service"
+        run: ./scripts/ci-jobs.sh appliance
 
   dependency-audit:
     runs-on: ubuntu-latest

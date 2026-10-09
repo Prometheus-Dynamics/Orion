@@ -111,6 +111,16 @@ print_stdout = "allow"
 todo = "deny"
 unimplemented = "deny"
 
+# Debug builds (`cargo build`, `cargo test`, clippy's build scripts): workspace crates keep line
+# tables, so panics and backtraces still show file:line, but no variable or type info, and
+# dependencies get no debug info at all. This cuts compile and link time and the size of the
+# target directory; attach a debugger with `CARGO_PROFILE_DEV_DEBUG=full` when you need one.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

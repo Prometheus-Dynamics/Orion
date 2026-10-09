@@ -20,6 +20,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- CI does less work for the same guarantees. The Linux jobs run `scripts/ci-jobs.sh <job>` (also the local entry point, with per-step wall and CPU times); the orion-node clippy matrix keeps one build per distinct `cfg` combination (11 instead of 18), the orion-node test builds drop runs another one already covers (3 instead of 7 plus a duplicate filtered run), lint/build steps that repeated an all-features or test build are gone, orion-link is linted on three cores that differ in atomics instead of five (release builds stay on all five), the MCU template is built once by `mcu-size.sh`, the two allocator jobs are one job on the appliance feature set, and the appliance job verifies the unit against the cross-built binary. `docs/development.md` ("CI jobs") lists what each job covers. Debug builds use line tables only for workspace crates and no debug info for dependencies (`[profile.dev]`; `CARGO_PROFILE_DEV_DEBUG=full` to debug).
 - The Gaia layer `packaging/gaia/orion-node.toml` requires `gaia_version >= 2.0.0` (was `>= 2.1.0`): Gaia's development line is versioned 2.0.0 again, so the old bound failed every importing build.
 - `ORION_NODE_LOCAL_AUTH=same-user-or-group` now also admits callers whose **supplementary** groups include the node's group (before: primary group only), so `SupplementaryGroups=orion` works.
 - The well-known `update` action takes `image_url` instead of `bundle_url` (Atlas's argument name); no handler in Orion used it.
