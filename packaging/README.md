@@ -68,7 +68,9 @@ workspace `.cargo/config.toml` links `aarch64-unknown-linux-gnu` binaries with
 `-z max-page-size=65536`, so one binary runs on all three. GNU ld and LLD already default to 64 KiB
 for aarch64; the setting protects against toolchains configured otherwise. A `RUSTFLAGS` or
 `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` environment variable replaces it, so carry it
-over (`-C link-arg=-z -C link-arg=max-page-size=65536`) when you set one. Check a binary with:
+over (`-C link-arg=-Wl,-z,max-page-size=65536`) when you set one. Pass it through the
+compiler driver as one `-Wl,` argument: some GCC drivers (Buildroot's Bootlin toolchains, for one)
+drop a bare `-z` followed by a separate argument, and the binary silently ends up 4 KiB aligned. Check a binary with:
 
 ```sh
 readelf -lW orion-node | grep LOAD    # the last column (Align) must be 0x10000 (or at least 0x4000)
