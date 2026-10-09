@@ -31,6 +31,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Fixed
 
+- `selector_placement_converges_to_the_same_node_everywhere` failed on loaded machines: with a 300 ms liveness timeout a slow round made a node look gone, so observers computed another node. Tests about where placement lands now use a liveness and grace that cannot lapse during the test, so the outcome depends only on the converged state.
 - Reconnecting a local stream client under the same local address (a fixed name or a restarted service) failed with "no control message available" for the old session's lifetime: the node resumes the session and flushes the events queued for the address while it was away (by design, within `ORION_NODE_LOCAL_SESSION_TTL_MS`), and `orion-client` took the first of them for the response to its next subscription. `orion-client` stream sessions now keep events that arrive while a request waits for its response and return them from `next_events` first (this also covers a subscription's bootstrap racing the next subscription on the same stream). On the node, the old connection's teardown no longer detaches a newer connection under the same address (or releases its action claims).
 
 ## [1.0.0] - 2026-04-19
