@@ -70,6 +70,7 @@ fn render_value(value: &TypedConfigValue) -> String {
         TypedConfigValue::Bool(value) => value.to_string(),
         TypedConfigValue::Int(value) => value.to_string(),
         TypedConfigValue::UInt(value) => value.to_string(),
+        TypedConfigValue::F64(value) => value.to_string(),
         TypedConfigValue::String(value)
             if value.is_empty() || value.contains(char::is_whitespace) =>
         {

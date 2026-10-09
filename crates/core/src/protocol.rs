@@ -38,7 +38,9 @@ use core::fmt;
 ///   `HttpResponsePayload::Actions`); link gateway counters in
 ///   `NodeObservabilitySnapshot::links` (`LinkStatusSnapshot`). Still unreleased, so it also
 ///   carries CPU utilisation and temperatures in `HostMetricsSnapshot` / `HostMetricsSample` and
-///   supplementary groups in `UnixPeerIdentity`, and `StateWatch::include_observed`.
+///   supplementary groups in `UnixPeerIdentity`, `StateWatch::include_observed`, and
+///   `TypedConfigValue::F64` (same archived size, so the fingerprint did not move; the canonical
+///   encoding fixture pins it).
 pub const CONTROL_PROTOCOL_VERSION: u16 = 4;
 
 /// Fingerprint of the archived layout of the control-protocol types at

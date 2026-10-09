@@ -10,7 +10,7 @@ use orion_control_plane::{
 use crate::cli::{LocalControlArgs, OutputFormat};
 use crate::render::print_structured;
 
-const ACTION_AFTER_HELP: &str = "Examples:\n  orionctl action run node/node-a reboot --arg delay_ms=5000 --wait\n  orionctl action run resource/camera.front locate --arg duration_ms=10000\n  orionctl action run provider/provider.camera restart-unit --arg unit=camera.service --wait -o json\n\nArguments are KEY=VALUE; values are typed as bool (true/false), int, uint, or string. Force a\ntype with KEY=TYPE:VALUE where TYPE is bool, int, uint, string, or hex (bytes).";
+const ACTION_AFTER_HELP: &str = "Examples:\n  orionctl action run node/node-a reboot --arg delay_ms=5000 --wait\n  orionctl action run resource/camera.front locate --arg duration_ms=10000\n  orionctl action run provider/provider.camera restart-unit --arg unit=camera.service --wait -o json\n\nArguments are KEY=VALUE; values are typed as bool (true/false), int, uint, or string. Force a\ntype with KEY=TYPE:VALUE where TYPE is bool, int, uint, f64, string, or hex (bytes); floats\nare never inferred (f64:1.5).";
 
 #[derive(Subcommand, Debug)]
 #[command(after_help = ACTION_AFTER_HELP)]
@@ -74,13 +74,17 @@ pub(crate) fn parse_action_arg(input: &str) -> Result<(String, TypedConfigValue)
                 raw.parse()
                     .map_err(|error| format!("invalid uint `{raw}`: {error}"))?,
             ),
+            "f64" => TypedConfigValue::F64(
+                raw.parse()
+                    .map_err(|error| format!("invalid f64 `{raw}`: {error}"))?,
+            ),
             "string" => TypedConfigValue::String(raw.to_owned()),
             "hex" => TypedConfigValue::Bytes(decode_hex(raw)?),
             other => return Err(format!("unknown argument type `{other}`")),
         })
     };
     let value = match value.split_once(':') {
-        Some((kind, raw)) if ["bool", "int", "uint", "string", "hex"].contains(&kind) => {
+        Some((kind, raw)) if ["bool", "int", "uint", "f64", "string", "hex"].contains(&kind) => {
             typed(kind, raw)?
         }
         _ => match value {
@@ -204,6 +208,7 @@ fn render_value(value: &TypedConfigValue) -> String {
         TypedConfigValue::Bool(value) => value.to_string(),
         TypedConfigValue::Int(value) => value.to_string(),
         TypedConfigValue::UInt(value) => value.to_string(),
+        TypedConfigValue::F64(value) => value.to_string(),
         TypedConfigValue::String(value) if value.contains(char::is_whitespace) => {
             format!("{value:?}")
         }
@@ -287,6 +292,16 @@ mod tests {
             parse_action_arg("code=string:0042"),
             Ok(("code".into(), TypedConfigValue::String("0042".into())))
         );
+        assert_eq!(
+            parse_action_arg("fx=f64:912.25"),
+            Ok(("fx".into(), TypedConfigValue::F64(912.25)))
+        );
+        // Floats are never inferred: version strings stay strings.
+        assert_eq!(
+            parse_action_arg("version=2.0"),
+            Ok(("version".into(), TypedConfigValue::String("2.0".into())))
+        );
+        assert!(parse_action_arg("fx=f64:wide").is_err());
         assert_eq!(
             parse_action_arg("blob=hex:01ff"),
             Ok(("blob".into(), TypedConfigValue::Bytes(vec![1, 255])))

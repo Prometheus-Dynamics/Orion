@@ -46,11 +46,13 @@ fn many<T>(rng: &mut Rng, max: usize, mut f: impl FnMut(&mut Rng) -> T) -> Vec<T
 }
 
 fn value(rng: &mut Rng) -> TypedConfigValue {
-    match rng.below(5) {
+    match rng.below(6) {
         0 => TypedConfigValue::Bool(rng.chance(50)),
         1 => TypedConfigValue::Int(rng.next_u64() as i64 >> rng.below(64)),
         2 => TypedConfigValue::UInt(rng.next_u64() >> rng.below(64)),
         3 => TypedConfigValue::String(text(rng)),
+        // Any bit pattern, including NaNs, infinities and subnormals.
+        4 => TypedConfigValue::F64(f64::from_bits(rng.next_u64())),
         _ => TypedConfigValue::Bytes(many(rng, 20, Rng::byte)),
     }
 }
@@ -126,6 +128,7 @@ fn value_view(value: &TypedConfigValue) -> Value<'_> {
         TypedConfigValue::UInt(v) => Value::UInt(*v),
         TypedConfigValue::String(v) => Value::String(v),
         TypedConfigValue::Bytes(v) => Value::Bytes(v),
+        TypedConfigValue::F64(v) => Value::F64(*v),
     }
 }
 

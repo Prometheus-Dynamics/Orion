@@ -92,6 +92,8 @@ pub(super) fn append_host_facts_metrics(
                 TypedConfigValue::Int(value) => *value as f64,
                 TypedConfigValue::UInt(value) => *value as f64,
                 TypedConfigValue::Bool(value) => f64::from(u8::from(*value)),
+                TypedConfigValue::F64(value) if value.is_finite() => *value,
+                TypedConfigValue::F64(_) => return None,
                 TypedConfigValue::String(_) | TypedConfigValue::Bytes(_) => return None,
             };
             Some((key.as_str(), value))

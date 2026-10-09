@@ -254,6 +254,7 @@ fn control_messages() -> Vec<(&'static str, ControlMessage)> {
                 )
                 .with_arg("transfer_id", TypedConfigValue::String("transfer-7".into()))
                 .with_arg("size", TypedConfigValue::UInt(1 << 20))
+                .with_arg("scale", TypedConfigValue::F64(0.5))
                 .with_deadline_ms(60_000)
                 .with_requested_by("local:operator"),
             )),

@@ -207,6 +207,10 @@ fn typed_value_to_json(value: TypedConfigValue) -> JsonValue {
         TypedConfigValue::Int(value) => JsonValue::Number(JsonNumber::from(value)),
         TypedConfigValue::UInt(value) => JsonValue::Number(JsonNumber::from(value)),
         TypedConfigValue::String(value) => JsonValue::String(value),
+        // JSON has no NaN or infinity; those decode as null.
+        TypedConfigValue::F64(value) => JsonNumber::from_f64(value)
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null),
         TypedConfigValue::Bytes(value) => JsonValue::Array(
             value
                 .into_iter()

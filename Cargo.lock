@@ -1311,6 +1311,7 @@ dependencies = [
  "orion-transport-tcp",
  "rkyv",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

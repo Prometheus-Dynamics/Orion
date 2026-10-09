@@ -200,7 +200,10 @@ fn validate(entry: &StatusEntry) -> Result<(), StatusPublishError> {
     let value_len = match &entry.value {
         TypedConfigValue::String(value) => value.len(),
         TypedConfigValue::Bytes(value) => value.len(),
-        TypedConfigValue::Bool(_) | TypedConfigValue::Int(_) | TypedConfigValue::UInt(_) => 0,
+        TypedConfigValue::Bool(_)
+        | TypedConfigValue::Int(_)
+        | TypedConfigValue::UInt(_)
+        | TypedConfigValue::F64(_) => 0,
     };
     if value_len > MAX_STATUS_VALUE_BYTES {
         return Err(StatusPublishError::Invalid(format!(

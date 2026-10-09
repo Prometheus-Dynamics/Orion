@@ -177,8 +177,8 @@ impl Encode for Ownership {
     }
 }
 
-/// `TypedConfigValue` as borrowed data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `TypedConfigValue` as borrowed data. `F64` compares bit for bit, like `TypedConfigValue`.
+#[derive(Debug, Clone, Copy)]
 pub enum Value<'a> {
     /// `Bool`.
     Bool(bool),
@@ -190,7 +190,25 @@ pub enum Value<'a> {
     String(&'a str),
     /// `Bytes`.
     Bytes(&'a [u8]),
+    /// `F64`: eight little-endian bytes, as postcard writes an `f64`.
+    F64(f64),
 }
+
+impl PartialEq for Value<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Int(a), Self::Int(b)) => a == b,
+            (Self::UInt(a), Self::UInt(b)) => a == b,
+            (Self::String(a), Self::String(b)) => a == b,
+            (Self::Bytes(a), Self::Bytes(b)) => a == b,
+            (Self::F64(a), Self::F64(b)) => a.to_bits() == b.to_bits(),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Value<'_> {}
 
 impl Encode for Value<'_> {
     fn encode(&self, w: &mut Writer<'_>) {
@@ -214,6 +232,10 @@ impl Encode for Value<'_> {
             Self::Bytes(value) => {
                 w.byte(4);
                 w.bytes(value);
+            }
+            Self::F64(value) => {
+                w.byte(5);
+                w.raw(&value.to_le_bytes());
             }
         }
     }

@@ -241,7 +241,7 @@ orionctl get actions [--target resource/camera.front] [--id <action id>] [-o jso
 ```
 
 `--arg KEY=VALUE` infers `bool`, `uint`, `int`, then `string`; force a type with
-`KEY=TYPE:VALUE` (`bool`, `int`, `uint`, `string`, `hex`). `--wait` polls until the action is final
+`KEY=TYPE:VALUE` (`bool`, `int`, `uint`, `f64`, `string`, `hex`; floats are never inferred, so `version=2.0` stays a string). `--wait` polls until the action is final
 and exits non-zero unless it succeeded. Both commands use the local socket only.
 
 `orion-client`:

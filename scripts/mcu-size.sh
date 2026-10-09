@@ -120,7 +120,7 @@ for target in "${targets[@]}"; do
         fi
         (cd "$template" && cargo build --locked --release --quiet --target "$target" \
             --no-default-features --features "${variant_features[$variant]}")
-        archive="$template/target/$target/release/liborion_mcu_template.a"
+        archive="${CARGO_TARGET_DIR:-$template/target}/$target/release/liborion_mcu_template.a"
         if [[ "${MCU_SIZE_BUILD_ONLY:-0}" == "1" ]]; then
             echo "built $archive ($variant)"
             continue

@@ -217,6 +217,8 @@ Status entries carry no unit metadata, so the unit goes in the key, as the built
 - Values are fixed-point integers (`Int` / `UInt`); the suffix names unit and scale: `_uv`, `_ua`,
   `_uw`, `_mv`, `_mg`, `_mdps`, `_rpm`, `_hz`, `_bytes`, `_seconds`, `_ms`. Dimensionless ratios
   and duty cycles use `_milli` (0..1000).
+- `F64` is for values with no natural fixed point (camera intrinsics, distortion coefficients, a
+  mount pose); keep the unit in the key all the same (`camera.fx_px`, `mount.pitch_rad`).
 - Keys are lowercase, dot-separated paths with the axis or index last:
   `imu.acceleration.x_mg`, `power.bus_voltage_uv`, `fan.duty_milli`.
 - A key never changes unit; add a new key instead.

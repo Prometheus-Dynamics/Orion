@@ -102,16 +102,39 @@ impl ResourceBinding {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+/// A typed value in workload configs, action arguments and outputs, and status entries.
+///
+/// Equality compares `F64` values bit for bit (`f64::to_bits`), so `Eq` holds: `NaN` equals
+/// itself and `0.0` differs from `-0.0`. Prefer fixed-point integers where a unit suffix fits
+/// (`docs/host-facts.md`); `F64` is for values without a natural fixed point, such as camera
+/// intrinsics or a mount pose.
+#[derive(Clone, Debug, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum TypedConfigValue {
     Bool(bool),
     Int(i64),
     UInt(u64),
     String(String),
     Bytes(Vec<u8>),
+    /// A 64-bit IEEE 754 float. Added last, so the postcard (link) and rkyv encodings of the
+    /// other variants are unchanged.
+    F64(f64),
 }
+
+impl PartialEq for TypedConfigValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Int(a), Self::Int(b)) => a == b,
+            (Self::UInt(a), Self::UInt(b)) => a == b,
+            (Self::String(a), Self::String(b)) => a == b,
+            (Self::Bytes(a), Self::Bytes(b)) => a == b,
+            (Self::F64(a), Self::F64(b)) => a.to_bits() == b.to_bits(),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for TypedConfigValue {}
 
 impl TypedConfigValue {
     pub fn kind_name(&self) -> &'static str {
@@ -121,6 +144,7 @@ impl TypedConfigValue {
             Self::UInt(_) => "uint",
             Self::String(_) => "string",
             Self::Bytes(_) => "bytes",
+            Self::F64(_) => "f64",
         }
     }
 
@@ -148,6 +172,13 @@ impl TypedConfigValue {
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(value) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Self::F64(value) => Some(*value),
             _ => None,
         }
     }
