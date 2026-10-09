@@ -35,9 +35,9 @@ async fn node_ipc_stream_server_pushes_state_events_to_live_stream_clients() {
         .send(&ControlEnvelope {
             source: LocalAddress::new("cli-stream"),
             destination: LocalAddress::new("orion"),
-            message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                Revision::ZERO,
+            )),
         })
         .await
         .expect("stream watch registration should send");
@@ -351,9 +351,7 @@ async fn node_ipc_stream_server_keeps_partial_frames_across_heartbeat_ticks() {
     assert!(matches!(welcome.message, ControlMessage::ClientWelcome(_)));
 
     let watch = envelope(ControlMessage::WatchState(
-        orion::control_plane::StateWatch {
-            desired_revision: Revision::ZERO,
-        },
+        orion::control_plane::StateWatch::desired(Revision::ZERO),
     ));
     let mut frame = Vec::new();
     write_control_frame(&mut frame, &watch)

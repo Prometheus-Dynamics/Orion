@@ -656,9 +656,9 @@ async fn orion_node_binary_survives_concurrent_http_ipc_and_peer_sync_activity()
                 .send(&ControlEnvelope {
                     source: LocalAddress::new("concurrent-stream"),
                     destination: LocalAddress::new("orion"),
-                    message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                        desired_revision: orion::Revision::ZERO,
-                    }),
+                    message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                        orion::Revision::ZERO,
+                    )),
                 })
                 .await
                 .expect("watch registration should send");

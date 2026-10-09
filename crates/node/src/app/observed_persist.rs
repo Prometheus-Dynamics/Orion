@@ -125,6 +125,7 @@ impl NodeApp {
     /// Persists an observed or applied state change, coalesced when a coalescer runs.
     pub(super) fn persist_observed_state(&self) -> Result<(), NodeError> {
         self.mark_observed_content_changed();
+        self.notify_observed_watchers();
         if self.defer_observed_persist() {
             return Ok(());
         }
@@ -134,6 +135,7 @@ impl NodeApp {
     /// Async variant of [`Self::persist_observed_state`].
     pub(super) async fn persist_observed_state_async(&self) -> Result<(), NodeError> {
         self.mark_observed_content_changed();
+        self.notify_observed_watchers();
         if self.defer_observed_persist() {
             return Ok(());
         }

@@ -168,6 +168,61 @@ impl NodeApp {
         }
     }
 
+    /// The current observed-watch generation (the observed state is recorded first).
+    pub(in crate::app) fn observed_watch_generation(&self) -> u64 {
+        let observed = self.store_read().observed.clone();
+        self.state
+            .observed_watch
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .observe(observed)
+    }
+
+    /// Sends a state snapshot to every `include_observed` watcher when the observed state changed
+    /// since its last snapshot. Called after observed-state writes and at the end of every
+    /// reconcile pass; cheap when nobody watches.
+    pub(in crate::app) fn notify_observed_watchers(&self) {
+        if !self
+            .clients_read()
+            .values()
+            .any(|client| client.wants_observed())
+        {
+            return;
+        }
+        let generation = self.observed_watch_generation();
+        let behind = self
+            .clients_read()
+            .values()
+            .any(|client| client.wants_observed() && client.observed_generation < generation);
+        if !behind {
+            return;
+        }
+        let snapshot = self.state_snapshot();
+        let desired_revision = snapshot.state.desired.revision;
+        let mut pending_flushes = Vec::<PendingClientStreamFlush>::new();
+        self.with_client_registry_txn(|txn| {
+            for (source, client) in txn.clients_mut() {
+                if !client.wants_observed() || client.observed_generation >= generation {
+                    continue;
+                }
+                enqueue_state_snapshot_event(client, snapshot.clone());
+                client.observed_generation = generation;
+                if let Some(watch) = client.state_watch.as_mut() {
+                    watch.desired_revision = watch.desired_revision.max(desired_revision);
+                }
+                if let Some(flush) = prepare_client_stream_flush(source, client) {
+                    pending_flushes.push(flush);
+                }
+            }
+        });
+        for flush in pending_flushes {
+            let delivered = execute_client_stream_flush(&flush);
+            let _ = self.with_client_mut_if_present(&flush.source, |client| {
+                finalize_client_stream_flush(client, &flush, delivered);
+            });
+        }
+    }
+
     pub(crate) fn flush_client_stream_for_source(
         &self,
         source: &orion::transport::ipc::LocalAddress,

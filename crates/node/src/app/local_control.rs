@@ -518,10 +518,22 @@ impl NodeApp {
         Ok(())
     }
 
-    pub(super) fn detach_local_client_stream(&self, source: &LocalAddress) {
+    /// Detaches the stream connection that owns `sender`. A newer connection under the same
+    /// address (a reconnect that raced the old connection's teardown) keeps its stream, claims
+    /// and subscriptions.
+    pub(super) fn detach_local_client_stream(
+        &self,
+        source: &LocalAddress,
+        sender: &tokio::sync::mpsc::Sender<ControlEnvelope>,
+    ) {
         let detached = self
             .with_client_mut_if_present(source, |client| {
-                if client.stream_sender.take().is_some() {
+                let owned = client
+                    .stream_sender
+                    .as_ref()
+                    .is_some_and(|current| current.same_channel(sender));
+                if owned {
+                    client.stream_sender = None;
                     client.last_activity_ms = Self::current_time_ms();
                     true
                 } else {
@@ -553,9 +565,15 @@ impl NodeApp {
         watch: &StateWatch,
     ) -> Result<(), NodeError> {
         let current_revision = self.current_desired_revision();
-        let snapshot = (current_revision > watch.desired_revision).then(|| self.state_snapshot());
+        // An observed watch always starts with a bootstrap snapshot.
+        let observed_generation = watch
+            .include_observed
+            .then(|| self.observed_watch_generation());
+        let snapshot = (current_revision > watch.desired_revision || observed_generation.is_some())
+            .then(|| self.state_snapshot());
         self.with_client_mut(source, |client| {
             client.state_watch = Some(watch.clone());
+            client.observed_generation = observed_generation.unwrap_or(0);
             if let Some(snapshot) = snapshot {
                 enqueue_state_snapshot_event(client, snapshot);
                 if let Some(state_watch) = client.state_watch.as_mut() {

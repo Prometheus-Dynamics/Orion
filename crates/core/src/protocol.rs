@@ -38,7 +38,7 @@ use core::fmt;
 ///   `HttpResponsePayload::Actions`); link gateway counters in
 ///   `NodeObservabilitySnapshot::links` (`LinkStatusSnapshot`). Still unreleased, so it also
 ///   carries CPU utilisation and temperatures in `HostMetricsSnapshot` / `HostMetricsSample` and
-///   supplementary groups in `UnixPeerIdentity`.
+///   supplementary groups in `UnixPeerIdentity`, and `StateWatch::include_observed`.
 pub const CONTROL_PROTOCOL_VERSION: u16 = 4;
 
 /// Fingerprint of the archived layout of the control-protocol types at
@@ -47,7 +47,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 4;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x9c9d_c056_e47d_6379;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0xcd89_4564_3d84_fb91;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

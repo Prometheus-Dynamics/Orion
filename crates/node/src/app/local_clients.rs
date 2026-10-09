@@ -10,6 +10,25 @@ use orion::{
 };
 use std::collections::{BTreeMap, VecDeque};
 
+/// The observed state last seen by observed-state watchers (`StateWatch::include_observed`) and a
+/// generation that moves whenever it changes.
+#[derive(Default)]
+pub(super) struct ObservedWatch {
+    pub(super) last: Option<orion::control_plane::ObservedClusterState>,
+    pub(super) generation: u64,
+}
+
+impl ObservedWatch {
+    /// Records `observed` and returns the generation it belongs to.
+    pub(super) fn observe(&mut self, observed: orion::control_plane::ObservedClusterState) -> u64 {
+        if self.last.as_ref() != Some(&observed) {
+            self.last = Some(observed);
+            self.generation = self.generation.saturating_add(1);
+        }
+        self.generation
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct PendingClientStreamFlush {
     pub(super) source: LocalAddress,
@@ -22,6 +41,8 @@ pub(super) struct PendingClientStreamFlush {
 pub(super) struct LocalClientState {
     pub(super) session: ClientSession,
     pub(super) state_watch: Option<StateWatch>,
+    /// Observed-watch generation this client's last snapshot covered (`include_observed`).
+    pub(super) observed_generation: u64,
     pub(super) executor_watch: Option<ExecutorWatchState>,
     pub(super) provider_watch: Option<ProviderWatchState>,
     pub(super) status_watch: Option<StatusQuery>,
@@ -43,10 +64,17 @@ pub(super) struct LocalClientState {
 }
 
 impl LocalClientState {
+    pub(super) fn wants_observed(&self) -> bool {
+        self.state_watch
+            .as_ref()
+            .is_some_and(|watch| watch.include_observed)
+    }
+
     pub(super) fn new(session: ClientSession, now_ms: u64, max_queued_events: usize) -> Self {
         Self {
             session,
             state_watch: None,
+            observed_generation: 0,
             executor_watch: None,
             provider_watch: None,
             status_watch: None,

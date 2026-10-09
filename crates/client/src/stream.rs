@@ -5,6 +5,7 @@ use crate::{
 use orion_control_plane::{ClientEvent, ClientHello, ClientRole, ControlMessage};
 use orion_core::{ClientName, NodeId};
 use orion_transport_ipc::{ControlEnvelope, LocalAddress, UnixControlStreamClient};
+use std::collections::VecDeque;
 use std::path::Path;
 
 pub(crate) struct ClientEventStreamSession {
@@ -12,6 +13,9 @@ pub(crate) struct ClientEventStreamSession {
     local_address: LocalAddress,
     daemon_address: LocalAddress,
     node_id: NodeId,
+    /// Event batches that arrived while a subscription waited for its response; returned by
+    /// `next_client_events` before anything newer.
+    pending_events: VecDeque<Vec<ClientEvent>>,
 }
 
 impl ClientEventStreamSession {
@@ -43,6 +47,7 @@ impl ClientEventStreamSession {
                 local_address: config.local_address,
                 daemon_address: config.daemon_address,
                 node_id: session.node_id,
+                pending_events: VecDeque::new(),
             }),
             ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),
             _ => Err(ClientError::NoMessageAvailable),
@@ -77,6 +82,9 @@ impl ClientEventStreamSession {
         }
     }
 
+    /// The response to the request just sent. Events pushed meanwhile (for example the bootstrap
+    /// of an earlier subscription on this stream, or changes racing the request) are kept for
+    /// `next_client_events` instead of being mistaken for the response.
     pub(crate) async fn recv_response_message(&mut self) -> Result<ControlMessage, ClientError> {
         loop {
             let Some(response) = self.client.recv().await? else {
@@ -85,6 +93,9 @@ impl ClientEventStreamSession {
             match response.message {
                 ControlMessage::Ping => {
                     self.send(ControlMessage::Pong).await?;
+                }
+                ControlMessage::ClientEvents(events) => {
+                    self.pending_events.push_back(events);
                 }
                 message => return Ok(message),
             }
@@ -106,6 +117,9 @@ impl ClientEventStreamSession {
     }
 
     pub(crate) async fn next_client_events(&mut self) -> Result<Vec<ClientEvent>, ClientError> {
+        if let Some(events) = self.pending_events.pop_front() {
+            return Ok(events);
+        }
         match self.recv_event_message().await? {
             ControlMessage::ClientEvents(events) => Ok(events),
             ControlMessage::Rejected(reason) => Err(ClientError::Rejected(reason)),

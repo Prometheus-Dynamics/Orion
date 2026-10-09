@@ -41,9 +41,7 @@ fn local_ipc_rejects_wrong_client_role_before_app_logic() {
             crate::ControlSurface::LocalIpc,
             source,
             destination,
-            ControlMessage::WatchState(StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            ControlMessage::WatchState(StateWatch::desired(Revision::ZERO)),
         )
         .expect_err("provider role should not be allowed to watch control-plane state");
 

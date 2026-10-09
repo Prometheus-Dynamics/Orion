@@ -121,7 +121,7 @@ where
 
     pub fn subscribe_state(&self, desired_revision: Revision) -> Result<(), ClientError> {
         self.session.request_control_with(
-            ControlMessage::WatchState(StateWatch { desired_revision }),
+            ControlMessage::WatchState(StateWatch::desired(desired_revision)),
             expect_accepted,
         )
     }
@@ -246,11 +246,29 @@ impl ControlPlaneEventStream {
         })
     }
 
+    /// Subscribes to `ClientEventKind::StateSnapshot` events whenever the desired revision moves
+    /// past `desired_revision`. Observed-state changes alone do not fire it; use
+    /// [`Self::subscribe_state_and_observed`] for those.
     pub async fn subscribe_state(&mut self, desired_revision: Revision) -> Result<(), ClientError> {
+        self.subscribe_state_watch(StateWatch::desired(desired_revision))
+            .await
+    }
+
+    /// Subscribes to `ClientEventKind::StateSnapshot` events for desired **and** observed changes
+    /// (workload phases, resource health and availability, leases, node records): a bootstrap
+    /// snapshot, then one whenever either changes (coalesced to the newest snapshot).
+    pub async fn subscribe_state_and_observed(
+        &mut self,
+        desired_revision: Revision,
+    ) -> Result<(), ClientError> {
+        self.subscribe_state_watch(StateWatch::desired(desired_revision).with_observed())
+            .await
+    }
+
+    /// Subscribes with an explicit [`StateWatch`].
+    pub async fn subscribe_state_watch(&mut self, watch: StateWatch) -> Result<(), ClientError> {
         self.session
-            .subscribe_and_expect_accepted(ControlMessage::WatchState(StateWatch {
-                desired_revision,
-            }))
+            .subscribe_and_expect_accepted(ControlMessage::WatchState(watch))
             .await
     }
 

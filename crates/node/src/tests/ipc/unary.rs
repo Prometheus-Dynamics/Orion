@@ -499,9 +499,9 @@ async fn node_ipc_server_queues_state_events_for_registered_watchers() {
         .send(ControlEnvelope {
             source: LocalAddress::new("cli-watch"),
             destination: LocalAddress::new("orion"),
-            message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                Revision::ZERO,
+            )),
         })
         .await
         .expect("watch state should roundtrip");
@@ -582,9 +582,9 @@ async fn node_ipc_server_does_not_queue_duplicate_state_events_without_new_revis
         .send(ControlEnvelope {
             source: LocalAddress::new("cli-watch-dedup"),
             destination: LocalAddress::new("orion"),
-            message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                Revision::ZERO,
+            )),
         })
         .await
         .expect("watch registration should roundtrip");

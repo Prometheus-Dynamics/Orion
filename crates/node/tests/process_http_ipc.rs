@@ -69,9 +69,9 @@ async fn orion_node_binary_ipc_stream_pushes_control_plane_state_events() {
         .send(&ControlEnvelope {
             source: LocalAddress::new("cli-stream"),
             destination: LocalAddress::new("orion"),
-            message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                Revision::ZERO,
+            )),
         })
         .await
         .expect("watch registration should send");
@@ -447,9 +447,9 @@ async fn orion_node_binary_rate_limits_unary_ipc_clients() {
         .send(ControlEnvelope {
             source: LocalAddress::new("cli-rate"),
             destination: LocalAddress::new("orion"),
-            message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                Revision::ZERO,
+            )),
         })
         .await
         .expect("first request should roundtrip");
@@ -459,9 +459,9 @@ async fn orion_node_binary_rate_limits_unary_ipc_clients() {
         .send(ControlEnvelope {
             source: LocalAddress::new("cli-rate"),
             destination: LocalAddress::new("orion"),
-            message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                Revision::ZERO,
+            )),
         })
         .await
         .expect("rate-limited request should roundtrip");
@@ -527,9 +527,9 @@ async fn orion_node_binary_rate_limits_stream_ipc_clients() {
         .send(&ControlEnvelope {
             source: LocalAddress::new("cli-stream-rate"),
             destination: LocalAddress::new("orion"),
-            message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                Revision::ZERO,
+            )),
         })
         .await
         .expect("first stream request should send");
@@ -542,9 +542,9 @@ async fn orion_node_binary_rate_limits_stream_ipc_clients() {
         .send(&ControlEnvelope {
             source: LocalAddress::new("cli-stream-rate"),
             destination: LocalAddress::new("orion"),
-            message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                desired_revision: Revision::ZERO,
-            }),
+            message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                Revision::ZERO,
+            )),
         })
         .await
         .expect("rate-limited stream request should send");
@@ -604,9 +604,9 @@ async fn orion_node_binary_stream_reconnect_resumes_queued_events_before_ttl() {
             .send(&ControlEnvelope {
                 source: source.clone(),
                 destination: LocalAddress::new("orion"),
-                message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                    desired_revision: Revision::ZERO,
-                }),
+                message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                    Revision::ZERO,
+                )),
             })
             .await
             .expect("watch registration should send");
@@ -712,9 +712,9 @@ async fn orion_node_binary_stream_reconnect_after_ttl_drops_resume_state() {
             .send(&ControlEnvelope {
                 source: source.clone(),
                 destination: LocalAddress::new("orion"),
-                message: ControlMessage::WatchState(orion::control_plane::StateWatch {
-                    desired_revision: Revision::ZERO,
-                }),
+                message: ControlMessage::WatchState(orion::control_plane::StateWatch::desired(
+                    Revision::ZERO,
+                )),
             })
             .await
             .expect("watch registration should send");

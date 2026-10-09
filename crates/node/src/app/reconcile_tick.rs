@@ -83,6 +83,8 @@ impl NodeApp {
         started: std::time::Instant,
         result: Result<(NodeTickReport, ReconcileOutcome), NodeError>,
     ) -> Result<NodeTickReport, NodeError> {
+        // Observed changes that did not go through an observed write (node facts, placement).
+        self.notify_observed_watchers();
         match result {
             Ok((report, outcome)) => {
                 self.record_reconcile_success(started.elapsed(), &outcome, report.commands.len());

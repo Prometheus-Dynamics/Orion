@@ -531,7 +531,7 @@ impl NodeApp {
             }
         }
 
-        self.detach_local_client_stream(&source);
+        self.detach_local_client_stream(&source, &tx);
         drop(tx);
         match writer_task.await {
             Ok(result) => result?,

@@ -20,9 +20,7 @@ async fn node_local_client_reconnect_before_ttl_resumes_queued_events() {
 
     app.apply_local_control_message(
         &source,
-        ControlMessage::WatchState(orion::control_plane::StateWatch {
-            desired_revision: Revision::ZERO,
-        }),
+        ControlMessage::WatchState(orion::control_plane::StateWatch::desired(Revision::ZERO)),
     )
     .expect("watch registration should succeed");
 
@@ -74,9 +72,7 @@ async fn node_local_client_reconnect_after_ttl_drops_resumable_state() {
     .expect("client hello should succeed");
     app.apply_local_control_message(
         &source,
-        ControlMessage::WatchState(orion::control_plane::StateWatch {
-            desired_revision: Revision::ZERO,
-        }),
+        ControlMessage::WatchState(orion::control_plane::StateWatch::desired(Revision::ZERO)),
     )
     .expect("watch registration should succeed");
 
@@ -126,9 +122,7 @@ async fn node_local_client_reconnect_coalesces_superseded_state_snapshots() {
     .expect("client hello should succeed");
     app.apply_local_control_message(
         &source,
-        ControlMessage::WatchState(orion::control_plane::StateWatch {
-            desired_revision: Revision::ZERO,
-        }),
+        ControlMessage::WatchState(orion::control_plane::StateWatch::desired(Revision::ZERO)),
     )
     .expect("watch registration should succeed");
 

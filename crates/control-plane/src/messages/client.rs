@@ -92,8 +92,33 @@ pub struct PeerIdentityUpdate {
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
+/// A `WatchState` subscription: `ClientEventKind::StateSnapshot` events with the full desired and
+/// observed state.
+///
+/// A snapshot is sent when the desired revision moves past `desired_revision` (at subscribe time
+/// too). With `include_observed`, the watch also fires when the observed state changes (workload
+/// phases, resource health and availability, leases, node records), even when its revision does
+/// not move, and starts with a bootstrap snapshot.
 pub struct StateWatch {
     pub desired_revision: Revision,
+    #[serde(default)]
+    pub include_observed: bool,
+}
+
+impl StateWatch {
+    /// Desired-state changes after `desired_revision` only.
+    pub fn desired(desired_revision: Revision) -> Self {
+        Self {
+            desired_revision,
+            include_observed: false,
+        }
+    }
+
+    /// Also fire on observed-state changes.
+    pub fn with_observed(mut self) -> Self {
+        self.include_observed = true;
+        self
+    }
 }
 
 #[derive(

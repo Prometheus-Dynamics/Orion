@@ -144,7 +144,7 @@ A control-plane client (for example a device's web API) that today re-reads `/pr
 ```rust
 let mut events = ControlPlaneEventStream::connect_default("helios-api").await?;
 let node = events.node_id().clone();
-events.subscribe_state(Revision::ZERO).await?;          // desired/observed changes
+events.subscribe_state_and_observed(Revision::ZERO).await?; // desired and observed changes
 events.subscribe_status(
     StatusQuery::subject(StatusSubject::Node(node)).with_key_prefix("host."),
 ).await?;                                                // host.* metrics
@@ -165,6 +165,15 @@ handful of small `/proc` and `/sys` files. For an on-demand value with a fresh C
 `LocalControlPlaneClient::query_host_metrics()` instead. One stream can carry the state, status
 and action subscriptions together, and `orion-client` reconnect is the caller's: after
 `next_events` fails, connect and subscribe again (the next status event is a new bootstrap).
+Reconnecting under the same local address (a fixed name, or a restarted service) is fine: within
+`ORION_NODE_LOCAL_SESSION_TTL_MS` the node resumes the session, keeps its subscriptions, and first
+delivers the events queued while the client was away; subscribing again replaces each
+subscription and starts it with a new bootstrap.
+
+`subscribe_state` alone fires only when the desired revision moves;
+`subscribe_state_and_observed` (`StateWatch::include_observed`) also sends a snapshot whenever the
+observed state changes (workload phases, resource health and availability, leases, node records),
+starting with a bootstrap snapshot, so a client never needs to poll `fetch_state_snapshot`.
 
 ## Custom sources
 

@@ -453,6 +453,7 @@ impl NodeAppBuilder {
             lifecycle: LifecycleState::default(),
             reconcile: Default::default(),
             observed_persist: Default::default(),
+            observed_watch: Default::default(),
             cluster: Default::default(),
             status: Default::default(),
             actions: super::actions::ActionsState::with_handlers(self.action_handlers),

@@ -65,7 +65,11 @@ impl NodeApp {
         }
         self.publish_host_metrics(&facts);
         self.observability_lock().host_facts = Some(facts.clone());
-        self.publish_host_identity(facts.identity)
+        let changed = self.publish_host_identity(facts.identity);
+        if changed {
+            self.notify_observed_watchers();
+        }
+        changed
     }
 
     /// Samples the configured source (the default Linux source, or the one set with
