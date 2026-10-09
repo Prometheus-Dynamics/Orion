@@ -327,8 +327,14 @@ impl DockerCluster {
 
     pub async fn raw_post(&self, node: &str, path: &str, body: &[u8]) -> reqwest::Response {
         let port = self.ports.port_for(node);
+        // Announce the control protocol like a real client, so the node gets past its version
+        // check and handles the body (a request without the header is rejected with 400 first).
         reqwest::Client::new()
             .post(format!("http://127.0.0.1:{port}{path}"))
+            .header(
+                orion_core::CONTROL_PROTOCOL_HTTP_HEADER,
+                orion_core::CONTROL_PROTOCOL_VERSION.to_string(),
+            )
             .body(body.to_vec())
             .send()
             .await
