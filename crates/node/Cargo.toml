@@ -9,6 +9,9 @@ rust-version.workspace = true
 authors.workspace = true
 description = "Thin Orion node binary."
 readme = "README.md"
+# The device-agent contract test includes the orion-client example agent by a path outside this
+# crate, so it cannot build from the published package; it runs from the workspace only.
+exclude = ["tests/device_agent.rs"]
 
 [lints]
 workspace = true
