@@ -47,11 +47,19 @@ impl UnixControlHandler for UnixControlServiceAdapter {
     ) -> Pin<Box<dyn Future<Output = Result<ControlEnvelope, IpcTransportError>> + Send + '_>> {
         let adapter = self.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || {
+            let wait = NodeApp::run_action_wait(&envelope.message);
+            let mut response = tokio::task::spawn_blocking(move || {
                 adapter.execute_control_with_identity(envelope, identity)
             })
             .await
-            .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))?
+            .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))??;
+            if wait.is_some() {
+                response.message = self
+                    .app
+                    .complete_local_action_wait(wait, response.message)
+                    .await;
+            }
+            Ok(response)
         })
     }
 

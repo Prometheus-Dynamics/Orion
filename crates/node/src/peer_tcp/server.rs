@@ -94,6 +94,7 @@ impl NodeApp {
         request: &[u8],
     ) -> Result<HttpResponsePayload, NodeError> {
         let payload = HttpCodec.decode_request_body(request)?;
+        let wait = Self::peer_action_wait(&payload);
         let app = self.clone();
         let response = tokio::task::spawn_blocking(move || {
             app.serve_control_request(ControlRequest::from_peer_tcp_payload(payload))
@@ -101,7 +102,9 @@ impl NodeApp {
         .await
         .map_err(|err| NodeError::Storage(format!("peer TCP request task failed: {err}")))??;
         match response {
-            crate::ControlResponse::Http(response) => Ok(*response),
+            crate::ControlResponse::Http(response) => {
+                Ok(self.complete_peer_action_wait(wait, *response).await)
+            }
             crate::ControlResponse::Local(_) => Err(NodeError::Storage(
                 "local control response returned on the peer TCP surface".into(),
             )),

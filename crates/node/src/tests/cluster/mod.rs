@@ -12,6 +12,8 @@ use orion::{
 };
 
 #[cfg(feature = "peer-tcp")]
+mod action_calls;
+#[cfg(feature = "peer-tcp")]
 mod binding;
 mod conflicts;
 #[cfg(feature = "peer-tcp")]

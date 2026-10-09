@@ -25,6 +25,7 @@ pub struct ActionRequest {
     pub args: BTreeMap<String, TypedConfigValue>,
     pub deadline_ms: u64,        // relative budget from acceptance; 0 = node default
     pub requested_by: String,    // replaced by the node with the authenticated requester
+    pub wait_ms: u64,            // 0 = answer at once; else wait for the final result (below)
 }
 
 pub enum ActionState {
@@ -72,6 +73,55 @@ The existing `ResourceActionResult` / `ResourceActionStatus` describe the last a
 resource inside `ResourceState` and are part of the frozen MCU link wire, so they are not reused as
 the lifecycle record; `ActionResult::as_resource_action_result()` converts a final result for
 handlers that also record it on the resource.
+
+## Waiting for the result (request/response)
+
+An action is a request with a correlation id (`action_id`) and a reply (`ActionResult`: state plus
+typed output, `Bytes` and `F64` included). A caller that wants the reply sets `wait_ms`, and the
+node answers once the action is final instead of making the caller poll:
+
+| Surface | How the reply arrives |
+| --- | --- |
+| Control-plane stream (`ActionCaller`) | The node answers `RunAction` at once (a stream serves its requests in order, so one waiting call never holds up the next) and pushes the action's results to that stream as `ClientEventKind::ActionResults` events until it is final. |
+| Local unary socket (`LocalControlPlaneClient::call_action`) | The node holds the answer until the action is final, at most `ORION_NODE_ACTION_MAX_WAIT_MS` (default 2 s, below the transport I/O timeouts). |
+| Peer and remote-operator transports (`RemoteOperator::call_action`, forwarding) | The same, over `orion+tcp` or HTTP(S). |
+
+When the cap runs out first, the answer is the current, still running result, and the caller sends
+**the same request again**: same id, target, name and arguments return the existing action, so the
+resend waits again and never runs it twice. The clients do this for you:
+
+- `orion_client::ActionCaller` (stream): `ActionCaller::connect_at(stream_socket, name)` (or
+  `connect_default`, `from_stream`), then `caller.call(request, timeout).await`. The handle is
+  cloneable and runs any number of calls at once over one stream; a background task matches the
+  pushed results to the waiting calls by `action_id`. Use one per process for interactive callers
+  such as an API server.
+- `LocalControlPlaneClient::call_action(request, timeout)` (unary socket; a client built on the
+  stream socket is refused, use `ActionCaller` there).
+- `RemoteOperator::call_action(request, timeout)` (remote operators; each exchange waits at most
+  half the I/O timeout).
+
+`call` and `call_action` return the final result, or the latest running one when `timeout` passes
+(`RemoteOperator::call_action` returns `ActionTimeout`). The action keeps running until its own
+`deadline_ms`; set it to bound the work as well as the wait.
+
+Nothing changes for handlers: a provider receives each request as an `ActionRequest` event and may
+answer them concurrently (one task per request, each with a clone of `ActionReporter`) or one at a
+time. Several actions may be in flight on one resource or on different resources of one provider;
+the node imposes no per-target serialization.
+
+## Request/response actions vs workload actions
+
+Resource actions and resource-action workloads (a workload plus a lease, reported through
+`ResourceState::action_result`) both remain:
+
+| Use an action (`RunAction`, ideally with `wait_ms`) for | Use a workload and lease for |
+| --- | --- |
+| Short, imperative calls that return data: `gpio.get`, `i2c.transfer`, `spi.transfer`, a sensor read, `locate`. | Holding a resource over time: a claimed GPIO line or PWM channel, a timed fan override, a stream. |
+| Many concurrent calls, interactive latency (one round trip, also across nodes). | State that must be in desired state, replicate to every node, survive a requester disconnect or a node restart, and be visible in placement and leases. |
+| Operations whose outcome is a result: `calibrate`, `self-test`. | Exclusive ownership that other workloads must respect. |
+
+Long-running node operations (`update`) stay actions that answer early and report the outcome
+through status keys and facts ([device-agent.md](device-agent.md)).
 
 ## Lifecycle
 
@@ -135,10 +185,12 @@ its runtime, aborts it at the deadline, and records `ActionOutcome::Succeeded(ou
 
 ### Across nodes
 
-When the owner is another node, the submitting node forwards the request **once** over the
-signed peer transport (`orion+tcp` or HTTP(S), the same `PeerSyncTransport` request/response that
-peer sync uses) and then polls the owner with `QueryActions` (100 ms, doubling to 1 s) until the
-result is final, mirroring the owner's state and output into its own record. Its local deadline is
+When the owner is another node, the submitting node forwards the request over the signed peer
+transport (`orion+tcp` or HTTP(S), the same `PeerSyncTransport` request/response that peer sync
+uses) as a `RunAction` with `wait_ms` (at most 750 ms, below the HTTP client's request timeout).
+The owner holds its answer until the action is final, so a short action completes in one round
+trip; while it runs, the submitting node resends the same request (the owner returns the existing
+action) instead of polling. It mirrors the owner's state and output into its own record. Its local deadline is
 the request's deadline plus a 2 s grace, so the owner's own `TimedOut` arrives first. The owner
 never forwards again (one hop), so a stale view of who owns a target produces a `Rejected` result
 instead of a loop. A failed forward (unreachable peer, refused authentication) is recorded as
@@ -222,7 +274,11 @@ Orion implements none of these; handlers that implement one follow its conventio
 ## Limits
 
 Action ids, names, argument and output keys are at most 128 bytes; at most 32 arguments and 32
-output entries; string and byte values at most 1024 bytes. Larger output entries are dropped.
+output entries. String values are at most 1024 bytes; `Bytes` values at most 64 KiB (one SPI
+transaction); the keys and values of one request's arguments, and of one result's output, add up
+to at most 256 KiB. A request over a limit is refused; output entries over a limit are dropped.
+These limits are the node's; the MCU link protocol has its own, smaller frame limits
+([link-protocol.md](link-protocol.md)) and does not carry `ActionRequest`.
 
 | Variable | Default |
 | --- | --- |
@@ -230,6 +286,7 @@ output entries; string and byte values at most 1024 bytes. Larger output entries
 | `ORION_NODE_ACTION_MAX_DEADLINE_MS` | `600000` |
 | `ORION_NODE_ACTION_RESULT_TTL_MS` | `600000` |
 | `ORION_NODE_ACTION_MAX_TRACKED` | `256` |
+| `ORION_NODE_ACTION_MAX_WAIT_MS` | `2000` (longest unary answer held for `wait_ms`) |
 
 ## Surfaces
 
@@ -246,8 +303,10 @@ and exits non-zero unless it succeeded. Both commands use the local socket only.
 
 `orion-client`:
 
-- control plane: `LocalControlPlaneClient::{run_action, query_actions, wait_for_action}`,
+- control plane: `ActionCaller::{connect_at, connect_default, from_stream, call}`,
+  `LocalControlPlaneClient::{run_action, call_action, query_actions, wait_for_action}`,
   `ControlPlaneEventStream::subscribe_actions`, `ActionWatch::connect_at(..).next()`;
+- remote operators: `RemoteOperator::{run_action, call_action, query_actions, wait_for_action}`;
 - providers and executors: `watch_action_requests`, `claim_node_actions`, `ActionRequestWatch`
   (`reporter()` returns a cloneable `ActionReporter` that reports and publishes status while the
   watch waits in `next()`; `node_id()`, `reconnects()`, `publish_status`, `node_status_entry`).

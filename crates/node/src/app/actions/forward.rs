@@ -1,22 +1,25 @@
 //! Forwarding actions to the node that owns their target.
 //!
-//! The submitting node sends the request once as a signed `RunAction` over the peer's transport
-//! (`orion+tcp` or HTTP(S)), which the owner authorizes like any peer write (authenticated and
-//! enrolled), then polls the owner with `QueryActions` until the result is final or the local
-//! deadline (plus a grace period) passes. Forwarding is one hop: the owner never forwards again.
+//! The submitting node sends the request as a signed `RunAction` with `wait_ms` over the peer's
+//! transport (`orion+tcp` or HTTP(S)), which the owner authorizes like any peer write
+//! (authenticated and enrolled). The owner holds its answer until the action is final or the wait
+//! runs out, so a short action finishes in one round trip. While the action is still running, the
+//! submitting node resends the same request (the owner returns the existing action, it never runs
+//! it twice) until the result is final or the local deadline (plus a grace period) passes.
+//! Forwarding is one hop: the owner never forwards again.
 
 use super::super::peer_transport::PeerSyncTransport;
-use super::{NodeApp, lock};
+use super::{NodeApp, lock, wait::forward_wait_ms};
 use orion::{
     NodeId,
-    control_plane::{ActionQuery, ActionRequest, ActionResult, ActionState, ControlMessage},
+    control_plane::{ActionRequest, ActionResult, ActionState, ControlMessage},
     transport::http::HttpResponsePayload,
 };
 use std::time::Duration;
 use tracing::debug;
 
-const FIRST_POLL_DELAY: Duration = Duration::from_millis(100);
-const MAX_POLL_DELAY: Duration = Duration::from_secs(1);
+/// Pause before resending after a failed exchange (a transient transport error).
+const RETRY_DELAY: Duration = Duration::from_millis(100);
 
 impl NodeApp {
     pub(super) fn spawn_action_forward(
@@ -59,53 +62,50 @@ impl NodeApp {
                 );
             }
         };
-        match channel
-            .send_control(self, &node, ControlMessage::RunAction(Box::new(request)))
-            .await
-        {
-            Ok(HttpResponsePayload::Actions(results)) => {
-                self.apply_remote_action_result(&action_id, results);
-            }
-            Ok(_) => {
-                return self.finish_action(
-                    &action_id,
-                    ActionState::Failed {
-                        reason: format!(
-                            "node {node} answered the action with an unexpected response"
-                        ),
-                    },
-                );
-            }
-            Err(error) => {
-                return self.finish_action(
-                    &action_id,
-                    ActionState::Failed {
-                        reason: format!("forwarding the action to node {node} failed: {error}"),
-                    },
-                );
-            }
-        }
-        let mut delay = FIRST_POLL_DELAY;
+        let deadline = tokio::time::Instant::now()
+            + Duration::from_millis(
+                request
+                    .deadline_ms
+                    .saturating_add(super::REMOTE_DEADLINE_GRACE_MS),
+            );
+        let mut first = true;
         while self.action_is_running(&action_id) {
-            tokio::time::sleep(delay).await;
-            delay = (delay * 2).min(MAX_POLL_DELAY);
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let mut exchange = request.clone();
+            exchange.wait_ms = forward_wait_ms(remaining);
             match channel
-                .send_control(
-                    self,
-                    &node,
-                    ControlMessage::QueryActions(ActionQuery::action(action_id.clone())),
-                )
+                .send_control(self, &node, ControlMessage::RunAction(Box::new(exchange)))
                 .await
             {
                 Ok(HttpResponsePayload::Actions(results)) => {
-                    self.apply_remote_action_result(&action_id, results)
+                    self.apply_remote_action_result(&action_id, results);
                 }
-                // Transient failures are retried until the local deadline times the action out.
-                Ok(_) => {}
+                Ok(_) => {
+                    return self.finish_action(
+                        &action_id,
+                        ActionState::Failed {
+                            reason: format!(
+                                "node {node} answered the action with an unexpected response"
+                            ),
+                        },
+                    );
+                }
+                // The first exchange decides whether the owner took the action at all.
+                Err(error) if first => {
+                    return self.finish_action(
+                        &action_id,
+                        ActionState::Failed {
+                            reason: format!("forwarding the action to node {node} failed: {error}"),
+                        },
+                    );
+                }
+                // Later failures are retried until the local deadline times the action out.
                 Err(error) => {
-                    debug!(node = %self.config.node_id, peer = %node, action_id = %action_id, error = %error, "polling a forwarded action failed");
+                    debug!(node = %self.config.node_id, peer = %node, action_id = %action_id, error = %error, "waiting for a forwarded action failed");
+                    tokio::time::sleep(RETRY_DELAY).await;
                 }
             }
+            first = false;
         }
     }
 

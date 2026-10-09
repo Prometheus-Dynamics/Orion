@@ -6,7 +6,7 @@
 
 #[cfg(feature = "ipc")]
 pub use crate::{
-    ActionReporter, ActionRequestWatch, ActionWatch, AssignedWorkloadWatch,
+    ActionCaller, ActionReporter, ActionRequestWatch, ActionWatch, AssignedWorkloadWatch,
     AssignedWorkloadsUpdate, ClientIdentity, ClientSession, ControlPlaneClient,
     ControlPlaneEventStream, ExecutorApp, ExecutorClient, ExecutorEventStream,
     LocalControlPlaneClient, LocalExecutorApp, LocalExecutorClient, LocalExecutorEvent,

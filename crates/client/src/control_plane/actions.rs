@@ -31,6 +31,40 @@ impl LocalControlPlaneClient {
         .ok_or(ClientError::NoMessageAvailable)
     }
 
+    /// Runs an action and waits up to `timeout` for its final result, without polling: each
+    /// exchange is a `RunAction` with `wait_ms`, which the node answers once the action is final
+    /// (or after its per-exchange cap, `ORION_NODE_ACTION_MAX_WAIT_MS`, when the request is sent
+    /// again; the node never runs it twice). Returns the latest, still running result if `timeout`
+    /// passes first.
+    ///
+    /// Uses the unary socket; a client built on the stream socket is refused, use
+    /// [`super::ActionCaller`] there (it also runs many calls at once over one stream).
+    pub async fn call_action(
+        &self,
+        request: ActionRequest,
+        timeout: Duration,
+    ) -> Result<ActionResult, ClientError> {
+        if matches!(
+            self.transport,
+            super::LocalControlPlaneTransport::Stream { .. }
+        ) {
+            return Err(ClientError::Rejected(
+                "call_action needs the unary socket; use ActionCaller on a stream".into(),
+            ));
+        }
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let wait = u64::try_from(remaining.as_millis())
+                .unwrap_or(u64::MAX)
+                .max(1);
+            let result = self.run_action(request.clone().with_wait_ms(wait)).await?;
+            if result.state.is_terminal() || Instant::now() >= deadline {
+                return Ok(result);
+            }
+        }
+    }
+
     /// Actions the node tracks that match `query`.
     pub async fn query_actions(
         &self,

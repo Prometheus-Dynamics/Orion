@@ -14,7 +14,8 @@
 //!   with `query_status` or `watch_status` ([`StatusWatch`]).
 //! - Handle actions for a provider or executor with `watch_action_requests`
 //!   ([`ActionRequestWatch`]); submit and follow them with `LocalControlPlaneClient::run_action`,
-//!   `query_actions`, `wait_for_action`, and [`ActionWatch`] (see `docs/actions.md`).
+//!   `query_actions`, `wait_for_action`, `call_action`, [`ActionWatch`], and [`ActionCaller`]
+//!   for request/response actions over one stream (see `docs/actions.md`).
 //! - Talk to nodes over the network as a remote operator (desktop and fleet tools) with
 //!   `remote::RemoteOperator` (feature `remote`, `docs/remote-operator.md`).
 //! - Import [`prelude`] to get the client API plus the core and control-plane types executor and
@@ -53,7 +54,7 @@ pub use app::{
 };
 #[cfg(feature = "ipc")]
 pub use control_plane::{
-    ActionWatch, ControlPlaneClient, ControlPlaneEventStream, LocalControlPlaneClient,
+    ActionCaller, ActionWatch, ControlPlaneClient, ControlPlaneEventStream, LocalControlPlaneClient,
 };
 pub use error::ClientError;
 #[cfg(feature = "ipc")]

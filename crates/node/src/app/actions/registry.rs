@@ -11,8 +11,14 @@ use std::collections::BTreeMap;
 pub(crate) const MAX_ACTION_TEXT_BYTES: usize = 128;
 /// Most arguments of a request and entries of a result's output.
 pub(crate) const MAX_ACTION_MAP_ENTRIES: usize = 32;
-/// Longest string or byte value of an argument or output entry.
-pub(crate) const MAX_ACTION_VALUE_BYTES: usize = 1024;
+/// Longest string value of an argument or output entry.
+pub(crate) const MAX_ACTION_STRING_BYTES: usize = 1024;
+/// Longest byte value of an argument or output entry (hardware I/O: an SPI transaction is up to
+/// 64 KiB).
+pub(crate) const MAX_ACTION_BYTES_VALUE: usize = 64 * 1024;
+/// Most bytes of keys and values in one request's arguments or one result's output, so a single
+/// action cannot balloon a frame or the registry.
+pub(crate) const MAX_ACTION_PAYLOAD_BYTES: usize = 256 * 1024;
 
 /// Where an accepted action runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,7 +54,20 @@ fn value_len(value: &TypedConfigValue) -> usize {
     match value {
         TypedConfigValue::String(value) => value.len(),
         TypedConfigValue::Bytes(value) => value.len(),
-        _ => 0,
+        _ => 8,
+    }
+}
+
+/// Why `value` is over its size limit, if it is.
+fn value_too_long(value: &TypedConfigValue) -> Option<String> {
+    match value {
+        TypedConfigValue::String(text) if text.len() > MAX_ACTION_STRING_BYTES => Some(format!(
+            "is a string longer than {MAX_ACTION_STRING_BYTES} bytes"
+        )),
+        TypedConfigValue::Bytes(bytes) if bytes.len() > MAX_ACTION_BYTES_VALUE => {
+            Some(format!("is longer than {MAX_ACTION_BYTES_VALUE} bytes"))
+        }
+        _ => None,
     }
 }
 
@@ -78,11 +97,19 @@ pub(crate) fn validate_request(request: &ActionRequest) -> Result<(), String> {
                 "argument names must be 1 to {MAX_ACTION_TEXT_BYTES} bytes"
             ));
         }
-        if value_len(value) > MAX_ACTION_VALUE_BYTES {
-            return Err(format!(
-                "argument `{key}` is longer than {MAX_ACTION_VALUE_BYTES} bytes"
-            ));
+        if let Some(reason) = value_too_long(value) {
+            return Err(format!("argument `{key}` {reason}"));
         }
+    }
+    let total: usize = request
+        .args
+        .iter()
+        .map(|(key, value)| key.len() + value_len(value))
+        .sum();
+    if total > MAX_ACTION_PAYLOAD_BYTES {
+        return Err(format!(
+            "the arguments add up to {total} bytes; at most {MAX_ACTION_PAYLOAD_BYTES} are allowed"
+        ));
     }
     Ok(())
 }
@@ -93,13 +120,18 @@ pub(crate) fn merge_output(
     output: BTreeMap<String, TypedConfigValue>,
 ) {
     for (key, value) in output {
-        if key.is_empty()
-            || key.len() > MAX_ACTION_TEXT_BYTES
-            || value_len(&value) > MAX_ACTION_VALUE_BYTES
-        {
+        if key.is_empty() || key.len() > MAX_ACTION_TEXT_BYTES || value_too_long(&value).is_some() {
             continue;
         }
         if target.len() >= MAX_ACTION_MAP_ENTRIES && !target.contains_key(&key) {
+            continue;
+        }
+        let total: usize = target
+            .iter()
+            .filter(|(existing, _)| *existing != &key)
+            .map(|(key, value)| key.len() + value_len(value))
+            .sum();
+        if total + key.len() + value_len(&value) > MAX_ACTION_PAYLOAD_BYTES {
             continue;
         }
         target.insert(key, value);
@@ -323,11 +355,43 @@ mod tests {
         request.action_id = " ".into();
         assert!(validate_request(&request).is_err());
         request.action_id = "id".into();
-        request = request.with_arg(
-            "blob",
-            TypedConfigValue::Bytes(vec![0; MAX_ACTION_VALUE_BYTES + 1]),
+        // Byte values may be as large as one SPI transaction; strings stay small.
+        let spi = request.clone().with_arg(
+            "tx",
+            TypedConfigValue::Bytes(vec![0; MAX_ACTION_BYTES_VALUE]),
         );
-        assert!(validate_request(&request).is_err());
+        assert!(validate_request(&spi).is_ok());
+        let too_big = request.clone().with_arg(
+            "tx",
+            TypedConfigValue::Bytes(vec![0; MAX_ACTION_BYTES_VALUE + 1]),
+        );
+        assert!(validate_request(&too_big).is_err());
+        let long_string = request.clone().with_arg(
+            "text",
+            TypedConfigValue::String("x".repeat(MAX_ACTION_STRING_BYTES + 1)),
+        );
+        assert!(validate_request(&long_string).is_err());
+        // The arguments together are bounded too.
+        let mut total = request.clone();
+        for index in 0..5 {
+            total = total.with_arg(
+                format!("tx{index}"),
+                TypedConfigValue::Bytes(vec![0; MAX_ACTION_BYTES_VALUE]),
+            );
+        }
+        assert!(validate_request(&total).is_err());
+
+        let mut output = BTreeMap::new();
+        let blobs: BTreeMap<_, _> = (0..5)
+            .map(|index| {
+                (
+                    format!("rx{index}"),
+                    TypedConfigValue::Bytes(vec![0; MAX_ACTION_BYTES_VALUE]),
+                )
+            })
+            .collect();
+        merge_output(&mut output, blobs);
+        assert_eq!(output.len(), 3, "the output stops at the payload bound");
 
         let mut output = BTreeMap::new();
         let big: BTreeMap<_, _> = (0..MAX_ACTION_MAP_ENTRIES + 4)

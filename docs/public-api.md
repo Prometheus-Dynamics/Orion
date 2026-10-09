@@ -165,14 +165,16 @@ spawn_host_facts_loop}`.
 ## Actions
 
 See [actions.md](actions.md). `orion-control-plane`: `ActionTarget` (`FromStr`/`Display`,
-`status_subject`), `ActionRequest`, `ActionState`, `ActionResult` (`new`, `status_entries`,
+`status_subject`), `ActionRequest` (`with_wait_ms`), `ActionState`, `ActionResult` (`new`, `status_entries`,
 `as_resource_action_result`), `ActionReport`, `ActionQuery`, `action_names`, `action_status_keys`,
 and the control messages `RunAction`, `QueryActions`, `WatchActions`, `WatchActionRequests`,
 `ClaimNodeActions`, `ReportActionResult`, `ActionResults`. `orion-node`: `actions::{ActionHandler,
 ActionContext, ActionOutcome, ActionFuture}`, `NodeAppBuilder::with_action_handler`,
 `NodeApp::{run_action, query_actions, action_handler_names}`, `ActionTuning`
-(`NodeRuntimeTuning::actions`). `orion-client`: `LocalControlPlaneClient::{run_action,
-query_actions, wait_for_action}`, `ControlPlaneEventStream::subscribe_actions`, `ActionWatch`,
+(`NodeRuntimeTuning::actions`). `orion-client`: `ActionCaller` (`connect_at`, `connect_default`,
+`from_stream`, `call`, `node_id`), `LocalControlPlaneClient::{run_action, call_action,
+query_actions, wait_for_action}`, `RemoteOperator::call_action`,
+`ControlPlaneEventStream::subscribe_actions`, `ActionWatch`,
 `LocalProviderService` / `LocalExecutorService` `::{watch_action_requests, claim_node_actions}`,
 and `ActionRequestWatch` (`next`, `report`, `progress`, `succeed`, `fail`, `reject`,
 `publish_action_status`).

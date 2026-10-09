@@ -116,6 +116,21 @@ impl ClientEventStreamSession {
         }
     }
 
+    /// The next frame from the node, as is (pings included). Cancel-safe: it may be raced in
+    /// `tokio::select!`; a partially received frame is resumed by the next read.
+    pub(crate) async fn recv_frame(&mut self) -> Result<Option<ControlMessage>, ClientError> {
+        Ok(self
+            .client
+            .recv_wait()
+            .await?
+            .map(|envelope| envelope.message))
+    }
+
+    /// Event batches kept while a request waited for its response.
+    pub(crate) fn take_pending_events(&mut self) -> Vec<Vec<ClientEvent>> {
+        self.pending_events.drain(..).collect()
+    }
+
     pub(crate) async fn next_client_events(&mut self) -> Result<Vec<ClientEvent>, ClientError> {
         if let Some(events) = self.pending_events.pop_front() {
             return Ok(events);

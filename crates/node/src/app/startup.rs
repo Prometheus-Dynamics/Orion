@@ -483,6 +483,7 @@ impl NodeApp {
                             continue;
                         }
                         message => {
+                            let wait = Self::run_action_wait(&message);
                             let response = match self.serve_local_control_message_async(
                                 ControlSurface::LocalIpcStream,
                                 source.clone(),
@@ -494,6 +495,9 @@ impl NodeApp {
                                 Ok(response) => response,
                                 Err(err) => ControlMessage::Rejected(err.to_string()),
                             };
+                            // A waiting `RunAction` is answered at once; its results follow
+                            // as events, so the next request on this stream is not held up.
+                            let call = wait.is_some().then(|| response.clone());
                             tx.send(ControlEnvelope {
                                 source: destination,
                                 destination: source.clone(),
@@ -501,6 +505,9 @@ impl NodeApp {
                             })
                             .await
                             .map_err(|_| IpcTransportError::WriteFailed("failed to queue stream response".into()))?;
+                            if let Some(answered) = call {
+                                self.register_stream_action_call(&source, wait, &answered);
+                            }
                             self.flush_client_stream_for_source(&source);
                         }
                     }

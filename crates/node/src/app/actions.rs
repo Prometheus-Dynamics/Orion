@@ -17,6 +17,7 @@ mod clients;
 #[cfg(peer_sync)]
 mod forward;
 pub(crate) mod registry;
+mod wait;
 
 use super::{NodeApp, NodeError};
 use crate::actions::{ActionContext, ActionHandler};
@@ -60,6 +61,8 @@ pub(super) struct ActionsState {
     /// Node action names claimed by out-of-process local handlers (`ClaimNodeActions`).
     node_claims: Mutex<BTreeMap<String, LocalAddress>>,
     wake: tokio::sync::Notify,
+    /// Woken on every result change, for callers waiting on a `RunAction` with `wait_ms`.
+    changed: tokio::sync::Notify,
 }
 
 impl ActionsState {

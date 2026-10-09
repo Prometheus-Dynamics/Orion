@@ -474,7 +474,7 @@ error text) go to the node's volatile status lane instead:
   `executor/<id>`, `resource/<id>`, `workload/<id>`, or `node/<id>` (published by the node itself:
   host metrics under `host.*`, see `docs/host-facts.md`; a client holding a node action claim may
   publish `action.*` keys, see `docs/actions.md`). A value is a `TypedConfigValue` (`Bool`,
-  `Int`, `UInt`, `String`, `Bytes`). Each entry carries the node's receive time
+  `Int`, `UInt`, `F64`, `String`, `Bytes`). Each entry carries the node's receive time
   (`published_at_ms`, Unix milliseconds) and its TTL (`ttl_ms`).
 - **In memory only.** Entries are never persisted and are gone after a node restart; publishers
   republish. They are **not replicated** to peer nodes in this release: each node serves the
@@ -516,6 +516,40 @@ status count=2
 status subject=provider/provider.camera key=fps type=uint value=30 age_ms=120 expires_in_ms=29880
 status subject=resource/camera.front key=exposure_us type=uint value=800 age_ms=120 expires_in_ms=299880
 ```
+
+### Sensor and device resources
+
+A provider that fronts hardware (a hardware service publishing an IMU, power monitors, a
+magnetometer, temperatures, a fan, an LED ring, GPIO outputs) follows this convention so that any
+UI can render its devices without knowing the provider:
+
+- **One resource per device**, its `resource_type` namespaced by the provider's domain and naming
+  the kind of device: `lemnos.imu`, `lemnos.power`, `lemnos.fan`, `lemnos.gpio`. The record holds
+  the durable facts only: health, availability, capabilities, labels.
+- **Display labels** on the resource record, `key=value` strings that rarely change:
+  `display.name=Main IMU`, `device.model=bmi088`, `device.bus=i2c-1:0x18`, `device.group=chassis`.
+- **Readings in the status lane** under `resource/<id>`, one batch per device per sample, keys
+  named as in [host-facts.md](host-facts.md) ("Naming extra metrics and labels"): lowercase dotted
+  paths with the axis or index last and the unit in the suffix. Fixed-point integers use the
+  suffixes listed there (`_mv`, `_ua`, `_mdps`, `_rpm`, `_milli`, ...). `F64` readings use SI
+  suffixes: `_v`, `_a`, `_w`, `_c` (degrees Celsius), `_hz`, `_rpm`, `_m_s2`, `_rad_s`, `_ut`
+  (microtesla), `_pa`, `_ratio` (0..1). Examples: `accel.x_m_s2`, `gyro.z_rad_s`,
+  `bus_voltage_v`, `die_temperature_c`, `fan.duty_ratio`. A key never changes unit; a UI shows an
+  unknown suffix as a plain number.
+- **Rate.** Publish at most 10 Hz per device (1 to 2 Hz is plenty for dashboards), and set each
+  entry's `ttl_ms` to about three sample intervals so readings disappear when the provider stops.
+  Watchers are coalesced, so a slow watcher never queues more than one status event, but every
+  publish is still a local IPC exchange and a status-lane write; faster data (raw IMU at hundreds
+  of Hz) belongs on a resource endpoint. A dozen devices with ten keys each fit the default
+  per-publisher cap (256 entries).
+- **Not in observed state or host facts.** Observed resource state is persisted, replicated to
+  every peer and wakes the reconcile loop and observed-state watchers, so it is for durable facts
+  (health, availability, the last action applied). Host facts describe the node itself.
+- **Controls and operations are resource actions** (`gpio.set`, `fan.override`, `led.pattern`,
+  `imu.calibrate`) on the device's resource, run with `wait_ms` ([actions.md](actions.md),
+  "Waiting for the result"). A handler may run actions on different devices, or on one device,
+  concurrently. List the action names a device accepts as resource capabilities
+  (`ResourceCapability::new("action:imu.calibrate")`) so a UI can offer them.
 
 ## Queue Pressure
 

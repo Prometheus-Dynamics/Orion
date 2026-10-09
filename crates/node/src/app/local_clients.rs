@@ -47,6 +47,9 @@ pub(super) struct LocalClientState {
     pub(super) provider_watch: Option<ProviderWatchState>,
     pub(super) status_watch: Option<StatusQuery>,
     pub(super) action_watch: Option<ActionQuery>,
+    /// Actions this client submitted over its stream with `wait_ms`: their results are pushed to
+    /// the stream until they are final.
+    pub(super) action_calls: std::collections::BTreeSet<String>,
     next_event_sequence: u64,
     max_queued_events: usize,
     pub(super) queued_events: VecDeque<ClientEvent>,
@@ -79,6 +82,7 @@ impl LocalClientState {
             provider_watch: None,
             status_watch: None,
             action_watch: None,
+            action_calls: std::collections::BTreeSet::new(),
             next_event_sequence: 1,
             max_queued_events,
             queued_events: VecDeque::new(),

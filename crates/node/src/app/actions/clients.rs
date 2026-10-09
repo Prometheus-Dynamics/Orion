@@ -313,19 +313,31 @@ impl NodeApp {
         if results.is_empty() {
             return;
         }
+        self.state.actions.changed.notify_waiters();
         let mut flushes = Vec::<PendingClientStreamFlush>::new();
         self.with_client_registry_txn(|txn| {
             for (source, client) in txn.clients_mut() {
-                let Some(query) = client.action_watch.as_ref() else {
+                if client.action_watch.is_none() && client.action_calls.is_empty() {
                     continue;
-                };
+                }
                 let matching: Vec<ActionResult> = results
                     .iter()
-                    .filter(|result| query.matches(result))
+                    .filter(|result| {
+                        client.action_calls.contains(&result.action_id)
+                            || client
+                                .action_watch
+                                .as_ref()
+                                .is_some_and(|query| query.matches(result))
+                    })
                     .cloned()
                     .collect();
                 if matching.is_empty() {
                     continue;
+                }
+                for result in &matching {
+                    if result.state.is_terminal() {
+                        client.action_calls.remove(&result.action_id);
+                    }
                 }
                 enqueue_action_results_event(client, matching);
                 if let Some(flush) = prepare_client_stream_flush(source, client) {

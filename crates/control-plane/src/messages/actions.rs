@@ -234,6 +234,14 @@ impl FromStr for ActionTarget {
 /// accepts the request (`0` asks for the node default; the node caps it at its maximum). The node
 /// replaces `requested_by` with the authenticated requester (`local:<client name>` or
 /// `peer:<node id>/<original>`).
+///
+/// `wait_ms` asks for the reply path: `0` answers with the current result at once; otherwise the
+/// caller waits for the final result, at most `wait_ms` milliseconds. Over a unary exchange (local
+/// unary socket, a peer or remote-operator transport) the node holds its answer until the action is
+/// final or the wait (capped by the node) runs out; over a control-plane stream it answers at once
+/// and pushes the action's results to the stream as `ActionResults` events until it is final.
+/// Resubmitting the same request (same id, target, name and arguments) is how a caller keeps
+/// waiting: it returns the existing action, never runs it twice.
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
@@ -247,6 +255,8 @@ pub struct ActionRequest {
     pub deadline_ms: u64,
     #[serde(default)]
     pub requested_by: String,
+    #[serde(default)]
+    pub wait_ms: u64,
 }
 
 impl ActionRequest {
@@ -262,6 +272,7 @@ impl ActionRequest {
             args: BTreeMap::new(),
             deadline_ms: 0,
             requested_by: String::new(),
+            wait_ms: 0,
         }
     }
 
@@ -277,6 +288,12 @@ impl ActionRequest {
 
     pub fn with_requested_by(mut self, requested_by: impl Into<String>) -> Self {
         self.requested_by = requested_by.into();
+        self
+    }
+
+    /// Waits up to `wait_ms` for the final result (see the type documentation).
+    pub fn with_wait_ms(mut self, wait_ms: u64) -> Self {
+        self.wait_ms = wait_ms;
         self
     }
 }

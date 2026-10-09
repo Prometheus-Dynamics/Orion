@@ -43,7 +43,11 @@ impl HttpControlHandler for HttpControlServiceAdapter {
         _bytes_received: u64,
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponsePayload, HttpTransportError>> + Send + '_>>
     {
-        Box::pin(async move { self.handle_payload_metered_sync(payload) })
+        Box::pin(async move {
+            let wait = NodeApp::peer_action_wait(&payload);
+            let response = self.handle_payload_metered_sync(payload)?;
+            Ok(self.app.complete_peer_action_wait(wait, response).await)
+        })
     }
 
     fn handle_health(&self) -> Result<HttpResponsePayload, HttpTransportError> {

@@ -10,6 +10,7 @@ const DEFAULT_ACTION_DEFAULT_DEADLINE_MS: u64 = 30_000;
 const DEFAULT_ACTION_MAX_DEADLINE_MS: u64 = 600_000;
 const DEFAULT_ACTION_RESULT_TTL_MS: u64 = 600_000;
 const DEFAULT_ACTION_MAX_TRACKED: usize = 256;
+const DEFAULT_ACTION_MAX_WAIT_MS: u64 = 2_000;
 
 /// How the node samples host facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,6 +85,10 @@ pub struct ActionTuning {
     /// Most actions tracked at once (`ORION_NODE_ACTION_MAX_TRACKED`). The oldest final results
     /// are evicted first; requests are rejected while every tracked action is still running.
     pub max_tracked: usize,
+    /// Longest time the node holds one unary answer to a `RunAction` with `wait_ms`
+    /// (`ORION_NODE_ACTION_MAX_WAIT_MS`). It stays below the transport I/O timeouts; callers that
+    /// need longer resend the request.
+    pub max_wait: Duration,
     /// Action-name patterns enrolled remote operators may run when their policy names none
     /// (`ORION_NODE_OPERATOR_ACTIONS`, comma-separated `*`, `prefix*` or exact names). Empty by
     /// default: operators are read-only unless granted actions (`docs/remote-operator.md`).
@@ -97,6 +102,7 @@ impl Default for ActionTuning {
             max_deadline: Duration::from_millis(DEFAULT_ACTION_MAX_DEADLINE_MS),
             result_ttl: Duration::from_millis(DEFAULT_ACTION_RESULT_TTL_MS),
             max_tracked: DEFAULT_ACTION_MAX_TRACKED,
+            max_wait: Duration::from_millis(DEFAULT_ACTION_MAX_WAIT_MS),
             operator_actions: Vec::new(),
         }
     }
@@ -118,6 +124,10 @@ impl ActionTuning {
                 DEFAULT_ACTION_RESULT_TTL_MS,
             )?,
             max_tracked: parse_env_or("ORION_NODE_ACTION_MAX_TRACKED", DEFAULT_ACTION_MAX_TRACKED)?,
+            max_wait: duration_ms_env_or(
+                "ORION_NODE_ACTION_MAX_WAIT_MS",
+                DEFAULT_ACTION_MAX_WAIT_MS,
+            )?,
             operator_actions: operator_actions_from_env()?,
         };
         tuning.normalize();
@@ -130,6 +140,7 @@ impl ActionTuning {
             normalize_runtime_tuning_duration(self.default_deadline).min(self.max_deadline);
         self.result_ttl = normalize_runtime_tuning_duration(self.result_ttl);
         self.max_tracked = self.max_tracked.max(1);
+        self.max_wait = normalize_runtime_tuning_duration(self.max_wait);
     }
 
     pub fn with_default_deadline(mut self, deadline: Duration) -> Self {
@@ -152,6 +163,12 @@ impl ActionTuning {
 
     pub fn with_max_tracked(mut self, max_tracked: usize) -> Self {
         self.max_tracked = max_tracked;
+        self.normalize();
+        self
+    }
+
+    pub fn with_max_wait(mut self, max_wait: Duration) -> Self {
+        self.max_wait = max_wait;
         self.normalize();
         self
     }

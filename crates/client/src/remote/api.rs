@@ -174,6 +174,36 @@ impl RemoteOperator {
         }
     }
 
+    /// Runs an action and waits up to `timeout` for its final result, without polling: each
+    /// exchange is a `RunAction` with `wait_ms` (at most half the I/O timeout), which the node
+    /// answers once the action is final; while it runs, the same request is sent again (the node
+    /// never runs it twice). A target owned by another node is forwarded there, which also waits
+    /// instead of polling. Fails with [`RemoteError::ActionTimeout`] if `timeout` passes first.
+    pub async fn call_action(
+        &self,
+        request: ActionRequest,
+        timeout: Duration,
+    ) -> Result<ActionResult, RemoteError> {
+        let deadline = Instant::now() + timeout;
+        let chunk = (self.config().io_timeout / 2).max(Duration::from_millis(1));
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let wait = u64::try_from(remaining.min(chunk).as_millis())
+                .unwrap_or(u64::MAX)
+                .max(1);
+            let result = self.run_action(request.clone().with_wait_ms(wait)).await?;
+            if result.state.is_terminal() {
+                return Ok(result);
+            }
+            if Instant::now() >= deadline {
+                return Err(RemoteError::ActionTimeout {
+                    action_id: request.action_id,
+                    timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                });
+            }
+        }
+    }
+
     /// Tracked actions matching `query` (every action with read access, else the operator's own).
     pub async fn query_actions(
         &self,
