@@ -251,7 +251,17 @@ async fn discovered_enrollments_survive_a_restart() {
     let b = TcpNode::start("node-b", None).await;
     let a_discovery = a.discover(&bus, Some(KEY));
     let b_discovery = b.discover(&bus, Some(KEY));
-    wait_until("a enrolled b", || a.app.is_registered_peer(&b.id())).await;
+    // The peer is registered before the enrollment is written to `discovered-peers.json`, so wait
+    // for the record too: restoring from the state directory is what this test is about.
+    wait_until("a enrolled b and recorded it", || {
+        a.app.is_registered_peer(&b.id())
+            && crate::discovery::store::load(&state_dir).is_ok_and(|records| {
+                records
+                    .iter()
+                    .any(|record| record.node_id == b.id().as_str())
+            })
+    })
+    .await;
     a_discovery.shutdown().await;
     a.stop().await;
 
