@@ -15,7 +15,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::subscription::{TopicEvent, TopicInfo};
 use super::{ClientConfig, ClientEvent, Command, Shared};
-use crate::codec::{decode_frame, encode_frame};
+use crate::codec::{Frame, decode_frames, encode_frame, encode_frames};
 use crate::error::{Error, Result};
 use crate::message::{
     AnnounceParams, Control, PublishParams, SetPropertiesParams, SubscribeOptions, SubscribeParams,
@@ -166,15 +166,21 @@ async fn serve(
             options: sub.options.clone(),
         })));
     }
+    // Every publication's last value goes out in one batched binary message.
+    let now = now_micros();
+    let mut values: Vec<(i32, i64, &Value)> = Vec::new();
     for (&pubuid, publication) in &state.pubs {
         replay.push(Outbound::Text(publish_message(pubuid, publication)));
         if let Some(value) = &publication.last {
-            replay.push(Outbound::Binary(
-                match encode_frame(pubuid as i32, now_micros(), value) {
-                    Ok(bytes) => bytes,
-                    Err(_) => continue,
-                },
-            ));
+            values.push((pubuid as i32, now, value));
+        }
+    }
+    if !values.is_empty() {
+        match encode_frames(values) {
+            Ok(bytes) => replay.push(Outbound::Binary(bytes)),
+            Err(e) => {
+                let _ = events.send(ClientEvent::ProtocolWarning(e.to_string()));
+            }
         }
     }
     for message in replay {
@@ -401,13 +407,23 @@ fn on_binary(
     events: &mpsc::UnboundedSender<ClientEvent>,
     shared: &Shared,
 ) {
-    let frame = match decode_frame(bytes) {
-        Ok(frame) => frame,
-        Err(e) => {
-            let _ = events.send(ClientEvent::ProtocolWarning(e.to_string()));
-            return;
-        }
-    };
+    // One WebSocket message may batch several values; a malformed one drops the rest of it.
+    let (frames, error) = decode_frames(bytes);
+    for frame in frames {
+        on_frame(frame, state, link, events, shared);
+    }
+    if let Some(e) = error {
+        let _ = events.send(ClientEvent::ProtocolWarning(e.to_string()));
+    }
+}
+
+fn on_frame(
+    frame: Frame,
+    state: &mut State,
+    link: &mut Link,
+    events: &mpsc::UnboundedSender<ClientEvent>,
+    shared: &Shared,
+) {
     if frame.id == -1 {
         on_pong(&frame, link, events, shared);
         return;
@@ -415,13 +431,13 @@ fn on_binary(
     match link.ids.get(&frame.id) {
         Some(name) => {
             let name = name.clone();
+            let own = link.own.contains(&frame.id);
             let event = TopicEvent::Value {
                 id: frame.id,
                 name: name.clone(),
                 timestamp_us: frame.timestamp_us,
                 value: frame.value,
             };
-            let own = link.own.contains(&frame.id);
             route(state, &name, event, own);
         }
         None => {

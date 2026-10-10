@@ -17,26 +17,68 @@ pub struct Frame {
     pub value: Value,
 }
 
-/// Encodes one binary frame.
+/// Encodes one binary frame (one message).
 pub fn encode_frame(id: i32, timestamp_us: i64, value: &Value) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(16);
-    enc(rmp::encode::write_array_len(&mut buf, 4))?;
-    enc(rmp::encode::write_sint(&mut buf, i64::from(id)))?;
-    enc(rmp::encode::write_sint(&mut buf, timestamp_us))?;
-    enc(rmp::encode::write_sint(
-        &mut buf,
-        i64::from(value.type_id()),
-    ))?;
-    write_value(&mut buf, value)?;
+    encode_frame_into(&mut buf, id, timestamp_us, value)?;
     Ok(buf)
 }
 
-/// Decodes one binary frame. Trailing bytes are an error.
-pub fn decode_frame(mut bytes: &[u8]) -> Result<Frame> {
-    let top = rmpv::decode::read_value(&mut bytes).map_err(|e| dec(e.to_string()))?;
-    if !bytes.is_empty() {
-        return Err(dec("trailing bytes after frame".into()));
+/// Appends one encoded message to `buf`. Several messages in one buffer make a batched binary
+/// frame, which is what ntcore sends (see [`decode_frames`]).
+pub fn encode_frame_into(
+    buf: &mut Vec<u8>,
+    id: i32,
+    timestamp_us: i64,
+    value: &Value,
+) -> Result<()> {
+    enc(rmp::encode::write_array_len(buf, 4))?;
+    enc(rmp::encode::write_sint(buf, i64::from(id)))?;
+    enc(rmp::encode::write_sint(buf, timestamp_us))?;
+    enc(rmp::encode::write_sint(buf, i64::from(value.type_id())))?;
+    write_value(buf, value)
+}
+
+/// Encodes several messages as one batched binary frame, to save WebSocket messages.
+pub fn encode_frames<'a>(
+    messages: impl IntoIterator<Item = (i32, i64, &'a Value)>,
+) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    for (id, timestamp_us, value) in messages {
+        encode_frame_into(&mut buf, id, timestamp_us, value)?;
     }
+    Ok(buf)
+}
+
+/// Decodes every message in a binary frame. A frame is a sequence of concatenated MessagePack
+/// arrays: ntcore batches several values into one WebSocket message. Returns the messages decoded
+/// before any malformed one, plus the error that stopped decoding; the rest of the frame is
+/// dropped, and the connection stays up.
+pub fn decode_frames(mut bytes: &[u8]) -> (Vec<Frame>, Option<Error>) {
+    let mut frames = Vec::new();
+    while !bytes.is_empty() {
+        let message = match rmpv::decode::read_value(&mut bytes) {
+            Ok(message) => message,
+            Err(e) => return (frames, Some(dec(e.to_string()))),
+        };
+        match frame_from_value(message) {
+            Ok(frame) => frames.push(frame),
+            Err(e) => return (frames, Some(e)),
+        }
+    }
+    (frames, None)
+}
+
+/// Decodes a buffer that must hold exactly one message.
+pub fn decode_frame(bytes: &[u8]) -> Result<Frame> {
+    match decode_frames(bytes) {
+        (mut frames, None) if frames.len() == 1 => Ok(frames.remove(0)),
+        (_, Some(e)) => Err(e),
+        _ => Err(dec("expected exactly one frame".into())),
+    }
+}
+
+fn frame_from_value(top: rmpv::Value) -> Result<Frame> {
     let rmpv::Value::Array(items) = top else {
         return Err(dec("frame is not an array".into()));
     };
@@ -232,6 +274,93 @@ mod tests {
         // [-1, 0, 2, 5] with the int as uint8 (0xcc 0x05): accepted for the int type.
         let bytes = [0x94, 0xff, 0x00, 0x02, 0xcc, 0x05];
         assert_eq!(decode_frame(&bytes).unwrap().value, Value::Int(5));
+    }
+
+    #[test]
+    fn batched_frame_decodes_every_message() {
+        let values = [
+            Value::Double(1.5),
+            Value::String("x".into()),
+            Value::DoubleArray(vec![2.0]),
+        ];
+        let batch = encode_frames(
+            values
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (i as i32, 10 + i as i64, v)),
+        )
+        .unwrap();
+        let (frames, err) = decode_frames(&batch);
+        assert!(err.is_none());
+        assert_eq!(frames.len(), 3);
+        for (i, (frame, value)) in frames.iter().zip(&values).enumerate() {
+            assert_eq!(frame.id, i as i32);
+            assert_eq!(frame.timestamp_us, 10 + i as i64);
+            assert_eq!(&frame.value, value);
+        }
+    }
+
+    #[test]
+    fn batch_mixing_an_rtt_reply_and_a_value_decodes_both() {
+        // What ntcore sends after a ping: the RTT reply (id -1) and a value in one frame.
+        let mut batch = encode_frame(-1, 5_000, &Value::Int(4_000)).unwrap();
+        batch.extend(encode_frame(3, 5_001, &Value::Boolean(true)).unwrap());
+        let (frames, err) = decode_frames(&batch);
+        assert!(err.is_none());
+        assert_eq!(frames[0].id, -1);
+        assert_eq!(frames[0].value, Value::Int(4_000));
+        assert_eq!(
+            frames[1],
+            Frame {
+                id: 3,
+                timestamp_us: 5_001,
+                value: Value::Boolean(true)
+            }
+        );
+    }
+
+    #[test]
+    fn captured_style_batch_with_ntcore_widths() {
+        // Hand-built to the layout ntcore uses: positive fixint ids, uint32 timestamps and
+        // float64 doubles, then a string and a double array in the same message.
+        // [0, 0xce 1000000, 1, 0xcb 2.5]
+        let mut bytes = vec![0x94, 0x00, 0xce, 0x00, 0x0f, 0x42, 0x40, 0x01, 0xcb];
+        bytes.extend_from_slice(&2.5f64.to_be_bytes());
+        // [1, 1000001, 4, "hi"]
+        bytes.extend_from_slice(&[
+            0x94, 0x01, 0xce, 0x00, 0x0f, 0x42, 0x41, 0x04, 0xa2, b'h', b'i',
+        ]);
+        // [2, 1000002, 17, [1.0, 2.0]]
+        bytes.extend_from_slice(&[0x94, 0x02, 0xce, 0x00, 0x0f, 0x42, 0x42, 0x11, 0x92, 0xcb]);
+        bytes.extend_from_slice(&1.0f64.to_be_bytes());
+        bytes.push(0xcb);
+        bytes.extend_from_slice(&2.0f64.to_be_bytes());
+        let (frames, err) = decode_frames(&bytes);
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[0].value, Value::Double(2.5));
+        assert_eq!(frames[1].value, Value::String("hi".into()));
+        assert_eq!(frames[2].value, Value::DoubleArray(vec![1.0, 2.0]));
+    }
+
+    #[test]
+    fn malformed_message_keeps_earlier_frames_and_drops_the_rest() {
+        let mut batch = encode_frame(1, 1, &Value::Int(7)).unwrap();
+        // A message whose type id (99) is unknown, then a good message that must be dropped.
+        batch.extend_from_slice(&[0x94, 0x01, 0x01, 0x63, 0x01]);
+        batch.extend(encode_frame(2, 2, &Value::Int(8)).unwrap());
+        let (frames, err) = decode_frames(&batch);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].value, Value::Int(7));
+        assert!(err.is_some());
+    }
+
+    #[test]
+    fn truncated_message_is_an_error_not_a_panic() {
+        let bytes = encode_frame(1, 1, &Value::String("abcdef".into())).unwrap();
+        let (frames, err) = decode_frames(&bytes[..bytes.len() - 2]);
+        assert!(frames.is_empty());
+        assert!(err.is_some());
     }
 
     #[test]

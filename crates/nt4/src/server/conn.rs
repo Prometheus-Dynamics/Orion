@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
 
 use super::state::{Outgoing, State, Sub};
-use crate::codec::decode_frame;
+use crate::codec::{Frame, decode_frames};
 use crate::error::{Error, Result};
 use crate::message::{Control, parse_text};
 use crate::{SUBPROTOCOL_V4_0, SUBPROTOCOL_V4_1};
@@ -156,10 +156,17 @@ fn handle_text(state: &Mutex<State>, client: u64, text: &str) {
 
 fn handle_binary(state: &Mutex<State>, client: u64, bytes: &[u8]) {
     let mut state = lock(state);
-    let frame = match decode_frame(bytes) {
-        Ok(frame) => frame,
-        Err(e) => return state.warn(Some(client), e.to_string()),
-    };
+    // One WebSocket message may batch several values; a malformed one drops the rest of it.
+    let (frames, error) = decode_frames(bytes);
+    for frame in frames {
+        handle_frame(&mut state, client, frame);
+    }
+    if let Some(e) = error {
+        state.warn(Some(client), e.to_string());
+    }
+}
+
+fn handle_frame(state: &mut State, client: u64, frame: Frame) {
     if frame.id == -1 {
         if let Err(e) = state.reply_rtt(client, &frame.value) {
             state.warn(Some(client), e.to_string());

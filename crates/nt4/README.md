@@ -96,12 +96,34 @@ connection events.
 | Transport | WebSocket, path `/nt/<client name>`, default port 5810, no TLS |
 | Subprotocol | `v4.1.networktables.first.wpi.edu`, with `networktables.first.wpi.edu` accepted as the fallback |
 | Control | Text frames: JSON arrays of `{"method", "params"}`. Client: `publish`, `unpublish`, `setproperties`, `subscribe`, `unsubscribe`. Server: `announce`, `unannounce`, `properties` |
-| Values | Binary frames: MessagePack `[topic id, timestamp us, type id, value]` |
+| Values | Binary frames: MessagePack `[topic id, timestamp us, type id, value]`. One WebSocket message may hold several of these back to back (ntcore batches values this way), and the decoder reads them all |
 | Clock | RTT pings: `[-1, 0, int, client time]`, answered with `[-1, server time, int, client time]` |
+
+Batching: receiving handles any number of messages per binary frame, and a malformed one drops only the rest of its frame (a `ProtocolWarning`), not the connection. Sending is one value per frame, except that the client's reconnect replay of last values goes out as one batch. `encode_frames` builds a batch for callers that want to send several values per WebSocket message.
 
 Type ids: boolean 0, double 1, int 2 (signed 64-bit), float 3, string 4, raw 5 (also `msgpack`,
 `protobuf` and `struct:*` topics, which carry opaque bytes), boolean[] 16, double[] 17, int[] 18,
 float[] 19, string[] 20. `type_id_for_name` maps type strings to ids.
+
+## Clocks
+
+Value timestamps are microseconds on the server's clock. `orion-nt4` servers use microseconds
+since the server process started, so their clock starts near 0. A WPILib client's
+`getServerTimeOffset()` against an orion server is therefore about minus the client's own Unix
+time (for example -1.79e15 µs in 2026). WPILib servers use Unix time, so an orion client sees an
+offset of about +1.79e15 µs there. Robot FPGA time also starts at 0, so this is the same
+convention a robot uses.
+
+A server stamps every value it stores or relays with its own clock. A timestamp the client sends
+is ignored, so a relayed value's timestamp is always on the server's clock.
+
+## Interop with WPILib
+
+`scripts/nt4-interop.sh` checks both directions against WPILib's ntcore (the `pyntcore` package,
+installed into `target/nt4-interop/venv`). It is optional and not part of CI. An orion server gets
+a double[] and a string from an ntcore client, and the server's relay is checked for timestamps. An
+ntcore server publishes double, boolean, string[], int and raw values, and an orion client must
+receive all five.
 
 ## Bridging into Orion (future)
 

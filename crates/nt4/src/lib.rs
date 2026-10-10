@@ -24,7 +24,9 @@ pub mod value;
 pub use client::{
     Client, ClientConfig, ClientEvent, ClientHandle, Publisher, Subscription, TopicEvent, TopicInfo,
 };
-pub use codec::{Frame, decode_frame, encode_frame};
+pub use codec::{
+    Frame, decode_frame, decode_frames, encode_frame, encode_frame_into, encode_frames,
+};
 pub use error::{Error, Result};
 pub use message::{Control, Properties, SubscribeOptions};
 pub use server::{
