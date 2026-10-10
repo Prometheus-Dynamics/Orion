@@ -1,0 +1,33 @@
+[package]
+name = "orion-nt4"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "NetworkTables 4.1 (FRC NT4) client and server: pub/sub over WebSocket with MessagePack values, RTT time sync, and a local API for hosts."
+readme = "README.md"
+keywords = ["frc", "networktables", "nt4", "websocket"]
+categories = ["network-programming", "asynchronous"]
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+futures-util.workspace = true
+rmp.workspace = true
+rmpv.workspace = true
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-tungstenite.workspace = true
+
+[dev-dependencies]
+clap = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "io-std", "io-util"] }
