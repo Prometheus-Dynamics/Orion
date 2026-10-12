@@ -89,6 +89,68 @@ cargo run -p orion-nt4 --example nt4-dump -- --host 127.0.0.1 --prefix /
 `nt4-dump` subscribes to a prefix (everything by default) and prints announces, values and
 connection events.
 
+## Measuring camera latency
+
+`nt4-latency` measures a vision camera's end-to-end latency and timestamp accuracy with no robot.
+The tool is the NT4 server. PhotonVision connects to it and syncs its clock to the tool's clock,
+so the capture timestamps it publishes are on the tool's clock. A page on this machine shows an
+AprilTag (tag36h11) that the tool switches on and off at random 300 to 700 ms intervals, logging
+each flip as commanded and as painted. For each flip the tool measures:
+
+- **a, true latency:** the page's paint of the flip to the arrival of the camera result that
+  first shows it.
+- **b, reported latency:** the camera's capture timestamp to that arrival.
+- **c, timestamp error:** the capture timestamp minus the paint, minus `--display-delay-ms`. Zero
+  means the capture timestamps are exact once the display lag is taken out.
+
+Steps:
+
+1. Start the tool: `cargo run -p orion-nt4 --example nt4-latency -- --camera cam0 --csv flips.csv`.
+   `--camera` is the camera's name in PhotonVision (the `/photonvision/<name>/` table). `--count`
+   sets the number of flips (default 60). `--nt-bind` defaults to port 5810.
+2. In PhotonVision's networking settings, set the NetworkTables server to this machine's address,
+   port 5810. Keep the camera name the same as `--camera`.
+3. Open `http://127.0.0.1:8080/` on the screen, and make it fullscreen. Use `--web-port` to change
+   the port.
+4. Aim the camera at the screen so the tag fills a good part of the view and the screen is the
+   brightest thing in it. The tool waits for the page and for PhotonVision's clock sync, then
+   starts flipping.
+5. Read the summary, and the per-flip CSV (`flip_cmd_us`, `flip_painted_us`, `capture_us`,
+   `publish_us`, `nt_arrival_us`, and the three metrics in ms).
+
+Measure the display delay once, from the paint to the light leaving the screen. Film the screen
+with a phone in slow motion and count the frames between the flip and the visible change, or use
+the monitor's specified input lag (often one to two frames plus the panel's response time). Pass it
+as `--display-delay-ms`. Until then, the default of 0 makes c relative: it is right in shape but
+offset by the display lag.
+
+What the tool decodes from PhotonVision:
+
+- `/photonvision/<camera>/hasTarget` (boolean) gives the on and off transitions.
+- `/photonvision/<camera>/rawBytes` (raw) carries the `PhotonPipelineResult`. The tool reads only
+  its first 32 bytes, the `PhotonPipelineMetadata`: four little-endian int64 values, `sequenceID`,
+  `captureTimestampMicros`, `publishTimestampMicros` and `timeSinceLastPong`. This is the layout in
+  PhotonVision's `photon-targeting` serde (`PhotonPipelineMetadataSerde`). The target list after it
+  is not decoded. `latencyMillis` is not used.
+- The arrival time is the tool's own receive time. PhotonVision adds its NT time offset to the
+  capture and publish times before publishing, so they are on the tool's clock.
+
+Matching: each `hasTarget` transition pairs with the `rawBytes` result that arrived closest to it
+(within 100 ms). The result's capture time picks the nearest flip painted at or before it, and that
+flip must show the new state. A flip with no matched transition is a drop. A result whose publish
+time is more than 1 s from its arrival is not on the tool's clock (PhotonVision has not synced yet),
+so it is excluded and counted.
+
+Checks before a measurement run:
+
+- The tag must be detected. `hasTarget` should follow the screen. If it does not, check the tag id
+  and the family (tag36h11) in PhotonVision.
+- Drops rise when flips come closer together than the camera's frame time. Raise
+  `--min-interval-ms` if so.
+- The page paints in `requestAnimationFrame`, and the change scans out about one frame later. That
+  lag is part of the display delay, so measuring the delay with the same screen and refresh rate
+  keeps it right.
+
 ## Wire format
 
 | Part | Format |
@@ -165,3 +227,8 @@ Not implemented or not verified:
 bytes, JSON control messages) and in-process round trips over loopback: publish and prefix
 subscribe, late joiners, own-echo rules, unpublish and unannounce, several clients, the local API
 with client writes, every value type, RTT sync, and persistence across a restart.
+
+`cargo test -p orion-nt4 --example nt4-latency` runs the latency tool's tests: the matching and
+metric arithmetic on synthetic timelines, the metadata decoder, the clock estimate, the tag
+rendering, and an in-process run with a fake camera (NT client) and a fake page (WebSocket client)
+that checks the measured numbers against the simulated latency.

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AprilTag {{TAG_ID}} latency display</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #field { width: min(100vw, 100vh); height: min(100vw, 100vh); background: #000; }
+  #field.on { background: #fff; }
+  #field svg { display: none; width: 100%; height: 100%; }
+  #field.on svg { display: block; }
+  #status { position: fixed; left: 8px; top: 8px; color: #888; font: 14px sans-serif; display: none; }
+</style>
+</head>
+<body>
+<div id="field">{{TAG_SVG}}</div>
+<div id="status">connecting to the latency tool...</div>
+<script>
+(function () {
+  "use strict";
+  // Flips are applied in requestAnimationFrame. The paint time reported is the frame's timestamp,
+  // the same clock as performance.now(). The frame that carries the change is scanned out about one
+  // frame later; that lag belongs to the display delay (see the README).
+  var field = document.getElementById("field");
+  var status = document.getElementById("status");
+  var ws = null;
+  var retryMs = 250;
+
+  function send(message) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+  }
+
+  function connect() {
+    var scheme = location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(scheme + location.host + "/ws");
+    ws.onopen = function () {
+      status.style.display = "none";
+      retryMs = 250;
+    };
+    ws.onclose = function () {
+      status.style.display = "block";
+      setTimeout(connect, retryMs);
+      retryMs = Math.min(retryMs * 2, 2000);
+    };
+    ws.onmessage = function (event) {
+      var message;
+      try { message = JSON.parse(event.data); } catch (e) { return; }
+      if (message.t === "ping") {
+        // Answer at once, so the tool's round trip is as short as the link allows.
+        send({ t: "pong", st: message.st, pc: performance.now() * 1000 });
+      } else if (message.t === "flip") {
+        requestAnimationFrame(function (frameTime) {
+          field.className = message.on ? "on" : "";
+          send({ t: "painted", seq: message.seq, pc: frameTime * 1000 });
+        });
+      }
+    };
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>
