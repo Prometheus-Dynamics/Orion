@@ -231,17 +231,23 @@ impl NodeSecurityAuthorizer {
             )))
         };
         match operation {
-            ControlOperation::OperatorHello => Ok(()),
+            ControlOperation::OperatorHello | ControlOperation::Ping => Ok(()),
+            // A push session and its watches: read access (an operator without it can still
+            // watch its own actions, as with `QueryActions`).
             ControlOperation::QueryStateSnapshot
             | ControlOperation::QueryObservability
-            | ControlOperation::QueryStatus => {
+            | ControlOperation::QueryStatus
+            | ControlOperation::WatchStatus
+            | ControlOperation::WatchState => {
                 if operator.policy.read {
                     Ok(())
                 } else {
                     refuse("its policy grants no read access")
                 }
             }
-            ControlOperation::QueryActions => {
+            ControlOperation::OpenSession
+            | ControlOperation::QueryActions
+            | ControlOperation::WatchActions => {
                 if operator.policy.read || !operator.allowed_actions.is_empty() {
                     Ok(())
                 } else {
@@ -327,7 +333,15 @@ impl NodeSecurityAuthorizer {
 
 impl Authorizer for NodeSecurityAuthorizer {
     fn authorize(&self, request: &ControlRequest) -> Result<(), NodeError> {
-        if matches!(request.context.principal, ControlPrincipal::Local { .. }) {
+        if let ControlPrincipal::Local { source, .. } = &request.context.principal {
+            // Remote push sessions are local clients under a reserved address; nothing on the
+            // local socket may speak as one.
+            if crate::app::is_remote_session_address(source) {
+                return Err(NodeError::Authorization(format!(
+                    "local client address {} is reserved for remote sessions",
+                    source.as_str()
+                )));
+            }
             self.authorize_local_identity(request)?;
         }
         if let ControlPrincipal::Peer(peer) = &request.context.principal

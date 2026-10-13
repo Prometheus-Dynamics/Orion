@@ -104,6 +104,8 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
         OperatorRecord,
         OperatorTrustState,
         OperatorWelcome,
+        SessionOpen,
+        SessionWelcome,
         OperatorsSnapshot,
         MaintenanceAction,
         MaintenanceCommand,

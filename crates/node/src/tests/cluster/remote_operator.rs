@@ -253,7 +253,11 @@ async fn read_access_can_be_withheld_and_removed_operators_are_refused() {
 }
 
 /// A signed request from `identity` as the node's peer surface sees it.
-fn signed(identity: &OperatorIdentity, nonce: u64, message: ControlMessage) -> HttpRequestPayload {
+pub(super) fn signed(
+    identity: &OperatorIdentity,
+    nonce: u64,
+    message: ControlMessage,
+) -> HttpRequestPayload {
     let key = ed25519_dalek::SigningKey::from_bytes(&identity.secret_key_bytes());
     HttpRequestPayload::AuthenticatedPeer(
         orion_auth::crypto::sign_peer_request(
@@ -266,7 +270,10 @@ fn signed(identity: &OperatorIdentity, nonce: u64, message: ControlMessage) -> H
     )
 }
 
-fn serve(app: &NodeApp, request: HttpRequestPayload) -> Result<HttpResponsePayload, NodeError> {
+pub(super) fn serve(
+    app: &NodeApp,
+    request: HttpRequestPayload,
+) -> Result<HttpResponsePayload, NodeError> {
     match app.serve_control_request(ControlRequest::from_peer_tcp_payload(request))? {
         ControlResponse::Http(response) => Ok(*response),
         ControlResponse::Local(_) => panic!("local response on the peer surface"),

@@ -247,7 +247,8 @@ impl HttpCodec {
             | HttpResponsePayload::EnrollmentChallenge(_)
             | HttpResponsePayload::Actions(_)
             | HttpResponsePayload::OperatorWelcome(_)
-            | HttpResponsePayload::Status(_)) => Ok(HttpResponse {
+            | HttpResponsePayload::Status(_)
+            | HttpResponsePayload::Session(_)) => Ok(HttpResponse {
                 status: 200,
                 body: encode_to_vec(payload)
                     .map_err(|err| HttpTransportError::EncodeResponse(err.to_string()))?,

@@ -7,11 +7,14 @@
 //! request  = [kind u8][rkyv archive]   (the HTTP codec's request body, usually an
 //!                                       AuthenticatedPeerRequest)
 //! response = [status u8][sig_len u8][signature][key_len u8][public key][body]
-//!            status 0: body is an rkyv HttpResponsePayload; status 1: body is a UTF-8 error
+//!            status 0: body is an rkyv HttpResponsePayload; status 1: body is a UTF-8 error;
+//!            status 2 (push sessions): body is [seq u64 LE][rkyv ControlMessage]
 //! ```
 //!
 //! The response signature covers [`crate::canonical_peer_response_bytes`]: the responder's id and
-//! key, the exact request payload, the status and the body.
+//! key, the exact request payload, the status and the body. A push event (status 2) is signed as
+//! a response to the session's `OpenSession` request, with its sequence number in the body: so
+//! it is bound to that session, and the client refuses one whose number does not move on.
 
 use alloc::{
     format,
@@ -26,6 +29,9 @@ pub const PEER_TCP_SCHEME: &str = "orion+tcp";
 pub const PEER_TCP_STATUS_OK: u8 = 0;
 /// Response status: the body is a UTF-8 error message.
 pub const PEER_TCP_STATUS_ERROR: u8 = 1;
+/// Push session event: the body is `[seq u64 LE][rkyv ControlMessage]`, signed as a response to
+/// the session's `OpenSession` request.
+pub const PEER_TCP_STATUS_PUSH: u8 = 2;
 /// Largest response header: status, signature length, signature, key length, key.
 pub const PEER_TCP_RESPONSE_HEADER_MAX_BYTES: usize = 3 + 64 + 32;
 
@@ -83,7 +89,10 @@ impl PeerTcpResponseFrame {
     pub fn decode(bytes: &[u8]) -> Result<Self, PeerTcpFrameError> {
         let malformed = || PeerTcpFrameError("truncated response frame".into());
         let (&status, rest) = bytes.split_first().ok_or_else(malformed)?;
-        if status != PEER_TCP_STATUS_OK && status != PEER_TCP_STATUS_ERROR {
+        if status != PEER_TCP_STATUS_OK
+            && status != PEER_TCP_STATUS_ERROR
+            && status != PEER_TCP_STATUS_PUSH
+        {
             return Err(PeerTcpFrameError(format!(
                 "unknown response status {status}"
             )));

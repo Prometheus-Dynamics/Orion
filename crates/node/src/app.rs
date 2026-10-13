@@ -36,6 +36,7 @@ mod placement;
 mod reconcile;
 mod reconcile_tick;
 mod reconcile_trigger;
+mod remote_sessions;
 mod startup;
 mod startup_loops;
 mod state_access;
@@ -50,6 +51,7 @@ pub(crate) use observability::{clear_test_audit_append_delay, set_test_audit_app
 #[cfg(test)]
 pub(crate) use persistence::{clear_test_persist_delay, set_test_persist_delay};
 #[cfg(any(feature = "transport-http", feature = "peer-tcp"))]
+pub(crate) use remote_sessions::{REMOTE_SESSION_IDLE_TIMEOUT, is_remote_session_address};
 pub(crate) use task_handle::GracefulTaskHandle;
 pub use types::{
     HttpMutualTlsMode, NodeError, NodeSnapshot, NodeTickReport, PeerSyncExecution,

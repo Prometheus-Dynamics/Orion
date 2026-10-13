@@ -12,6 +12,7 @@ use super::maintenance::{MaintenanceCommand, MaintenanceStatus};
 use super::metrics::{NodeObservabilitySnapshot, PeerTrustSnapshot};
 use super::mutations::MutationBatch;
 use super::operators::{OperatorEnrollment, OperatorId, OperatorsSnapshot};
+use super::session::SessionOpen;
 use super::status::{StatusEntry, StatusQuery};
 use super::sync::{PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest, SyncSummaryRequest};
 use crate::{LeaseRecord, WorkloadRecord};
@@ -108,4 +109,7 @@ pub enum ControlMessage {
     EnrollOperator(Box<OperatorEnrollment>),
     /// Revokes a remote operator (local control only).
     RemoveOperator(OperatorId),
+    /// Opens a push session on this `orion+tcp` connection (remote operators; answered with
+    /// `HttpResponsePayload::Session`). See `messages::session`.
+    OpenSession(SessionOpen),
 }

@@ -73,6 +73,9 @@ pub struct ControlRequestContext {
     pub peer_auth: Option<PeerRequestAuth>,
     pub authenticated_peer: Option<AuthenticatedPeer>,
     pub local_identity: Option<UnixPeerIdentity>,
+    /// The remote push session (its local client address) a request arrived on, for the
+    /// watches and pings that only make sense inside one (`peer_tcp::session`).
+    pub session: Option<LocalAddress>,
 }
 
 impl ControlRequestContext {
@@ -84,6 +87,7 @@ impl ControlRequestContext {
             peer_auth: None,
             authenticated_peer: None,
             local_identity: None,
+            session: None,
         }
     }
 
@@ -118,6 +122,7 @@ impl ControlRequestContext {
             peer_auth: None,
             authenticated_peer: None,
             local_identity,
+            session: None,
         }
     }
 
@@ -196,6 +201,7 @@ pub enum ControlOperation {
     ActionResults,
     ClaimNodeActions,
     OperatorHello,
+    OpenSession,
     QueryOperators,
     Operators,
     EnrollOperator,
@@ -224,6 +230,13 @@ impl ControlRequest {
     /// A peer request received on the `orion+tcp` transport.
     pub fn from_peer_tcp_payload(payload: HttpRequestPayload) -> Self {
         Self::from_peer_payload(payload, ControlRequestContext::peer_tcp())
+    }
+
+    /// A request received on a remote push session's connection.
+    pub fn from_session_payload(payload: HttpRequestPayload, session: LocalAddress) -> Self {
+        let mut request = Self::from_peer_tcp_payload(payload);
+        request.context.session = Some(session);
+        request
     }
 
     fn from_peer_payload(payload: HttpRequestPayload, context: ControlRequestContext) -> Self {
@@ -363,6 +376,7 @@ impl ControlRequest {
                 ControlMessage::ActionResults(_) => ControlOperation::ActionResults,
                 ControlMessage::ClaimNodeActions(_) => ControlOperation::ClaimNodeActions,
                 ControlMessage::OperatorHello => ControlOperation::OperatorHello,
+                ControlMessage::OpenSession(_) => ControlOperation::OpenSession,
                 ControlMessage::QueryOperators => ControlOperation::QueryOperators,
                 ControlMessage::Operators(_) => ControlOperation::Operators,
                 ControlMessage::EnrollOperator(_) => ControlOperation::EnrollOperator,
@@ -498,7 +512,11 @@ impl RequestService<ControlRequest> for NodeControlService {
                     ) =>
                 {
                     self.app
-                        .apply_operator_control_message(&context.principal, *message)
+                        .apply_operator_control_message(
+                            &context.principal,
+                            *message,
+                            context.session.as_ref(),
+                        )
                         .map(|response| ControlResponse::Http(Box::new(response)))
                 }
                 ControlSurface::PeerHttp | ControlSurface::PeerTcp => self

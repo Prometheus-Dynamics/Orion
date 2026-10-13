@@ -34,11 +34,11 @@ pub use messages::{
     OperationFailureCategory, OperationMetricsSnapshot, PeerEnrollment, PeerHello,
     PeerIdentityUpdate, PeerSyncErrorKind, PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot,
     PersistenceMetricsSnapshot, ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate,
-    RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot, StateSnapshot, StateWatch,
-    StatusChange, StatusEntry, StatusKey, StatusLaneUsageSnapshot, StatusQuery, StatusSubject,
-    StatusSubjectParseError, SyncDiffRequest, SyncRequest, SyncSummaryRequest,
-    TransportMetricsSnapshot, WorkerQueueUsageSnapshot, action_names, action_status_keys,
-    update_action,
+    REMOTE_SESSION_PREFIX, RegistryUsageSnapshot, SessionOpen, SessionWelcome, StateSectionCounts,
+    StateSizeSnapshot, StateSnapshot, StateWatch, StatusChange, StatusEntry, StatusKey,
+    StatusLaneUsageSnapshot, StatusQuery, StatusSubject, StatusSubjectParseError, SyncDiffRequest,
+    SyncRequest, SyncSummaryRequest, TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
+    action_names, action_status_keys, update_action,
 };
 pub use messages::{
     InvalidOperatorId, MAX_OPERATOR_ACTION_PATTERNS, MAX_OPERATOR_NAME_LEN, OPERATOR_ID_PREFIX,

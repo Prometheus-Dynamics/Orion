@@ -121,9 +121,9 @@ impl NodeApp {
             message @ (ControlMessage::QueryOperators
             | ControlMessage::EnrollOperator(_)
             | ControlMessage::RemoveOperator(_)) => self.apply_local_operator_message(message),
-            ControlMessage::OperatorHello => Ok(ControlMessage::Rejected(
-                "OperatorHello is only served to remote operators".into(),
-            )),
+            ControlMessage::OperatorHello | ControlMessage::OpenSession(_) => Ok(
+                ControlMessage::Rejected("only served to remote operators".into()),
+            ),
             ControlMessage::ReplacePeerIdentity(update) => {
                 self.replace_peer_identity_hex(&update.node_id, &update.public_key_hex)?;
                 Ok(ControlMessage::Accepted)
@@ -197,6 +197,7 @@ impl NodeApp {
                     }
                     orion::transport::http::HttpResponsePayload::Readiness(_)
                     | orion::transport::http::HttpResponsePayload::EnrollmentChallenge(_)
+                    | orion::transport::http::HttpResponsePayload::Session(_)
                     | orion::transport::http::HttpResponsePayload::Actions(_)
                     | orion::transport::http::HttpResponsePayload::OperatorWelcome(_)
                     | orion::transport::http::HttpResponsePayload::Status(_) => {

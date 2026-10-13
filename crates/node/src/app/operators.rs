@@ -23,6 +23,7 @@ impl NodeApp {
         &self,
         principal: &ControlPrincipal,
         message: ControlMessage,
+        session: Option<&orion::transport::ipc::LocalAddress>,
     ) -> Result<HttpResponsePayload, NodeError> {
         let operator = match principal {
             ControlPrincipal::Operator(operator) => operator,
@@ -71,6 +72,15 @@ impl NodeApp {
             ControlMessage::QueryActions(query) => Ok(HttpResponsePayload::Actions(
                 self.query_actions_for_operator(&query, operator),
             )),
+            ControlMessage::OpenSession(open) => {
+                self.open_remote_session(&operator.operator_id, open)
+            }
+            message @ (ControlMessage::WatchStatus(_)
+            | ControlMessage::WatchState(_)
+            | ControlMessage::WatchActions(_)
+            | ControlMessage::Ping) => {
+                self.apply_remote_session_message(&operator.operator_id, session, message)
+            }
             other => Err(NodeError::Authorization(format!(
                 "operator {} may not send {other:?}",
                 operator.operator_id

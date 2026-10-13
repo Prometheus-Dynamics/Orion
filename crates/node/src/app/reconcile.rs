@@ -118,6 +118,7 @@ impl NodeApp {
             | ControlMessage::ActionResults(_)
             | ControlMessage::ClaimNodeActions(_)
             | ControlMessage::OperatorHello
+            | ControlMessage::OpenSession(_)
             | ControlMessage::QueryOperators
             | ControlMessage::Operators(_)
             | ControlMessage::EnrollOperator(_)

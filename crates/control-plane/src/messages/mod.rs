@@ -8,6 +8,7 @@ mod metrics;
 mod mutations;
 mod operators;
 mod resource_usage;
+mod session;
 mod status;
 mod sync;
 
@@ -53,6 +54,7 @@ pub use resource_usage::{
     ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot, RegistryUsageSnapshot,
     StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot, WorkerQueueUsageSnapshot,
 };
+pub use session::{REMOTE_SESSION_PREFIX, SessionOpen, SessionWelcome};
 pub use status::{
     StatusChange, StatusEntry, StatusKey, StatusQuery, StatusSubject, StatusSubjectParseError,
 };

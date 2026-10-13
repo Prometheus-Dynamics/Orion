@@ -69,8 +69,13 @@ let done = operator.wait_for_action("reboot-42", std::time::Duration::from_secs(
 | `discovery::browse_nodes(duration, cluster)` (feature `discovery`) | mDNS browse of `_orion._tcp`; returns `DiscoveredNode { advertisement, key_fingerprint, urls, compatible }`. |
 | `RemoteError` | `Transport`, `ProtocolMismatch`, `NodeAuthentication`, `Rejected` (signed refusal; `is_not_enrolled()`), `Enrollment`, `ActionTimeout`, ... |
 
-**Watches poll.** `orion+tcp` is request/response only, so `watch_status` and `watch_actions`
-re-query every `poll_interval` (500 ms by default, `with_interval` changes it, minimum 50 ms) and
+**Push sessions.** `RemoteOperator::open_session(client_name)` opens a `RemoteSession` on a
+connection of its own; the node then pushes what the session watches as it happens, without
+polling (see "Push sessions" below). The polling watches remain for nodes before control
+protocol 5.
+
+**Watches poll.** Outside a session, `orion+tcp` is request/response only, so `watch_status` and
+`watch_actions` re-query every `poll_interval` (500 ms by default, `with_interval` changes it, minimum 50 ms) and
 yield when something changed: `RemoteStatusWatch::next` returns the full matching set when it
 differs from the previous poll, `RemoteActionWatch::next` returns the results that are new or
 changed. `wait_for_action` polls the same way. Each poll is one signed request. `call_action` does
@@ -87,7 +92,48 @@ observed slice). An action whose target another node owns is forwarded once over
 transport; that node sees `requested_by = peer:<connected node>/operator:<name>`. Observability
 is per node: connect to a node to read its own.
 
-### Status queries across nodes
+### Push sessions
+
+```rust
+let mut session = operator.open_session("atlas").await?;          // its own orion+tcp connection
+session.watch_status(StatusQuery::subject(StatusSubject::Node(node_id))).await?;
+session.watch_actions(ActionQuery::default()).await?;
+while let Some(event) = session.next_event().await {              // ClientEvent, as local streams
+    match event.event {
+        ClientEventKind::Status(change) => { /* bootstrap, then coalesced changes */ }
+        ClientEventKind::ActionResults(results) => { /* as they change */ }
+        _ => {}
+    }
+}
+```
+
+| Item | Purpose |
+| --- | --- |
+| `RemoteOperator::open_session(client_name)` | Opens the session (`OpenSession`); needs read access, or allowed actions for action results. |
+| `RemoteSession::{watch_status, watch_actions, watch_state}` | The session's watches; each kind has one query at a time, a new one replaces it. |
+| `RemoteSession::next_event` | The next pushed `ClientEvent`; `None` once the session closed. |
+| `RemoteSession::{session_id, node_id}` | Who the session is with. |
+
+How it works:
+
+- After the node answers `OpenSession`, the connection stays a session. The operator's signed
+  requests (watches, pings) are answered on it in order, and the events of its watches are
+  pushed in between as frames with status `PEER_TCP_STATUS_PUSH` (body `[seq u64 LE][rkyv
+  ControlMessage::ClientEvents]`). Each push is signed by the node as a response to the
+  session's `OpenSession` request, and its sequence number must move on, so a push can't be
+  replayed into another session or reordered.
+- On the node a session is a local client under a reserved address (`remote-session/<operator>/<n>`,
+  `REMOTE_SESSION_PREFIX`), so status bootstraps, coalescing and the bounded event queue are the
+  same as for local stream clients. Nothing on the local socket may use that prefix, and a
+  session only accepts its own operator's requests.
+- The client pings every third of the node's idle timeout (`SessionWelcome::idle_timeout_ms`,
+  30 s); a session that sends nothing for that long is closed. A closed session does not come
+  back by itself: open a new one and watch again. Dropping a `RemoteSession` closes it, and the
+  node forgets its watches.
+- Watches are refused outside a session (over the request/response connection or HTTP they
+  would have nowhere to push to).
+
+
 
 The status lane is volatile and **node-local**: entries live only on the node they were published
 on (host metrics on the node itself, provider and action keys on the node that hosts the provider).
