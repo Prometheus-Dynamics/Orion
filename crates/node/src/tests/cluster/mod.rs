@@ -21,6 +21,8 @@ mod fixtures;
 #[cfg(all(feature = "transport-http", feature = "peer-tcp"))]
 mod mixed;
 #[cfg(feature = "peer-tcp")]
+mod open_read;
+#[cfg(feature = "peer-tcp")]
 mod peer_tcp;
 #[cfg(feature = "peer-tcp")]
 mod placement;

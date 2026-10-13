@@ -58,9 +58,13 @@ impl NodeApp {
         &self,
         request: &[u8],
         session: Option<LocalAddress>,
+        remote: SocketAddr,
     ) -> (ResponseFrame, Option<String>) {
         let mut opened = None;
-        let (status, body) = match self.execute_peer_tcp_request(request, session).await {
+        let (status, body) = match self
+            .execute_peer_tcp_request(request, session, remote)
+            .await
+        {
             Ok(response) => {
                 if let HttpResponsePayload::Session(welcome) = &response {
                     opened = Some(welcome.session_id.clone());
@@ -110,15 +114,19 @@ impl NodeApp {
         &self,
         request: &[u8],
         session: Option<LocalAddress>,
+        remote: SocketAddr,
     ) -> Result<HttpResponsePayload, NodeError> {
         let payload = HttpCodec.decode_request_body(request)?;
         let wait = Self::peer_action_wait(&payload);
         let app = self.clone();
         let response = tokio::task::spawn_blocking(move || {
-            app.serve_control_request(match session {
-                Some(session) => ControlRequest::from_session_payload(payload, session),
-                None => ControlRequest::from_peer_tcp_payload(payload),
-            })
+            app.serve_control_request(
+                match session {
+                    Some(session) => ControlRequest::from_session_payload(payload, session),
+                    None => ControlRequest::from_peer_tcp_payload(payload),
+                }
+                .with_remote_addr(remote.ip()),
+            )
         })
         .await
         .map_err(|err| NodeError::Storage(format!("peer TCP request task failed: {err}")))??;
@@ -249,7 +257,7 @@ async fn serve_connection(app: NodeApp, mut stream: TcpStream, remote: SocketAdd
             }
         };
         let started = Instant::now();
-        let (response, opened) = app.serve_peer_tcp_request(&request, None).await;
+        let (response, opened) = app.serve_peer_tcp_request(&request, None, remote).await;
         let encoded = match response.encode() {
             Ok(encoded) => encoded,
             Err(err) => {

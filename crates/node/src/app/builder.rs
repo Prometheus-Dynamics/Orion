@@ -383,6 +383,9 @@ impl NodeAppBuilder {
         );
         security
             .set_operator_default_actions(config.runtime_tuning.actions.operator_actions.clone());
+        security.set_operator_open_read(config.runtime_tuning.actions.operator_open_read);
+        security
+            .set_operator_auto_enroll(config.runtime_tuning.actions.operator_auto_enroll.clone());
         let transport_security = Arc::new(NodeTransportSecurityManager::new(
             security.clone(),
             http_tls_cert_path.clone(),

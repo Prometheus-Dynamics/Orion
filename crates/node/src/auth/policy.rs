@@ -356,10 +356,27 @@ impl Authorizer for NodeSecurityAuthorizer {
             (ControlPrincipal::UnenrolledOperator { .. }, ControlOperation::OperatorHello) => {
                 Ok(())
             }
+            // What `ORION_NODE_OPERATOR_OPEN_READ` opens to operators the node has not enrolled.
             (ControlPrincipal::UnenrolledOperator { operator_id, .. }, operation) => {
-                Err(NodeError::Authorization(format!(
-                    "operator {operator_id} is not enrolled and may not perform {operation:?}"
-                )))
+                let open = self.security.operator_open_read();
+                let allowed = match operation {
+                    ControlOperation::OpenSession | ControlOperation::Ping => open.any(),
+                    ControlOperation::QueryStatus | ControlOperation::WatchStatus => open.status,
+                    ControlOperation::SubscribeStream | ControlOperation::UnsubscribeStream => {
+                        open.streams
+                    }
+                    ControlOperation::QueryStateSnapshot | ControlOperation::WatchState => {
+                        open.state
+                    }
+                    _ => false,
+                };
+                if allowed {
+                    Ok(())
+                } else {
+                    Err(NodeError::Authorization(format!(
+                        "operator {operator_id} is not enrolled and may not perform {operation:?}"
+                    )))
+                }
             }
             (_, ControlOperation::OperatorHello) => Err(NodeError::Authorization(
                 "OperatorHello needs a request signed by an `operator:<name>` principal".into(),

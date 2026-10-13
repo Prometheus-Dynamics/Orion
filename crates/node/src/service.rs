@@ -76,6 +76,8 @@ pub struct ControlRequestContext {
     /// The remote push session (its local client address) a request arrived on, for the
     /// watches and pings that only make sense inside one (`peer_tcp::session`).
     pub session: Option<LocalAddress>,
+    /// The remote end's address on the `orion+tcp` transport (for network auto-enrollment).
+    pub remote_addr: Option<std::net::IpAddr>,
 }
 
 impl ControlRequestContext {
@@ -88,6 +90,7 @@ impl ControlRequestContext {
             authenticated_peer: None,
             local_identity: None,
             session: None,
+            remote_addr: None,
         }
     }
 
@@ -123,6 +126,7 @@ impl ControlRequestContext {
             authenticated_peer: None,
             local_identity,
             session: None,
+            remote_addr: None,
         }
     }
 
@@ -241,6 +245,12 @@ impl ControlRequest {
         let mut request = Self::from_peer_tcp_payload(payload);
         request.context.session = Some(session);
         request
+    }
+
+    /// The address the request came from.
+    pub fn with_remote_addr(mut self, addr: std::net::IpAddr) -> Self {
+        self.context.remote_addr = Some(addr);
+        self
     }
 
     fn from_peer_payload(payload: HttpRequestPayload, context: ControlRequestContext) -> Self {
@@ -524,6 +534,7 @@ impl RequestService<ControlRequest> for NodeControlService {
                             &context.principal,
                             *message,
                             context.session.as_ref(),
+                            context.remote_addr,
                         )
                         .map(|response| ControlResponse::Http(Box::new(response)))
                 }

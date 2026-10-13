@@ -100,7 +100,7 @@ pub(super) async fn serve_session(
             }
         };
         let response = app
-            .serve_peer_tcp_request(&request, Some(session.clone()))
+            .serve_peer_tcp_request(&request, Some(session.clone()), remote)
             .await
             .0;
         let encoded = match response.encode() {

@@ -244,6 +244,22 @@ revokes the key (persisted): every request of that operator, including its hello
 the shared key does not enroll it again. `orionctl operators enroll` lifts the revocation.
 Enrollments and removals go to the audit log (`operator_enrolled`, `operator_removed`).
 
+### Open read and auto-enrollment
+
+Two node settings (`docs/node-env.md`) relax enrollment for trusted networks. Requests stay
+signed either way: the node still knows which key asked, and a removed operator stays removed.
+
+- `ORION_NODE_OPERATOR_OPEN_READ` (comma-separated `status`, `streams`, `state`; default
+  none) lets operators the node has not enrolled read without approval: `status` opens
+  `QueryStatus` and `WatchStatus`, `streams` opens `SubscribeStream` and `UnsubscribeStream`,
+  `state` opens `QueryStateSnapshot` and `WatchState`. Any of them also opens `OpenSession` and
+  `Ping`. Actions and administration still need enrollment.
+- `ORION_NODE_OPERATOR_AUTO_ENROLL` (`<cidr>[=<pattern>,...];...`) enrolls an unknown operator
+  whose `OperatorHello` arrives from a listed network, with read access and the rule's action
+  patterns (none: read only). The enrollment method is `Network`. IPv4-mapped IPv6 addresses
+  match IPv4 rules. Meant for a point-to-point link such as a USB gadget subnet, where being on
+  the network already means being at the device; never list a shared network.
+
 ## Authorization
 
 | Principal | May |
