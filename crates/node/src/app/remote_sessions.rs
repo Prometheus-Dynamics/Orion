@@ -94,6 +94,7 @@ impl NodeApp {
     }
 
     /// Attaches a session's connection as its client stream; pushed events go to `sender`.
+    #[cfg(feature = "peer-tcp")]
     pub(crate) fn attach_remote_session(
         &self,
         session: &LocalAddress,
@@ -105,6 +106,7 @@ impl NodeApp {
     }
 
     /// The session's connection closed: forgets the session and its watches.
+    #[cfg(feature = "peer-tcp")]
     pub(crate) fn close_remote_session(
         &self,
         session: &LocalAddress,
