@@ -422,6 +422,7 @@ pub(super) struct NodeState {
     pub(super) observed_persist: super::observed_persist::ObservedPersistState,
     pub(super) observed_watch: std::sync::Mutex<super::local_clients::ObservedWatch>,
     pub(super) status: super::status_lane::StatusLaneState,
+    pub(super) streams: super::streams::StreamsState,
     pub(super) actions: super::actions::ActionsState,
     pub(super) host_facts: super::host_facts::HostFactsState,
     pub(super) cluster: super::cluster_state::ClusterRuntimeState,

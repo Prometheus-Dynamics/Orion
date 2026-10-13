@@ -10,6 +10,7 @@ mod operators;
 mod resource_usage;
 mod session;
 mod status;
+mod streams;
 mod sync;
 
 pub use actions::{
@@ -52,11 +53,18 @@ pub use operators::{
 pub use resource_usage::{
     LocalStreamUsageSnapshot, MutationHistoryUsageSnapshot, NodeResourceUsageSnapshot,
     ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot, RegistryUsageSnapshot,
-    StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot, WorkerQueueUsageSnapshot,
+    StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot, StreamsUsageSnapshot,
+    WorkerQueueUsageSnapshot,
 };
 pub use session::{REMOTE_SESSION_PREFIX, SessionOpen, SessionWelcome};
 pub use status::{
     StatusChange, StatusEntry, StatusKey, StatusQuery, StatusSubject, StatusSubjectParseError,
+};
+pub use streams::{
+    Backfill, HistoryPolicy, MAX_STREAM_NAME_LEN, MAX_STREAM_SERIES, SampleChunk,
+    SampleChunkBuilder, SampleDecodeError, SampleValue, Sampling, SeriesDecl, SeriesKind,
+    StreamCatalog, StreamCursor, StreamData, StreamDecl, StreamDemand, StreamPublish, StreamRef,
+    StreamReset, StreamResetReason, StreamSubscription,
 };
 pub use sync::{
     DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,

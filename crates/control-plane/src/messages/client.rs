@@ -148,6 +148,14 @@ pub enum ClientEventKind {
     ActionRequest(Box<ActionRequest>),
     /// Updated action results for a `WatchActions` subscription (newest result per action).
     ActionResults(Vec<ActionResult>),
+    /// A subscribed stream's series (first, and after a reset).
+    StreamCatalog(super::streams::StreamCatalog),
+    /// Samples of a subscribed stream: its backfill or new batches.
+    StreamData(super::streams::StreamData),
+    /// A subscribed stream's cursor no longer holds; a catalog and a backfill follow.
+    StreamReset(super::streams::StreamReset),
+    /// For a stream's publisher: which of its series have subscribers.
+    StreamDemand(super::streams::StreamDemand),
 }
 
 #[derive(

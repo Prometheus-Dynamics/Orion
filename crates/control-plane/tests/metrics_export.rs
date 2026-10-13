@@ -323,5 +323,6 @@ fn sample_resource_usage() -> NodeResourceUsageSnapshot {
             dropped_total: 1,
             unauthorized_total: 0,
         },
+        streams: Default::default(),
     }
 }

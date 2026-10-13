@@ -131,6 +131,47 @@ pub(crate) fn print_peer_summary(snapshot: &PeerTrustSnapshot) {
 
 pub(crate) fn print_event_summary(event: &ClientEvent) {
     match &event.event {
+        ClientEventKind::StreamCatalog(catalog) => {
+            println!(
+                "stream seq={} {}/{} catalog epoch={} series={} live={}",
+                event.sequence,
+                catalog.stream.owner,
+                catalog.stream.id,
+                catalog.epoch,
+                catalog.series.len(),
+                catalog.live,
+            );
+        }
+        ClientEventKind::StreamData(data) => {
+            println!(
+                "stream seq={} {}/{} batch={} backfill={} samples={}",
+                event.sequence,
+                data.stream.owner,
+                data.stream.id,
+                data.cursor.seq,
+                data.backfill,
+                data.chunks
+                    .iter()
+                    .map(|chunk| u64::from(chunk.count))
+                    .sum::<u64>(),
+            );
+        }
+        ClientEventKind::StreamReset(reset) => {
+            println!(
+                "stream seq={} {}/{} reset {:?}",
+                event.sequence, reset.stream.owner, reset.stream.id, reset.reason
+            );
+        }
+        ClientEventKind::StreamDemand(demand) => {
+            println!(
+                "stream seq={} {}/{} subscribers={} series={}",
+                event.sequence,
+                demand.stream.owner,
+                demand.stream.id,
+                demand.subscribers,
+                demand.series.len()
+            );
+        }
         ClientEventKind::StateSnapshot(snapshot) => {
             println!(
                 "state seq={} desired_rev={} observed_rev={} desired_workloads={} observed_workloads={} desired_resources={} observed_resources={} desired_providers={} desired_executors={} desired_leases={} observed_leases={}",

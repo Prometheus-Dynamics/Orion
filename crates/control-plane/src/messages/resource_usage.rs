@@ -32,6 +32,7 @@ pub struct NodeResourceUsageSnapshot {
     pub registries: RegistryUsageSnapshot,
     pub observed_persistence: ObservedPersistenceUsageSnapshot,
     pub status_lane: StatusLaneUsageSnapshot,
+    pub streams: StreamsUsageSnapshot,
 }
 
 /// Process memory counters read from `/proc/self/status` and `/proc/self/smaps_rollup`.
@@ -282,4 +283,33 @@ pub struct StatusLaneUsageSnapshot {
     pub dropped_total: u64,
     /// Publish batches refused because the publisher does not own a subject.
     pub unauthorized_total: u64,
+}
+
+/// Live streams and their history (never persisted, not replicated; `docs/streams.md`).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+#[serde(default)]
+pub struct StreamsUsageSnapshot {
+    pub streams: u64,
+    pub series: u64,
+    /// Samples held in the history rings.
+    pub samples: u64,
+    /// History memory the streams were given (`ORION_NODE_STREAM_MEMORY_MAX_BYTES` caps it).
+    pub budget_bytes: u64,
+    pub max_budget_bytes: u64,
+    pub subscribers: u64,
+    pub batches_total: u64,
+    pub samples_total: u64,
+    /// Declarations and batches refused (not the owner, not the publisher).
+    pub refused_total: u64,
 }

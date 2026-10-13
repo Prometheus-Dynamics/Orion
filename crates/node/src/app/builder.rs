@@ -456,6 +456,7 @@ impl NodeAppBuilder {
             observed_watch: Default::default(),
             cluster: Default::default(),
             status: Default::default(),
+            streams: Default::default(),
             actions: super::actions::ActionsState::with_handlers(self.action_handlers),
             host_facts: super::host_facts::HostFactsState::new(host_facts_source),
             #[cfg(feature = "link-gateway")]

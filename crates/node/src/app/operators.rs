@@ -78,6 +78,8 @@ impl NodeApp {
             message @ (ControlMessage::WatchStatus(_)
             | ControlMessage::WatchState(_)
             | ControlMessage::WatchActions(_)
+            | ControlMessage::SubscribeStream(_)
+            | ControlMessage::UnsubscribeStream(_)
             | ControlMessage::Ping) => {
                 self.apply_remote_session_message(&operator.operator_id, session, message)
             }

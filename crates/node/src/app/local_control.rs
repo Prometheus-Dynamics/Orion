@@ -121,6 +121,22 @@ impl NodeApp {
             message @ (ControlMessage::QueryOperators
             | ControlMessage::EnrollOperator(_)
             | ControlMessage::RemoveOperator(_)) => self.apply_local_operator_message(message),
+            ControlMessage::DeclareStream(decl) => {
+                self.declare_stream(source, decl)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::PublishSamples(publish) => {
+                self.publish_stream_samples(source, publish)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::SubscribeStream(subscription) => {
+                self.subscribe_stream(source, subscription)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::UnsubscribeStream(stream) => {
+                self.unsubscribe_stream(source, &stream);
+                Ok(ControlMessage::Accepted)
+            }
             ControlMessage::OperatorHello | ControlMessage::OpenSession(_) => Ok(
                 ControlMessage::Rejected("only served to remote operators".into()),
             ),
@@ -544,6 +560,7 @@ impl NodeApp {
             .unwrap_or(false);
         if detached {
             self.release_action_handler(source);
+            self.forget_stream_client(source);
             self.with_observability_txn(|txn| {
                 let observability = txn.state_mut();
                 observability.client_stream_detaches_total =

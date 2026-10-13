@@ -15,7 +15,7 @@ mod state;
 
 pub use messages::{
     ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
-    ActionTargetParseError, AuditLogBackpressureMode, ClientEvent, ClientEventKind,
+    ActionTargetParseError, AuditLogBackpressureMode, Backfill, ClientEvent, ClientEventKind,
     ClientEventPoll, ClientHello, ClientRole, ClientSession, ClientSessionMetricsSnapshot,
     CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot,
     CommunicationFailureKind, CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
@@ -24,21 +24,25 @@ pub use messages::{
     DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary,
     DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState, DiscoveryMetricsSnapshot,
     DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
-    EnrollmentHello, EnrollmentRole, ExecutorStateUpdate, ExecutorWorkloadQuery,
+    EnrollmentHello, EnrollmentRole, ExecutorStateUpdate, ExecutorWorkloadQuery, HistoryPolicy,
     HostMetricsSnapshot, HttpMutualTlsMode, LatencyMetricsSnapshot, LinkStatusSnapshot,
-    LocalStreamUsageSnapshot, MaintenanceAction, MaintenanceCommand, MaintenanceMode,
-    MaintenanceState, MaintenanceStatus, MutationApplyError, MutationBatch,
-    MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus, NodeObservabilitySnapshot,
-    NodeReadinessSnapshot, NodeReadinessStatus, NodeResourceUsageSnapshot, ObservabilityEvent,
-    ObservabilityEventKind, ObservedPersistenceUsageSnapshot, ObservedStateUpdate,
-    OperationFailureCategory, OperationMetricsSnapshot, PeerEnrollment, PeerHello,
-    PeerIdentityUpdate, PeerSyncErrorKind, PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot,
-    PersistenceMetricsSnapshot, ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate,
-    REMOTE_SESSION_PREFIX, RegistryUsageSnapshot, SessionOpen, SessionWelcome, StateSectionCounts,
+    LocalStreamUsageSnapshot, MAX_STREAM_NAME_LEN, MAX_STREAM_SERIES, MaintenanceAction,
+    MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus, MutationApplyError,
+    MutationBatch, MutationHistoryUsageSnapshot, NodeHealthSnapshot, NodeHealthStatus,
+    NodeObservabilitySnapshot, NodeReadinessSnapshot, NodeReadinessStatus,
+    NodeResourceUsageSnapshot, ObservabilityEvent, ObservabilityEventKind,
+    ObservedPersistenceUsageSnapshot, ObservedStateUpdate, OperationFailureCategory,
+    OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerSyncErrorKind,
+    PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
+    ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate, REMOTE_SESSION_PREFIX,
+    RegistryUsageSnapshot, SampleChunk, SampleChunkBuilder, SampleDecodeError, SampleValue,
+    Sampling, SeriesDecl, SeriesKind, SessionOpen, SessionWelcome, StateSectionCounts,
     StateSizeSnapshot, StateSnapshot, StateWatch, StatusChange, StatusEntry, StatusKey,
-    StatusLaneUsageSnapshot, StatusQuery, StatusSubject, StatusSubjectParseError, SyncDiffRequest,
-    SyncRequest, SyncSummaryRequest, TransportMetricsSnapshot, WorkerQueueUsageSnapshot,
-    action_names, action_status_keys, update_action,
+    StatusLaneUsageSnapshot, StatusQuery, StatusSubject, StatusSubjectParseError, StreamCatalog,
+    StreamCursor, StreamData, StreamDecl, StreamDemand, StreamPublish, StreamRef, StreamReset,
+    StreamResetReason, StreamSubscription, StreamsUsageSnapshot, SyncDiffRequest, SyncRequest,
+    SyncSummaryRequest, TransportMetricsSnapshot, WorkerQueueUsageSnapshot, action_names,
+    action_status_keys, update_action,
 };
 pub use messages::{
     InvalidOperatorId, MAX_OPERATOR_ACTION_PATTERNS, MAX_OPERATOR_NAME_LEN, OPERATOR_ID_PREFIX,
@@ -301,6 +305,11 @@ mod tests {
             | ControlMessage::ReportActionResult(_)
             | ControlMessage::ActionResults(_)
             | ControlMessage::ClaimNodeActions(_)
+            | ControlMessage::OpenSession(_)
+            | ControlMessage::DeclareStream(_)
+            | ControlMessage::PublishSamples(_)
+            | ControlMessage::SubscribeStream(_)
+            | ControlMessage::UnsubscribeStream(_)
             | ControlMessage::OperatorHello
             | ControlMessage::QueryOperators
             | ControlMessage::Operators(_)

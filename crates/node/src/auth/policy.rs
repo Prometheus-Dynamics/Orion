@@ -238,7 +238,9 @@ impl NodeSecurityAuthorizer {
             | ControlOperation::QueryObservability
             | ControlOperation::QueryStatus
             | ControlOperation::WatchStatus
-            | ControlOperation::WatchState => {
+            | ControlOperation::WatchState
+            | ControlOperation::SubscribeStream
+            | ControlOperation::UnsubscribeStream => {
                 if operator.policy.read {
                     Ok(())
                 } else {
@@ -431,11 +433,16 @@ impl Authorizer for NodeSecurityAuthorizer {
             ) => self.authorize_local_role(source, ClientRole::Provider),
             (
                 ControlPrincipal::Local { .. },
-                ControlOperation::QueryStatus | ControlOperation::WatchStatus,
+                ControlOperation::QueryStatus
+                | ControlOperation::WatchStatus
+                | ControlOperation::SubscribeStream
+                | ControlOperation::UnsubscribeStream,
             ) => Ok(()),
             (
                 ControlPrincipal::Local { source, .. },
                 ControlOperation::PublishStatus
+                | ControlOperation::DeclareStream
+                | ControlOperation::PublishSamples
                 | ControlOperation::WatchActionRequests
                 | ControlOperation::ClaimNodeActions
                 | ControlOperation::ReportActionResult,

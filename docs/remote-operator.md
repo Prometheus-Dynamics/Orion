@@ -111,6 +111,7 @@ while let Some(event) = session.next_event().await {              // ClientEvent
 | --- | --- |
 | `RemoteOperator::open_session(client_name)` | Opens the session (`OpenSession`); needs read access, or allowed actions for action results. |
 | `RemoteSession::{watch_status, watch_actions, watch_state}` | The session's watches; each kind has one query at a time, a new one replaces it. |
+| `RemoteSession::{subscribe_stream, unsubscribe_stream}` | Live streams ([streams.md](streams.md)): catalog, backfill, then every batch; one subscription per stream. |
 | `RemoteSession::next_event` | The next pushed `ClientEvent`; `None` once the session closed. |
 | `RemoteSession::{session_id, node_id}` | Who the session is with. |
 

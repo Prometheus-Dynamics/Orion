@@ -279,6 +279,54 @@ pub(super) fn enqueue_action_results_event(
     );
 }
 
+/// Queued samples of one stream past which a subscriber that does not keep up gets a reset
+/// instead (it resubscribes from its cursor).
+const MAX_MERGED_STREAM_BYTES: usize = 1024 * 1024;
+
+/// Queues a stream event. Live batches of one stream (and epoch) merge into the one still
+/// queued, so a slow subscriber holds one growing event per stream rather than losing older
+/// batches to the queue limit; past [`MAX_MERGED_STREAM_BYTES`] its queued samples are dropped for
+/// a `StreamReset { reason: Overrun }`. A newer demand replaces a queued one.
+pub(super) fn enqueue_stream_event(client: &mut LocalClientState, event: ClientEventKind) {
+    match event {
+        ClientEventKind::StreamData(data) if !data.backfill => {
+            let queued = client.queued_events.iter().position(|queued| {
+                matches!(&queued.event, ClientEventKind::StreamData(q)
+                    if !q.backfill && q.stream == data.stream && q.cursor.epoch == data.cursor.epoch)
+            });
+            if let Some(position) = queued
+                && let ClientEventKind::StreamData(merged) =
+                    &mut client.queued_events[position].event
+            {
+                merged.cursor = data.cursor;
+                merged.chunks.extend(data.chunks);
+                let bytes: usize = merged.chunks.iter().map(|c| c.data.len() + 16).sum();
+                if bytes > MAX_MERGED_STREAM_BYTES {
+                    let stream = merged.stream.clone();
+                    client.queued_events.remove(position);
+                    client.dropped_events = client.dropped_events.saturating_add(1);
+                    enqueue_client_event(
+                        client,
+                        ClientEventKind::StreamReset(orion::control_plane::StreamReset {
+                            stream,
+                            reason: orion::control_plane::StreamResetReason::Overrun,
+                        }),
+                    );
+                }
+                return;
+            }
+            enqueue_client_event(client, ClientEventKind::StreamData(data));
+        }
+        ClientEventKind::StreamDemand(demand) => {
+            client.queued_events.retain(|queued| {
+                !matches!(&queued.event, ClientEventKind::StreamDemand(q) if q.stream == demand.stream)
+            });
+            enqueue_client_event(client, ClientEventKind::StreamDemand(demand));
+        }
+        other => enqueue_client_event(client, other),
+    }
+}
+
 fn enqueue_client_event(client: &mut LocalClientState, event: ClientEventKind) {
     while client.queued_events.len() >= client.max_queued_events {
         client.queued_events.pop_front();

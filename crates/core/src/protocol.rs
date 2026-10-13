@@ -42,7 +42,9 @@ use core::fmt;
 ///   `TypedConfigValue::F64` (same archived size, so the fingerprint did not move; the canonical
 ///   encoding fixture pins it).
 /// - `5`: remote push sessions (`ControlMessage::OpenSession`, `SessionOpen`, `SessionWelcome`,
-///   `HttpResponsePayload::Session`).
+///   `HttpResponsePayload::Session`); live streams (`DeclareStream`, `PublishSamples`,
+///   `SubscribeStream`, `UnsubscribeStream`, `ClientEventKind::StreamCatalog` / `StreamData` /
+///   `StreamReset` / `StreamDemand` and their types, `NodeResourceUsageSnapshot::streams`).
 pub const CONTROL_PROTOCOL_VERSION: u16 = 5;
 
 /// Fingerprint of the archived layout of the control-protocol types at
@@ -51,7 +53,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 5;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x2bb8_2e35_4c80_0c0f;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x5728_e2b0_c5a1_c4ab;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

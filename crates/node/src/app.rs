@@ -43,6 +43,7 @@ mod state_access;
 mod status_admin;
 mod status_forward;
 mod status_lane;
+mod streams;
 mod task_handle;
 mod tls_bootstrap;
 mod types;

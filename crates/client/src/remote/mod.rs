@@ -55,5 +55,9 @@ pub use orion_control_plane::{
     ClientEventKind, NodeRecord, OperatorId, OperatorTrustState, OperatorWelcome, StateWatch,
     StatusChange, StatusEntry, StatusQuery, StatusSubject,
 };
+pub use orion_control_plane::{
+    Backfill, SampleChunk, SeriesDecl, SeriesKind, StreamCatalog, StreamCursor, StreamData,
+    StreamRef, StreamReset, StreamResetReason, StreamSubscription,
+};
 pub use session::RemoteSession;
 pub use watch::{RemoteActionWatch, RemoteStatusWatch};

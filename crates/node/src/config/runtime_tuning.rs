@@ -34,6 +34,7 @@ const DEFAULT_TOMBSTONE_RETENTION_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
 const DEFAULT_CLOCK_REFRESH_MS: u64 = 10_000;
 const DEFAULT_OBSERVED_PERSIST_INTERVAL_MS: u64 = 2_000;
 const DEFAULT_STATUS_MAX_ENTRIES: usize = 4_096;
+const DEFAULT_STREAM_MEMORY_MAX_BYTES: usize = 4 * 1024 * 1024;
 const DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER: usize = 256;
 const DEFAULT_STATUS_MAX_TTL_MS: u64 = 300_000;
 const MIN_RUNTIME_TUNING_DURATION_MS: u64 = 1;
@@ -100,6 +101,9 @@ pub struct NodeRuntimeTuning {
     pub status_max_entries_per_publisher: usize,
     /// Longest time-to-live of a status entry (also the TTL of entries published with `ttl_ms = 0`).
     pub status_max_ttl: Duration,
+    /// Memory for the history of every live stream together (`docs/streams.md`); a declaration
+    /// whose history would exceed what is left keeps proportionally less.
+    pub stream_memory_max_bytes: usize,
     /// Node labels, peer liveness and placement grace (`docs/placement.md`).
     pub placement: super::placement::PlacementTuning,
     /// Host facts refresh and image files (`docs/host-facts.md`).
@@ -444,6 +448,10 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_STATUS_MAX_TTL_MS",
                 DEFAULT_STATUS_MAX_TTL_MS,
             )?,
+            stream_memory_max_bytes: parse_env_or(
+                "ORION_NODE_STREAM_MEMORY_MAX_BYTES",
+                DEFAULT_STREAM_MEMORY_MAX_BYTES,
+            )?,
             placement: super::placement::PlacementTuning::from_env()?,
             host_facts: super::host_actions::HostFactsTuning::from_env()?,
             actions: super::host_actions::ActionTuning::from_env()?,
@@ -537,6 +545,7 @@ impl Default for NodeRuntimeTuning {
             status_max_entries: DEFAULT_STATUS_MAX_ENTRIES,
             status_max_entries_per_publisher: DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER,
             status_max_ttl: Duration::from_millis(DEFAULT_STATUS_MAX_TTL_MS),
+            stream_memory_max_bytes: DEFAULT_STREAM_MEMORY_MAX_BYTES,
             placement: super::placement::PlacementTuning::default(),
             host_facts: Default::default(),
             actions: Default::default(),
@@ -683,6 +692,10 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
         (
             "ORION_NODE_STATUS_MAX_TTL_MS",
             tuning.status_max_ttl.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_STREAM_MEMORY_MAX_BYTES",
+            tuning.stream_memory_max_bytes.to_string(),
         ),
     ]
     .into_iter()

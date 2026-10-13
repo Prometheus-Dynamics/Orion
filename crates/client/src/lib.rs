@@ -31,6 +31,8 @@ mod executor;
 mod graph;
 #[cfg(feature = "ipc")]
 mod provider;
+#[cfg(feature = "ipc")]
+mod publisher;
 #[cfg(feature = "remote")]
 pub mod remote;
 mod resource;
@@ -66,6 +68,8 @@ pub use graph::{
 pub use orion_control_plane::ClientRole;
 #[cfg(feature = "ipc")]
 pub use provider::{ProviderClient, ProviderEventStream};
+#[cfg(feature = "ipc")]
+pub use publisher::StreamPublisher;
 pub use resource::{DerivedResource, ProviderResource, ResourceClaim};
 #[cfg(feature = "ipc")]
 pub use session::{

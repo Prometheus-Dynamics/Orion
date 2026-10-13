@@ -14,6 +14,7 @@ use super::mutations::MutationBatch;
 use super::operators::{OperatorEnrollment, OperatorId, OperatorsSnapshot};
 use super::session::SessionOpen;
 use super::status::{StatusEntry, StatusQuery};
+use super::streams::{StreamDecl, StreamPublish, StreamRef, StreamSubscription};
 use super::sync::{PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest, SyncSummaryRequest};
 use crate::{LeaseRecord, WorkloadRecord};
 use alloc::{boxed::Box, string::String, vec::Vec};
@@ -112,4 +113,12 @@ pub enum ControlMessage {
     /// Opens a push session on this `orion+tcp` connection (remote operators; answered with
     /// `HttpResponsePayload::Session`). See `messages::session`.
     OpenSession(SessionOpen),
+    /// Declares (or redeclares) a live stream (provider and executor clients only).
+    DeclareStream(StreamDecl),
+    /// A batch of samples for a declared stream, from its publisher.
+    PublishSamples(StreamPublish),
+    /// Subscribes the client stream (or remote session) to a stream: `StreamCatalog`, the
+    /// backfill, then `StreamData` events.
+    SubscribeStream(StreamSubscription),
+    UnsubscribeStream(StreamRef),
 }

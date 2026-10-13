@@ -18,6 +18,7 @@ use orion_auth::{
 };
 use orion_control_plane::{
     ActionQuery, ClientEvent, ControlMessage, SessionOpen, SessionWelcome, StateWatch, StatusQuery,
+    StreamRef, StreamSubscription,
 };
 use orion_core::{NodeId, decode_from_slice};
 use orion_transport_http::HttpResponsePayload;
@@ -212,6 +213,23 @@ impl RemoteSession {
     /// `include_observed`, when the observed state changes).
     pub async fn watch_state(&self, watch: StateWatch) -> Result<(), RemoteError> {
         self.accepted(ControlMessage::WatchState(watch)).await
+    }
+
+    /// Subscribes to a live stream (`docs/streams.md`): a `StreamCatalog` event, the backfill
+    /// the subscription asks for (`StreamData` with `backfill`), then a `StreamData` for every
+    /// batch. A stream not declared yet starts when its publisher declares it. Resubscribing
+    /// (for example `Backfill::Since` the last cursor after a gap) replaces the subscription.
+    pub async fn subscribe_stream(
+        &self,
+        subscription: StreamSubscription,
+    ) -> Result<(), RemoteError> {
+        self.accepted(ControlMessage::SubscribeStream(subscription))
+            .await
+    }
+
+    pub async fn unsubscribe_stream(&self, stream: StreamRef) -> Result<(), RemoteError> {
+        self.accepted(ControlMessage::UnsubscribeStream(stream))
+            .await
     }
 
     /// The next pushed event; `None` once the session has closed.

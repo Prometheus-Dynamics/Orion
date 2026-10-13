@@ -84,6 +84,8 @@ impl HttpRequestPayload {
                 | ControlMessage::WatchStatus(_)
                 | ControlMessage::WatchState(_)
                 | ControlMessage::WatchActions(_)
+                | ControlMessage::SubscribeStream(_)
+                | ControlMessage::UnsubscribeStream(_)
                 | ControlMessage::Ping => Ok(ControlRoute::Operator),
                 ControlMessage::ClientHello(_)
                 | ControlMessage::ClientWelcome(_)
@@ -124,7 +126,9 @@ impl HttpRequestPayload {
                 | ControlMessage::QueryOperators
                 | ControlMessage::Operators(_)
                 | ControlMessage::EnrollOperator(_)
-                | ControlMessage::RemoveOperator(_) => {
+                | ControlMessage::RemoveOperator(_)
+                | ControlMessage::DeclareStream(_)
+                | ControlMessage::PublishSamples(_) => {
                     Err(crate::HttpTransportError::UnsupportedControlMessage)
                 }
             },

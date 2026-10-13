@@ -30,6 +30,8 @@ mod remote_operator;
 mod remote_operator_actions;
 #[cfg(feature = "peer-tcp")]
 mod remote_session;
+#[cfg(feature = "peer-tcp")]
+mod streams;
 
 /// Delivers peer requests by calling the remote node's control pipeline directly (including
 /// peer authentication), so the sync engine runs without sockets.

@@ -285,6 +285,26 @@ impl ControlPlaneEventStream {
             .await
     }
 
+    /// Subscribes to a live stream (`docs/streams.md`): `StreamCatalog`, the backfill, then a
+    /// `StreamData` event per batch (`ClientEventKind::Stream*`).
+    pub async fn subscribe_stream(
+        &mut self,
+        subscription: orion_control_plane::StreamSubscription,
+    ) -> Result<(), ClientError> {
+        self.session
+            .subscribe_and_expect_accepted(ControlMessage::SubscribeStream(subscription))
+            .await
+    }
+
+    pub async fn unsubscribe_stream(
+        &mut self,
+        stream: orion_control_plane::StreamRef,
+    ) -> Result<(), ClientError> {
+        self.session
+            .subscribe_and_expect_accepted(ControlMessage::UnsubscribeStream(stream))
+            .await
+    }
+
     /// The node this stream is connected to.
     pub fn node_id(&self) -> &NodeId {
         self.session.node_id()
