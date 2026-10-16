@@ -11,12 +11,19 @@ pub struct LocalRuntimePublisherBuilder {
     executor: Option<orion_control_plane::ExecutorRecord>,
 }
 
+/// Publishes a provider's resources and an executor's snapshot. Each role
+/// keeps one app on the node's stream socket for the publisher's life (its
+/// clones share it): every publish reuses that session, and a session that
+/// drops reconnects on the next request, instead of a new connection and
+/// handshake per publish.
 #[derive(Clone, Debug)]
 pub struct LocalRuntimePublisher {
     runtime: LocalNodeRuntime,
     client_name: String,
     provider: Option<ProviderRecord>,
     executor: Option<orion_control_plane::ExecutorRecord>,
+    provider_app: Option<LocalProviderApp>,
+    executor_app: Option<LocalExecutorApp>,
 }
 
 impl LocalRuntimePublisherBuilder {
@@ -40,11 +47,26 @@ impl LocalRuntimePublisherBuilder {
     }
 
     pub fn build(self) -> LocalRuntimePublisher {
+        // A session app connects lazily, on its first request; building one
+        // only checks the role, so these don't fail in practice (and a
+        // publisher without one falls back to an app per call).
+        let provider_app = self.provider.clone().and_then(|provider| {
+            self.runtime
+                .provider_session(format!("{}-provider", self.client_name), provider)
+                .ok()
+        });
+        let executor_app = self.executor.clone().and_then(|executor| {
+            self.runtime
+                .executor_session(format!("{}-executor", self.client_name), executor)
+                .ok()
+        });
         LocalRuntimePublisher {
             runtime: self.runtime,
             client_name: self.client_name,
             provider: self.provider,
             executor: self.executor,
+            provider_app,
+            executor_app,
         }
     }
 }
@@ -134,15 +156,23 @@ impl LocalRuntimePublisher {
     }
 
     fn provider_app(&self, provider: ProviderRecord) -> Result<LocalProviderApp, ClientError> {
-        self.runtime
-            .provider(format!("{}-provider", self.client_name), provider)
+        match &self.provider_app {
+            Some(app) => Ok(app.clone()),
+            None => self
+                .runtime
+                .provider(format!("{}-provider", self.client_name), provider),
+        }
     }
 
     fn executor_app(
         &self,
         executor: orion_control_plane::ExecutorRecord,
     ) -> Result<LocalExecutorApp, ClientError> {
-        self.runtime
-            .executor(format!("{}-executor", self.client_name), executor)
+        match &self.executor_app {
+            Some(app) => Ok(app.clone()),
+            None => self
+                .runtime
+                .executor(format!("{}-executor", self.client_name), executor),
+        }
     }
 }
