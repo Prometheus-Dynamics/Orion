@@ -18,6 +18,29 @@ workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+# Both halves are on by default. A consumer that needs one side builds with
+# `default-features = false, features = ["client"]` (or `"server"`).
+default = ["client", "server"]
+# The client needs the WebSocket connector (`connect_async`); the server needs only the handshake.
+client = ["tokio-tungstenite/connect"]
+server = []
+
+[[example]]
+name = "nt4-dump"
+path = "examples/nt4-dump.rs"
+required-features = ["client"]
+
+[[example]]
+name = "nt4-server"
+path = "examples/nt4-server.rs"
+required-features = ["server"]
+
+[[example]]
+name = "nt4-latency"
+path = "examples/nt4-latency/main.rs"
+required-features = ["client", "server"]
+
 [dependencies]
 futures-util.workspace = true
 rmp.workspace = true

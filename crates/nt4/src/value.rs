@@ -49,7 +49,7 @@ pub enum Value {
     /// `float`
     #[serde(rename = "float")]
     Float(f32),
-    /// `string`
+    /// `string`, and `json` topics (JSON text in a string)
     #[serde(rename = "string")]
     String(String),
     /// `raw`, `msgpack`, `protobuf`, `struct:*` (opaque bytes)
@@ -150,7 +150,8 @@ impl Value {
 
 /// The binary type id for an NT4 type string, or `None` for a type this crate does not model.
 ///
-/// `msgpack`, `protobuf`, `raw` and every `struct:*` / `proto:*` type map to [`RAW`]. Type strings
+/// `json` is a string-valued type (binary type id [`STRING`]), as in WPILib. `msgpack`,
+/// `protobuf`, `raw` and every `struct:*` / `proto:*` type map to [`RAW`]. Type strings
 /// are matched exactly, so `"double[]"` is [`DOUBLE_ARRAY`].
 pub fn type_id_for_name(type_name: &str) -> Option<u8> {
     Some(match type_name {
@@ -158,7 +159,7 @@ pub fn type_id_for_name(type_name: &str) -> Option<u8> {
         "double" => DOUBLE,
         "int" => INT,
         "float" => FLOAT,
-        "string" => STRING,
+        "string" | "json" => STRING,
         "raw" | "msgpack" | "protobuf" => RAW,
         "boolean[]" => BOOLEAN_ARRAY,
         "double[]" => DOUBLE_ARRAY,
@@ -217,11 +218,14 @@ mod tests {
         assert_eq!(type_id_for_name("msgpack"), Some(RAW));
         assert_eq!(type_id_for_name("struct:Pose2d[]"), Some(RAW));
         assert_eq!(type_id_for_name("proto:frc.Foo"), Some(RAW));
-        assert_eq!(type_id_for_name("json"), None);
+        assert_eq!(type_id_for_name("json"), Some(STRING));
+        assert_eq!(type_id_for_name("jsonx"), None);
     }
 
     #[test]
     fn values_fit_their_type_names() {
+        assert!(Value::String("{}".into()).fits_type("json"));
+        assert!(!Value::Int(1).fits_type("json"));
         assert!(Value::Double(1.0).fits_type("double"));
         assert!(!Value::Double(1.0).fits_type("float"));
         assert!(Value::Raw(vec![1]).fits_type("struct:Pose2d"));

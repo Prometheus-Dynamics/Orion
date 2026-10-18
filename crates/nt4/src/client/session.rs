@@ -7,6 +7,8 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+
+use crate::mailbox::{self, CONTROL_CAPACITY, PushError};
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -44,7 +46,7 @@ struct State {
 struct SubState {
     topics: Vec<String>,
     options: SubscribeOptions,
-    events: mpsc::UnboundedSender<TopicEvent>,
+    events: mailbox::Sender<String, TopicEvent>,
 }
 
 struct Publication {
@@ -82,7 +84,7 @@ enum Outbound {
 pub(crate) async fn run(
     config: ClientConfig,
     shared: Arc<Shared>,
-    mut commands: mpsc::UnboundedReceiver<Command>,
+    mut commands: mailbox::Receiver<u32, Command>,
     events: mpsc::UnboundedSender<ClientEvent>,
 ) {
     let mut state = State::default();
@@ -152,7 +154,7 @@ async fn connect(config: &ClientConfig) -> Result<Socket> {
 async fn serve(
     mut socket: Socket,
     state: &mut State,
-    commands: &mut mpsc::UnboundedReceiver<Command>,
+    commands: &mut mailbox::Receiver<u32, Command>,
     events: &mpsc::UnboundedSender<ClientEvent>,
     shared: &Shared,
 ) -> Outcome {
@@ -361,13 +363,14 @@ fn on_text(
                     properties,
                     pubuid,
                 };
-                route(state, &name, TopicEvent::Announced(info), false);
+                route(state, events, &name, TopicEvent::Announced(info), false);
             }
             Ok(Control::Unannounce(p)) => {
                 link.ids.remove(&p.id);
                 link.own.remove(&p.id);
                 route(
                     state,
+                    events,
                     &p.name,
                     TopicEvent::Unannounced {
                         id: p.id,
@@ -380,6 +383,7 @@ fn on_text(
                 let name = p.name.clone();
                 route(
                     state,
+                    events,
                     &name,
                     TopicEvent::PropertiesChanged {
                         name: p.name,
@@ -438,7 +442,7 @@ fn on_frame(
                 timestamp_us: frame.timestamp_us,
                 value: frame.value,
             };
-            route(state, &name, event, own);
+            route(state, events, &name, event, own);
         }
         None => {
             let _ = events.send(ClientEvent::ProtocolWarning(format!(
@@ -480,8 +484,19 @@ fn on_pong(
 /// Delivers a topic event to every subscription whose names or prefixes match `name`. `own` marks
 /// the client's own values (echoes), which only `all` subscriptions receive. Subscriptions whose stream was
 /// dropped are removed.
-fn route(state: &mut State, name: &str, event: TopicEvent, own: bool) {
+fn route(
+    state: &mut State,
+    events: &mpsc::UnboundedSender<ClientEvent>,
+    name: &str,
+    event: TopicEvent,
+    own: bool,
+) {
     let mut dead = Vec::new();
+    let key = match &event {
+        TopicEvent::Value { name, .. } => Some(name.clone()),
+        _ => None,
+    };
+    let unannounced = matches!(event, TopicEvent::Unannounced { .. });
     for (&subuid, sub) in &state.subs {
         if own && !sub.options.all {
             continue;
@@ -489,8 +504,20 @@ fn route(state: &mut State, name: &str, event: TopicEvent, own: bool) {
         if !name_matches(&sub.topics, sub.options.prefix, name) {
             continue;
         }
-        if sub.events.send(event.clone()).is_err() {
-            dead.push(subuid);
+        if unannounced {
+            // A value still queued for a topic that went away must not be delivered after it.
+            sub.events.purge(&name.to_owned());
+        }
+        match sub.events.push(event.clone(), key.clone()) {
+            Ok(()) => {}
+            Err(PushError::Closed(_)) => dead.push(subuid),
+            Err(PushError::Full(_)) => {
+                sub.events.abort();
+                let _ = events.send(ClientEvent::ProtocolWarning(format!(
+                    "subscription {subuid} fell more than {CONTROL_CAPACITY} events behind; closed"
+                )));
+                dead.push(subuid);
+            }
         }
     }
     for subuid in dead {

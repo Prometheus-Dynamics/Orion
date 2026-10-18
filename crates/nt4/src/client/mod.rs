@@ -34,6 +34,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
+use crate::mailbox::{self, CONTROL_CAPACITY, PushError};
+
 use crate::DEFAULT_PORT;
 use crate::error::{Error, Result};
 use crate::message::{Properties, SubscribeOptions};
@@ -102,7 +104,7 @@ pub(crate) enum Command {
         subuid: u32,
         topics: Vec<String>,
         options: SubscribeOptions,
-        events: mpsc::UnboundedSender<TopicEvent>,
+        events: mailbox::Sender<String, TopicEvent>,
     },
     Unsubscribe {
         subuid: u32,
@@ -153,7 +155,7 @@ impl Client {
     /// background and is retried until the client (and every handle) is dropped.
     pub fn start(config: ClientConfig) -> Self {
         let shared = Arc::new(Shared::default());
-        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mailbox::channel(CONTROL_CAPACITY);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         tokio::spawn(session::run(config, Arc::clone(&shared), cmd_rx, event_tx));
         Self {
@@ -182,7 +184,7 @@ impl Client {
 /// sent after the next connect. Cheap to clone; all clones share one connection.
 #[derive(Clone, Debug)]
 pub struct ClientHandle {
-    tx: mpsc::UnboundedSender<Command>,
+    tx: mailbox::Sender<u32, Command>,
     shared: Arc<Shared>,
 }
 
@@ -191,7 +193,7 @@ impl ClientHandle {
     /// their announces, values and property changes. Dropping the stream unsubscribes.
     pub fn subscribe(&self, topics: &[&str], options: SubscribeOptions) -> Result<Subscription> {
         let subuid = self.shared.next_subuid.fetch_add(1, Ordering::Relaxed) + 1;
-        let (events_tx, events_rx) = mpsc::unbounded_channel();
+        let (events_tx, events_rx) = mailbox::channel(CONTROL_CAPACITY);
         let topics = topics.iter().map(|t| (*t).to_owned()).collect();
         self.send(Command::Subscribe {
             subuid,
@@ -253,7 +255,16 @@ impl ClientHandle {
     }
 
     pub(crate) fn send(&self, command: Command) -> Result<()> {
-        self.tx.send(command).map_err(|_| Error::Closed)
+        let key = match &command {
+            Command::Set { pubuid, .. } => Some(*pubuid),
+            _ => None,
+        };
+        self.tx.push(command, key).map_err(|e| match e {
+            PushError::Closed(_) => Error::Closed,
+            PushError::Full(_) => {
+                Error::Io(std::io::Error::other("NT4 client command backlog is full"))
+            }
+        })
     }
 }
 
@@ -299,6 +310,7 @@ impl Publisher {
 
     /// Stops publishing the topic.
     pub fn unpublish(&self) -> Result<()> {
+        self.handle.tx.purge(&self.pubuid);
         self.handle.send(Command::Unpublish {
             pubuid: self.pubuid,
         })

@@ -1,6 +1,6 @@
 //! Per-subscription streams: the typed topic events a subscription receives.
 
-use tokio::sync::mpsc;
+use crate::mailbox;
 
 use super::ClientHandle;
 use crate::message::Properties;
@@ -58,14 +58,14 @@ pub enum TopicEvent {
 pub struct Subscription {
     handle: ClientHandle,
     subuid: u32,
-    events: mpsc::UnboundedReceiver<TopicEvent>,
+    events: mailbox::Receiver<String, TopicEvent>,
 }
 
 impl Subscription {
     pub(crate) fn new(
         handle: ClientHandle,
         subuid: u32,
-        events: mpsc::UnboundedReceiver<TopicEvent>,
+        events: mailbox::Receiver<String, TopicEvent>,
     ) -> Self {
         Self {
             handle,

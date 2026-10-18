@@ -1,5 +1,6 @@
 //! The optional persistence file: JSON with every topic that has the `persistent` property.
 
+use std::io::Write;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -40,12 +41,28 @@ pub(super) fn load(path: &Path) -> Result<Vec<Entry>> {
     }
 }
 
-/// Writes the file atomically (temporary file, then rename).
-pub(super) fn save(path: &Path, entries: &[Entry]) -> Result<()> {
+/// The file contents: compact JSON.
+pub(super) fn encode(entries: &[Entry]) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(&FileRef { topics: entries })?)
+}
+
+/// Writes the file atomically: a temporary file is synced to disk, renamed over the target, and
+/// the directory is synced so the rename itself survives a crash.
+pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    let bytes = serde_json::to_vec_pretty(&FileRef { topics: entries })?;
-    std::fs::write(&tmp, bytes)?;
+    let tmp = std::path::PathBuf::from(tmp);
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
     std::fs::rename(&tmp, path)?;
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty())
+        && let Ok(dir) = std::fs::File::open(dir)
+    {
+        // Not every platform can sync a directory; the file itself is already synced.
+        let _ = dir.sync_all();
+    }
     Ok(())
 }

@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -17,6 +16,7 @@ use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
 use super::state::{Outgoing, State, Sub};
 use crate::codec::{Frame, decode_frames};
 use crate::error::{Error, Result};
+use crate::mailbox::{self, CONTROL_CAPACITY};
 use crate::message::{Control, parse_text};
 use crate::{SUBPROTOCOL_V4_0, SUBPROTOCOL_V4_1};
 
@@ -84,7 +84,7 @@ async fn serve(stream: TcpStream, state: std::sync::Arc<Mutex<State>>) -> Result
     let callback = |req: &Request, response: Response| handshake(req, response, &mut name);
     let mut socket = accept_hdr_async(stream, callback).await?;
 
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mailbox::channel(CONTROL_CAPACITY);
     let client = lock(&state).add_client(name, tx);
     loop {
         tokio::select! {
@@ -96,10 +96,8 @@ async fn serve(stream: TcpStream, state: std::sync::Arc<Mutex<State>>) -> Result
             },
             outgoing = rx.recv() => {
                 let sent = match outgoing {
-                    Some(Outgoing::Text(text)) => socket.send(Message::Text(text.into())).await,
-                    Some(Outgoing::Binary(bytes)) => {
-                        socket.send(Message::Binary(bytes.to_vec().into())).await
-                    }
+                    Some(Outgoing::Text(text)) => socket.send(Message::Text(text)).await,
+                    Some(Outgoing::Binary(bytes)) => socket.send(Message::Binary(bytes)).await,
                     None => break,
                 };
                 if sent.is_err() {

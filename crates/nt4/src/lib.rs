@@ -13,14 +13,18 @@
 //! * [`Value`]: every NT4 value type; topic type strings map to ids with [`type_id_for_name`], and
 //!   the numeric type ids live in [`value`].
 
+#[cfg(feature = "client")]
 mod client;
 mod codec;
 mod error;
+mod mailbox;
 mod message;
+#[cfg(feature = "server")]
 mod server;
 mod time;
 pub mod value;
 
+#[cfg(feature = "client")]
 pub use client::{
     Client, ClientConfig, ClientEvent, ClientHandle, Publisher, Subscription, TopicEvent, TopicInfo,
 };
@@ -29,6 +33,7 @@ pub use codec::{
 };
 pub use error::{Error, Result};
 pub use message::{Control, Properties, SubscribeOptions};
+#[cfg(feature = "server")]
 pub use server::{
     ClientInfo, Server, ServerConfig, ServerEvent, ServerHandle, TopicOwner, TopicSnapshot,
 };

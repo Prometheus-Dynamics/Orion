@@ -159,6 +159,8 @@ pub fn parse_text(text: &str) -> Result<Vec<std::result::Result<Control, String>
 }
 
 /// Serializes control messages as one text frame (a JSON array).
+// Only the client sends control messages; the server builds its frames with `serde_json` directly.
+#[cfg_attr(not(feature = "client"), allow(dead_code))]
 pub fn encode_text(messages: &[Control]) -> Result<String> {
     Ok(serde_json::to_string(messages)?)
 }

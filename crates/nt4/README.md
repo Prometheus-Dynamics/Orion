@@ -14,6 +14,14 @@ needs only Tokio, a WebSocket client and server (`tokio-tungstenite`, no TLS), `
 MessagePack, and serde_json. There is no `unsafe` code and no C dependency, so it cross-compiles
 for `aarch64-unknown-linux-musl` and other musl targets.
 
+Cargo features: `client` and `server`, both on by default. A consumer that needs one role builds
+with `default-features = false, features = ["client"]` (or `"server"`) and gets only that half.
+
+Flow control: a subscriber that falls behind keeps only the latest value per topic, while
+announces and property changes are never dropped. A server client whose control backlog overflows
+is disconnected. The persistence file is rewritten at most about once a second (compact JSON,
+fsynced, atomic rename) and flushed when the server is dropped.
+
 ## Usage
 
 Client, subscribing by prefix and publishing one topic:

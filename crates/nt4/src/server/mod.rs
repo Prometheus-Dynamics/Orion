@@ -19,7 +19,8 @@ mod state;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -31,13 +32,18 @@ use crate::time::now_micros;
 use crate::value::Value;
 use state::{Owner, State};
 
+/// How long a change to a persistent topic may wait before the file is rewritten. A burst of
+/// changes inside one window costs one write.
+const PERSIST_DEBOUNCE: Duration = Duration::from_secs(1);
+
 /// Where the server listens and whether it persists.
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
     /// Listen address. The default is `0.0.0.0:5810`.
     pub bind: SocketAddr,
-    /// JSON file holding every `persistent` topic. Off by default; written on each change to such
-    /// a topic and restored on start.
+    /// JSON file holding every `persistent` topic. Off by default. Changes to such a topic are
+    /// written (compact JSON, synced to disk) within about a second, and any pending change is
+    /// written when the [`Server`] is dropped. Restored on start.
     pub persist_path: Option<PathBuf>,
 }
 
@@ -55,6 +61,9 @@ pub struct Server {
     handle: ServerHandle,
     local_addr: SocketAddr,
     task: JoinHandle<()>,
+    persister: Option<JoinHandle<()>>,
+    /// Serialises file writes between the persister and the drop-time flush.
+    writes: Arc<Mutex<()>>,
 }
 
 impl Server {
@@ -65,12 +74,18 @@ impl Server {
         state.load_persisted()?;
         let listener = TcpListener::bind(config.bind).await?;
         let local_addr = listener.local_addr()?;
+        let persist_enabled = config.persist_path.is_some();
         let inner = Arc::new(Mutex::new(state));
+        let writes = Arc::new(Mutex::new(()));
         let task = tokio::spawn(conn::accept_loop(listener, Arc::clone(&inner)));
+        let persister = persist_enabled
+            .then(|| tokio::spawn(persist_loop(Arc::clone(&inner), Arc::clone(&writes))));
         Ok(Self {
             handle: ServerHandle { inner },
             local_addr,
             task,
+            persister,
+            writes,
         })
     }
 
@@ -88,6 +103,44 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         self.task.abort();
+        if let Some(persister) = &self.persister {
+            persister.abort();
+        }
+        // Flush a change the persister has not written yet. The state lock is released before the
+        // write gate is taken, as in the persister, so the two never wait on each other.
+        let job = conn::lock(&self.handle.inner).take_persist_job();
+        if let Some((path, bytes)) = job {
+            let _gate = self.writes.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Err(e) = persist::write_atomic(&path, &bytes) {
+                conn::lock(&self.handle.inner).persist_failed(e.to_string());
+            }
+        }
+    }
+}
+
+/// Rewrites the persistence file once per [`PERSIST_DEBOUNCE`] while a change is pending.
+async fn persist_loop(inner: Arc<Mutex<State>>, writes: Arc<Mutex<()>>) {
+    let mut ticker = tokio::time::interval(PERSIST_DEBOUNCE);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        let Some((path, bytes)) = conn::lock(&inner).take_persist_job() else {
+            continue;
+        };
+        let gate = Arc::clone(&writes);
+        let result = tokio::task::spawn_blocking(move || {
+            let _gate = gate.lock().unwrap_or_else(PoisonError::into_inner);
+            persist::write_atomic(&path, &bytes)
+        })
+        .await;
+        let failure = match result {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(e.to_string()),
+            Err(e) => Some(e.to_string()),
+        };
+        if let Some(message) = failure {
+            conn::lock(&inner).persist_failed(message);
+        }
     }
 }
 

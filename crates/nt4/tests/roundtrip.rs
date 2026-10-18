@@ -1,5 +1,7 @@
 //! In-process round trips: a real server on a loopback port, real clients over WebSocket.
 
+#![cfg(all(feature = "client", feature = "server"))]
+
 use std::time::Duration;
 
 use orion_nt4::{

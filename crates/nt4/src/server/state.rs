@@ -1,16 +1,23 @@
 //! The server's topic table, client table and fan-out rules. Every method runs under the
 //! server mutex, so each change and the messages that announce it are ordered consistently.
+//!
+//! Each client has one outbox ([`crate::mailbox`]). Control messages (announce, unannounce,
+//! properties, RTT replies) are queued in order and never dropped; a client whose control backlog
+//! overflows is disconnected. Values are keyed by topic id, so a client that is behind keeps only
+//! the latest value per topic. Frames and text are shared (`Bytes` / `Utf8Bytes`), so fan-out to
+//! N clients is N reference-count bumps.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
+use tokio_tungstenite::tungstenite::{Bytes, Utf8Bytes};
 
 use super::persist;
 use super::{ClientInfo, ServerEvent, TopicOwner, TopicSnapshot};
 use crate::codec::encode_frame;
 use crate::error::{Error, Result};
+use crate::mailbox::{self, CONTROL_CAPACITY, PushError};
 use crate::message::{
     AnnounceParams, Control, Properties, PropertiesParams, SubscribeOptions, UnannounceParams,
     name_matches,
@@ -18,12 +25,15 @@ use crate::message::{
 use crate::time::now_micros;
 use crate::value::{Value, type_id_for_name};
 
-/// A message queued for one client's connection task.
-#[derive(Debug)]
+/// A message queued for one client's connection task. Cloning is a reference-count bump.
+#[derive(Clone, Debug)]
 pub(super) enum Outgoing {
-    Text(String),
-    Binary(Arc<[u8]>),
+    Text(Utf8Bytes),
+    Binary(Bytes),
 }
+
+/// The sending half of one client's outbox. Values are keyed by topic id.
+pub(super) type Outbox = mailbox::Sender<i32, Outgoing>;
 
 /// Who owns a topic's values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +64,7 @@ pub(super) struct Sub {
 
 pub(super) struct ClientEntry {
     pub name: String,
-    pub tx: mpsc::UnboundedSender<Outgoing>,
+    pub tx: Outbox,
     pub subs: BTreeMap<u32, Sub>,
     /// Publisher uid -> topic name.
     pub pubs: HashMap<u32, String>,
@@ -69,6 +79,8 @@ pub(super) struct State {
     pub clients: BTreeMap<u64, ClientEntry>,
     next_client: u64,
     persist_path: Option<PathBuf>,
+    /// A persistent topic changed since the last write. Cleared when the writer takes the job.
+    persist_dirty: bool,
     events: broadcast::Sender<ServerEvent>,
 }
 
@@ -97,6 +109,7 @@ impl State {
             clients: BTreeMap::new(),
             next_client: 1,
             persist_path,
+            persist_dirty: false,
             events,
         }
     }
@@ -158,7 +171,7 @@ impl State {
         id
     }
 
-    pub fn add_client(&mut self, name: String, tx: mpsc::UnboundedSender<Outgoing>) -> u64 {
+    pub fn add_client(&mut self, name: String, tx: Outbox) -> u64 {
         let id = self.next_client;
         self.next_client += 1;
         self.clients.insert(
@@ -175,11 +188,13 @@ impl State {
         id
     }
 
-    /// Drops a client. Topics it published are unpublished (kept only if retained or persistent).
+    /// Drops a client and aborts its outbox. Topics it published are unpublished (kept only if
+    /// retained or persistent).
     pub fn remove_client(&mut self, id: u64) {
         let Some(client) = self.clients.remove(&id) else {
             return;
         };
+        client.tx.abort();
         let owned: Vec<String> = self
             .topics
             .iter()
@@ -191,6 +206,27 @@ impl State {
         }
         let name = client.name;
         self.emit(|| ServerEvent::ClientDisconnected { id, name });
+    }
+
+    /// Queues a message for one client. A keyed value never fails; a control message fails only
+    /// when the client's backlog is full, and then the client is disconnected, because a control
+    /// message cannot be dropped without desynchronising its topic table.
+    fn queue(&mut self, client: u64, item: Outgoing, key: Option<i32>) {
+        let Some(entry) = self.clients.get(&client) else {
+            return;
+        };
+        match entry.tx.push(item, key) {
+            Ok(()) | Err(PushError::Closed(_)) => {}
+            Err(PushError::Full(_)) => {
+                self.warn(
+                    Some(client),
+                    format!(
+                        "client fell more than {CONTROL_CAPACITY} control messages behind; disconnected"
+                    ),
+                );
+                self.remove_client(client);
+            }
+        }
     }
 
     /// Creates or takes over a topic. Clients that knew the old definition get a fresh announce.
@@ -338,15 +374,18 @@ impl State {
                 .ok_or_else(|| Error::UnknownTopic(name.into()))?;
             (topic.id, topic.owner, flag(&topic.properties, "persistent"))
         };
-        let bytes: Arc<[u8]> = encode_frame(id, timestamp_us, &value)?.into();
-        for (&cid, client) in &self.clients {
-            if !client.announced.contains(&id) {
-                continue;
-            }
-            let is_owner = matches!(owner, Owner::Client { id: o, .. } if o == cid);
-            if wants_values(client, name, is_owner) {
-                let _ = client.tx.send(Outgoing::Binary(Arc::clone(&bytes)));
-            }
+        let frame = Bytes::from(encode_frame(id, timestamp_us, &value)?);
+        let targets: Vec<u64> = self
+            .clients
+            .iter()
+            .filter(|(cid, client)| {
+                let is_owner = matches!(owner, Owner::Client { id: o, .. } if o == **cid);
+                client.announced.contains(&id) && wants_values(client, name, is_owner)
+            })
+            .map(|(cid, _)| *cid)
+            .collect();
+        for cid in targets {
+            self.queue(cid, Outgoing::Binary(frame.clone()), Some(id));
         }
         self.emit(|| ServerEvent::ValueChanged {
             name: name.to_owned(),
@@ -381,11 +420,9 @@ impl State {
             name: name.to_owned(),
             update: update.clone(),
         });
-        let text = json(&message)?;
-        for client in self.clients.values() {
-            if client.announced.contains(&id) {
-                let _ = client.tx.send(Outgoing::Text(text.clone()));
-            }
+        let text = Utf8Bytes::from(json(&message)?);
+        for cid in self.announced_clients(id) {
+            self.queue(cid, Outgoing::Text(text.clone()), None);
         }
         self.emit(|| ServerEvent::PropertiesChanged {
             name: name.to_owned(),
@@ -419,16 +456,18 @@ impl State {
     }
 
     /// Sends a client a binary RTT reply (`[-1, now, int, client_time]`).
-    pub fn reply_rtt(&self, client: u64, value: &Value) -> Result<()> {
-        let bytes: Arc<[u8]> = encode_frame(-1, now_micros(), value)?.into();
-        self.send_binary(client, bytes);
+    pub fn reply_rtt(&mut self, client: u64, value: &Value) -> Result<()> {
+        let frame = Bytes::from(encode_frame(-1, now_micros(), value)?);
+        self.queue(client, Outgoing::Binary(frame), None);
         Ok(())
     }
 
-    fn send_binary(&self, client: u64, bytes: Arc<[u8]>) {
-        if let Some(entry) = self.clients.get(&client) {
-            let _ = entry.tx.send(Outgoing::Binary(bytes));
-        }
+    fn announced_clients(&self, id: i32) -> Vec<u64> {
+        self.clients
+            .iter()
+            .filter(|(_, c)| c.announced.contains(&id))
+            .map(|(cid, _)| *cid)
+            .collect()
     }
 
     fn announce_all(&mut self, name: &str) {
@@ -462,7 +501,7 @@ impl State {
         });
         entry.announced.insert(topic.id);
         if let Ok(text) = json(&message) {
-            let _ = entry.tx.send(Outgoing::Text(text));
+            self.queue(client, Outgoing::Text(Utf8Bytes::from(text)), None);
         }
     }
 
@@ -475,15 +514,25 @@ impl State {
             id,
         });
         let Ok(text) = json(&message) else { return };
-        for entry in self.clients.values_mut() {
-            if entry.announced.remove(&id) {
-                let _ = entry.tx.send(Outgoing::Text(text.clone()));
-            }
+        let text = Utf8Bytes::from(text);
+        // A value still queued for this id must not follow its unannounce.
+        let targets: Vec<u64> = self
+            .clients
+            .iter_mut()
+            .filter_map(|(cid, entry)| {
+                entry.announced.remove(&id).then(|| {
+                    entry.tx.purge(&id);
+                    *cid
+                })
+            })
+            .collect();
+        for cid in targets {
+            self.queue(cid, Outgoing::Text(text.clone()), None);
         }
     }
 
     /// The current value to a client that just subscribed (late joiners get the last value).
-    fn send_current(&self, client: u64, name: &str) {
+    fn send_current(&mut self, client: u64, name: &str) {
         let Some(topic) = self.topics.get(name) else {
             return;
         };
@@ -497,8 +546,9 @@ impl State {
         if !entry.announced.contains(&topic.id) || !wants_values(entry, name, is_owner) {
             return;
         }
-        if let Ok(bytes) = encode_frame(topic.id, *timestamp_us, value) {
-            self.send_binary(client, Arc::from(bytes));
+        let id = topic.id;
+        if let Ok(frame) = encode_frame(id, *timestamp_us, value) {
+            self.queue(client, Outgoing::Binary(Bytes::from(frame)), Some(id));
         }
     }
 
@@ -534,11 +584,22 @@ impl State {
         self.emit(|| ServerEvent::ProtocolWarning { client, message });
     }
 
-    /// Writes every persistent topic to the persistence file, if one is configured.
-    pub fn persist(&self) {
-        let Some(path) = &self.persist_path else {
-            return;
-        };
+    /// Marks the persistence file stale. The writer task rewrites it within about a second, so a
+    /// burst of changes costs one write.
+    fn persist(&mut self) {
+        if self.persist_path.is_some() {
+            self.persist_dirty = true;
+        }
+    }
+
+    /// Takes the pending write: the file path and the compact JSON to write there. `None` when
+    /// nothing changed since the last write.
+    pub fn take_persist_job(&mut self) -> Option<(PathBuf, Vec<u8>)> {
+        if !self.persist_dirty {
+            return None;
+        }
+        let path = self.persist_path.clone()?;
+        self.persist_dirty = false;
         let entries: Vec<persist::Entry> = self
             .topics
             .iter()
@@ -550,11 +611,19 @@ impl State {
                 value: t.value.as_ref().map(|(_, v)| v.clone()),
             })
             .collect();
-        if let Err(e) = persist::save(path, &entries) {
-            self.emit(|| ServerEvent::PersistFailed {
-                message: e.to_string(),
-            });
+        match persist::encode(&entries) {
+            Ok(bytes) => Some((path, bytes)),
+            Err(e) => {
+                self.persist_failed(e.to_string());
+                None
+            }
         }
+    }
+
+    /// A write failed: retry on the next tick and tell the host.
+    pub fn persist_failed(&mut self, message: String) {
+        self.persist_dirty = true;
+        self.emit(|| ServerEvent::PersistFailed { message });
     }
 }
 
