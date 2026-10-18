@@ -26,7 +26,6 @@ use orion::{
         PeerEnrollment, ProviderRecord, ProviderStateUpdate, ResourceCapability, ResourceRecord,
         TypedConfigValue, WorkloadConfig, WorkloadObservedState, WorkloadRecord,
     },
-    encode_to_vec,
     runtime::{
         ExecutorCommand, ExecutorIntegration, ExecutorSnapshot, ProviderIntegration,
         ProviderSnapshot,
@@ -43,8 +42,6 @@ use orion::{
 use orion::{ProtocolVersion, ResourceId};
 use rcgen::generate_simple_self_signed;
 use serde::Deserialize;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::Duration;
 use std::{fs, path::PathBuf};
@@ -68,10 +65,7 @@ fn desired_content(
 }
 
 fn entry_fingerprint<T: orion::ArchiveEncode>(value: &T) -> u64 {
-    let bytes = encode_to_vec(value).expect("value should encode");
-    let mut hasher = DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    hasher.finish()
+    crate::app::desired_entry_fingerprint(value).expect("value should encode")
 }
 
 fn peer_control_message(payload: HttpRequestPayload) -> Result<ControlMessage, HttpTransportError> {

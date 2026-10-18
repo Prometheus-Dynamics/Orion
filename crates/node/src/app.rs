@@ -66,6 +66,8 @@ use crate::transport_security::{
     ManagedTransportProtocol, NodeTransportSecurityManager,
 };
 pub(crate) use actions::ActionOrigin;
+#[cfg(test)]
+pub(crate) use desired_state::entry_fingerprint as desired_entry_fingerprint;
 pub(crate) use desired_sync::section_fingerprints as desired_section_fingerprints;
 use local_clients::{ClientRegistryTxn, LocalClientState};
 #[cfg(any(test, net_transport))]
@@ -110,7 +112,6 @@ use orion_core::PeerBaseUrl;
 use state_access::NodeState;
 use std::{
     collections::BTreeMap,
-    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,

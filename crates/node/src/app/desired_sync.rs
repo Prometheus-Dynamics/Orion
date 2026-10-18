@@ -4,7 +4,7 @@
 //! [`DesiredClusterState::apply_stamped`] applies, so the initiator of a sync round can split the
 //! differing objects into the ones it pushes and the ones it pulls. See `docs/peer-sync.md`.
 
-use super::desired_state::{entry_fingerprint, summarize_section};
+use super::desired_state::{entry_fingerprint, stable_hash64, summarize_section};
 use super::*;
 use orion::{HlcTimestamp, control_plane::DesiredObjectKey};
 
@@ -54,11 +54,11 @@ pub(crate) fn section_fingerprints(
         BTreeMap<K, V>: ArchiveEncode,
         BTreeMap<K, HlcTimestamp>: ArchiveEncode,
     {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        entry_fingerprint(records)?.hash(&mut hasher);
-        entry_fingerprint(stamps)?.hash(&mut hasher);
-        entry_fingerprint(tombstones)?.hash(&mut hasher);
-        Ok(hasher.finish())
+        let mut bytes = [0u8; 24];
+        bytes[..8].copy_from_slice(&entry_fingerprint(records)?.to_le_bytes());
+        bytes[8..16].copy_from_slice(&entry_fingerprint(stamps)?.to_le_bytes());
+        bytes[16..].copy_from_slice(&entry_fingerprint(tombstones)?.to_le_bytes());
+        Ok(stable_hash64(&bytes))
     }
     let (stamps, tombstones) = (&desired.stamps, &desired.tombstones);
     Ok(DesiredStateSectionFingerprints {

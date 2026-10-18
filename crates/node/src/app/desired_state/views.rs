@@ -11,10 +11,24 @@ use orion::{
     },
     encode_to_vec,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    hash::{Hash, Hasher},
-};
+use std::collections::{BTreeMap, BTreeSet};
+
+const FNV1A64_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV1A64_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// FNV-1a 64 over `bytes`.
+///
+/// Fingerprints from this function are persisted in the snapshot manifest and compared with
+/// fingerprints from peers, so they must not depend on the Rust release or the build. `DefaultHasher`
+/// makes no such promise (its algorithm may change between releases), so it is not used for them.
+pub(crate) fn stable_hash64(bytes: &[u8]) -> u64 {
+    let mut hash = FNV1A64_OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV1A64_PRIME);
+    }
+    hash
+}
 
 impl NodeApp {
     pub(crate) fn invalidate_desired_metadata_cache(&self) {
@@ -136,16 +150,13 @@ impl NodeApp {
 pub(crate) fn desired_fingerprint(desired: &DesiredClusterState) -> Result<u64, NodeError> {
     let bytes = encode_to_vec(&section_fingerprints(desired)?)
         .map_err(|err| NodeError::Storage(err.to_string()))?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Ok(hasher.finish())
+    Ok(stable_hash64(&bytes))
 }
 
+/// Stable fingerprint of one archived record (see [`stable_hash64`]).
 pub(crate) fn entry_fingerprint<T: ArchiveEncode>(value: &T) -> Result<u64, NodeError> {
     let bytes = encode_to_vec(value).map_err(|err| NodeError::Storage(err.to_string()))?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Ok(hasher.finish())
+    Ok(stable_hash64(&bytes))
 }
 
 pub(crate) fn summarize_section<K, V>(
@@ -418,5 +429,14 @@ mod tests {
         assert!(target.workloads.is_empty());
         assert!(target.resources.is_empty());
         assert!(target.leases.is_empty());
+    }
+
+    // Reference values of FNV-1a 64. A change here changes persisted and peer-exchanged
+    // fingerprints, which is a wire and on-disk compatibility break.
+    #[test]
+    fn stable_hash64_matches_fnv1a_reference_values() {
+        assert_eq!(super::stable_hash64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(super::stable_hash64(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(super::stable_hash64(b"foobar"), 0x8594_4171_f739_67e8);
     }
 }

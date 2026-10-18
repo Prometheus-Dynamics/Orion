@@ -13,7 +13,7 @@ use orion::{
 };
 pub(crate) use views::{
     diff_desired_cluster_state, entry_fingerprint, merge_observed_state, merge_peer_observed_state,
-    summarize_section,
+    stable_hash64, summarize_section,
 };
 
 /// One desired-state transaction. Holds the store, mutation history, history baseline and clock
