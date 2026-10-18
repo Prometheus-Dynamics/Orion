@@ -138,7 +138,10 @@ async fn subscribed_node() -> (OperatorNode, RemoteSession) {
         OperatorPolicy::default(),
     )
     .await;
-    let session = operator.open_session("operator-console").await.expect("session opens");
+    let session = operator
+        .open_session("operator-console")
+        .await
+        .expect("session opens");
     (node, session)
 }
 

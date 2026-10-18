@@ -31,7 +31,10 @@ async fn a_session_pushes_status_changes_as_they_happen() {
     let identity = OperatorIdentity::generate("alice").expect("identity");
     let operator = enrolled_operator(&node, identity, OperatorPolicy::default()).await;
 
-    let mut session = operator.open_session("operator-console").await.expect("session opens");
+    let mut session = operator
+        .open_session("operator-console")
+        .await
+        .expect("session opens");
     assert!(
         session
             .session_id()
@@ -94,7 +97,10 @@ async fn watches_need_a_session_and_read_access() {
     serve(&node.app, signed(&alice, 1, watch())).expect_err("a watch outside a session is refused");
 
     // Another operator can't use alice's session, and nothing local can speak as one.
-    let session = reader.open_session("operator-console").await.expect("session opens");
+    let session = reader
+        .open_session("operator-console")
+        .await
+        .expect("session opens");
     let address = LocalAddress::new(session.session_id());
     let mallory = OperatorIdentity::generate("mallory").expect("identity");
     enrolled_operator(&node, mallory.clone(), OperatorPolicy::default()).await;
