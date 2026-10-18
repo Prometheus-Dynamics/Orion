@@ -27,8 +27,10 @@ const HEADER_BYTES: usize = STREAM_FRAME_HEADER_BYTES;
 pub struct ControlFrameReadState {
     header: [u8; HEADER_BYTES],
     header_filled: usize,
+    /// Payload bytes read so far; grows towards `payload_len` through spare capacity, so the
+    /// buffer is never zero-filled.
     payload: Option<Vec<u8>>,
-    payload_filled: usize,
+    payload_len: usize,
     /// Set when the header announced another protocol version: the payload is drained (never
     /// decoded) and this error is returned once the frame is complete.
     mismatch: Option<IpcTransportError>,
@@ -110,27 +112,29 @@ impl ControlFrameReadState {
                     "control frame exceeds maximum transport payload size".into(),
                 ));
             }
-            self.payload = Some(vec![0_u8; len]);
-            self.payload_filled = 0;
+            self.payload = Some(Vec::with_capacity(len));
+            self.payload_len = len;
         }
 
-        let payload = self
-            .payload
-            .as_mut()
-            .expect("payload buffer allocated above");
-        while self.payload_filled < payload.len() {
-            let read = reader
-                .read(&mut payload[self.payload_filled..])
+        // `read_to_end` through `take` appends straight into the buffer's spare capacity, so no
+        // zero fill is needed. Bytes already appended stay in `self.payload` if the future is
+        // dropped, so a cancelled read resumes where it stopped.
+        while self.payload.as_ref().map_or(0, Vec::len) < self.payload_len {
+            let filled = self.payload.as_ref().map_or(0, Vec::len);
+            let remaining = (self.payload_len - filled) as u64;
+            let buffer = self.payload.get_or_insert_with(Vec::new);
+            let read = (&mut *reader)
+                .take(remaining)
+                .read_to_end(buffer)
                 .await
                 .map_err(|err| IpcTransportError::ReadFailed(err.to_string()))?;
             if read == 0 {
                 self.reset();
                 return Err(IpcTransportError::ReadFailed("early eof".into()));
             }
-            self.payload_filled += read;
         }
 
-        let payload = self.payload.take().expect("payload buffer allocated above");
+        let payload = self.payload.take().unwrap_or_default();
         let mismatch = self.mismatch.take();
         self.reset();
         if let Some(err) = mismatch {
@@ -142,7 +146,7 @@ impl ControlFrameReadState {
     fn reset(&mut self) {
         self.header_filled = 0;
         self.payload = None;
-        self.payload_filled = 0;
+        self.payload_len = 0;
         self.mismatch = None;
     }
 }
