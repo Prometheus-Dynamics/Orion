@@ -419,7 +419,7 @@ impl NodeAppBuilder {
         let state = Arc::new(NodeState {
             persisted: PersistedState {
                 store: RwLock::new(store),
-                mutation_history: RwLock::new(Vec::new()),
+                mutation_history: RwLock::new(Default::default()),
                 mutation_history_baseline: RwLock::new(DesiredClusterState::default()),
                 mutation_history_size: Default::default(),
                 maintenance_state: RwLock::new(maintenance_state),

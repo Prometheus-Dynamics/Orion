@@ -3,7 +3,8 @@ mod worker;
 use super::{
     NodeApp, NodeError,
     desired_state::{
-        normalize_mutation_history_in_place, normalize_mutation_history_with_baseline,
+        MutationHistory, normalize_mutation_history_in_place,
+        normalize_mutation_history_with_baseline,
     },
 };
 use crate::blocking::run_possibly_blocking;
@@ -27,7 +28,7 @@ pub(crate) use worker::{clear_test_persist_delay, set_test_persist_delay};
 
 struct PersistedStateBundle {
     snapshot: ClusterStateEnvelope,
-    history: Vec<MutationBatch>,
+    history: MutationHistory,
     baseline: DesiredClusterState,
 }
 
@@ -109,7 +110,7 @@ impl NodeApp {
         &self,
         snapshot: PersistedSnapshotSections,
         desired: DesiredClusterState,
-        history: Vec<MutationBatch>,
+        history: MutationHistory,
         baseline: DesiredClusterState,
     ) -> PersistedStateBundle {
         PersistedStateBundle {
@@ -123,7 +124,7 @@ impl NodeApp {
         &self,
         snapshot: PersistedSnapshotSections,
         desired: DesiredClusterState,
-        history: Vec<MutationBatch>,
+        history: MutationHistory,
         baseline: DesiredClusterState,
     ) -> Result<(), NodeError> {
         self.restore_persisted_state_bundle(
@@ -187,7 +188,7 @@ impl NodeApp {
                     None
                 },
                 history_bytes: if encode_all_sections || history_changed {
-                    Some(encode_archive_to_vec(history)?)
+                    Some(encode_archive_to_vec(history.as_vec())?)
                 } else {
                     None
                 },
@@ -225,7 +226,9 @@ impl NodeApp {
             return Ok(false);
         };
         let snapshot_sections_result = storage.load_snapshot_sections();
-        let history_result = storage.load_mutation_history();
+        let history_result = storage
+            .load_mutation_history()
+            .map(MutationHistory::from_batches);
         let baseline_result = storage.load_mutation_history_baseline();
 
         let result = match (snapshot_sections_result, history_result, baseline_result) {
@@ -252,7 +255,7 @@ impl NodeApp {
                     self.restore_replayed_snapshot_state(
                         snapshot,
                         desired,
-                        Vec::new(),
+                        MutationHistory::default(),
                         DesiredClusterState::default(),
                     )?;
                     Ok(true)
@@ -268,7 +271,7 @@ impl NodeApp {
                     self.restore_replayed_snapshot_state(
                         snapshot,
                         desired,
-                        Vec::new(),
+                        MutationHistory::default(),
                         DesiredClusterState::default(),
                     )?;
                     Ok(true)
@@ -297,7 +300,7 @@ impl NodeApp {
                     self.config.runtime_tuning.max_mutation_history_batches,
                     self.config.runtime_tuning.max_mutation_history_bytes,
                 )?;
-                let desired = reconstruct_desired_from_history(&baseline, &history)?;
+                let desired = reconstruct_desired_from_history(&baseline, history.batches())?;
                 self.restore_persisted_state_bundle(PersistedStateBundle {
                     snapshot: ClusterStateEnvelope::new(
                         desired,
@@ -533,7 +536,7 @@ impl NodeApp {
         storage: &NodeStorage,
         snapshot: &PersistedSnapshotSections,
         baseline: &DesiredClusterState,
-        history: &[MutationBatch],
+        history: &MutationHistory,
     ) -> Result<DesiredClusterState, NodeError> {
         if snapshot.manifest.latest_desired_revision == snapshot.manifest.desired_snapshot_revision
         {
@@ -541,14 +544,14 @@ impl NodeApp {
         }
 
         if baseline.revision > snapshot.manifest.desired_snapshot_revision {
-            return reconstruct_desired_from_history(baseline, history);
+            return reconstruct_desired_from_history(baseline, history.batches());
         }
 
         let desired_snapshot = storage.load_snapshot_desired(&snapshot.manifest)?;
         reconstruct_desired_from_checkpoint_and_history(
             &desired_snapshot,
             snapshot.manifest.latest_desired_revision,
-            history,
+            history.batches(),
         )
     }
 }

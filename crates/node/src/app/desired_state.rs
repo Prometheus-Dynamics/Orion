@@ -20,7 +20,7 @@ pub(crate) use views::{
 /// locks (in that order) for its whole lifetime.
 pub(super) struct DesiredStateTxn<'a> {
     store: &'a mut LocalRuntimeStore,
-    history: &'a mut Vec<MutationBatch>,
+    history: &'a mut MutationHistory,
     baseline: &'a mut DesiredClusterState,
     clock: &'a mut HybridLogicalClock,
     wall_ms: u64,
@@ -45,7 +45,7 @@ impl DesiredStateTxn<'_> {
         desired: DesiredClusterState,
         observed: ObservedClusterState,
         applied: orion::control_plane::AppliedClusterState,
-        history: Vec<MutationBatch>,
+        history: MutationHistory,
         baseline: DesiredClusterState,
     ) {
         if let Some(max) = desired.max_stamp() {
@@ -211,7 +211,7 @@ impl NodeApp {
         desired: DesiredClusterState,
         observed: ObservedClusterState,
         applied: orion::control_plane::AppliedClusterState,
-        history: Vec<MutationBatch>,
+        history: MutationHistory,
         baseline: DesiredClusterState,
     ) -> Result<(), NodeError> {
         self.with_desired_state_transaction(|txn| {
@@ -225,7 +225,7 @@ impl NodeApp {
 
     pub(super) fn with_mutation_history_mut<T>(
         &self,
-        mutate: impl FnOnce(&mut Vec<MutationBatch>, &mut DesiredClusterState) -> T,
+        mutate: impl FnOnce(&mut MutationHistory, &mut DesiredClusterState) -> T,
     ) -> T {
         let mut history = self.mutation_history_lock();
         let mut baseline = self.mutation_history_baseline_lock();
@@ -333,30 +333,138 @@ impl NodeApp {
     }
 }
 
+/// Mutation history batches with the encoded size of each batch, kept in step with the batches.
+///
+/// The byte cap is checked against the sum of the batch sizes, so appending and trimming never
+/// re-encode the history. The sum is a close estimate of the archived history (the history archive
+/// adds one vector header on top of the batches), and the cap is a budget, not a file-size contract.
+/// Encoding the history is still exact where the file is written (see the persistence path).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MutationHistory {
+    batches: Vec<MutationBatch>,
+    encoded_sizes: Vec<usize>,
+    encoded_total: usize,
+}
+
+impl MutationHistory {
+    pub(crate) fn from_batches(batches: Vec<MutationBatch>) -> Self {
+        let encoded_sizes: Vec<usize> = batches.iter().map(batch_encoded_len).collect();
+        let encoded_total = encoded_sizes
+            .iter()
+            .fold(0usize, |sum, size| sum.saturating_add(*size));
+        Self {
+            batches,
+            encoded_sizes,
+            encoded_total,
+        }
+    }
+
+    pub(crate) fn batches(&self) -> &[MutationBatch] {
+        &self.batches
+    }
+
+    /// The batches as the `Vec` that is archived to disk (same archive layout as before).
+    pub(crate) fn as_vec(&self) -> &Vec<MutationBatch> {
+        &self.batches
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.batches.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.batches.is_empty()
+    }
+
+    /// Estimated archived size of the whole history, from the per-batch sizes.
+    pub(crate) fn encoded_len(&self) -> usize {
+        self.encoded_total
+    }
+
+    fn push(&mut self, batch: MutationBatch) {
+        let size = batch_encoded_len(&batch);
+        self.encoded_total = self.encoded_total.saturating_add(size);
+        self.encoded_sizes.push(size);
+        self.batches.push(batch);
+    }
+
+    /// Removes the oldest `count` batches and returns them, oldest first.
+    fn drop_front(&mut self, count: usize) -> Vec<MutationBatch> {
+        let dropped: Vec<MutationBatch> = self.batches.drain(0..count).collect();
+        let dropped_size: usize = self
+            .encoded_sizes
+            .drain(0..count)
+            .fold(0usize, |sum, size| sum.saturating_add(size));
+        self.encoded_total = self.encoded_total.saturating_sub(dropped_size);
+        dropped
+    }
+
+    /// Removes empty batches. Returns `true` when any were removed.
+    fn retain_non_empty(&mut self) -> bool {
+        if self.batches.iter().all(|batch| !batch.mutations.is_empty()) {
+            return false;
+        }
+        let mut kept_batches = Vec::with_capacity(self.batches.len());
+        let mut kept_sizes = Vec::with_capacity(self.batches.len());
+        for (batch, size) in self.batches.drain(..).zip(self.encoded_sizes.drain(..)) {
+            if !batch.mutations.is_empty() {
+                kept_batches.push(batch);
+                kept_sizes.push(size);
+            }
+        }
+        self.batches = kept_batches;
+        self.encoded_sizes = kept_sizes;
+        self.encoded_total = self
+            .encoded_sizes
+            .iter()
+            .fold(0usize, |sum, size| sum.saturating_add(*size));
+        true
+    }
+}
+
+fn batch_encoded_len(batch: &MutationBatch) -> usize {
+    encode_to_vec(batch)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX)
+}
+
 fn mutation_history_contiguity_error(action: &str, err: impl std::fmt::Display) -> NodeError {
     NodeError::Storage(format!("{action}: {err}"))
 }
 
+fn fold_dropped_batches(
+    dropped: Vec<MutationBatch>,
+    baseline: &mut DesiredClusterState,
+    action: &str,
+) -> Result<(), NodeError> {
+    for batch in dropped {
+        batch
+            .apply_to_checked(baseline)
+            .map_err(|err| mutation_history_contiguity_error(action, err))?;
+    }
+    Ok(())
+}
+
 pub(super) fn normalize_mutation_history_with_baseline(
-    mut history: Vec<MutationBatch>,
+    mut history: MutationHistory,
     baseline: &mut DesiredClusterState,
     max_batches: usize,
     max_bytes: usize,
-) -> Result<Vec<MutationBatch>, NodeError> {
+) -> Result<MutationHistory, NodeError> {
     let _ = normalize_mutation_history_in_place(&mut history, baseline, max_batches, max_bytes)?;
     Ok(history)
 }
 
+/// Enforces the batch and byte caps. Batches that leave the history are folded into `baseline`
+/// in order, so the baseline plus the remaining batches always describe the same state. Returns
+/// `true` when the history or the baseline changed.
 pub(super) fn normalize_mutation_history_in_place(
-    history: &mut Vec<MutationBatch>,
+    history: &mut MutationHistory,
     baseline: &mut DesiredClusterState,
     max_batches: usize,
     max_bytes: usize,
 ) -> Result<bool, NodeError> {
-    let mut changed = false;
-    let original_len = history.len();
-    history.retain(|batch| !batch.mutations.is_empty());
-    changed |= history.len() != original_len;
+    let mut changed = history.retain_non_empty();
     if history.is_empty() {
         changed |= baseline.revision != Revision::ZERO;
         *baseline = DesiredClusterState::default();
@@ -366,67 +474,168 @@ pub(super) fn normalize_mutation_history_in_place(
     if history.len() > keep_batches {
         let drain_count = history.len() - keep_batches;
         changed = true;
-        for dropped in history.drain(0..drain_count) {
-            dropped.apply_to_checked(baseline).map_err(|err| {
-                mutation_history_contiguity_error(
-                    "failed to fold dropped mutation batch into history baseline",
-                    err,
-                )
-            })?;
-        }
+        let dropped = history.drop_front(drain_count);
+        fold_dropped_batches(
+            dropped,
+            baseline,
+            "failed to fold dropped mutation batch into history baseline",
+        )?;
     }
 
     let keep_bytes = max_bytes.max(1);
-    let mut encoded_len = mutation_history_encoded_len(history);
-    if history.len() > 1 && encoded_len > keep_bytes {
+    if history.len() > 1 && history.encoded_len() > keep_bytes {
         let drain_count = mutation_history_byte_trim_count(history, keep_bytes);
-        changed |= drain_count > 0;
-        for dropped in history.drain(0..drain_count) {
-            dropped.apply_to_checked(baseline).map_err(|err| {
-                mutation_history_contiguity_error(
-                    "failed to fold trimmed mutation batch into history baseline",
-                    err,
-                )
-            })?;
-        }
-        encoded_len = mutation_history_encoded_len(history);
-    }
-    while history.len() > 1 && encoded_len > keep_bytes {
-        changed = true;
-        let dropped = history.drain(0..1).next().ok_or_else(|| {
-            NodeError::Storage("failed to trim mutation history despite non-empty history".into())
-        })?;
-        dropped.apply_to_checked(baseline).map_err(|err| {
-            mutation_history_contiguity_error(
+        if drain_count > 0 {
+            changed = true;
+            let dropped = history.drop_front(drain_count);
+            fold_dropped_batches(
+                dropped,
+                baseline,
                 "failed to fold trimmed mutation batch into history baseline",
-                err,
-            )
-        })?;
-        encoded_len = mutation_history_encoded_len(history);
+            )?;
+        }
     }
     Ok(changed)
 }
 
-fn mutation_history_byte_trim_count(history: &[MutationBatch], keep_bytes: usize) -> usize {
-    if history.len() <= 1 || mutation_history_encoded_len(history) <= keep_bytes {
-        return 0;
-    }
-
-    let mut low = 0;
-    let mut high = history.len() - 1;
-    while low < high {
-        let mid = (low + high) / 2;
-        if mutation_history_encoded_len(&history[mid..]) <= keep_bytes {
-            high = mid;
-        } else {
-            low = mid + 1;
+/// Number of oldest batches to drop so that the newest batches fit in `keep_bytes`. The newest
+/// batch is always kept. Walks back from the newest batch once, so it costs O(batches) additions.
+fn mutation_history_byte_trim_count(history: &MutationHistory, keep_bytes: usize) -> usize {
+    let mut kept = 0usize;
+    let mut first_kept = history.len();
+    for (index, size) in history.encoded_sizes.iter().enumerate().rev() {
+        if kept.saturating_add(*size) > keep_bytes {
+            break;
         }
+        kept += size;
+        first_kept = index;
     }
-    low
+    first_kept.min(history.len().saturating_sub(1))
 }
 
-fn mutation_history_encoded_len(history: &[MutationBatch]) -> usize {
-    encode_to_vec(&history.to_vec())
-        .map(|bytes| bytes.len())
-        .unwrap_or(usize::MAX)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orion::{HlcTimestamp, control_plane::ArtifactRecord};
+
+    /// Batch `index` (based on revision `index`) puts one artifact with `label_len` bytes of label,
+    /// so batches get different encoded sizes.
+    fn batch(index: u64, label_len: usize) -> MutationBatch {
+        let artifact = ArtifactRecord::builder(orion::ArtifactId::new(format!("artifact.{index}")))
+            .label("x".repeat(label_len))
+            .build();
+        MutationBatch::stamped(
+            Revision::new(index),
+            [(
+                DesiredStateMutation::PutArtifact(artifact),
+                HlcTimestamp::new(index + 1, 0, 1),
+            )],
+        )
+    }
+
+    fn history_of(batches: &[MutationBatch]) -> MutationHistory {
+        MutationHistory::from_batches(batches.to_vec())
+    }
+
+    fn encoded_size(batches: &[MutationBatch]) -> usize {
+        encode_to_vec(&batches.to_vec())
+            .expect("history encodes")
+            .len()
+    }
+
+    #[test]
+    fn tracked_sizes_match_per_batch_encoding() {
+        let mut history = MutationHistory::default();
+        let batches: Vec<_> = (0..12)
+            .map(|index| batch(index, (index as usize) * 37))
+            .collect();
+        for batch in &batches {
+            history.push(batch.clone());
+        }
+        let expected: usize = batches.iter().map(batch_encoded_len).sum();
+        assert_eq!(history.encoded_len(), expected);
+        assert_eq!(history, history_of(&batches));
+    }
+
+    #[test]
+    fn byte_trim_keeps_longest_fitting_suffix_and_folds_the_rest_into_baseline() {
+        let batches: Vec<_> = (0..10)
+            .map(|index| batch(index, 200 + index as usize * 50))
+            .collect();
+        let total = history_of(&batches).encoded_len();
+        // Budget for roughly the newest half; the exact boundary follows the tracked sizes.
+        let keep_bytes = total / 2;
+        let mut history = history_of(&batches);
+        let mut baseline = DesiredClusterState::default();
+
+        let changed =
+            normalize_mutation_history_in_place(&mut history, &mut baseline, 256, keep_bytes)
+                .expect("trim should succeed");
+
+        assert!(changed);
+        assert!(history.len() < batches.len());
+        assert!(history.len() >= 1);
+        assert!(history.encoded_len() <= keep_bytes);
+        // Adding the next older batch would exceed the budget (longest fitting suffix).
+        let dropped = batches.len() - history.len();
+        if dropped > 0 {
+            let with_one_more = history.encoded_len() + batch_encoded_len(&batches[dropped - 1]);
+            assert!(with_one_more > keep_bytes);
+        }
+        // The retained batches are the newest ones, in order, and the baseline is the state just
+        // before the first retained batch.
+        assert_eq!(history.batches(), &batches[dropped..]);
+        assert_eq!(baseline.revision, Revision::new(dropped as u64));
+        assert_eq!(baseline.artifacts.len(), dropped);
+    }
+
+    #[test]
+    fn byte_trim_always_keeps_newest_batch_even_when_it_alone_exceeds_budget() {
+        let batches: Vec<_> = (0..4).map(|index| batch(index, 500)).collect();
+        let mut history = history_of(&batches);
+        let mut baseline = DesiredClusterState::default();
+
+        normalize_mutation_history_in_place(&mut history, &mut baseline, 256, 1)
+            .expect("trim should succeed");
+
+        assert_eq!(history.batches(), &batches[3..]);
+        assert_eq!(baseline.revision, Revision::new(3));
+    }
+
+    #[test]
+    fn batch_cap_folds_oldest_batches_into_baseline() {
+        let batches: Vec<_> = (0..6).map(|index| batch(index, 8)).collect();
+        let mut history = history_of(&batches);
+        let mut baseline = DesiredClusterState::default();
+
+        normalize_mutation_history_in_place(&mut history, &mut baseline, 2, usize::MAX)
+            .expect("trim should succeed");
+
+        assert_eq!(history.batches(), &batches[4..]);
+        assert_eq!(baseline.revision, Revision::new(4));
+    }
+
+    #[test]
+    fn tracked_total_stays_consistent_after_trimming() {
+        let batches: Vec<_> = (0..20)
+            .map(|index| batch(index, 40 + index as usize))
+            .collect();
+        let mut history = history_of(&batches);
+        let mut baseline = DesiredClusterState::default();
+        normalize_mutation_history_in_place(&mut history, &mut baseline, 7, 2_000)
+            .expect("trim should succeed");
+
+        let recomputed: usize = history.encoded_sizes.iter().sum();
+        assert_eq!(history.encoded_len(), recomputed);
+        assert_eq!(history.encoded_sizes.len(), history.len());
+        // Estimate versus the archive of the whole history: the difference is only the per-vector
+        // overhead, not a per-batch cost.
+        let exact = encoded_size(history.batches());
+        assert!(
+            history.encoded_len().abs_diff(exact) <= 64,
+            "estimate {} vs archive {}",
+            history.encoded_len(),
+            exact
+        );
+    }
 }

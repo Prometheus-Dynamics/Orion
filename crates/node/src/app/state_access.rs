@@ -1,9 +1,10 @@
 use super::{
     ClientRegistry, ClientRegistryTxn, DesiredClusterState, DesiredStateMetadataCache,
-    DesiredStateSummaryCache, ExecutorRegistry, LifecycleSnapshot, LocalClientState, MutationBatch,
-    NodeApp, NodeError, ObservabilityState, ObservabilityTxn, PeerClientRegistry, PeerRegistry,
-    PeerState, ProviderRegistry,
+    DesiredStateSummaryCache, ExecutorRegistry, LifecycleSnapshot, LocalClientState,
+    NodeApp, NodeError, ObservabilityState, ObservabilityTxn, PeerClientRegistry,
+    PeerRegistry, PeerState, ProviderRegistry,
 };
+use super::desired_state::MutationHistory;
 use crate::auth::{LocalSessionLookup, PeerObservedScope, PeerPolicyLookup};
 use crate::lock::{read_rwlock, write_rwlock};
 use orion::{
@@ -283,14 +284,14 @@ impl NodeApp {
         self.state.lifecycle.snapshot()
     }
 
-    pub(super) fn mutation_history_read(&self) -> RwLockReadGuard<'_, Vec<MutationBatch>> {
+    pub(super) fn mutation_history_read(&self) -> RwLockReadGuard<'_, MutationHistory> {
         read_rwlock(
             self.state.persisted.mutation_history.read(),
             "node mutation history",
         )
     }
 
-    pub(super) fn mutation_history_lock(&self) -> RwLockWriteGuard<'_, Vec<MutationBatch>> {
+    pub(super) fn mutation_history_lock(&self) -> RwLockWriteGuard<'_, MutationHistory> {
         let guard = write_rwlock(
             self.state.persisted.mutation_history.write(),
             "node mutation history",
@@ -333,7 +334,7 @@ impl NodeApp {
 
     pub(super) fn with_persisted_state_read<T>(
         &self,
-        read: impl FnOnce(&LocalRuntimeStore, &Vec<MutationBatch>, &ControlDesiredClusterState) -> T,
+        read: impl FnOnce(&LocalRuntimeStore, &MutationHistory, &ControlDesiredClusterState) -> T,
     ) -> T {
         let store = self.store_read();
         let history = self.mutation_history_read();
@@ -380,7 +381,7 @@ impl NodeApp {
 
 pub(super) struct PersistedState {
     pub(super) store: std::sync::RwLock<LocalRuntimeStore>,
-    pub(super) mutation_history: std::sync::RwLock<Vec<MutationBatch>>,
+    pub(super) mutation_history: std::sync::RwLock<MutationHistory>,
     pub(super) mutation_history_baseline: std::sync::RwLock<DesiredClusterState>,
     pub(super) mutation_history_size: super::MutationHistorySizeCache,
     pub(super) maintenance_state: std::sync::RwLock<MaintenanceState>,

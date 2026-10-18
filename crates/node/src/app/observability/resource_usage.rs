@@ -4,10 +4,10 @@
 //! snapshot stays cheap enough for periodic polling on small appliances.
 
 use super::COMMUNICATION_ENDPOINT_RUNTIME_LIMIT;
-use crate::app::NodeApp;
+use crate::app::{NodeApp, desired_state::MutationHistory};
 use orion::{
     control_plane::{
-        DesiredClusterState, LocalStreamUsageSnapshot, MutationBatch, MutationHistoryUsageSnapshot,
+        DesiredClusterState, LocalStreamUsageSnapshot, MutationHistoryUsageSnapshot,
         NodeResourceUsageSnapshot, ObservedClusterState, ProcessMemorySnapshot,
         RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot, WorkerQueueUsageSnapshot,
     },
@@ -37,8 +37,7 @@ impl MutationHistorySizeCache {
         self.generation.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[allow(clippy::ptr_arg)] // rkyv encodes the owned `Vec` layout the history cap measures.
-    pub(crate) fn encoded_bytes(&self, history: &Vec<MutationBatch>) -> Option<u64> {
+    pub(crate) fn encoded_bytes(&self, history: &MutationHistory) -> Option<u64> {
         let generation = self.generation.load(Ordering::Relaxed);
         let mut cached = self.cached.lock().ok()?;
         if let Some((cached_generation, bytes)) = *cached
@@ -46,7 +45,10 @@ impl MutationHistorySizeCache {
         {
             return Some(bytes);
         }
-        let bytes = encode_to_vec(history).ok()?.len().min(u64::MAX as usize) as u64;
+        let bytes = encode_to_vec(history.as_vec())
+            .ok()?
+            .len()
+            .min(u64::MAX as usize) as u64;
         *cached = Some((generation, bytes));
         Some(bytes)
     }
@@ -71,7 +73,13 @@ impl NodeApp {
             MutationHistoryUsageSnapshot {
                 batches: history.len() as u64,
                 max_batches: usize_to_u64(tuning.max_mutation_history_batches),
-                mutations: usize_to_u64(history.iter().map(|batch| batch.mutations.len()).sum()),
+                mutations: usize_to_u64(
+                    history
+                        .batches()
+                        .iter()
+                        .map(|batch| batch.mutations.len())
+                        .sum(),
+                ),
                 encoded_bytes: self
                     .state
                     .persisted
