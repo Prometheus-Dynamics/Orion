@@ -9,13 +9,13 @@
 //! # async fn demo() -> orion_nt4::Result<()> {
 //! use orion_nt4::{Client, ClientConfig, ClientEvent, SubscribeOptions, TopicEvent, Value};
 //!
-//! let mut client = Client::start(ClientConfig::new("10.0.0.2", "atlas"));
+//! let mut client = Client::start(ClientConfig::new("192.0.2.2", "app"));
 //! let handle = client.handle();
 //! let mut cameras = handle.subscribe(&["/CameraPublisher/"], SubscribeOptions {
 //!     prefix: true,
 //!     ..Default::default()
 //! })?;
-//! let speed = handle.publish("/HeliOS/speed", "double")?; // cheap to clone and to call set on
+//! let speed = handle.publish("/app/speed", "double")?; // cheap to clone and to call set on
 //! speed.set(Value::Double(1.5))?;
 //! while let Some(event) = cameras.next().await {
 //!     if let TopicEvent::Value { name, value, .. } = event {

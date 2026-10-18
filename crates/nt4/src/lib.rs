@@ -1,6 +1,6 @@
 //! NetworkTables 4.1 (FRC NT4) for Orion tools: a client that subscribes to and publishes topics
-//! of a robot, a camera or a coprocessor, and a server that Atlas and HeliOS can host with values
-//! they edit themselves.
+//! of a robot, a camera or a coprocessor, and a server that a host app can run with values it
+//! edits itself.
 //!
 //! The crate is independent of `orion-node`. It needs only Tokio and speaks the wire protocol
 //! directly: a WebSocket per client, JSON control messages in text frames, and MessagePack values

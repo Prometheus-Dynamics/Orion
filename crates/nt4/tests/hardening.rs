@@ -89,23 +89,17 @@ fn temp_file(tag: &str) -> PathBuf {
 async fn json_topics_announce_as_strings_and_carry_text_values() {
     let server = start_server().await;
     let publisher = connect(&server, "pub").await;
-    let result = publisher
-        .handle()
-        .publish("/HeliOS/result", "json")
-        .unwrap();
+    let result = publisher.handle().publish("/app/result", "json").unwrap();
     let text = r#"{"ok":true,"detections":3}"#;
     result.set(Value::String(text.into())).unwrap();
-    wait_for_value(&server, "/HeliOS/result", Value::String(text.into())).await;
+    wait_for_value(&server, "/app/result", Value::String(text.into())).await;
     assert_eq!(
-        server.handle().topic("/HeliOS/result").unwrap().type_name,
+        server.handle().topic("/app/result").unwrap().type_name,
         "json"
     );
 
     let subscriber = connect(&server, "sub").await;
-    let mut sub = subscriber
-        .handle()
-        .subscribe(&["/HeliOS/"], prefix())
-        .unwrap();
+    let mut sub = subscriber.handle().subscribe(&["/app/"], prefix()).unwrap();
     match next_match(&mut sub, |e| matches!(e, TopicEvent::Announced(_))).await {
         TopicEvent::Announced(info) => assert_eq!(info.type_name, "json"),
         other => panic!("expected an announce, got {other:?}"),
@@ -113,18 +107,18 @@ async fn json_topics_announce_as_strings_and_carry_text_values() {
     let event = next_match(&mut sub, |e| matches!(e, TopicEvent::Value { .. })).await;
     assert_eq!(
         value_of(&event),
-        Some(("/HeliOS/result", Value::String(text.into())))
+        Some(("/app/result", Value::String(text.into())))
     );
 
     // The host can edit a json topic with a string too.
     server
         .handle()
-        .set_value("/HeliOS/result", Value::String("{}".into()))
+        .set_value("/app/result", Value::String("{}".into()))
         .unwrap();
     let event = next_match(&mut sub, |e| matches!(e, TopicEvent::Value { .. })).await;
     assert_eq!(
         value_of(&event),
-        Some(("/HeliOS/result", Value::String("{}".into())))
+        Some(("/app/result", Value::String("{}".into())))
     );
 }
 

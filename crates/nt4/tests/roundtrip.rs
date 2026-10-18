@@ -76,21 +76,18 @@ async fn publish_reaches_prefix_subscriber_and_late_joiner_gets_last_value() {
     let server = start_server().await;
     let publisher = connect(&server, "pub").await;
     let publisher_handle = publisher.handle();
-    let speed = publisher_handle.publish("/robot/speed", "double").unwrap();
+    let speed = publisher_handle.publish("/app/speed", "double").unwrap();
     speed.set(Value::Double(1.0)).unwrap();
     speed.set(Value::Double(2.5)).unwrap();
-    wait_for_value(&server, "/robot/speed", Value::Double(2.5)).await;
+    wait_for_value(&server, "/app/speed", Value::Double(2.5)).await;
 
     // A late joiner subscribes after the last value and still gets it.
     let subscriber = connect(&server, "late").await;
-    let mut sub = subscriber
-        .handle()
-        .subscribe(&["/robot/"], prefix())
-        .unwrap();
+    let mut sub = subscriber.handle().subscribe(&["/app/"], prefix()).unwrap();
     let announced = next_match(&mut sub, |e| matches!(e, TopicEvent::Announced(_))).await;
     match announced {
         TopicEvent::Announced(info) => {
-            assert_eq!(info.name, "/robot/speed");
+            assert_eq!(info.name, "/app/speed");
             assert_eq!(info.type_name, "double");
             assert_eq!(info.pubuid, None);
         }
@@ -98,7 +95,7 @@ async fn publish_reaches_prefix_subscriber_and_late_joiner_gets_last_value() {
     }
     let first = next_match(&mut sub, |e| value_of(e).is_some()).await;
     let (name, value) = value_of(&first).unwrap();
-    assert_eq!(name, "/robot/speed");
+    assert_eq!(name, "/app/speed");
     assert_eq!(value, Value::Double(2.5));
 
     // A later value is pushed live.
@@ -112,7 +109,7 @@ async fn publish_reaches_prefix_subscriber_and_late_joiner_gets_last_value() {
     other.set(Value::Int(1)).unwrap();
     speed.set(Value::Double(4.0)).unwrap();
     let next = next_match(&mut sub, |e| value_of(e).is_some()).await;
-    assert_eq!(value_of(&next).unwrap().0, "/robot/speed");
+    assert_eq!(value_of(&next).unwrap().0, "/app/speed");
 }
 
 #[tokio::test]

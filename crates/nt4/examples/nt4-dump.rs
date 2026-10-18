@@ -2,7 +2,7 @@
 //! announce, value and connection event.
 //!
 //! ```text
-//! cargo run -p orion-nt4 --example nt4-dump -- --host 10.0.0.2 --prefix /CameraPublisher/
+//! cargo run -p orion-nt4 --example nt4-dump -- --host 192.0.2.2 --prefix /CameraPublisher/
 //! ```
 
 use std::error::Error;

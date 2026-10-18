@@ -36,11 +36,6 @@ name = "nt4-server"
 path = "examples/nt4-server.rs"
 required-features = ["server"]
 
-[[example]]
-name = "nt4-latency"
-path = "examples/nt4-latency/main.rs"
-required-features = ["client", "server"]
-
 [dependencies]
 futures-util.workspace = true
 rmp.workspace = true
