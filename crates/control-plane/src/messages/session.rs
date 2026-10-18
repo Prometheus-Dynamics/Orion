@@ -18,7 +18,7 @@ pub const REMOTE_SESSION_PREFIX: &str = "remote-session/";
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
 pub struct SessionOpen {
-    /// Shown in the node's observability (the client's name, e.g. `atlas`).
+    /// Shown in the node's observability (the client's name, e.g. `operator-console`).
     pub client_name: String,
 }
 

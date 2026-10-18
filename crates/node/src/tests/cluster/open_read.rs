@@ -65,7 +65,7 @@ async fn open_read_lets_unenrolled_operators_watch_what_is_listed_and_nothing_el
         Vec::new(),
     )
     .await;
-    let operator = stranger(&node, "atlas").await;
+    let operator = stranger(&node, "operator-console").await;
     assert!(!operator.is_enrolled());
     operator
         .status(StatusQuery::default())
@@ -73,7 +73,7 @@ async fn open_read_lets_unenrolled_operators_watch_what_is_listed_and_nothing_el
         .expect("the status lane is open");
 
     let session = operator
-        .open_session("atlas")
+        .open_session("operator-console")
         .await
         .expect("a session opens");
     session
@@ -107,9 +107,9 @@ async fn open_read_lets_unenrolled_operators_watch_what_is_listed_and_nothing_el
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn without_open_read_an_unenrolled_operator_gets_no_session() {
     let node = node_with(OperatorOpenRead::default(), Vec::new()).await;
-    let refused = stranger(&node, "atlas")
+    let refused = stranger(&node, "operator-console")
         .await
-        .open_session("atlas")
+        .open_session("operator-console")
         .await
         .expect_err("closed by default");
     assert!(matches!(refused, RemoteError::Rejected(_)), "{refused}");
@@ -120,7 +120,7 @@ async fn without_open_read_an_unenrolled_operator_gets_no_session() {
 async fn operators_from_an_auto_enroll_network_are_enrolled_on_their_hello() {
     let rules = OperatorAutoEnroll::parse_all("127.0.0.0/8=reboot,usb-boot").expect("rule parses");
     let node = node_with(OperatorOpenRead::default(), rules).await;
-    let identity = OperatorIdentity::generate("atlas").expect("identity");
+    let identity = OperatorIdentity::generate("operator-console").expect("identity");
     let operator = RemoteOperator::connect(&node.url(), identity.clone(), NodeTrust::FirstUse)
         .await
         .expect("connects");
@@ -158,7 +158,7 @@ async fn operators_from_an_auto_enroll_network_are_enrolled_on_their_hello() {
 async fn operators_from_other_networks_are_not_auto_enrolled() {
     let rules = OperatorAutoEnroll::parse_all("10.0.0.0/8=reboot").expect("rule parses");
     let node = node_with(OperatorOpenRead::default(), rules).await;
-    assert!(!stranger(&node, "atlas").await.is_enrolled());
+    assert!(!stranger(&node, "operator-console").await.is_enrolled());
     node.server.shutdown().await.expect("listener stops");
 }
 

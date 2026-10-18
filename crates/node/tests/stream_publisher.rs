@@ -62,7 +62,7 @@ async fn a_publisher_streams_to_a_local_subscriber_and_hears_the_demand() {
             .expect("publishes");
     }
 
-    let mut subscriber = ControlPlaneEventStream::connect_at(&stream_socket, "atlas-local")
+    let mut subscriber = ControlPlaneEventStream::connect_at(&stream_socket, "console-local")
         .await
         .expect("subscriber connects");
     subscriber

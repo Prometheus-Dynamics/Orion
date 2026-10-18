@@ -95,7 +95,7 @@ is per node: connect to a node to read its own.
 ### Push sessions
 
 ```rust
-let mut session = operator.open_session("atlas").await?;          // its own orion+tcp connection
+let mut session = operator.open_session("operator-console").await?;          // its own orion+tcp connection
 session.watch_status(StatusQuery::subject(StatusSubject::Node(node_id))).await?;
 session.watch_actions(ActionQuery::default()).await?;
 while let Some(event) = session.next_event().await {              // ClientEvent, as local streams

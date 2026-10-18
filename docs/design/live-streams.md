@@ -5,7 +5,7 @@ implemented yet.
 
 ## Why
 
-A desktop operator (Atlas) wants a board's live readings at about 10 Hz or the source rate, for
+A desktop operator (an operator console) wants a board's live readings at about 10 Hz or the source rate, for
 as long as a page is open. Graphs must be full the moment the page opens. The board may spend
 under 1% of one core on this (orion-node and the publisher together), with no forks. Today Orion
 has neither part:
@@ -122,7 +122,7 @@ pub struct StreamCursor { pub epoch: u64, pub seq: u64 }   // epoch: publisher s
 - **Downsampling:** samples older than `full_rate` are averaged per `1/reduced_hz` bucket into
   the reduced ring.
 - **Memory cap:** `ORION_NODE_STREAM_MEMORY_MAX` (default 4 MiB). A declaration whose policy
-  would exceed it is clamped and reported in observability. Example: Atlas's board stream, with
+  would exceed it is clamped and reported in observability. Example: an operator console's device stream, with
   30 gauge series at 10 Hz for 5 min plus 6 IMU channels at 100 Hz for 30 s and reduced to 10 Hz
   for 5 min, needs about 0.8 MiB.
 - **Lifetime:** rings live in memory and are never persisted. A publisher reconnect with a new
@@ -156,7 +156,7 @@ On resume with `Since(cursor)`:
 
 ### Cross-node
 
-Phase 1 answers subscriptions for subjects the connected node owns. Atlas connects to each
+Phase 1 answers subscriptions for subjects the connected node owns. An operator console connects to each
 board's own node. Forwarding a subscription to the owning node over the peer transport, as
 `QueryStatus` is forwarded today, is phase 3.
 
@@ -194,8 +194,8 @@ This adds control messages and archived types, so `CONTROL_PROTOCOL_VERSION` goe
 - **Observability:** a `streams` section, plus the session counters.
 
 Mixed versions aren't supported, as today. A v5 client talking to a v4 node keeps the polling
-watches, because `OperatorWelcome` carries the version. Downstreams (HeliOS's orion-node
-artifact, Atlas's crates) move to the same rev together.
+watches, because `OperatorWelcome` carries the version. Downstreams (each product's orion-node
+artifact and operator console) move to the same rev together.
 
 ## 5. Tests and measurement
 
@@ -218,13 +218,13 @@ artifact, Atlas's crates) move to the same rev together.
 
 ## 6. Users of this (outside Orion, for context)
 
-- **board-agent (Atlas repo):**
+- **device-agent (the product's repo):**
   - declares `board.live` on `node/<id>`;
   - samples /sys and /proc at 10 Hz in Rust;
-  - takes lemnosd devices at their rate;
+  - takes the device daemon's devices at their rate;
   - publishes 50 ms batches over its existing IPC session;
   - publishes slow state (`board.*`) to the status lane on change;
   - claims more node actions.
-- **Atlas:** one `RemoteSession` per board. It subscribes to `board.live` with a 5-minute
+- **Operator console:** one `RemoteSession` per device. It subscribes to `board.live` with a 5-minute
   backfill and to status `board.*`, and runs actions through Orion. The board's HTTP endpoints
   remain as the fallback for boards without this.

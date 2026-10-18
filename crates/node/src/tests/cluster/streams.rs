@@ -134,11 +134,11 @@ async fn subscribed_node() -> (OperatorNode, RemoteSession) {
     let node = operator_node("node-a", None).await;
     let operator = enrolled_operator(
         &node,
-        OperatorIdentity::generate("atlas").expect("identity"),
+        OperatorIdentity::generate("operator-console").expect("identity"),
         OperatorPolicy::default(),
     )
     .await;
-    let session = operator.open_session("atlas").await.expect("session opens");
+    let session = operator.open_session("operator-console").await.expect("session opens");
     (node, session)
 }
 
@@ -254,7 +254,7 @@ async fn a_resumed_subscription_gets_only_what_it_missed() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn subscriptions_wait_for_their_stream_and_the_publisher_hears_the_demand() {
     let (node, mut session) = subscribed_node().await;
-    // Atlas subscribes before board-agent has declared anything.
+    // The operator console subscribes before board-agent has declared anything.
     session
         .subscribe_stream(StreamSubscription::all(stream_ref()).with_series(["led.*"]))
         .await
