@@ -27,7 +27,11 @@ use super::{
         system_time_to_unix_nanos,
     },
 };
-use crate::{IpcTransportError, UnixFdFrame, recv_unix_fd_frame_async, send_unix_fd_frame_async};
+use crate::{
+    IpcTransportError, UnixFdFrame,
+    fd_frame::{send_unix_fd_frame_async, send_unix_fd_frame_parts_async},
+    recv_unix_fd_frame_async,
+};
 
 /// The retained latest frame. Descriptors are dup'd per reply; the originals close once the frame
 /// is replaced and no in-flight reply still references it.
@@ -236,7 +240,7 @@ async fn handle_connection(
                 let current = slot.borrow_and_update().clone();
                 match current {
                     Some(stored) => frame_reply(&stored, &config)?,
-                    None => status_frame(ResponseStatus::Empty, 0),
+                    None => Reply::Owned(status_frame(ResponseStatus::Empty, 0)),
                 }
             }
             LatestRequest::NextAfter { sequence, wait } => {
@@ -265,7 +269,7 @@ async fn wait_for_newer(
     after: u64,
     wait: std::time::Duration,
     config: &UnixFdLatestConfig,
-) -> Result<Option<UnixFdFrame>, IpcTransportError> {
+) -> Result<Option<Reply>, IpcTransportError> {
     let deadline = tokio::time::Instant::now() + wait;
     let mut watch_peer = true;
     loop {
@@ -276,7 +280,7 @@ async fn wait_for_newer(
         {
             return frame_reply(&stored, config).map(Some);
         }
-        let timeout_reply = || status_frame(ResponseStatus::Timeout, latest_sequence);
+        let timeout_reply = || Reply::Owned(status_frame(ResponseStatus::Timeout, latest_sequence));
         tokio::select! {
             changed = slot.changed() => {
                 if changed.is_err() {
@@ -293,10 +297,22 @@ async fn wait_for_newer(
     }
 }
 
+/// A reply ready to send. A frame reply shares the retained payload with the slot instead of
+/// copying it into a buffer per reader; only the small response header and the duplicated
+/// descriptors are owned by the reply.
+enum Reply {
+    Owned(UnixFdFrame),
+    Frame {
+        header: Vec<u8>,
+        frame: Arc<StoredFrame>,
+        fds: Vec<OwnedFd>,
+    },
+}
+
 fn frame_reply(
-    stored: &StoredFrame,
+    stored: &Arc<StoredFrame>,
     config: &UnixFdLatestConfig,
-) -> Result<UnixFdFrame, IpcTransportError> {
+) -> Result<Reply, IpcTransportError> {
     let header = ResponseHeader {
         status: ResponseStatus::Frame,
         sequence: stored.sequence,
@@ -305,14 +321,14 @@ fn frame_reply(
     if let Some(max_age) = config.max_age
         && stored.published_instant.elapsed() > max_age
     {
-        return Ok(UnixFdFrame::new(
+        return Ok(Reply::Owned(UnixFdFrame::new(
             ResponseHeader {
                 status: ResponseStatus::Stale,
                 ..header
             }
             .encode_with_payload(&[]),
             Vec::new(),
-        ));
+        )));
     }
     let fds = stored
         .fds
@@ -322,10 +338,11 @@ fn frame_reply(
         .map_err(|err| {
             IpcTransportError::EncodeFailed(format!("failed to duplicate fd latest frame: {err}"))
         })?;
-    Ok(UnixFdFrame::new(
-        header.encode_with_payload(&stored.payload),
+    Ok(Reply::Frame {
+        header: header.encode_with_payload(&[]),
+        frame: Arc::clone(stored),
         fds,
-    ))
+    })
 }
 
 fn status_frame(status: ResponseStatus, sequence: u64) -> UnixFdFrame {
@@ -337,15 +354,27 @@ fn status_frame(status: ResponseStatus, sequence: u64) -> UnixFdFrame {
 
 async fn send_reply(
     stream: &UnixStream,
-    reply: &UnixFdFrame,
+    reply: &Reply,
     config: &UnixFdLatestConfig,
 ) -> Result<(), IpcTransportError> {
-    let send = send_unix_fd_frame_async(
-        stream,
-        reply,
-        config.max_payload_bytes + RESPONSE_HEADER_BYTES,
-        config.max_fds,
-    );
+    let max_payload_bytes = config.max_payload_bytes + RESPONSE_HEADER_BYTES;
+    let send = async {
+        match reply {
+            Reply::Owned(frame) => {
+                send_unix_fd_frame_async(stream, frame, max_payload_bytes, config.max_fds).await
+            }
+            Reply::Frame { header, frame, fds } => {
+                send_unix_fd_frame_parts_async(
+                    stream,
+                    &[header.as_slice(), frame.payload.as_slice()],
+                    fds,
+                    max_payload_bytes,
+                    config.max_fds,
+                )
+                .await
+            }
+        }
+    };
     match tokio::time::timeout(config.io_timeout, send).await {
         Ok(sent) => sent.map(|_| ()),
         Err(_) => Err(IpcTransportError::WriteFailed(format!(

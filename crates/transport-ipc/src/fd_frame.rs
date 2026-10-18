@@ -48,8 +48,26 @@ pub fn send_unix_fd_frame<S: AsRawFd>(
     max_payload_bytes: usize,
     max_fds: usize,
 ) -> Result<usize, IpcTransportError> {
-    validate_send_frame(frame, max_payload_bytes, max_fds)?;
-    send_unix_fd_frame_raw(stream.as_raw_fd(), frame, 0)
+    send_unix_fd_frame_parts(
+        stream,
+        &[&frame.payload],
+        &frame.fds,
+        max_payload_bytes,
+        max_fds,
+    )
+}
+
+/// Sends one frame whose payload is the concatenation of `payload_parts`. Lets callers send a
+/// shared buffer behind a small header without first joining the two into a new `Vec`.
+pub fn send_unix_fd_frame_parts<S: AsRawFd>(
+    stream: &S,
+    payload_parts: &[&[u8]],
+    fds: &[OwnedFd],
+    max_payload_bytes: usize,
+    max_fds: usize,
+) -> Result<usize, IpcTransportError> {
+    validate_send_frame(payload_parts, fds, max_payload_bytes, max_fds)?;
+    send_unix_fd_frame_raw(stream.as_raw_fd(), payload_parts, fds, 0)
         .map_err(|err| IpcTransportError::WriteFailed(err.to_string()))
 }
 
@@ -59,7 +77,25 @@ pub async fn send_unix_fd_frame_async(
     max_payload_bytes: usize,
     max_fds: usize,
 ) -> Result<usize, IpcTransportError> {
-    validate_send_frame(frame, max_payload_bytes, max_fds)?;
+    send_unix_fd_frame_parts_async(
+        stream,
+        &[&frame.payload],
+        &frame.fds,
+        max_payload_bytes,
+        max_fds,
+    )
+    .await
+}
+
+/// Async form of [`send_unix_fd_frame_parts`].
+pub async fn send_unix_fd_frame_parts_async(
+    stream: &tokio::net::UnixStream,
+    payload_parts: &[&[u8]],
+    fds: &[OwnedFd],
+    max_payload_bytes: usize,
+    max_fds: usize,
+) -> Result<usize, IpcTransportError> {
+    validate_send_frame(payload_parts, fds, max_payload_bytes, max_fds)?;
     loop {
         stream
             .writable()
@@ -68,7 +104,7 @@ pub async fn send_unix_fd_frame_async(
         // `try_io` clears tokio's cached readiness on `WouldBlock`, so the loop parks instead of
         // spinning until the socket becomes writable again.
         match stream.try_io(tokio::io::Interest::WRITABLE, || {
-            send_unix_fd_frame_raw(stream.as_raw_fd(), frame, libc::MSG_DONTWAIT)
+            send_unix_fd_frame_raw(stream.as_raw_fd(), payload_parts, fds, libc::MSG_DONTWAIT)
         }) {
             Ok(sent) => return Ok(sent),
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
@@ -78,17 +114,19 @@ pub async fn send_unix_fd_frame_async(
 }
 
 fn validate_send_frame(
-    frame: &UnixFdFrame,
+    payload_parts: &[&[u8]],
+    fds: &[OwnedFd],
     max_payload_bytes: usize,
     max_fds: usize,
 ) -> Result<(), IpcTransportError> {
     let max_payload_bytes = max_payload_bytes.max(1);
-    if frame.payload.len() > max_payload_bytes {
+    let payload_len: usize = payload_parts.iter().map(|part| part.len()).sum();
+    if payload_len > max_payload_bytes {
         return Err(IpcTransportError::EncodeFailed(
             "fd frame payload exceeds maximum transport payload size".into(),
         ));
     }
-    if frame.fds.len() > max_fds {
+    if fds.len() > max_fds {
         return Err(IpcTransportError::EncodeFailed(
             "fd frame descriptor count exceeds maximum transport descriptor count".into(),
         ));
@@ -96,22 +134,27 @@ fn validate_send_frame(
     Ok(())
 }
 
-fn send_unix_fd_frame_raw(raw_fd: RawFd, frame: &UnixFdFrame, flags: i32) -> io::Result<usize> {
-    let header = u32::try_from(frame.payload.len())
+fn send_unix_fd_frame_raw(
+    raw_fd: RawFd,
+    payload_parts: &[&[u8]],
+    fds: &[OwnedFd],
+    flags: i32,
+) -> io::Result<usize> {
+    let payload_len: usize = payload_parts.iter().map(|part| part.len()).sum();
+    let header = u32::try_from(payload_len)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "fd frame payload too large"))?
         .to_le_bytes();
-    let mut iov = [
-        libc::iovec {
-            iov_base: header.as_ptr().cast_mut().cast(),
-            iov_len: header.len(),
-        },
-        libc::iovec {
-            iov_base: frame.payload.as_ptr().cast_mut().cast(),
-            iov_len: frame.payload.len(),
-        },
-    ];
+    let mut iov = Vec::with_capacity(payload_parts.len() + 1);
+    iov.push(libc::iovec {
+        iov_base: header.as_ptr().cast_mut().cast(),
+        iov_len: header.len(),
+    });
+    iov.extend(payload_parts.iter().map(|part| libc::iovec {
+        iov_base: part.as_ptr().cast_mut().cast(),
+        iov_len: part.len(),
+    }));
 
-    let raw_fds = frame.fds.iter().map(AsRawFd::as_raw_fd).collect::<Vec<_>>();
+    let raw_fds = fds.iter().map(AsRawFd::as_raw_fd).collect::<Vec<_>>();
     let mut control = control_buffer_for(raw_fds.len());
     let mut msg: libc::msghdr = unsafe { zeroed() };
     msg.msg_iov = iov.as_mut_ptr();
@@ -139,7 +182,7 @@ fn send_unix_fd_frame_raw(raw_fd: RawFd, frame: &UnixFdFrame, flags: i32) -> io:
         }
     }
 
-    let expected = HEADER_BYTES + frame.payload.len();
+    let expected = HEADER_BYTES + payload_len;
     let sent = retry_interrupted(|| unsafe { libc::sendmsg(raw_fd, &msg, flags) })?;
     let sent =
         usize::try_from(sent).map_err(|_| io::Error::other("sendmsg returned invalid length"))?;
@@ -223,11 +266,20 @@ fn recv_unix_fd_frame_raw(
         )));
     }
 
-    let mut bytes = vec![0_u8; frame_len];
-    let mut iov = [libc::iovec {
-        iov_base: bytes.as_mut_ptr().cast(),
-        iov_len: bytes.len(),
-    }];
+    // The header and payload land in separate buffers (two iovecs), so the payload Vec is handed
+    // to the caller as received instead of being copied out of one combined frame buffer.
+    let mut header = [0_u8; HEADER_BYTES];
+    let mut payload = vec![0_u8; payload_len];
+    let mut iov = [
+        libc::iovec {
+            iov_base: header.as_mut_ptr().cast(),
+            iov_len: header.len(),
+        },
+        libc::iovec {
+            iov_base: payload.as_mut_ptr().cast(),
+            iov_len: payload.len(),
+        },
+    ];
     let mut control = control_buffer_for(max_fds);
     let mut msg: libc::msghdr = unsafe { zeroed() };
     msg.msg_iov = iov.as_mut_ptr();
@@ -260,11 +312,7 @@ fn recv_unix_fd_frame_raw(
             "fd frame missing payload length header".into(),
         ));
     }
-    let received_payload_len = u32::from_le_bytes(
-        bytes[..HEADER_BYTES]
-            .try_into()
-            .expect("header slice has fixed length"),
-    ) as usize;
+    let received_payload_len = u32::from_le_bytes(header) as usize;
     if received_payload_len != payload_len {
         return Err(RawFdFrameError::Decode(
             "fd frame payload length header changed while receiving frame".into(),
@@ -275,20 +323,14 @@ fn recv_unix_fd_frame_raw(
             "short fd frame read: received {received} of {frame_len} bytes"
         )));
     }
-    if received > frame_len {
-        return Err(RawFdFrameError::Decode(
-            "fd frame contained trailing bytes".into(),
-        ));
-    }
+    // The iovecs total exactly `frame_len`, so a longer read is impossible; MSG_TRUNC above
+    // catches anything that did not fit.
 
     let fds = unsafe { collect_fds(&msg, max_fds) }.map_err(|err| match err {
         IpcTransportError::DecodeFailed(message) => RawFdFrameError::Decode(message),
         other => RawFdFrameError::Decode(other.to_string()),
     })?;
-    Ok(Some(UnixFdFrame {
-        payload: bytes[HEADER_BYTES..frame_len].to_vec(),
-        fds,
-    }))
+    Ok(Some(UnixFdFrame { payload, fds }))
 }
 
 enum RawFdFrameError {
