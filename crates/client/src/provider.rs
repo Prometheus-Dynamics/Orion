@@ -1,3 +1,5 @@
+use std::{sync::Arc, time::Duration};
+
 use orion_control_plane::{
     ClientEvent, ClientRole, ControlMessage, LeaseRecord, ProviderLeaseQuery, ProviderRecord,
     ProviderStateUpdate, ResourceRecord,
@@ -7,6 +9,7 @@ use orion_transport_ipc::LocalControlTransport;
 use crate::{
     default_ipc_stream_socket_path,
     error::ClientError,
+    publish::{PublishDedupe, send_state_publish},
     response::{expect_provider_leases, provider_lease_query},
     session::{
         ClientSession, ensure_client_role, local_identity_for_role, local_session_config_for_role,
@@ -18,6 +21,7 @@ use crate::{
 #[derive(Clone)]
 pub struct ProviderClient<T> {
     session: ClientSession<T>,
+    dedupe: Option<Arc<PublishDedupe>>,
 }
 
 pub struct ProviderEventStream {
@@ -30,11 +34,23 @@ where
 {
     pub fn new(session: ClientSession<T>) -> Result<Self, ClientError> {
         ensure_client_role(session.identity(), ClientRole::Provider)?;
-        Ok(Self { session })
+        Ok(Self {
+            session,
+            dedupe: None,
+        })
     }
 
     pub fn session(&self) -> &ClientSession<T> {
         &self.session
+    }
+
+    /// Skips a state publish whose encoded message is identical to the last one the node
+    /// accepted, sending it again once `refresh` has elapsed. Keep `refresh` well below the
+    /// node's local session TTL (300 s by default). Off unless this is called; see
+    /// [`crate::publish`] for the revision-sync latency it trades for fewer publishes.
+    pub fn with_publish_refresh(mut self, refresh: Duration) -> Self {
+        self.dedupe = Some(Arc::new(PublishDedupe::new(refresh)));
+        self
     }
 
     pub fn register_provider(&self, provider: ProviderRecord) -> Result<(), ClientError> {
@@ -49,11 +65,14 @@ where
     where
         I: IntoIterator<Item = ResourceRecord>,
     {
-        self.session
-            .send_control_and_expect_accepted(ControlMessage::ProviderState(ProviderStateUpdate {
+        send_state_publish(
+            &self.session,
+            self.dedupe.as_deref(),
+            ControlMessage::ProviderState(ProviderStateUpdate {
                 provider,
                 resources: resources.into_iter().collect(),
-            }))
+            }),
+        )
     }
 
     pub fn fetch_leases(&self, provider: &ProviderRecord) -> Result<Vec<LeaseRecord>, ClientError> {

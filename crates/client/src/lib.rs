@@ -31,6 +31,7 @@ mod executor;
 mod graph;
 #[cfg(feature = "ipc")]
 mod provider;
+mod publish;
 #[cfg(feature = "remote")]
 pub mod remote;
 mod resource;
