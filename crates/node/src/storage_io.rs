@@ -26,6 +26,16 @@ pub(crate) fn blocking_read_file(path: &Path, action: &'static str) -> Result<Ve
     })
 }
 
+/// Whether an atomic write syncs its directory after the rename.
+///
+/// `Deferred` leaves the rename to be made durable by a later [`sync_parent_directory`] on the same
+/// directory. The caller must do that before any file that depends on this one is installed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DirSync {
+    PerWrite,
+    Deferred,
+}
+
 pub(crate) fn atomic_write_file(
     path: &Path,
     bytes: &[u8],
@@ -33,13 +43,32 @@ pub(crate) fn atomic_write_file(
     write_action: &'static str,
     install_action: &'static str,
 ) -> Result<(), NodeError> {
+    atomic_write_file_with(
+        path,
+        bytes,
+        create_dir_action,
+        write_action,
+        install_action,
+        DirSync::PerWrite,
+    )
+}
+
+pub(crate) fn atomic_write_file_with(
+    path: &Path,
+    bytes: &[u8],
+    create_dir_action: &'static str,
+    write_action: &'static str,
+    install_action: &'static str,
+    dir_sync: DirSync,
+) -> Result<(), NodeError> {
     let mut reader = bytes;
-    atomic_write_stream(
+    atomic_write_stream_with(
         path,
         &mut reader,
         create_dir_action,
         write_action,
         install_action,
+        dir_sync,
     )
 }
 
@@ -49,6 +78,24 @@ pub(crate) fn atomic_write_stream(
     create_dir_action: &'static str,
     write_action: &'static str,
     install_action: &'static str,
+) -> Result<(), NodeError> {
+    atomic_write_stream_with(
+        path,
+        reader,
+        create_dir_action,
+        write_action,
+        install_action,
+        DirSync::PerWrite,
+    )
+}
+
+pub(crate) fn atomic_write_stream_with(
+    path: &Path,
+    reader: &mut dyn Read,
+    create_dir_action: &'static str,
+    write_action: &'static str,
+    install_action: &'static str,
+    dir_sync: DirSync,
 ) -> Result<(), NodeError> {
     let parent = path.parent().ok_or_else(|| NodeError::StoragePath {
         action: write_action,
@@ -85,7 +132,9 @@ pub(crate) fn atomic_write_stream(
 
         std::fs::rename(&tmp_path, path)
             .map_err(|err| storage_path_error(install_action, path, err))?;
-        sync_parent_directory(parent, install_action)?;
+        if dir_sync == DirSync::PerWrite {
+            sync_parent_directory(parent, install_action)?;
+        }
         Ok(())
     })
 }

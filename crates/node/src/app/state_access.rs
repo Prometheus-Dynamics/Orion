@@ -1,10 +1,10 @@
+use super::desired_state::MutationHistory;
 use super::{
     ClientRegistry, ClientRegistryTxn, DesiredClusterState, DesiredStateMetadataCache,
-    DesiredStateSummaryCache, ExecutorRegistry, LifecycleSnapshot, LocalClientState,
-    NodeApp, NodeError, ObservabilityState, ObservabilityTxn, PeerClientRegistry,
-    PeerRegistry, PeerState, ProviderRegistry,
+    DesiredStateSummaryCache, ExecutorRegistry, LifecycleSnapshot, LocalClientState, NodeApp,
+    NodeError, ObservabilityState, ObservabilityTxn, PeerClientRegistry, PeerRegistry, PeerState,
+    ProviderRegistry,
 };
-use super::desired_state::MutationHistory;
 use crate::auth::{LocalSessionLookup, PeerObservedScope, PeerPolicyLookup};
 use crate::lock::{read_rwlock, write_rwlock};
 use orion::{

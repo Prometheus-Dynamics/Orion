@@ -1,6 +1,6 @@
 use crate::NodeError;
 use crate::storage_io::{
-    atomic_write_file, atomic_write_stream, sync_parent_directory as sync_directory,
+    DirSync, atomic_write_file_with, atomic_write_stream, sync_parent_directory as sync_directory,
 };
 use orion::{
     ArtifactId, Revision,
@@ -221,6 +221,7 @@ impl NodeStorage {
         applied_revision: Revision,
         applied_bytes: Option<&[u8]>,
         rewrite_desired: bool,
+        dir_sync: DirSync,
     ) -> Result<(), NodeError> {
         self.ensure_layout()?;
         let existing_manifest = self.load_snapshot_manifest()?;
@@ -233,7 +234,7 @@ impl NodeStorage {
                         "cannot rewrite desired snapshot without encoded desired bytes".into(),
                     )
                 })?;
-                self.atomic_write(&self.snapshot_desired_path(), desired_bytes)?;
+                self.atomic_write_with(&self.snapshot_desired_path(), desired_bytes, dir_sync)?;
                 (
                     desired.revision,
                     desired.section_fingerprints.clone().ok_or_else(|| {
@@ -280,7 +281,7 @@ impl NodeStorage {
 
         match observed_bytes {
             Some(observed_bytes) => {
-                self.atomic_write(&self.snapshot_observed_path(), observed_bytes)?
+                self.atomic_write_with(&self.snapshot_observed_path(), observed_bytes, dir_sync)?
             }
             None => {
                 if !has_existing_manifest || !self.snapshot_observed_path().exists() {
@@ -293,7 +294,7 @@ impl NodeStorage {
         }
         match applied_bytes {
             Some(applied_bytes) => {
-                self.atomic_write(&self.snapshot_applied_path(), applied_bytes)?
+                self.atomic_write_with(&self.snapshot_applied_path(), applied_bytes, dir_sync)?
             }
             None => {
                 if !has_existing_manifest || !self.snapshot_applied_path().exists() {
@@ -304,6 +305,12 @@ impl NodeStorage {
                 }
             }
         }
+        // The manifest is the commit point of a persist: everything it describes must be durable
+        // first. A deferred write set is made durable by one directory sync here, instead of one per
+        // file. The manifest's own rename is synced by its write.
+        if dir_sync == DirSync::Deferred {
+            self.sync_root_directory()?;
+        }
         self.atomic_write(&self.snapshot_manifest_path(), &manifest_bytes)
     }
 
@@ -313,9 +320,13 @@ impl NodeStorage {
         self.atomic_write(&self.mutation_history_path(), &bytes)
     }
 
-    pub(crate) fn save_mutation_history_bytes(&self, bytes: &[u8]) -> Result<(), NodeError> {
+    pub(crate) fn save_mutation_history_bytes(
+        &self,
+        bytes: &[u8],
+        dir_sync: DirSync,
+    ) -> Result<(), NodeError> {
         self.ensure_layout()?;
-        self.atomic_write(&self.mutation_history_path(), bytes)
+        self.atomic_write_with(&self.mutation_history_path(), bytes, dir_sync)
     }
 
     pub fn save_mutation_history_baseline(
@@ -356,6 +367,7 @@ impl NodeStorage {
         &self,
         baseline_revision: Revision,
         bytes: Option<&[u8]>,
+        dir_sync: DirSync,
     ) -> Result<(), NodeError> {
         self.ensure_layout()?;
         let path = self.mutation_history_baseline_path();
@@ -371,7 +383,7 @@ impl NodeStorage {
         let bytes = bytes.ok_or_else(|| {
             NodeError::Storage("missing encoded mutation history baseline bytes".into())
         })?;
-        self.atomic_write(&path, bytes)
+        self.atomic_write_with(&path, bytes, dir_sync)
     }
 
     pub fn load_snapshot(&self) -> Result<Option<PersistedSnapshot>, NodeError> {
@@ -518,13 +530,28 @@ impl NodeStorage {
     }
 
     fn atomic_write(&self, path: &Path, bytes: &[u8]) -> Result<(), NodeError> {
-        atomic_write_file(
+        self.atomic_write_with(path, bytes, DirSync::PerWrite)
+    }
+
+    fn atomic_write_with(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+        dir_sync: DirSync,
+    ) -> Result<(), NodeError> {
+        atomic_write_file_with(
             path,
             bytes,
             "failed to create storage directory",
             "failed to write storage file",
             "failed to install storage file",
+            dir_sync,
         )
+    }
+
+    /// Makes the renames of every deferred write in the storage root durable.
+    pub(crate) fn sync_root_directory(&self) -> Result<(), NodeError> {
+        sync_parent_directory(&self.root)
     }
 
     fn atomic_write_stream(&self, path: &Path, content: &mut dyn Read) -> Result<(), NodeError> {

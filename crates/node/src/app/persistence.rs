@@ -12,6 +12,7 @@ use crate::storage::{
     EncodedDesiredSnapshot, NodeStorage, PersistedSnapshotSections, SnapshotManifest,
     desired_snapshot_revision_only, encode_archive_to_vec, encode_desired_snapshot,
 };
+use crate::storage_io::DirSync;
 use orion::{
     ArtifactId, Revision,
     control_plane::{
@@ -51,11 +52,16 @@ pub(super) fn persist_bundle_to_storage(
     bundle: &EncodedPersistedStateBundle,
 ) -> Result<(), NodeError> {
     worker::delay_before_persist_for_tests();
+    // Every file except the manifest is renamed without its own directory sync; the manifest write
+    // syncs the directory once all of them are in place (see `save_encoded_snapshot`). That keeps
+    // the manifest, which names the revisions the other files must match, as the last durable step.
+    let dir_sync = DirSync::Deferred;
     if let Some(history_bytes) = &bundle.history_bytes {
-        storage.save_mutation_history_bytes(history_bytes)?;
+        storage.save_mutation_history_bytes(history_bytes, dir_sync)?;
         storage.save_mutation_history_baseline_bytes(
             bundle.baseline_revision,
             bundle.baseline_bytes.as_deref(),
+            dir_sync,
         )?;
     }
     let rewrite_desired = should_rewrite_desired_snapshot(storage, bundle)?;
@@ -66,6 +72,7 @@ pub(super) fn persist_bundle_to_storage(
         bundle.applied_revision,
         bundle.applied_bytes.as_deref(),
         rewrite_desired,
+        dir_sync,
     )
 }
 
@@ -725,6 +732,46 @@ mod tests {
             .expect("manifest should load")
             .expect("manifest should exist");
         assert_eq!(manifest.desired_snapshot_revision, Revision::new(9));
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    // The deferred write set (history, baseline, snapshot files) followed by the manifest must read
+    // back as one consistent state.
+    #[test]
+    fn deferred_persist_writes_history_and_manifest_together() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "orion-persist-deferred-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        let storage = NodeStorage::new(&state_dir);
+        let history = vec![MutationBatch::stamped(Revision::ZERO, [])];
+        let desired = DesiredClusterState {
+            revision: Revision::new(1),
+            ..DesiredClusterState::default()
+        };
+        let mut bundle = bundle(
+            encode_desired_snapshot(&desired).expect("desired encodes"),
+            1,
+        );
+        bundle.history_bytes = Some(encode_archive_to_vec(&history).expect("history encodes"));
+        persist_bundle_to_storage(&storage, &bundle).expect("deferred persist should succeed");
+
+        assert_eq!(
+            storage
+                .load_mutation_history()
+                .expect("history should load"),
+            history
+        );
+        let manifest = storage
+            .load_snapshot_manifest()
+            .expect("manifest should load")
+            .expect("manifest should exist");
+        assert_eq!(manifest.latest_desired_revision, Revision::new(1));
+        assert_eq!(manifest.desired_snapshot_revision, Revision::new(1));
         let _ = std::fs::remove_dir_all(state_dir);
     }
 }
