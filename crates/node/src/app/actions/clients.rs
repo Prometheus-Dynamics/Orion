@@ -350,8 +350,8 @@ impl NodeApp {
         }
     }
 
-    fn complete_flush(&self, flush: PendingClientStreamFlush) {
-        let delivered = execute_client_stream_flush(&flush);
+    fn complete_flush(&self, mut flush: PendingClientStreamFlush) {
+        let delivered = execute_client_stream_flush(&mut flush);
         let _ = self.with_client_mut_if_present(&flush.source, |client| {
             finalize_client_stream_flush(client, &flush, delivered);
         });

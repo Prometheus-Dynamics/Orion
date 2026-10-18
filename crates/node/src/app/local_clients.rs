@@ -34,7 +34,8 @@ pub(super) struct PendingClientStreamFlush {
     pub(super) source: LocalAddress,
     sender: tokio::sync::mpsc::Sender<ControlEnvelope>,
     last_sequence: u64,
-    envelope: ControlEnvelope,
+    /// Taken (moved, not cloned) by [`execute_client_stream_flush`].
+    envelope: Option<ControlEnvelope>,
 }
 
 #[derive(Clone, Debug)]
@@ -310,12 +311,17 @@ pub(super) fn prepare_client_stream_flush(
         source: source.clone(),
         sender,
         last_sequence,
-        envelope,
+        envelope: Some(envelope),
     })
 }
 
-pub(super) fn execute_client_stream_flush(flush: &PendingClientStreamFlush) -> bool {
-    flush.sender.try_send(flush.envelope.clone()).is_ok()
+/// Sends the prepared envelope. The envelope is moved into the channel, so the event batch is
+/// not copied a second time; the queue itself is only trimmed by `finalize_client_stream_flush`.
+pub(super) fn execute_client_stream_flush(flush: &mut PendingClientStreamFlush) -> bool {
+    match flush.envelope.take() {
+        Some(envelope) => flush.sender.try_send(envelope).is_ok(),
+        None => false,
+    }
 }
 
 pub(super) fn finalize_client_stream_flush(

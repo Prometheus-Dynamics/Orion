@@ -8,10 +8,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 impl NodeApp {
     pub(super) fn notify_desired_state_watchers(&self, previous_revision: orion::Revision) {
-        let snapshot = self.state_snapshot();
-        if snapshot.state.desired.revision <= previous_revision {
+        // Check the revision before building a snapshot: a deep clone of desired, observed and
+        // applied state is only needed when the desired state actually moved.
+        if self.current_desired_revision() <= previous_revision {
             return;
         }
+        let snapshot = self.state_snapshot();
         #[cfg(feature = "link-gateway")]
         self.notify_link_desired_change();
         self.notify_client_watchers_with(snapshot);
@@ -82,12 +84,13 @@ impl NodeApp {
                 .filter(|revision| snapshot.state.desired.revision > *revision)
                 .map(|revision| (revision, snapshot.clone()));
 
+            // Compare by reference and clone only the lists that actually changed.
             let executor_update = if let Some((executor_id, last_workloads)) = executor_watch {
                 executor_workloads_by_id
                     .get(&executor_id)
-                    .and_then(|workloads| workloads.clone())
-                    .filter(|workloads| workloads != &last_workloads)
-                    .map(|workloads| (executor_id, last_workloads, workloads))
+                    .and_then(|workloads| workloads.as_ref())
+                    .filter(|workloads| *workloads != &last_workloads)
+                    .map(|workloads| (executor_id, last_workloads, workloads.clone()))
             } else {
                 None
             };
@@ -95,9 +98,8 @@ impl NodeApp {
             let provider_update = if let Some((provider_id, last_leases)) = provider_watch {
                 provider_leases_by_id
                     .get(&provider_id)
-                    .cloned()
-                    .filter(|leases| leases != &last_leases)
-                    .map(|leases| (provider_id, last_leases, leases))
+                    .filter(|leases| *leases != &last_leases)
+                    .map(|leases| (provider_id, last_leases, leases.clone()))
             } else {
                 None
             };
@@ -160,8 +162,8 @@ impl NodeApp {
             }
         });
 
-        for flush in pending_flushes {
-            let delivered = execute_client_stream_flush(&flush);
+        for mut flush in pending_flushes {
+            let delivered = execute_client_stream_flush(&mut flush);
             let _ = self.with_client_mut_if_present(&flush.source, |client| {
                 finalize_client_stream_flush(client, &flush, delivered);
             });
@@ -215,8 +217,8 @@ impl NodeApp {
                 }
             }
         });
-        for flush in pending_flushes {
-            let delivered = execute_client_stream_flush(&flush);
+        for mut flush in pending_flushes {
+            let delivered = execute_client_stream_flush(&mut flush);
             let _ = self.with_client_mut_if_present(&flush.source, |client| {
                 finalize_client_stream_flush(client, &flush, delivered);
             });
@@ -230,10 +232,10 @@ impl NodeApp {
         let pending = self.with_client_mut_if_present(source, |client| {
             prepare_client_stream_flush(source, client)
         });
-        let Some(Some(flush)) = pending else {
+        let Some(Some(mut flush)) = pending else {
             return;
         };
-        let delivered = execute_client_stream_flush(&flush);
+        let delivered = execute_client_stream_flush(&mut flush);
         let _ = self.with_client_mut_if_present(source, |client| {
             finalize_client_stream_flush(client, &flush, delivered);
         });

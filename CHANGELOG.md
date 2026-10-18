@@ -40,6 +40,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Fixed
 
+- `orion-node` CPU and memory on the reconcile and state-watch paths: a re-published provider or executor snapshot that changes nothing no longer runs a reconcile pass; the desired-state watcher checks the revision before copying state; placement and lease passes skip cloning cluster state when no workload uses placement or leases are idle; a stream flush moves its event batch into the channel instead of copying it; watchers compare executor and provider lists by reference and copy only changed ones; and `orion-runtime` matches incoming resources by id in a map instead of a scan. Behaviour is unchanged.
 - `orion-node` with `systemd-notify` could send a `WATCHDOG=1` after `STOPPING=1` on shutdown: the watchdog task was stopped after the stopping notification, so a tick in between still pinged (seen as a failure of `ready_follows_listeners_watchdog_pings_and_stopping_on_exit` on a loaded machine). The watchdog now stops first.
 - The published `orion-node` package did not build its tests: `tests/device_agent.rs` includes the orion-client example agent by a path outside the crate. The package now leaves that test out; it runs from the workspace.
 - `discovered_enrollments_survive_a_restart` could restore nothing on a loaded machine: a peer is registered before its enrollment is written to `discovered-peers.json`, and the test restarted as soon as the peer was registered. It now also waits for the record.

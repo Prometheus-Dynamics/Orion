@@ -57,12 +57,15 @@ impl NodeApp {
     pub(super) fn run_placement_pass(&self) -> bool {
         let facts_changed = self.publish_local_node_facts();
         let liveness_changed = self.refresh_unreachable_nodes();
-        let (desired, observed, schedulable) = self.cluster_inputs();
-        if desired
+        // Most clusters use no placement: check that before cloning desired and observed state.
+        let placement_used = self
+            .store_read()
+            .desired
             .workloads
             .values()
-            .any(|workload| workload.placement.is_some())
-        {
+            .any(|workload| workload.placement.is_some());
+        if placement_used {
+            let (desired, observed, schedulable) = self.cluster_inputs();
             let now_ms = Self::current_time_ms();
             let view = ClusterView::from_state(
                 &self.config.node_id,
@@ -102,15 +105,17 @@ impl NodeApp {
 
     /// Runs after the runtime planned: releases, acquires and arbitrates cross-node leases.
     pub(super) fn run_lease_pass(&self, unsatisfied: &[UnsatisfiedRequirement]) {
-        let (desired, observed, _) = self.cluster_inputs();
-        let local = self.config.node_id.clone();
-        let has_remote_leases = desired
+        let has_remote_leases = self
+            .store_read()
+            .desired
             .leases
             .values()
             .any(|lease| !lease.holders.is_empty());
         if unsatisfied.is_empty() && !has_remote_leases {
             return;
         }
+        let (desired, observed, _) = self.cluster_inputs();
+        let local = self.config.node_id.clone();
         let now_ms = Self::current_time_ms();
         let mut edits = BTreeMap::<ResourceId, LeaseEdit>::new();
         let released = self.release_leases(&desired, &observed, now_ms, &mut edits);

@@ -295,8 +295,8 @@ impl NodeApp {
                 }
             }
         });
-        for flush in flushes {
-            let delivered = execute_client_stream_flush(&flush);
+        for mut flush in flushes {
+            let delivered = execute_client_stream_flush(&mut flush);
             let _ = self.with_client_mut_if_present(&flush.source, |client| {
                 finalize_client_stream_flush(client, &flush, delivered);
             });

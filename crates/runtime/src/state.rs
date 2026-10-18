@@ -140,17 +140,27 @@ impl LocalRuntimeStore {
 
         let previous_observed_revision = self.observed.revision;
         let mut changed = false;
-        self.observed.resources.retain(|resource_id, resource| {
-            let retain = resource.provider_id != provider_id
-                || snapshot
-                    .resources
-                    .iter()
-                    .any(|incoming| incoming.resource_id == *resource_id && incoming == resource);
-            if !retain {
-                changed = true;
+        {
+            // Index the incoming resources by id so each retained entry is a map lookup instead
+            // of a scan over the whole snapshot.
+            let mut incoming_by_id: BTreeMap<&ResourceId, Vec<&ResourceRecord>> = BTreeMap::new();
+            for resource in &snapshot.resources {
+                incoming_by_id
+                    .entry(&resource.resource_id)
+                    .or_default()
+                    .push(resource);
             }
-            retain
-        });
+            self.observed.resources.retain(|resource_id, resource| {
+                let retain = resource.provider_id != provider_id
+                    || incoming_by_id.get(resource_id).is_some_and(|candidates| {
+                        candidates.iter().any(|incoming| **incoming == *resource)
+                    });
+                if !retain {
+                    changed = true;
+                }
+                retain
+            });
+        }
 
         for resource in snapshot.resources {
             if self.observed.resources.get(&resource.resource_id) != Some(&resource) {

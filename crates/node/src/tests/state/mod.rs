@@ -10,6 +10,7 @@ mod peers;
 mod persistence_basics;
 #[cfg(feature = "transport-http")]
 mod readiness;
+mod reconcile_triggers;
 mod replay;
 mod replay_fallback;
 mod resource_usage;

@@ -660,12 +660,16 @@ impl NodeApp {
         &self,
         snapshot: ProviderSnapshot,
     ) -> Result<(), NodeError> {
-        self.ensure_provider_record(snapshot.provider.clone())?;
+        let created = self.ensure_provider_record(snapshot.provider.clone())?;
         let changed = self.with_store_mut(|store| store.apply_provider_snapshot(snapshot))?;
         if changed {
             self.persist_observed_state()?;
         }
-        self.reconcile_after_change()?;
+        // Clients re-publish identical snapshots several times a second: a pass is only needed
+        // when observed state moved or a new record was written.
+        if changed || created {
+            self.reconcile_after_change()?;
+        }
         Ok(())
     }
 
@@ -674,7 +678,7 @@ impl NodeApp {
         source: &LocalAddress,
         update: ExecutorStateUpdate,
     ) -> Result<(), NodeError> {
-        self.ensure_executor_record(update.executor.clone())?;
+        let created = self.ensure_executor_record(update.executor.clone())?;
         self.record_status_owner(source, OwnedSubject::Executor(&update.executor.executor_id));
         let changed = self.with_store_mut(|store| {
             store.apply_executor_snapshot(ExecutorSnapshot {
@@ -686,11 +690,14 @@ impl NodeApp {
         if changed {
             self.persist_observed_state()?;
         }
-        self.reconcile_after_change()?;
+        if changed || created {
+            self.reconcile_after_change()?;
+        }
         Ok(())
     }
 
-    fn ensure_provider_record(&self, record: ProviderRecord) -> Result<(), NodeError> {
+    /// Writes the provider record unless it is already current. Returns whether it was written.
+    fn ensure_provider_record(&self, record: ProviderRecord) -> Result<bool, NodeError> {
         let current = self
             .store_read()
             .desired
@@ -698,15 +705,17 @@ impl NodeApp {
             .get(&record.provider_id)
             .cloned();
         if current.as_ref() == Some(&record) {
-            return Ok(());
+            return Ok(false);
         }
-        self.put_provider_record_tracked(record)
+        self.put_provider_record_tracked(record)?;
+        Ok(true)
     }
 
+    /// Writes the executor record unless it is already current. Returns whether it was written.
     fn ensure_executor_record(
         &self,
         record: orion::control_plane::ExecutorRecord,
-    ) -> Result<(), NodeError> {
+    ) -> Result<bool, NodeError> {
         let current = self
             .store_read()
             .desired
@@ -714,9 +723,10 @@ impl NodeApp {
             .get(&record.executor_id)
             .cloned();
         if current.as_ref() == Some(&record) {
-            return Ok(());
+            return Ok(false);
         }
-        self.put_executor_record_tracked(record)
+        self.put_executor_record_tracked(record)?;
+        Ok(true)
     }
 
     fn executor_workloads(
