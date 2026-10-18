@@ -121,9 +121,25 @@ impl NodeApp {
             message @ (ControlMessage::QueryOperators
             | ControlMessage::EnrollOperator(_)
             | ControlMessage::RemoveOperator(_)) => self.apply_local_operator_message(message),
-            ControlMessage::OperatorHello => Ok(ControlMessage::Rejected(
-                "OperatorHello is only served to remote operators".into(),
-            )),
+            ControlMessage::DeclareStream(decl) => {
+                self.declare_stream(source, decl)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::PublishSamples(publish) => {
+                self.publish_stream_samples(source, publish)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::SubscribeStream(subscription) => {
+                self.subscribe_stream(source, subscription)?;
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::UnsubscribeStream(stream) => {
+                self.unsubscribe_stream(source, &stream);
+                Ok(ControlMessage::Accepted)
+            }
+            ControlMessage::OperatorHello | ControlMessage::OpenSession(_) => Ok(
+                ControlMessage::Rejected("only served to remote operators".into()),
+            ),
             ControlMessage::ReplacePeerIdentity(update) => {
                 self.replace_peer_identity_hex(&update.node_id, &update.public_key_hex)?;
                 Ok(ControlMessage::Accepted)
@@ -197,6 +213,7 @@ impl NodeApp {
                     }
                     orion::transport::http::HttpResponsePayload::Readiness(_)
                     | orion::transport::http::HttpResponsePayload::EnrollmentChallenge(_)
+                    | orion::transport::http::HttpResponsePayload::Session(_)
                     | orion::transport::http::HttpResponsePayload::Actions(_)
                     | orion::transport::http::HttpResponsePayload::OperatorWelcome(_)
                     | orion::transport::http::HttpResponsePayload::Status(_) => {
@@ -543,6 +560,7 @@ impl NodeApp {
             .unwrap_or(false);
         if detached {
             self.release_action_handler(source);
+            self.forget_stream_client(source);
             self.with_observability_txn(|txn| {
                 let observability = txn.state_mut();
                 observability.client_stream_detaches_total =

@@ -85,6 +85,8 @@ pub(super) struct OperatorTrust {
     revoked: BTreeSet<OperatorId>,
     pending: BTreeMap<OperatorId, PendingOperator>,
     default_actions: Vec<String>,
+    open_read: crate::OperatorOpenRead,
+    auto_enroll: Vec<crate::OperatorAutoEnroll>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -235,6 +237,32 @@ impl NodeSecurity {
             .clone()
     }
 
+    /// What operators the node has not enrolled may read (`ORION_NODE_OPERATOR_OPEN_READ`).
+    pub fn set_operator_open_read(&self, open: crate::OperatorOpenRead) {
+        write_rwlock(self.operators.write(), "operators").open_read = open;
+    }
+
+    pub fn operator_open_read(&self) -> crate::OperatorOpenRead {
+        read_rwlock(self.operators.read(), "operators").open_read
+    }
+
+    /// Networks whose operators are enrolled on their hello (`ORION_NODE_OPERATOR_AUTO_ENROLL`).
+    pub fn set_operator_auto_enroll(&self, rules: Vec<crate::OperatorAutoEnroll>) {
+        write_rwlock(self.operators.write(), "operators").auto_enroll = rules;
+    }
+
+    /// The auto-enrollment rule for an operator connecting from `addr`, if any.
+    pub fn operator_auto_enroll_rule(
+        &self,
+        addr: std::net::IpAddr,
+    ) -> Option<crate::OperatorAutoEnroll> {
+        read_rwlock(self.operators.read(), "operators")
+            .auto_enroll
+            .iter()
+            .find(|rule| rule.contains(addr))
+            .cloned()
+    }
+
     fn persist_operators(&self) -> Result<(), NodeError> {
         let Some(storage) = self.storage.as_ref() else {
             return Ok(());
@@ -308,6 +336,14 @@ impl NodeSecurity {
                 operator_id,
                 public_key: key,
             }),
+            // `ORION_NODE_OPERATOR_OPEN_READ`: the policy decides which reads it may make.
+            None if self.operator_open_read().any() => {
+                self.record_and_validate_nonce(&auth.node_id, auth.nonce)?;
+                Ok(OperatorAuthentication::Unenrolled {
+                    operator_id,
+                    public_key: key,
+                })
+            }
             None => Err(NodeError::Authorization(format!(
                 "operator {operator_id} is not enrolled on node {} (key fingerprint {}); approve \
                  it with `orionctl operators enroll {operator_id} --fingerprint {}` or enroll \

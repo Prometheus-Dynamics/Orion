@@ -3,7 +3,7 @@ use orion_auth::{AuthenticatedPeerRequest, PeerRequestPayload};
 use orion_control_plane::{
     ActionResult, ControlMessage, DesiredStateSummary, EnrollmentChallenge, MutationBatch,
     NodeHealthSnapshot, NodeObservabilitySnapshot, NodeReadinessSnapshot, ObservedStateUpdate,
-    OperatorWelcome, PeerHello, StateSnapshot, StatusEntry,
+    OperatorWelcome, PeerHello, SessionWelcome, StateSnapshot, StatusEntry,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,8 @@ pub enum HttpResponsePayload {
     OperatorWelcome(Box<OperatorWelcome>),
     /// Status-lane entries for a remote operator's `QueryStatus`.
     Status(Vec<StatusEntry>),
+    /// Answer to `OpenSession`: the connection is a push session from here on.
+    Session(SessionWelcome),
 }
 
 impl HttpRequestPayload {
@@ -74,9 +76,17 @@ impl HttpRequestPayload {
                 ControlMessage::RunAction(_) | ControlMessage::QueryActions(_) => {
                     Ok(ControlRoute::Actions)
                 }
-                ControlMessage::OperatorHello | ControlMessage::QueryStatus(_) => {
-                    Ok(ControlRoute::Operator)
-                }
+                // The watches and pings of a push session travel as operator requests (over
+                // HTTP they are refused: a session needs its own `orion+tcp` connection).
+                ControlMessage::OperatorHello
+                | ControlMessage::QueryStatus(_)
+                | ControlMessage::OpenSession(_)
+                | ControlMessage::WatchStatus(_)
+                | ControlMessage::WatchState(_)
+                | ControlMessage::WatchActions(_)
+                | ControlMessage::SubscribeStream(_)
+                | ControlMessage::UnsubscribeStream(_)
+                | ControlMessage::Ping => Ok(ControlRoute::Operator),
                 ControlMessage::ClientHello(_)
                 | ControlMessage::ClientWelcome(_)
                 | ControlMessage::ProviderState(_)
@@ -97,13 +107,10 @@ impl HttpRequestPayload {
                 | ControlMessage::UpdateMaintenance(_)
                 | ControlMessage::MaintenanceStatus(_)
                 | ControlMessage::Observability(_)
-                | ControlMessage::WatchState(_)
                 | ControlMessage::PollClientEvents(_)
                 | ControlMessage::ClientEvents(_)
                 | ControlMessage::PublishStatus(_)
-                | ControlMessage::WatchStatus(_)
                 | ControlMessage::Status(_)
-                | ControlMessage::Ping
                 | ControlMessage::Pong
                 | ControlMessage::Accepted
                 | ControlMessage::Rejected(_)
@@ -112,7 +119,6 @@ impl HttpRequestPayload {
                 | ControlMessage::EnrollDiscoveredPeer(_)
                 | ControlMessage::RemovePeer(_)
                 | ControlMessage::EnrollmentChallenge(_)
-                | ControlMessage::WatchActions(_)
                 | ControlMessage::WatchActionRequests(_)
                 | ControlMessage::ReportActionResult(_)
                 | ControlMessage::ActionResults(_)
@@ -120,7 +126,9 @@ impl HttpRequestPayload {
                 | ControlMessage::QueryOperators
                 | ControlMessage::Operators(_)
                 | ControlMessage::EnrollOperator(_)
-                | ControlMessage::RemoveOperator(_) => {
+                | ControlMessage::RemoveOperator(_)
+                | ControlMessage::DeclareStream(_)
+                | ControlMessage::PublishSamples(_) => {
                     Err(crate::HttpTransportError::UnsupportedControlMessage)
                 }
             },

@@ -173,6 +173,16 @@ impl LocalNodeRuntime {
         LocalProviderApp::connect_at(&self.ipc_socket_path, name, provider)
     }
 
+    /// A provider app on the node's stream socket that keeps one session across its requests
+    /// (and reconnects when it drops), for a client that publishes often.
+    pub fn provider_session(
+        &self,
+        name: impl Into<String>,
+        provider: ProviderRecord,
+    ) -> Result<LocalProviderApp, ClientError> {
+        LocalProviderApp::connect_stream_at(&self.ipc_stream_socket_path, name, provider)
+    }
+
     pub fn provider_client(
         &self,
         name: impl Into<String>,
@@ -186,6 +196,16 @@ impl LocalNodeRuntime {
         executor: ExecutorRecord,
     ) -> Result<LocalExecutorApp, ClientError> {
         LocalExecutorApp::connect_at(&self.ipc_socket_path, name, executor)
+    }
+
+    /// An executor app on the node's stream socket that keeps one session across its requests
+    /// (and reconnects when it drops), for a client that publishes often.
+    pub fn executor_session(
+        &self,
+        name: impl Into<String>,
+        executor: ExecutorRecord,
+    ) -> Result<LocalExecutorApp, ClientError> {
+        LocalExecutorApp::connect_stream_at(&self.ipc_stream_socket_path, name, executor)
     }
 
     pub fn executor_client(

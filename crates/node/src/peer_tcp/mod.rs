@@ -12,6 +12,7 @@
 //! (`orion-client`, feature `remote`).
 
 mod server;
+mod session;
 
 pub(crate) use orion_auth::peer_tcp::{
     PEER_TCP_RESPONSE_HEADER_MAX_BYTES as RESPONSE_HEADER_MAX_BYTES,

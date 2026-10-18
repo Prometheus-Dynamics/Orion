@@ -355,7 +355,11 @@ fn control_plane_client_subscribes_and_polls_state_events() {
         | ClientEventKind::ProviderLeases { .. }
         | ClientEventKind::Status(_)
         | ClientEventKind::ActionRequest(_)
-        | ClientEventKind::ActionResults(_) => {
+        | ClientEventKind::ActionResults(_)
+        | ClientEventKind::StreamCatalog(_)
+        | ClientEventKind::StreamData(_)
+        | ClientEventKind::StreamReset(_)
+        | ClientEventKind::StreamDemand(_) => {
             panic!("unexpected non-control-plane event");
         }
     }

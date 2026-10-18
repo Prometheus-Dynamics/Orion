@@ -74,7 +74,11 @@ async fn node_ipc_stream_server_pushes_state_events_to_live_stream_clients() {
                 | ClientEventKind::ProviderLeases { .. }
                 | ClientEventKind::Status(_)
                 | ClientEventKind::ActionRequest(_)
-                | ClientEventKind::ActionResults(_) => {
+                | ClientEventKind::ActionResults(_)
+                | ClientEventKind::StreamCatalog(_)
+                | ClientEventKind::StreamData(_)
+                | ClientEventKind::StreamReset(_)
+                | ClientEventKind::StreamDemand(_) => {
                     panic!("unexpected non-state event");
                 }
             }

@@ -32,7 +32,8 @@
 //!   [`RemoteOperator::status`], [`RemoteOperator::run_action`] (also for targets owned by other
 //!   nodes: the connected node forwards them), [`RemoteOperator::wait_for_action`],
 //!   [`RemoteOperator::observability`]. Watches poll ([`RemoteOperator::watch_status`],
-//!   [`RemoteOperator::watch_actions`]).
+//!   [`RemoteOperator::watch_actions`]); [`RemoteOperator::open_session`] opens a
+//!   [`RemoteSession`] the node pushes them on instead.
 //!
 //! Operators are never cluster members: nodes do not sync with them, do not count them for
 //! liveness or placement, and refuse every desired-state write from them.
@@ -43,13 +44,20 @@ pub mod discovery;
 mod error;
 mod identity;
 mod operator;
+mod session;
 mod watch;
 
 pub use error::RemoteError;
 pub use identity::OperatorIdentity;
 pub use operator::{NodeTrust, RemoteOperator, RemoteOperatorConfig};
 pub use orion_control_plane::{
-    ActionQuery, ActionRequest, ActionResult, ActionState, ActionTarget, NodeRecord, OperatorId,
-    OperatorTrustState, OperatorWelcome, StatusEntry, StatusQuery, StatusSubject,
+    ActionQuery, ActionRequest, ActionResult, ActionState, ActionTarget, ClientEvent,
+    ClientEventKind, NodeRecord, OperatorId, OperatorTrustState, OperatorWelcome, StateWatch,
+    StatusChange, StatusEntry, StatusQuery, StatusSubject,
 };
+pub use orion_control_plane::{
+    Backfill, SampleChunk, SeriesDecl, SeriesKind, StreamCatalog, StreamCursor, StreamData,
+    StreamRef, StreamReset, StreamResetReason, StreamSubscription,
+};
+pub use session::RemoteSession;
 pub use watch::{RemoteActionWatch, RemoteStatusWatch};

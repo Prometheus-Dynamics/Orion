@@ -221,6 +221,9 @@ pub enum OperatorEnrollmentMethod {
     Approval,
     /// The shared enrollment key handshake.
     EnrollmentKey,
+    /// Its hello came from a network the node enrolls automatically
+    /// (`ORION_NODE_OPERATOR_AUTO_ENROLL`).
+    Network,
 }
 
 /// Trust state of an operator on one node.

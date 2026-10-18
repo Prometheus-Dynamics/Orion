@@ -29,7 +29,7 @@ use std::{
     sync::Arc,
 };
 use tokio::{sync::oneshot, task::JoinSet};
-use tracing::info;
+use tracing::debug;
 
 impl NodeApp {
     #[cfg(feature = "transport-http")]
@@ -337,7 +337,9 @@ impl NodeApp {
         &self,
         stream: tokio::net::UnixStream,
     ) -> Result<(), IpcTransportError> {
-        info!(node = %self.config.node_id, "client stream session opened");
+        // Every stream client connection; DEBUG, so a client that reconnects
+        // often doesn't flood the journal.
+        debug!(node = %self.config.node_id, "client stream session opened");
         let peer_identity = orion::transport::ipc::unix_peer_identity(&stream);
         let max_payload_bytes = self.config.runtime_tuning.transport_max_payload_bytes;
         let (mut reader, mut writer) = stream.into_split();

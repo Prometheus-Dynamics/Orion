@@ -136,6 +136,7 @@ impl NodeApp {
             registries,
             observed_persistence: self.observed_persistence_usage(),
             status_lane: self.status_lane_usage(),
+            streams: self.streams_usage(),
         }
     }
 

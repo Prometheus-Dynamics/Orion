@@ -21,6 +21,8 @@ mod fixtures;
 #[cfg(all(feature = "transport-http", feature = "peer-tcp"))]
 mod mixed;
 #[cfg(feature = "peer-tcp")]
+mod open_read;
+#[cfg(feature = "peer-tcp")]
 mod peer_tcp;
 #[cfg(feature = "peer-tcp")]
 mod placement;
@@ -28,6 +30,10 @@ mod placement;
 mod remote_operator;
 #[cfg(feature = "peer-tcp")]
 mod remote_operator_actions;
+#[cfg(feature = "peer-tcp")]
+mod remote_session;
+#[cfg(feature = "peer-tcp")]
+mod streams;
 
 /// Delivers peer requests by calling the remote node's control pipeline directly (including
 /// peer authentication), so the sync engine runs without sockets.

@@ -23,6 +23,8 @@ impl NodeApp {
         &self,
         principal: &ControlPrincipal,
         message: ControlMessage,
+        session: Option<&orion::transport::ipc::LocalAddress>,
+        remote: Option<std::net::IpAddr>,
     ) -> Result<HttpResponsePayload, NodeError> {
         let operator = match principal {
             ControlPrincipal::Operator(operator) => operator,
@@ -30,10 +32,32 @@ impl NodeApp {
                 operator_id,
                 public_key,
             } => {
+                // The policy let through only the hello and what open read allows.
                 return match message {
-                    ControlMessage::OperatorHello => Ok(HttpResponsePayload::OperatorWelcome(
-                        Box::new(self.operator_welcome(operator_id, public_key, None)),
+                    ControlMessage::OperatorHello => {
+                        let enrolled = remote.and_then(|addr| {
+                            self.auto_enroll_operator(operator_id, public_key, addr)
+                        });
+                        Ok(HttpResponsePayload::OperatorWelcome(Box::new(
+                            self.operator_welcome(operator_id, public_key, enrolled.as_ref()),
+                        )))
+                    }
+                    ControlMessage::OpenSession(open) => {
+                        self.open_remote_session(operator_id, open)
+                    }
+                    message @ (ControlMessage::WatchStatus(_)
+                    | ControlMessage::WatchState(_)
+                    | ControlMessage::SubscribeStream(_)
+                    | ControlMessage::UnsubscribeStream(_)
+                    | ControlMessage::Ping) => {
+                        self.apply_remote_session_message(operator_id, session, message)
+                    }
+                    ControlMessage::QueryStatus(query) => Ok(HttpResponsePayload::Status(
+                        self.query_status_routed(&query)?,
                     )),
+                    ControlMessage::QueryStateSnapshot => {
+                        Ok(HttpResponsePayload::Snapshot(self.state_snapshot()))
+                    }
                     _ => Err(NodeError::Authorization(format!(
                         "operator {operator_id} is not enrolled"
                     ))),
@@ -71,6 +95,17 @@ impl NodeApp {
             ControlMessage::QueryActions(query) => Ok(HttpResponsePayload::Actions(
                 self.query_actions_for_operator(&query, operator),
             )),
+            ControlMessage::OpenSession(open) => {
+                self.open_remote_session(&operator.operator_id, open)
+            }
+            message @ (ControlMessage::WatchStatus(_)
+            | ControlMessage::WatchState(_)
+            | ControlMessage::WatchActions(_)
+            | ControlMessage::SubscribeStream(_)
+            | ControlMessage::UnsubscribeStream(_)
+            | ControlMessage::Ping) => {
+                self.apply_remote_session_message(&operator.operator_id, session, message)
+            }
             other => Err(NodeError::Authorization(format!(
                 "operator {} may not send {other:?}",
                 operator.operator_id
@@ -117,6 +152,41 @@ impl NodeApp {
                 .map(|operator| operator.allowed_actions.clone())
                 .unwrap_or_default(),
         }
+    }
+
+    /// Enrolls `operator_id` when its hello came from a network of
+    /// `ORION_NODE_OPERATOR_AUTO_ENROLL` (never one an administrator removed or enrolled with
+    /// another key): read access and the rule's actions.
+    fn auto_enroll_operator(
+        &self,
+        operator_id: &OperatorId,
+        key: &[u8; 32],
+        addr: std::net::IpAddr,
+    ) -> Option<AuthenticatedOperator> {
+        let rule = self.security.operator_auto_enroll_rule(addr)?;
+        self.security
+            .check_operator_auto_enrollable(operator_id, key)
+            .ok()?;
+        let policy = OperatorPolicy {
+            read: true,
+            actions: Some(rule.actions.clone()),
+        };
+        if let Err(error) = self.enroll_operator_key(
+            operator_id,
+            *key,
+            OperatorEnrollmentMethod::Network,
+            policy.clone(),
+        ) {
+            tracing::warn!(node = %self.config.node_id, operator = %operator_id, %error, "network auto-enrollment failed");
+            return None;
+        }
+        info!(node = %self.config.node_id, operator = %operator_id, %addr, "operator enrolled from its network");
+        Some(AuthenticatedOperator {
+            operator_id: operator_id.clone(),
+            public_key_hex: orion_core::PublicKeyHex::new(orion_auth::hex::encode_hex(key)),
+            policy,
+            allowed_actions: rule.actions,
+        })
     }
 
     /// The discovery cluster name and whether a shared enrollment key is configured.

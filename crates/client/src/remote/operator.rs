@@ -306,7 +306,7 @@ impl RemoteOperator {
     }
 }
 
-fn encode_signed(
+pub(super) fn encode_signed(
     identity: &OperatorIdentity,
     message: ControlMessage,
 ) -> Result<Vec<u8>, RemoteError> {
@@ -336,7 +336,7 @@ async fn exchange(client: &ControlTcpClient, request: &[u8]) -> Result<Vec<u8>, 
     }
 }
 
-fn decode_payload(body: &[u8]) -> Result<HttpResponsePayload, RemoteError> {
+pub(super) fn decode_payload(body: &[u8]) -> Result<HttpResponsePayload, RemoteError> {
     decode_from_slice::<HttpResponsePayload>(body)
         .map_err(|err| RemoteError::Decode(err.to_string()))
 }
@@ -355,6 +355,7 @@ pub(crate) fn unexpected(request: &str, response: &HttpResponsePayload) -> Remot
         HttpResponsePayload::Actions(_) => "actions",
         HttpResponsePayload::OperatorWelcome(_) => "operator welcome",
         HttpResponsePayload::Status(_) => "status",
+        HttpResponsePayload::Session(_) => "session",
     };
     RemoteError::UnexpectedResponse(format!("{kind} response to {request}"))
 }

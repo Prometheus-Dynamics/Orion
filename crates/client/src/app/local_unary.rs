@@ -110,6 +110,18 @@ where
         )
     }
 
+    fn connect_stream_at(
+        socket_path: impl AsRef<Path>,
+        name: impl Into<String>,
+    ) -> Result<Self, ClientError> {
+        let identity = local_identity_for_role(name, Role::ROLE);
+        Self::connect_stream(
+            socket_path,
+            identity.clone(),
+            local_session_config_for_role(&identity),
+        )
+    }
+
     fn connect_default(name: impl Into<String>) -> Result<Self, ClientError> {
         let identity = local_identity_for_role(name, Role::ROLE);
         Self::connect_stream(
@@ -363,6 +375,17 @@ impl LocalProviderClient {
         })
     }
 
+    /// Connect using the IPC stream socket at `socket_path` and reuse the negotiated session
+    /// across repeated local requests from this client instance (reconnecting when it drops).
+    pub fn connect_stream_at(
+        socket_path: impl AsRef<Path>,
+        name: impl Into<String>,
+    ) -> Result<Self, ClientError> {
+        Ok(Self {
+            inner: LocalUnaryClient::connect_stream_at(socket_path, name)?,
+        })
+    }
+
     /// Connect using the default IPC stream socket and reuse the negotiated session across
     /// repeated local requests from this client instance.
     pub fn connect_default(name: impl Into<String>) -> Result<Self, ClientError> {
@@ -457,6 +480,19 @@ impl LocalProviderApp {
     ) -> Result<Self, ClientError> {
         Ok(Self {
             client: LocalProviderClient::connect_at(socket_path, name)?,
+            provider,
+        })
+    }
+
+    /// Connect using the IPC stream socket at `socket_path` and reuse the negotiated session
+    /// across repeated local requests from this app instance (reconnecting when it drops).
+    pub fn connect_stream_at(
+        socket_path: impl AsRef<Path>,
+        name: impl Into<String>,
+        provider: ProviderRecord,
+    ) -> Result<Self, ClientError> {
+        Ok(Self {
+            client: LocalProviderClient::connect_stream_at(socket_path, name)?,
             provider,
         })
     }
@@ -557,6 +593,17 @@ impl LocalExecutorClient {
     ) -> Result<Self, ClientError> {
         Ok(Self {
             inner: LocalUnaryClient::connect_at(socket_path, name)?,
+        })
+    }
+
+    /// Connect using the IPC stream socket at `socket_path` and reuse the negotiated session
+    /// across repeated local requests from this client instance (reconnecting when it drops).
+    pub fn connect_stream_at(
+        socket_path: impl AsRef<Path>,
+        name: impl Into<String>,
+    ) -> Result<Self, ClientError> {
+        Ok(Self {
+            inner: LocalUnaryClient::connect_stream_at(socket_path, name)?,
         })
     }
 
@@ -684,6 +731,19 @@ impl LocalExecutorApp {
     ) -> Result<Self, ClientError> {
         Ok(Self {
             client: LocalExecutorClient::connect_at(socket_path, name)?,
+            executor,
+        })
+    }
+
+    /// Connect using the IPC stream socket at `socket_path` and reuse the negotiated session
+    /// across repeated local requests from this app instance (reconnecting when it drops).
+    pub fn connect_stream_at(
+        socket_path: impl AsRef<Path>,
+        name: impl Into<String>,
+        executor: ExecutorRecord,
+    ) -> Result<Self, ClientError> {
+        Ok(Self {
+            client: LocalExecutorClient::connect_stream_at(socket_path, name)?,
             executor,
         })
     }

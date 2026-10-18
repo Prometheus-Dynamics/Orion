@@ -231,17 +231,25 @@ impl NodeSecurityAuthorizer {
             )))
         };
         match operation {
-            ControlOperation::OperatorHello => Ok(()),
+            ControlOperation::OperatorHello | ControlOperation::Ping => Ok(()),
+            // A push session and its watches: read access (an operator without it can still
+            // watch its own actions, as with `QueryActions`).
             ControlOperation::QueryStateSnapshot
             | ControlOperation::QueryObservability
-            | ControlOperation::QueryStatus => {
+            | ControlOperation::QueryStatus
+            | ControlOperation::WatchStatus
+            | ControlOperation::WatchState
+            | ControlOperation::SubscribeStream
+            | ControlOperation::UnsubscribeStream => {
                 if operator.policy.read {
                     Ok(())
                 } else {
                     refuse("its policy grants no read access")
                 }
             }
-            ControlOperation::QueryActions => {
+            ControlOperation::OpenSession
+            | ControlOperation::QueryActions
+            | ControlOperation::WatchActions => {
                 if operator.policy.read || !operator.allowed_actions.is_empty() {
                     Ok(())
                 } else {
@@ -327,7 +335,15 @@ impl NodeSecurityAuthorizer {
 
 impl Authorizer for NodeSecurityAuthorizer {
     fn authorize(&self, request: &ControlRequest) -> Result<(), NodeError> {
-        if matches!(request.context.principal, ControlPrincipal::Local { .. }) {
+        if let ControlPrincipal::Local { source, .. } = &request.context.principal {
+            // Remote push sessions are local clients under a reserved address; nothing on the
+            // local socket may speak as one.
+            if crate::app::is_remote_session_address(source) {
+                return Err(NodeError::Authorization(format!(
+                    "local client address {} is reserved for remote sessions",
+                    source.as_str()
+                )));
+            }
             self.authorize_local_identity(request)?;
         }
         if let ControlPrincipal::Peer(peer) = &request.context.principal
@@ -340,10 +356,27 @@ impl Authorizer for NodeSecurityAuthorizer {
             (ControlPrincipal::UnenrolledOperator { .. }, ControlOperation::OperatorHello) => {
                 Ok(())
             }
+            // What `ORION_NODE_OPERATOR_OPEN_READ` opens to operators the node has not enrolled.
             (ControlPrincipal::UnenrolledOperator { operator_id, .. }, operation) => {
-                Err(NodeError::Authorization(format!(
-                    "operator {operator_id} is not enrolled and may not perform {operation:?}"
-                )))
+                let open = self.security.operator_open_read();
+                let allowed = match operation {
+                    ControlOperation::OpenSession | ControlOperation::Ping => open.any(),
+                    ControlOperation::QueryStatus | ControlOperation::WatchStatus => open.status,
+                    ControlOperation::SubscribeStream | ControlOperation::UnsubscribeStream => {
+                        open.streams
+                    }
+                    ControlOperation::QueryStateSnapshot | ControlOperation::WatchState => {
+                        open.state
+                    }
+                    _ => false,
+                };
+                if allowed {
+                    Ok(())
+                } else {
+                    Err(NodeError::Authorization(format!(
+                        "operator {operator_id} is not enrolled and may not perform {operation:?}"
+                    )))
+                }
             }
             (_, ControlOperation::OperatorHello) => Err(NodeError::Authorization(
                 "OperatorHello needs a request signed by an `operator:<name>` principal".into(),
@@ -417,11 +450,16 @@ impl Authorizer for NodeSecurityAuthorizer {
             ) => self.authorize_local_role(source, ClientRole::Provider),
             (
                 ControlPrincipal::Local { .. },
-                ControlOperation::QueryStatus | ControlOperation::WatchStatus,
+                ControlOperation::QueryStatus
+                | ControlOperation::WatchStatus
+                | ControlOperation::SubscribeStream
+                | ControlOperation::UnsubscribeStream,
             ) => Ok(()),
             (
                 ControlPrincipal::Local { source, .. },
                 ControlOperation::PublishStatus
+                | ControlOperation::DeclareStream
+                | ControlOperation::PublishSamples
                 | ControlOperation::WatchActionRequests
                 | ControlOperation::ClaimNodeActions
                 | ControlOperation::ReportActionResult,

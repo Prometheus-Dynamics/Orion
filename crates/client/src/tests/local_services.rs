@@ -325,12 +325,12 @@ async fn local_runtime_publisher_registers_provider_and_executor() {
         for expected_role in [ClientRole::Provider, ClientRole::Executor] {
             let role = expected_role.clone();
             let (mut stream, _) = listener.accept().await.expect("accept should work");
-            let hello = read_unary_envelope(&mut stream).await;
+            let hello = read_frame(&mut stream).await;
             assert!(matches!(
                 hello.message,
                 ControlMessage::ClientHello(ref request) if request.role == role
             ));
-            write_unary_envelope(
+            write_frame(
                 &mut stream,
                 &ControlEnvelope {
                     source: LocalAddress::new("orion"),
@@ -346,14 +346,14 @@ async fn local_runtime_publisher_registers_provider_and_executor() {
             )
             .await;
 
-            let (mut stream, _) = listener.accept().await.expect("accept should work");
-            let request = read_unary_envelope(&mut stream).await;
+            // The same connection: the session is kept.
+            let request = read_frame(&mut stream).await;
             match request.message {
                 ControlMessage::ProviderState(_) if role == ClientRole::Provider => {}
                 ControlMessage::ExecutorState(_) if role == ClientRole::Executor => {}
                 other => panic!("unexpected register message: {other:?}"),
             }
-            write_unary_envelope(
+            write_frame(
                 &mut stream,
                 &ControlEnvelope {
                     source: LocalAddress::new("orion"),
@@ -421,8 +421,8 @@ async fn local_runtime_publisher_publishes_provider_resources_and_executor_snaps
     let server_task = tokio::spawn(async move {
         for expected_message in ["provider", "executor"] {
             let (mut stream, _) = listener.accept().await.expect("accept should work");
-            let hello = read_unary_envelope(&mut stream).await;
-            write_unary_envelope(
+            let hello = read_frame(&mut stream).await;
+            write_frame(
                 &mut stream,
                 &ControlEnvelope {
                     source: LocalAddress::new("orion"),
@@ -442,8 +442,8 @@ async fn local_runtime_publisher_publishes_provider_resources_and_executor_snaps
             )
             .await;
 
-            let (mut stream, _) = listener.accept().await.expect("accept should work");
-            let request = read_unary_envelope(&mut stream).await;
+            // The same connection: the session is kept.
+            let request = read_frame(&mut stream).await;
             match request.message {
                 ControlMessage::ProviderState(update) if expected_message == "provider" => {
                     assert_eq!(update.provider, expected_provider);
@@ -456,7 +456,7 @@ async fn local_runtime_publisher_publishes_provider_resources_and_executor_snaps
                 }
                 other => panic!("unexpected publish message: {other:?}"),
             }
-            write_unary_envelope(
+            write_frame(
                 &mut stream,
                 &ControlEnvelope {
                     source: LocalAddress::new("orion"),
@@ -487,6 +487,93 @@ async fn local_runtime_publisher_publishes_provider_resources_and_executor_snaps
         .await
         .expect("publish should succeed");
 
+    server_task.await.expect("server should complete");
+    let _ = tokio::fs::remove_file(&socket_path).await;
+}
+
+/// One control frame of a stream session (the publisher's transport).
+async fn read_frame(stream: &mut tokio::net::UnixStream) -> ControlEnvelope {
+    read_control_frame(stream)
+        .await
+        .expect("frame should decode")
+        .expect("frame should exist")
+}
+
+async fn write_frame(stream: &mut tokio::net::UnixStream, envelope: &ControlEnvelope) {
+    write_control_frame(stream, envelope)
+        .await
+        .expect("frame should send");
+}
+
+#[tokio::test]
+async fn local_runtime_publisher_keeps_one_session_across_publishes() {
+    let socket_path = unique_socket_path("runtime-publisher-session");
+    let _ = tokio::fs::remove_file(&socket_path).await;
+    let listener = UnixListener::bind(&socket_path).expect("listener should bind");
+    let provider = ProviderRecord {
+        provider_id: ProviderId::new("provider.local"),
+        node_id: NodeId::new("node-a"),
+        resource_types: vec![ResourceType::new("camera.device")],
+    };
+
+    let server_task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("accept should work");
+        let hello = read_frame(&mut stream).await;
+        assert!(matches!(hello.message, ControlMessage::ClientHello(_)));
+        write_frame(
+            &mut stream,
+            &ControlEnvelope {
+                source: LocalAddress::new("orion"),
+                destination: hello.source,
+                message: ControlMessage::ClientWelcome(orion_control_plane::ClientSession {
+                    session_id: SessionId::new("node-a:provider"),
+                    role: ClientRole::Provider,
+                    node_id: NodeId::new("node-a"),
+                    source: "publisher".into(),
+                    client_name: "publisher".into(),
+                }),
+            },
+        )
+        .await;
+        // Three publishes, one connection and one hello.
+        for _ in 0..3 {
+            let request = read_frame(&mut stream).await;
+            assert!(
+                matches!(request.message, ControlMessage::ProviderState(_)),
+                "{:?}",
+                request.message
+            );
+            write_frame(
+                &mut stream,
+                &ControlEnvelope {
+                    source: LocalAddress::new("orion"),
+                    destination: request.source,
+                    message: ControlMessage::Accepted,
+                },
+            )
+            .await;
+        }
+        // No second connection while the session lasts.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), listener.accept())
+                .await
+                .is_err(),
+            "the publisher connected again"
+        );
+    });
+
+    let publisher = LocalRuntimePublisher::builder(
+        LocalNodeRuntime::new(&socket_path, &socket_path),
+        "publisher",
+    )
+    .provider(provider)
+    .build();
+    for _ in 0..3 {
+        publisher
+            .publish_provider_resources(Vec::new())
+            .await
+            .expect("publish should succeed");
+    }
     server_task.await.expect("server should complete");
     let _ = tokio::fs::remove_file(&socket_path).await;
 }

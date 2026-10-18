@@ -93,7 +93,7 @@ impl NodeApp {
 
     /// Whether the local client `source` owns `subject`: its provider or executor, a resource of
     /// its provider (or realized by its executor), or a workload its executor runs.
-    fn local_client_owns(&self, source: &LocalAddress, subject: &StatusSubject) -> bool {
+    pub(super) fn local_client_owns(&self, source: &LocalAddress, subject: &StatusSubject) -> bool {
         let (providers, executors): (Vec<ProviderId>, Vec<ExecutorId>) = {
             let owners = lock(&self.state.status.owners);
             (

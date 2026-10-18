@@ -12,7 +12,7 @@ use orion::{
     encode_to_vec,
     transport::{
         http::{HttpCodec, HttpResponsePayload},
-        ipc::IpcTransportError,
+        ipc::{IpcTransportError, LocalAddress},
     },
 };
 use orion_transport_ipc::{
@@ -52,13 +52,31 @@ impl NodeApp {
         Ok((local_addr, GracefulTaskHandle::new(shutdown_tx, handle)))
     }
 
-    /// Executes one decoded request frame and builds the response frame.
-    async fn serve_peer_tcp_request(&self, request: &[u8]) -> ResponseFrame {
-        let (status, body) = match self.execute_peer_tcp_request(request).await {
-            Ok(response) => match encode_to_vec(&response) {
-                Ok(body) => (STATUS_OK, body),
-                Err(err) => (STATUS_ERROR, err.to_string().into_bytes()),
-            },
+    /// Executes one decoded request frame (on the push session `session`, if any) and builds
+    /// the response frame; with the id of the session it opened, for an `OpenSession`.
+    pub(super) async fn serve_peer_tcp_request(
+        &self,
+        request: &[u8],
+        session: Option<LocalAddress>,
+        remote: SocketAddr,
+    ) -> (ResponseFrame, Option<String>) {
+        let mut opened = None;
+        let (status, body) = match self
+            .execute_peer_tcp_request(request, session, remote)
+            .await
+        {
+            Ok(response) => {
+                if let HttpResponsePayload::Session(welcome) = &response {
+                    opened = Some(welcome.session_id.clone());
+                }
+                match encode_to_vec(&response) {
+                    Ok(body) => (STATUS_OK, body),
+                    Err(err) => {
+                        opened = None;
+                        (STATUS_ERROR, err.to_string().into_bytes())
+                    }
+                }
+            }
             Err(err) => (STATUS_ERROR, err.to_string().into_bytes()),
         };
         // The peer reads frames up to the same limit; leave room for the signature header.
@@ -82,22 +100,33 @@ impl NodeApp {
                 None
             }
         };
-        ResponseFrame {
-            status,
-            signature,
-            body,
-        }
+        (
+            ResponseFrame {
+                status,
+                signature,
+                body,
+            },
+            opened,
+        )
     }
 
     async fn execute_peer_tcp_request(
         &self,
         request: &[u8],
+        session: Option<LocalAddress>,
+        remote: SocketAddr,
     ) -> Result<HttpResponsePayload, NodeError> {
         let payload = HttpCodec.decode_request_body(request)?;
         let wait = Self::peer_action_wait(&payload);
         let app = self.clone();
         let response = tokio::task::spawn_blocking(move || {
-            app.serve_control_request(ControlRequest::from_peer_tcp_payload(payload))
+            app.serve_control_request(
+                match session {
+                    Some(session) => ControlRequest::from_session_payload(payload, session),
+                    None => ControlRequest::from_peer_tcp_payload(payload),
+                }
+                .with_remote_addr(remote.ip()),
+            )
         })
         .await
         .map_err(|err| NodeError::Storage(format!("peer TCP request task failed: {err}")))??;
@@ -130,7 +159,7 @@ impl NodeApp {
         );
     }
 
-    fn record_peer_tcp_server_failure(&self, remote: SocketAddr, error: &PeerTcpError) {
+    pub(super) fn record_peer_tcp_server_failure(&self, remote: SocketAddr, error: &PeerTcpError) {
         self.record_communication_endpoint_failure_kind(
             peer_tcp_server_endpoint(self, remote),
             None,
@@ -228,7 +257,7 @@ async fn serve_connection(app: NodeApp, mut stream: TcpStream, remote: SocketAdd
             }
         };
         let started = Instant::now();
-        let response = app.serve_peer_tcp_request(&request).await;
+        let (response, opened) = app.serve_peer_tcp_request(&request, None, remote).await;
         let encoded = match response.encode() {
             Ok(encoded) => encoded,
             Err(err) => {
@@ -242,12 +271,27 @@ async fn serve_connection(app: NodeApp, mut stream: TcpStream, remote: SocketAdd
         )
         .await;
         match written {
-            Ok(Ok(sent)) => app.record_peer_tcp_server_exchange(
-                remote,
-                request.len() as u64,
-                sent as u64,
-                started.elapsed(),
-            ),
+            Ok(Ok(sent)) => {
+                app.record_peer_tcp_server_exchange(
+                    remote,
+                    request.len() as u64,
+                    sent as u64,
+                    started.elapsed(),
+                );
+                // An answered `OpenSession`: the connection is a push session from here on.
+                if let Some(session) = opened {
+                    super::session::serve_session(
+                        app,
+                        stream,
+                        read_state,
+                        remote,
+                        LocalAddress::new(session),
+                        request,
+                    )
+                    .await;
+                    return;
+                }
+            }
             Ok(Err(err)) => {
                 app.record_peer_tcp_server_failure(remote, &PeerTcpError::Frame(err));
                 return;

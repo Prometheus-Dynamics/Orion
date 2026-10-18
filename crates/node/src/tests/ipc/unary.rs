@@ -531,7 +531,11 @@ async fn node_ipc_server_queues_state_events_for_registered_watchers() {
                 | ClientEventKind::ProviderLeases { .. }
                 | ClientEventKind::Status(_)
                 | ClientEventKind::ActionRequest(_)
-                | ClientEventKind::ActionResults(_) => {
+                | ClientEventKind::ActionResults(_)
+                | ClientEventKind::StreamCatalog(_)
+                | ClientEventKind::StreamData(_)
+                | ClientEventKind::StreamReset(_)
+                | ClientEventKind::StreamDemand(_) => {
                     panic!("unexpected non-state event");
                 }
             }

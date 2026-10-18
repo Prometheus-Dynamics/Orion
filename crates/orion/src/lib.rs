@@ -62,8 +62,8 @@ pub mod client {
         LocalProviderSubscription, LocalRuntimePublisher, LocalRuntimePublisherBuilder,
         LocalServiceRetryPolicy, ProviderApp, ProviderClient, ProviderEventStream,
         ProviderResource, ResolvedGraphPayload, ResourceClaim, SessionConfig, StatusWatch,
-        default_ipc_socket_path, default_ipc_stream_socket_path, graph_reference_for_workload,
-        resolve_graph_reference, resolve_workload_graph,
+        StreamPublisher, default_ipc_socket_path, default_ipc_stream_socket_path,
+        graph_reference_for_workload, resolve_graph_reference, resolve_workload_graph,
     };
 }
 
@@ -108,11 +108,18 @@ pub mod control_plane {
         ResourceEndpointError, ResourceOwnershipMode, ResourceRecord, ResourceRecordBuilder,
         ResourceState, RestartPolicy, SharedMemoryEndpoint, StateSectionCounts, StateSizeSnapshot,
         StateSnapshot, StateWatch, StatusChange, StatusEntry, StatusKey, StatusLaneUsageSnapshot,
-        StatusQuery, StatusSubject, StatusSubjectParseError, SyncDiffRequest, SyncRequest,
-        SyncSummaryRequest, TcpEndpoint, TransportMetricsSnapshot, TypedConfigValue,
+        StatusQuery, StatusSubject, StatusSubjectParseError, StreamsUsageSnapshot, SyncDiffRequest,
+        SyncRequest, SyncSummaryRequest, TcpEndpoint, TransportMetricsSnapshot, TypedConfigValue,
         TypedResourceEndpoint, UnixEndpoint, WorkerQueueUsageSnapshot, WorkloadConfig,
         WorkloadObservedState, WorkloadRecord, WorkloadRecordBuilder, WorkloadRequirement,
         config_json_value, deserialize_config, duration_ms_u64, estimate_wire_bytes,
+    };
+    pub use orion_control_plane::{
+        Backfill, HistoryPolicy, MAX_STREAM_NAME_LEN, MAX_STREAM_SERIES, REMOTE_SESSION_PREFIX,
+        SampleChunk, SampleChunkBuilder, SampleDecodeError, SampleValue, Sampling, SeriesDecl,
+        SeriesKind, SessionOpen, SessionWelcome, StreamCatalog, StreamCursor, StreamData,
+        StreamDecl, StreamDemand, StreamPublish, StreamRef, StreamReset, StreamResetReason,
+        StreamSubscription,
     };
     pub use orion_control_plane::{
         DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState,

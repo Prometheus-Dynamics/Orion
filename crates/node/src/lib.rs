@@ -131,7 +131,7 @@ pub use auth::{
 pub use clock::{ClockStatusSource, KernelClockReading, KernelClockStatusSource};
 pub use config::{
     ActionTuning, HostFactsTuning, NodeConfig, NodeProcessConfig, NodeRuntimeThreads,
-    PlacementTuning,
+    OperatorAutoEnroll, OperatorOpenRead, PlacementTuning,
 };
 pub use host_facts::{HostFactsSource, LayeredHostFactsSource, LinuxHostFactsSource};
 pub use peer::{

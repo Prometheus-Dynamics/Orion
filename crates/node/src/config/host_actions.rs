@@ -93,6 +93,137 @@ pub struct ActionTuning {
     /// (`ORION_NODE_OPERATOR_ACTIONS`, comma-separated `*`, `prefix*` or exact names). Empty by
     /// default: operators are read-only unless granted actions (`docs/remote-operator.md`).
     pub operator_actions: Vec<String>,
+    /// What operators the node has not enrolled may read (`ORION_NODE_OPERATOR_OPEN_READ`).
+    pub operator_open_read: OperatorOpenRead,
+    /// Networks whose operators are enrolled on their first hello
+    /// (`ORION_NODE_OPERATOR_AUTO_ENROLL`).
+    pub operator_auto_enroll: Vec<OperatorAutoEnroll>,
+}
+
+/// What operators the node has not enrolled may read, without actions
+/// (`ORION_NODE_OPERATOR_OPEN_READ`: `status`, `streams` and `state`, comma-separated). Their
+/// requests are still signed (replay-protected); they can open push sessions for what is listed.
+/// Nothing by default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OperatorOpenRead {
+    /// `QueryStatus` and status watches.
+    pub status: bool,
+    /// Stream subscriptions (`docs/streams.md`).
+    pub streams: bool,
+    /// `QueryStateSnapshot` and state watches (node records, host facts).
+    pub state: bool,
+}
+
+impl OperatorOpenRead {
+    pub fn any(&self) -> bool {
+        self.status || self.streams || self.state
+    }
+
+    pub fn parse(raw: &str) -> Result<Self, NodeError> {
+        let mut open = Self::default();
+        for item in raw
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+        {
+            match item {
+                "status" => open.status = true,
+                "streams" => open.streams = true,
+                "state" => open.state = true,
+                other => {
+                    return Err(NodeError::Config(format!(
+                        "ORION_NODE_OPERATOR_OPEN_READ: `{other}` is not one of status, streams, \
+                         state"
+                    )));
+                }
+            }
+        }
+        Ok(open)
+    }
+}
+
+/// Operators whose `OperatorHello` comes from `network` are enrolled with `actions` (and read
+/// access) without an administrator (`ORION_NODE_OPERATOR_AUTO_ENROLL`), unless an administrator
+/// removed them or they are enrolled with another key. The enrollment is persisted and audited
+/// like any other.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OperatorAutoEnroll {
+    pub network: std::net::IpAddr,
+    pub prefix: u8,
+    pub actions: Vec<String>,
+}
+
+impl OperatorAutoEnroll {
+    /// Whether `addr` is on the rule's network (IPv4-mapped IPv6 counts as IPv4).
+    pub fn contains(&self, addr: std::net::IpAddr) -> bool {
+        use std::net::IpAddr;
+        let addr = match addr {
+            IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(addr, IpAddr::V4),
+            v4 => v4,
+        };
+        match (self.network, addr) {
+            (IpAddr::V4(net), IpAddr::V4(ip)) => {
+                let bits = u32::from(self.prefix.min(32));
+                let mask = if bits == 0 {
+                    0
+                } else {
+                    u32::MAX << (32 - bits)
+                };
+                u32::from(net) & mask == u32::from(ip) & mask
+            }
+            (IpAddr::V6(net), IpAddr::V6(ip)) => {
+                let bits = u32::from(self.prefix.min(128));
+                let mask = if bits == 0 {
+                    0
+                } else {
+                    u128::MAX << (128 - bits)
+                };
+                u128::from(net) & mask == u128::from(ip) & mask
+            }
+            _ => false,
+        }
+    }
+
+    /// `<network>/<prefix>=<pattern>,<pattern>`, rules separated by `;`
+    /// (`172.31.0.0/16=reboot,usb-boot`). An empty pattern list grants read access only.
+    pub fn parse_all(raw: &str) -> Result<Vec<Self>, NodeError> {
+        let invalid = |rule: &str, why: &str| {
+            NodeError::Config(format!("ORION_NODE_OPERATOR_AUTO_ENROLL: `{rule}`: {why}"))
+        };
+        let mut rules = Vec::new();
+        for rule in raw
+            .split(';')
+            .map(str::trim)
+            .filter(|rule| !rule.is_empty())
+        {
+            let (network, actions) = rule.split_once('=').unwrap_or((rule, ""));
+            let (address, prefix) = network
+                .trim()
+                .split_once('/')
+                .ok_or_else(|| invalid(rule, "the network needs a /prefix"))?;
+            let network: std::net::IpAddr = address
+                .parse()
+                .map_err(|_| invalid(rule, "not an IP address"))?;
+            let prefix: u8 = prefix.parse().map_err(|_| invalid(rule, "bad prefix"))?;
+            if prefix > if network.is_ipv4() { 32 } else { 128 } {
+                return Err(invalid(rule, "prefix too long"));
+            }
+            let actions: Vec<String> = actions
+                .split(',')
+                .map(str::trim)
+                .filter(|pattern| !pattern.is_empty())
+                .map(str::to_owned)
+                .collect();
+            orion::control_plane::validate_action_patterns(&actions)
+                .map_err(|err| invalid(rule, &err.to_string()))?;
+            rules.push(Self {
+                network,
+                prefix,
+                actions,
+            });
+        }
+        Ok(rules)
+    }
 }
 
 impl Default for ActionTuning {
@@ -104,6 +235,8 @@ impl Default for ActionTuning {
             max_tracked: DEFAULT_ACTION_MAX_TRACKED,
             max_wait: Duration::from_millis(DEFAULT_ACTION_MAX_WAIT_MS),
             operator_actions: Vec::new(),
+            operator_open_read: OperatorOpenRead::default(),
+            operator_auto_enroll: Vec::new(),
         }
     }
 }
@@ -129,6 +262,24 @@ impl ActionTuning {
                 DEFAULT_ACTION_MAX_WAIT_MS,
             )?,
             operator_actions: operator_actions_from_env()?,
+            operator_open_read: match env::var("ORION_NODE_OPERATOR_OPEN_READ") {
+                Ok(raw) => OperatorOpenRead::parse(&raw)?,
+                Err(env::VarError::NotPresent) => OperatorOpenRead::default(),
+                Err(env::VarError::NotUnicode(_)) => {
+                    return Err(NodeError::Config(
+                        "ORION_NODE_OPERATOR_OPEN_READ must be valid unicode".into(),
+                    ));
+                }
+            },
+            operator_auto_enroll: match env::var("ORION_NODE_OPERATOR_AUTO_ENROLL") {
+                Ok(raw) => OperatorAutoEnroll::parse_all(&raw)?,
+                Err(env::VarError::NotPresent) => Vec::new(),
+                Err(env::VarError::NotUnicode(_)) => {
+                    return Err(NodeError::Config(
+                        "ORION_NODE_OPERATOR_AUTO_ENROLL must be valid unicode".into(),
+                    ));
+                }
+            },
         };
         tuning.normalize();
         Ok(tuning)
@@ -176,6 +327,18 @@ impl ActionTuning {
     /// Default action patterns of remote operators (see [`Self::operator_actions`]).
     pub fn with_operator_actions(mut self, patterns: impl IntoIterator<Item = String>) -> Self {
         self.operator_actions = patterns.into_iter().collect();
+        self
+    }
+
+    /// See [`Self::operator_open_read`].
+    pub fn with_operator_open_read(mut self, open: OperatorOpenRead) -> Self {
+        self.operator_open_read = open;
+        self
+    }
+
+    /// See [`Self::operator_auto_enroll`].
+    pub fn with_operator_auto_enroll(mut self, rules: Vec<OperatorAutoEnroll>) -> Self {
+        self.operator_auto_enroll = rules;
         self
     }
 }

@@ -118,6 +118,11 @@ impl NodeApp {
             | ControlMessage::ActionResults(_)
             | ControlMessage::ClaimNodeActions(_)
             | ControlMessage::OperatorHello
+            | ControlMessage::OpenSession(_)
+            | ControlMessage::DeclareStream(_)
+            | ControlMessage::PublishSamples(_)
+            | ControlMessage::SubscribeStream(_)
+            | ControlMessage::UnsubscribeStream(_)
             | ControlMessage::QueryOperators
             | ControlMessage::Operators(_)
             | ControlMessage::EnrollOperator(_)
