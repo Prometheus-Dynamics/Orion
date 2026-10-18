@@ -213,6 +213,7 @@ impl NodeStorage {
         self.atomic_write(&self.snapshot_manifest_path(), &manifest_bytes)
     }
 
+    #[allow(clippy::too_many_arguments)] // one argument per persisted section; kept flat for the persist call site.
     pub(crate) fn save_encoded_snapshot(
         &self,
         desired: &EncodedDesiredSnapshot,

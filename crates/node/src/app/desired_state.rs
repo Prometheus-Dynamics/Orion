@@ -574,7 +574,7 @@ mod tests {
 
         assert!(changed);
         assert!(history.len() < batches.len());
-        assert!(history.len() >= 1);
+        assert!(!history.is_empty());
         assert!(history.encoded_len() <= keep_bytes);
         // Adding the next older batch would exceed the budget (longest fitting suffix).
         let dropped = batches.len() - history.len();
