@@ -425,6 +425,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY` | `64` | Persistence worker queue capacity. |
 | `ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY` | `128` | Auth state worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |
+| `ORION_NODE_AUDIT_LOG_MAX_BYTES` | `4194304` | Size at which `ORION_NODE_AUDIT_LOG` rotates to `<path>.1`, replacing the previous rotation (one rotated file is kept). The file stays open between records. A record larger than the cap is still written. Minimum 1. |
 | `ORION_NODE_RECONCILE_BACKSTOP_MS` | `5000` | Longest idle period before the event-driven reconcile loop runs a periodic backstop pass. Clamped to at least `ORION_NODE_RECONCILE_MS`. |
 | `ORION_NODE_HLC_MAX_DRIFT_MS` | `300000` | Largest distance a peer's hybrid-logical-clock timestamp may be ahead of the local wall clock; desired-state versions stamped further ahead are rejected and counted (`desired_merge.clock_skew_rejections`). See `docs/peer-sync.md`. |
 | `ORION_NODE_LIVENESS_TIMEOUT_MS` | `5000` | A peer not heard from (sync round, signed request, observed push) for this long is considered gone: placement stops choosing it and cross-node bindings to its resources become unavailable. See `docs/placement.md`. |

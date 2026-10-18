@@ -5,12 +5,12 @@ use serde::Serialize;
 #[cfg(test)]
 use std::time::Duration;
 use std::{
-    fs::OpenOptions,
+    fs::{File, OpenOptions},
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     sync::mpsc::{self, SyncSender, TrySendError},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, PoisonError},
     thread::JoinHandle,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -47,6 +47,7 @@ struct AuditEventRecord {
 pub(crate) struct AuditLogSink {
     pub(super) path: PathBuf,
     sender: SyncSender<AuditEventRecord>,
+    writer: Arc<Mutex<AuditFileWriter>>,
     overload_policy: AuditLogOverloadPolicy,
     dropped_records: AtomicU64,
     queued_records: Arc<AtomicU64>,
@@ -67,8 +68,11 @@ impl AuditLogSink {
         path: PathBuf,
         queue_capacity: usize,
         overload_policy: AuditLogOverloadPolicy,
+        max_bytes: usize,
     ) -> Result<Self, NodeError> {
         let (sender, receiver) = mpsc::sync_channel(queue_capacity);
+        let writer = Arc::new(Mutex::new(AuditFileWriter::new(path.clone(), max_bytes)));
+        let worker_writer = Arc::clone(&writer);
         let worker_path = path.clone();
         let queued_records = Arc::new(AtomicU64::new(0));
         let worker_queued_records = Arc::clone(&queued_records);
@@ -77,7 +81,7 @@ impl AuditLogSink {
             .spawn(move || {
                 while let Ok(record) = receiver.recv() {
                     saturating_decrement(&worker_queued_records);
-                    if let Err(err) = append_audit_record(&worker_path, &record) {
+                    if let Err(err) = append_audit_record(&worker_writer, &record) {
                         tracing::warn!(
                             path = %worker_path.display(),
                             error = %err,
@@ -93,6 +97,7 @@ impl AuditLogSink {
         Ok(Self {
             path,
             sender,
+            writer,
             overload_policy,
             dropped_records: AtomicU64::new(0),
             queued_records,
@@ -101,7 +106,7 @@ impl AuditLogSink {
     }
 
     fn append(&self, record: &AuditEventRecord) -> Result<(), NodeError> {
-        append_audit_record(&self.path, record)
+        append_audit_record(&self.writer, record)
     }
 
     fn enqueue(&self, record: AuditEventRecord) -> Result<(), NodeError> {
@@ -187,37 +192,118 @@ impl Drop for AuditLogSink {
     }
 }
 
-fn append_audit_record(path: &std::path::Path, record: &AuditEventRecord) -> Result<(), NodeError> {
+fn append_audit_record(
+    writer: &Mutex<AuditFileWriter>,
+    record: &AuditEventRecord,
+) -> Result<(), NodeError> {
     #[cfg(test)]
     maybe_test_delay_before_audit_append();
-    let parent = path
-        .parent()
-        .ok_or_else(|| NodeError::Storage("audit log path must have a parent directory".into()))?;
-    std::fs::create_dir_all(parent).map_err(|err| {
-        NodeError::Storage(format!(
-            "failed to create audit log directory `{}`: {err}",
-            parent.display()
-        ))
-    })?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|err| {
-            NodeError::Storage(format!(
-                "failed to open audit log `{}`: {err}",
-                path.display()
-            ))
-        })?;
     let mut line = serde_json::to_vec(record)
         .map_err(|err| NodeError::Storage(format!("failed to encode audit log record: {err}")))?;
     line.push(b'\n');
-    file.write_all(&line).map_err(|err| {
-        NodeError::Storage(format!(
-            "failed to append audit log `{}`: {err}",
-            path.display()
-        ))
-    })
+    writer
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .append(&line)
+}
+
+/// The audit log file, kept open between records. Before a record would grow the file past
+/// `max_bytes`, the file is renamed to `<path>.1` (replacing the previous rotation) and a new file
+/// is started, so the log keeps at most about two caps of history. A single record larger than
+/// the cap is still written.
+#[derive(Debug)]
+struct AuditFileWriter {
+    path: PathBuf,
+    max_bytes: u64,
+    file: Option<File>,
+    len: u64,
+}
+
+impl AuditFileWriter {
+    fn new(path: PathBuf, max_bytes: usize) -> Self {
+        Self {
+            path,
+            max_bytes: u64::try_from(max_bytes).unwrap_or(u64::MAX),
+            file: None,
+            len: 0,
+        }
+    }
+
+    fn open(&mut self) -> Result<(), NodeError> {
+        let parent = self.path.parent().ok_or_else(|| {
+            NodeError::Storage("audit log path must have a parent directory".into())
+        })?;
+        std::fs::create_dir_all(parent).map_err(|err| {
+            NodeError::Storage(format!(
+                "failed to create audit log directory `{}`: {err}",
+                parent.display()
+            ))
+        })?;
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|err| {
+                NodeError::Storage(format!(
+                    "failed to open audit log `{}`: {err}",
+                    self.path.display()
+                ))
+            })?;
+        self.len = file.metadata().map_or(0, |metadata| metadata.len());
+        self.file = Some(file);
+        Ok(())
+    }
+
+    fn append(&mut self, line: &[u8]) -> Result<(), NodeError> {
+        if self.file.is_none() {
+            self.open()?;
+        }
+        let line_len = u64::try_from(line.len()).unwrap_or(u64::MAX);
+        if self.len > 0 && self.len.saturating_add(line_len) > self.max_bytes {
+            self.rotate()?;
+        }
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| NodeError::Storage("audit log file is not open".into()))?;
+        match file.write_all(line) {
+            Ok(()) => {
+                self.len = self.len.saturating_add(line_len);
+                Ok(())
+            }
+            Err(err) => {
+                // Drop the handle so the next record reopens the file.
+                self.file = None;
+                Err(NodeError::Storage(format!(
+                    "failed to append audit log `{}`: {err}",
+                    self.path.display()
+                )))
+            }
+        }
+    }
+
+    fn rotate(&mut self) -> Result<(), NodeError> {
+        // Close the handle before renaming it.
+        self.file = None;
+        match std::fs::rename(&self.path, rotated_audit_path(&self.path)) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(NodeError::Storage(format!(
+                    "failed to rotate audit log `{}`: {err}",
+                    self.path.display()
+                )));
+            }
+        }
+        self.open()
+    }
+}
+
+/// `<path>.1`: the single rotated audit log file.
+fn rotated_audit_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".1");
+    path.with_file_name(name)
 }
 
 #[cfg(test)]
@@ -280,4 +366,114 @@ fn saturating_decrement(counter: &AtomicU64) {
     let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
         Some(value.saturating_sub(1))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuditFileWriter, rotated_audit_path};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn temp_audit_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("orion-audit-{name}-{unique}"))
+    }
+
+    fn read(path: &Path) -> String {
+        fs::read_to_string(path).unwrap_or_default()
+    }
+
+    #[test]
+    fn audit_writer_rotates_once_the_cap_would_be_exceeded() {
+        let dir = temp_audit_dir("rotate");
+        let path = dir.join("audit.log");
+        let mut writer = AuditFileWriter::new(path.clone(), 40);
+
+        for line in [b"aaaaaaaaaa\n", b"bbbbbbbbbb\n", b"cccccccccc\n"] {
+            writer.append(line).expect("append should succeed");
+        }
+        assert_eq!(read(&path), "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\n");
+        assert!(!rotated_audit_path(&path).exists());
+
+        writer
+            .append(b"dddddddddd\n")
+            .expect("append should rotate");
+        writer
+            .append(b"eeeeeeeeee\n")
+            .expect("append should succeed");
+        assert_eq!(read(&path), "dddddddddd\neeeeeeeeee\n");
+        assert_eq!(
+            read(&rotated_audit_path(&path)),
+            "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\n"
+        );
+
+        // Only one rotated file is kept: the next rotation replaces `.1`.
+        writer
+            .append(b"ffffffffff\n")
+            .expect("append should succeed");
+        writer
+            .append(b"gggggggggg\n")
+            .expect("append should rotate again");
+        assert_eq!(read(&path), "gggggggggg\n");
+        assert_eq!(
+            read(&rotated_audit_path(&path)),
+            "dddddddddd\neeeeeeeeee\nffffffffff\n"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn audit_writer_keeps_a_record_larger_than_the_cap() {
+        let dir = temp_audit_dir("oversized");
+        let path = dir.join("audit.log");
+        let mut writer = AuditFileWriter::new(path.clone(), 10);
+
+        writer
+            .append(b"0123456789abcdefghij\n")
+            .expect("oversized record should still be written");
+        assert_eq!(read(&path), "0123456789abcdefghij\n");
+        assert!(!rotated_audit_path(&path).exists());
+
+        writer.append(b"next\n").expect("append should rotate");
+        assert_eq!(read(&path), "next\n");
+        assert_eq!(read(&rotated_audit_path(&path)), "0123456789abcdefghij\n");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn audit_writer_counts_existing_file_size_on_reopen() {
+        let dir = temp_audit_dir("reopen");
+        let path = dir.join("audit.log");
+        let mut first = AuditFileWriter::new(path.clone(), 15);
+        first
+            .append(b"0123456789\n")
+            .expect("append should succeed");
+        drop(first);
+
+        // A restarted node starts from the size already on disk, not from zero.
+        let mut second = AuditFileWriter::new(path.clone(), 15);
+        second
+            .append(b"abcdefghij\n")
+            .expect("append should rotate");
+        assert_eq!(read(&path), "abcdefghij\n");
+        assert_eq!(read(&rotated_audit_path(&path)), "0123456789\n");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rotated_audit_path_appends_one_suffix() {
+        assert_eq!(
+            rotated_audit_path(Path::new("/var/lib/orion/audit.log")),
+            PathBuf::from("/var/lib/orion/audit.log.1")
+        );
+    }
 }

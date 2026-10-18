@@ -399,6 +399,7 @@ impl NodeAppBuilder {
             config.runtime_tuning.persistence_worker_queue_capacity;
         let audit_log_queue_capacity = config.runtime_tuning.audit_log_queue_capacity;
         let audit_log_overload_policy = config.runtime_tuning.audit_log_overload_policy;
+        let audit_log_max_bytes = config.runtime_tuning.audit_log_max_bytes;
         let base_source: Arc<dyn crate::host_facts::HostFactsSource> =
             self.host_facts_source.unwrap_or_else(|| {
                 Arc::new(
@@ -491,6 +492,7 @@ impl NodeAppBuilder {
                         path,
                         audit_log_queue_capacity,
                         audit_log_overload_policy,
+                        audit_log_max_bytes,
                     )
                 })
                 .transpose()?

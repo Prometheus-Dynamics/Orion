@@ -359,8 +359,13 @@ mod tests {
             .as_nanos();
         let root = env::temp_dir().join(format!("orion-audit-drop-{unique}"));
         let path = root.join("audit").join("events.jsonl");
-        let sink = AuditLogSink::new(path.clone(), 1, AuditLogOverloadPolicy::DropNewest)
-            .expect("audit log sink should build");
+        let sink = AuditLogSink::new(
+            path.clone(),
+            1,
+            AuditLogOverloadPolicy::DropNewest,
+            4 * 1024 * 1024,
+        )
+        .expect("audit log sink should build");
         set_test_audit_append_delay(Duration::from_millis(25));
 
         sink.enqueue_test_record(
@@ -406,7 +411,7 @@ mod tests {
             .as_nanos();
         let root = env::temp_dir().join(format!("orion-audit-drop-count-{unique}"));
         let path = root.join("audit").join("events.jsonl");
-        let sink = AuditLogSink::new(path, 1, AuditLogOverloadPolicy::DropNewest)
+        let sink = AuditLogSink::new(path, 1, AuditLogOverloadPolicy::DropNewest, 4 * 1024 * 1024)
             .expect("audit log sink should build");
         set_test_audit_append_delay(Duration::from_millis(25));
 

@@ -28,6 +28,8 @@ const DEFAULT_OBSERVABILITY_EVENT_LIMIT: usize = 128;
 const DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY: usize = 64;
 const DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY: usize = 128;
 const DEFAULT_AUDIT_LOG_QUEUE_CAPACITY: usize = 1024;
+/// Size at which the audit log file is rotated to `<file>.1` (one rotated file is kept).
+const DEFAULT_AUDIT_LOG_MAX_BYTES: usize = 4 * 1024 * 1024;
 const DEFAULT_RECONCILE_BACKSTOP_MS: u64 = 5_000;
 const DEFAULT_HLC_MAX_DRIFT_MS: u64 = 300_000;
 const DEFAULT_TOMBSTONE_RETENTION_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
@@ -71,6 +73,9 @@ pub struct NodeRuntimeTuning {
     pub persistence_worker_queue_capacity: usize,
     pub auth_state_worker_queue_capacity: usize,
     pub audit_log_queue_capacity: usize,
+    /// The audit log is rotated to `<path>.1` before a record would grow it past this size
+    /// (`ORION_NODE_AUDIT_LOG_MAX_BYTES`). A single record larger than the cap is still written.
+    pub audit_log_max_bytes: usize,
     pub audit_log_overload_policy: AuditLogOverloadPolicy,
     /// Longest the reconcile loop stays idle without a wake-up before it runs a periodic
     /// backstop pass. Values at or below the reconcile interval (`ORION_NODE_RECONCILE_MS`)
@@ -241,6 +246,12 @@ impl NodeRuntimeTuning {
         self
     }
 
+    pub fn with_audit_log_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.audit_log_max_bytes = max_bytes;
+        self.normalize();
+        self
+    }
+
     pub fn with_audit_log_overload_policy(mut self, policy: AuditLogOverloadPolicy) -> Self {
         self.audit_log_overload_policy = policy;
         self.normalize();
@@ -404,6 +415,10 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY",
                 DEFAULT_AUDIT_LOG_QUEUE_CAPACITY,
             )?,
+            audit_log_max_bytes: parse_env_or(
+                "ORION_NODE_AUDIT_LOG_MAX_BYTES",
+                DEFAULT_AUDIT_LOG_MAX_BYTES,
+            )?,
             audit_log_overload_policy: parse_audit_log_overload_policy(
                 "ORION_NODE_AUDIT_LOG_OVERLOAD_POLICY",
                 AuditLogOverloadPolicy::DropNewest,
@@ -480,6 +495,7 @@ impl NodeRuntimeTuning {
         self.persistence_worker_queue_capacity = self.persistence_worker_queue_capacity.max(1);
         self.auth_state_worker_queue_capacity = self.auth_state_worker_queue_capacity.max(1);
         self.audit_log_queue_capacity = self.audit_log_queue_capacity.max(1);
+        self.audit_log_max_bytes = self.audit_log_max_bytes.max(1);
         self.reconcile_backstop_interval =
             normalize_runtime_tuning_duration(self.reconcile_backstop_interval);
         self.hlc_max_drift = normalize_runtime_tuning_duration(self.hlc_max_drift);
@@ -526,6 +542,7 @@ impl Default for NodeRuntimeTuning {
             persistence_worker_queue_capacity: DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY,
             auth_state_worker_queue_capacity: DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY,
             audit_log_queue_capacity: DEFAULT_AUDIT_LOG_QUEUE_CAPACITY,
+            audit_log_max_bytes: DEFAULT_AUDIT_LOG_MAX_BYTES,
             audit_log_overload_policy: AuditLogOverloadPolicy::DropNewest,
             reconcile_backstop_interval: Duration::from_millis(DEFAULT_RECONCILE_BACKSTOP_MS),
             hlc_max_drift: Duration::from_millis(DEFAULT_HLC_MAX_DRIFT_MS),
@@ -651,6 +668,10 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
         (
             "ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY",
             tuning.audit_log_queue_capacity.to_string(),
+        ),
+        (
+            "ORION_NODE_AUDIT_LOG_MAX_BYTES",
+            tuning.audit_log_max_bytes.to_string(),
         ),
         (
             "ORION_NODE_RECONCILE_BACKSTOP_MS",
