@@ -20,7 +20,7 @@ mod version;
 
 pub use archive::{
     ArchiveEncode, decode_from_slice, decode_from_slice_with, decode_length_prefixed,
-    encode_length_prefixed, encode_to_vec,
+    encode_length_prefixed, encode_to_aligned, encode_to_vec,
 };
 pub use compat::{CompatibilityState, FeatureFlag};
 pub use error::OrionError;

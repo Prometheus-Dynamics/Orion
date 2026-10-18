@@ -140,7 +140,8 @@ pub mod core {
         ConfigSchemaDef, ConfigSchemaId, ExecutorId, FeatureFlag, HlcClockSkew, HlcTimestamp,
         HybridLogicalClock, NodeId, OrionError, PeerBaseUrl, ProtocolVersion, ProviderId,
         PublicKeyHex, ResourceId, ResourceType, ResourceTypeDef, Revision, RuntimeType,
-        RuntimeTypeDef, SessionId, WorkloadId, decode_from_slice, encode_to_vec, hlc_node_tag,
+        RuntimeTypeDef, SessionId, WorkloadId, decode_from_slice, encode_to_aligned, encode_to_vec,
+        hlc_node_tag,
     };
 }
 
@@ -293,7 +294,7 @@ pub use core::{
     ArchiveEncode, ArtifactId, CapabilityDef, CapabilityId, CompatibilityState, ConfigSchemaDef,
     ConfigSchemaId, ExecutorId, FeatureFlag, NodeId, OrionError, ProtocolVersion, ProviderId,
     ResourceId, ResourceType, ResourceTypeDef, Revision, RuntimeType, RuntimeTypeDef, WorkloadId,
-    decode_from_slice, encode_to_vec,
+    decode_from_slice, encode_to_aligned, encode_to_vec,
 };
 #[cfg(feature = "macros")]
 pub use orion_macros::{OrionExecutor, OrionProvider, orion_resource_type, orion_runtime_type};

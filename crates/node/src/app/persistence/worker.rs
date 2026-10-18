@@ -401,7 +401,7 @@ pub(super) fn delay_before_persist_for_tests() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{desired_snapshot_revision_only, encode_archive_to_vec};
+    use crate::storage::{desired_snapshot_revision_only, encode_archive};
     use orion::{
         Revision,
         control_plane::{
@@ -465,10 +465,10 @@ mod tests {
         EncodedPersistedStateBundle {
             desired: desired_snapshot_revision_only(&desired),
             observed_revision: observed.revision,
-            observed_bytes: Some(encode_archive_to_vec(&observed).expect("observed should encode")),
+            observed_bytes: Some(encode_archive(&observed).expect("observed should encode")),
             applied_revision: applied.revision,
-            applied_bytes: Some(encode_archive_to_vec(&applied).expect("applied should encode")),
-            history_bytes: Some(encode_archive_to_vec(&history).expect("history should encode")),
+            applied_bytes: Some(encode_archive(&applied).expect("applied should encode")),
+            history_bytes: Some(encode_archive(&history).expect("history should encode")),
             baseline_revision: Revision::ZERO,
             baseline_bytes: None,
             snapshot_rewrite_cadence: 1,

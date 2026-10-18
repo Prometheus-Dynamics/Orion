@@ -11,6 +11,7 @@ use orion::{
     },
     encode_to_vec,
 };
+use orion_core::encode_to_aligned;
 use std::collections::{BTreeMap, BTreeSet};
 
 const FNV1A64_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
@@ -155,7 +156,7 @@ pub(crate) fn desired_fingerprint(desired: &DesiredClusterState) -> Result<u64, 
 
 /// Stable fingerprint of one archived record (see [`stable_hash64`]).
 pub(crate) fn entry_fingerprint<T: ArchiveEncode>(value: &T) -> Result<u64, NodeError> {
-    let bytes = encode_to_vec(value).map_err(|err| NodeError::Storage(err.to_string()))?;
+    let bytes = encode_to_aligned(value).map_err(|err| NodeError::Storage(err.to_string()))?;
     Ok(stable_hash64(&bytes))
 }
 

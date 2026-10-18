@@ -10,7 +10,7 @@ use super::{
 use crate::blocking::run_possibly_blocking;
 use crate::storage::{
     EncodedDesiredSnapshot, NodeStorage, PersistedSnapshotSections, SnapshotManifest,
-    desired_snapshot_revision_only, encode_archive_to_vec, encode_desired_snapshot,
+    desired_snapshot_revision_only, encode_archive, encode_desired_snapshot,
 };
 use crate::storage_io::DirSync;
 use orion::{
@@ -20,6 +20,7 @@ use orion::{
         MutationBatch, ObservedClusterState,
     },
 };
+use rkyv::util::AlignedVec;
 use std::{fs::File, io::Read};
 use tracing::info_span;
 
@@ -36,12 +37,12 @@ struct PersistedStateBundle {
 pub(super) struct EncodedPersistedStateBundle {
     desired: EncodedDesiredSnapshot,
     observed_revision: Revision,
-    observed_bytes: Option<Vec<u8>>,
+    observed_bytes: Option<AlignedVec>,
     applied_revision: Revision,
-    applied_bytes: Option<Vec<u8>>,
-    history_bytes: Option<Vec<u8>>,
+    applied_bytes: Option<AlignedVec>,
+    history_bytes: Option<AlignedVec>,
     baseline_revision: Revision,
-    baseline_bytes: Option<Vec<u8>>,
+    baseline_bytes: Option<AlignedVec>,
     snapshot_rewrite_cadence: u64,
     /// Observed-content generation captured with this bundle (see `observed_persist`).
     observed_generation: u64,
@@ -184,18 +185,18 @@ impl NodeApp {
                 },
                 observed_revision: store.observed.revision,
                 observed_bytes: if encode_all_sections || observed_changed {
-                    Some(encode_archive_to_vec(&store.observed)?)
+                    Some(encode_archive(&store.observed)?)
                 } else {
                     None
                 },
                 applied_revision: store.applied.revision,
                 applied_bytes: if encode_all_sections || applied_changed {
-                    Some(encode_archive_to_vec(&store.applied)?)
+                    Some(encode_archive(&store.applied)?)
                 } else {
                     None
                 },
                 history_bytes: if encode_all_sections || history_changed {
-                    Some(encode_archive_to_vec(history.as_vec())?)
+                    Some(encode_archive(history.as_vec())?)
                 } else {
                     None
                 },
@@ -205,7 +206,7 @@ impl NodeApp {
                 {
                     None
                 } else {
-                    Some(encode_archive_to_vec(baseline)?)
+                    Some(encode_archive(baseline)?)
                 },
                 snapshot_rewrite_cadence: self.config.runtime_tuning.snapshot_rewrite_cadence,
                 observed_generation,
@@ -665,11 +666,11 @@ mod tests {
             desired,
             observed_revision: Revision::ZERO,
             observed_bytes: Some(
-                encode_archive_to_vec(&ObservedClusterState::default()).expect("observed encodes"),
+                encode_archive(&ObservedClusterState::default()).expect("observed encodes"),
             ),
             applied_revision: Revision::ZERO,
             applied_bytes: Some(
-                encode_archive_to_vec(&AppliedClusterState::default()).expect("applied encodes"),
+                encode_archive(&AppliedClusterState::default()).expect("applied encodes"),
             ),
             history_bytes: None,
             baseline_revision: Revision::ZERO,
@@ -757,7 +758,7 @@ mod tests {
             encode_desired_snapshot(&desired).expect("desired encodes"),
             1,
         );
-        bundle.history_bytes = Some(encode_archive_to_vec(&history).expect("history encodes"));
+        bundle.history_bytes = Some(encode_archive(&history).expect("history encodes"));
         persist_bundle_to_storage(&storage, &bundle).expect("deferred persist should succeed");
 
         assert_eq!(

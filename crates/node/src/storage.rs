@@ -67,7 +67,7 @@ pub struct SnapshotManifest {
 #[derive(Clone, Debug)]
 pub(crate) struct EncodedDesiredSnapshot {
     pub(crate) revision: Revision,
-    pub(crate) bytes: Option<Vec<u8>>,
+    pub(crate) bytes: Option<AlignedVec>,
     pub(crate) section_fingerprints: Option<DesiredStateSectionFingerprints>,
     pub(crate) section_counts: Option<DesiredStateSectionCounts>,
 }
@@ -277,7 +277,7 @@ impl NodeStorage {
             desired_section_fingerprints,
             desired_section_counts,
         };
-        let manifest_bytes = encode_archive_to_vec(&manifest)?;
+        let manifest_bytes = encode_archive(&manifest)?;
 
         match observed_bytes {
             Some(observed_bytes) => {
@@ -599,7 +599,7 @@ pub(crate) fn encode_desired_snapshot(
 ) -> Result<EncodedDesiredSnapshot, NodeError> {
     Ok(EncodedDesiredSnapshot {
         revision: desired.revision,
-        bytes: Some(encode_archive_to_vec(desired)?),
+        bytes: Some(encode_archive(desired)?),
         section_fingerprints: Some(desired_section_fingerprints(desired)?),
         section_counts: Some(desired_section_counts(desired)),
     })
@@ -618,7 +618,8 @@ pub(crate) fn desired_snapshot_revision_only(
 
 type DecodeStrategy = Strategy<Pool, ArchiveError>;
 
-pub(crate) fn encode_archive_to_vec<T>(value: &T) -> Result<Vec<u8>, NodeError>
+/// Archives `value` into the aligned buffer rkyv produces, without copying it.
+pub(crate) fn encode_archive<T>(value: &T) -> Result<AlignedVec, NodeError>
 where
     T: for<'a> RkyvSerialize<
         rkyv::api::high::HighSerializer<
@@ -628,9 +629,7 @@ where
         >,
     >,
 {
-    let bytes =
-        rkyv::to_bytes::<ArchiveError>(value).map_err(|err| NodeError::Storage(err.to_string()))?;
-    Ok(bytes.as_ref().to_vec())
+    rkyv::to_bytes::<ArchiveError>(value).map_err(|err| NodeError::Storage(err.to_string()))
 }
 
 fn encode_to_vec<T>(value: &T) -> Result<Vec<u8>, NodeError>
@@ -643,7 +642,7 @@ where
         >,
     >,
 {
-    encode_archive_to_vec(value)
+    Ok(encode_archive(value)?.to_vec())
 }
 
 fn decode_from_slice<T>(payload: &[u8]) -> Result<T, NodeError>

@@ -28,13 +28,20 @@ impl<T> ArchiveEncode for T where
 {
 }
 
+/// Archives `value` into an aligned buffer. The bytes are the same as [`encode_to_vec`]'s, without
+/// the copy into a `Vec`: use it for bytes that are written out or hashed, not stored as a `Vec`.
+pub fn encode_to_aligned<T>(value: &T) -> Result<AlignedVec, OrionError>
+where
+    T: ArchiveEncode,
+{
+    rkyv::to_bytes::<ArchiveError>(value).map_err(|err| OrionError::Serialization(err.to_string()))
+}
+
 pub fn encode_to_vec<T>(value: &T) -> Result<Vec<u8>, OrionError>
 where
     T: ArchiveEncode,
 {
-    let bytes = rkyv::to_bytes::<ArchiveError>(value)
-        .map_err(|err| OrionError::Serialization(err.to_string()))?;
-    Ok(bytes.as_ref().to_vec())
+    Ok(encode_to_aligned(value)?.to_vec())
 }
 
 pub fn decode_from_slice<T>(payload: &[u8]) -> Result<T, OrionError>
