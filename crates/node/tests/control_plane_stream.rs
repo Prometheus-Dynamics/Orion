@@ -183,7 +183,7 @@ fn host_status_query() -> StatusQuery {
 }
 
 async fn connect_fixed(node: &Node) -> ControlPlaneEventStream {
-    ControlPlaneEventStream::connect_at_with_local_address(&node.stream, "helios-api", "helios-api")
+    ControlPlaneEventStream::connect_at_with_local_address(&node.stream, "app-api", "app-api")
         .await
         .expect("stream")
 }

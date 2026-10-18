@@ -524,7 +524,7 @@ magnetometer, temperatures, a fan, an LED ring, GPIO outputs) follows this conve
 UI can render its devices without knowing the provider:
 
 - **One resource per device**, its `resource_type` namespaced by the provider's domain and naming
-  the kind of device: `lemnos.imu`, `lemnos.power`, `lemnos.fan`, `lemnos.gpio`. The record holds
+  the kind of device: `device.imu`, `device.power`, `device.fan`, `device.gpio`. The record holds
   the durable facts only: health, availability, capabilities, labels.
 - **Display labels** on the resource record, `key=value` strings that rarely change:
   `display.name=Main IMU`, `device.model=bmi088`, `device.bus=i2c-1:0x18`, `device.group=chassis`.

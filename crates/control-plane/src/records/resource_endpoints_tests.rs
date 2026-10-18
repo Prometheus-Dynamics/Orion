@@ -7,7 +7,7 @@ struct FrameLeaseEndpoint {
 }
 
 impl CustomEndpointScheme for FrameLeaseEndpoint {
-    const SCHEME: &'static str = "styx-frame-lease+unix";
+    const SCHEME: &'static str = "frame-lease+unix";
 
     fn from_payload(payload: &str) -> Option<Self> {
         Some(Self {
@@ -34,14 +34,14 @@ impl CustomEndpointScheme for SerialEndpoint {
 
 #[test]
 fn parse_accepts_custom_scheme() {
-    let endpoint = ResourceEndpoint::parse("styx-frame-lease+unix:///run/helios/cam0.sock")
+    let endpoint = ResourceEndpoint::parse("frame-lease+unix:///run/app/cam0.sock")
         .expect("custom scheme should parse");
 
     let custom = endpoint.as_custom().expect("should be custom");
     assert!(endpoint.is_custom());
-    assert_eq!(endpoint.scheme(), "styx-frame-lease+unix");
-    assert_eq!(endpoint.payload(), "/run/helios/cam0.sock");
-    assert_eq!(custom.base_scheme(), "styx-frame-lease");
+    assert_eq!(endpoint.scheme(), "frame-lease+unix");
+    assert_eq!(endpoint.payload(), "/run/app/cam0.sock");
+    assert_eq!(custom.base_scheme(), "frame-lease");
     assert_eq!(custom.transport_suffix(), Some("unix"));
 }
 
@@ -55,9 +55,9 @@ fn custom_scheme_without_suffix_has_no_transport() {
 
 #[test]
 fn parse_lowercases_schemes() {
-    let endpoint = ResourceEndpoint::parse("Styx-Frame-Lease+UNIX://cam0").expect("should parse");
-    assert_eq!(endpoint.scheme(), "styx-frame-lease+unix");
-    assert_eq!(endpoint.to_string(), "styx-frame-lease+unix://cam0");
+    let endpoint = ResourceEndpoint::parse("Frame-Lease+UNIX://cam0").expect("should parse");
+    assert_eq!(endpoint.scheme(), "frame-lease+unix");
+    assert_eq!(endpoint.to_string(), "frame-lease+unix://cam0");
 
     let shm = ResourceEndpoint::parse("SHM://graph").expect("builtin should parse");
     assert!(matches!(shm, ResourceEndpoint::SharedMemory(ref e) if e.name == "graph"));
@@ -106,7 +106,7 @@ fn endpoints_round_trip_through_display() {
         "tcp://127.0.0.1:1234",
         "http://localhost:8080/graph",
         "https://example.test/graph?x=1",
-        "styx-frame-lease+unix:///run/helios/cam0.sock",
+        "frame-lease+unix:///run/app/cam0.sock",
         "serial://ttyUSB0",
     ] {
         let endpoint = ResourceEndpoint::parse(input).expect(input);
@@ -161,16 +161,16 @@ fn custom_endpoint_new_validates() {
 
 #[test]
 fn typed_custom_endpoint_is_resolved_from_record() {
-    let resource = ResourceRecord::builder("resource.cam0", "camera.frames", "provider.helios")
+    let resource = ResourceRecord::builder("resource.cam0", "camera.frames", "provider.frames")
         .endpoint("shm://cam0-frames")
         .endpoint("serial://not-a-tty")
-        .endpoint(FrameLeaseEndpoint::endpoint_string("/run/helios/cam0.sock"))
+        .endpoint(FrameLeaseEndpoint::endpoint_string("/run/app/cam0.sock"))
         .build();
 
     let lease = resource
         .endpoint::<FrameLeaseEndpoint>()
         .expect("frame lease endpoint should resolve");
-    assert_eq!(lease.socket_path, "/run/helios/cam0.sock");
+    assert_eq!(lease.socket_path, "/run/app/cam0.sock");
 
     let any_custom = resource
         .endpoint::<CustomEndpoint>()
@@ -191,11 +191,11 @@ fn typed_custom_endpoint_is_resolved_from_record() {
 
 #[test]
 fn typed_custom_endpoint_does_not_match_other_schemes() {
-    let endpoint = ResourceEndpoint::parse("styx-frame-lease+tcp://10.0.0.1:9000").expect("parse");
+    let endpoint = ResourceEndpoint::parse("frame-lease+tcp://192.0.2.1:9000").expect("parse");
     assert_eq!(FrameLeaseEndpoint::from_endpoint(&endpoint), None);
     assert_eq!(
         <FrameLeaseEndpoint as TypedResourceEndpoint>::TYPE_NAME,
-        "styx-frame-lease+unix"
+        "frame-lease+unix"
     );
     let serial = ResourceEndpoint::parse("serial://ttyS0").expect("parse");
     assert_eq!(
@@ -208,8 +208,8 @@ fn typed_custom_endpoint_does_not_match_other_schemes() {
 
 #[test]
 fn record_with_custom_endpoints_round_trips_through_serde_and_rkyv() {
-    let resource = ResourceRecord::builder("resource.cam0", "camera.frames", "provider.helios")
-        .endpoint("styx-frame-lease+unix:///run/helios/cam0.sock")
+    let resource = ResourceRecord::builder("resource.cam0", "camera.frames", "provider.frames")
+        .endpoint("frame-lease+unix:///run/app/cam0.sock")
         .endpoint("shm://cam0-frames")
         .build();
 
@@ -226,7 +226,7 @@ fn record_with_custom_endpoints_round_trips_through_serde_and_rkyv() {
             .endpoint::<FrameLeaseEndpoint>()
             .expect("typed endpoint after decode")
             .socket_path,
-        "/run/helios/cam0.sock"
+        "/run/app/cam0.sock"
     );
 }
 

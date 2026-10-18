@@ -377,7 +377,7 @@ fn remote_bindings_resolve_with_owner_node_endpoints_and_availability() {
         "camera.device",
         ProviderId::new("provider.cameras-b"),
     )
-    .endpoint("tcp://10.0.0.2:5000")
+    .endpoint("tcp://192.0.2.2:5000")
     .health(HealthState::Healthy)
     .build();
     snapshot
@@ -397,7 +397,7 @@ fn remote_bindings_resolve_with_owner_node_endpoints_and_availability() {
         ResourceBinding::remote(
             ResourceId::new("resource.camera.b"),
             NodeId::new("node-b"),
-            vec!["tcp://10.0.0.2:5000".into()],
+            vec!["tcp://192.0.2.2:5000".into()],
             false,
         ),
     ];
@@ -416,6 +416,6 @@ fn remote_bindings_resolve_with_owner_node_endpoints_and_availability() {
             .endpoint::<TcpEndpoint>()
             .expect("tcp endpoint")
             .address,
-        "10.0.0.2:5000"
+        "192.0.2.2:5000"
     );
 }

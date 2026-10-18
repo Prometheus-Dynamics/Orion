@@ -10,7 +10,7 @@
 //!
 //! let identity = OperatorIdentity::generate("alice")?; // store identity.secret_key_bytes()
 //! let operator =
-//!     RemoteOperator::connect("orion+tcp://10.0.0.2:9200", identity, NodeTrust::FirstUse).await?;
+//!     RemoteOperator::connect("orion+tcp://192.0.2.2:9200", identity, NodeTrust::FirstUse).await?;
 //! if !operator.is_enrolled() {
 //!     operator.enroll_with_key(b"<the cluster's enrollment key>").await?;
 //! }

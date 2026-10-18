@@ -100,7 +100,7 @@ pub struct HttpEndpoint {
 }
 
 /// An endpoint whose scheme is not one of Orion's built-in schemes, for example
-/// `styx-frame-lease+unix:///run/helios/cam0.sock`.
+/// `frame-lease+unix:///run/app/cam0.sock`.
 ///
 /// `scheme` is stored in canonical (ASCII lowercase) form and `payload` is everything after
 /// `://`, verbatim. Values produced by [`ResourceEndpoint::parse`] or [`CustomEndpoint::new`]
@@ -142,8 +142,8 @@ impl CustomEndpoint {
         &self.payload
     }
 
-    /// The scheme without its transport suffix: `styx-frame-lease` for
-    /// `styx-frame-lease+unix`. Equal to the whole scheme when there is no `+`.
+    /// The scheme without its transport suffix: `frame-lease` for
+    /// `frame-lease+unix`. Equal to the whole scheme when there is no `+`.
     pub fn base_scheme(&self) -> &str {
         self.scheme
             .rsplit_once('+')
@@ -151,7 +151,7 @@ impl CustomEndpoint {
     }
 
     /// The transport named after the last `+` in the scheme: `unix` for
-    /// `styx-frame-lease+unix`. `None` when the scheme has no `+`.
+    /// `frame-lease+unix`. `None` when the scheme has no `+`.
     pub fn transport_suffix(&self) -> Option<&str> {
         self.scheme.rsplit_once('+').map(|(_, suffix)| suffix)
     }
@@ -229,18 +229,18 @@ pub trait TypedResourceEndpoint: Sized {
 /// }
 ///
 /// impl CustomEndpointScheme for FrameLeaseEndpoint {
-///     const SCHEME: &'static str = "styx-frame-lease+unix";
+///     const SCHEME: &'static str = "frame-lease+unix";
 ///
 ///     fn from_payload(payload: &str) -> Option<Self> {
 ///         Some(Self { socket_path: payload.to_owned() })
 ///     }
 /// }
 ///
-/// let resource = ResourceRecord::builder("resource.cam0", "camera.frames", "provider.helios")
-///     .endpoint("styx-frame-lease+unix:///run/helios/cam0.sock")
+/// let resource = ResourceRecord::builder("resource.cam0", "camera.frames", "provider.frames")
+///     .endpoint("frame-lease+unix:///run/app/cam0.sock")
 ///     .build();
 /// let endpoint = resource.endpoint::<FrameLeaseEndpoint>().unwrap();
-/// assert_eq!(endpoint.socket_path, "/run/helios/cam0.sock");
+/// assert_eq!(endpoint.socket_path, "/run/app/cam0.sock");
 /// ```
 ///
 /// `SCHEME` must not be a built-in scheme (those never parse as custom endpoints) and is
@@ -330,7 +330,7 @@ impl ResourceEndpoint {
         })
     }
 
-    /// The endpoint scheme, e.g. `shm`, `https` or `styx-frame-lease+unix`.
+    /// The endpoint scheme, e.g. `shm`, `https` or `frame-lease+unix`.
     pub fn scheme(&self) -> &str {
         match self {
             Self::SharedMemory(_) => "shm",

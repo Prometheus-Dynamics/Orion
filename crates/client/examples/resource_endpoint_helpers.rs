@@ -13,7 +13,7 @@ struct FrameLeaseEndpoint {
 }
 
 impl CustomEndpointScheme for FrameLeaseEndpoint {
-    const SCHEME: &'static str = "styx-frame-lease+unix";
+    const SCHEME: &'static str = "frame-lease+unix";
     const TYPE_NAME: &'static str = "frame lease";
 
     fn from_payload(payload: &str) -> Option<Self> {
@@ -52,8 +52,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("unix_endpoint={}", unix.path);
 
     let camera_resource =
-        ResourceRecord::builder("resource.cam0", "camera.frames", "provider.helios")
-            .endpoint(FrameLeaseEndpoint::endpoint_string("/run/helios/cam0.sock"))
+        ResourceRecord::builder("resource.cam0", "camera.frames", "provider.frames")
+            .endpoint(FrameLeaseEndpoint::endpoint_string("/run/app/cam0.sock"))
             .build();
     let lease = camera_resource.endpoint::<FrameLeaseEndpoint>()?;
     println!("frame_lease_endpoint={}", lease.socket_path);

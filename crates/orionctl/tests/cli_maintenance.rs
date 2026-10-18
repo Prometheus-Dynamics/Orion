@@ -14,7 +14,7 @@ async fn orionctl_maintenance_commands_update_local_node_state() {
         "--socket",
         &harness.ipc_socket.to_string_lossy(),
         "--allow-runtime",
-        "helios.updater.v1",
+        "example.updater.v1",
         "--allow-workload",
         "workload.updater",
         "-o",
@@ -39,7 +39,7 @@ async fn orionctl_maintenance_commands_update_local_node_state() {
     assert_eq!(status_json["state"]["mode"], "maintenance");
     assert_eq!(
         status_json["state"]["allow_runtime_types"][0],
-        "helios.updater.v1"
+        "example.updater.v1"
     );
     assert_eq!(
         status_json["state"]["allow_workload_ids"][0],

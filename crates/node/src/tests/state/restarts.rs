@@ -251,7 +251,7 @@ fn maintenance_state_persists_across_restart() {
 
     app.update_maintenance(MaintenanceCommand {
         action: MaintenanceAction::Enter,
-        allow_runtime_types: vec![RuntimeType::new("helios.updater.v1")],
+        allow_runtime_types: vec![RuntimeType::new("example.updater.v1")],
         allow_workload_ids: vec![WorkloadId::new("workload.updater")],
     })
     .expect("maintenance update should succeed");
@@ -279,7 +279,7 @@ fn maintenance_state_persists_across_restart() {
     assert_eq!(status.state.mode, MaintenanceMode::Maintenance);
     assert_eq!(
         status.state.allow_runtime_types,
-        vec![RuntimeType::new("helios.updater.v1")]
+        vec![RuntimeType::new("example.updater.v1")]
     );
     assert_eq!(
         status.state.allow_workload_ids,

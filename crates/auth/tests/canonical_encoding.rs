@@ -94,7 +94,7 @@ fn desired_state() -> DesiredClusterState {
         .health(HealthState::Healthy)
         .label("imu")
         .endpoint("shm://orion-imu-01")
-        .endpoint("styx-frame-lease+unix:///run/helios/cam0.sock")
+        .endpoint("frame-lease+unix:///run/app/cam0.sock")
         .build(),
     );
     desired.put_provider(
@@ -157,7 +157,7 @@ fn observed_update() -> ObservedStateUpdate {
                 architecture: Some("aarch64".into()),
                 boot_id: Some("0d6a3c62-6e1b-4b8e-9df5-3a0c2a4b5c6d".into()),
                 board_serial: Some("10000000abcdef12".into()),
-                board_model: Some("Compute Module 5".into()),
+                board_model: Some("Example Compute Module".into()),
                 machine_id: Some("4f6c2a0e3b8d4c1f9a7e5d2b1c0a9f8e".into()),
                 cpu_count: Some(4),
                 memory_total_bytes: Some(8 << 30),
@@ -314,7 +314,7 @@ fn control_messages() -> Vec<(&'static str, ControlMessage)> {
                 initiator: NodeId::new("node-a"),
                 initiator_public_key: vec![0x11; 32],
                 initiator_nonce: vec![0x22; 32],
-                initiator_url: Some(PeerBaseUrl::new("orion+tcp://10.0.0.1:9200")),
+                initiator_url: Some(PeerBaseUrl::new("orion+tcp://192.0.2.1:9200")),
                 responder: NodeId::new("node-b"),
                 role: EnrollmentRole::Node,
             })),

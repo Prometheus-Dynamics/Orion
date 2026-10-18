@@ -100,7 +100,7 @@ the trust store:
 ```sh
 $ orionctl get discovered-peers --socket /run/orion/control.sock
 discovery backend=mdns cluster=lab local_fingerprint=sha256:3f9a... enrollment_key=false discovered=1 enrolled=0 ...
-peer node=node-b state=discovered fingerprint=sha256:91c2... protocol=v3 urls=orion+tcp://10.0.0.2:9200 last_seen_ms_ago=812 expires_in_ms=119188 last_enrollment_error=-
+peer node=node-b state=discovered fingerprint=sha256:91c2... protocol=v3 urls=orion+tcp://192.0.2.2:9200 last_seen_ms_ago=812 expires_in_ms=119188 last_enrollment_error=-
 ```
 
 `-o json|yaml|toml` prints the full `DiscoverySnapshot` including the public keys.
@@ -121,7 +121,7 @@ enrollment is persisted.
 ```sh
 # on node-a
 orionctl peers enroll node-b --socket /run/orion/control.sock
-peer node-b cluster=lab urls=orion+tcp://10.0.0.2:9200
+peer node-b cluster=lab urls=orion+tcp://192.0.2.2:9200
   key fingerprint sha256:91c2...
   public key      7c1e...
 Compare the fingerprint with `orionctl get discovered-peers` on node-b (local fingerprint). Trust this key? [y/N] y
@@ -184,7 +184,7 @@ but nodes only *initiate* it over `orion+tcp`.
 
 ### Static configuration
 
-`ORION_NODE_PEERS` entries with a key segment (`node-b=orion+tcp://10.0.0.2:9200|<key hex>`) work
+`ORION_NODE_PEERS` entries with a key segment (`node-b=orion+tcp://192.0.2.2:9200|<key hex>`) work
 exactly as before and do not need discovery.
 
 ## Removing peers

@@ -21,19 +21,19 @@ use std::sync::{
 };
 use std::time::Instant;
 
-const PROVIDER: &str = "provider.lemnos";
-const RESOURCE: &str = "lemnos.raw";
-/// Largest SPI transaction lemnosd accepts, the size the action limits must carry.
+const PROVIDER: &str = "provider.bus";
+const RESOURCE: &str = "bus.raw";
+/// Largest SPI transaction the bus provider accepts, the size the action limits must carry.
 const SPI_MAX: usize = 64 * 1024;
 
 fn raw_resource(node: &NodeApp) -> (ProviderRecord, ResourceRecord) {
     (
         ProviderRecord::builder(ProviderId::new(PROVIDER), node.config.node_id.clone())
-            .resource_type(ResourceType::new("lemnos.raw"))
+            .resource_type(ResourceType::new("bus.raw"))
             .build(),
         ResourceRecord::builder(
             orion::ResourceId::new(RESOURCE),
-            "lemnos.raw",
+            "bus.raw",
             ProviderId::new(PROVIDER),
         )
         .health(HealthState::Healthy)
@@ -108,11 +108,11 @@ async fn raw_provider(node: &OperatorNode) -> RawProvider {
         .expect("ipc stream server should start");
     // The provider and its resource are published in-process; the provider's own handler
     // session then registers over real sockets.
-    publish_raw_resource(&node.app, "lemnos-publisher");
+    publish_raw_resource(&node.app, "bus-publisher");
     let (provider, _) = raw_resource(&node.app);
     let service = LocalProviderService::new(
         LocalNodeRuntime::new(&socket, &stream_socket),
-        "lemnos-provider",
+        "bus-provider",
         provider,
     )
     .with_retry_policy(
@@ -159,7 +159,7 @@ async fn raw_provider(node: &OperatorNode) -> RawProvider {
 async fn action_caller_runs_concurrent_calls_on_one_resource_over_one_stream() {
     let node = operator_node("node-calls", None).await;
     let provider = raw_provider(&node).await;
-    let caller = ActionCaller::connect_at(&provider.sockets[1], "helios-api")
+    let caller = ActionCaller::connect_at(&provider.sockets[1], "app-api")
         .await
         .expect("caller connects");
 
@@ -246,10 +246,10 @@ async fn action_caller_runs_concurrent_calls_on_one_resource_over_one_stream() {
 async fn unary_call_action_waits_for_the_result_without_polling() {
     let node = operator_node("node-unary-calls", None).await;
     let provider = raw_provider(&node).await;
-    let client = LocalControlPlaneClient::connect_at(&provider.sockets[0], "helios-api")
-        .expect("unary client");
+    let client =
+        LocalControlPlaneClient::connect_at(&provider.sockets[0], "app-api").expect("unary client");
     let started = Instant::now();
-    let before = unary_exchanges(&node, "helios-api");
+    let before = unary_exchanges(&node, "app-api");
     let result = client
         .call_action(
             transfer("unary-1", 150, vec![7; 16]),
@@ -264,7 +264,7 @@ async fn unary_call_action_waits_for_the_result_without_polling() {
     );
     assert!(started.elapsed() >= Duration::from_millis(150));
     assert!(
-        unary_exchanges(&node, "helios-api") - before <= 2,
+        unary_exchanges(&node, "app-api") - before <= 2,
         "the node held its answer; the client did not spin"
     );
 
@@ -330,7 +330,7 @@ async fn forwarded_actions_finish_in_one_round_trip() {
             .expect("peer registration");
     }
     // The resource's provider runs on node-b and answers from a polled handler session.
-    let source = publish_raw_resource(&b.app, "b-lemnos");
+    let source = publish_raw_resource(&b.app, "b-bus");
     b.app
         .apply_local_control_message(
             &source,

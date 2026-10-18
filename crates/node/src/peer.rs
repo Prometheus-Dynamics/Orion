@@ -390,14 +390,14 @@ mod tests {
             Ok(PeerTransportKind::Https)
         );
         assert_eq!(
-            PeerTransportKind::from_base_url("orion+tcp://10.0.0.2:9200"),
+            PeerTransportKind::from_base_url("orion+tcp://192.0.2.2:9200"),
             Ok(PeerTransportKind::Tcp)
         );
         assert!(PeerTransportKind::from_base_url("ftp://a:1").is_err());
         assert!(PeerTransportKind::from_base_url("a:1").is_err());
         assert_eq!(
-            peer_tcp_authority("orion+tcp://10.0.0.2:9200/"),
-            Ok("10.0.0.2:9200")
+            peer_tcp_authority("orion+tcp://192.0.2.2:9200/"),
+            Ok("192.0.2.2:9200")
         );
         assert!(peer_tcp_authority("orion+tcp://host").is_err());
         assert!(peer_tcp_authority("http://host:1").is_err());

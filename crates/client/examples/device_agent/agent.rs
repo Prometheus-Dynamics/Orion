@@ -84,8 +84,8 @@ impl StageRequest {
     }
 }
 
-/// The device package's side: on Raze, `pd-device-update stage/apply/status`, `raze-leds`, and
-/// `systemctl reboot`.
+/// The device package's side: its image writer (stage, apply, status), its LED driver for
+/// `locate`, and a reboot (for example `systemctl reboot`).
 pub trait Updater: Send + Sync + 'static {
     /// Current state (`update status`).
     fn status(&self) -> UpdaterStatus;

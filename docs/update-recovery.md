@@ -223,8 +223,8 @@ come from the same source, so `orionctl get nodes` and `orionctl get updates` ca
 
 ## Staged rollouts across nodes
 
-A robot has many Linux coprocessors and MCUs. Updating them all at once risks bricking the robot,
-so rollouts proceed in waves with health gates.
+A machine can have many Linux coprocessors and MCUs. Updating them all at once risks bricking the
+machine, so rollouts proceed in waves with health gates.
 
 ### Rollout record
 
@@ -311,7 +311,7 @@ update is also a rolling Orion update. Two cases:
   written *before* the first node updates (each node has the full desired state locally, and state
   migration carries the intents forward), so a node in the new island still knows its own intent
   and can commit or roll back without talking to the old island.
-- **Update order inside a robot**:
+- **Update order inside one machine**:
   1. canary Linux node (non-critical, ideally one that hosts redundant resources);
   2. remaining Linux nodes in waves, respecting `max_unavailable` per resource group;
   3. MCUs last, per gateway node, after their gateway node is committed. The link protocol is

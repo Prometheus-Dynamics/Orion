@@ -44,10 +44,10 @@ struct Waiting {
 /// use orion_core::ResourceId;
 /// use std::time::Duration;
 ///
-/// let caller = ActionCaller::connect_default("helios-api").await?;
+/// let caller = ActionCaller::connect_default("app-api").await?;
 /// let request = ActionRequest::new(
 ///     "gpio-get-1",
-///     ActionTarget::Resource(ResourceId::new("lemnos.raw")),
+///     ActionTarget::Resource(ResourceId::new("bus.raw")),
 ///     "gpio.get",
 /// )
 /// .with_arg("line", TypedConfigValue::UInt(17));

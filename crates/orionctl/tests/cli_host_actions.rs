@@ -17,7 +17,7 @@ impl HostFactsSource for FixedHost {
                 image_version: Some("2024.10.1".into()),
                 kernel_release: Some("6.6.31".into()),
                 architecture: Some("aarch64".into()),
-                board_model: Some("Compute Module 5".into()),
+                board_model: Some("Example Compute Module".into()),
                 cpu_count: Some(4),
                 ..NodeHostFacts::default()
             },

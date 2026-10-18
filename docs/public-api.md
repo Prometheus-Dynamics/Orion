@@ -106,8 +106,8 @@ schemes are stored in lowercase. `ResourceEndpoint` implements `Display`/`FromSt
 Parsing fails with `MissingScheme`, `InvalidScheme` or `EmptyPayload`. `UnsupportedScheme` is
 kept for compatibility but `parse` no longer returns it.
 
-A `+` suffix names the transport underneath a custom protocol, e.g. `styx-frame-lease+unix`:
-`CustomEndpoint::base_scheme()` returns `styx-frame-lease` and `transport_suffix()` returns
+A `+` suffix names the transport underneath a custom protocol, e.g. `frame-lease+unix`:
+`CustomEndpoint::base_scheme()` returns `frame-lease` and `transport_suffix()` returns
 `Some("unix")`.
 
 Downstream crates add typed endpoints by implementing `CustomEndpointScheme`. Every such type
@@ -121,14 +121,14 @@ struct FrameLeaseEndpoint {
 }
 
 impl CustomEndpointScheme for FrameLeaseEndpoint {
-    const SCHEME: &'static str = "styx-frame-lease+unix";
+    const SCHEME: &'static str = "frame-lease+unix";
 
     fn from_payload(payload: &str) -> Option<Self> {
         Some(Self { socket_path: payload.to_owned() })
     }
 }
 
-// advertise: .endpoint(FrameLeaseEndpoint::endpoint_string("/run/helios/cam0.sock"))
+// advertise: .endpoint(FrameLeaseEndpoint::endpoint_string("/run/app/cam0.sock"))
 let lease = resource.endpoint::<FrameLeaseEndpoint>()?;
 ```
 

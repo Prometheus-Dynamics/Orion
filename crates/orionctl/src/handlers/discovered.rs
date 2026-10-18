@@ -211,7 +211,7 @@ mod tests {
                 cluster: "lab".into(),
                 public_key_hex: PublicKeyHex::new("00".repeat(32)),
                 key_fingerprint: "sha256:bb".into(),
-                peer_urls: vec![PeerBaseUrl::new("orion+tcp://10.0.0.2:9200")],
+                peer_urls: vec![PeerBaseUrl::new("orion+tcp://192.0.2.2:9200")],
                 control_protocol_version: 3,
                 state: DiscoveredPeerState::Discovered,
                 first_seen_at_ms: 1_000,
@@ -225,7 +225,7 @@ mod tests {
         assert!(text.contains("enrollment_attempts=2"));
         assert!(text.contains(
             "peer node=node-b state=discovered fingerprint=sha256:bb protocol=v3 \
-             urls=orion+tcp://10.0.0.2:9200 last_seen_ms_ago=500 expires_in_ms=1000"
+             urls=orion+tcp://192.0.2.2:9200 last_seen_ms_ago=500 expires_in_ms=1000"
         ));
         let disabled = render_discovery_summary(&DiscoverySnapshot::default(), 0);
         assert!(disabled.starts_with("discovery enabled=false"));

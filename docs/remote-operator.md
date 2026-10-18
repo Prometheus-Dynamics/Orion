@@ -40,7 +40,7 @@ let identity = OperatorIdentity::generate("alice")?;            // or from_secre
 let secret: [u8; 32] = identity.secret_key_bytes();              // store this
 println!("{} {}", identity.operator_id(), identity.fingerprint()); // operator:alice sha256:...
 
-let operator = RemoteOperator::connect("orion+tcp://10.0.0.2:9200", identity, NodeTrust::FirstUse).await?;
+let operator = RemoteOperator::connect("orion+tcp://192.0.2.2:9200", identity, NodeTrust::FirstUse).await?;
 if !operator.is_enrolled() {
     operator.enroll_with_key(b"<ORION_NODE_ENROLLMENT_KEY>").await?; // or: administrator approval
 }

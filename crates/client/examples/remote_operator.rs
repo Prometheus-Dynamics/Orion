@@ -4,7 +4,7 @@
 //! ```sh
 //! # On the node: ORION_NODE_PEER_ADDR=0.0.0.0:9200 ORION_NODE_PEER_AUTH=required
 //! # (plus ORION_NODE_DISCOVERY=mdns ORION_NODE_ENROLLMENT_KEY=... for shared-key enrollment).
-//! ORION_NODE_URL=orion+tcp://10.0.0.2:9200 \
+//! ORION_NODE_URL=orion+tcp://192.0.2.2:9200 \
 //! ORION_OPERATOR_KEY_FILE=$HOME/.config/my-tool/operator.key \
 //! ORION_ENROLLMENT_KEY=... \
 //! ORION_ACTION=locate \

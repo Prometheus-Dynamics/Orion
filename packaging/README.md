@@ -62,7 +62,7 @@ This is for local verification only; image builds should use the image's own too
 
 ### Page size (16 KiB and 64 KiB kernels)
 
-arm64 kernels run with 4 KiB, 16 KiB (for example Raspberry Pi 5 / CM5 kernels) or 64 KiB pages,
+arm64 kernels run with 4 KiB, 16 KiB (common on small single-board computers) or 64 KiB pages,
 and refuse to load an ELF whose `PT_LOAD` segments are aligned to less than the page size. The
 workspace `.cargo/config.toml` links `aarch64-unknown-linux-gnu` binaries with
 `-z max-page-size=65536`, so one binary runs on all three. GNU ld and LLD already default to 64 KiB

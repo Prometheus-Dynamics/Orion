@@ -143,18 +143,18 @@ pub(crate) async fn publish_observed_updater_state(harness: &TestHarness) {
     desired.put_artifact(ArtifactRecord::builder("artifact.update").build());
     desired.put_provider(
         ProviderRecord::builder("provider.observed", harness._app.config.node_id.clone())
-            .resource_type("helios.updater.runtime.v1")
+            .resource_type("example.updater.runtime.v1")
             .build(),
     );
     desired.put_executor(
         ExecutorRecord::builder("executor.observed", harness._app.config.node_id.clone())
-            .runtime_type("helios.updater.v1")
+            .runtime_type("example.updater.v1")
             .build(),
     );
     desired.put_workload(
         WorkloadRecord::builder(
             WorkloadId::new("workload.update"),
-            "helios.updater.v1",
+            "example.updater.v1",
             ArtifactId::new("artifact.update"),
         )
         .assigned_to(harness._app.config.node_id.clone())
@@ -169,14 +169,14 @@ pub(crate) async fn publish_observed_updater_state(harness: &TestHarness) {
         .provider(
             "orionctl.test.provider",
             ProviderRecord::builder("provider.observed", harness._app.config.node_id.clone())
-                .resource_type("helios.updater.runtime.v1")
+                .resource_type("example.updater.runtime.v1")
                 .build(),
         )
         .expect("provider client should connect")
         .publish_resources(vec![
             ResourceRecord::builder(
                 "resource.updater.runtime",
-                "helios.updater.runtime.v1",
+                "example.updater.runtime.v1",
                 "provider.observed",
             )
             .ownership_mode(ResourceOwnershipMode::Exclusive)
@@ -192,7 +192,7 @@ pub(crate) async fn publish_observed_updater_state(harness: &TestHarness) {
         .executor(
             "orionctl.test.executor",
             ExecutorRecord::builder("executor.observed", harness._app.config.node_id.clone())
-                .runtime_type("helios.updater.v1")
+                .runtime_type("example.updater.v1")
                 .build(),
         )
         .expect("executor client should connect")
@@ -200,7 +200,7 @@ pub(crate) async fn publish_observed_updater_state(harness: &TestHarness) {
             vec![
                 WorkloadRecord::builder(
                     WorkloadId::new("workload.update"),
-                    "helios.updater.v1",
+                    "example.updater.v1",
                     ArtifactId::new("artifact.update"),
                 )
                 .assigned_to(harness._app.config.node_id.clone())
@@ -211,7 +211,7 @@ pub(crate) async fn publish_observed_updater_state(harness: &TestHarness) {
             vec![
                 ResourceRecord::builder(
                     "resource.update.execution",
-                    "helios.updater.execution.v1",
+                    "example.updater.execution.v1",
                     "provider.observed",
                 )
                 .realized_by_executor("executor.observed")

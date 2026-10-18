@@ -207,7 +207,7 @@ async fn device_agent_updates_asynchronously_and_republishes_after_boot() {
     );
 
     // Invalid arguments are rejected by the agent, not run.
-    let mut bad = update_request("update-bad", "http://atlas/image-2.0.img.xz");
+    let mut bad = update_request("update-bad", "http://images.example/image-2.0.img.xz");
     bad.args.remove(update_action::ARG_SHA256);
     operator.run_action(bad).await.expect("run");
     assert!(matches!(
@@ -217,7 +217,10 @@ async fn device_agent_updates_asynchronously_and_republishes_after_boot() {
 
     // `update` succeeds as soon as staging started; the rest is in the `update.*` keys.
     let accepted = operator
-        .run_action(update_request("update-1", "http://atlas/image-2.0.img.xz"))
+        .run_action(update_request(
+            "update-1",
+            "http://images.example/image-2.0.img.xz",
+        ))
         .await
         .expect("run");
     assert_eq!(accepted.state, ActionState::Accepted);
@@ -243,14 +246,17 @@ async fn device_agent_updates_asynchronously_and_republishes_after_boot() {
     assert_eq!(
         updater.calls(),
         vec![
-            "stage http://atlas/image-2.0.img.xz".to_owned(),
+            "stage http://images.example/image-2.0.img.xz".to_owned(),
             "apply".to_owned()
         ]
     );
 
     // A failing stage: the action still succeeded (it started); the keys carry the error.
     operator
-        .run_action(update_request("update-2", "http://atlas/corrupt.img.xz"))
+        .run_action(update_request(
+            "update-2",
+            "http://images.example/corrupt.img.xz",
+        ))
         .await
         .expect("run");
     assert_eq!(
@@ -266,7 +272,10 @@ async fn device_agent_updates_asynchronously_and_republishes_after_boot() {
     // image is refused while one stages.
     let hold = updater.hold_staging();
     operator
-        .run_action(update_request("update-3", "http://atlas/image-3.0.img.xz"))
+        .run_action(update_request(
+            "update-3",
+            "http://images.example/image-3.0.img.xz",
+        ))
         .await
         .expect("run");
     assert_eq!(
@@ -278,7 +287,7 @@ async fn device_agent_updates_asynchronously_and_republishes_after_boot() {
     operator
         .run_action(update_request(
             "update-3-retry",
-            "http://atlas/image-3.0.img.xz",
+            "http://images.example/image-3.0.img.xz",
         ))
         .await
         .expect("run");
@@ -288,7 +297,7 @@ async fn device_agent_updates_asynchronously_and_republishes_after_boot() {
     operator
         .run_action(update_request_with(
             "update-other",
-            "http://atlas/image-4.0.img.xz",
+            "http://images.example/image-4.0.img.xz",
             &other_sha,
         ))
         .await
@@ -419,7 +428,7 @@ async fn device_agent_updates_asynchronously_and_republishes_after_boot() {
         ("rollback-2", action_names::UPDATE_ROLLBACK),
     ] {
         let request = if name == action_names::UPDATE {
-            update_request(id, "http://atlas/image-3.0.img.xz")
+            update_request(id, "http://images.example/image-3.0.img.xz")
         } else {
             node_action(id, name)
         };
@@ -519,7 +528,7 @@ impl HostFactsSource for BusyHost {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn control_plane_event_stream_follows_host_metrics_on_the_status_lane() {
     let node = start_node("host-watch").await;
-    let mut events = ControlPlaneEventStream::connect_at(&node.stream, "helios-api")
+    let mut events = ControlPlaneEventStream::connect_at(&node.stream, "app-api")
         .await
         .expect("event stream");
     assert_eq!(events.node_id().as_str(), "node-a");

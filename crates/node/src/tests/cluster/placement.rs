@@ -93,7 +93,7 @@ async fn colocation_follows_the_resource() {
     provider_b.set(vec![camera(
         "resource.cam",
         "provider.cam-b",
-        "tcp://10.0.0.2:5000",
+        "tcp://192.0.2.2:5000",
     )]);
     b.app
         .register_provider(provider_b.clone())
@@ -132,7 +132,7 @@ async fn colocation_follows_the_resource() {
     provider_c.set(vec![camera(
         "resource.cam",
         "provider.cam-c",
-        "tcp://10.0.0.3:5000",
+        "tcp://192.0.2.3:5000",
     )]);
     rounds_until(
         &all,

@@ -58,7 +58,7 @@ systemd" below covers the service side:
 - set `ORION_NODE_RUNTIME_WORKER_THREADS=1` or `2` and lower `ORION_NODE_MAX_MUTATION_HISTORY*` and worker queue capacities to fit the device memory budget
 - on glibc targets, set `MALLOC_ARENA_MAX=2` to limit per-thread malloc arenas
 - keep the default allocator (glibc malloc). In every appliance soak run, the opt-in `alloc-jemalloc` and `alloc-mimalloc` features below used more memory than glibc
-- check transparent huge pages (THP) on the device: `cat /sys/kernel/mm/transparent_hugepage/enabled` and `grep AnonHugePages /proc/$(pidof orion-node)/smaps_rollup`. With THP set to `always`, the kernel can back sparsely used heap regions with whole huge pages. On a kernel with 16 KiB pages, as Raspberry Pi OS ships for BCM2712 (Pi 5 / CM5), a PMD huge page is 32 MiB instead of 2 MiB, so check `getconf PAGESIZE` too. If `AnonHugePages` is a large share of `Anonymous`, boot with `transparent_hugepage=madvise` (or write `madvise` to that sysfs file)
+- check transparent huge pages (THP) on the device: `cat /sys/kernel/mm/transparent_hugepage/enabled` and `grep AnonHugePages /proc/$(pidof orion-node)/smaps_rollup`. With THP set to `always`, the kernel can back sparsely used heap regions with whole huge pages. On a kernel with 16 KiB pages (common on small arm64 boards), a PMD huge page is 32 MiB instead of 2 MiB, so check `getconf PAGESIZE` too. If `AnonHugePages` is a large share of `Anonymous`, boot with `transparent_hugepage=madvise` (or write `madvise` to that sysfs file)
 
 #### Global allocator features
 
@@ -116,7 +116,7 @@ Every run passed the soak's caps and its 256 KiB/min slope limit. glibc with `MA
 was the smallest configuration in every row group. It saved 0.5 to 1 MiB over plain glibc, and the
 saving was largest with one worker per core. In this workload, glibc arenas stayed small: plain
 glibc with 24 workers used about 1 MiB more than with 2 workers. That is far from the roughly
-25 MiB of extra anonymous memory measured on HeliOS, so arenas alone are unlikely to explain it.
+25 MiB of extra anonymous memory measured on a device image, so arenas alone are unlikely to explain it.
 
 Transparent huge pages cause most of the jemalloc and mimalloc overhead here. In an earlier run of
 this matrix, 200 s in with default workers on 24 CPUs, `AnonHugePages` was 12 MiB of mimalloc's
@@ -130,7 +130,7 @@ expires, which produces the large negative slopes.
 Stripped `opt-level = "z"` binary sizes were 5.39 MiB for glibc, 5.50 MiB for mimalloc
 (+0.11 MiB), and 5.68 MiB for jemalloc (+0.29 MiB).
 
-These measurements were taken on x86_64, not on the CM5. On the device, compare `RssAnon` and
+These measurements were taken on x86_64, not on the arm64 board. On the device, compare `RssAnon` and
 `AnonHugePages` with and without `MALLOC_ARENA_MAX=2` and with THP set to `madvise` before you
 switch allocators.
 
@@ -216,7 +216,7 @@ The socket's file permissions still apply before any of this: the packaged servi
 than root also need to be in the `orion` group, or the image adds an ACL. Typical settings:
 
 ```sh
-# Appliance (HeliOS, PhotonVision images): services in the orion group, operators as root.
+# Appliance images: services in the orion group, operators as root.
 ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root
 # The same with an explicit allow-list (for example an operator group that is also given
 # access to /run/orion):

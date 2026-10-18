@@ -136,7 +136,7 @@ fn linux_source_reads_a_fixture_root() {
     write(
         &root,
         "proc/device-tree/model",
-        "Raspberry Pi Compute Module 5 Rev 1.0\0",
+        "Example Compute Module Rev 1.0\0",
     );
     write(&root, "sys/class/dmi/id/product_name", "ignored\n");
     write(
@@ -173,7 +173,7 @@ fn linux_source_reads_a_fixture_root() {
     assert_eq!(identity.board_serial.as_deref(), Some("10000000abcdef12"));
     assert_eq!(
         identity.board_model.as_deref(),
-        Some("Raspberry Pi Compute Module 5 Rev 1.0"),
+        Some("Example Compute Module Rev 1.0"),
         "the device tree wins over DMI"
     );
     assert_eq!(

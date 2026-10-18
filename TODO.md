@@ -1,11 +1,11 @@
 # TODO
 
-Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
+Tracks Orion's integration with its first consumers and appliance hardening work. See
 [CHANGELOG.md](CHANGELOG.md) for the user-facing summary of what landed.
 
 ## Done
 
-### HeliOS integration
+### Integration
 
 - [x] IPC-only node profile: `ORION_NODE_HTTP_ADDR=off`, `ORION_NODE_RUNTIME_WORKER_THREADS`,
       `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` ([docs/node-env.md](docs/node-env.md), "Single-node appliance profile").
@@ -36,8 +36,8 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
       watchdog tied to reconcile-loop progress; no libsystemd. `orion-node` handles `SIGTERM`.
 - [x] `packaging/`: systemd unit, environment file (appliance profile), sysusers entry, Buildroot
       users table, preset, and the importable Gaia layer `packaging/gaia/orion-node.toml`
-      ([packaging/README.md](packaging/README.md)). Images such as HeliOS import the layer instead of
-      carrying their own orion-node artifact, unit and env file (HeliOS side tracked below).
+      ([packaging/README.md](packaging/README.md)). Images import the layer instead of carrying their
+      own orion-node artifact, unit and env file.
 - [x] aarch64 release link verified locally (Fedora aarch64 glibc sysroot, LLVM libunwind standing
       in for `libgcc_s`): 3.07 MiB stripped appliance build, runs under qemu-user, 64 KiB `PT_LOAD`
       alignment pinned by `.cargo/config.toml` for 16 KiB page kernels. CI cross-links it and checks
@@ -122,9 +122,9 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
       groups via `SO_PEERGROUPS`; optional `packaging/gaia/orionctl.toml` layer.
 - [x] Device-agent contract ([docs/device-agent.md](docs/device-agent.md)): claim-scoped
       `<name>.*` node status keys, `update_action` names, `ActionReporter`, example agent with a
-      fake updater and contract tests. Atlas's `pd-device-agent` implements it.
+      fake updater and contract tests.
 - [x] CPU utilisation and temperatures in `HostMetricsSnapshot` / `HostMetricsSample`,
-      `ControlPlaneEventStream::subscribe_status` (HeliOS can drop its `/proc` polling).
+      `ControlPlaneEventStream::subscribe_status` (consumers can drop their `/proc` polling).
 - [ ] Actions: an `ActionWatch` for peers (today a forwarding node polls the owner); action counters
       in `resource_usage`; link devices as action handlers (needs a link message kind).
 - [ ] Host facts: replicate selected volatile host metrics to peers (the status lane is node-local).
@@ -143,14 +143,14 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 
 ## Open
 
-### Needs the device (HeliOS CM5)
+### Needs the device (arm64 board)
 
-- [ ] Run the appliance soak with a release aarch64 build on the CM5. x86 release builds plateau at
+- [ ] Run the appliance soak with a release aarch64 build on the board. x86 release builds plateau at
       3–5 MiB PSS, so the observed ~42 MiB is not reproduced off-device.
 - [ ] Check transparent huge pages on the device (prime suspect for the anonymous-memory gap):
       `/sys/kernel/mm/transparent_hugepage/enabled`, `getconf PAGESIZE`, and `AnonHugePages` in
       `/proc/$(pidof orion-node)/smaps_rollup`. If large, set THP to `madvise` in the Gaia image.
-- [ ] Install the packaged service on the CM5 image (16 KiB pages) and confirm `READY=1`, watchdog
+- [ ] Install the packaged service on the board image (16 KiB pages) and confirm `READY=1`, watchdog
       pings and a watchdog restart (`kill -STOP $(pidof orion-node)`) under the real systemd.
 
 ### CI
@@ -168,25 +168,10 @@ Tracks the Orion ↔ HeliOS integration and appliance hardening work. See
 
 - [ ] Tag a release so downstreams can pin by tag instead of `rev` (version stays 1.0.0 until first ship).
 
-### HeliOS side (tracked here for coordination; changes live in the HeliOS repo)
-
-- [ ] Pin `orion` by `rev`/tag for both the backend crates and the Gaia `orion-node` artifact (same rev:
-      the control-protocol layout must match).
-- [ ] Import `packaging/gaia/orion-node.toml` from the pinned Orion source (source id `orion`) and drop
-      the HeliOS-side `orion-node` artifact, install, unit and env file; keep device-specific
-      settings in a later layer (its own `orion-node-env` file or unit drop-ins). Create the `orion`
-      user at build time (squashfs root: add `packaging/buildroot/orion-users.table` to
-      `BR2_ROOTFS_USERS_TABLES`) or override `User=root` in a drop-in, and give IPC clients
-      `Group=orion` with `ORION_NODE_LOCAL_AUTH=same-user-or-group`.
-- [ ] Replace hand-rolled frame-lease servers with `UnixFdLatestServer`/`UnixFdLatestClient`, and the
-      `shm://` metadata file (per-frame write) with a typed custom endpoint.
-- [ ] Use `watch_assigned_workloads` in the engine instead of its own retry loop.
-- [ ] Move FrameLease descriptor/backing types into Styx.
-
 ### Decided model, not yet implemented
 
-Decisions from 2026-10-03, prompted by HeliOS multi-camera design questions. Orion stays generic;
-none of these are HeliOS-specific features.
+Decisions from 2026-10-03, prompted by multi-camera design questions. Orion stays generic;
+none of these are app-specific features.
 
 - [ ] **Durable vs volatile observed state.** Records hold durable facts only (existence,
       health/availability, workload phase).
@@ -242,7 +227,7 @@ none of these are HeliOS-specific features.
 
 ### Decisions (2026-10-05)
 
-- Frame leases stay in the producer (Styx `FrameSocket` + its public lease codec). Orion carries
+- Frame leases stay in the producer (its frame socket and lease codec). Orion carries
   only discovery and typed endpoint records (`ResourceEndpoint::Custom`); `UnixFdLatest*` stays a
   generic latest-value fd channel without hold/release, because buffer-pool reuse and back-pressure
   are producer-specific.
@@ -288,7 +273,7 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       key), signed `orion+tcp` requests; list/watch node records and host facts, query/watch status
       lanes, send `ActionRequest` / watch `ActionResult`, optional mDNS discovery. Nodes treat it as
       an operator principal (no desired-state replica, no placement/liveness role), with
-      per-identity action authorization. First consumer: Atlas (`atlas-driver-orion`).
+      per-identity action authorization. First consumer: a fleet tool.
       Done: `docs/remote-operator.md`; status queries are forwarded to the owning node.
 - [x] The remote operator client builds on Windows and macOS (`orion-transport-ipc`'s frame code
       and `ControlTcpClient` are cross-platform, the Unix socket parts `#[cfg(unix)]`; CI checks

@@ -142,7 +142,7 @@ A control-plane client (for example a device's web API) that today re-reads `/pr
 `/sys` every second can follow the node instead:
 
 ```rust
-let mut events = ControlPlaneEventStream::connect_default("helios-api").await?;
+let mut events = ControlPlaneEventStream::connect_default("app-api").await?;
 let node = events.node_id().clone();
 events.subscribe_state_and_observed(Revision::ZERO).await?; // desired and observed changes
 events.subscribe_status(

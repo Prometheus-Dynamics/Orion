@@ -29,7 +29,7 @@ async fn camera_cluster(grace: Duration) -> (ClusterNode, ClusterNode, ClusterNo
     provider.set(vec![camera(
         "resource.cam-b",
         "provider.cam-b",
-        "tcp://10.0.0.2:5000",
+        "tcp://192.0.2.2:5000",
     )]);
     b.app
         .register_provider(provider.clone())
@@ -73,7 +73,7 @@ async fn workload_binds_a_remote_resource_and_both_sides_see_the_lease() {
             .remote
             .as_ref()
             .map(|remote| remote.endpoints.clone()),
-        Some(vec!["tcp://10.0.0.2:5000".to_string()])
+        Some(vec!["tcp://192.0.2.2:5000".to_string()])
     );
     // The executor watch delivers the same binding.
     let delivered = a
@@ -202,7 +202,7 @@ async fn binding_moves_to_another_owner_after_the_grace_period() {
     provider_c.set(vec![camera(
         "resource.cam-c",
         "provider.cam-c",
-        "tcp://10.0.0.3:5000",
+        "tcp://192.0.2.3:5000",
     )]);
     c.app
         .register_provider(provider_c)

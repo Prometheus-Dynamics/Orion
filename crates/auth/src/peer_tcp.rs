@@ -169,8 +169,8 @@ mod tests {
     #[test]
     fn peer_tcp_urls_parse_to_authorities() {
         assert_eq!(
-            peer_tcp_authority("orion+tcp://10.0.0.2:9200/"),
-            Ok("10.0.0.2:9200")
+            peer_tcp_authority("orion+tcp://192.0.2.2:9200/"),
+            Ok("192.0.2.2:9200")
         );
         assert!(peer_tcp_authority("orion+tcp://host").is_err());
         assert!(peer_tcp_authority("http://host:1").is_err());

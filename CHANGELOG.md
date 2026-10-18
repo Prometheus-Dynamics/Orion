@@ -6,8 +6,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Removed (breaking, dev tooling and examples only)
+
+- `orion-nt4` example `nt4-latency` (a PhotonVision camera latency tool with an AprilTag page) is removed from this repository and moves to the PhotonVision tooling. The `[[example]]` entry, its tests and its README section are gone with it. Public `orion-nt4` API is unchanged.
+
+### Changed (breaking, dev tooling, examples, test fixtures and docs only)
+
+- Product names are gone from examples, tests, docs and scripts. Names that a host or product used are now generic. Renamed strings: client name `helios-api` to `app-api`; provider and resource ids `provider.helios` to `provider.frames`, `provider.lemnos` to `provider.bus`, `lemnos.raw` to `bus.raw`, `helios.updater*.v1` to `example.updater*.v1`; resource-type examples in [docs/observability.md](docs/observability.md) `lemnos.imu|power|fan|gpio` to `device.imu|power|fan|gpio`; custom endpoint scheme example `styx-frame-lease+unix` to `frame-lease+unix` with socket paths under `/run/app/`; topic prefixes `/HeliOS/` to `/app/` and `/robot/` to `/app/` in `orion-nt4` tests.
+- Device-agent example and docs ([docs/device-agent.md](docs/device-agent.md)): no product or board names. The contract (action names, arguments, `update.*` keys) is unchanged.
+- Example and test addresses in the `10.0.0.0/8` range are now `192.0.2.0/24` (RFC 5737 documentation addresses). Hosts named `atlas` in test URLs are `images.example`.
+- `TODO.md` no longer tracks product-side work. The HeliOS-side items moved to that product's tracker.
+- Board-model test fixtures use `Example Compute Module`. The `arm64` 64 KiB page alignment and the packaging are unchanged.
+
 ### Added
 
+- `scripts/check-neutral-names.sh` fails when a product or board name appears in a tracked file outside its allowlist (the `orion-nt4` crate and its interop scripts, which implement the WPILib NetworkTables 4 protocol, and `CHANGELOG.md`). It runs in `scripts/ci.sh` and in the CI `workspace` job.
 - `orion-nt4` has `client` and `server` cargo features, both on by default. `--no-default-features --features client` (or `server`) builds only that half and its WebSocket dependencies. Example `nt4-server` needs `server`, `nt4-dump` needs `client`, `nt4-latency` needs both.
 - `orion-nt4` maps the `json` topic type to string values (`type_id_for_name("json")` is the string id, as in WPILib), so json topics announce, carry `Value::String`, and survive persistence.
 - `orion-nt4` queues are bounded and share buffers: a slow subscriber keeps only the latest value per topic (control messages are never dropped; a server client whose control backlog overflows is disconnected). Fan-out shares frames and text instead of copying them per client. The persistence file is rewritten at most about once a second, compact and fsynced, and flushed on drop.

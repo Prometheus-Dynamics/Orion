@@ -35,7 +35,7 @@ async fn orionctl_describe_reports_full_object_state_and_blockers() {
             .health(orion::control_plane::HealthState::Healthy)
             .availability(orion::control_plane::AvailabilityState::Available)
             .endpoint("shm://camera-describe")
-            .endpoint("styx-frame-lease+unix:///run/helios/cam0.sock")
+            .endpoint("frame-lease+unix:///run/app/cam0.sock")
             .build(),
     );
     desired.put_workload(
@@ -135,9 +135,8 @@ async fn orionctl_describe_reports_full_object_state_and_blockers() {
     assert!(resource_stdout.contains("resource: resource.describe"));
     assert!(resource_stdout.contains("type: camera.device"));
     assert!(
-        resource_stdout.contains(
-            "endpoints: shm://camera-describe,styx-frame-lease+unix:///run/helios/cam0.sock"
-        ),
+        resource_stdout
+            .contains("endpoints: shm://camera-describe,frame-lease+unix:///run/app/cam0.sock"),
         "{resource_stdout}"
     );
 }

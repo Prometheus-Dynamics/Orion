@@ -22,7 +22,7 @@ fn announcement(advertisement: &Advertisement, ttl_ms: u64) -> Announcement {
         addresses: vec![
             "fe80::1".parse().expect("ip"),
             "2001:db8::2".parse().expect("ip"),
-            "10.0.0.2".parse().expect("ip"),
+            "192.0.2.2".parse().expect("ip"),
         ],
         port: advertisement.srv_port(),
         txt: advertisement.txt(),
@@ -53,9 +53,9 @@ fn txt_records_roundtrip_and_build_peer_urls() {
     assert_eq!(
         urls,
         [
-            "orion+tcp://10.0.0.2:9200",
+            "orion+tcp://192.0.2.2:9200",
             "orion+tcp://[2001:db8::2]:9200",
-            "https://10.0.0.2:9100",
+            "https://192.0.2.2:9100",
             "https://[2001:db8::2]:9100",
         ]
     );
@@ -106,7 +106,7 @@ fn registry_filters_by_cluster_refreshes_and_expires() {
         Observation::Refreshed(NodeId::new("node-b"))
     );
     let mut moved = announcement(&b, 100);
-    moved.addresses = vec!["10.0.0.9".parse().expect("ip")];
+    moved.addresses = vec!["192.0.2.9".parse().expect("ip")];
     assert_eq!(
         registry.observe(&moved, 1_060),
         Observation::Changed(NodeId::new("node-b"))

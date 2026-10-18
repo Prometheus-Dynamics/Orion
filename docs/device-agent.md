@@ -4,9 +4,8 @@ A device agent is a small daemon shipped by a device package (not by Orion) that
 `orion-node`'s local IPC, claims node-level actions such as `update`, `update.cancel`,
 `update.rollback`, `reboot` and `locate`, runs
 them with the package's own tools, and keeps the durable outcome of the last update visible on the
-status lane. Atlas's `pd-device-agent` (Atlas `docs/ota.md`) is the first one. This page is the
-contract between such an agent, `orion-node` (control protocol v4), and the tools that drive it
-(Atlas through the remote operator client, `orionctl`, fleet tools).
+status lane. This page is the contract between such an agent, `orion-node` (control protocol v4),
+and the tools that drive it (a fleet tool through the remote operator client, `orionctl`, scripts).
 
 Orion implements none of the actions and never touches disks: image bytes come from the URL the
 requester names, and the agent's writer verifies them. See [actions.md](actions.md) for the general
@@ -29,8 +28,8 @@ An example agent with a fake updater is in
   without a limit). Nothing on the device may depend on the agent being connected.
 
 ```rust
-let service = LocalProviderService::new(runtime, "pd-device-agent",
-        ProviderRecord::builder(ProviderId::new("pd-device-agent"), node_id).build())
+let service = LocalProviderService::new(runtime, "device-agent",
+        ProviderRecord::builder(ProviderId::new("device-agent"), node_id).build())
     .with_retry_policy(LocalServiceRetryPolicy::fixed_delay(Duration::from_secs(1)));
 let mut watch = service
     .claim_node_actions(["update", "update.cancel", "update.rollback", "reboot", "locate"])
@@ -71,11 +70,11 @@ The agent claims all five (the example does); `update.cancel` and `update.rollba
 `orionctl` passes them with `--arg`:
 
 ```text
-orionctl action run node/raze-1 update --arg image_url=http://10.0.0.5:8080/raze-2.0.img.xz \
+orionctl action run node/device-1 update --arg image_url=http://192.0.2.5:8080/device-2.0.img.xz \
     --arg sha256=string:<64 hex digits> --arg size=734003200 --wait
-orionctl get status --subject node/raze-1 --key-prefix update.     # follow the outcome
-orionctl action run node/raze-1 update.cancel --wait
-orionctl action run node/raze-1 update.rollback --wait
+orionctl get status --subject node/device-1 --key-prefix update.     # follow the outcome
+orionctl action run node/device-1 update.cancel --wait
+orionctl action run node/device-1 update.rollback --wait
 ```
 
 ### Result semantics: `update` is asynchronous
@@ -101,7 +100,7 @@ outcome comes only from durable facts:
 2. the node's host facts (`NodeRecord::host`: `boot_id` changes on the reboot, `image_version` /
    `os_version` show the running image; replicated to peers, see [host-facts.md](host-facts.md)).
 
-A requester such as Atlas therefore treats the action result as "accepted for staging", then
+A requester therefore treats the action result as "accepted for staging", then
 follows `update.state` (status-lane watch or periodic `QueryStatus`) until `confirmed`,
 `rolled-back`, `cancelled` or `error`, and matches `update.boot_id` against the host facts'
 `boot_id` to know the keys describe the current boot.
@@ -184,11 +183,11 @@ Readers query them on the node itself, or through any peer: a `QueryStatus` for 
 forwarded once to the owning node (local control-plane clients and remote operators alike):
 
 ```text
-orionctl get status --subject node/raze-1 --key-prefix update.
+orionctl get status --subject node/device-1 --key-prefix update.
 ```
 
 ```rust
-// Atlas, through the remote operator client:
+// A fleet tool, through the remote operator client:
 let entries = operator.status(StatusQuery::subject(StatusSubject::Node(node_id))
     .with_key_prefix("update.")).await?;
 ```
@@ -224,5 +223,5 @@ and tombstones, the observed-slice fold, and U4's delivery loop to be useful. Wh
 - U4 delivers intents as `update` actions keyed by `(intent, version, generation)` with
   re-delivery after reboots, so requesters stop sending actions themselves;
 - the action names, arguments, result semantics and `update.*` keys above stay valid, so an agent
-  written against this page keeps working, and Atlas's Orion capability changes only where it reads
+  written against this page keeps working, and a requester's Orion integration changes only where it reads
   the outcome.

@@ -11,8 +11,8 @@ own observed slice and pushes it to its peers (see "Observed state" below).
 
 ## Behaviour before control protocol v3
 
-This section records how merging worked up to protocol v2, because it explains the HeliOS
-"bytewise max" report and why the model changed.
+This section records how merging worked up to protocol v2, because it explains the earlier
+"bytewise max" behaviour and why the model changed.
 
 - Each node had one desired-state `Revision`: a counter that every `put_*`/`remove_*` incremented.
   Peers compared revisions to decide who was "ahead".
@@ -236,7 +236,7 @@ IPC-only build:
 ```sh
 cargo build -p orion-node --release --no-default-features --features peer-tcp
 ORION_NODE_ID=node-a ORION_NODE_PEER_ADDR=0.0.0.0:9200 \
-  ORION_NODE_PEERS='node-b=orion+tcp://10.0.0.2:9200|<node-b-public-key-hex>' orion-node
+  ORION_NODE_PEERS='node-b=orion+tcp://192.0.2.2:9200|<node-b-public-key-hex>' orion-node
 ```
 
 Wire format (one long-lived connection per peer, requests are sequential on a connection):
