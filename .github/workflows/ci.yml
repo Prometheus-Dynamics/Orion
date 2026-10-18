@@ -27,7 +27,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: fmt, file sizes, workspace tests (scripts/ci-jobs.sh workspace)
+      - name: fmt, file sizes, product names, workspace tests (scripts/ci-jobs.sh workspace)
         run: ./scripts/ci-jobs.sh workspace
 
   docs-and-lints:

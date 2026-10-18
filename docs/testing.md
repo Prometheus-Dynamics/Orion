@@ -6,6 +6,7 @@ Orion splits validation into default workspace checks, Docker-backed cluster cov
 
 - `cargo fmt --check`
 - `./scripts/check-file-sizes.sh`
+- `./scripts/check-neutral-names.sh` (no product or board names outside the allowlist in the script)
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo test --workspace --all-features`
 - `cargo doc --workspace --no-deps`
@@ -56,7 +57,7 @@ node with the test's features, so an allocator feature on the test build also ap
 ```sh
 # glibc (default), 2 workers
 ORION_SOAK_DURATION_SECS=600 cargo test --release -p orion-node --test appliance_memory_soak -- --ignored --nocapture
-# glibc with two malloc arenas, one worker per core, pinned to 4 CPUs like a CM5
+# glibc with two malloc arenas, one worker per core, pinned to 4 CPUs like a small arm64 board
 MALLOC_ARENA_MAX=2 ORION_SOAK_NODE_WORKER_THREADS=0 taskset -c 0-3 \
   cargo test --release -p orion-node --test appliance_memory_soak -- --ignored --nocapture
 # jemalloc / mimalloc

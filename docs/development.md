@@ -15,6 +15,7 @@ Use these commands for the default local validation loop:
 ./scripts/repo-clean.sh
 cargo fmt --check
 ./scripts/check-file-sizes.sh
+./scripts/check-neutral-names.sh
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo doc --workspace --no-deps

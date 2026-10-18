@@ -10,6 +10,9 @@ cargo fmt --check
 echo "==> Checking file sizes"
 "$root_dir/scripts/check-file-sizes.sh"
 
+echo "==> Checking for product names"
+"$root_dir/scripts/check-neutral-names.sh"
+
 echo "==> Running clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 

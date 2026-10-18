@@ -66,6 +66,7 @@ clippy() { cargo clippy --locked "$@" -- -D warnings; }
 job_workspace() {
     step workspace "fmt" cargo fmt --check
     step workspace "file sizes" ./scripts/check-file-sizes.sh
+    step workspace "product names" ./scripts/check-neutral-names.sh
     step workspace "test --workspace --all-features" cargo test --locked --workspace --all-features
 }
 
