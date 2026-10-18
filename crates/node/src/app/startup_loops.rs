@@ -1,8 +1,8 @@
 use super::observability::push_observability_event_with_context;
 use super::{NodeApp, NodeError, PeerSyncExecution, ReconcileLoopHandle};
-use orion::control_plane::{NodeObservabilitySnapshot, ObservabilityEventKind};
+use orion::control_plane::ObservabilityEventKind;
 use std::{future::Future, sync::Arc, time::Duration};
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 impl NodeApp {
     pub(super) fn spawn_background_loop<F, Fut>(
@@ -120,56 +120,6 @@ impl NodeApp {
             }
         })
     }
-
-    pub fn spawn_observability_loop(&self, interval: Duration) -> ReconcileLoopHandle {
-        self.spawn_background_loop(interval, |app| async move {
-            let snapshot = app.observability_snapshot();
-            log_observability_summary(&snapshot);
-        })
-    }
-}
-
-fn log_observability_summary(snapshot: &NodeObservabilitySnapshot) {
-    info!(
-        node = %snapshot.node_id,
-        desired_revision = %snapshot.desired_revision,
-        observed_revision = %snapshot.observed_revision,
-        applied_revision = %snapshot.applied_revision,
-        maintenance_mode = %snapshot.maintenance.mode,
-        peer_sync_paused = snapshot.peer_sync_paused,
-        remote_desired_state_blocked = snapshot.remote_desired_state_blocked,
-        replay_failures = snapshot.replay.failure_count,
-        replay_last_error_category = ?snapshot.replay.last_error_category,
-        peer_sync_failures = snapshot.peer_sync.failure_count,
-        peer_sync_last_error_category = ?snapshot.peer_sync.last_error_category,
-        reconcile_failures = snapshot.reconcile.failure_count,
-        reconcile_last_error_category = ?snapshot.reconcile.last_error_category,
-        mutation_failures = snapshot.mutation_apply.failure_count,
-        mutation_last_error_category = ?snapshot.mutation_apply.last_error_category,
-        persistence_failures = snapshot.persistence.state_persist.failure_count,
-        persistence_last_error_category = ?snapshot.persistence.state_persist.last_error_category,
-        persistence_last_duration_ms = snapshot.persistence.state_persist.last_duration_ms,
-        artifact_write_failures = snapshot.persistence.artifact_write.failure_count,
-        artifact_write_last_error_category = ?snapshot.persistence.artifact_write.last_error_category,
-        artifact_write_last_duration_ms = snapshot.persistence.artifact_write.last_duration_ms,
-        persistence_worker_queue_waits = snapshot.persistence.worker_queue_wait_count,
-        persistence_worker_queue_wait_ms_total = snapshot.persistence.worker_queue_wait_ms_total,
-        persistence_worker_queue_wait_ms_max = snapshot.persistence.worker_queue_wait_ms_max,
-        persistence_worker_reply_waits = snapshot.persistence.worker_reply_wait_count,
-        persistence_worker_operation_ms_max = snapshot.persistence.worker_operation_ms_max,
-        http_request_failures = snapshot.transport.http_request_failures,
-        http_malformed_input_count = snapshot.transport.http_malformed_input_count,
-        ipc_frame_failures = snapshot.transport.ipc_frame_failures,
-        ipc_malformed_input_count = snapshot.transport.ipc_malformed_input_count,
-        reconnect_count = snapshot.transport.reconnect_count,
-        audit_log_dropped_records = snapshot.audit_log_dropped_records,
-        configured_peer_count = snapshot.configured_peer_count,
-        degraded_peer_count = snapshot.degraded_peer_count,
-        active_clients = snapshot.client_sessions.registered_clients,
-        live_streams = snapshot.client_sessions.live_stream_clients,
-        queued_client_events = snapshot.client_sessions.queued_client_events,
-        "observability summary"
-    );
 }
 
 pub(super) fn record_stale_stream_eviction(
