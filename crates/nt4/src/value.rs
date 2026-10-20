@@ -151,7 +151,8 @@ impl Value {
 /// The binary type id for an NT4 type string, or `None` for a type this crate does not model.
 ///
 /// `json` is a string-valued type (binary type id [`STRING`]), as in WPILib. `msgpack`,
-/// `protobuf`, `raw` and every `struct:*` / `proto:*` type map to [`RAW`]. Type strings
+/// `protobuf`, `raw`, `structschema` (a struct's schema, on `/.schema/struct:<Name>`) and every
+/// `struct:*` / `proto:*` type map to [`RAW`]. Type strings
 /// are matched exactly, so `"double[]"` is [`DOUBLE_ARRAY`].
 pub fn type_id_for_name(type_name: &str) -> Option<u8> {
     Some(match type_name {
@@ -160,7 +161,7 @@ pub fn type_id_for_name(type_name: &str) -> Option<u8> {
         "int" => INT,
         "float" => FLOAT,
         "string" | "json" => STRING,
-        "raw" | "msgpack" | "protobuf" => RAW,
+        "raw" | "msgpack" | "protobuf" | "structschema" => RAW,
         "boolean[]" => BOOLEAN_ARRAY,
         "double[]" => DOUBLE_ARRAY,
         "int[]" => INT_ARRAY,
@@ -218,6 +219,7 @@ mod tests {
         assert_eq!(type_id_for_name("msgpack"), Some(RAW));
         assert_eq!(type_id_for_name("struct:Pose2d[]"), Some(RAW));
         assert_eq!(type_id_for_name("proto:frc.Foo"), Some(RAW));
+        assert_eq!(type_id_for_name("structschema"), Some(RAW));
         assert_eq!(type_id_for_name("json"), Some(STRING));
         assert_eq!(type_id_for_name("jsonx"), None);
     }
