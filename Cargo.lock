@@ -1361,7 +1361,7 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "orion"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "orion-auth",
  "orion-client",
@@ -1383,7 +1383,7 @@ dependencies = [
 
 [[package]]
 name = "orion-auth"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "ed25519-dalek",
  "hmac",
@@ -1397,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "orion-client"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
@@ -1415,7 +1415,7 @@ dependencies = [
 
 [[package]]
 name = "orion-cluster"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "orion-control-plane",
  "orion-core",
@@ -1425,7 +1425,7 @@ dependencies = [
 
 [[package]]
 name = "orion-control-plane"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "criterion",
  "orion-core",
@@ -1438,7 +1438,7 @@ dependencies = [
 
 [[package]]
 name = "orion-core"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "rkyv",
  "serde",
@@ -1447,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "orion-data-plane"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "orion-core",
  "rkyv",
@@ -1457,7 +1457,7 @@ dependencies = [
 
 [[package]]
 name = "orion-link"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "embedded-can",
  "embedded-io 0.7.1",
@@ -1470,7 +1470,7 @@ dependencies = [
 
 [[package]]
 name = "orion-macros"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "quote",
  "syn 3.0.6",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "orion-node"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "criterion",
  "ed25519-dalek",
@@ -1516,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "orion-nt4"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "clap",
  "futures-util",
@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "orion-perf-check"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "serde",
  "serde_json",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "orion-runtime"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "criterion",
  "orion-control-plane",
@@ -1551,11 +1551,11 @@ dependencies = [
 
 [[package]]
 name = "orion-service"
-version = "1.0.0"
+version = "1.0.1-dev"
 
 [[package]]
 name = "orion-transport-common"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "rustls",
  "rustls-pemfile",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "orion-transport-http"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "axum",
  "criterion",
@@ -1587,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "orion-transport-ipc"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "criterion",
  "libc",
@@ -1603,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "orion-transport-quic"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "criterion",
  "orion-core",
@@ -1621,7 +1621,7 @@ dependencies = [
 
 [[package]]
 name = "orion-transport-tcp"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "criterion",
  "orion-core",
@@ -1638,7 +1638,7 @@ dependencies = [
 
 [[package]]
 name = "orionctl"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "clap",
  "orion",

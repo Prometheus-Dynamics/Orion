@@ -166,7 +166,7 @@ Tracks Orion's integration with its first consumers and appliance hardening work
 
 ### Release
 
-- [ ] Tag a release so downstreams can pin by tag instead of `rev` (version stays 1.0.0 until first ship).
+- [ ] Tag a release so downstreams can pin by tag instead of `rev` (workspace is 1.0.1-dev; the release version is set when the user agrees it).
 
 ### Decided model, not yet implemented
 
