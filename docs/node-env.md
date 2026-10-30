@@ -56,7 +56,7 @@ systemd" below covers the service side:
   - `http://`/`https://` entries in `ORION_NODE_PEERS`, `ORION_NODE_HTTP_PROBE_ADDR`, `ORION_NODE_HTTP_TLS_CERT`, `ORION_NODE_HTTP_TLS_KEY`, and `ORION_NODE_HTTP_TLS_AUTO` fail startup with an error that names the missing feature. `orion+tcp://` peers likewise need the `peer-tcp` feature.
   - Embedders that pass peers or HTTP TLS files to `NodeApp::builder()` get the same error from `try_build()`.
 - set `ORION_NODE_RUNTIME_WORKER_THREADS=1` or `2` and lower `ORION_NODE_MAX_MUTATION_HISTORY*` and worker queue capacities to fit the device memory budget
-- on glibc targets, set `MALLOC_ARENA_MAX=2` to limit per-thread malloc arenas
+- on glibc targets, keep the packaged unit's malloc settings: `MALLOC_ARENA_MAX=1` with 64 KiB `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TOP_PAD_` and `MALLOC_TRIM_THRESHOLD_`. On a CM5 with one pipeline, after three workload rewrites, they held 8.4 MiB PSS against 13.6 MiB with `MALLOC_ARENA_MAX=2` alone
 - keep the default allocator (glibc malloc). In every appliance soak run, the opt-in `alloc-jemalloc` and `alloc-mimalloc` features below used more memory than glibc
 - check transparent huge pages (THP) on the device: `cat /sys/kernel/mm/transparent_hugepage/enabled` and `grep AnonHugePages /proc/$(pidof orion-node)/smaps_rollup`. With THP set to `always`, the kernel can back sparsely used heap regions with whole huge pages. On a kernel with 16 KiB pages (common on small arm64 boards), a PMD huge page is 32 MiB instead of 2 MiB, so check `getconf PAGESIZE` too. If `AnonHugePages` is a large share of `Anonymous`, boot with `transparent_hugepage=madvise` (or write `madvise` to that sysfs file)
 

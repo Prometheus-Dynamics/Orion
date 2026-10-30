@@ -42,8 +42,11 @@ Environment=ORION_NODE_STATE_DIR=/var/lib/orion
 Environment=ORION_NODE_IPC_SOCKET=/run/orion/control.sock
 Environment=ORION_NODE_IPC_STREAM_SOCKET=/run/orion/control-stream.sock
 Environment=ORION_NODE_HTTP_ADDR=off
-# Cap glibc per-thread malloc arenas: uncapped, a soak grew from 38 to 125 MB with no leak, and 128 MB boards need the cap (docs/node-env.md).
-Environment=MALLOC_ARENA_MAX=2
+# glibc malloc: one arena, and free memory returned to the system. Uncapped arenas grew a soak from
+# 38 to 125 MB with no leak; two arenas still held ~5 MiB more than one (CM5, one pipeline, after
+# three workload rewrites: 13.6 against 8.4 MiB PSS). Large blocks go to mmap and are unmapped on
+# free (docs/node-env.md).
+Environment=MALLOC_ARENA_MAX=1 MALLOC_MMAP_THRESHOLD_=65536 MALLOC_TOP_PAD_=65536 MALLOC_TRIM_THRESHOLD_=65536
 EnvironmentFile=-/etc/default/orion-node.env
 
 # Identity. A fixed system user (orion.sysusers) rather than DynamicUser=, so IPC clients can be
