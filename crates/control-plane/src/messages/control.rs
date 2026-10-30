@@ -15,7 +15,9 @@ use super::operators::{OperatorEnrollment, OperatorId, OperatorsSnapshot};
 use super::session::SessionOpen;
 use super::status::{StatusEntry, StatusQuery};
 use super::streams::{StreamDecl, StreamPublish, StreamRef, StreamSubscription};
-use super::sync::{PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest, SyncSummaryRequest};
+use super::sync::{
+    PeerHello, RobotLinkListener, StateSnapshot, SyncDiffRequest, SyncRequest, SyncSummaryRequest,
+};
 use crate::{LeaseRecord, WorkloadRecord};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use orion_core::NodeId;
@@ -121,4 +123,7 @@ pub enum ControlMessage {
     /// backfill, then `StreamData` events.
     SubscribeStream(StreamSubscription),
     UnsubscribeStream(StreamRef),
+    /// Announces the sender's `orion+tcp` listener port after a signed hello on a robot link
+    /// (open mode only, `docs/discovery.md`); answered with `Accepted`.
+    RobotLinkListener(RobotLinkListener),
 }

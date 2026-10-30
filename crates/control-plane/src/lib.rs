@@ -35,8 +35,8 @@ pub use messages::{
     OperationMetricsSnapshot, PeerEnrollment, PeerHello, PeerIdentityUpdate, PeerSyncErrorKind,
     PeerSyncStatus, PeerTrustRecord, PeerTrustSnapshot, PersistenceMetricsSnapshot,
     ProcessMemorySnapshot, ProviderLeaseQuery, ProviderStateUpdate, REMOTE_SESSION_PREFIX,
-    RegistryUsageSnapshot, SampleChunk, SampleChunkBuilder, SampleDecodeError, SampleValue,
-    Sampling, SeriesDecl, SeriesKind, SessionOpen, SessionWelcome, StateSectionCounts,
+    RegistryUsageSnapshot, RobotLinkListener, SampleChunk, SampleChunkBuilder, SampleDecodeError,
+    SampleValue, Sampling, SeriesDecl, SeriesKind, SessionOpen, SessionWelcome, StateSectionCounts,
     StateSizeSnapshot, StateSnapshot, StateWatch, StatusChange, StatusEntry, StatusKey,
     StatusLaneUsageSnapshot, StatusQuery, StatusSubject, StatusSubjectParseError, StreamCatalog,
     StreamCursor, StreamData, StreamDecl, StreamDemand, StreamPublish, StreamRef, StreamReset,
@@ -310,6 +310,7 @@ mod tests {
             | ControlMessage::PublishSamples(_)
             | ControlMessage::SubscribeStream(_)
             | ControlMessage::UnsubscribeStream(_)
+            | ControlMessage::RobotLinkListener(_)
             | ControlMessage::OperatorHello
             | ControlMessage::QueryOperators
             | ControlMessage::Operators(_)

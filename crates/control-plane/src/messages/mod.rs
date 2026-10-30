@@ -68,6 +68,6 @@ pub use streams::{
 };
 pub use sync::{
     DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,
-    DesiredStateSummary, PeerHello, StateSnapshot, SyncDiffRequest, SyncRequest,
+    DesiredStateSummary, PeerHello, RobotLinkListener, StateSnapshot, SyncDiffRequest, SyncRequest,
     SyncSummaryRequest,
 };

@@ -5,16 +5,24 @@
 //! first use. Everything else, including every `optional` and `required` setting, is decided by
 //! the rules in `auth.rs`, unchanged.
 //!
-//! The hello exchange does not call [`NodeSecurity::trust_robot_link_peer`] yet (the next step in
-//! `docs/discovery.md`), so outside tests the decision and pinning code is unused.
-#![cfg_attr(not(test), allow(dead_code))]
-
+//! The wire part: in open mode a node signs its hello and its listener announcement with its node
+//! identity key (`NodeSecurity::wrap_http_payload`), and the receiver verifies the signature
+//! without pinning anything (`NodeSecurity::verify_robot_link_request`). The decision below then
+//! runs with the connection's address; `NodeApp::note_robot_link_message` acts on it.
 use super::NodeSecurity;
 use super::modes::PeerAuthenticationMode;
 use crate::NodeError;
 use crate::lock::{read_rwlock, write_rwlock};
 use orion::NodeId;
 use std::net::IpAddr;
+
+/// A robot-link request whose signature verified: the signer's node id and key. Nothing is
+/// trusted yet; the robot-link policy decides on it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RobotLinkProof {
+    pub(crate) node_id: NodeId,
+    pub(crate) public_key: [u8; 32],
+}
 
 /// `ORION_NODE_PEER_AUTO_TRUST`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,6 +219,12 @@ impl NodeSecurity {
     /// Sets the robot-link policy (`ORION_NODE_ROBOT_LINKS`, `ORION_NODE_PEER_AUTO_TRUST`).
     pub fn set_robot_link_trust(&self, trust: RobotLinkTrust) {
         *write_rwlock(self.robot_link.write(), "robot_link") = trust;
+    }
+
+    /// Whether this node signs its open-mode hello and listener announcement: robot-link trust is
+    /// on, so the peers it talks to may want to pin its key.
+    pub(crate) fn signs_robot_link_messages(&self) -> bool {
+        read_rwlock(self.robot_link.read(), "robot_link").mode == PeerAutoTrust::RobotLink
     }
 
     /// Trusts `node_id` with `public_key` if the robot-link rule allows it, pinning the key on first

@@ -140,6 +140,9 @@ impl NodeApp {
             ControlMessage::OperatorHello | ControlMessage::OpenSession(_) => Ok(
                 ControlMessage::Rejected("only served to remote operators".into()),
             ),
+            ControlMessage::RobotLinkListener(_) => Ok(ControlMessage::Rejected(
+                "only sent between peers on a robot link".into(),
+            )),
             ControlMessage::ReplacePeerIdentity(update) => {
                 self.replace_peer_identity_hex(&update.node_id, &update.public_key_hex)?;
                 Ok(ControlMessage::Accepted)

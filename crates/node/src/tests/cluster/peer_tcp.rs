@@ -395,3 +395,176 @@ async fn actions_are_forwarded_to_the_owning_node_over_orion_tcp() {
         node.server.shutdown().await.expect("listener should stop");
     }
 }
+
+/// Turns on robot-link trust for `node` with `link` as its robot network (open mode).
+fn robot_link_on(node: &TcpNode, link: &str) {
+    node.app.security.set_robot_link_trust(
+        crate::auth::RobotLinkTrust::from_settings(
+            crate::PeerAuthenticationMode::Disabled,
+            Some("robot-link"),
+            Some(link),
+        )
+        .expect("robot link should parse"),
+    );
+}
+
+/// Registers `peer` on `node` by address only: no key, so trust must come from the robot link.
+fn register_by_address(node: &TcpNode, peer: &TcpNode) {
+    node.app
+        .register_peer(PeerConfig::new(
+            peer.app.config.node_id.clone(),
+            orion_core::PeerBaseUrl::new(format!("orion+tcp://{}", peer.addr)),
+        ))
+        .expect("peer registration should succeed");
+}
+
+fn pinned_key_of(node: &TcpNode, peer: &TcpNode) -> Option<orion_core::PublicKeyHex> {
+    node.app
+        .security
+        .trusted_peer_public_key_hex(&peer.app.config.node_id)
+        .expect("trust store should read")
+}
+
+#[tokio::test]
+async fn open_mode_peers_on_a_robot_link_auto_sync() {
+    let mode = crate::PeerAuthenticationMode::Disabled;
+    let (a, b) = (
+        tcp_node("node-a", mode).await,
+        tcp_node("node-b", mode).await,
+    );
+    robot_link_on(&a, "127.0.0.0/8");
+    robot_link_on(&b, "127.0.0.0/8");
+    // Only a knows b; b learns a from a's signed hello and registers it.
+    register_by_address(&a, &b);
+    assert!(b.app.peer_state_for_test(&NodeId::new("node-a")).is_none());
+    write_local(
+        &a.app,
+        DesiredStateMutation::PutArtifact(artifact("artifact.a", 1)),
+    );
+    write_local(
+        &b.app,
+        DesiredStateMutation::PutArtifact(artifact("artifact.b", 1)),
+    );
+    sync(&a, &b).await;
+
+    assert_eq!(pinned_key_of(&b, &a), Some(a.app.security.public_key_hex()));
+    let registered = b
+        .app
+        .peer_state_for_test(&NodeId::new("node-a"))
+        .expect("b should register a for sync");
+    assert_eq!(
+        registered.base_url.as_str(),
+        format!("orion+tcp://127.0.0.1:{}", a.addr.port())
+    );
+    // b now syncs back on its own, and both sides hold the same state.
+    sync(&b, &a).await;
+    let state = assert_all_equal(&apps(&[&a, &b]));
+    assert_eq!(state.artifacts.len(), 2);
+    for node in [a, b] {
+        node.server.shutdown().await.expect("listener should stop");
+    }
+}
+
+#[tokio::test]
+async fn open_mode_peers_off_the_robot_link_are_not_trusted_or_registered() {
+    let mode = crate::PeerAuthenticationMode::Disabled;
+    let (a, b) = (
+        tcp_node("node-a", mode).await,
+        tcp_node("node-b", mode).await,
+    );
+    // The robot network is elsewhere: a's connection from 127.0.0.1 is off the link.
+    robot_link_on(&a, "10.0.0.0/8");
+    robot_link_on(&b, "10.0.0.0/8");
+    register_by_address(&a, &b);
+    sync(&a, &b).await;
+
+    assert!(b.app.peer_state_for_test(&NodeId::new("node-a")).is_none());
+    assert_eq!(pinned_key_of(&b, &a), None);
+    for node in [a, b] {
+        node.server.shutdown().await.expect("listener should stop");
+    }
+}
+
+#[tokio::test]
+async fn open_mode_refuses_a_changed_key_on_a_robot_link() {
+    let mode = crate::PeerAuthenticationMode::Disabled;
+    let (a, b) = (
+        tcp_node("node-a", mode).await,
+        tcp_node("node-b", mode).await,
+    );
+    robot_link_on(&a, "127.0.0.0/8");
+    robot_link_on(&b, "127.0.0.0/8");
+    register_by_address(&a, &b);
+    sync(&a, &b).await;
+    let first_key = a.app.security.public_key_hex();
+    assert_eq!(pinned_key_of(&b, &a), Some(first_key.clone()));
+
+    // A re-keyed node-a (a fresh identity under the same id) on the same robot link.
+    let rekeyed = tcp_node("node-a", mode).await;
+    robot_link_on(&rekeyed, "127.0.0.0/8");
+    register_by_address(&rekeyed, &b);
+    let err = rekeyed
+        .app
+        .sync_peer(&NodeId::new("node-b"))
+        .await
+        .expect_err("a re-keyed node-a is refused by b");
+    assert!(err.to_string().contains("pinned"), "{err}");
+
+    assert_ne!(rekeyed.app.security.public_key_hex(), first_key);
+    assert_eq!(
+        pinned_key_of(&b, &a),
+        Some(first_key),
+        "the pinned key is kept, the new key is refused"
+    );
+    for node in [a, b, rekeyed] {
+        node.server.shutdown().await.expect("listener should stop");
+    }
+}
+
+#[tokio::test]
+async fn unsigned_open_mode_peers_still_sync_and_are_not_trusted() {
+    let mode = crate::PeerAuthenticationMode::Disabled;
+    let (a, b) = (
+        tcp_node("node-a", mode).await,
+        tcp_node("node-b", mode).await,
+    );
+    // a has no robot-link policy: its hello is unsigned, as from a node built before this change.
+    robot_link_on(&b, "127.0.0.0/8");
+    register_by_address(&a, &b);
+    write_local(
+        &a.app,
+        DesiredStateMutation::PutArtifact(artifact("artifact.a", 1)),
+    );
+    sync(&a, &b).await;
+
+    assert_eq!(
+        assert_all_equal(&apps(&[&a, &b])).artifacts.len(),
+        1,
+        "the unsigned peer still syncs"
+    );
+    assert!(b.app.peer_state_for_test(&NodeId::new("node-a")).is_none());
+    assert_eq!(pinned_key_of(&b, &a), None);
+    for node in [a, b] {
+        node.server.shutdown().await.expect("listener should stop");
+    }
+}
+
+#[tokio::test]
+async fn security_on_never_registers_peers_from_the_robot_link_path() {
+    let mode = crate::PeerAuthenticationMode::Optional;
+    let (a, b) = (
+        tcp_node("node-a", mode).await,
+        tcp_node("node-b", mode).await,
+    );
+    robot_link_on(&a, "127.0.0.0/8");
+    robot_link_on(&b, "127.0.0.0/8");
+    // Optional mode keeps its own rules: a's signed hello is authenticated as before, and b
+    // registers nothing it was not configured with.
+    register_by_address(&a, &b);
+    sync(&a, &b).await;
+
+    assert!(b.app.peer_state_for_test(&NodeId::new("node-a")).is_none());
+    for node in [a, b] {
+        node.server.shutdown().await.expect("listener should stop");
+    }
+}

@@ -62,7 +62,9 @@ impl HttpRequestPayload {
                 }
             },
             Self::Control(message) => match message.as_ref() {
-                ControlMessage::Hello(_) => Ok(ControlRoute::Hello),
+                ControlMessage::Hello(_) | ControlMessage::RobotLinkListener(_) => {
+                    Ok(ControlRoute::Hello)
+                }
                 ControlMessage::SyncRequest(_)
                 | ControlMessage::SyncSummaryRequest(_)
                 | ControlMessage::SyncDiffRequest(_) => Ok(ControlRoute::Sync),

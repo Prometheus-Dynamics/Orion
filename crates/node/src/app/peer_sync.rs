@@ -82,6 +82,7 @@ impl NodeApp {
             .await?;
         self.record_peer_hello(node_id, &remote, CompatibilityState::Preferred)?;
         self.note_peer_heard(node_id);
+        self.announce_robot_link_listener(node_id, transport).await;
         self.set_peer_sync_status(node_id, PeerSyncStatus::Syncing)?;
 
         // Safe mode is receive-only: pull what peers have, push nothing (`safe_mode.rs`).

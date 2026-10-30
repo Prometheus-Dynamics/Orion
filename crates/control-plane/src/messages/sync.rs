@@ -21,6 +21,18 @@ pub struct PeerHello {
     pub transport_binding_signature: Option<Vec<u8>>,
 }
 
+/// The sender's `orion+tcp` listener port, announced to a robot-link peer right after its signed
+/// hello (`docs/discovery.md`, "Robot links"). The receiver registers the sender at
+/// `orion+tcp://<connection address>:<port>`. Trust comes from the signed request, never from
+/// this message's contents.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+pub struct RobotLinkListener {
+    pub node_id: NodeId,
+    pub port: u16,
+}
+
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]

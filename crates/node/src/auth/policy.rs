@@ -38,6 +38,16 @@ impl Authenticator for NodeSecurityAuthenticator {
         };
 
         match request.context.peer_auth.as_ref() {
+            // Open mode: a robot-link hello or listener announcement is verified, not trusted; the
+            // robot-link policy decides on it (`docs/discovery.md`, "Robot links").
+            Some(auth)
+                if self.security.mode() == PeerAuthenticationMode::Disabled
+                    && request.operation().is_robot_link_message() =>
+            {
+                let proof = self.security.verify_robot_link_request(auth, &payload)?;
+                request.context.robot_link = Some(proof);
+                Ok(())
+            }
             // Remote operators are a principal kind of their own: their keys live in the operator
             // trust store, never in the peer trust store, and they never become peers.
             Some(auth) if OperatorId::is_operator_principal(auth.node_id.as_str()) => {
@@ -381,6 +391,10 @@ impl Authorizer for NodeSecurityAuthorizer {
             (_, ControlOperation::OperatorHello) => Err(NodeError::Authorization(
                 "OperatorHello needs a request signed by an `operator:<name>` principal".into(),
             )),
+            (
+                ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
+                ControlOperation::RobotLinkListener,
+            ) if self.peer_authentication == PeerAuthenticationMode::Disabled => Ok(()),
             (
                 ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
                 ControlOperation::Hello

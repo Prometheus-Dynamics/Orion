@@ -37,6 +37,7 @@ mod reconcile;
 mod reconcile_tick;
 mod reconcile_trigger;
 mod remote_sessions;
+mod robot_link;
 mod safe_mode;
 pub use safe_mode::SafeModeCause;
 mod startup;
@@ -192,6 +193,9 @@ pub struct NodeApp {
     #[cfg(feature = "discovery-mdns")]
     pub(crate) discovery: Arc<std::sync::OnceLock<Arc<crate::discovery::DiscoveryState>>>,
     pub(crate) security: Arc<NodeSecurity>,
+    /// The address the `orion+tcp` peer listener bound, set by `start_peer_tcp_server`.
+    #[cfg_attr(not(peer_sync), allow(dead_code))]
+    pub(crate) peer_tcp_bound: Arc<std::sync::OnceLock<std::net::SocketAddr>>,
     /// Set when the node runs in safe mode (`docs/update-recovery.md`); fixed for this process.
     safe_mode: Option<safe_mode::SafeModeCause>,
     pub(crate) control_middlewares: Arc<[ControlMiddlewareHandle]>,

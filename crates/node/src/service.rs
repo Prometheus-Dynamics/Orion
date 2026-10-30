@@ -78,6 +78,9 @@ pub struct ControlRequestContext {
     pub session: Option<LocalAddress>,
     /// The remote end's address on the `orion+tcp` transport (for network auto-enrollment).
     pub remote_addr: Option<std::net::IpAddr>,
+    /// Set when the request is an open-mode robot-link message whose signature verified
+    /// (`docs/discovery.md`, "Robot links"). Trust is decided later, on the robot-link policy.
+    pub(crate) robot_link: Option<crate::auth::RobotLinkProof>,
 }
 
 impl ControlRequestContext {
@@ -91,6 +94,7 @@ impl ControlRequestContext {
             local_identity: None,
             session: None,
             remote_addr: None,
+            robot_link: None,
         }
     }
 
@@ -127,6 +131,7 @@ impl ControlRequestContext {
             local_identity,
             session: None,
             remote_addr: None,
+            robot_link: None,
         }
     }
 
@@ -210,6 +215,7 @@ pub enum ControlOperation {
     PublishSamples,
     SubscribeStream,
     UnsubscribeStream,
+    RobotLinkListener,
     QueryOperators,
     Operators,
     EnrollOperator,
@@ -221,6 +227,11 @@ impl ControlOperation {
     /// (the handshake authenticates itself; see `docs/discovery.md`).
     pub fn is_enrollment_handshake(self) -> bool {
         matches!(self, Self::EnrollmentHello | Self::EnrollmentConfirm)
+    }
+
+    /// Open-mode messages that robot-link trust reads (`docs/discovery.md`, "Robot links").
+    pub fn is_robot_link_message(self) -> bool {
+        matches!(self, Self::Hello | Self::RobotLinkListener)
     }
 }
 
@@ -395,6 +406,7 @@ impl ControlRequest {
                 ControlMessage::PublishSamples(_) => ControlOperation::PublishSamples,
                 ControlMessage::SubscribeStream(_) => ControlOperation::SubscribeStream,
                 ControlMessage::UnsubscribeStream(_) => ControlOperation::UnsubscribeStream,
+                ControlMessage::RobotLinkListener(_) => ControlOperation::RobotLinkListener,
                 ControlMessage::QueryOperators => ControlOperation::QueryOperators,
                 ControlMessage::Operators(_) => ControlOperation::Operators,
                 ControlMessage::EnrollOperator(_) => ControlOperation::EnrollOperator,
@@ -538,16 +550,21 @@ impl RequestService<ControlRequest> for NodeControlService {
                         )
                         .map(|response| ControlResponse::Http(Box::new(response)))
                 }
-                ControlSurface::PeerHttp | ControlSurface::PeerTcp => self
-                    .app
-                    .apply_control_message(
-                        context
-                            .authenticated_peer
-                            .as_ref()
-                            .map(|peer| peer.node_id.clone()),
-                        *message,
-                    )
-                    .map(|response| ControlResponse::Http(Box::new(response))),
+                ControlSurface::PeerHttp | ControlSurface::PeerTcp => {
+                    if let Some(proof) = context.robot_link.as_ref() {
+                        self.app
+                            .note_robot_link_message(proof, context.remote_addr, &message);
+                    }
+                    self.app
+                        .apply_control_message(
+                            context
+                                .authenticated_peer
+                                .as_ref()
+                                .map(|peer| peer.node_id.clone()),
+                            *message,
+                        )
+                        .map(|response| ControlResponse::Http(Box::new(response)))
+                }
                 ControlSurface::LocalIpc | ControlSurface::LocalIpcStream => {
                     let source = context.local_source().ok_or_else(|| {
                         NodeError::Storage(

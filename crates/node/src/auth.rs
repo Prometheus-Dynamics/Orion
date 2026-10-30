@@ -19,7 +19,8 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use getrandom::{SysRng, rand_core::UnwrapErr};
 pub use local_access::{LOCAL_AUTH_ALLOW_ENV, LocalAccessAllowList};
 pub use modes::{LocalAuthenticationMode, PeerAuthenticationMode};
-use orion_control_plane::{ClientSession, PeerHello};
+use orion::transport::http::HttpRequestPayload;
+use orion_control_plane::{ClientSession, ControlMessage, PeerHello};
 use orion_core::{ExecutorId, NodeId, PublicKeyHex, ResourceId};
 use orion_transport_ipc::LocalAddress;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
@@ -38,6 +39,7 @@ pub use orion_auth::{
     PeerRequestPayload, TRANSPORT_BINDING_VERSION,
 };
 pub use policy::PeerSecurityMiddleware;
+pub(crate) use robot_link::RobotLinkProof;
 pub use robot_link::RobotLinkTrust;
 use store::{
     AuthStateWorker, load_next_outbound_nonce, load_or_create_identity, load_seen_nonces,
@@ -432,11 +434,25 @@ impl NodeSecurity {
         Ok(())
     }
 
+    /// Open mode signs only what robot-link trust needs (the hello and the listener announcement),
+    /// and only on a node with robot-link trust on. Everything else stays unsigned, as before.
+    fn signs_in_open_mode(&self, payload: &HttpRequestPayload) -> bool {
+        self.signs_robot_link_messages()
+            && matches!(
+                payload,
+                HttpRequestPayload::Control(message)
+                    if matches!(
+                        message.as_ref(),
+                        ControlMessage::Hello(_) | ControlMessage::RobotLinkListener(_)
+                    )
+            )
+    }
+
     pub fn wrap_http_payload(
         &self,
         payload: orion::transport::http::HttpRequestPayload,
     ) -> Result<orion::transport::http::HttpRequestPayload, NodeError> {
-        if self.mode == PeerAuthenticationMode::Disabled {
+        if self.mode == PeerAuthenticationMode::Disabled && !self.signs_in_open_mode(&payload) {
             return Ok(payload);
         }
 
@@ -461,7 +477,7 @@ impl NodeSecurity {
         &self,
         payload: orion::transport::http::HttpRequestPayload,
     ) -> Result<orion::transport::http::HttpRequestPayload, NodeError> {
-        if self.mode == PeerAuthenticationMode::Disabled {
+        if self.mode == PeerAuthenticationMode::Disabled && !self.signs_in_open_mode(&payload) {
             return Ok(payload);
         }
 
@@ -541,6 +557,49 @@ impl NodeSecurity {
         Ok(AuthenticatedPeer {
             node_id: auth.node_id.clone(),
             public_key_hex: PublicKeyHex::new(encode_hex(&public_key)),
+        })
+    }
+
+    /// Verifies a robot-link request signed in open mode. Unlike [`Self::authenticate_request`] it
+    /// pins nothing: the robot-link policy decides on the verified key. The nonce is still
+    /// checked, so a captured hello cannot be replayed.
+    pub(crate) fn verify_robot_link_request(
+        &self,
+        auth: &PeerRequestAuth,
+        payload: &PeerRequestPayload,
+    ) -> Result<RobotLinkProof, NodeError> {
+        let public_key = parse_public_key_bytes(&auth.public_key)?;
+        let signature = parse_signature_bytes(&auth.signature)?;
+        self.ensure_peer_is_not_revoked(&auth.node_id)?;
+        // Refuse a re-keyed peer before its nonces are looked at: a fresh key starts counting
+        // nonces again, and the error should name the key, not a replayed nonce.
+        let pinned = read_rwlock(self.trusted_peer_state.read(), "trusted_peer_state")
+            .peers
+            .get(&auth.node_id)
+            .copied();
+        if pinned.is_some_and(|pinned| pinned != public_key) {
+            return Err(NodeError::Authentication(format!(
+                "peer {} presented a key other than the one pinned on its robot link",
+                auth.node_id
+            )));
+        }
+        VerifyingKey::from_bytes(&public_key)
+            .map_err(|err| NodeError::Authentication(err.to_string()))?
+            .verify(
+                &canonical_request_bytes(
+                    auth.version,
+                    &auth.node_id,
+                    &public_key,
+                    auth.nonce,
+                    payload,
+                )?,
+                &signature,
+            )
+            .map_err(|err| NodeError::Authentication(err.to_string()))?;
+        self.record_and_validate_nonce(&auth.node_id, auth.nonce)?;
+        Ok(RobotLinkProof {
+            node_id: auth.node_id.clone(),
+            public_key,
         })
     }
 

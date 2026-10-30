@@ -246,11 +246,49 @@ Limits, stated plainly:
 - Trusted peers are pinned, not enrolled: they do not appear as `enrolled` in `orionctl`, and
   removing one (`orionctl peers remove`) revokes it as usual.
 
-Not in this change (the next step, to be designed with the hello exchange): the wire path. Open-mode
-nodes do not sign their hello today, so the receiver has no verified key to pin, and a trusted
-robot peer is not yet registered for sync automatically (it still needs `ORION_NODE_PEERS` or
-`orionctl peers enroll`). The decision and the pinning are implemented and tested now; they are
-what that step will call with the verified hello key and the connection's source address.
+### On the wire
+
+Open-mode nodes have no shared key, so the hello is what carries the proof. A node with robot-link
+trust on (`ORION_NODE_ROBOT_LINKS` set and `ORION_NODE_PEER_AUTO_TRUST=robot-link`, which is the
+open-mode default) signs two messages with its ed25519 node identity key, using the same signed
+request envelope as the other peers (`AuthenticatedPeerRequest`; the signature covers the message
+and a nonce):
+
+1. its `Hello`;
+2. `RobotLinkListener { node_id, port }`, sent right after a successful hello exchange, where
+   `port` is the port its `orion+tcp` listener is bound to (the source port of a connection is
+   ephemeral and useless here).
+
+Every other message stays unsigned, and a node without robot-link trust signs nothing.
+
+The receiver (open mode only) verifies the signature and checks the nonce, but the authenticator
+pins nothing. The robot-link policy then decides, with the address the connection came from:
+
+- **Hello**: the rule above (`trust_robot_link_peer`): the key is pinned on first use, a changed key
+  or an off-link address is refused.
+- **RobotLinkListener**: the same check, then the sender is registered for sync at
+  `orion+tcp://<connection address>:<port>`, unless the node id is already a peer (a configured
+  URL is never overwritten). The registration is audited as `peer_enrolled`.
+
+A refused decision is logged and the request is still answered as usual, so a peer that lacks the
+policy keeps syncing as before and is just not registered. Over HTTP there is no connection address,
+so nothing is trusted that way.
+
+Compatibility:
+
+- An **unsigned hello** (a node without robot-link trust, or one built before this change) is
+  handled exactly as before: no trust, no registration.
+- With **security on** (`optional` or `required`) the hello and requests are signed and verified as
+  before, and a `RobotLinkListener` is refused: it only means something in open mode.
+- `RobotLinkListener` is a new control message, appended to `ControlMessage`. The layout fingerprint
+  does not change and `CONTROL_PROTOCOL_VERSION` is not bumped, so mixed clusters keep syncing. An
+  older node cannot decode the announcement and answers with an error, which the sender ignores.
+- An older open-mode node that receives a signed hello applies its own pre-change rule for signed
+  requests and pins the sender's key on first contact, since it knows nothing about robot links.
+  Turn robot links on for all nodes of one robot together.
+
+Limits: the robot link has to be private (see above), and the registered address is the connection
+address, so a peer that moves to a new address is re-registered by its next hello and announcement.
 
 ## Threat model
 

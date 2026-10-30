@@ -526,6 +526,7 @@ impl NodeAppBuilder {
                 .transpose()?
                 .map(Arc::new),
             security,
+            peer_tcp_bound: Arc::default(),
             #[cfg(feature = "discovery-mdns")]
             discovery: Arc::default(),
             control_middlewares: Arc::from(Vec::<ControlMiddlewareHandle>::new()),
