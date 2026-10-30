@@ -1,8 +1,9 @@
 use super::{
     NodeApp, NodeError,
     local_clients::{
-        ExecutorWatchState, ProviderWatchState, enqueue_executor_workloads_event,
-        enqueue_provider_leases_event, enqueue_state_snapshot_event,
+        ExecutorWatchState, ProviderWatchState, archive_fingerprint,
+        enqueue_executor_workloads_event, enqueue_provider_leases_event,
+        enqueue_state_snapshot_event, insert_state_snapshot_event, reserve_state_snapshot_event,
     },
     observability::public_http_mutual_tls_mode,
     status_lane::OwnedSubject,
@@ -509,6 +510,8 @@ impl NodeApp {
         source: &LocalAddress,
         sender: tokio::sync::mpsc::Sender<ControlEnvelope>,
     ) -> Result<(), NodeError> {
+        // A stream drains the queue without building snapshots, so a reserved one is built first.
+        self.materialize_pending_state_snapshot(source)?;
         let reconnected = self.with_client_mut(source, |client| {
             let reconnected = client.stream_seen;
             client.stream_seen = true;
@@ -590,13 +593,17 @@ impl NodeApp {
         let observed_generation = watch
             .include_observed
             .then(|| self.observed_watch_generation());
-        let snapshot = (current_revision > watch.desired_revision || observed_generation.is_some())
-            .then(|| self.state_snapshot());
+        let bootstrap = current_revision > watch.desired_revision || observed_generation.is_some();
+        let streaming = self.with_client_mut(source, |client| client.stream_sender.is_some())?;
+        let snapshot = (bootstrap && streaming).then(|| self.state_snapshot());
         self.with_client_mut(source, |client| {
             client.state_watch = Some(watch.clone());
             client.observed_generation = observed_generation.unwrap_or(0);
-            if let Some(snapshot) = snapshot {
-                enqueue_state_snapshot_event(client, snapshot);
+            if bootstrap {
+                match snapshot {
+                    Some(snapshot) => enqueue_state_snapshot_event(client, snapshot),
+                    None => reserve_state_snapshot_event(client),
+                }
                 if let Some(state_watch) = client.state_watch.as_mut() {
                     state_watch.desired_revision = current_revision;
                 }
@@ -613,7 +620,7 @@ impl NodeApp {
         self.with_client_mut(source, |client| {
             client.executor_watch = Some(ExecutorWatchState {
                 executor_id: query.executor_id.clone(),
-                last_workloads: workloads.clone(),
+                last_fingerprint: archive_fingerprint(&workloads),
             });
             enqueue_executor_workloads_event(client, query.executor_id, workloads);
         })
@@ -628,10 +635,31 @@ impl NodeApp {
         self.with_client_mut(source, |client| {
             client.provider_watch = Some(ProviderWatchState {
                 provider_id: query.provider_id.clone(),
-                last_leases: leases.clone(),
+                last_fingerprint: archive_fingerprint(&leases),
             });
             enqueue_provider_leases_event(client, query.provider_id, leases);
         })
+    }
+
+    /// Builds the state snapshot reserved for `source`, if any. The snapshot is built without
+    /// holding the client registry, then queued at its reserved sequence unless a newer reservation
+    /// has replaced it meanwhile.
+    pub(super) fn materialize_pending_state_snapshot(
+        &self,
+        source: &LocalAddress,
+    ) -> Result<(), NodeError> {
+        while let Some(sequence) =
+            self.with_client_mut(source, |client| client.pending_state_snapshot)?
+        {
+            let snapshot = self.state_snapshot();
+            self.with_client_mut(source, |client| {
+                if client.pending_state_snapshot == Some(sequence) {
+                    client.pending_state_snapshot = None;
+                    insert_state_snapshot_event(client, sequence, snapshot);
+                }
+            })?;
+        }
+        Ok(())
     }
 
     fn poll_client_events(
@@ -639,6 +667,7 @@ impl NodeApp {
         source: &LocalAddress,
         poll: &ClientEventPoll,
     ) -> Result<Vec<ClientEvent>, NodeError> {
+        self.materialize_pending_state_snapshot(source)?;
         self.with_client_mut(source, |client| {
             let max_events = usize::try_from(poll.max_events.max(1)).unwrap_or(usize::MAX);
             let mut events = Vec::new();
@@ -651,8 +680,10 @@ impl NodeApp {
                 if events.len() >= max_events {
                     break;
                 }
-                events.push(event.clone());
-                client.queued_events.pop_front();
+                // Moved out of the queue, not cloned: a materialized snapshot is large.
+                if let Some(event) = client.queued_events.pop_front() {
+                    events.push(event);
+                }
             }
 
             events

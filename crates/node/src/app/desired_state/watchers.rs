@@ -1,8 +1,8 @@
 use super::NodeApp;
 use crate::app::local_clients::{
-    PendingClientStreamFlush, enqueue_executor_workloads_event, enqueue_provider_leases_event,
-    enqueue_state_snapshot_event, execute_client_stream_flush, finalize_client_stream_flush,
-    prepare_client_stream_flush,
+    PendingClientStreamFlush, archive_fingerprint, enqueue_executor_workloads_event,
+    enqueue_provider_leases_event, enqueue_state_snapshot_event, execute_client_stream_flush,
+    finalize_client_stream_flush, prepare_client_stream_flush, reserve_state_snapshot_event,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,22 +10,33 @@ impl NodeApp {
     pub(super) fn notify_desired_state_watchers(&self, previous_revision: orion::Revision) {
         // Check the revision before building a snapshot: a deep clone of desired, observed and
         // applied state is only needed when the desired state actually moved.
-        if self.current_desired_revision() <= previous_revision {
+        let desired_revision = self.current_desired_revision();
+        if desired_revision <= previous_revision {
             return;
         }
-        let snapshot = self.state_snapshot();
         #[cfg(feature = "link-gateway")]
         self.notify_link_desired_change();
-        self.notify_client_watchers_with(snapshot);
+        self.notify_client_watchers_with(desired_revision);
     }
 
     /// Re-evaluates executor and provider watches without a desired-state change (cross-node
     /// binding availability depends on peer liveness).
     pub(in crate::app) fn notify_client_watchers(&self) {
-        self.notify_client_watchers_with(self.state_snapshot());
+        self.notify_client_watchers_with(self.current_desired_revision());
     }
 
-    fn notify_client_watchers_with(&self, snapshot: orion::control_plane::StateSnapshot) {
+    /// Queues the state updates and executor/provider watch updates for `desired_revision`. A state
+    /// snapshot is copied only for streaming watchers; the others get a reservation and build the
+    /// snapshot when they poll.
+    fn notify_client_watchers_with(&self, desired_revision: orion::Revision) {
+        let streaming_behind = self.clients_read().values().any(|client| {
+            client.stream_sender.is_some()
+                && client
+                    .state_watch
+                    .as_ref()
+                    .is_some_and(|watch| watch.desired_revision < desired_revision)
+        });
+        let snapshot = streaming_behind.then(|| self.state_snapshot());
         let client_views: Vec<_> = self
             .clients_read()
             .iter()
@@ -39,11 +50,11 @@ impl NodeApp {
                     client
                         .executor_watch
                         .as_ref()
-                        .map(|watch| (watch.executor_id.clone(), watch.last_workloads.clone())),
+                        .map(|watch| (watch.executor_id.clone(), watch.last_fingerprint)),
                     client
                         .provider_watch
                         .as_ref()
-                        .map(|watch| (watch.provider_id.clone(), watch.last_leases.clone())),
+                        .map(|watch| (watch.provider_id.clone(), watch.last_fingerprint)),
                 )
             })
             .collect();
@@ -80,78 +91,76 @@ impl NodeApp {
 
         let mut updates = Vec::new();
         for (source, previous_watched_revision, executor_watch, provider_watch) in client_views {
-            let state_snapshot = previous_watched_revision
-                .filter(|revision| snapshot.state.desired.revision > *revision)
-                .map(|revision| (revision, snapshot.clone()));
+            let state_behind =
+                previous_watched_revision.filter(|revision| desired_revision > *revision);
 
             // Compare by reference and clone only the lists that actually changed.
-            let executor_update = if let Some((executor_id, last_workloads)) = executor_watch {
-                executor_workloads_by_id
-                    .get(&executor_id)
-                    .and_then(|workloads| workloads.as_ref())
-                    .filter(|workloads| *workloads != &last_workloads)
-                    .map(|workloads| (executor_id, last_workloads, workloads.clone()))
-            } else {
-                None
-            };
+            let executor_update = executor_watch.and_then(|(executor_id, last)| {
+                let workloads = executor_workloads_by_id.get(&executor_id)?.as_ref()?;
+                let fingerprint = archive_fingerprint(workloads);
+                (fingerprint.is_none() || fingerprint != last)
+                    .then(|| (executor_id, last, fingerprint, workloads.clone()))
+            });
 
-            let provider_update = if let Some((provider_id, last_leases)) = provider_watch {
-                provider_leases_by_id
-                    .get(&provider_id)
-                    .filter(|leases| *leases != &last_leases)
-                    .map(|leases| (provider_id, last_leases, leases.clone()))
-            } else {
-                None
-            };
+            let provider_update = provider_watch.and_then(|(provider_id, last)| {
+                let leases = provider_leases_by_id.get(&provider_id)?;
+                let fingerprint = archive_fingerprint(leases);
+                (fingerprint.is_none() || fingerprint != last)
+                    .then(|| (provider_id, last, fingerprint, leases.clone()))
+            });
 
-            if state_snapshot.is_some() || executor_update.is_some() || provider_update.is_some() {
-                updates.push((source, state_snapshot, executor_update, provider_update));
+            if state_behind.is_some() || executor_update.is_some() || provider_update.is_some() {
+                updates.push((source, state_behind, executor_update, provider_update));
             }
         }
 
         let mut pending_flushes = Vec::<PendingClientStreamFlush>::new();
         self.with_client_registry_txn(|txn| {
-            for (source, state_snapshot, executor_update, provider_update) in updates {
+            for (source, state_behind, executor_update, provider_update) in updates {
                 let Some(client) = txn.client_mut_if_present(&source) else {
                     continue;
                 };
 
-                if let Some((previous_watched_revision, snapshot)) = state_snapshot
+                if let Some(previous_watched_revision) = state_behind
                     && client
                         .state_watch
                         .as_ref()
                         .map(|watch| watch.desired_revision)
                         == Some(previous_watched_revision)
                 {
-                    let desired_revision = snapshot.state.desired.revision;
-                    enqueue_state_snapshot_event(client, snapshot);
+                    let revision = match (client.stream_sender.is_some(), snapshot.as_ref()) {
+                        (true, Some(snapshot)) => {
+                            enqueue_state_snapshot_event(client, snapshot.clone());
+                            snapshot.state.desired.revision
+                        }
+                        _ => {
+                            reserve_state_snapshot_event(client);
+                            desired_revision
+                        }
+                    };
                     if let Some(watch) = client.state_watch.as_mut() {
-                        watch.desired_revision = desired_revision;
+                        watch.desired_revision = revision;
                     }
                 }
 
-                if let Some((executor_id, last_workloads, workloads)) = executor_update
-                    && client
-                        .executor_watch
-                        .as_ref()
-                        .map(|watch| (watch.executor_id.clone(), watch.last_workloads.clone()))
-                        == Some((executor_id.clone(), last_workloads))
+                if let Some((executor_id, last, fingerprint, workloads)) = executor_update
+                    && client.executor_watch.as_ref().is_some_and(|watch| {
+                        watch.executor_id == executor_id && watch.last_fingerprint == last
+                    })
                 {
                     if let Some(watch) = client.executor_watch.as_mut() {
-                        watch.last_workloads = workloads.clone();
+                        watch.last_fingerprint = fingerprint;
                     }
                     enqueue_executor_workloads_event(client, executor_id, workloads);
                 }
 
-                if let Some((provider_id, last_leases, leases)) = provider_update
-                    && client
-                        .provider_watch
-                        .as_ref()
-                        .map(|watch| (watch.provider_id.clone(), watch.last_leases.clone()))
-                        == Some((provider_id.clone(), last_leases))
+                if let Some((provider_id, last, fingerprint, leases)) = provider_update
+                    && client.provider_watch.as_ref().is_some_and(|watch| {
+                        watch.provider_id == provider_id && watch.last_fingerprint == last
+                    })
                 {
                     if let Some(watch) = client.provider_watch.as_mut() {
-                        watch.last_leases = leases.clone();
+                        watch.last_fingerprint = fingerprint;
                     }
                     enqueue_provider_leases_event(client, provider_id, leases);
                 }
@@ -172,12 +181,13 @@ impl NodeApp {
 
     /// The current observed-watch generation (the observed state is recorded first).
     pub(in crate::app) fn observed_watch_generation(&self) -> u64 {
-        let observed = self.store_read().observed.clone();
+        let fingerprint =
+            crate::app::local_clients::archive_fingerprint(&self.store_read().observed);
         self.state
             .observed_watch
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .observe(observed)
+            .observe(fingerprint)
     }
 
     /// Sends a state snapshot to every `include_observed` watcher when the observed state changed
@@ -199,15 +209,26 @@ impl NodeApp {
         if !behind {
             return;
         }
-        let snapshot = self.state_snapshot();
-        let desired_revision = snapshot.state.desired.revision;
+        // Only a streaming watcher needs the snapshot now; the others build it when they poll.
+        let streaming_behind = self.clients_read().values().any(|client| {
+            client.wants_observed()
+                && client.observed_generation < generation
+                && client.stream_sender.is_some()
+        });
+        let snapshot = streaming_behind.then(|| self.state_snapshot());
+        let desired_revision = self.current_desired_revision();
         let mut pending_flushes = Vec::<PendingClientStreamFlush>::new();
         self.with_client_registry_txn(|txn| {
             for (source, client) in txn.clients_mut() {
                 if !client.wants_observed() || client.observed_generation >= generation {
                     continue;
                 }
-                enqueue_state_snapshot_event(client, snapshot.clone());
+                match (client.stream_sender.is_some(), snapshot.as_ref()) {
+                    (true, Some(snapshot)) => {
+                        enqueue_state_snapshot_event(client, snapshot.clone());
+                    }
+                    _ => reserve_state_snapshot_event(client),
+                }
                 client.observed_generation = generation;
                 if let Some(watch) = client.state_watch.as_mut() {
                     watch.desired_revision = watch.desired_revision.max(desired_revision);

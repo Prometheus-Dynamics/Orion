@@ -14,19 +14,39 @@ use std::collections::{BTreeMap, VecDeque};
 /// generation that moves whenever it changes.
 #[derive(Default)]
 pub(super) struct ObservedWatch {
-    pub(super) last: Option<orion::control_plane::ObservedClusterState>,
+    pub(super) last: Option<ArchiveFingerprint>,
     pub(super) generation: u64,
 }
 
+/// A 128-bit digest of an archive encoding. Watchers only need to know whether a value changed,
+/// so the value itself is not kept (it would be a second full copy of the watched state).
+pub(super) type ArchiveFingerprint = [u64; 2];
+
 impl ObservedWatch {
-    /// Records `observed` and returns the generation it belongs to.
-    pub(super) fn observe(&mut self, observed: orion::control_plane::ObservedClusterState) -> u64 {
-        if self.last.as_ref() != Some(&observed) {
-            self.last = Some(observed);
+    /// Records `fingerprint` and returns the generation it belongs to. `None` (the state could not
+    /// be encoded) always counts as a change.
+    pub(super) fn observe(&mut self, fingerprint: Option<ArchiveFingerprint>) -> u64 {
+        if fingerprint.is_none() || self.last != fingerprint {
+            self.last = fingerprint;
             self.generation = self.generation.saturating_add(1);
         }
         self.generation
     }
+}
+
+/// Digest of `value`'s archive encoding (two SipHash keyings, 128 bits in total). `None` when the
+/// value cannot be encoded; callers treat that as a change.
+pub(super) fn archive_fingerprint<T: orion::ArchiveEncode>(
+    value: &T,
+) -> Option<ArchiveFingerprint> {
+    use std::hash::Hasher;
+    let bytes = orion::encode_to_vec(value).ok()?;
+    let mut first = std::collections::hash_map::DefaultHasher::new();
+    first.write(&bytes);
+    let mut second = std::collections::hash_map::DefaultHasher::new();
+    second.write_u8(0xa5);
+    second.write(&bytes);
+    Some([first.finish(), second.finish()])
 }
 
 #[derive(Clone)]
@@ -54,6 +74,9 @@ pub(super) struct LocalClientState {
     next_event_sequence: u64,
     max_queued_events: usize,
     pub(super) queued_events: VecDeque<ClientEvent>,
+    /// Sequence reserved for a state snapshot that is built when the client next polls, instead of
+    /// being copied into the queue now (see `NodeApp::materialize_pending_state_snapshot`).
+    pub(super) pending_state_snapshot: Option<u64>,
     pub(super) dropped_events: u64,
     pub(super) stream_sender: Option<tokio::sync::mpsc::Sender<ControlEnvelope>>,
     pub(super) unary_metrics: CommunicationMetrics,
@@ -87,6 +110,7 @@ impl LocalClientState {
             next_event_sequence: 1,
             max_queued_events,
             queued_events: VecDeque::new(),
+            pending_state_snapshot: None,
             dropped_events: 0,
             stream_sender: None,
             unary_metrics: CommunicationMetrics::default(),
@@ -159,20 +183,59 @@ impl<'a> ClientRegistryTxn<'a> {
 #[derive(Clone, Debug)]
 pub(super) struct ExecutorWatchState {
     pub(super) executor_id: ExecutorId,
-    pub(super) last_workloads: Vec<WorkloadRecord>,
+    /// Fingerprint of the workload list last sent to this watcher.
+    pub(super) last_fingerprint: Option<ArchiveFingerprint>,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct ProviderWatchState {
     pub(super) provider_id: ProviderId,
-    pub(super) last_leases: Vec<LeaseRecord>,
+    /// Fingerprint of the lease list last sent to this watcher.
+    pub(super) last_fingerprint: Option<ArchiveFingerprint>,
 }
 
 pub(super) fn enqueue_state_snapshot_event(client: &mut LocalClientState, snapshot: StateSnapshot) {
+    client.pending_state_snapshot = None;
     client
         .queued_events
         .retain(|event| !matches!(event.event, ClientEventKind::StateSnapshot(_)));
     enqueue_client_event(client, ClientEventKind::StateSnapshot(Box::new(snapshot)));
+}
+
+/// Reserves the next sequence for a state snapshot that is built only when the client polls. A
+/// client that is not draining its queue then holds no copy of the state, and only the newest
+/// reservation counts.
+pub(super) fn reserve_state_snapshot_event(client: &mut LocalClientState) {
+    client
+        .queued_events
+        .retain(|event| !matches!(event.event, ClientEventKind::StateSnapshot(_)));
+    let sequence = client.next_event_sequence;
+    client.next_event_sequence = client.next_event_sequence.saturating_add(1);
+    client.pending_state_snapshot = Some(sequence);
+}
+
+/// Queues the snapshot built for a reservation, at the reserved sequence.
+pub(super) fn insert_state_snapshot_event(
+    client: &mut LocalClientState,
+    sequence: u64,
+    snapshot: StateSnapshot,
+) {
+    while client.queued_events.len() >= client.max_queued_events {
+        client.queued_events.pop_front();
+        client.dropped_events = client.dropped_events.saturating_add(1);
+    }
+    let position = client
+        .queued_events
+        .iter()
+        .position(|event| event.sequence > sequence)
+        .unwrap_or(client.queued_events.len());
+    client.queued_events.insert(
+        position,
+        ClientEvent {
+            sequence,
+            event: ClientEventKind::StateSnapshot(Box::new(snapshot)),
+        },
+    );
 }
 
 pub(super) fn enqueue_executor_workloads_event(
