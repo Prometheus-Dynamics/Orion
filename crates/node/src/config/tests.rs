@@ -233,7 +233,10 @@ fn node_process_config_keeps_http_listener_enabled_by_default() {
     assert!(process.http_enabled);
     assert_eq!(
         process.runtime_threads,
-        crate::NodeRuntimeThreads::default()
+        crate::NodeRuntimeThreads {
+            worker_threads: Some(crate::config::DEFAULT_RUNTIME_WORKER_THREADS),
+            max_blocking_threads: None,
+        }
     );
 }
 

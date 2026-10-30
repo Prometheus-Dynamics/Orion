@@ -7,7 +7,9 @@ use orion_transport_common::{
 use std::{env, time::Duration};
 
 const DEFAULT_MUTATION_HISTORY_BATCHES: usize = 256;
-const DEFAULT_MUTATION_HISTORY_BYTES: usize = 1024 * 1024;
+/// About six revisions of a 40 KiB pipeline graph. The history is the main per-revision cost, so
+/// this is a trade-off: a peer that lags further behind than this catches up by snapshot instead.
+const DEFAULT_MUTATION_HISTORY_BYTES: usize = 256 * 1024;
 const DEFAULT_SNAPSHOT_REWRITE_CADENCE: u64 = 1;
 const DEFAULT_PEER_SYNC_BACKOFF_BASE_MS: u64 = 250;
 const DEFAULT_PEER_SYNC_BACKOFF_MAX_MS: u64 = 5_000;
@@ -25,7 +27,8 @@ const DEFAULT_LOCAL_SESSION_TTL_MS: u64 = 300_000;
 const DEFAULT_LOCAL_STREAM_SEND_QUEUE_CAPACITY: usize = 64;
 const DEFAULT_LOCAL_CLIENT_EVENT_QUEUE_LIMIT: usize = 256;
 const DEFAULT_OBSERVABILITY_EVENT_LIMIT: usize = 128;
-const DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY: usize = 64;
+/// Each queued persist carries its own encoded history, so the queue is kept short.
+const DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY: usize = 32;
 const DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY: usize = 128;
 const DEFAULT_AUDIT_LOG_QUEUE_CAPACITY: usize = 1024;
 /// Size at which the audit log file is rotated to `<file>.1` (one rotated file is kept).

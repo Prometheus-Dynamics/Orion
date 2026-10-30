@@ -115,6 +115,11 @@ pub struct NodeProcessConfig {
     pub discovery: Option<crate::discovery::DiscoveryConfig>,
 }
 
+/// Worker threads when `ORION_NODE_RUNTIME_WORKER_THREADS` is unset. The node's work is mostly
+/// async I/O and lock-held state updates; blocking persistence runs on its own pool, so two workers
+/// keep the per-thread stacks and malloc arenas of a per-core pool off small boards.
+pub const DEFAULT_RUNTIME_WORKER_THREADS: usize = 2;
+
 /// Tokio runtime sizing for the node binary.
 ///
 /// `None` keeps Tokio's defaults (one worker per core, 512 blocking threads).
@@ -127,7 +132,10 @@ pub struct NodeRuntimeThreads {
 impl NodeRuntimeThreads {
     pub fn try_from_env() -> Result<Self, NodeError> {
         Ok(Self {
-            worker_threads: positive_usize_env("ORION_NODE_RUNTIME_WORKER_THREADS")?,
+            worker_threads: Some(
+                positive_usize_env("ORION_NODE_RUNTIME_WORKER_THREADS")?
+                    .unwrap_or(DEFAULT_RUNTIME_WORKER_THREADS),
+            ),
             max_blocking_threads: positive_usize_env("ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS")?,
         })
     }

@@ -15,7 +15,7 @@ instead of silently falling back.
 | `ORION_NODE_IPC_SOCKET` | `${TMPDIR}/orion-<node-id>-control.sock` | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_IPC_STREAM_SOCKET` | `${TMPDIR}/orion-<node-id>-control-stream.sock` | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_HTTP_PROBE_ADDR` | unset | Socket address | Invalid address fails startup. |
-| `ORION_NODE_RUNTIME_WORKER_THREADS` | unset (one per CPU core) | Positive integer | Zero or invalid integer fails startup. |
+| `ORION_NODE_RUNTIME_WORKER_THREADS` | `2` | Positive integer | Zero or invalid integer fails startup. |
 | `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` | unset (Tokio default `512`) | Positive integer | Zero or invalid integer fails startup. |
 | `ORION_NODE_RECONCILE_MS` | `250` | Integer milliseconds, minimum effective value `1` | Invalid integer fails startup. Minimum idle gap between reconcile passes (see below); also the peer sync interval. |
 
@@ -428,7 +428,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `ORION_NODE_MAX_MUTATION_HISTORY` | `256` | Max mutation history batches retained in memory. |
-| `ORION_NODE_MAX_MUTATION_HISTORY_BYTES` | `1048576` | Max retained mutation history bytes. |
+| `ORION_NODE_MAX_MUTATION_HISTORY_BYTES` | `262144` | Max retained mutation history bytes. The history keeps a full copy of each revision's records, so this is the main per-revision memory cost; a peer that lags further than the history catches up by snapshot. |
 | `ORION_NODE_SNAPSHOT_REWRITE_CADENCE` | `1` | Snapshot rewrite cadence in persist cycles. |
 | `ORION_NODE_PEER_SYNC_BACKOFF_BASE_MS` | `250` | Base peer sync retry backoff. |
 | `ORION_NODE_PEER_SYNC_BACKOFF_MAX_MS` | `5000` | Max peer sync retry backoff. |
@@ -449,7 +449,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_TRANSPORT_MAX_PAYLOAD_BYTES` | `8388608` | Max inbound HTTP, IPC, TCP, and QUIC payload bytes before transport decode. |
 | `ORION_NODE_TRANSPORT_IO_TIMEOUT_MS` | `5000` | Per-operation transport connect/read/write/handshake timeout. |
 | `ORION_NODE_TRANSPORT_MAX_CONCURRENT_CONNECTIONS` | `1024` | Max in-flight accepted connections per managed transport listener. |
-| `ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY` | `64` | Persistence worker queue capacity. |
+| `ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY` | `32` | Persistence worker queue capacity. |
 | `ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY` | `128` | Auth state worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_MAX_BYTES` | `4194304` | Size at which `ORION_NODE_AUDIT_LOG` rotates to `<path>.1`, replacing the previous rotation (one rotated file is kept). The file stays open between records. A record larger than the cap is still written. Minimum 1. |
