@@ -14,7 +14,12 @@
 //!  workload_artifact_memory_footprint -- --ignored --nocapture --test-threads=1`
 
 use super::*;
-use orion::control_plane::DesiredStateMutation;
+use orion::ResourceType;
+use orion::control_plane::{
+    AvailabilityState, ClientEventPoll, ClientHello, ClientRole, DesiredStateMutation,
+    ExecutorRecord, ExecutorStateUpdate, HealthState, LeaseState, ProviderRecord,
+    ProviderStateUpdate, ResourceRecord, StateWatch, StatusEntry, StatusQuery, StatusSubject,
+};
 use orion::transport::ipc::UnixControlHandler;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -86,6 +91,10 @@ fn env_opt_usize(key: &str) -> Option<usize> {
     std::env::var(key)
         .ok()
         .and_then(|raw| raw.trim().parse().ok())
+}
+
+fn env_flag(key: &str) -> bool {
+    std::env::var(key).is_ok_and(|raw| raw.trim() == "1")
 }
 
 fn env_usize(key: &str, default: usize) -> usize {
@@ -360,4 +369,365 @@ fn workload_artifact_memory_footprint() {
         updated.arena_kib,
         updated.rss_kib,
     );
+}
+
+/// Device-like load: the HeliOS pipeline plus the other clients a CM5 node serves at once.
+///
+/// Two providers publish `HELIOS_MEM_PROVIDER_RESOURCES` observed resources each (cameras and
+/// lemnos devices) every few rounds, an executor (the engine) publishes a status entry every round
+/// (the 30 Hz status lane), and the pipeline is rewritten every `HELIOS_MEM_PIPELINE_EVERY` rounds.
+/// Four watchers subscribe: two poll every round (the API), two never poll (a slow watcher), so
+/// their queued events are never drained.
+#[test]
+#[ignore = "memory footprint harness; run explicitly with --ignored"]
+fn device_like_load_footprint() {
+    let rounds = env_usize("HELIOS_MEM_ROUNDS", 600);
+    let payload_bytes = env_usize("HELIOS_MEM_PAYLOAD_BYTES", 40 * 1024);
+    let resources_per_provider = env_usize("HELIOS_MEM_PROVIDER_RESOURCES", 50);
+    let pipeline_every = env_usize("HELIOS_MEM_PIPELINE_EVERY", 10).max(1);
+    let provider_every = env_usize("HELIOS_MEM_PROVIDER_EVERY", 5).max(1);
+
+    let state_dir = temp_state_dir("device-footprint");
+    let base_live = live_bytes();
+    reset_peak();
+    let mut builder = NodeApp::builder()
+        .config(test_node_config_with_state_dir_and_auth(
+            "node-mem",
+            "node-mem",
+            state_dir,
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .with_local_rate_limit_max_messages(u32::MAX);
+    if let Some(bytes) = env_opt_usize("HELIOS_MEM_HISTORY_BYTES") {
+        builder = builder.with_max_mutation_history_bytes(bytes);
+    }
+    if let Some(capacity) = env_opt_usize("HELIOS_MEM_QUEUE_CAPACITY") {
+        builder = builder.with_persistence_worker_queue_capacity(capacity);
+    }
+    let app = builder.try_build().expect("node app should build");
+
+    connect(&app, "orionctl.mem", ClientRole::ControlPlane);
+    let engine = connect(&app, "helios-engine", ClientRole::Executor);
+    let peripherals = connect(&app, "helios-peripherals", ClientRole::Provider);
+    let lemnos = connect(&app, "lemnos-orion", ClientRole::Provider);
+    let api_state = connect(&app, "helios-api.state", ClientRole::ControlPlane);
+    let api_status = connect(&app, "helios-api.status", ClientRole::ControlPlane);
+    let slow_state = connect(&app, "helios-api.state.slow", ClientRole::ControlPlane);
+    let slow_status = connect(&app, "lemnos.status.slow", ClientRole::ControlPlane);
+
+    expect_accepted(&app, &api_state, watch_state(true));
+    expect_accepted(&app, &api_status, watch_status());
+    if !env_flag("HELIOS_MEM_NO_SLOW") && !env_flag("HELIOS_MEM_NO_SLOW_STATE") {
+        expect_accepted(&app, &slow_state, watch_state(false));
+    }
+    if !env_flag("HELIOS_MEM_NO_SLOW") && !env_flag("HELIOS_MEM_NO_SLOW_STATUS") {
+        expect_accepted(&app, &slow_status, watch_status());
+    }
+    let providers_on = !env_flag("HELIOS_MEM_NO_PROVIDERS");
+    let status_on = !env_flag("HELIOS_MEM_NO_STATUS");
+
+    send_mutations(
+        &app,
+        vec![
+            DesiredStateMutation::PutArtifact(pipeline_artifact(0, payload_bytes)),
+            DesiredStateMutation::PutWorkload(pipeline_workload(0, 0, payload_bytes)),
+        ],
+    );
+    // The engine registers as the executor of the pipeline; only then may it publish the
+    // pipeline's status (the status lane checks ownership).
+    let response = request(
+        &app,
+        &engine,
+        ControlMessage::ExecutorState(ExecutorStateUpdate {
+            executor: ExecutorRecord {
+                executor_id: ExecutorId::new("executor.engine"),
+                node_id: NodeId::new("node-mem"),
+                runtime_types: vec![RuntimeType::new("helios.engine.v1")],
+            },
+            workloads: vec![pipeline_workload(0, 0, payload_bytes)],
+            resources: Vec::new(),
+        }),
+    );
+    assert!(matches!(response, ControlMessage::Accepted), "{response:?}");
+    let provider_resources = resources_per_provider;
+    let mut api_state_cursor = 0u64;
+    let mut api_status_cursor = 0u64;
+    if providers_on {
+        provider_update(
+            &app,
+            &peripherals,
+            "provider.camera.peripherals",
+            "camera.frame",
+            provider_resources,
+            0,
+        );
+        provider_update(
+            &app,
+            &lemnos,
+            "provider.lemnos.orion",
+            "lemnos.device",
+            provider_resources,
+            0,
+        );
+    }
+
+    let created = sample(&app, "created", base_live);
+    print_phase(&created);
+
+    reset_peak();
+    let mut revision = 0usize;
+    let mut ramp = Vec::new();
+    for round in 1..=rounds {
+        if status_on {
+            request(
+                &app,
+                &engine,
+                ControlMessage::PublishStatus(vec![StatusEntry::new(
+                    StatusSubject::Workload(WorkloadId::new("workload.pipeline.0")),
+                    "engine.frame",
+                    TypedConfigValue::UInt(round as u64),
+                )]),
+            );
+        }
+        if round % pipeline_every == 0 {
+            revision += 1;
+            send_mutations(
+                &app,
+                vec![DesiredStateMutation::PutWorkload(pipeline_workload(
+                    0,
+                    revision,
+                    payload_bytes,
+                ))],
+            );
+        }
+        if providers_on && round % provider_every == 0 {
+            provider_update(
+                &app,
+                &peripherals,
+                "provider.camera.peripherals",
+                "camera.frame",
+                provider_resources,
+                round,
+            );
+            provider_update(
+                &app,
+                &lemnos,
+                "provider.lemnos.orion",
+                "lemnos.device",
+                provider_resources,
+                round,
+            );
+        }
+        poll(&app, &api_state, &mut api_state_cursor);
+        poll(&app, &api_status, &mut api_status_cursor);
+        if round == 1 || round % 100 == 0 || round == rounds {
+            let phase = sample(&app, "rounds", base_live);
+            ramp.push(phase);
+        }
+    }
+    for phase in &ramp {
+        print_phase(phase);
+    }
+    let usage = app.observability_snapshot().resource_usage;
+    eprintln!(
+        "MEMHARNESS DEVICE queued_client_events_total={} queued_client_events_max={} \
+         dropped_client_events_total={} state_watchers={} provider_watchers={}",
+        usage.local_streams.queued_client_events_total,
+        usage.local_streams.queued_client_events_max,
+        usage.local_streams.dropped_client_events_total,
+        usage.local_streams.state_watchers,
+        usage.local_streams.provider_watchers,
+    );
+    let snapshot_state = app.state_snapshot().state;
+    let encoded = |len: Option<usize>| len.unwrap_or(0);
+    eprintln!(
+        "MEMHARNESS DEVICE encoded_bytes desired={} observed={} applied={}",
+        encoded(
+            orion::encode_to_vec(&snapshot_state.desired)
+                .ok()
+                .map(|v| v.len())
+        ),
+        encoded(
+            orion::encode_to_vec(&snapshot_state.observed)
+                .ok()
+                .map(|v| v.len())
+        ),
+        encoded(
+            orion::encode_to_vec(&snapshot_state.applied)
+                .ok()
+                .map(|v| v.len())
+        ),
+    );
+    eprintln!("MEMHARNESS DEVICE status_lane={:?}", usage.status_lane);
+    eprintln!("MEMHARNESS DEVICE state={:?}", usage.state);
+    eprintln!(
+        "MEMHARNESS DEVICE registries={:?} observed_persistence={:?}",
+        usage.registries, usage.observed_persistence
+    );
+    eprintln!("MEMHARNESS DEVICE worker_queues={:?}", usage.worker_queues);
+    let steady = ramp.last().map(|phase| phase.live_kib).unwrap_or(0.0);
+    eprintln!(
+        "MEMHARNESS DEVICE SUMMARY rounds={rounds} created_live_kib={:.1} steady_live_kib={steady:.1} \
+         steady_peak_kib={:.1} steady_arena_kib={:.1} steady_vmrss_kib={} \
+         revisions={revision} history_batches={}",
+        created.live_kib,
+        ramp.last().map(|phase| phase.peak_kib).unwrap_or(0.0),
+        ramp.last().map(|phase| phase.arena_kib).unwrap_or(0.0),
+        ramp.last().map(|phase| phase.rss_kib).unwrap_or(0),
+        usage.mutation_history.batches,
+    );
+}
+
+fn connect(app: &NodeApp, name: &'static str, role: ClientRole) -> LocalAddress {
+    let source = LocalAddress::new(name);
+    let response = app
+        .unix_control_handler()
+        .handle_control(ControlEnvelope {
+            source: source.clone(),
+            destination: LocalAddress::new("orion"),
+            message: ControlMessage::ClientHello(ClientHello {
+                client_name: name.into(),
+                role,
+            }),
+        })
+        .expect("client hello should be served");
+    assert!(matches!(response.message, ControlMessage::ClientWelcome(_)));
+    source
+}
+
+fn request(app: &NodeApp, source: &LocalAddress, message: ControlMessage) -> ControlMessage {
+    app.unix_control_handler()
+        .handle_control(ControlEnvelope {
+            source: source.clone(),
+            destination: LocalAddress::new("orion"),
+            message,
+        })
+        .expect("control message should be served")
+        .message
+}
+
+fn expect_accepted(app: &NodeApp, source: &LocalAddress, message: ControlMessage) {
+    let response = request(app, source, message);
+    assert!(matches!(response, ControlMessage::Accepted), "{response:?}");
+}
+
+fn watch_state(include_observed: bool) -> ControlMessage {
+    ControlMessage::WatchState(StateWatch {
+        desired_revision: Revision::ZERO,
+        include_observed,
+    })
+}
+
+fn watch_status() -> ControlMessage {
+    ControlMessage::WatchStatus(StatusQuery::all())
+}
+
+/// Drains everything queued for `source` after `cursor`, as a polling client does.
+fn poll(app: &NodeApp, source: &LocalAddress, cursor: &mut u64) {
+    let response = request(
+        app,
+        source,
+        ControlMessage::PollClientEvents(ClientEventPoll {
+            after_sequence: *cursor,
+            max_events: 256,
+        }),
+    );
+    let ControlMessage::ClientEvents(events) = response else {
+        panic!("poll should return client events: {response:?}");
+    };
+    if let Some(last) = events.last() {
+        *cursor = last.sequence;
+    }
+}
+
+fn provider_update(
+    app: &NodeApp,
+    source: &LocalAddress,
+    provider: &'static str,
+    resource_type: &'static str,
+    count: usize,
+    round: usize,
+) {
+    let resources = (0..count)
+        .map(|index| {
+            let id = format!("{provider}.resource.{index}");
+            ResourceRecord::builder(orion::ResourceId::new(id), resource_type, provider)
+                .health(HealthState::Healthy)
+                .availability(if (round / 5 + index).is_multiple_of(2) {
+                    AvailabilityState::Available
+                } else {
+                    AvailabilityState::Unavailable
+                })
+                .lease_state(LeaseState::Unleased)
+                .build()
+        })
+        .collect();
+    let response = request(
+        app,
+        source,
+        ControlMessage::ProviderState(ProviderStateUpdate {
+            provider: ProviderRecord::builder(provider, "node-mem")
+                .resource_type(ResourceType::new(resource_type))
+                .build(),
+            resources,
+        }),
+    );
+    assert!(matches!(response, ControlMessage::Accepted), "{response:?}");
+}
+
+/// A watcher that never polls holds no state snapshot; its first poll builds one that reflects the
+/// desired state at that time.
+#[test]
+fn unpolled_state_watch_builds_its_snapshot_on_first_poll() {
+    let state_dir = temp_state_dir("lazy-state-watch");
+    let app = NodeApp::builder()
+        .config(test_node_config_with_state_dir_and_auth(
+            "node-lazy",
+            "node-lazy",
+            state_dir,
+            crate::PeerAuthenticationMode::Disabled,
+        ))
+        .with_local_rate_limit_max_messages(u32::MAX)
+        .try_build()
+        .expect("node app should build");
+    connect(&app, "orionctl.mem", ClientRole::ControlPlane);
+    let watcher = connect(&app, "helios-api.lazy", ClientRole::ControlPlane);
+    expect_accepted(&app, &watcher, watch_state(false));
+
+    for index in 0..3 {
+        send_mutations(
+            &app,
+            vec![DesiredStateMutation::PutArtifact(pipeline_artifact(
+                index, 16,
+            ))],
+        );
+    }
+    let current = app.state_snapshot().state.desired.revision;
+
+    let usage = app.observability_snapshot().resource_usage;
+    assert_eq!(
+        usage.local_streams.queued_client_events_total, 0,
+        "an unpolled state watch must not queue a snapshot"
+    );
+
+    let response = request(
+        &app,
+        &watcher,
+        ControlMessage::PollClientEvents(ClientEventPoll {
+            after_sequence: 0,
+            max_events: 16,
+        }),
+    );
+    let ControlMessage::ClientEvents(events) = response else {
+        panic!("poll should return client events: {response:?}");
+    };
+    let snapshot = events
+        .iter()
+        .find_map(|event| match &event.event {
+            orion::control_plane::ClientEventKind::StateSnapshot(snapshot) => Some(snapshot),
+            _ => None,
+        })
+        .expect("first poll should carry the bootstrap state snapshot");
+    assert_eq!(snapshot.state.desired.revision, current);
+    assert_eq!(snapshot.state.desired.artifacts.len(), 3);
 }
