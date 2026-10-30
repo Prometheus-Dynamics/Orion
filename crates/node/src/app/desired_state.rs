@@ -78,13 +78,19 @@ impl DesiredStateTxn<'_> {
         }
         let base_revision = self.store.desired.revision;
         let mut versions = Vec::with_capacity(mutations.len());
+        let mut removed_providers = Vec::new();
         for mutation in mutations {
             let stamp = self.clock.now(self.wall_ms);
+            if let DesiredStateMutation::RemoveProvider(provider_id) = &mutation {
+                removed_providers.push(provider_id.clone());
+            }
             self.store.desired.force_stamped(mutation.clone(), stamp);
             versions.push((mutation, stamp));
         }
         let count = versions.len();
         self.append_batch(MutationBatch::stamped(base_revision, versions))?;
+        self.store
+            .prune_observed_for_removed_providers(&removed_providers);
         Ok(count)
     }
 
@@ -126,6 +132,17 @@ impl DesiredStateTxn<'_> {
                 base_revision,
                 outcome.applied.iter().cloned(),
             ))?;
+            // A peer removed a provider: retract what it last reported here, too.
+            let removed_providers: Vec<&_> = outcome
+                .applied
+                .iter()
+                .filter_map(|(mutation, _)| match mutation {
+                    DesiredStateMutation::RemoveProvider(provider_id) => Some(provider_id),
+                    _ => None,
+                })
+                .collect();
+            self.store
+                .prune_observed_for_removed_providers(removed_providers);
         }
         Ok(outcome)
     }

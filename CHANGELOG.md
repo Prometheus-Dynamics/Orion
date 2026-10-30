@@ -18,6 +18,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `TODO.md` no longer tracks product-side work. The HeliOS-side items moved to that product's tracker.
 - Board-model test fixtures use `Example Compute Module`. The `arm64` 64 KiB page alignment and the packaging are unchanged.
 
+### Fixed
+
+- Removing a provider (a `RemoveProvider` desired mutation, applied locally or merged from a peer) retracts the observed resources and leases that provider last reported, on the node that applies it. Previously they stayed until the next restart, and the owner's slice kept them on peers.
+
 ### Added
 
 - Safe mode (`ORION_NODE_SAFE_MODE=1`, see [docs/node-env.md](docs/node-env.md#safe-mode)). Persisted state that cannot be decoded, or is from a newer snapshot format, is moved to `<state dir>/quarantine-<unix ms>/` instead of failing startup, and the node starts with an empty desired state in safe mode. An unreadable identity key also starts safe mode, with outbound peer sync off. Safe mode is `maintenance` with no workloads, receive-only peer sync, and health reason `safe_mode: <cause>`. The cause persists in `safe-mode.txt` until `orionctl maintenance exit` and a restart.

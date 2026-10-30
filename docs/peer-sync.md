@@ -215,6 +215,12 @@ the sender's applied revision. Pushes are best effort; a failed push does not fa
 round and is retried on the next one. Observed slices are not relayed: a node learns another
 node's observed facts only from that node.
 
+A removed provider's observed records are retracted when the removal is applied, locally or from
+a peer. Every node that applies a `RemoveProvider` tombstone drops the resources and leases that
+provider last reported; the owner's next observed slice then carries the retraction to its peers.
+Removal is the only way to retract them: a provider that is still in the desired state keeps its
+last report until it publishes a new one.
+
 ## Transports
 
 `ORION_NODE_PEERS` entries choose the transport by URL scheme:

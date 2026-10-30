@@ -120,6 +120,38 @@ impl LocalRuntimeStore {
             .retain(|resource_id, _| self.observed.resources.contains_key(resource_id));
     }
 
+    /// Retracts what providers that the desired state no longer has last reported: their observed
+    /// resources and the leases on them. Removing a provider is a desired tombstone, and a removed
+    /// provider cannot publish again, so nothing else would drop those records until the next
+    /// start. Ids that are still in the desired state are ignored. Returns whether observed state
+    /// changed; the owner's observed slice then carries the retraction to peers.
+    pub fn prune_observed_for_removed_providers<'a>(
+        &mut self,
+        provider_ids: impl IntoIterator<Item = &'a ProviderId>,
+    ) -> bool {
+        let removed: BTreeSet<&ProviderId> = provider_ids
+            .into_iter()
+            .filter(|provider_id| !self.desired.providers.contains_key(*provider_id))
+            .collect();
+        if removed.is_empty() {
+            return false;
+        }
+        let mut changed = false;
+        self.observed.resources.retain(|_, resource| {
+            let retain = !removed.contains(&resource.provider_id);
+            changed |= !retain;
+            retain
+        });
+        if !changed {
+            return false;
+        }
+        self.observed
+            .leases
+            .retain(|resource_id, _| self.observed.resources.contains_key(resource_id));
+        self.refresh_observed_revision();
+        true
+    }
+
     pub fn apply_provider_snapshot(
         &mut self,
         snapshot: ProviderSnapshot,

@@ -8,6 +8,7 @@ mod observability;
 mod observed_coalescing;
 mod peers;
 mod persistence_basics;
+mod provider_retraction;
 #[cfg(feature = "transport-http")]
 mod readiness;
 mod reconcile_triggers;
