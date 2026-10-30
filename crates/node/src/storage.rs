@@ -713,6 +713,26 @@ where
     rkyv::to_bytes::<ArchiveError>(value).map_err(|err| NodeError::Storage(err.to_string()))
 }
 
+/// Like [`encode_archive`], but starts the output buffer at `capacity` bytes. Large archives
+/// whose size is known up front (the mutation history) skip the repeated grow-and-copy steps,
+/// which otherwise leave a transient copy of about the archive size on the heap.
+pub(crate) fn encode_archive_with_capacity<T>(
+    value: &T,
+    capacity: usize,
+) -> Result<AlignedVec, NodeError>
+where
+    T: for<'a> RkyvSerialize<
+        rkyv::api::high::HighSerializer<
+            AlignedVec,
+            rkyv::ser::allocator::ArenaHandle<'a>,
+            ArchiveError,
+        >,
+    >,
+{
+    rkyv::api::high::to_bytes_in::<_, ArchiveError>(value, AlignedVec::with_capacity(capacity))
+        .map_err(|err| NodeError::Storage(err.to_string()))
+}
+
 fn encode_to_vec<T>(value: &T) -> Result<Vec<u8>, NodeError>
 where
     T: for<'a> RkyvSerialize<

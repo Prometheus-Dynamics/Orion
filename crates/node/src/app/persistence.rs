@@ -10,7 +10,8 @@ use super::{
 use crate::blocking::run_possibly_blocking;
 use crate::storage::{
     EncodedDesiredSnapshot, NodeStorage, PersistedSnapshotSections, SnapshotManifest,
-    desired_snapshot_revision_only, encode_archive, encode_desired_snapshot,
+    desired_snapshot_revision_only, encode_archive, encode_archive_with_capacity,
+    encode_desired_snapshot,
 };
 use crate::storage_io::DirSync;
 use orion::{
@@ -33,6 +34,9 @@ struct PersistedStateBundle {
     history: MutationHistory,
     baseline: DesiredClusterState,
 }
+
+/// Headroom over the estimated history size, for the archive's vector header and alignment.
+const HISTORY_ARCHIVE_SLACK_BYTES: usize = 4096;
 
 pub(super) struct EncodedPersistedStateBundle {
     desired: EncodedDesiredSnapshot,
@@ -196,7 +200,10 @@ impl NodeApp {
                     None
                 },
                 history_bytes: if encode_all_sections || history_changed {
-                    Some(encode_archive(history.as_vec())?)
+                    Some(encode_archive_with_capacity(
+                        history.as_vec(),
+                        history.encoded_len() + HISTORY_ARCHIVE_SLACK_BYTES,
+                    )?)
                 } else {
                     None
                 },
