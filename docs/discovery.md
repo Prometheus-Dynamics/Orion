@@ -201,6 +201,57 @@ that comes from `ORION_NODE_PEERS` is registered again at the next start (and th
 it is revoked); remove it from the variable as well. The difference to `orionctl peers revoke` is
 that `remove` also unregisters the peer from sync and forgets its enrollment.
 
+## Robot links: trust without a shared key
+
+Problem: in open mode (`ORION_NODE_PEER_AUTH=disabled`, the FRC default: the robot network is
+open by design) nothing is signed, discovery is off, and a shared enrollment key is the only
+automatic way for the nodes of one robot to find and trust each other. Nobody wants to hand that
+key out on an open robot network.
+
+Rule: a peer is trusted without a shared key only when all of these hold.
+
+1. **Open mode only.** `ORION_NODE_PEER_AUTH=disabled`. With `optional` or `required` nothing
+   changes: the rules above (configured, enrolled, pinned on first contact in `optional`, or the
+   enrollment key) stay as they are.
+2. **A robot link.** The peer's connection comes from an address inside a subnet the robot declares
+   as its own link (`ORION_NODE_ROBOT_LINKS`, for example the USB gadget network or the robot
+   Ethernet). Off-link peers are never trusted this way, whatever they claim.
+3. **Key pinned on first use (TOFU).** The first ed25519 key a node id presents over a robot link
+   is pinned in the trust store. A later key for the same node id is refused, as is a key that is
+   not the pinned one, even from the robot link. Re-keying a robot node needs an explicit
+   `orionctl peers remove` and `enroll`, like any other peer.
+4. **Opt-in through configuration.** `ORION_NODE_PEER_AUTO_TRUST=off|robot-link`. The default is
+   `robot-link` in open mode and `off` otherwise. `robot-link` with no `ORION_NODE_ROBOT_LINKS`
+   fails startup when set explicitly; the default with no subnets is simply off.
+
+Decision, applied per presented key (see `auth/robot_link.rs`):
+
+| Mode | Auto-trust | Link | Pinned for node id | Result |
+| --- | --- | --- | --- | --- |
+| `optional` or `required` | any | any | any | refused: security on, nothing changes here |
+| `disabled` | `off` | any | any | refused: not enabled |
+| `disabled` | `robot-link` | not a robot link | any | refused: off-link |
+| `disabled` | `robot-link` | robot link | none | trusted, key pinned (first use) |
+| `disabled` | `robot-link` | robot link | same key | trusted (already pinned) |
+| `disabled` | `robot-link` | robot link | other key | refused: pinned-key mismatch |
+
+Limits, stated plainly:
+
+- Trust on first use means the first host that answers on a robot link as a node id pins that
+  id. Keep robot links private: a host on the USB gadget network or the robot Ethernet is a robot
+  peer. This is the same model as `optional` mode, restricted to the link.
+- Source addresses are checked on the connection, not claimed in the message, so a host off the
+  link cannot take the robot-link path by claiming to be on it. Addresses on the robot link can be
+  spoofed by another host on that same link, which is why the link itself must be private.
+- Trusted peers are pinned, not enrolled: they do not appear as `enrolled` in `orionctl`, and
+  removing one (`orionctl peers remove`) revokes it as usual.
+
+Not in this change (the next step, to be designed with the hello exchange): the wire path. Open-mode
+nodes do not sign their hello today, so the receiver has no verified key to pin, and a trusted
+robot peer is not yet registered for sync automatically (it still needs `ORION_NODE_PEERS` or
+`orionctl peers enroll`). The decision and the pinning are implemented and tested now; they are
+what that step will call with the verified hello key and the connection's source address.
+
 ## Threat model
 
 mDNS is unauthenticated: anyone on the link can send or spoof announcements and goodbyes.
