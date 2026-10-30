@@ -9,6 +9,7 @@ use super::{
 use crate::app::tls_bootstrap::resolve_http_server_tls_paths;
 use crate::auth::{
     LocalAccessAllowList, LocalAuthenticationMode, NodeSecurity, PeerSecurityMiddleware,
+    RobotLinkTrust,
 };
 use crate::config::{NodeConfig, NodeRuntimeTuning, normalize_runtime_tuning_duration};
 use crate::peer::{PeerConfig, PeerState};
@@ -407,6 +408,7 @@ impl NodeAppBuilder {
         security.set_operator_open_read(config.runtime_tuning.actions.operator_open_read);
         security
             .set_operator_auto_enroll(config.runtime_tuning.actions.operator_auto_enroll.clone());
+        security.set_robot_link_trust(RobotLinkTrust::try_from_env(config.peer_authentication)?);
         let transport_security = Arc::new(NodeTransportSecurityManager::new(
             security.clone(),
             http_tls_cert_path.clone(),

@@ -186,6 +186,8 @@ drop-in to disable the watchdog. Start-up (state replay) is not covered by the w
 | --- | --- | --- | --- |
 | `ORION_NODE_PEERS` | unset | Comma-separated `node-id=<url>` entries where `<url>` is `http://host:port`, `https://host:port` (feature `transport-http`) or `orion+tcp://host:port` (feature `peer-tcp`); optional `|ca=/path` (HTTPS) and trusted public key segments. HTTP and TCP peers can be mixed. | Invalid entry format, an unknown scheme, or a scheme whose feature is not compiled in fails startup. |
 | `ORION_NODE_PEER_AUTH` | `optional` | `disabled`, `optional`, `required` | Invalid mode fails startup. |
+| `ORION_NODE_ROBOT_LINKS` | unset | Comma-separated IPv4 or IPv6 subnets (`192.0.2.0/24`, `fd00:7::/64`) or single addresses that are the robot's own links (USB gadget network, robot Ethernet). See "Robot links" in `docs/discovery.md`. | Invalid subnet or prefix fails startup. |
+| `ORION_NODE_PEER_AUTO_TRUST` | `robot-link` with `ORION_NODE_PEER_AUTH=disabled`, otherwise `off` | `off`, `robot-link` | Invalid value fails startup. `robot-link` without `ORION_NODE_ROBOT_LINKS` fails startup when set explicitly; as the default it is off. With security on (`optional`, `required`) it never applies. |
 | `ORION_NODE_PEER_SYNC_MODE` | `parallel` | `serial`, `parallel` | Invalid mode fails startup. |
 | `ORION_NODE_PEER_SYNC_MAX_IN_FLIGHT` | `4` | Integer, minimum effective value `1` | Invalid integer fails startup. |
 | `ORION_NODE_HTTP_MTLS` | `disabled` | `disabled`, `optional`, `required` | Invalid mode fails startup. |

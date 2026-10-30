@@ -5,6 +5,7 @@ mod operators;
 #[cfg(feature = "peer-tcp")]
 mod peer_response;
 mod policy;
+mod robot_link;
 mod store;
 
 use crate::lock::{read_rwlock, write_rwlock};
@@ -37,6 +38,7 @@ pub use orion_auth::{
     PeerRequestPayload, TRANSPORT_BINDING_VERSION,
 };
 pub use policy::PeerSecurityMiddleware;
+pub use robot_link::RobotLinkTrust;
 use store::{
     AuthStateWorker, load_next_outbound_nonce, load_or_create_identity, load_seen_nonces,
     load_trusted_peer_state,
@@ -100,6 +102,8 @@ pub struct NodeSecurity {
     next_nonce: Arc<AtomicU64>,
     /// Remote operators (`docs/remote-operator.md`), persisted in `trusted-operators.json`.
     operators: Arc<RwLock<operators::OperatorTrust>>,
+    /// Robot-link trust in open mode (`docs/discovery.md`, "Robot links").
+    robot_link: Arc<RwLock<RobotLinkTrust>>,
 }
 
 // Security-state locking contract:
@@ -178,6 +182,7 @@ impl NodeSecurity {
             seen_nonces,
             next_nonce,
             operators,
+            robot_link: Arc::new(RwLock::new(RobotLinkTrust::default())),
         })
     }
 
