@@ -7,6 +7,8 @@ image runs.
 | File | Installed as | Purpose |
 | --- | --- | --- |
 | `systemd/orion-node.service` | `/etc/systemd/system/orion-node.service` or `/usr/lib/systemd/system/` | The unit: `Type=notify`, watchdog, restart policy, `orion` user, hardening. |
+| `systemd/orion-node-safe.service` | `/etc/systemd/system/orion-node-safe.service` (not enabled) | The safe-mode unit, the same identity, state and hardening as `orion-node.service` (keep the two in step). See "Safe mode" below. |
+| `systemd/orion-node.service.d/safe-mode.conf.example` | a drop-in under `orion-node.service.d/` (not installed) | Starts the safe-mode unit when `orion-node` gives up. |
 | `systemd/orion-node.env.example` | `/etc/default/orion-node.env` | Node settings: the single-node appliance profile from `docs/node-env.md`, with clustering, discovery and link examples commented out. |
 | `systemd/orion.sysusers` | `/usr/lib/sysusers.d/orion.conf` | Creates the `orion` user and group (member of `dialout`) at boot through `systemd-sysusers`. |
 | `buildroot/orion-users.table` | `BR2_ROOTFS_USERS_TABLES` entry | The same user, created at image build time (read-only root filesystems). |
@@ -143,6 +145,23 @@ set `ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root` so `orionctl` works as ro
   clock facts), `PrivateDevices=` (hides serial ports), `PrivateNetwork=` (peer sync,
   discovery), `PrivateUsers=` (breaks group-based IPC access). If `ORION_NODE_AUDIT_LOG` points
   outside `/var/lib/orion`, add `ReadWritePaths=` for it.
+
+### Safe mode
+
+`orion-node-safe.service` runs the node with `ORION_NODE_SAFE_MODE=1`: no workloads, no outbound
+peer sync, and health and readiness report `safe_mode: <cause>` (`docs/update-recovery.md`). It is
+not enabled. Start it by hand with `systemctl start orion-node-safe`, or let the main unit start it
+when the main unit gives up. The main unit keeps `Restart=always`, and with its default
+`StartLimitIntervalSec=0` it never reaches `failed`, so `OnFailure=` would never fire. To use it,
+copy `systemd/orion-node.service.d/safe-mode.conf.example` into
+`/etc/systemd/system/orion-node.service.d/safe-mode.conf` (it adds `OnFailure=` and a start limit)
+and run `systemctl daemon-reload`. After repairing the node, `systemctl reset-failed orion-node`
+and `systemctl start orion-node`; that stops the safe unit, since the two conflict. The node writes
+a safe-mode marker, so clear the mode with `orionctl maintenance exit` before a normal start if the
+node is still in safe mode.
+
+The safe unit copies the identity, state and hardening settings of the main unit. Change them in
+both units together.
 
 ### Overriding with drop-ins
 

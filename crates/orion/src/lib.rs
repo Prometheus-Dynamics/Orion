@@ -138,6 +138,7 @@ pub mod control_plane {
         render_communication_metrics_with_config, render_host_facts_metrics, render_host_metrics,
         render_link_metrics, render_observability_metrics,
         render_observability_metrics_with_config, render_resource_usage_metrics,
+        render_safe_mode_metrics,
     };
 }
 

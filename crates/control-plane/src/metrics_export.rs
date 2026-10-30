@@ -10,6 +10,7 @@ mod discovery;
 mod format;
 mod host_facts;
 mod resource_usage;
+mod safe_mode;
 
 use clock::append_clock_metrics;
 pub use clock::render_clock_metrics;
@@ -20,6 +21,7 @@ use host_facts::{append_host_facts_metrics, append_link_metrics};
 pub use host_facts::{render_host_facts_metrics, render_link_metrics};
 use resource_usage::append_resource_usage_metrics;
 pub use resource_usage::render_resource_usage_metrics;
+pub use safe_mode::render_safe_mode_metrics;
 
 const PROMOTED_ENDPOINT_LABELS: &[&str] = &[
     "peer_node_id",

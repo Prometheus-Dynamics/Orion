@@ -29,6 +29,16 @@ pub enum SafeModeCause {
 }
 
 impl SafeModeCause {
+    /// A short, fixed name of the cause, for the `cause` label of `orion_safe_mode`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::IdentityUnreadable { .. } => "identity_unreadable",
+            Self::StateQuarantined { .. } => "state_quarantined",
+            Self::Requested => "requested",
+            Self::Persisted(_) => "persisted",
+        }
+    }
+
     /// The cause as shown after `safe_mode: ` in health reasons, and as persisted in the marker.
     pub fn describe(&self) -> String {
         match self {
@@ -59,6 +69,14 @@ impl NodeApp {
     /// The cause of safe mode, when this process runs in it.
     pub fn safe_mode(&self) -> Option<&SafeModeCause> {
         self.safe_mode.as_ref()
+    }
+
+    /// The `orion_safe_mode` family for the metrics endpoint (`docs/observability.md`).
+    pub(crate) fn safe_mode_metrics(&self) -> String {
+        orion::control_plane::render_safe_mode_metrics(
+            &self.config.node_id,
+            self.safe_mode.as_ref().map(SafeModeCause::kind),
+        )
     }
 
     /// In safe mode peers may still push to the node and it pulls from them, but it never pushes

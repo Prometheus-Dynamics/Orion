@@ -55,7 +55,7 @@ pub use metrics_export::{
     MetricsExportConfig, render_clock_metrics, render_communication_metrics,
     render_communication_metrics_with_config, render_host_facts_metrics, render_host_metrics,
     render_link_metrics, render_observability_metrics, render_observability_metrics_with_config,
-    render_resource_usage_metrics,
+    render_resource_usage_metrics, render_safe_mode_metrics,
 };
 pub use metrics_support::{
     COMMUNICATION_RECENT_SAMPLE_LIMIT, COMMUNICATION_RECENT_WINDOW_MS,

@@ -75,6 +75,12 @@ id = "orion-node-service"
 name = "orion-node.service"
 unit_path = "@self/../systemd/orion-node.service"
 
+# The safe-mode unit: staged, not enabled (see packaging/README.md, "Safe mode").
+[[stage.services]]
+id = "orion-node-safe-service"
+name = "orion-node-safe.service"
+unit_path = "@self/../systemd/orion-node-safe.service"
+
 [[stage.files]]
 id = "orion-node-env"
 src = "@self/../systemd/orion-node.env.example"
@@ -107,4 +113,4 @@ kind = "buildroot"
 [image.feed]
 install_entries = ["install-orion-node"]
 stage_files = ["orion-node-env", "orion-node-sysusers", "orion-node-preset"]
-stage_services = ["orion-node-service"]
+stage_services = ["orion-node-service", "orion-node-safe-service"]

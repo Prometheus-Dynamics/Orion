@@ -1,0 +1,87 @@
+# orion-node in safe mode (docs/update-recovery.md, "Safe mode"): the node starts with no
+# workloads, pushes no state to its peers, and reports `safe_mode: <cause>` in health and
+# readiness. Not enabled by the preset. Start it by hand (`systemctl start orion-node-safe`), or
+# from orion-node.service through OnFailure= (see
+# orion-node.service.d/safe-mode.conf.example). It conflicts with orion-node.service: both use the
+# same state directory and IPC sockets.
+
+[Unit]
+Description=Orion node in safe mode
+Documentation=https://github.com/Prometheus-Dynamics/Orion/blob/main/packaging/README.md
+After=network.target
+Conflicts=orion-node.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/orion-node
+# The node runs in safe mode because of its environment; the marker it writes stays until the
+# operator clears it (`orionctl maintenance exit`), so a later start of orion-node stays safe too.
+Environment=ORION_NODE_SAFE_MODE=1
+# A safe-mode node that fails is left for the operator to look at.
+Restart=no
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+
+# Settings, as in orion-node.service. Keep the two units in step (packaging/README.md).
+Environment=ORION_NODE_STATE_DIR=/var/lib/orion
+Environment=ORION_NODE_IPC_SOCKET=/run/orion/control.sock
+Environment=ORION_NODE_IPC_STREAM_SOCKET=/run/orion/control-stream.sock
+Environment=ORION_NODE_HTTP_ADDR=off
+# Cap glibc per-thread malloc arenas: uncapped, a soak grew from 38 to 125 MB with no leak, and 128 MB boards need the cap (docs/node-env.md).
+Environment=MALLOC_ARENA_MAX=2
+EnvironmentFile=-/etc/default/orion-node.env
+
+# Identity. A fixed system user (orion.sysusers) rather than DynamicUser=, so IPC clients can be
+# granted access through the `orion` group and the state directory keeps a stable owner.
+# dialout gives access to serial MCU links (/dev/ttyS*, ttyAMA*, ttyUSB*, ttyACM* on most images);
+# SocketCAN needs no group. Add groups with a drop-in, for example `SupplementaryGroups=gpio`
+# (SupplementaryGroups= accumulates across drop-ins; an empty assignment resets it).
+User=orion
+Group=orion
+SupplementaryGroups=dialout
+
+# /var/lib/orion (state) and /run/orion (IPC sockets) are created and owned by systemd. The
+# runtime directory is group-traversable and UMask=0007 makes the sockets group-connectable, so a
+# client service in the orion group (Group=orion or SupplementaryGroups=orion) can connect when
+# the node runs with ORION_NODE_LOCAL_AUTH=same-user-or-group (or same-user-or-group-or-root,
+# which also admits root shells). With the default `same-user`, clients must run as the orion
+# user.
+StateDirectory=orion
+StateDirectoryMode=0750
+RuntimeDirectory=orion
+RuntimeDirectoryMode=0750
+UMask=0007
+
+# Hardening. Nothing below blocks IPC sockets, the peer/discovery listeners, serial or CAN links.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectProc=invisible
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+# AF_NETLINK: interface enumeration for mDNS discovery. AF_CAN: SocketCAN links.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_CAN
+# adjtimex is read-only here (no CAP_SYS_TIME): the node reports kernel clock sync status. This is
+# also why ProtectClock= is not set; it would deny that read.
+SystemCallFilter=@system-service adjtimex
+SystemCallErrorNumber=EPERM
+# Not set on purpose: PrivateDevices= (hides serial ports), PrivateNetwork=/IPAddressDeny= (peer
+# sync and discovery), PrivateUsers= (breaks the orion group for IPC clients). If the audit log
+# (ORION_NODE_AUDIT_LOG) lives outside /var/lib/orion, add ReadWritePaths= for it.
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

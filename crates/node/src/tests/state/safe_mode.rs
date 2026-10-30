@@ -163,3 +163,36 @@ fn unreadable_identity_gives_safe_mode_without_peer_sync_and_keeps_the_key_file(
 
     let _ = fs::remove_dir_all(state_dir);
 }
+
+#[test]
+fn safe_mode_is_reported_by_readiness_health_and_metrics() {
+    let state_dir = temp_state_dir("safe-report");
+    let app = NodeApp::builder()
+        .config(safe_mode_config(state_dir.clone()))
+        .with_safe_mode(true)
+        .try_build()
+        .expect("node app should build");
+
+    let reason = "safe_mode: requested by ORION_NODE_SAFE_MODE";
+    let readiness = app.readiness_snapshot();
+    assert!(!readiness.ready, "a node in safe mode is not ready");
+    assert!(
+        readiness.reasons.iter().any(|entry| entry == reason),
+        "readiness reasons were {:?}",
+        readiness.reasons
+    );
+    assert!(
+        app.health_snapshot()
+            .reasons
+            .iter()
+            .any(|entry| entry == reason)
+    );
+    assert!(
+        app.safe_mode_metrics()
+            .contains("orion_safe_mode{node_id=\"node-a\",cause=\"requested\"} 1\n"),
+        "{}",
+        app.safe_mode_metrics()
+    );
+
+    let _ = fs::remove_dir_all(state_dir);
+}

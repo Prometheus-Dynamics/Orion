@@ -42,7 +42,7 @@ Environment=ORION_NODE_STATE_DIR=/var/lib/orion
 Environment=ORION_NODE_IPC_SOCKET=/run/orion/control.sock
 Environment=ORION_NODE_IPC_STREAM_SOCKET=/run/orion/control-stream.sock
 Environment=ORION_NODE_HTTP_ADDR=off
-# Limit glibc malloc arenas; see docs/node-env.md ("Single-node appliance profile").
+# Cap glibc per-thread malloc arenas: uncapped, a soak grew from 38 to 125 MB with no leak, and 128 MB boards need the cap (docs/node-env.md).
 Environment=MALLOC_ARENA_MAX=2
 EnvironmentFile=-/etc/default/orion-node.env
 

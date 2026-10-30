@@ -248,7 +248,8 @@ impl HttpProbeServiceAdapter {
         let snapshot = self.app.observability_snapshot();
         let config =
             MetricsExportConfig::try_from_env().map_err(HttpTransportError::request_failed)?;
-        let rendered = render_observability_metrics_with_config(&snapshot, &config);
+        let mut rendered = render_observability_metrics_with_config(&snapshot, &config);
+        rendered.push_str(&self.app.safe_mode_metrics());
         self.app.record_http_control_exchange(
             "http/metrics",
             "metrics",

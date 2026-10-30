@@ -352,6 +352,7 @@ Prometheus gauges:
 | `orion_node_clock_max_error_seconds` | `node_id` | Omitted when unknown. |
 | `orion_node_clock_estimated_error_seconds` | `node_id` | Omitted when unknown. |
 | `orion_node_clock_stratum` | `node_id` | Omitted when unknown. |
+| `orion_safe_mode` | `node_id`, `cause` | 1 while the node runs in safe mode, with the cause kind (`requested`, `persisted`, `state_quarantined`, `identity_unreadable`) as label; 0 otherwise (`cause=""`). Rendered beside the node's other families on the metrics endpoint. |
 
 `orionctl get nodes` lists desired and observed nodes with `clock_source`, `clock_synced`,
 `clock_offset_ns`, `clock_max_error_ns`, and `timebase` fields, and `orionctl describe node <id>`

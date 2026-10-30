@@ -234,10 +234,12 @@ job_appliance() {
     # serves and no host build is needed.
     if command -v systemd-analyze >/dev/null 2>&1; then
         step appliance "systemd-analyze verify the unit" bash -c "
-            unit=\"\$(mktemp -d)/orion-node.service\"
-            sed \"s#/usr/bin/orion-node#\$(realpath '$target_dir')/aarch64-unknown-linux-gnu/release/orion-node#\" \
-                packaging/systemd/orion-node.service >\"\$unit\"
-            systemd-analyze verify \"\$unit\""
+            units=\"\$(mktemp -d)\"
+            for unit in orion-node orion-node-safe; do
+                sed \"s#/usr/bin/orion-node#\$(realpath '$target_dir')/aarch64-unknown-linux-gnu/release/orion-node#\" \
+                    packaging/systemd/\$unit.service >\"\$units/\$unit.service\"
+            done
+            systemd-analyze verify \"\$units/orion-node.service\" \"\$units/orion-node-safe.service\""
     fi
 }
 

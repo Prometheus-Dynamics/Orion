@@ -408,6 +408,9 @@ impl NodeApp {
         if !initial_sync_complete {
             reasons.push("initial peer sync still pending".to_owned());
         }
+        if let Some(cause) = self.safe_mode() {
+            reasons.push(format!("safe_mode: {}", cause.describe()));
+        }
         let ready = reasons.is_empty();
 
         NodeReadinessSnapshot {

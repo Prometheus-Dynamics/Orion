@@ -1,0 +1,17 @@
+# Example drop-in for orion-node.service, not installed by default. To use it, copy it to
+# /etc/systemd/system/orion-node.service.d/safe-mode.conf (or run `systemctl edit orion-node`
+# and paste the lines), then `systemctl daemon-reload`.
+#
+# When orion-node gives up, systemd starts orion-node-safe.service: the node comes up in safe mode
+# (no workloads, no outbound peer sync) so an operator can inspect and repair it. The main unit
+# keeps Restart=always. It sets StartLimitIntervalSec=0, so it never reaches `failed` and
+# OnFailure= would never run; this drop-in sets a start limit, so repeated failures fail the unit.
+#
+# After repairing: `systemctl reset-failed orion-node`, then `systemctl start orion-node` (which
+# stops the safe unit, since the two conflict). Clear the persisted safe-mode marker first with
+# `orionctl maintenance exit` if the node is still in safe mode.
+
+[Unit]
+OnFailure=orion-node-safe.service
+StartLimitIntervalSec=5min
+StartLimitBurst=10
