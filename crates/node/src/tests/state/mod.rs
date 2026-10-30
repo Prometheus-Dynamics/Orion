@@ -4,6 +4,7 @@ mod clock_facts;
 mod communication_metrics;
 mod compaction;
 mod host_facts;
+mod memory_footprint;
 mod observability;
 mod observed_coalescing;
 mod peers;
