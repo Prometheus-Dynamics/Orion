@@ -10,6 +10,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use orion_control_plane::{
     ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget, ClientEventKind,
@@ -57,36 +58,58 @@ struct HandlerTarget {
     retry_policy: LocalServiceRetryPolicy,
 }
 
+/// First pause before reconnecting a dropped action watch; doubles up to the maximum.
+const ACTION_WATCH_RECONNECT_MIN: Duration = Duration::from_millis(50);
+const ACTION_WATCH_RECONNECT_MAX: Duration = Duration::from_secs(5);
+
 impl HandlerTarget {
+    /// The first registration: retries per the service's policy.
     async fn subscribe(&self) -> Result<ClientEventStreamSession, ClientError> {
-        self.retry_policy
-            .retry(|| async {
-                let identity = local_identity_for_role(self.name.clone(), self.role.clone());
-                let config = local_session_config_for_role(&identity);
-                let mut stream = ClientEventStreamSession::connect(
-                    &self.socket_path,
-                    identity,
-                    config,
-                    self.role.clone(),
-                )
+        self.retry_policy.retry(|| self.connect_once()).await
+    }
+
+    /// Re-registers after the node dropped the stream, for example because `orion-node` restarted.
+    /// Retries without a limit, backing off from [`ACTION_WATCH_RECONNECT_MIN`] to
+    /// [`ACTION_WATCH_RECONNECT_MAX`]: a handler outlives the node it serves, so the service's
+    /// retry policy (no retries by default) does not apply here.
+    async fn resubscribe(&self) -> ClientEventStreamSession {
+        let mut delay = ACTION_WATCH_RECONNECT_MIN;
+        loop {
+            match self.connect_once().await {
+                Ok(stream) => return stream,
+                Err(_) => {
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(ACTION_WATCH_RECONNECT_MAX);
+                }
+            }
+        }
+    }
+
+    async fn connect_once(&self) -> Result<ClientEventStreamSession, ClientError> {
+        let identity = local_identity_for_role(self.name.clone(), self.role.clone());
+        let config = local_session_config_for_role(&identity);
+        let mut stream = ClientEventStreamSession::connect(
+            &self.socket_path,
+            identity,
+            config,
+            self.role.clone(),
+        )
+        .await?;
+        if !self.targets.is_empty() {
+            stream
+                .subscribe_and_expect_accepted(ControlMessage::WatchActionRequests(
+                    self.targets.clone(),
+                ))
                 .await?;
-                if !self.targets.is_empty() {
-                    stream
-                        .subscribe_and_expect_accepted(ControlMessage::WatchActionRequests(
-                            self.targets.clone(),
-                        ))
-                        .await?;
-                }
-                if !self.node_actions.is_empty() {
-                    stream
-                        .subscribe_and_expect_accepted(ControlMessage::ClaimNodeActions(
-                            self.node_actions.clone(),
-                        ))
-                        .await?;
-                }
-                Ok(stream)
-            })
-            .await
+        }
+        if !self.node_actions.is_empty() {
+            stream
+                .subscribe_and_expect_accepted(ControlMessage::ClaimNodeActions(
+                    self.node_actions.clone(),
+                ))
+                .await?;
+        }
+        Ok(stream)
     }
 }
 
@@ -275,8 +298,8 @@ impl ActionRequestWatch {
         self.reporter.node_status_entry(key, value)
     }
 
-    /// Waits for the next action request. Reconnects (and re-registers) per the service's retry
-    /// policy when the stream drops.
+    /// Waits for the next action request. When the stream drops (for example the node restarted),
+    /// reconnects and re-registers, backing off without a limit; see [`Self::reconnects`].
     pub async fn next(&mut self) -> Result<ActionRequest, ClientError> {
         loop {
             if let Some(request) = self.pending.pop_front() {
@@ -291,7 +314,7 @@ impl ActionRequestWatch {
                     }
                 }
                 Err(_) => {
-                    self.stream = self.target.subscribe().await?;
+                    self.stream = self.target.resubscribe().await;
                     self.reconnects = self.reconnects.saturating_add(1);
                 }
             }

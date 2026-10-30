@@ -50,7 +50,7 @@ loop {
 | Target | `ActionTarget::Node(<this node>)` requests with a claimed name go to the claimant. Requests for other nodes are forwarded to their owner first (one hop), so remote requesters reach the agent too. |
 | Conflicts | A name with an in-process handler (`NodeAppBuilder::with_action_handler`) cannot be claimed. A name held by another connected client is refused; the holder may claim again. |
 | Pending | Requests accepted while no claimant was connected are not queued for later: with no handler they are `Rejected` at once. Requests already delivered to the claimant but not reported are redelivered when it claims again on the same connection name. |
-| Release | Claims are released when the claimant's stream disconnects or its session expires. `ActionRequestWatch::next` reconnects with the service's retry policy and claims again; `ActionRequestWatch::reconnects()` counts this. |
+| Release | Claims are released when the claimant's stream disconnects or its session expires. `ActionRequestWatch::next` reconnects and claims again without a retry limit, backing off from 50 ms to 5 s, so the agent resumes when `orion-node` restarts (the service's retry policy governs only the first registration); `ActionRequestWatch::reconnects()` counts this. |
 
 ## Action names and arguments
 

@@ -20,6 +20,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Fixed
 
+- Action watches (`ActionRequestWatch`) resume after `orion-node` restarts. Reconnects retry without a limit with backoff (50 ms doubling to 5 s), instead of once under the service's default no-retry policy, which ended the watch at the first restart.
 - Removing a provider (a `RemoveProvider` desired mutation, applied locally or merged from a peer) retracts the observed resources and leases that provider last reported, on the node that applies it. Previously they stayed until the next restart, and the owner's slice kept them on peers.
 
 ### Added

@@ -181,7 +181,8 @@ its runtime, aborts it at the deadline, and records `ActionOutcome::Succeeded(ou
   to may report on it.
 - When the handler's stream disconnects (or its session expires), the node releases its
   registrations and claims and fails the actions still waiting for it with `Failed { reason:
-  "handler disconnected" }`. The watch re-registers when it reconnects.
+  "handler disconnected" }`. The watch re-registers when it reconnects: after a node restart it retries
+  without a limit, backing off from 50 ms to 5 s, whatever the service's retry policy says.
 
 ### Across nodes
 
