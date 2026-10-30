@@ -10,7 +10,6 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
-use std::time::Duration;
 
 use orion_control_plane::{
     ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget, ClientEventKind,
@@ -19,6 +18,7 @@ use orion_control_plane::{
 use orion_core::NodeId;
 
 use super::local_unary::{LocalUnaryClient, LocalUnaryRole};
+use super::reconnect::reconnect_with_backoff;
 use crate::{
     ClientError, LocalExecutorClient, LocalExecutorService, LocalProviderClient,
     LocalProviderService, LocalServiceRetryPolicy,
@@ -58,10 +58,6 @@ struct HandlerTarget {
     retry_policy: LocalServiceRetryPolicy,
 }
 
-/// First pause before reconnecting a dropped action watch; doubles up to the maximum.
-const ACTION_WATCH_RECONNECT_MIN: Duration = Duration::from_millis(50);
-const ACTION_WATCH_RECONNECT_MAX: Duration = Duration::from_secs(5);
-
 impl HandlerTarget {
     /// The first registration: retries per the service's policy.
     async fn subscribe(&self) -> Result<ClientEventStreamSession, ClientError> {
@@ -69,20 +65,10 @@ impl HandlerTarget {
     }
 
     /// Re-registers after the node dropped the stream, for example because `orion-node` restarted.
-    /// Retries without a limit, backing off from [`ACTION_WATCH_RECONNECT_MIN`] to
-    /// [`ACTION_WATCH_RECONNECT_MAX`]: a handler outlives the node it serves, so the service's
-    /// retry policy (no retries by default) does not apply here.
-    async fn resubscribe(&self) -> ClientEventStreamSession {
-        let mut delay = ACTION_WATCH_RECONNECT_MIN;
-        loop {
-            match self.connect_once().await {
-                Ok(stream) => return stream,
-                Err(_) => {
-                    tokio::time::sleep(delay).await;
-                    delay = (delay * 2).min(ACTION_WATCH_RECONNECT_MAX);
-                }
-            }
-        }
+    /// Retries without a limit with backoff (see `reconnect.rs`); a refusal, such as a claim that
+    /// another client holds now, ends the watch with its error.
+    async fn resubscribe(&self) -> Result<ClientEventStreamSession, ClientError> {
+        reconnect_with_backoff(|| self.connect_once()).await
     }
 
     async fn connect_once(&self) -> Result<ClientEventStreamSession, ClientError> {
@@ -299,7 +285,8 @@ impl ActionRequestWatch {
     }
 
     /// Waits for the next action request. When the stream drops (for example the node restarted),
-    /// reconnects and re-registers, backing off without a limit; see [`Self::reconnects`].
+    /// reconnects and re-registers, backing off without a limit; see [`Self::reconnects`]. Returns
+    /// the error when the reconnect is refused for a reason a retry cannot fix.
     pub async fn next(&mut self) -> Result<ActionRequest, ClientError> {
         loop {
             if let Some(request) = self.pending.pop_front() {
@@ -314,7 +301,7 @@ impl ActionRequestWatch {
                     }
                 }
                 Err(_) => {
-                    self.stream = self.target.resubscribe().await;
+                    self.stream = self.target.resubscribe().await?;
                     self.reconnects = self.reconnects.saturating_add(1);
                 }
             }

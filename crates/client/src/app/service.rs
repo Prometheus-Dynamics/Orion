@@ -7,6 +7,7 @@ use orion_core::Revision;
 use tokio::time::sleep;
 
 use super::event_pump::EventPump;
+use super::reconnect::reconnect_with_backoff;
 use crate::{
     ClientError, ControlPlaneEventStream, ExecutorEventStream, LocalNodeRuntime,
     ProviderEventStream,
@@ -157,15 +158,23 @@ impl LocalExecutorService {
         })
     }
 
+    /// The first workload stream: retries per the service's policy.
     async fn connect_workload_stream(&self) -> Result<ExecutorEventStream, ClientError> {
-        let stream_name = format!("{}-watch", self.client_name);
         self.retry_policy
-            .retry(|| async {
-                let mut stream = self.runtime.executor_stream(stream_name.clone()).await?;
-                stream.subscribe_workloads(&self.executor).await?;
-                Ok(stream)
-            })
+            .retry(|| self.open_workload_stream())
             .await
+    }
+
+    /// A workload stream after the node dropped the stream: backs off without a limit.
+    async fn reconnect_workload_stream(&self) -> Result<ExecutorEventStream, ClientError> {
+        reconnect_with_backoff(|| self.open_workload_stream()).await
+    }
+
+    async fn open_workload_stream(&self) -> Result<ExecutorEventStream, ClientError> {
+        let stream_name = format!("{}-watch", self.client_name);
+        let mut stream = self.runtime.executor_stream(stream_name).await?;
+        stream.subscribe_workloads(&self.executor).await?;
+        Ok(stream)
     }
 }
 
@@ -197,7 +206,7 @@ impl LocalExecutorSubscription {
                     }
                 }
                 Err(_) => {
-                    self.stream = self.service.connect_workload_stream().await?;
+                    self.stream = self.service.reconnect_workload_stream().await?;
                 }
             }
         }
@@ -326,29 +335,49 @@ impl LocalProviderService {
         })
     }
 
+    /// The first lease stream: retries per the service's policy.
     async fn connect_lease_stream(&self) -> Result<ProviderEventStream, ClientError> {
-        let stream_name = format!("{}-leases", self.client_name);
-        self.retry_policy
-            .retry(|| async {
-                let mut stream = self.runtime.provider_stream(stream_name.clone()).await?;
-                stream.subscribe_leases(&self.provider).await?;
-                Ok(stream)
-            })
-            .await
+        self.retry_policy.retry(|| self.open_lease_stream()).await
     }
 
+    /// A lease stream after the node dropped the stream: backs off without a limit.
+    async fn reconnect_lease_stream(&self) -> Result<ProviderEventStream, ClientError> {
+        reconnect_with_backoff(|| self.open_lease_stream()).await
+    }
+
+    async fn open_lease_stream(&self) -> Result<ProviderEventStream, ClientError> {
+        let stream_name = format!("{}-leases", self.client_name);
+        let mut stream = self.runtime.provider_stream(stream_name).await?;
+        stream.subscribe_leases(&self.provider).await?;
+        Ok(stream)
+    }
+
+    /// The first state stream: retries per the service's policy.
     async fn connect_state_stream(
         &self,
         desired_revision: Revision,
     ) -> Result<ControlPlaneEventStream, ClientError> {
-        let stream_name = format!("{}-control", self.client_name);
         self.retry_policy
-            .retry(|| async {
-                let mut stream = self.runtime.control_stream(stream_name.clone()).await?;
-                stream.subscribe_state(desired_revision).await?;
-                Ok(stream)
-            })
+            .retry(|| self.open_state_stream(desired_revision))
             .await
+    }
+
+    /// A state stream after the node dropped the stream: backs off without a limit.
+    async fn reconnect_state_stream(
+        &self,
+        desired_revision: Revision,
+    ) -> Result<ControlPlaneEventStream, ClientError> {
+        reconnect_with_backoff(|| self.open_state_stream(desired_revision)).await
+    }
+
+    async fn open_state_stream(
+        &self,
+        desired_revision: Revision,
+    ) -> Result<ControlPlaneEventStream, ClientError> {
+        let stream_name = format!("{}-control", self.client_name);
+        let mut stream = self.runtime.control_stream(stream_name).await?;
+        stream.subscribe_state(desired_revision).await?;
+        Ok(stream)
     }
 }
 
@@ -378,7 +407,7 @@ impl LocalProviderSubscription {
                             }
                         }
                         Err(_) => {
-                            let stream = self.service.connect_lease_stream().await?;
+                            let stream = self.service.reconnect_lease_stream().await?;
                             self.lease_events = EventPump::spawn(stream);
                         }
                     }
@@ -402,7 +431,7 @@ impl LocalProviderSubscription {
                         Err(_) => {
                             let stream = self
                                 .service
-                                .connect_state_stream(self.desired_revision)
+                                .reconnect_state_stream(self.desired_revision)
                                 .await?;
                             self.state_events = EventPump::spawn(stream);
                         }

@@ -14,6 +14,7 @@ use orion_control_plane::{
 };
 
 use super::local_unary::{LocalUnaryClient, LocalUnaryRole};
+use super::reconnect::reconnect_with_backoff;
 use crate::{
     ClientError, LocalExecutorApp, LocalExecutorClient, LocalExecutorService, LocalProviderApp,
     LocalProviderClient, LocalProviderService, LocalServiceRetryPolicy,
@@ -223,24 +224,31 @@ struct StatusWatchTarget {
 }
 
 impl StatusWatchTarget {
+    /// The first subscription: retries per the service's policy.
     async fn subscribe(&self) -> Result<ClientEventStreamSession, ClientError> {
-        self.retry_policy
-            .retry(|| async {
-                let identity = local_identity_for_role(self.name.clone(), self.role.clone());
-                let config = local_session_config_for_role(&identity);
-                let mut stream = ClientEventStreamSession::connect(
-                    &self.socket_path,
-                    identity,
-                    config,
-                    self.role.clone(),
-                )
-                .await?;
-                stream
-                    .subscribe_and_expect_accepted(ControlMessage::WatchStatus(self.query.clone()))
-                    .await?;
-                Ok(stream)
-            })
-            .await
+        self.retry_policy.retry(|| self.connect_once()).await
+    }
+
+    /// A reconnect after the node dropped the stream: backs off without a limit (see
+    /// `reconnect.rs`); a refusal ends the watch.
+    async fn resubscribe(&self) -> Result<ClientEventStreamSession, ClientError> {
+        reconnect_with_backoff(|| self.connect_once()).await
+    }
+
+    async fn connect_once(&self) -> Result<ClientEventStreamSession, ClientError> {
+        let identity = local_identity_for_role(self.name.clone(), self.role.clone());
+        let config = local_session_config_for_role(&identity);
+        let mut stream = ClientEventStreamSession::connect(
+            &self.socket_path,
+            identity,
+            config,
+            self.role.clone(),
+        )
+        .await?;
+        stream
+            .subscribe_and_expect_accepted(ControlMessage::WatchStatus(self.query.clone()))
+            .await?;
+        Ok(stream)
     }
 }
 
@@ -248,8 +256,9 @@ impl StatusWatchTarget {
 /// [`LocalExecutorService::watch_status`].
 ///
 /// The node coalesces changes per watcher (newest value per key), so a slow reader never builds
-/// an unbounded backlog. After a reconnect (per the service's retry policy) the next change is a
-/// new bootstrap: replace the local view instead of merging into it.
+/// an unbounded backlog. After a reconnect the next change is a new bootstrap: replace the local
+/// view instead of merging into it. A reconnect refused for a reason a retry cannot fix ends the
+/// watch with its error.
 pub struct StatusWatch {
     target: StatusWatchTarget,
     stream: ClientEventStreamSession,
@@ -287,7 +296,7 @@ impl StatusWatch {
                     }
                 }
                 Err(_) => {
-                    self.stream = self.target.subscribe().await?;
+                    self.stream = self.target.resubscribe().await?;
                 }
             }
         }

@@ -2,6 +2,7 @@ mod actions;
 mod event_pump;
 mod local_unary;
 mod publish;
+mod reconnect;
 mod runtime;
 mod service;
 mod status;

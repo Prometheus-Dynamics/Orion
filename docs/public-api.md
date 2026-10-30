@@ -65,6 +65,11 @@ let change = watch.next().await?; // bootstrap first, then coalesced changes
   `LocalControlPlaneClient::query_status` reads the lane.
 - Types (re-exported by `orion_client::prelude` and `orion::control_plane`): `StatusSubject`,
   `StatusEntry`, `StatusKey`, `StatusQuery`, `StatusChange`.
+- Reconnects: a status watch, an assigned-workload watch (`LocalExecutorSubscription`), a provider
+  subscription (leases and state), and an action watch reconnect after `orion-node` restarts without
+  a retry limit, backing off from 50 ms to 5 s, whatever the service's retry policy says. The first
+  connection still follows the policy. A reconnect the node refuses for a reason a retry cannot fix
+  (`ClientError::Rejected`, a role or protocol mismatch) ends the watch with that error.
 - A client may publish only for subjects it owns (its provider or executor, their resources, and
   its executor's assigned workloads); other batches are rejected as a whole. Status is local to
   the node and not replicated. See `docs/observability.md` ("Volatile Status Lane").

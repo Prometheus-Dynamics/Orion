@@ -618,7 +618,7 @@ pub(super) async fn serve_executor_bootstrap_query(
     .await;
 }
 
-async fn serve_executor_watch_stream(
+pub(super) async fn serve_executor_watch_stream(
     listener: UnixListener,
     executor: ExecutorRecord,
     workloads: Vec<WorkloadRecord>,

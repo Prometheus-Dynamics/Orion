@@ -17,6 +17,7 @@ mod local_services;
 mod provider_cancel_safety;
 mod subscription_batches;
 mod views;
+mod watch_reconnect;
 
 fn setup_transport() -> IpcTransport {
     let transport = IpcTransport::new();

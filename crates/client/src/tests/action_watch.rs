@@ -58,6 +58,94 @@ async fn action_watch_resumes_after_the_node_restarts_with_the_default_policy() 
     let _ = tokio::fs::remove_file(&stream_socket_path).await;
 }
 
+#[tokio::test]
+async fn action_watch_ends_with_the_error_when_the_restarted_node_refuses_it() {
+    let unary_socket_path = unique_socket_path("action-watch-refused-unary");
+    let stream_socket_path = unique_socket_path("action-watch-refused-stream");
+    let _ = tokio::fs::remove_file(&unary_socket_path).await;
+    let _ = tokio::fs::remove_file(&stream_socket_path).await;
+    let stream_listener =
+        UnixListener::bind(&stream_socket_path).expect("stream listener should bind");
+
+    let provider = ProviderRecord::builder("provider.refused", NodeId::new("node-a"))
+        .resource_type(ResourceType::new("camera.frame"))
+        .build();
+    let provider_id = provider.provider_id.clone();
+    let node_task = tokio::spawn(serve_node_refusing_reconnect(
+        stream_listener,
+        stream_socket_path.clone(),
+        provider_id.clone(),
+    ));
+
+    let runtime = LocalNodeRuntime::new(&unary_socket_path, &stream_socket_path);
+    let service = LocalProviderService::new(runtime, "actions", provider);
+    let mut watch = service
+        .watch_action_requests()
+        .await
+        .expect("watch should connect");
+    let first = watch
+        .next()
+        .await
+        .expect("first request before the restart");
+    assert_eq!(first.action_id, "action.before-refusal");
+
+    // The restarted node refuses the registration (say, the claim is held by another client). A
+    // retry cannot fix that, so the watch ends with the refusal instead of reconnecting forever.
+    let error = watch
+        .next()
+        .await
+        .expect_err("a refused reconnect should end the watch");
+    assert_eq!(
+        error,
+        ClientError::Rejected("another client already watches these providers".into())
+    );
+
+    node_task.await.expect("node task should complete");
+    let _ = tokio::fs::remove_file(&unary_socket_path).await;
+    let _ = tokio::fs::remove_file(&stream_socket_path).await;
+}
+
+/// A node that serves one request, goes down, and comes back refusing the registration.
+async fn serve_node_refusing_reconnect(
+    listener: UnixListener,
+    path: PathBuf,
+    provider_id: ProviderId,
+) {
+    serve_one_action_watch(&listener, &provider_id, "action.before-refusal").await;
+    drop(listener);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    remove_socket(&path).await;
+    let listener = UnixListener::bind(&path).expect("restarted node should bind its socket");
+    let (mut stream, _) = listener.accept().await.expect("watch accept should work");
+    let hello = read_control_frame(&mut stream)
+        .await
+        .expect("hello frame should decode")
+        .expect("hello frame should exist");
+    write_welcome(
+        &mut stream,
+        hello.source,
+        ClientRole::Provider,
+        "actions-actions",
+    )
+    .await;
+    let request = read_control_frame(&mut stream)
+        .await
+        .expect("watch request should decode")
+        .expect("watch request should exist");
+    write_control_frame(
+        &mut stream,
+        &ControlEnvelope {
+            source: LocalAddress::new("orion"),
+            destination: request.source,
+            message: ControlMessage::Rejected(
+                "another client already watches these providers".into(),
+            ),
+        },
+    )
+    .await
+    .expect("rejection should send");
+}
+
 /// A node that serves one request, goes down (its listener closes) for a while, and comes back.
 async fn serve_node_restart(listener: UnixListener, path: PathBuf, provider_id: ProviderId) {
     serve_one_action_watch(&listener, &provider_id, "action.before-restart").await;

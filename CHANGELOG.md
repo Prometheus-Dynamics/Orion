@@ -20,12 +20,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Fixed
 
+- Status, assigned-workload and provider watches resume after `orion-node` restarts the same way as action watches (see below). A reconnect that the node refuses for a reason a retry cannot fix now ends the watch with its error, on every watch and not only on action watches.
 - Action watches (`ActionRequestWatch`) resume after `orion-node` restarts. Reconnects retry without a limit with backoff (50 ms doubling to 5 s), instead of once under the service's default no-retry policy, which ended the watch at the first restart.
 - Removing a provider (a `RemoveProvider` desired mutation, applied locally or merged from a peer) retracts the observed resources and leases that provider last reported, on the node that applies it. Previously they stayed until the next restart, and the owner's slice kept them on peers.
 
 ### Added
 
-- Robot-link peer trust works on the wire in open mode (`docs/discovery.md`, "Robot links"). Open-mode nodes with robot links sign their hello and a new `RobotLinkListener` announcement (their `orion+tcp` port) with their node identity key; a receiver on a declared robot subnet pins the key on first use, refuses a changed key, and registers the peer for sync. Security on is unchanged; unsigned hellos are handled as before.
 - Robot-link peer trust in open mode (`ORION_NODE_ROBOT_LINKS`, `ORION_NODE_PEER_AUTO_TRUST`; design in [docs/discovery.md](docs/discovery.md#robot-links-trust-without-a-shared-key)). With `ORION_NODE_PEER_AUTH=disabled`, a peer whose connection comes from a declared robot link is trusted with its key pinned on first use; a changed key is refused. Security on is unchanged. The decision and pinning are in place; registering such peers for sync over the hello exchange is the next step.
 - Safe mode (`ORION_NODE_SAFE_MODE=1`, see [docs/node-env.md](docs/node-env.md#safe-mode)). Persisted state that cannot be decoded, or is from a newer snapshot format, is moved to `<state dir>/quarantine-<unix ms>/` instead of failing startup, and the node starts with an empty desired state in safe mode. An unreadable identity key also starts safe mode, with outbound peer sync off. Safe mode is `maintenance` with no workloads, receive-only peer sync, and health reason `safe_mode: <cause>`. The cause persists in `safe-mode.txt` until `orionctl maintenance exit` and a restart.
 - `scripts/check-neutral-names.sh` fails when a product or board name appears in a tracked file outside its allowlist (the `orion-nt4` crate and its interop scripts, which implement the WPILib NetworkTables 4 protocol, and `CHANGELOG.md`). It runs in `scripts/ci.sh` and in the CI `workspace` job.
