@@ -83,5 +83,6 @@ SystemCallErrorNumber=EPERM
 # (ORION_NODE_AUDIT_LOG) lives outside /var/lib/orion, add ReadWritePaths= for it.
 LimitNOFILE=8192
 
-[Install]
-WantedBy=multi-user.target
+# No [Install] section: this unit is never enabled. Images that apply presets (Buildroot runs
+# `systemctl preset-all`) would otherwise start it at every boot beside orion-node.service, which it
+# conflicts with. Start it by hand or through the main unit's OnFailure= drop-in.

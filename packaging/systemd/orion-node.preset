@@ -2,3 +2,4 @@
 # (`systemctl preset-all`, as Buildroot does at image build time).
 # Install as /usr/lib/systemd/system-preset/80-orion-node.preset.
 enable orion-node.service
+disable orion-node-safe.service
