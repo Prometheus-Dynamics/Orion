@@ -280,6 +280,31 @@ Keys for every link:
 
 Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:can0?device_base=0x600&host_base=0x680&addresses=1-16&allow=motor-a,motor-b'`.
 
+## Safe mode
+
+Safe mode starts the node so that it can be inspected and repaired without doing harm
+([update-recovery.md](update-recovery.md#safe-mode)). In safe mode the node runs in `maintenance`
+with no workloads allowed (so it is unschedulable), refuses maintenance changes other than
+`orionctl maintenance exit`, and receives peer state without pushing its own. Local IPC, health and
+observability keep working. Health shows `safe_mode: <cause>` in its reasons and status `degraded`.
+
+| Variable | Default | Valid values | Failure behavior |
+| --- | --- | --- | --- |
+| `ORION_NODE_SAFE_MODE` | `false` | `1`, `0`, `true`, `false`, `yes`, `no`, `on`, `off` | Invalid boolean fails startup. |
+
+Safe mode is also entered without the variable when:
+
+- persisted cluster state cannot be decoded, or the snapshot is from a newer format than this build
+  reads. The state files (`snapshot-*.rkyv`, `mutation-history*.rkyv`) are moved to
+  `<state dir>/quarantine-<unix ms>/` and never deleted, and the node starts with an empty desired
+  state. The same goes for an unreadable maintenance state file, which is moved on its own.
+- the node identity key (`node-identity.ed25519`) cannot be read. The node runs on a throwaway identity, does
+  not touch the key file, and does not sync with peers at all.
+
+The cause is written to `<state dir>/safe-mode.txt`, so a restart stays in safe mode until the
+operator runs `orionctl maintenance exit` and restarts the node. Removing `ORION_NODE_SAFE_MODE`
+alone is not enough while the marker exists.
+
 ## Persistence and Logging
 
 | Variable | Default | Valid values | Failure behavior |

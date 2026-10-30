@@ -30,6 +30,18 @@ impl NodeApp {
         &self,
         command: MaintenanceCommand,
     ) -> Result<MaintenanceStatus, NodeError> {
+        if self.safe_mode.is_some() {
+            // Safe mode keeps the node unschedulable. Clearing it is `exit` plus a restart.
+            if matches!(command.action, MaintenanceAction::Exit) {
+                if let Some(storage) = self.storage.as_ref() {
+                    storage.clear_safe_mode_marker()?;
+                }
+                return Ok(self.maintenance_status());
+            }
+            return Err(NodeError::Config(
+                "node is in safe mode: maintenance changes are refused; run `orionctl maintenance exit`, then restart orion-node".into(),
+            ));
+        }
         let new_state = {
             let current = self.maintenance_state_read().clone();
             Self::next_maintenance_state(current, command)

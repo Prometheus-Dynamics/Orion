@@ -326,6 +326,9 @@ impl NodeApp {
                 communication_degraded_count
             ));
         }
+        if let Some(cause) = self.safe_mode() {
+            reasons.push(format!("safe_mode: {}", cause.describe()));
+        }
         let status = if reasons.is_empty() {
             NodeHealthStatus::Healthy
         } else {

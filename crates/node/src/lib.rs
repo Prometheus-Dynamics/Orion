@@ -122,7 +122,7 @@ pub mod transport {
 
 pub use app::{
     NodeApp, NodeAppBuilder, NodeError, NodeSnapshot, NodeTickReport, PeerSyncExecution,
-    ReconcileLoopHandle,
+    ReconcileLoopHandle, SafeModeCause,
 };
 pub use auth::{
     AuthenticatedOperator, AuthenticatedPeer, LOCAL_AUTH_ALLOW_ENV, LocalAccessAllowList,

@@ -13,7 +13,9 @@ use crate::auth::{
 use crate::config::{NodeConfig, NodeRuntimeTuning, normalize_runtime_tuning_duration};
 use crate::peer::{PeerConfig, PeerState};
 use crate::service::{ControlMiddleware, ControlMiddlewareHandle};
-use crate::storage::NodeStorage;
+use crate::storage::{
+    CLUSTER_STATE_FILES, MAINTENANCE_STATE_FILE, NodeStorage, SNAPSHOT_FORMAT_VERSION,
+};
 use crate::transport_security::{NodeTransportSecurityManager, PeerTransportSecurityMode};
 #[cfg(feature = "transport-quic")]
 use orion::transport::quic::QuicTransport;
@@ -58,6 +60,7 @@ impl Default for NodeAppBuilder {
             local_access_allow: None,
             control_middlewares: Vec::new(),
             auto_startup_replay: true,
+            safe_mode: None,
             action_handlers: BTreeMap::new(),
             host_facts_source: None,
             host_facts_overlays: Vec::new(),
@@ -129,6 +132,13 @@ impl NodeAppBuilder {
 
     pub fn with_startup_replay(mut self, enabled: bool) -> Self {
         self.auto_startup_replay = enabled;
+        self
+    }
+
+    /// Starts in safe mode (`docs/update-recovery.md`). Without this call, `ORION_NODE_SAFE_MODE`
+    /// decides.
+    pub fn with_safe_mode(mut self, enabled: bool) -> Self {
+        self.safe_mode = Some(enabled);
         self
     }
 
@@ -332,12 +342,23 @@ impl NodeAppBuilder {
         store.observed = self.observed.unwrap_or_default();
         store.applied = self.applied.unwrap_or_default();
         let storage = config.state_dir.clone().map(NodeStorage::new);
-        let maintenance_state = storage
+        // Set by the first state problem found; any of them puts the node into safe mode.
+        let mut quarantined: Option<super::safe_mode::SafeModeCause> = None;
+        let maintenance_state = match storage
             .as_ref()
-            .map(NodeStorage::load_maintenance_state)
-            .transpose()?
-            .flatten()
-            .unwrap_or_else(MaintenanceState::normal);
+            .map(|storage| (storage, storage.load_maintenance_state()))
+        {
+            Some((_, Ok(state))) => state.unwrap_or_else(MaintenanceState::normal),
+            Some((storage, Err(err))) => {
+                quarantined = Some(super::safe_mode::quarantine_files(
+                    storage,
+                    &[MAINTENANCE_STATE_FILE],
+                    format!("maintenance state unreadable: {err}"),
+                )?);
+                MaintenanceState::normal()
+            }
+            None => MaintenanceState::normal(),
+        };
         store.set_maintenance(maintenance_state.clone());
         let (http_tls_cert_path, http_tls_key_path) = resolve_http_server_tls_paths(
             self.http_tls_cert_path,
@@ -478,6 +499,7 @@ impl NodeAppBuilder {
         });
 
         let mut app = NodeApp {
+            safe_mode: None,
             config,
             runtime,
             state,
@@ -521,20 +543,38 @@ impl NodeAppBuilder {
         control_middlewares.extend(self.control_middlewares);
         app.control_middlewares = Arc::from(control_middlewares);
 
-        if let Some(storage) = app.storage.as_ref()
-            && let Some(report) =
-                storage.migrate_legacy_state(orion::hlc_node_tag(app.config.node_id.as_str()))?
-        {
-            info!(
-                node = %app.config.node_id,
-                from_format = report.from_format,
-                to_format = report.to_format,
-                desired_revision = %report.desired_revision,
-                objects = report.objects,
-                tombstones = report.tombstones,
-                backup_dir = %report.backup_dir.display(),
-                "migrated the state directory to the current snapshot format"
-            );
+        if let Some(storage) = app.storage.as_ref() {
+            if let Some(version) = storage.newer_snapshot_format()? {
+                quarantined = Some(super::safe_mode::quarantine_files(
+                    storage,
+                    &CLUSTER_STATE_FILES,
+                    format!(
+                        "snapshot format {version} is newer than this build reads ({SNAPSHOT_FORMAT_VERSION})"
+                    ),
+                )?);
+            } else {
+                match storage.migrate_legacy_state(orion::hlc_node_tag(app.config.node_id.as_str()))
+                {
+                    Ok(Some(report)) => info!(
+                        node = %app.config.node_id,
+                        from_format = report.from_format,
+                        to_format = report.to_format,
+                        desired_revision = %report.desired_revision,
+                        objects = report.objects,
+                        tombstones = report.tombstones,
+                        backup_dir = %report.backup_dir.display(),
+                        "migrated the state directory to the current snapshot format"
+                    ),
+                    Ok(None) => {}
+                    Err(err) => {
+                        quarantined = Some(super::safe_mode::quarantine_files(
+                            storage,
+                            &CLUSTER_STATE_FILES,
+                            format!("state migration failed: {err}"),
+                        )?);
+                    }
+                }
+            }
         }
         app.seed_clock_from_desired();
         if self.auto_startup_replay && app.storage.is_some() {
@@ -542,11 +582,46 @@ impl NodeAppBuilder {
                 warn!(
                     node = %app.config.node_id,
                     error = %err,
-                    "startup replay returned an error during node build"
+                    "startup replay failed; moving the unreadable cluster state aside"
                 );
+                if quarantined.is_none()
+                    && let Some(storage) = app.storage.as_ref()
+                {
+                    quarantined = Some(super::safe_mode::quarantine_files(
+                        storage,
+                        &CLUSTER_STATE_FILES,
+                        format!("state unreadable: {err}"),
+                    )?);
+                }
             }
         } else if app.storage.is_none() {
             app.state.lifecycle.set_replay_state(true);
+        }
+
+        // Safe mode: a quarantined state, an unreadable identity, a marker left by an earlier start,
+        // or the environment. The first one that applies is the reported cause.
+        let identity_error = app.security.identity_error().map(str::to_owned);
+        let persisted = match app.storage.as_ref().map(NodeStorage::load_safe_mode_marker) {
+            Some(Ok(marker)) => marker,
+            Some(Err(err)) => {
+                warn!(node = %app.config.node_id, error = %err, "could not read the safe mode marker");
+                None
+            }
+            None => None,
+        };
+        let requested = self
+            .safe_mode
+            .map(Ok)
+            .unwrap_or_else(NodeConfig::try_safe_mode_from_env)?;
+        let cause = quarantined
+            .or_else(|| {
+                identity_error
+                    .map(|error| super::safe_mode::SafeModeCause::IdentityUnreadable { error })
+            })
+            .or_else(|| persisted.map(super::safe_mode::SafeModeCause::Persisted))
+            .or(requested.then_some(super::safe_mode::SafeModeCause::Requested));
+        if let Some(cause) = cause {
+            app.activate_safe_mode(cause);
         }
 
         Ok(app)

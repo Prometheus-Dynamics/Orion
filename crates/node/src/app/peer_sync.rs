@@ -43,7 +43,7 @@ impl NodeApp {
 
     /// Runs one sync round with `node_id` over the transport selected by its base URL.
     pub async fn sync_peer(&self, node_id: &NodeId) -> Result<(), NodeError> {
-        if self.peer_sync_paused() {
+        if self.peer_sync_paused() || self.peer_sync_disabled() {
             return Ok(());
         }
         let started = Instant::now();
@@ -84,9 +84,13 @@ impl NodeApp {
         self.note_peer_heard(node_id);
         self.set_peer_sync_status(node_id, PeerSyncStatus::Syncing)?;
 
+        // Safe mode is receive-only: pull what peers have, push nothing (`safe_mode.rs`).
+        let receive_only = self.peer_sync_receive_only();
         let local = self.desired_metadata()?;
         if remote.desired_fingerprint == local.fingerprint {
-            self.push_observed_slice(node_id, transport).await;
+            if !receive_only {
+                self.push_observed_slice(node_id, transport).await;
+            }
             return Ok(PeerSyncRound {
                 converged: true,
                 ..PeerSyncRound::default()
@@ -116,6 +120,7 @@ impl NodeApp {
         let local_summary = self.desired_state_summary_for_sections(&sections)?;
         let cutoff = self.tombstone_cutoff_ms(Self::wall_clock_ms());
         let (push, pull) = plan_sync_exchange(&local_summary, &remote_summary, cutoff);
+        let push = if receive_only { Vec::new() } else { push };
         let mut round = PeerSyncRound {
             pushed: push.len(),
             pulled: pull.len(),
@@ -160,7 +165,7 @@ impl NodeApp {
             }
         }
 
-        if round.converged {
+        if round.converged && !receive_only {
             let metadata = self.desired_metadata()?;
             self.record_peer_assumed_desired_state(
                 node_id,
@@ -170,7 +175,9 @@ impl NodeApp {
                 CompatibilityState::Preferred,
             )?;
         }
-        self.push_observed_slice(node_id, transport).await;
+        if !receive_only {
+            self.push_observed_slice(node_id, transport).await;
+        }
         Ok(round)
     }
 }

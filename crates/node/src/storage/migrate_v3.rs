@@ -554,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_format_3_state_fails_startup_without_overwriting_it() {
+    fn unreadable_format_3_state_is_quarantined_intact_and_safe_mode_starts() {
         let dir = temp_dir("bad");
         let storage = NodeStorage::new(&dir);
         write_legacy_state(&storage);
@@ -563,20 +563,24 @@ mod tests {
         let manifest_before =
             std::fs::read(storage.snapshot_manifest_path()).expect("manifest should be readable");
 
-        let err = NodeApp::try_new(
+        let app = NodeApp::try_new(
             NodeConfig::for_local_node("node-a")
                 .with_state_dir(&dir)
                 .with_ipc_socket_path(dir.join("control.sock")),
         )
-        .err()
-        .expect("startup must fail on state it cannot migrate");
-        let message = err.to_string();
-        assert!(message.contains("could not be migrated"), "{message}");
-        assert!(message.contains("docs/peer-sync.md"), "{message}");
+        .expect("startup should enter safe mode instead of failing");
+        let Some(crate::SafeModeCause::StateQuarantined { reason, quarantine }) =
+            app.safe_mode().cloned()
+        else {
+            panic!("expected quarantined state, got {:?}", app.safe_mode());
+        };
+        assert!(reason.contains("could not be migrated"), "{reason}");
+        assert!(reason.contains("docs/peer-sync.md"), "{reason}");
         assert_eq!(
-            std::fs::read(storage.snapshot_manifest_path()).expect("manifest should be readable"),
+            std::fs::read(quarantine.join("snapshot-manifest.rkyv"))
+                .expect("the moved manifest should exist"),
             manifest_before,
-            "the old manifest is not overwritten"
+            "the old manifest is moved aside, not overwritten"
         );
         let _ = std::fs::remove_dir_all(dir);
     }

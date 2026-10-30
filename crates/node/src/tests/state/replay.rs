@@ -271,7 +271,7 @@ fn replay_recovers_from_history_when_snapshot_is_missing() {
 }
 
 #[test]
-fn replay_rejects_partial_sectioned_snapshot_loss() {
+fn partial_sectioned_snapshot_loss_is_quarantined_and_safe_mode_starts() {
     let state_dir = temp_state_dir("snapshot-partial-loss");
 
     let app = NodeApp::builder()
@@ -326,10 +326,13 @@ fn replay_rejects_partial_sectioned_snapshot_loss() {
         .try_build()
         .expect("node app should build");
 
-    let err = replayed
-        .replay_state()
-        .expect_err("partial sectioned snapshot loss should fail");
-    assert!(matches!(err, NodeError::Storage(_)));
+    // Startup replay fails on the partial loss; the node quarantines what is left and starts in
+    // safe mode, so a second replay has nothing to read.
+    assert!(matches!(
+        replayed.safe_mode(),
+        Some(crate::SafeModeCause::StateQuarantined { .. })
+    ));
+    assert!(!replayed.replay_state().expect("nothing is left to replay"));
 
     let _ = fs::remove_dir_all(state_dir);
 }

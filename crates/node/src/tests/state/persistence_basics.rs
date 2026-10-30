@@ -118,31 +118,6 @@ fn node_persists_and_replays_state_and_artifacts() {
 }
 
 #[test]
-fn replay_rejects_corrupt_snapshot_file() {
-    let state_dir = temp_state_dir("corrupt");
-    fs::create_dir_all(&state_dir).expect("state dir should be created");
-    fs::write(state_dir.join("snapshot-manifest.rkyv"), b"not-rkyv")
-        .expect("corrupt snapshot should be written");
-
-    let app = NodeApp::builder()
-        .config(test_node_config_with_state_dir_and_auth(
-            "node-a",
-            "node-test",
-            state_dir.clone(),
-            crate::PeerAuthenticationMode::Optional,
-        ))
-        .try_build()
-        .expect("node app should build");
-
-    let err = app
-        .replay_state()
-        .expect_err("corrupt snapshot should fail");
-    assert!(matches!(err, NodeError::Storage(_)));
-
-    let _ = fs::remove_dir_all(state_dir);
-}
-
-#[test]
 fn observed_only_persist_reuses_unchanged_applied_and_history_files() {
     let state_dir = temp_state_dir("dirty-section-persist");
     let app = NodeApp::builder()

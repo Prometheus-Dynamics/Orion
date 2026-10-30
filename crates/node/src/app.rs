@@ -37,6 +37,8 @@ mod reconcile;
 mod reconcile_tick;
 mod reconcile_trigger;
 mod remote_sessions;
+mod safe_mode;
+pub use safe_mode::SafeModeCause;
 mod startup;
 mod startup_loops;
 mod state_access;
@@ -190,6 +192,8 @@ pub struct NodeApp {
     #[cfg(feature = "discovery-mdns")]
     pub(crate) discovery: Arc<std::sync::OnceLock<Arc<crate::discovery::DiscoveryState>>>,
     pub(crate) security: Arc<NodeSecurity>,
+    /// Set when the node runs in safe mode (`docs/update-recovery.md`); fixed for this process.
+    safe_mode: Option<safe_mode::SafeModeCause>,
     pub(crate) control_middlewares: Arc<[ControlMiddlewareHandle]>,
     pub http: HttpTransport,
     pub ipc: IpcTransport,
@@ -727,6 +731,7 @@ pub struct NodeAppBuilder {
     local_access_allow: Option<crate::auth::LocalAccessAllowList>,
     control_middlewares: Vec<ControlMiddlewareHandle>,
     auto_startup_replay: bool,
+    safe_mode: Option<bool>,
     action_handlers: BTreeMap<String, Arc<dyn crate::actions::ActionHandler>>,
     host_facts_source: Option<Arc<dyn crate::host_facts::HostFactsSource>>,
     host_facts_overlays: Vec<Arc<dyn crate::host_facts::HostFactsSource>>,

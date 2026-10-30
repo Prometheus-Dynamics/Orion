@@ -28,13 +28,24 @@ const SNAPSHOT_OBSERVED_FILE: &str = "snapshot-observed.rkyv";
 const SNAPSHOT_APPLIED_FILE: &str = "snapshot-applied.rkyv";
 const MUTATION_HISTORY_FILE: &str = "mutation-history.rkyv";
 const MUTATION_HISTORY_BASELINE_FILE: &str = "mutation-history-baseline.rkyv";
-const MAINTENANCE_STATE_FILE: &str = "maintenance-state.rkyv";
+pub(crate) const MAINTENANCE_STATE_FILE: &str = "maintenance-state.rkyv";
 const ARTIFACT_METADATA_FILE: &str = "metadata.rkyv";
 const ARTIFACT_PAYLOAD_FILE: &str = "payload.bin";
 /// Snapshot format. `4`: per-object HLC stamps and tombstones in the desired state, stamped
 /// mutation history. `5`: `NodeRecord::host` (control protocol v4). Format `3` and `4` directories
 /// are migrated by [`NodeStorage::migrate_legacy_state`].
-const SNAPSHOT_FORMAT_VERSION: u32 = 5;
+pub(crate) const SNAPSHOT_FORMAT_VERSION: u32 = 5;
+/// Written while the node runs in safe mode (`docs/update-recovery.md`); holds the cause.
+const SAFE_MODE_MARKER_FILE: &str = "safe-mode.txt";
+/// Files that make up the persisted cluster state. Quarantine moves all of them aside together.
+pub(crate) const CLUSTER_STATE_FILES: [&str; 6] = [
+    SNAPSHOT_MANIFEST_FILE,
+    SNAPSHOT_DESIRED_FILE,
+    SNAPSHOT_OBSERVED_FILE,
+    SNAPSHOT_APPLIED_FILE,
+    MUTATION_HISTORY_FILE,
+    MUTATION_HISTORY_BASELINE_FILE,
+];
 
 mod migrate_v3;
 mod migrate_v4;
@@ -362,6 +373,75 @@ impl NodeStorage {
         self.ensure_layout()?;
         let bytes = encode_to_vec(state)?;
         self.atomic_write(&self.maintenance_state_path(), &bytes)
+    }
+
+    /// The snapshot format of a manifest this build cannot read because it is newer. `None` when
+    /// there is no manifest, it does not decode, or its format is one this build reads.
+    pub fn newer_snapshot_format(&self) -> Result<Option<u32>, NodeError> {
+        let path = self.snapshot_manifest_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = std::fs::read(&path).map_err(|err| NodeError::Storage(err.to_string()))?;
+        Ok(decode_from_slice::<SnapshotManifest>(&bytes)
+            .ok()
+            .map(|manifest| manifest.format_version)
+            .filter(|version| *version > SNAPSHOT_FORMAT_VERSION))
+    }
+
+    /// Moves the named state files into a fresh `quarantine-<unix ms>/` directory under the state
+    /// root. Files are renamed, never deleted, and absent names are skipped. Returns the directory
+    /// when at least one file moved.
+    pub fn quarantine_files(&self, names: &[&str]) -> Result<Option<PathBuf>, NodeError> {
+        let present: Vec<&str> = names
+            .iter()
+            .copied()
+            .filter(|name| self.root.join(name).exists())
+            .collect();
+        if present.is_empty() {
+            return Ok(None);
+        }
+        let mut stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as u64)
+            .unwrap_or(0);
+        let dir = loop {
+            let candidate = self.root.join(format!("quarantine-{stamp}"));
+            if !candidate.exists() {
+                break candidate;
+            }
+            stamp += 1;
+        };
+        std::fs::create_dir_all(&dir).map_err(|err| NodeError::Storage(err.to_string()))?;
+        for name in present {
+            std::fs::rename(self.root.join(name), dir.join(name))
+                .map_err(|err| NodeError::Storage(err.to_string()))?;
+        }
+        self.sync_root_directory()?;
+        Ok(Some(dir))
+    }
+
+    pub fn load_safe_mode_marker(&self) -> Result<Option<String>, NodeError> {
+        let path = self.root.join(SAFE_MODE_MARKER_FILE);
+        if !path.exists() {
+            return Ok(None);
+        }
+        std::fs::read_to_string(&path)
+            .map(|text| Some(text.trim().to_owned()))
+            .map_err(|err| NodeError::Storage(err.to_string()))
+    }
+
+    pub fn save_safe_mode_marker(&self, cause: &str) -> Result<(), NodeError> {
+        self.ensure_layout()?;
+        self.atomic_write(&self.root.join(SAFE_MODE_MARKER_FILE), cause.as_bytes())
+    }
+
+    pub fn clear_safe_mode_marker(&self) -> Result<(), NodeError> {
+        match std::fs::remove_file(self.root.join(SAFE_MODE_MARKER_FILE)) {
+            Ok(()) => self.sync_root_directory(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(NodeError::Storage(err.to_string())),
+        }
     }
 
     pub(crate) fn save_mutation_history_baseline_bytes(

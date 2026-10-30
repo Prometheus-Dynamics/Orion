@@ -15,6 +15,7 @@ use crypto::{
     parse_public_key_bytes, parse_signature_bytes,
 };
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+use getrandom::{SysRng, rand_core::UnwrapErr};
 pub use local_access::{LOCAL_AUTH_ALLOW_ENV, LocalAccessAllowList};
 pub use modes::{LocalAuthenticationMode, PeerAuthenticationMode};
 use orion_control_plane::{ClientSession, PeerHello};
@@ -89,6 +90,8 @@ pub struct NodeSecurity {
     mode: PeerAuthenticationMode,
     local_node_id: NodeId,
     identity: Arc<SigningKey>,
+    /// Why the node identity could not be loaded (the node runs on a fresh, unpersisted key).
+    identity_error: Option<String>,
     storage: Option<NodeStorage>,
     auth_state_worker: Option<Arc<AuthStateWorker>>,
     configured_peer_keys: Arc<RwLock<BTreeMap<NodeId, Option<[u8; 32]>>>>,
@@ -129,7 +132,16 @@ impl NodeSecurity {
         storage: Option<NodeStorage>,
         auth_state_worker_queue_capacity: usize,
     ) -> Result<Self, NodeError> {
-        let identity = Arc::new(load_or_create_identity(storage.as_ref())?);
+        // An unreadable key does not stop the node from starting: it runs on a throwaway identity
+        // with peer sync off (safe mode), and the key file is left untouched.
+        let (identity, identity_error) = match load_or_create_identity(storage.as_ref()) {
+            Ok(key) => (key, None),
+            Err(err) => (
+                SigningKey::generate(&mut UnwrapErr(SysRng)),
+                Some(err.to_string()),
+            ),
+        };
+        let identity = Arc::new(identity);
         let configured_peer_keys = peers
             .iter()
             .map(|peer| {
@@ -158,6 +170,7 @@ impl NodeSecurity {
             mode,
             local_node_id,
             identity,
+            identity_error,
             storage,
             auth_state_worker,
             configured_peer_keys: Arc::new(RwLock::new(configured_peer_keys)),
@@ -170,6 +183,11 @@ impl NodeSecurity {
 
     pub fn mode(&self) -> PeerAuthenticationMode {
         self.mode
+    }
+
+    /// The reason the node identity key could not be read, if it could not.
+    pub(crate) fn identity_error(&self) -> Option<&str> {
+        self.identity_error.as_deref()
     }
 
     /// This node's ed25519 public key.

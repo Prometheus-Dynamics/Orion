@@ -433,3 +433,16 @@ fn node_process_config_parses_links_from_env() {
         matches!(err, crate::NodeError::Config(message) if message.contains("unsupported baud"))
     );
 }
+
+#[test]
+fn safe_mode_env_var_is_a_boolean_and_rejects_garbage() {
+    with_env_vars(&[("ORION_NODE_SAFE_MODE", Some("1"))], || {
+        assert!(crate::NodeConfig::try_safe_mode_from_env().expect("1 should parse"));
+    });
+    with_env_vars(&[("ORION_NODE_SAFE_MODE", None)], || {
+        assert!(!crate::NodeConfig::try_safe_mode_from_env().expect("unset should parse"));
+    });
+    with_env_vars(&[("ORION_NODE_SAFE_MODE", Some("maybe"))], || {
+        assert!(crate::NodeConfig::try_safe_mode_from_env().is_err());
+    });
+}

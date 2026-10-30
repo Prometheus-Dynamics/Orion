@@ -522,6 +522,13 @@ decoded) starts the node so that it can be inspected and repaired, never so that
 - Peer sync is receive-only until the operator leaves safe mode (`orionctl maintenance` back to
   normal plus a restart), which avoids resurrecting deleted objects from a stale copy.
 
+Implemented (U2), with these details: the cause persists in `safe-mode.txt` in the state directory;
+`orionctl maintenance exit` clears it and a restart leaves safe mode. Maintenance changes other
+than `exit` are refused in safe mode. An unreadable identity key (`node-identity.ed25519`) puts the node in
+safe mode with outbound peer sync off; the key file is left untouched. The packaged unit does not
+include an `OnFailure=` safe-mode unit yet: it restarts with `Restart=always` and no start limit,
+so nothing would trigger it. The `orion_safe_mode` metric is not exported yet.
+
 ## Observability
 
 - `orionctl get updates` (per node and component: phase, installed, target, generation, last

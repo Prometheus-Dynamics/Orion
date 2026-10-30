@@ -352,6 +352,11 @@ impl NodeConfig {
         )
     }
 
+    /// `ORION_NODE_SAFE_MODE`: start in safe mode (`docs/update-recovery.md`, "Safe mode").
+    pub fn try_safe_mode_from_env() -> Result<bool, NodeError> {
+        bool_env_or_false("ORION_NODE_SAFE_MODE")
+    }
+
     pub fn try_http_tls_auto_from_env() -> Result<bool, NodeError> {
         bool_env_or_false("ORION_NODE_HTTP_TLS_AUTO")
     }
