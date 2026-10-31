@@ -3,6 +3,51 @@
 Tracks Orion's integration with its first consumers and appliance hardening work. See
 [CHANGELOG.md](CHANGELOG.md) for the user-facing summary of what landed.
 
+## Next release (version agreed with the user; the workspace is 1.0.1-dev)
+
+The release list: the 2026-10-27 feature freeze plus the hardware-support work added on 2026-10-30
+(the last addition). Everything else stays under the headings below. Every item: what, why, done
+when, blocked by.
+
+### 1. Freeze items still open
+
+- [ ] **aarch64 appliance soak.** Why: the frozen soak item; orion-node runs on every board. Done
+      when: a release aarch64 build runs `appliance_memory_soak` (or the packaged node under
+      HeliOS's load) for 24 h on a Raze, PSS stays flat after warm-up, there are no restarts, and the
+      numbers are in docs/node-env.md. Blocked by: a Raze slot (HeliOS coordinator).
+- [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate public types,
+      aliases or client methods remain across orion-client/control-plane/node, and docs match.
+      Blocked by: nothing.
+- [x] Retraction, action-watch reconnect, robot-link peer trust, supervision and safe mode
+      (3f86056, bbc505b, 83fce6b, 3a00507, 2ec9f08, a380034, 9ad7991).
+
+### 2. Hardware support and memory (added 2026-10-30)
+
+- [ ] **Byte-bounded watch queues.** Why: a non-polling executor/lease watcher can still hold up to
+      256 full-list events; the K230D has 128 MB for everything. Done when: per-client queues are
+      capped in bytes (a plain knob with a default) or coalesce to the latest list, and the
+      device-like footprint harness shows a slow watcher holding at most the cap. Blocked by:
+      nothing.
+- [ ] **riscv64 and armv7 builds.** Why: the K230D (riscv64) and Flame (RV1106G2, Cortex-A7) run
+      orion-node and orionctl. Done when: the IPC-only node and orionctl build for
+      riscv64gc-unknown-linux-gnu/musl and armv7-unknown-linux-gnueabihf in CI, and the node tests
+      pass under qemu for one of them. Blocked by: nothing.
+- [ ] **Memory on the device.** Why: the K230D budget. Done when: PSS under HeliOS's load is
+      re-measured with the packaged unit's malloc settings (6a70758: 8.4 MiB on a Raze CM5, against
+      13.6 MiB before) and recorded in docs/node-env.md. Blocked by: a HeliOS image with
+      Orion 6a70758 on a Raze.
+- [ ] **What Atlas needs on the SystemCore.** Why: Atlas installs its agent on the SystemCore and
+      talks to it over Orion, so flashes run detached. Done when: whatever Atlas asks for (e.g.
+      bulk blob transfer for images, long-running jobs with progress) is in Orion and used by Atlas.
+      Blocked by: Atlas's request.
+
+### 3. Release mechanics
+
+- [ ] Version agreed with the user; CHANGELOG.md for the release.
+- [ ] Tag the release; HeliOS, Atlas and the Gaia `orion` source pin the tag instead of a `rev`.
+- [ ] Gates on the release commit: fmt, clippy -D warnings, tests, the node feature matrix and the
+      file-size check.
+
 ## Done
 
 ### Integration
