@@ -238,7 +238,7 @@ clients").
 Things the image provides:
 
 - the `orion` user on a read-only root filesystem (see "The `orion` user"); Gaia has no user
-  schema, so add `@source:orion/packaging/buildroot/orion-users.table` to the image's
+  schema, so add `${source.orion}/packaging/buildroot/orion-users.table` to the image's
   `BR2_ROOTFS_USERS_TABLES`;
 - its own environment file: redeclare `orion-node-env` with another `src` (and do not also declare
   a `[[stage.env_sets]]` named `orion-node`; both write `/etc/default/orion-node.env`);

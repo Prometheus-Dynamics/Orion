@@ -20,7 +20,8 @@
 # Redeclare the `orionctl` artifact after this import for another feature set, for example
 # features = ["yaml", "toml"] for YAML/TOML output and workload specs.
 
-gaia_version = ">=2.0.0"
+config = 3
+gaia_version = ">=2.0.1-dev"
 
 [providers.rust]
 allow_nested_build = true
@@ -37,15 +38,15 @@ target_name = "orionctl"
 install_name = "orionctl"
 install_class = "binary"
 install_dest_hint = "/usr/bin/orionctl"
-output_path = "${workspace.out_dir}/artifacts/orionctl/orionctl"
+output_path = "${outputs.dir}/artifacts/orionctl/orionctl"
 
 [artifacts.execution]
 backend = "docker"
 
 [artifacts.execution.docker]
 image = "orion-aarch64-cross"
-dockerfile = "@self/docker/aarch64-cross.Dockerfile"
-context = "@self/docker"
+dockerfile = "${self}/docker/aarch64-cross.Dockerfile"
+context = "${self}/docker"
 
 [[install]]
 id = "install-orionctl"
