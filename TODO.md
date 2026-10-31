@@ -3,7 +3,7 @@
 Tracks Orion's integration with its first consumers and appliance hardening work. See
 [CHANGELOG.md](CHANGELOG.md) for the user-facing summary of what landed.
 
-## Next release (version agreed with the user; the workspace is 1.0.1-dev)
+## Next release (1.0.0)
 
 The release list: the 2026-10-27 feature freeze plus the hardware-support work added on 2026-10-30
 (the last addition). Everything else stays under the headings below. Every item: what, why, done
@@ -43,7 +43,8 @@ when, blocked by.
 
 ### 3. Release mechanics
 
-- [ ] Version agreed with the user; CHANGELOG.md for the release.
+- [ ] Version 1.0.0 (agreed with the user on 2026-10-30; tagged when this feature push is done);
+      CHANGELOG.md for the release.
 - [ ] Tag the release; HeliOS, Atlas and the Gaia `orion` source pin the tag instead of a `rev`.
 - [ ] Gates on the release commit: fmt, clippy -D warnings, tests, the node feature matrix and the
       file-size check.
@@ -211,7 +212,7 @@ when, blocked by.
 
 ### Release
 
-- [ ] Tag a release so downstreams can pin by tag instead of `rev` (workspace is 1.0.1-dev; the release version is set when the user agrees it).
+- [x] Release version agreed: 1.0.0 (see "Next release").
 
 ### Decided model, not yet implemented
 
