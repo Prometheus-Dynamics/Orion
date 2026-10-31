@@ -11,13 +11,17 @@ when, blocked by.
 
 ### 1. Freeze items still open
 
-- [ ] **aarch64 appliance soak.** Why: the frozen soak item; orion-node runs on every board. Done
-      when: a release aarch64 build runs `appliance_memory_soak` (or the packaged node under
-      HeliOS's load) for 24 h on a Raze, PSS stays flat after warm-up, there are no restarts, and the
-      numbers are in docs/node-env.md. Blocked by: a Raze slot (HeliOS coordinator).
+- [ ] **aarch64 appliance soak.** Why: the frozen soak item; orion-node runs on every board. Data so
+      far (2026-10-31, Raze #1, the packaged node under HeliOS's real load): 7 days up, 0 restarts,
+      PSS 9.8 MiB / RSS 11.3 MiB. Left: a release aarch64 build's 24 h PSS curve after warm-up,
+      recorded in docs/node-env.md. Blocked by: nothing (the coordinator lends Raze #1 on request).
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate public types,
       aliases or client methods remain across orion-client/control-plane/node, and docs match.
       Blocked by: nothing.
+- [ ] **Unknown arguments start a node.** Why: `orion-node --version` on a Raze (2026-10-31)
+      started a second node (`node.local`, sockets in /tmp) instead of printing a version or
+      refusing. Done when: `--version` and `--help` work, and an unknown argument exits non-zero
+      without starting anything. Blocked by: nothing.
 - [x] Retraction, action-watch reconnect, robot-link peer trust, supervision and safe mode
       (3f86056, bbc505b, 83fce6b, 3a00507, 2ec9f08, a380034, 9ad7991).
 
@@ -32,14 +36,14 @@ when, blocked by.
       orion-node and orionctl. Done when: the IPC-only node and orionctl build for
       riscv64gc-unknown-linux-gnu/musl and armv7-unknown-linux-gnueabihf in CI, and the node tests
       pass under qemu for one of them. Blocked by: nothing.
-- [ ] **Memory on the device.** Why: the K230D budget. Done when: PSS under HeliOS's load is
-      re-measured with the packaged unit's malloc settings (6a70758: 8.4 MiB on a Raze CM5, against
-      13.6 MiB before) and recorded in docs/node-env.md. Blocked by: a HeliOS image with
-      Orion 6a70758 on a Raze.
+- [x] **Memory on the device.** The packaged unit's malloc settings (6a70758: one arena, 64 KiB
+      mmap/trim/top-pad) on Raze #1 under HeliOS's load: PSS 9.8 MiB, RSS 11.3 MiB, private dirty
+      6.9 MiB after 7 days (13.6 MiB before 6a70758). Record it in docs/node-env.md with the release.
 - [ ] **What Atlas needs on the SystemCore.** Why: Atlas installs its agent on the SystemCore and
-      talks to it over Orion, so flashes run detached. Done when: whatever Atlas asks for (e.g.
-      bulk blob transfer for images, long-running jobs with progress) is in Orion and used by Atlas.
-      Blocked by: Atlas's request.
+      drives it over Orion, so flashes run detached. Atlas has asked for four things: (1) blob push
+      for images, (2) a job API (long-running jobs with progress, cancel and re-attach), (3)
+      provider rights for non-HeliOS clients (the Atlas agent), (4) status values over 1024 bytes.
+      Done when: all four are in Orion and Atlas's agent uses them. Blocked by: nothing.
 
 ### 3. Release mechanics
 
@@ -193,11 +197,10 @@ when, blocked by.
 
 - [ ] Run the appliance soak with a release aarch64 build on the board. x86 release builds plateau at
       3–5 MiB PSS, so the observed ~42 MiB is not reproduced off-device.
-- [ ] Check transparent huge pages on the device (prime suspect for the anonymous-memory gap):
-      `/sys/kernel/mm/transparent_hugepage/enabled`, `getconf PAGESIZE`, and `AnonHugePages` in
-      `/proc/$(pidof orion-node)/smaps_rollup`. If large, set THP to `madvise` in the Gaia image.
-- [ ] Install the packaged service on the board image (16 KiB pages) and confirm `READY=1`, watchdog
-      pings and a watchdog restart (`kill -STOP $(pidof orion-node)`) under the real systemd.
+- [x] Transparent huge pages: not applicable on the Raze; its kernel has no THP
+      (`/sys/kernel/mm/transparent_hugepage` absent), and AnonHugePages is 0.
+- [x] The packaged service on the board image (16 KiB pages): `Type=notify`, `WatchdogUSec=30s`,
+      StatusText "serving node=raze-…", 0 restarts in 7 days (Raze #1, 2026-10-31).
 
 ### CI
 
@@ -286,12 +289,9 @@ Design only so far: [docs/update-recovery.md](docs/update-recovery.md). Orion ca
 intents and progress; the writer (A/B slots, verification, bootloader) is an external device
 manager, which keeps out-of-band paths that never depend on Orion. Milestones in order:
 
-- [ ] **U0 Prerequisites** (parallel work): generic action mechanism (`ActionRequest` /
-      `ActionResult`); host facts with OS / image version on the observed `NodeRecord`.
-- [ ] **U1 Supervision**: feature `systemd` with `READY=1`, `WATCHDOG=1` from the reconcile loop and
-      `STATUS=`; example unit (watchdog, restart limits, `OnFailure=` safe mode); wedged-loop test.
-- [ ] **U2 Safe mode**: `ORION_NODE_SAFE_MODE`; quarantine undecodable or newer-format state instead
-      of failing startup; no workloads, receive-only sync, health reason, `orion_safe_mode` metric.
+- [x] **U0 Prerequisites**: the generic action mechanism is in (`ActionRequest`, `ActionCaller`, `wait_ms`, 4fadba9).
+- [x] **U1 Supervision**: done (`READY=1`, `WATCHDOG=1`, see the release section: 2ec9f08, a380034).
+- [x] **U2 Safe mode**: done (a380034, 9ad7991; the safe-mode unit is never enabled by default).
 - [ ] **U3 Data model** (scoped against the device-agent contract in
       [docs/device-agent.md](docs/device-agent.md), "From here to durable update records"): `UpdateIntentRecord` desired section and `UpdateStatusRecord` in the
       observed slice (protocol bump, batched with other layout changes); `orionctl get updates`;
