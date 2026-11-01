@@ -38,7 +38,7 @@ when, blocked by.
       pass under qemu for one of them. Blocked by: nothing.
 - [x] **Memory on the device.** The packaged unit's malloc settings (6a70758: one arena, 64 KiB
       mmap/trim/top-pad) on Raze #1 under HeliOS's load: PSS 9.8 MiB, RSS 11.3 MiB, private dirty
-      6.9 MiB after 7 days (13.6 MiB before 6a70758). Record it in docs/node-env.md with the release.
+      6.9 MiB after 7 days (13.6 MiB before 6a70758). Recorded in docs/node-env.md.
 - [ ] **What Atlas needs on the SystemCore.** Why: Atlas installs its agent on the SystemCore and
       drives it over Orion, so flashes run detached. Atlas has asked for four things: (1) blob push
       for images, (2) a job API (long-running jobs with progress, cancel and re-attach), (3)
@@ -47,8 +47,10 @@ when, blocked by.
 
 ### 3. Release mechanics
 
-- [ ] Version 1.0.0 (agreed with the user on 2026-10-30; tagged when this feature push is done);
-      CHANGELOG.md for the release.
+For when the user calls the release; only the user decides when. Until then the workspace stays on
+its dev version.
+
+- [ ] Version 1.0.0 (target agreed with the user on 2026-10-30); CHANGELOG.md for the release.
 - [ ] Tag the release; HeliOS, Atlas and the Gaia `orion` source pin the tag instead of a `rev`.
 - [ ] Gates on the release commit: fmt, clippy -D warnings, tests, the node feature matrix and the
       file-size check.
@@ -195,8 +197,6 @@ when, blocked by.
 
 ### Needs the device (arm64 board)
 
-- [ ] Run the appliance soak with a release aarch64 build on the board. x86 release builds plateau at
-      3–5 MiB PSS, so the observed ~42 MiB is not reproduced off-device.
 - [x] Transparent huge pages: not applicable on the Raze; its kernel has no THP
       (`/sys/kernel/mm/transparent_hugepage` absent), and AnonHugePages is 0.
 - [x] The packaged service on the board image (16 KiB pages): `Type=notify`, `WatchdogUSec=30s`,
