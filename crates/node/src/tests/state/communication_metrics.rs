@@ -156,13 +156,19 @@ fn communication_metrics_classify_failures_and_degrade_health() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn observability_reports_ipc_stream_communication_metrics() {
     let state_dir = temp_state_dir("observability-ipc-stream");
+    let mut config = test_node_config_with_state_dir_and_auth(
+        "node-obs-ipc-stream",
+        "node-obs-ipc-stream",
+        state_dir.clone(),
+        crate::PeerAuthenticationMode::Disabled,
+    );
+    // The test asserts the exact hello and welcome exchange. Test builds heartbeat every 50 ms,
+    // and each heartbeat is a counted Ping and Pong, so under load a late poll would see extra
+    // messages. Keep the heartbeat out of this test's window.
+    config.ipc_stream_heartbeat_interval = Duration::from_secs(60);
+    config.ipc_stream_heartbeat_timeout = Duration::from_secs(120);
     let app = NodeApp::builder()
-        .config(test_node_config_with_state_dir_and_auth(
-            "node-obs-ipc-stream",
-            "node-obs-ipc-stream",
-            state_dir.clone(),
-            crate::PeerAuthenticationMode::Disabled,
-        ))
+        .config(config)
         .try_build()
         .expect("node app should build");
     let socket_path = state_dir.join("control-stream.sock");
@@ -192,8 +198,11 @@ async fn observability_reports_ipc_stream_communication_metrics() {
         .expect("welcome frame should be returned");
     assert!(matches!(welcome.message, ControlMessage::ClientWelcome(_)));
 
+    // Waits for the server task to record the exchange: an event, not a latency claim. A fixed
+    // count of 10 ms sleeps stretched unpredictably under load, so the budget is a deadline.
     let mut ipc_stream = None;
-    for _ in 0..50 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
         let snapshot = app.observability_snapshot();
         let endpoint = snapshot
             .communication

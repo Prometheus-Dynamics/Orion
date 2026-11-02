@@ -180,24 +180,13 @@ async fn zero_interval_keeps_immediate_observed_writes() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn desired_commits_stay_durable_and_carry_pending_observed_state() {
     let state_dir = temp_state_dir("observed-desired");
-    let app = coalescing_app("node.desired", state_dir.clone(), Duration::from_secs(60));
+    // The flush interval is 60 s. The first change must reach disk well inside it (half of it is
+    // the bound), so the check is about the interval, not about how loaded the machine is.
+    let interval = Duration::from_secs(60);
+    let app = coalescing_app("node.desired", state_dir.clone(), interval);
     let source = LocalAddress::new("coalesce-provider");
     register_provider_client(&app, &source);
     let handle = app.spawn_reconcile_loop(Duration::from_millis(5));
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    app.apply_local_control_message(&source, provider_update(&app, 0))
-        .expect("provider state should apply");
-    // The first deferred change after an idle period is flushed at once; the next one waits for
-    // the (60 s) interval.
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    app.apply_local_control_message(&source, provider_update(&app, 1))
-        .expect("provider state should apply");
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let usage = app
-        .observability_snapshot()
-        .resource_usage
-        .observed_persistence;
-    assert!(usage.pending, "the second change waits for the interval");
     let storage = NodeStorage::new(&state_dir);
     let persisted_label = |storage: &NodeStorage| {
         storage
@@ -211,6 +200,27 @@ async fn desired_commits_stay_durable_and_carry_pending_observed_state() {
                     .and_then(|resource| resource.labels.first().cloned())
             })
     };
+
+    // The first deferred change after an idle period is flushed at once; the next one waits for
+    // the (60 s) interval. Wait for the first flush to land rather than sleeping for a guessed time.
+    app.apply_local_control_message(&source, provider_update(&app, 0))
+        .expect("provider state should apply");
+    let flush_deadline = std::time::Instant::now() + interval / 2;
+    while persisted_label(&storage).as_deref() != Some("generation=0") {
+        assert!(
+            std::time::Instant::now() < flush_deadline,
+            "the first change after an idle period should be flushed well before the interval"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    app.apply_local_control_message(&source, provider_update(&app, 1))
+        .expect("provider state should apply");
+    let usage = app
+        .observability_snapshot()
+        .resource_usage
+        .observed_persistence;
+    assert!(usage.pending, "the second change waits for the interval");
     assert_eq!(persisted_label(&storage).as_deref(), Some("generation=0"));
 
     let before = state_writes(&app);

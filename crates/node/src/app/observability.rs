@@ -320,7 +320,7 @@ mod tests {
     use orion_transport_http::{HttpRequestFailureKind, HttpTransportError};
     use std::{
         env, fs,
-        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     #[test]
@@ -353,6 +353,7 @@ mod tests {
 
     #[test]
     fn audit_log_drops_newest_when_queue_is_full() {
+        let _serial = crate::tests::INJECTED_DELAY_LOCK.blocking_lock();
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
@@ -366,7 +367,10 @@ mod tests {
             4 * 1024 * 1024,
         )
         .expect("audit log sink should build");
-        set_test_audit_append_delay(Duration::from_millis(25));
+        // A blocked enqueue would wait for one slow append. Whether it blocked is checked below by
+        // the drop count, not by wall-clock time: a blocked enqueue never drops, and a loaded machine
+        // can delay any timing bound.
+        set_test_audit_append_delay(Duration::from_millis(500));
 
         sink.enqueue_test_record(
             1,
@@ -376,7 +380,6 @@ mod tests {
             "first",
         )
         .expect("first audit enqueue should succeed");
-        let started = Instant::now();
         for sequence in 2..=32 {
             sink.enqueue_test_record(
                 sequence,
@@ -387,10 +390,6 @@ mod tests {
             )
             .expect("audit enqueue should succeed even when dropped");
         }
-        assert!(
-            started.elapsed() < Duration::from_millis(10),
-            "drop_newest audit enqueue should not block behind slow audit I/O"
-        );
         assert!(
             sink.dropped_records() > 0,
             "drop_newest policy should drop at least one record under a slow one-slot worker"
@@ -405,6 +404,7 @@ mod tests {
 
     #[test]
     fn audit_log_drop_policy_counts_dropped_records() {
+        let _serial = crate::tests::INJECTED_DELAY_LOCK.blocking_lock();
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")

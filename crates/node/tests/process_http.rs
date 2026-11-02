@@ -662,12 +662,18 @@ async fn orion_node_binary_survives_concurrent_http_ipc_and_peer_sync_activity()
                 })
                 .await
                 .expect("watch registration should send");
-            assert!(matches!(
-                recv_non_ping(&mut client, "concurrent-stream")
+            // The state watch may push its bootstrap snapshot before the acknowledgement, depending
+            // on whether the desired revision has moved by then. Skip those event frames only.
+            loop {
+                match recv_non_ping(&mut client, "concurrent-stream")
                     .await
-                    .message,
-                ControlMessage::Accepted
-            ));
+                    .message
+                {
+                    ControlMessage::Accepted => break,
+                    ControlMessage::ClientEvents(_) => {}
+                    other => panic!("unexpected frame after the watch registration: {other:?}"),
+                }
+            }
 
             let mut state_event_count = 0usize;
             while state_event_count < 3 {

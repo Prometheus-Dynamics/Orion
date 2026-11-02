@@ -3,6 +3,7 @@ use orion::control_plane::{DesiredStateMutation, MaintenanceAction, MaintenanceC
 
 #[tokio::test(flavor = "current_thread")]
 async fn async_snapshot_adoption_does_not_block_the_runtime_thread() {
+    let _serial = crate::tests::INJECTED_DELAY_LOCK.lock().await;
     let state_dir = temp_state_dir("async-snapshot-adoption");
     let app = NodeApp::builder()
         .config(test_node_config_with_state_dir_and_auth(

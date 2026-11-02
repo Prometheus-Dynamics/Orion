@@ -5,6 +5,7 @@ use crate::config::AuditLogOverloadPolicy;
 use orion::control_plane::DesiredStateMutation;
 use orion::transport::http::HttpResponsePayload;
 use orion::transport::ipc::UnixControlHandler;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(feature = "transport-http")]
 #[test]
@@ -200,6 +201,7 @@ fn observability_tracks_non_tls_http_and_ipc_transport_failures() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn observability_tracks_persistence_latency_and_worker_backpressure() {
+    let _serial = crate::tests::INJECTED_DELAY_LOCK.lock().await;
     let state_dir = temp_state_dir("observability-persistence");
     let app = NodeApp::builder()
         .config(test_node_config_with_state_dir_and_auth(
@@ -278,6 +280,13 @@ async fn observability_tracks_persistence_latency_and_worker_backpressure() {
 #[cfg(feature = "transport-http")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
+    let _serial = crate::tests::INJECTED_DELAY_LOCK.lock().await;
+    // The injected worker delay. The control calls below must return while the persistence
+    // operation they would otherwise queue behind is still in flight. That is checked by ordering,
+    // not wall-clock time: a loaded machine can stall a thread for longer than any fixed bound, but
+    // a call that did not wait cannot be made to return after the operation it skipped finished.
+    let injected_delay = Duration::from_millis(500);
+    let persist_a_done = Arc::new(AtomicBool::new(false));
     let state_dir = temp_state_dir("control-pressure");
     let audit_log_path = state_dir.join("audit").join("events.jsonl");
     let mut config = test_node_config_with_state_dir_and_auth(
@@ -306,12 +315,17 @@ async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
         .size_bytes(1)
         .build();
 
-    set_test_persist_delay(Duration::from_millis(40));
-    set_test_audit_append_delay(Duration::from_millis(40));
+    set_test_persist_delay(injected_delay);
+    set_test_audit_append_delay(injected_delay);
 
     let persist_a = {
         let app = app.clone();
-        tokio::spawn(async move { app.put_artifact_content_async(&artifact_a, &[1]).await })
+        let done = persist_a_done.clone();
+        tokio::spawn(async move {
+            let result = app.put_artifact_content_async(&artifact_a, &[1]).await;
+            done.store(true, Ordering::SeqCst);
+            result
+        })
     };
     let persist_b = {
         let app = app.clone();
@@ -332,7 +346,6 @@ async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
 
     tokio::time::sleep(Duration::from_millis(5)).await;
 
-    let http_started = std::time::Instant::now();
     let http_response = app
         .http_control_handler()
         .handle_payload(HttpRequestPayload::Control(Box::new(
@@ -340,15 +353,14 @@ async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
         )))
         .expect("observability query should succeed");
     assert!(
-        http_started.elapsed() < Duration::from_millis(30),
-        "HTTP observability query should stay fast under worker pressure"
+        !persist_a_done.load(Ordering::SeqCst),
+        "HTTP observability query should return before the in-flight persistence operation finishes"
     );
     assert!(matches!(
         http_response,
         HttpResponsePayload::Observability(_)
     ));
 
-    let ipc_started = std::time::Instant::now();
     let ipc_response = app
         .unix_control_handler()
         .handle_control(ControlEnvelope {
@@ -358,8 +370,8 @@ async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
         })
         .expect("local ping should succeed");
     assert!(
-        ipc_started.elapsed() < Duration::from_millis(30),
-        "local IPC ping should stay fast under worker pressure"
+        !persist_a_done.load(Ordering::SeqCst),
+        "local IPC ping should return before the in-flight persistence operation finishes"
     );
     assert_eq!(ipc_response.message, ControlMessage::Pong);
 
@@ -387,6 +399,13 @@ async fn control_queries_remain_fast_under_persistence_and_audit_pressure() {
 #[cfg(feature = "transport-http")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn concurrent_peer_sync_persistence_and_local_control_activity_remains_responsive() {
+    let _serial = crate::tests::INJECTED_DELAY_LOCK.lock().await;
+    // The injected worker delay. The control calls below must return while the persistence
+    // operation they would otherwise queue behind is still in flight. That is checked by ordering,
+    // not wall-clock time: a loaded machine can stall a thread for longer than any fixed bound, but
+    // a call that did not wait cannot be made to return after the operation it skipped finished.
+    let injected_delay = Duration::from_millis(500);
+    let persist_a_done = Arc::new(AtomicBool::new(false));
     let state_dir = temp_state_dir("peer-sync-persistence-control");
     let app = NodeApp::builder()
         .config(test_node_config_with_state_dir_and_auth(
@@ -410,11 +429,16 @@ async fn concurrent_peer_sync_persistence_and_local_control_activity_remains_res
         .size_bytes(1)
         .build();
 
-    set_test_persist_delay(Duration::from_millis(40));
+    set_test_persist_delay(injected_delay);
 
     let persist_a = {
         let app = app.clone();
-        tokio::spawn(async move { app.put_artifact_content_async(&artifact_a, &[1]).await })
+        let done = persist_a_done.clone();
+        tokio::spawn(async move {
+            let result = app.put_artifact_content_async(&artifact_a, &[1]).await;
+            done.store(true, Ordering::SeqCst);
+            result
+        })
     };
     let persist_b = {
         let app = app.clone();
@@ -428,7 +452,6 @@ async fn concurrent_peer_sync_persistence_and_local_control_activity_remains_res
     tokio::time::sleep(Duration::from_millis(5)).await;
 
     for _ in 0..4 {
-        let http_started = std::time::Instant::now();
         let http_response = app
             .http_control_handler()
             .handle_payload(HttpRequestPayload::Control(Box::new(
@@ -436,15 +459,14 @@ async fn concurrent_peer_sync_persistence_and_local_control_activity_remains_res
             )))
             .expect("observability query should succeed");
         assert!(
-            http_started.elapsed() < Duration::from_millis(30),
-            "HTTP observability query should stay fast while peer sync and persistence are active"
+            !persist_a_done.load(Ordering::SeqCst),
+            "HTTP observability query should return before the in-flight persistence operation finishes"
         );
         assert!(matches!(
             http_response,
             HttpResponsePayload::Observability(_)
         ));
 
-        let ipc_started = std::time::Instant::now();
         let ipc_response = app
             .unix_control_handler()
             .handle_control(ControlEnvelope {
@@ -454,8 +476,8 @@ async fn concurrent_peer_sync_persistence_and_local_control_activity_remains_res
             })
             .expect("local ping should succeed");
         assert!(
-            ipc_started.elapsed() < Duration::from_millis(30),
-            "local IPC ping should stay fast while peer sync and persistence are active"
+            !persist_a_done.load(Ordering::SeqCst),
+            "local IPC ping should return before the in-flight persistence operation finishes"
         );
         assert_eq!(ipc_response.message, ControlMessage::Pong);
     }
@@ -489,6 +511,7 @@ async fn concurrent_peer_sync_persistence_and_local_control_activity_remains_res
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn saturated_persistence_queue_exposes_backpressure_metrics_with_bounded_completion() {
+    let _serial = crate::tests::INJECTED_DELAY_LOCK.lock().await;
     let state_dir = temp_state_dir("persistence-saturation");
     let app = NodeApp::builder()
         .config(test_node_config_with_state_dir_and_auth(

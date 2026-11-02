@@ -647,3 +647,10 @@ fn write_test_tls_files(name: &str) -> (PathBuf, PathBuf, PathBuf) {
 }
 
 mod ipc;
+
+/// Serializes the tests that inject persistence or audit-append delays (`set_test_persist_delay`,
+/// `set_test_audit_append_delay`). Those delays are process-wide: one test's delay slows any other
+/// persistence or audit write running at the same time, and a clear from one test cuts short the
+/// delay another test is measuring. Each such test holds this lock from its first line to its last,
+/// so they run one at a time, and each bounds its timings against the delay it injected.
+pub(crate) static INJECTED_DELAY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

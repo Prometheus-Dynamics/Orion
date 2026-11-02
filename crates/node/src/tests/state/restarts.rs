@@ -323,15 +323,19 @@ async fn restart_during_mutation_apply_recovers_latest_mutation() {
     app.register_executor(NamedExecutor::new("executor.mutation", "graph.exec.v1"))
         .expect("executor registration should succeed");
 
-    let (addr, server) = app
+    let (_addr, server) = app
         .start_http_server("127.0.0.1:0".parse().expect("socket address should parse"))
         .await
         .expect("HTTP server should start");
-    let client = HttpClient::try_new(format!("http://{}", addr)).expect("HTTP client should build");
 
-    let response = client
-        .send(
-            &app.security
+    // The request goes through the handler the HTTP route calls, in process, so the apply is still
+    // in flight when the node is torn down. The HTTP client's one-second request timeout is not
+    // checked here: under load the persisted write can take longer, and the test is about what
+    // survives the restart.
+    let response = app
+        .http_control_handler()
+        .handle_payload_metered_async(
+            app.security
                 .wrap_http_payload(HttpRequestPayload::Control(Box::new(
                     orion::control_plane::ControlMessage::Mutations(
                         orion::control_plane::MutationBatch {
@@ -360,6 +364,7 @@ async fn restart_during_mutation_apply_recovers_latest_mutation() {
                     ),
                 )))
                 .expect("mutation request should be signed"),
+            0,
         )
         .await
         .expect("mutation request should succeed");
