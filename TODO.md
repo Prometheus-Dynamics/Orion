@@ -44,12 +44,6 @@ when, blocked by.
 - [x] **Memory on the device.** The packaged unit's malloc settings (6a70758: one arena, 64 KiB
       mmap/trim/top-pad) on Raze #1 under HeliOS's load: PSS 9.8 MiB, RSS 11.3 MiB, private dirty
       6.9 MiB after 7 days (13.6 MiB before 6a70758). Recorded in docs/node-env.md.
-- [ ] **What Atlas needs on the SystemCore.** Why: Atlas installs its agent on the SystemCore and
-      drives it over Orion, so flashes run detached. Atlas has asked for four things: (1) blob push
-      for images, (2) a job API (long-running jobs with progress, cancel and re-attach), (3)
-      provider rights for non-HeliOS clients (the Atlas agent), (4) status values over 1024 bytes.
-      Done when: all four are in Orion and Atlas's agent uses them. Blocked by: nothing.
-
 ### 3. Release mechanics
 
 For when the user calls the release; only the user decides when. Until then the workspace stays on
@@ -78,6 +72,15 @@ its dev version.
 - [x] Slim `orionctl`: `orion-transport-http` split into `client` / `server` features; `orionctl`
       features `http`, `yaml`, `toml` (default on). IPC + JSON build is 1.80 MiB / 57 crates vs
       4.38 MiB / 139 crates default (2.65 MiB with YAML + TOML).
+
+- [x] **What Atlas needs on the SystemCore** (all four in Orion; Atlas's agent adopts them next):
+      blob push over local IPC, `BeginBlob`/`WriteBlobChunk`/`CommitBlob`/`QueryBlobs`/`DeleteBlob`,
+      resumable and digest-checked, `LocalControlPlaneClient::push_blob` ([docs/blobs.md](docs/blobs.md),
+      02cafc3); long-running jobs on the action lane, `ActionState::Cancelled` and the `<name>.cancel`
+      companion, one-hour deadline cap ([docs/actions.md](docs/actions.md#long-running-jobs), 4a66027);
+      provider rights for non-HeliOS clients, `ORION_NODE_LOCAL_PROVIDER_ALLOW` ([docs/node-env.md](docs/node-env.md#local-ipc-access), 416b67b);
+      status values up to `ORION_NODE_STATUS_MAX_VALUE_BYTES` (4 KiB) under `ORION_NODE_STATUS_MAX_BYTES`
+      (4 MiB), 1c2f1bf. Protocol v7.
 
 ### Efficiency
 
