@@ -248,7 +248,7 @@ pub(crate) fn host_status_entries(subject: &StatusSubject, facts: &HostFacts) ->
             _ => 0,
         };
         entry.key.len() <= super::status_lane::store::MAX_STATUS_KEY_BYTES
-            && value_len <= super::status_lane::store::MAX_STATUS_VALUE_BYTES
+            && value_len <= super::status_lane::store::STATUS_VALUE_CEILING_BYTES
     });
     entries
 }

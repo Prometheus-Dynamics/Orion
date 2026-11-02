@@ -490,7 +490,8 @@ error text) go to the node's volatile status lane instead:
   Link devices publish under their provider subject. Any local client may query and watch.
 - **Bounded.** `ORION_NODE_STATUS_MAX_ENTRIES` (default 4096) and
   `ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER` (default 256) cap memory; keys are at most 128
-  bytes and string/byte values at most 1024 bytes. A batch is stored atomically or refused.
+  bytes and string/byte values at most `ORION_NODE_STATUS_MAX_VALUE_BYTES` (default 4096) with the
+  node-wide value budget `ORION_NODE_STATUS_MAX_BYTES` (default 4 MiB). A batch is stored atomically or refused.
 - **Bulk data stays out.** Frames, detections, and other high-rate data belong on resource
   endpoints, not in the status lane.
 

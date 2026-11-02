@@ -46,6 +46,7 @@ mod state_access;
 mod status_admin;
 mod status_forward;
 mod status_lane;
+pub(crate) use status_lane::store::STATUS_VALUE_CEILING_BYTES;
 mod streams;
 mod task_handle;
 mod tls_bootstrap;

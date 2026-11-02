@@ -42,6 +42,9 @@ const DEFAULT_STATUS_MAX_ENTRIES: usize = 4_096;
 const DEFAULT_STREAM_MEMORY_MAX_BYTES: usize = 4 * 1024 * 1024;
 const DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER: usize = 256;
 const DEFAULT_STATUS_MAX_TTL_MS: u64 = 300_000;
+const DEFAULT_STATUS_MAX_VALUE_BYTES: usize = 4_096;
+const DEFAULT_STATUS_MAX_TOTAL_BYTES: usize = 4 * 1024 * 1024;
+
 const MIN_RUNTIME_TUNING_DURATION_MS: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,6 +112,11 @@ pub struct NodeRuntimeTuning {
     pub status_max_entries_per_publisher: usize,
     /// Longest time-to-live of a status entry (also the TTL of entries published with `ttl_ms = 0`).
     pub status_max_ttl: Duration,
+    /// Longest string or byte status value, in bytes (at most 64 KiB).
+    pub status_max_value_bytes: usize,
+    /// Bytes of string and byte status values held node-wide; a batch that would exceed it is
+    /// refused whole. With the entry caps this bounds the lane's memory.
+    pub status_max_total_bytes: usize,
     /// Memory for the history of every live stream together (`docs/streams.md`); a declaration
     /// whose history would exceed what is left keeps proportionally less.
     pub stream_memory_max_bytes: usize,
@@ -466,6 +474,14 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_STATUS_MAX_TTL_MS",
                 DEFAULT_STATUS_MAX_TTL_MS,
             )?,
+            status_max_value_bytes: parse_env_or(
+                "ORION_NODE_STATUS_MAX_VALUE_BYTES",
+                DEFAULT_STATUS_MAX_VALUE_BYTES,
+            )?,
+            status_max_total_bytes: parse_env_or(
+                "ORION_NODE_STATUS_MAX_BYTES",
+                DEFAULT_STATUS_MAX_TOTAL_BYTES,
+            )?,
             stream_memory_max_bytes: parse_env_or(
                 "ORION_NODE_STREAM_MEMORY_MAX_BYTES",
                 DEFAULT_STREAM_MEMORY_MAX_BYTES,
@@ -518,6 +534,10 @@ impl NodeRuntimeTuning {
             .status_max_entries_per_publisher
             .clamp(1, self.status_max_entries);
         self.status_max_ttl = normalize_runtime_tuning_duration(self.status_max_ttl);
+        self.status_max_value_bytes = self
+            .status_max_value_bytes
+            .clamp(1, crate::app::STATUS_VALUE_CEILING_BYTES);
+        self.status_max_total_bytes = self.status_max_total_bytes.max(self.status_max_value_bytes);
         self.placement.normalize();
         self.actions.normalize();
     }
@@ -565,6 +585,8 @@ impl Default for NodeRuntimeTuning {
             status_max_entries: DEFAULT_STATUS_MAX_ENTRIES,
             status_max_entries_per_publisher: DEFAULT_STATUS_MAX_ENTRIES_PER_PUBLISHER,
             status_max_ttl: Duration::from_millis(DEFAULT_STATUS_MAX_TTL_MS),
+            status_max_value_bytes: DEFAULT_STATUS_MAX_VALUE_BYTES,
+            status_max_total_bytes: DEFAULT_STATUS_MAX_TOTAL_BYTES,
             stream_memory_max_bytes: DEFAULT_STREAM_MEMORY_MAX_BYTES,
             placement: super::placement::PlacementTuning::default(),
             host_facts: Default::default(),
@@ -716,6 +738,14 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
         (
             "ORION_NODE_STATUS_MAX_TTL_MS",
             tuning.status_max_ttl.as_millis().to_string(),
+        ),
+        (
+            "ORION_NODE_STATUS_MAX_VALUE_BYTES",
+            tuning.status_max_value_bytes.to_string(),
+        ),
+        (
+            "ORION_NODE_STATUS_MAX_BYTES",
+            tuning.status_max_total_bytes.to_string(),
         ),
         (
             "ORION_NODE_STREAM_MEMORY_MAX_BYTES",

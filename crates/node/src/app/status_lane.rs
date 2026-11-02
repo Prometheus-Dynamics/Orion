@@ -70,6 +70,8 @@ impl NodeApp {
             max_entries: tuning.status_max_entries,
             max_entries_per_publisher: tuning.status_max_entries_per_publisher,
             max_ttl_ms: u64::try_from(tuning.status_max_ttl.as_millis()).unwrap_or(u64::MAX),
+            max_value_bytes: tuning.status_max_value_bytes,
+            max_total_value_bytes: tuning.status_max_total_bytes,
         }
     }
 

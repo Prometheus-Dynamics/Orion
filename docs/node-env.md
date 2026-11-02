@@ -401,7 +401,14 @@ The status lane (see `docs/observability.md`) is in memory only and bounded:
   entries one local client or link device holds;
 - `ORION_NODE_STATUS_MAX_TTL_MS` (default `300000`) is the longest TTL; entries published with
   `ttl_ms = 0` get this TTL, and longer TTLs are capped;
-- keys are at most 128 bytes and string or byte values at most 1024 bytes.
+- `ORION_NODE_STATUS_MAX_VALUE_BYTES` (default `4096`, at most `65536`) is the longest string or
+  byte value; the lane refuses longer ones;
+- `ORION_NODE_STATUS_MAX_BYTES` (default `4194304`, 4 MiB) caps the bytes of string and byte values
+  held node-wide, so the lane's memory stays bounded whatever the value size. A batch that would
+  exceed it is refused whole. With the default cap, a full lane's values fit in one 8 MiB control
+  frame (`ORION_NODE_TRANSPORT_MAX_PAYLOAD_BYTES`) with its keys, so `QueryStatus` answers stay under
+  the frame limit;
+- keys are at most 128 bytes.
 
 A batch that would exceed a cap, or that has an invalid entry, is rejected as a whole and counted
 in `resource_usage.status_lane.dropped_total`.
@@ -472,6 +479,8 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_STATUS_MAX_ENTRIES` | `4096` | Node-wide cap on volatile status lane entries. |
 | `ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER` | `256` | Status lane entries one local client or link device may hold (clamped to the node-wide cap). |
 | `ORION_NODE_STATUS_MAX_TTL_MS` | `300000` | Longest status entry TTL, also used for entries published with `ttl_ms = 0`. |
+| `ORION_NODE_STATUS_MAX_VALUE_BYTES` | `4096` | Longest string or byte status value (at most 65536). |
+| `ORION_NODE_STATUS_MAX_BYTES` | `4194304` | Node-wide budget for the bytes of string and byte status values; at least the value cap. |
 | `ORION_NODE_STREAM_MEMORY_MAX_BYTES` | `4194304` | Memory for the history of all live streams together (`docs/streams.md`); a stream declared beyond it keeps proportionally less history. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_INTERVAL_MS` | `5000` | `50` in test builds. IPC stream heartbeat interval. |
 | `ORION_NODE_IPC_STREAM_HEARTBEAT_TIMEOUT_MS` | `15000` | `125` in test builds. IPC stream heartbeat timeout. |

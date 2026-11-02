@@ -9,14 +9,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Longest status key, in bytes.
 pub(crate) const MAX_STATUS_KEY_BYTES: usize = 128;
-/// Longest string or byte value, in bytes.
-pub(crate) const MAX_STATUS_VALUE_BYTES: usize = 1024;
+/// Hard ceiling for string or byte values, in bytes. `ORION_NODE_STATUS_MAX_VALUE_BYTES` cannot
+/// raise the cap above it (64 KiB, one SPI transaction, like `Bytes` action values).
+pub(crate) const STATUS_VALUE_CEILING_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct StatusLimits {
     pub(crate) max_entries: usize,
     pub(crate) max_entries_per_publisher: usize,
     pub(crate) max_ttl_ms: u64,
+    /// Longest string or byte value accepted.
+    pub(crate) max_value_bytes: usize,
+    /// Bytes of string and byte values held node-wide (the memory bound behind the entry caps).
+    pub(crate) max_total_value_bytes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,6 +29,7 @@ pub(crate) enum StatusPublishError {
     Invalid(String),
     NodeFull { needed: usize, max: usize },
     PublisherFull { needed: usize, max: usize },
+    ValueBytesFull { needed: usize, max: usize },
 }
 
 impl std::fmt::Display for StatusPublishError {
@@ -37,6 +43,10 @@ impl std::fmt::Display for StatusPublishError {
             Self::PublisherFull { needed, max } => write!(
                 f,
                 "publisher status cap reached: batch needs {needed} entries, cap is {max}"
+            ),
+            Self::ValueBytesFull { needed, max } => write!(
+                f,
+                "status value budget reached: batch needs {needed} value bytes, budget is {max}"
             ),
         }
     }
@@ -62,6 +72,8 @@ pub(crate) struct StatusStore {
     entries: BTreeMap<StatusKey, Stored>,
     per_publisher: BTreeMap<String, usize>,
     expiries: BTreeSet<(u64, StatusKey)>,
+    /// Sum of the value sizes of every held entry (kept exact by `remove` and `publish`).
+    value_bytes: usize,
 }
 
 impl StatusStore {
@@ -89,7 +101,7 @@ impl StatusStore {
         // Later entries for the same key win within one batch.
         let mut batch: BTreeMap<StatusKey, StatusEntry> = BTreeMap::new();
         for entry in entries {
-            validate(&entry)?;
+            validate(&entry, limits.max_value_bytes)?;
             batch.insert(entry.status_key(), entry);
         }
         let new_global = batch
@@ -120,6 +132,23 @@ impl StatusStore {
             });
         }
 
+        let batch_value_bytes: usize = batch.values().map(|e| value_len(&e.value)).sum();
+        let replaced_value_bytes: usize = batch
+            .keys()
+            .filter_map(|key| self.entries.get(key))
+            .map(|stored| value_len(&stored.entry.value))
+            .sum();
+        let needed_value_bytes = self
+            .value_bytes
+            .saturating_sub(replaced_value_bytes)
+            .saturating_add(batch_value_bytes);
+        if needed_value_bytes > limits.max_total_value_bytes {
+            return Err(StatusPublishError::ValueBytesFull {
+                needed: needed_value_bytes,
+                max: limits.max_total_value_bytes,
+            });
+        }
+
         let mut outcome = PublishOutcome::default();
         for (key, mut entry) in batch {
             entry.ttl_ms = if entry.ttl_ms == 0 {
@@ -133,6 +162,7 @@ impl StatusStore {
                 None => true,
             };
             self.expiries.insert((entry.expires_at_ms(), key.clone()));
+            self.value_bytes = self.value_bytes.saturating_add(value_len(&entry.value));
             *self.per_publisher.entry(publisher.to_owned()).or_insert(0) += 1;
             if changed {
                 outcome.changed.push(entry.clone());
@@ -177,6 +207,9 @@ impl StatusStore {
         let stored = self.entries.remove(key)?;
         self.expiries
             .remove(&(stored.entry.expires_at_ms(), key.clone()));
+        self.value_bytes = self
+            .value_bytes
+            .saturating_sub(value_len(&stored.entry.value));
         if let Some(count) = self.per_publisher.get_mut(&stored.publisher) {
             *count = count.saturating_sub(1);
             if *count == 0 {
@@ -187,7 +220,19 @@ impl StatusStore {
     }
 }
 
-fn validate(entry: &StatusEntry) -> Result<(), StatusPublishError> {
+/// Size of a value's payload: string and byte values count their bytes, scalars count nothing.
+fn value_len(value: &TypedConfigValue) -> usize {
+    match value {
+        TypedConfigValue::String(value) => value.len(),
+        TypedConfigValue::Bytes(value) => value.len(),
+        TypedConfigValue::Bool(_)
+        | TypedConfigValue::Int(_)
+        | TypedConfigValue::UInt(_)
+        | TypedConfigValue::F64(_) => 0,
+    }
+}
+
+fn validate(entry: &StatusEntry, max_value_bytes: usize) -> Result<(), StatusPublishError> {
     if entry.key.trim().is_empty() {
         return Err(StatusPublishError::Invalid("empty key".into()));
     }
@@ -197,17 +242,10 @@ fn validate(entry: &StatusEntry) -> Result<(), StatusPublishError> {
             entry.key.chars().take(16).collect::<String>()
         )));
     }
-    let value_len = match &entry.value {
-        TypedConfigValue::String(value) => value.len(),
-        TypedConfigValue::Bytes(value) => value.len(),
-        TypedConfigValue::Bool(_)
-        | TypedConfigValue::Int(_)
-        | TypedConfigValue::UInt(_)
-        | TypedConfigValue::F64(_) => 0,
-    };
-    if value_len > MAX_STATUS_VALUE_BYTES {
+    let len = value_len(&entry.value);
+    if len > max_value_bytes {
         return Err(StatusPublishError::Invalid(format!(
-            "value of `{}` is {value_len} bytes, limit is {MAX_STATUS_VALUE_BYTES}",
+            "value of `{}` is {len} bytes, limit is {max_value_bytes}",
             entry.key
         )));
     }
@@ -223,6 +261,8 @@ mod tests {
         max_entries: 4,
         max_entries_per_publisher: 3,
         max_ttl_ms: 1_000,
+        max_value_bytes: 1024,
+        max_total_value_bytes: 4096,
     };
 
     fn entry(provider: &str, key: &str, value: u64) -> StatusEntry {
@@ -336,9 +376,52 @@ mod tests {
         let big = StatusEntry::new(
             StatusSubject::Provider(ProviderId::new("p")),
             "blob",
-            TypedConfigValue::Bytes(vec![0; MAX_STATUS_VALUE_BYTES + 1]),
+            TypedConfigValue::Bytes(vec![0; LIMITS.max_value_bytes + 1]),
         );
         assert!(store.publish("a", vec![big], 0, LIMITS).is_err());
         assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn value_budget_is_exact_and_refreshes_free_it() {
+        let limits = StatusLimits {
+            max_entries: 16,
+            max_entries_per_publisher: 16,
+            max_ttl_ms: 1_000,
+            max_value_bytes: 1024,
+            max_total_value_bytes: 100,
+        };
+        let text = |key: &str, len: usize| {
+            StatusEntry::new(
+                StatusSubject::Provider(ProviderId::new("p")),
+                key,
+                TypedConfigValue::String("x".repeat(len)),
+            )
+        };
+        let mut store = StatusStore::default();
+        store
+            .publish("a", vec![text("a", 60)], 0, limits)
+            .expect("60 of 100 bytes");
+        // 60 + 50 is over budget: the whole batch is refused and nothing changes.
+        assert!(matches!(
+            store.publish("a", vec![text("b", 50)], 0, limits),
+            Err(StatusPublishError::ValueBytesFull {
+                needed: 110,
+                max: 100
+            })
+        ));
+        assert_eq!(store.len(), 1);
+        // Replacing the held value frees its bytes first: 30 (replacement) fits.
+        store
+            .publish("a", vec![text("a", 30)], 0, limits)
+            .expect("replacement needs only its own bytes");
+        store
+            .publish("a", vec![text("b", 70)], 0, limits)
+            .expect("30 + 70 fits exactly");
+        // Expiry releases the bytes too.
+        assert_eq!(store.expire(2_000).len(), 2);
+        store
+            .publish("a", vec![text("c", 100)], 2_000, limits)
+            .expect("expired entries no longer count");
     }
 }

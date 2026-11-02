@@ -85,6 +85,41 @@ fn runtime_tuning_parses_transport_payload_limit_from_env() {
 }
 
 #[test]
+fn runtime_tuning_status_value_limits_are_clamped() {
+    let _guard = env_lock().lock().expect("env lock should not be poisoned");
+    let keys = [
+        "ORION_NODE_STATUS_MAX_VALUE_BYTES",
+        "ORION_NODE_STATUS_MAX_BYTES",
+    ];
+    let prior: Vec<_> = keys.iter().map(std::env::var_os).collect();
+
+    unsafe {
+        std::env::set_var("ORION_NODE_STATUS_MAX_VALUE_BYTES", "1000000");
+        std::env::set_var("ORION_NODE_STATUS_MAX_BYTES", "10");
+    }
+    let clamped = NodeRuntimeTuning::try_from_env().expect("runtime tuning should parse");
+    unsafe {
+        std::env::set_var("ORION_NODE_STATUS_MAX_VALUE_BYTES", "8192");
+        std::env::remove_var("ORION_NODE_STATUS_MAX_BYTES");
+    }
+    let raised = NodeRuntimeTuning::try_from_env().expect("runtime tuning should parse");
+
+    for (key, value) in keys.iter().zip(prior) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    // The value cap stops at the 64 KiB ceiling, and the budget is never below one value.
+    assert_eq!(clamped.status_max_value_bytes, 64 * 1024);
+    assert_eq!(clamped.status_max_total_bytes, 64 * 1024);
+    // Defaults are 4 KiB values under a 4 MiB budget.
+    assert_eq!(raised.status_max_value_bytes, 8192);
+    assert_eq!(raised.status_max_total_bytes, 4 * 1024 * 1024);
+}
+
+#[test]
 fn node_env_docs_include_runtime_tuning_defaults() {
     let docs_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/node-env.md");
     let Ok(docs) = std::fs::read_to_string(docs_path) else {

@@ -10,6 +10,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `orion-nt4` example `nt4-latency` (a PhotonVision camera latency tool with an AprilTag page) is removed from this repository and moves to the PhotonVision tooling. The `[[example]]` entry, its tests and its README section are gone with it. Public `orion-nt4` API is unchanged.
 
+### Changed
+
+- Status lane values may be up to `ORION_NODE_STATUS_MAX_VALUE_BYTES` (default 4096 bytes, was 1024; at most 64 KiB). The node-wide `ORION_NODE_STATUS_MAX_BYTES` budget (default 4 MiB) bounds the memory of all held values, so a batch that would exceed it is refused whole. No wire change: the value types are the same. See [docs/node-env.md](docs/node-env.md#volatile-status-lane-limits).
+
 ### Changed (breaking, dev tooling, examples, test fixtures and docs only)
 
 - Product names are gone from examples, tests, docs and scripts. Names that a host or product used are now generic. Renamed strings: client name `helios-api` to `app-api`; provider and resource ids `provider.helios` to `provider.frames`, `provider.lemnos` to `provider.bus`, `lemnos.raw` to `bus.raw`, `helios.updater*.v1` to `example.updater*.v1`; resource-type examples in [docs/observability.md](docs/observability.md) `lemnos.imu|power|fan|gpio` to `device.imu|power|fan|gpio`; custom endpoint scheme example `styx-frame-lease+unix` to `frame-lease+unix` with socket paths under `/run/app/`; topic prefixes `/HeliOS/` to `/app/` and `/robot/` to `/app/` in `orion-nt4` tests.

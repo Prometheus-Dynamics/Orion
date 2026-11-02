@@ -72,6 +72,7 @@ impl NodeApp {
     }
 
     /// The `orion_safe_mode` family for the metrics endpoint (`docs/observability.md`).
+    #[cfg_attr(not(feature = "transport-http"), allow(dead_code))]
     pub(crate) fn safe_mode_metrics(&self) -> String {
         orion::control_plane::render_safe_mode_metrics(
             &self.config.node_id,
@@ -81,11 +82,13 @@ impl NodeApp {
 
     /// In safe mode peers may still push to the node and it pulls from them, but it never pushes
     /// its own state or observed slice, so a stale copy cannot overwrite peers' newer state.
+    #[cfg_attr(not(peer_sync), allow(dead_code))]
     pub(crate) fn peer_sync_receive_only(&self) -> bool {
         self.safe_mode.is_some()
     }
 
     /// Outbound peer sync is off when the node identity could not be read.
+    #[cfg_attr(not(peer_sync), allow(dead_code))]
     pub(crate) fn peer_sync_disabled(&self) -> bool {
         self.security.identity_error().is_some()
     }
