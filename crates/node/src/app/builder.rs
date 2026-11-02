@@ -469,6 +469,7 @@ impl NodeAppBuilder {
                 maintenance_state: RwLock::new(maintenance_state),
                 desired_metadata_cache: RwLock::new(None),
                 desired_summary_cache: RwLock::new(None),
+                persist_order: std::sync::Mutex::new(()),
                 clock: std::sync::Mutex::new(super::hlc_state::new_node_clock(
                     &config.node_id,
                     config

@@ -179,15 +179,23 @@ impl PersistenceWorker {
         result
     }
 
-    pub(super) async fn persist_bundle_async(
-        &self,
-        bundle: EncodedPersistedStateBundle,
-    ) -> Result<(), NodeError> {
-        self.request_async(|reply| PersistenceCommand::Persist {
-            bundle: Box::new(bundle),
-            reply,
+    /// Waits for queue capacity without capturing state. The caller captures and sends while it
+    /// holds the persist-order gate, so the queue order is the capture order.
+    pub(super) async fn reserve_persist(&self) -> Result<PersistReservation<'_>, NodeError> {
+        let operation_started = Instant::now();
+        let send_started = Instant::now();
+        let permit = self
+            .thread
+            .sender()
+            .reserve()
+            .await
+            .map_err(|_| NodeError::PersistenceWorkerUnavailable)?;
+        Ok(PersistReservation {
+            worker: self,
+            permit,
+            queue_wait: send_started.elapsed(),
+            operation_started,
         })
-        .await
     }
 
     pub(super) fn persist_bundle_blocking(
@@ -223,6 +231,55 @@ impl PersistenceWorker {
             content,
             reply,
         })
+    }
+}
+
+/// A reserved queue slot for one persist bundle (see `PersistenceWorker::reserve_persist`).
+pub(super) struct PersistReservation<'a> {
+    worker: &'a PersistenceWorker,
+    permit: mpsc::Permit<'a, PersistenceCommand>,
+    queue_wait: Duration,
+    operation_started: Instant,
+}
+
+impl<'a> PersistReservation<'a> {
+    /// Queues the bundle without waiting. Synchronous, so it can run under a lock.
+    pub(super) fn send(self, bundle: EncodedPersistedStateBundle) -> PersistReply<'a> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.permit.send(PersistenceCommand::Persist {
+            bundle: Box::new(bundle),
+            reply: reply_tx,
+        });
+        PersistReply {
+            worker: self.worker,
+            reply: reply_rx,
+            queue_wait: self.queue_wait,
+            operation_started: self.operation_started,
+        }
+    }
+}
+
+/// The pending reply of a queued persist bundle.
+pub(super) struct PersistReply<'a> {
+    worker: &'a PersistenceWorker,
+    reply: oneshot::Receiver<Result<(), NodeError>>,
+    queue_wait: Duration,
+    operation_started: Instant,
+}
+
+impl PersistReply<'_> {
+    pub(super) async fn wait(self) -> Result<(), NodeError> {
+        let reply_started = Instant::now();
+        let result = self
+            .reply
+            .await
+            .unwrap_or(Err(NodeError::PersistenceWorkerTerminated));
+        self.worker.record_request_metrics(
+            self.queue_wait,
+            Some(reply_started.elapsed()),
+            self.operation_started.elapsed(),
+        );
+        result
     }
 }
 

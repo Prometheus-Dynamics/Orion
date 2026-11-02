@@ -29,6 +29,26 @@ pub(crate) use worker::PersistenceWorker;
 #[cfg(test)]
 pub(crate) use worker::{clear_test_persist_delay, set_test_persist_delay};
 
+#[cfg(test)]
+thread_local! {
+    /// Runs once on this thread right after the next persist captures its bundle (test only).
+    static AFTER_CAPTURE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Arms a one-shot hook that runs on the calling thread after its next persist captures state.
+#[cfg(test)]
+pub(crate) fn set_after_capture_hook(hook: impl FnOnce() + 'static) {
+    AFTER_CAPTURE_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_after_capture_hook() {
+    if let Some(hook) = AFTER_CAPTURE_HOOK.with(|slot| slot.borrow_mut().take()) {
+        hook();
+    }
+}
+
 struct PersistedStateBundle {
     snapshot: ClusterStateEnvelope,
     history: MutationHistory,
@@ -109,15 +129,6 @@ fn should_rewrite_desired_snapshot(
 }
 
 impl NodeApp {
-    async fn persist_bundle_async(
-        storage: NodeStorage,
-        bundle: EncodedPersistedStateBundle,
-    ) -> Result<(), NodeError> {
-        tokio::task::spawn_blocking(move || persist_bundle_to_storage(&storage, &bundle))
-            .await
-            .map_err(|err| NodeError::Storage(format!("persistence task join failed: {err}")))?
-    }
-
     fn replay_bundle_from_snapshot(
         &self,
         snapshot: PersistedSnapshotSections,
@@ -345,23 +356,31 @@ impl NodeApp {
         result
     }
 
+    /// Captures the state and queues it for the persistence worker.
+    ///
+    /// Capture and queueing happen under the persist-order gate, so the worker writes bundles in
+    /// the order their state was captured. A bundle that reuses an earlier section's bytes relies
+    /// on that order: written after a newer bundle, it would name a revision the section file no
+    /// longer holds.
     pub async fn persist_state_async(&self) -> Result<(), NodeError> {
         let Some(storage) = &self.storage else {
             return Ok(());
         };
+        let Some(worker) = &self.persistence_worker else {
+            // The builder creates a worker whenever storage exists; the synchronous path keeps
+            // the same capture-to-write order otherwise.
+            return self.persist_state();
+        };
         let started = std::time::Instant::now();
         let result = async {
-            self.note_full_state_write();
-            let history_compacted = self.compact_mutation_history()?;
-            let rewrite_desired = should_capture_desired_snapshot(storage, self)?;
-            let bundle =
-                self.capture_encoded_persisted_state_bundle(rewrite_desired, history_compacted)?;
-            let observed_generation = bundle.observed_generation;
-            if let Some(worker) = &self.persistence_worker {
-                worker.persist_bundle_async(bundle).await?;
-            } else {
-                Self::persist_bundle_async(storage.clone(), bundle).await?;
-            }
+            // Wait for queue space before the gate: the gate is never held across an await.
+            let reservation = worker.reserve_persist().await?;
+            let (observed_generation, reply) = {
+                let _order = self.persist_order_guard();
+                let bundle = self.capture_persist_bundle(storage)?;
+                (bundle.observed_generation, reservation.send(bundle))
+            };
+            reply.wait().await?;
             self.note_observed_generation_persisted(observed_generation);
             Ok(())
         }
@@ -382,11 +401,9 @@ impl NodeApp {
         };
         let started = std::time::Instant::now();
         let result = (|| {
-            self.note_full_state_write();
-            let history_compacted = self.compact_mutation_history()?;
-            let rewrite_desired = should_capture_desired_snapshot(storage, self)?;
-            let bundle =
-                self.capture_encoded_persisted_state_bundle(rewrite_desired, history_compacted)?;
+            // Held through the write: this path waits for the worker anyway.
+            let _order = self.persist_order_guard();
+            let bundle = self.capture_persist_bundle(storage)?;
             let observed_generation = bundle.observed_generation;
             if let Some(worker) = &self.persistence_worker {
                 worker.persist_bundle_blocking(bundle)?;
@@ -402,6 +419,31 @@ impl NodeApp {
             Err(error) => self.record_persistence_failure(started.elapsed(), error),
         }
         result
+    }
+
+    /// Serializes capture with queueing, see `persist_state_async`.
+    fn persist_order_guard(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.state
+            .persisted
+            .persist_order
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Everything a persist decides before it captures: the full-state write accounting, history
+    /// compaction and whether the desired snapshot is rewritten. Must run under the gate.
+    fn capture_persist_bundle(
+        &self,
+        storage: &NodeStorage,
+    ) -> Result<EncodedPersistedStateBundle, NodeError> {
+        self.note_full_state_write();
+        let history_compacted = self.compact_mutation_history()?;
+        let rewrite_desired = should_capture_desired_snapshot(storage, self)?;
+        let bundle =
+            self.capture_encoded_persisted_state_bundle(rewrite_desired, history_compacted)?;
+        #[cfg(test)]
+        run_after_capture_hook();
+        Ok(bundle)
     }
 
     pub async fn put_artifact_content_async(

@@ -8,6 +8,7 @@ mod memory_footprint;
 mod observability;
 mod observed_coalescing;
 mod peers;
+mod persist_order;
 mod persistence_basics;
 mod provider_retraction;
 #[cfg(feature = "transport-http")]

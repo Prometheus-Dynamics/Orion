@@ -7,7 +7,7 @@ use std::time::Instant;
 
 const PROVIDER: &str = "provider.coalesce";
 
-fn coalescing_app(node_id: &str, state_dir: PathBuf, interval: Duration) -> NodeApp {
+pub(super) fn coalescing_app(node_id: &str, state_dir: PathBuf, interval: Duration) -> NodeApp {
     let config = test_node_config_with_state_dir_and_auth(
         NodeId::new(node_id),
         node_id,
@@ -25,7 +25,7 @@ fn coalescing_app(node_id: &str, state_dir: PathBuf, interval: Duration) -> Node
         .expect("node app should build")
 }
 
-fn provider_update(app: &NodeApp, generation: u64) -> ControlMessage {
+pub(super) fn provider_update(app: &NodeApp, generation: u64) -> ControlMessage {
     let health = if generation.is_multiple_of(2) {
         HealthState::Healthy
     } else {
@@ -45,7 +45,7 @@ fn provider_update(app: &NodeApp, generation: u64) -> ControlMessage {
     })
 }
 
-fn register_provider_client(app: &NodeApp, source: &LocalAddress) {
+pub(super) fn register_provider_client(app: &NodeApp, source: &LocalAddress) {
     app.apply_local_control_message(
         source,
         ControlMessage::ClientHello(ClientHello {

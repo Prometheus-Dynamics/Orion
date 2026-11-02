@@ -391,6 +391,9 @@ pub(super) struct PersistedState {
     /// baseline locks inside desired-state transactions.
     pub(super) clock: std::sync::Mutex<orion::HybridLogicalClock>,
     pub(super) merge_metrics: std::sync::Mutex<super::hlc_state::DesiredMergeMetrics>,
+    /// Orders persist captures with their queueing to the persistence worker (see
+    /// `persistence::NodeApp::persist_state_async`). Taken before the store and history locks.
+    pub(super) persist_order: std::sync::Mutex<()>,
 }
 
 pub(super) struct PeerRegistryState {
