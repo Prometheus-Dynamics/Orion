@@ -200,6 +200,15 @@ its dev version.
 - [x] Persistence failed when a mutation raced the desired-snapshot capture.
 - [x] Lock-order deadlock between peer-sync responses and desired-state commits.
 - [x] Order-dependent rustls provider panic in HTTP tests; peer-sync timing race in `process_http`.
+- [x] Snapshot write ordering race (persistence). A persist captured its bundle under the state read
+      lock, then queued it to the persistence worker without any ordering. Two concurrent persists could
+      queue in the reverse order of capture. A bundle that reuses the observed bytes (its observed
+      revision matched the manifest on disk at capture time) then wrote a manifest naming a revision
+      that the newer bundle's observed file had replaced, so `load_snapshot_sections` failed with
+      "snapshot manifest revisions do not match section files". Fixed: capture and queueing run under
+      one persist-order gate, and the async path reserves queue space before taking the gate. Regression
+      test `older_persist_cannot_commit_over_a_newer_snapshot` (fails before the fix). Stress: 200 of
+      200 green under load; the coalescing test 120 of 120 green.
 
 ## Open
 
@@ -212,17 +221,12 @@ its dev version.
 
 ### Persistence
 
-- [ ] **Snapshot write ordering race.** Why: under concurrent writes (the apply path's immediate
-      observed write, and the reconcile loop's writes), a persisted bundle's manifest can name an
-      observed revision that the observed file does not hold. Then `load_snapshot_sections` fails
-      with "snapshot manifest revisions do not match section files", and the state cannot be
-      restored at startup. Seen 6 times in 120 runs of
-      `desired_commits_stay_durable_and_carry_pending_observed_state` under heavy CPU load, with the
-      mismatch still present after the writes had stopped. Suspected mechanism, not yet confirmed:
-      bundles are captured on one thread and queued in another order, and a bundle that reuses the
-      existing observed bytes writes a manifest from its capture time. Done when: capture and
-      enqueue are ordered (or the manifest records the revisions it wrote), and that test stays green
-      across 200 stressed runs. Blocked by: nothing.
+- [ ] Find the device trigger of the 5 s idle persist. On the Raze board `state persistence
+      succeeded` logged every 5 s (the reconcile backstop) with nothing changing. On the bench an
+      idle node writes nothing (0 writes in 600 ms, also with a provider re-publishing identical
+      snapshots), so the trigger is a reconcile flag (`runtime_changed` or `applied_revision_changed`)
+      that flips on the device. Run with `RUST_LOG=orion_node=debug` on the board and read the
+      `reconcile pass changed observed state; persisting` line that names the flag.
 
 ### CI
 

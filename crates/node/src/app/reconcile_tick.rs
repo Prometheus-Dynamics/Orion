@@ -3,7 +3,7 @@ use orion::runtime::{
     ExecutorCommand, ExecutorIntegration, ExecutorSnapshot, ProviderSnapshot, ReconcileReport,
 };
 use std::{collections::BTreeMap, sync::Arc};
-use tracing::info_span;
+use tracing::{debug, info_span};
 
 struct CollectedRuntimeState {
     executors: Vec<Arc<dyn ExecutorIntegration + Send + Sync>>,
@@ -150,6 +150,7 @@ impl NodeApp {
         let (report, outcome) =
             self.dispatch_reconcile_report(executors, report, runtime_changed)?;
         if outcome.runtime_changed || outcome.applied_revision_changed {
+            log_reconcile_persist(self, &outcome);
             self.persist_observed_state_async().await?;
         }
         Ok((report, outcome))
@@ -164,6 +165,7 @@ impl NodeApp {
         let (report, outcome) =
             self.dispatch_reconcile_report(executors, report, runtime_changed)?;
         if outcome.runtime_changed || outcome.applied_revision_changed {
+            log_reconcile_persist(self, &outcome);
             self.persist_observed_state()?;
         }
         Ok((report, outcome))
@@ -207,6 +209,17 @@ impl NodeApp {
             Ok(changed)
         })
     }
+}
+
+/// Records why a reconcile pass persists observed state. A pass that changes nothing never reaches
+/// the persist call, so an idle node writes nothing; this line shows which change caused a write.
+fn log_reconcile_persist(app: &NodeApp, outcome: &ReconcileOutcome) {
+    debug!(
+        node = %app.config.node_id,
+        runtime_changed = outcome.runtime_changed,
+        applied_revision_changed = outcome.applied_revision_changed,
+        "reconcile pass changed observed state; persisting"
+    );
 }
 
 fn executor_index(

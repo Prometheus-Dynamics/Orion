@@ -578,7 +578,7 @@ impl NodeApp {
             Some(duration),
             "state persistence succeeded".into(),
         );
-        info!(node = %self.config.node_id, duration_ms = duration.as_millis() as u64, "state persistence succeeded");
+        debug!(node = %self.config.node_id, duration_ms = duration.as_millis() as u64, "state persistence succeeded");
     }
 
     fn record_persistence_failure(&self, duration: Duration, error: &NodeError) {
