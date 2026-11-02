@@ -2,13 +2,23 @@ name: CI
 
 on:
   push:
+    # Every push to dev runs the per-push set below. Docs-only pushes skip the workflow.
     branches:
+      - dev
       - main
       - master
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
   schedule:
     - cron: "17 9 * * 1"
   workflow_dispatch:
+
+# A newer push to the same ref supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   workspace:
@@ -243,6 +253,8 @@ jobs:
     # armv7) boards: cross-built in release for riscv64gc-unknown-linux-gnu and
     # armv7-unknown-linux-gnueabihf, the node tests run under qemu-user for riscv64 (against the
     # Debian sysroot the cross libc package installs), and the stripped sizes reported.
+    # About six minutes, so it runs on the weekly schedule and on dispatch, not on every push.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

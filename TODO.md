@@ -12,17 +12,17 @@ when, blocked by.
 ### 1. Freeze items still open
 
 - [ ] **aarch64 appliance soak.** Why: the frozen soak item; orion-node runs on every board. Data so
-      far (2026-10-31, Raze #1, the packaged node under HeliOS's real load): 7 days up, 0 restarts,
+      far (2026-10-31, reference board #1, the packaged node under the device runtime's real load): 7 days up, 0 restarts,
       PSS 9.8 MiB / RSS 11.3 MiB. Left: a release aarch64 build's 24 h PSS curve after warm-up,
-      recorded in docs/node-env.md. Blocked by: nothing (the coordinator lends Raze #1 on request).
+      recorded in docs/node-env.md. Blocked by: nothing (the coordinator lends reference board #1 on request).
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate public types,
       aliases or client methods remain across orion-client/control-plane/node, and docs match.
       Blocked by: nothing.
-- [ ] **Unknown arguments start a node.** Why: `orion-node --version` on a Raze (2026-10-31)
+- [ ] **Unknown arguments start a node.** Why: `orion-node --version` on a reference board (2026-10-31)
       started a second node (`node.local`, sockets in /tmp) instead of printing a version or
       refusing. Done when: `--version` and `--help` work, and an unknown argument exits non-zero
       without starting anything. Blocked by: nothing.
-- [x] Retraction, action-watch reconnect, robot-link peer trust, supervision and safe mode
+- [x] Retraction, action-watch reconnect, private-link peer trust, supervision and safe mode
       (3f86056, bbc505b, 83fce6b, 3a00507, 2ec9f08, a380034, 9ad7991).
 
 ### 2. Hardware support and memory (added 2026-10-30)
@@ -42,7 +42,7 @@ when, blocked by.
       locally with zig cc against glibc 2.39 and a Debian trixie sysroot; the GitHub job is the
       first run on ubuntu-latest. Blocked by: nothing.
 - [x] **Memory on the device.** The packaged unit's malloc settings (6a70758: one arena, 64 KiB
-      mmap/trim/top-pad) on Raze #1 under HeliOS's load: PSS 9.8 MiB, RSS 11.3 MiB, private dirty
+      mmap/trim/top-pad) on reference board #1 under the device runtime's load: PSS 9.8 MiB, RSS 11.3 MiB, private dirty
       6.9 MiB after 7 days (13.6 MiB before 6a70758). Recorded in docs/node-env.md.
 ### 3. Release mechanics
 
@@ -50,7 +50,7 @@ For when the user calls the release; only the user decides when. Until then the 
 its dev version.
 
 - [ ] Version 1.0.0 (target agreed with the user on 2026-10-30); CHANGELOG.md for the release.
-- [ ] Tag the release; HeliOS, Atlas and the Gaia `orion` source pin the tag instead of a `rev`.
+- [ ] Tag the release; the consuming products and the Gaia `orion` source pin the tag instead of a `rev`.
 - [ ] Gates on the release commit: fmt, clippy -D warnings, tests, the node feature matrix and the
       file-size check.
 
@@ -73,12 +73,12 @@ its dev version.
       features `http`, `yaml`, `toml` (default on). IPC + JSON build is 1.80 MiB / 57 crates vs
       4.38 MiB / 139 crates default (2.65 MiB with YAML + TOML).
 
-- [x] **What Atlas needs on the SystemCore** (all four in Orion; Atlas's agent adopts them next):
+- [x] **What the device agent needs on the SystemCore** (all four in Orion; the device agent adopts them next):
       blob push over local IPC, `BeginBlob`/`WriteBlobChunk`/`CommitBlob`/`QueryBlobs`/`DeleteBlob`,
       resumable and digest-checked, `LocalControlPlaneClient::push_blob` ([docs/blobs.md](docs/blobs.md),
       02cafc3); long-running jobs on the action lane, `ActionState::Cancelled` and the `<name>.cancel`
       companion, one-hour deadline cap ([docs/actions.md](docs/actions.md#long-running-jobs), 4a66027);
-      provider rights for non-HeliOS clients, `ORION_NODE_LOCAL_PROVIDER_ALLOW` ([docs/node-env.md](docs/node-env.md#local-ipc-access), 416b67b);
+      provider rights for clients other than the device runtime, `ORION_NODE_LOCAL_PROVIDER_ALLOW` ([docs/node-env.md](docs/node-env.md#local-ipc-access), 416b67b);
       status values up to `ORION_NODE_STATUS_MAX_VALUE_BYTES` (4 KiB) under `ORION_NODE_STATUS_MAX_BYTES`
       (4 MiB), 1c2f1bf. Protocol v7.
 
@@ -205,10 +205,10 @@ its dev version.
 
 ### Needs the device (arm64 board)
 
-- [x] Transparent huge pages: not applicable on the Raze; its kernel has no THP
+- [x] Transparent huge pages: not applicable on the reference board; its kernel has no THP
       (`/sys/kernel/mm/transparent_hugepage` absent), and AnonHugePages is 0.
 - [x] The packaged service on the board image (16 KiB pages): `Type=notify`, `WatchdogUSec=30s`,
-      StatusText "serving node=raze-…", 0 restarts in 7 days (Raze #1, 2026-10-31).
+      StatusText "serving node=node-…", 0 restarts in 7 days (reference board #1, 2026-10-31).
 
 ### CI
 
@@ -217,9 +217,19 @@ its dev version.
       alignment check, `systemd-analyze verify`).
 - [ ] Build the Gaia layer's docker image (`packaging/gaia/docker/aarch64-cross.Dockerfile`) once in
       a real Gaia run; it was only validated with `gaia validate` / `gaia plan`, not built.
-- [ ] Timing-sensitive tests (`control_queries_remain_fast_*`,
-      `concurrent_peer_sync_*_remains_responsive`, `audit_log_drops_newest_when_queue_is_full`) can
-      fail on heavily loaded machines; relax or restructure if they flake in CI.
+- [x] Timing-sensitive tests no longer flake under load. The injected-delay tests
+      (`control_queries_remain_fast_*`, `concurrent_peer_sync_*_remains_responsive`,
+      `audit_log_drops_newest_when_queue_is_full`) hold `tests::INJECTED_DELAY_LOCK` and assert
+      ordering, not wall-clock time: a control call returns while the operation it would wait
+      behind is still in flight. `observability_reports_ipc_stream_communication_metrics` runs with
+      its heartbeat out of the window. The coalescing flush, the process-level watch test and the
+      restart test no longer depend on fixed sleeps or the one-second client timeout. 20 of 20
+      full-suite runs green at load 54 to 113.
+- [x] CI on `dev` pushes: `ci.yml` runs on `dev`, `main` and `master` pushes (skipped for pushes
+      that only touch `docs/` or Markdown), with per-ref concurrency and cancel-in-progress. The
+      long jobs run on schedule or dispatch only: `cross32`, and the Docker suites in
+      `ci-docker.yml` (which no longer run on pull requests or pushes).
+- [ ] Watch `cross32` and `ci-docker` on the next weekly schedule: they have no per-push run now.
 
 ### Release
 

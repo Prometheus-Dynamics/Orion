@@ -31,7 +31,11 @@ See [`testing.md`](testing.md) for the repo-level validation surfaces and suite 
 ## CI jobs
 
 The Linux jobs of [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) run
-[`scripts/ci-jobs.sh`](../scripts/ci-jobs.sh), so a local run executes exactly the same commands:
+[`scripts/ci-jobs.sh`](../scripts/ci-jobs.sh), so a local run executes exactly the same commands.
+CI runs on every push to `dev`, `main` and `master` (skipped when a push only touches `docs/` or
+Markdown files), on pull requests, weekly, and on dispatch. The per-push set has to stay quick, so
+the long jobs run on schedule or dispatch only: `cross32` in `ci.yml`, the Docker suites in
+`ci-docker.yml`, and the soak and perf suites in `ci-soak.yml` and `ci-perf.yml`.
 
 ```bash
 ./scripts/ci-jobs.sh lints            # one job: workspace, lints, no-std, link, allocators, appliance, cross32
@@ -69,7 +73,7 @@ The feature matrix is chosen for distinct `cfg` combinations, not as a cross pro
   started and cross-built for aarch64 (one job, so the two builds share their dependencies).
 - **Appliance**: the release aarch64 cross-build with its 64 KiB segment alignment, a type-check of
   the `link-gateway` variant, and `systemd-analyze verify` against the cross-built binary.
-- **cross32**: the IPC-only `orion-node` and `orionctl` for the K230D (riscv64) and Flame (armv7)
+- **cross32** (weekly and on dispatch, not per push): the IPC-only `orion-node` and `orionctl` for the K230D (riscv64) and Flame (armv7)
   boards: `cargo check` and a release build for `riscv64gc-unknown-linux-gnu` and
   `armv7-unknown-linux-gnueabihf`, the `orion-node` and `orionctl` tests under `qemu-riscv64-static`
   (the node tests run with `--test-threads=1`: the stream and audit tests are timing-based and
