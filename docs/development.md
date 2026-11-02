@@ -34,9 +34,10 @@ The Linux jobs of [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) run
 [`scripts/ci-jobs.sh`](../scripts/ci-jobs.sh), so a local run executes exactly the same commands:
 
 ```bash
-./scripts/ci-jobs.sh lints            # one job: workspace, lints, no-std, link, allocators, appliance
+./scripts/ci-jobs.sh lints            # one job: workspace, lints, no-std, link, allocators, appliance, cross32
 ./scripts/ci-jobs.sh all              # everything (the link and appliance jobs need the MCU and
-                                      # aarch64 targets, and an aarch64 cross linker for appliance)
+                                      # aarch64 targets, and an aarch64 cross linker for appliance;
+                                      # cross32 needs the riscv64 and armhf cross linkers and qemu-user)
 CI_JOBS_TIMINGS=t.tsv ./scripts/ci-jobs.sh all   # per-step wall and CPU seconds as TSV
 ```
 
@@ -68,6 +69,13 @@ The feature matrix is chosen for distinct `cfg` combinations, not as a cross pro
   started and cross-built for aarch64 (one job, so the two builds share their dependencies).
 - **Appliance**: the release aarch64 cross-build with its 64 KiB segment alignment, a type-check of
   the `link-gateway` variant, and `systemd-analyze verify` against the cross-built binary.
+- **cross32**: the IPC-only `orion-node` and `orionctl` for the K230D (riscv64) and Flame (armv7)
+  boards: `cargo check` and a release build for `riscv64gc-unknown-linux-gnu` and
+  `armv7-unknown-linux-gnueabihf`, the `orion-node` and `orionctl` tests under `qemu-riscv64-static`
+  (the node tests run with `--test-threads=1`: the stream and audit tests are timing-based and
+  fail when run in parallel under emulation), and the stripped release sizes. The workflow sets the
+  cross linkers (`gcc-riscv64-linux-gnu`, `gcc-arm-linux-gnueabihf`) and the qemu runner, with
+  `QEMU_LD_PREFIX` set to the riscv64 cross libc (binaries that a test spawns run through binfmt).
 
 Debug builds use line tables only for workspace crates and no debug info for dependencies
 (`[profile.dev]` in [`Cargo.toml`](../Cargo.toml)); set `CARGO_PROFILE_DEV_DEBUG=full` to debug.

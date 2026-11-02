@@ -238,6 +238,45 @@ jobs:
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
         run: ./scripts/ci-jobs.sh appliance
 
+  cross32:
+    # The IPC-only orion-node and orionctl for the K230D (riscv64) and Flame (RV1106G2, Cortex-A7,
+    # armv7) boards: cross-built in release for riscv64gc-unknown-linux-gnu and
+    # armv7-unknown-linux-gnueabihf, the node tests run under qemu-user for riscv64 (against the
+    # Debian sysroot the cross libc package installs), and the stripped sizes reported.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
+          targets: riscv64gc-unknown-linux-gnu, armv7-unknown-linux-gnueabihf
+
+      - name: Install riscv64 and armhf cross compilers and qemu-user
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-linux-gnu libc6-dev-riscv64-cross libc6-riscv64-cross \
+            gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-static
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cross build and riscv64 node tests (scripts/ci-jobs.sh cross32)
+        env:
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          CC_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-gcc
+          AR_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-ar
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-riscv64-static
+          # The riscv64 cross libc is the qemu-user sysroot, also for binaries the test spawns (binfmt).
+          QEMU_LD_PREFIX: /usr/riscv64-linux-gnu
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+          CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc
+          AR_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-ar
+        run: ./scripts/ci-jobs.sh cross32
+
   dependency-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 20

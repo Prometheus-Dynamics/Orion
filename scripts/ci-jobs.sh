@@ -3,7 +3,7 @@
 # same commands. Each step prints its wall time and CPU time (user + system), and a summary at the
 # end; under GitHub Actions the steps are collapsible groups.
 #
-#   ./scripts/ci-jobs.sh <job>...        jobs: workspace lints no-std link allocators appliance
+#   ./scripts/ci-jobs.sh <job>...        jobs: workspace lints no-std link allocators appliance cross32
 #   ./scripts/ci-jobs.sh all             every job above, in order
 #   CI_JOBS_TIMINGS=file.tsv ...         also append "job<TAB>step<TAB>wall_s<TAB>cpu_s<TAB>rc" rows
 #
@@ -243,13 +243,46 @@ job_appliance() {
     fi
 }
 
+# The 32-bit and RISC-V Linux boards (K230D riscv64, Flame RV1106G2 armv7): the IPC-only orion-node
+# and orionctl cross-built for riscv64gc-unknown-linux-gnu and armv7-unknown-linux-gnueabihf in
+# release, the node tests run under qemu-user for riscv64 (serially: the stream and audit tests
+# are timing-based and fail when run in parallel under emulation), and the stripped sizes reported.
+# The CI workflow sets the cross linkers and the qemu runner (docs/development.md, "CI jobs").
+job_cross32() {
+    local riscv=riscv64gc-unknown-linux-gnu armv7=armv7-unknown-linux-gnueabihf
+    step cross32 "check orion-node orionctl [no-default-features] riscv64gc" \
+        cargo check --locked -p orion-node -p orionctl --no-default-features --target "$riscv"
+    step cross32 "check orion-node orionctl [no-default-features] armv7" \
+        cargo check --locked -p orion-node -p orionctl --no-default-features --target "$armv7"
+    step cross32 "release build orion-node orionctl [no-default-features] riscv64gc" \
+        cargo build --locked --release -p orion-node -p orionctl --no-default-features --target "$riscv"
+    step cross32 "release build orion-node orionctl [no-default-features] armv7" \
+        cargo build --locked --release -p orion-node -p orionctl --no-default-features --target "$armv7"
+    step cross32 "test orion-node [no-default-features] under qemu riscv64 (serial)" \
+        cargo test --locked -p orion-node --no-default-features --target "$riscv" -- --test-threads=1
+    step cross32 "test orionctl [no-default-features] under qemu riscv64" \
+        cargo test --locked -p orionctl --no-default-features --target "$riscv"
+    step cross32 "stripped sizes (release, riscv64gc and armv7)" bash -c '
+        target_dir="$1"; shift
+        for t in "$@"; do
+            for bin in orion-node orionctl; do
+                file="$target_dir/$t/release/$bin"
+                if readelf -S --wide "$file" | grep -q "[.]symtab"; then
+                    echo "error: $file is not stripped" >&2
+                    exit 1
+                fi
+                printf "%-34s %-12s %10s bytes\n" "$t" "$bin" "$(stat -c %s "$file")"
+            done
+        done' _ "${CARGO_TARGET_DIR:-target}" "$riscv" "$armv7"
+}
+
 jobs=("$@")
 if [[ ${#jobs[@]} == 0 ]]; then
-    echo "usage: $0 <workspace|lints|no-std|link|allocators|appliance|all>..." >&2
+    echo "usage: $0 <workspace|lints|no-std|link|allocators|appliance|cross32|all>..." >&2
     exit 2
 fi
 if [[ "${jobs[*]}" == "all" ]]; then
-    jobs=(workspace lints no-std link allocators appliance)
+    jobs=(workspace lints no-std link allocators appliance cross32)
 fi
 for job in "${jobs[@]}"; do
     case "$job" in
@@ -259,6 +292,7 @@ for job in "${jobs[@]}"; do
         link) job_link ;;
         allocators) job_allocators ;;
         appliance) job_appliance ;;
+        cross32) job_cross32 ;;
         *) echo "unknown job: $job" >&2; exit 2 ;;
     esac
 done
