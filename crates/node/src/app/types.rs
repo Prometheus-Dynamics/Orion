@@ -160,6 +160,8 @@ pub enum NodeError {
     Status(String),
     #[error("action: {0}")]
     Action(String),
+    #[error("blob: {0}")]
+    Blob(String),
 }
 
 #[derive(Clone)]

@@ -56,6 +56,7 @@ alloc-jemalloc = ["dep:tikv-jemallocator"]
 [dependencies]
 ed25519-dalek.workspace = true
 libc.workspace = true
+sha2.workspace = true
 mdns-sd = { workspace = true, optional = true }
 mimalloc = { workspace = true, optional = true }
 orion-auth = { workspace = true, features = ["std", "crypto"] }
@@ -88,6 +89,7 @@ orion = { workspace = true, features = ["auth", "client", "runtime", "macros", "
 # Remote operator tests (src/tests/cluster/remote_operator*.rs) drive nodes with the real client.
 orion-client = { workspace = true, features = ["ipc", "remote"] }
 orion-macros.workspace = true
+sha2.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
 

@@ -280,6 +280,13 @@ fn provider_allow_list_admits_the_provider_lane_only() {
     .expect("it publishes its provider state");
     send(ControlMessage::ClaimNodeActions(vec!["update".into()]))
         .expect("and claims node actions to handle");
+    // Blob push is in the provider lane; this node has no blob directory, so the answer is the
+    // store's, not an authorization refusal.
+    let blobs = send(ControlMessage::QueryBlobs(None));
+    assert!(
+        matches!(&blobs, Err(NodeError::Blob(_))),
+        "the provider lane reaches the blob store: {blobs:?}"
+    );
 
     let err = send(ControlMessage::WatchState(StateWatch::desired(
         Revision::ZERO,

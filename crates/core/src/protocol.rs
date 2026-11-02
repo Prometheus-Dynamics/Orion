@@ -47,7 +47,10 @@ use core::fmt;
 ///   `StreamReset` / `StreamDemand` and their types, `NodeResourceUsageSnapshot::streams`).
 /// - `6`: `ActionState::Cancelled`, the terminal state of a long-running job stopped by its
 ///   `<name>.cancel` companion action (`docs/actions.md`, "Long-running jobs").
-pub const CONTROL_PROTOCOL_VERSION: u16 = 6;
+/// - `7`: blob push (`docs/blobs.md`): `ControlMessage::BeginBlob`, `WriteBlobChunk`, `CommitBlob`,
+///   `QueryBlobs`, `DeleteBlob`, `Blob`, `Blobs`; `BlobBegin`, `BlobChunk`, `BlobState`,
+///   `BlobStatus`.
+pub const CONTROL_PROTOCOL_VERSION: u16 = 7;
 
 /// Fingerprint of the archived layout of the control-protocol types at
 /// [`CONTROL_PROTOCOL_VERSION`].
@@ -55,7 +58,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 6;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x5728_e2b0_c5a1_c4ab;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x5561_4b70_cdf9_8a72;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

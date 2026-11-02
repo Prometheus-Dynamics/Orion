@@ -15,10 +15,11 @@ mod state;
 
 pub use messages::{
     ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
-    ActionTargetParseError, AuditLogBackpressureMode, Backfill, ClientEvent, ClientEventKind,
-    ClientEventPoll, ClientHello, ClientRole, ClientSession, ClientSessionMetricsSnapshot,
-    CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot,
-    CommunicationFailureKind, CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
+    ActionTargetParseError, AuditLogBackpressureMode, Backfill, BlobBegin, BlobChunk, BlobState,
+    BlobStatus, ClientEvent, ClientEventKind, ClientEventPoll, ClientHello, ClientRole,
+    ClientSession, ClientSessionMetricsSnapshot, CommunicationEndpointScope,
+    CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot, CommunicationFailureKind,
+    CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
     CommunicationStageMetricsSnapshot, CommunicationTransportKind, ControlMessage,
     DesiredStateMergeSnapshot, DesiredStateMutation, DesiredStateObjectSelector,
     DesiredStateSection, DesiredStateSectionFingerprints, DesiredStateSummary,
@@ -314,6 +315,13 @@ mod tests {
             | ControlMessage::OperatorHello
             | ControlMessage::QueryOperators
             | ControlMessage::Operators(_)
+            | ControlMessage::BeginBlob(_)
+            | ControlMessage::WriteBlobChunk(_)
+            | ControlMessage::CommitBlob(_)
+            | ControlMessage::QueryBlobs(_)
+            | ControlMessage::DeleteBlob(_)
+            | ControlMessage::Blob(_)
+            | ControlMessage::Blobs(_)
             | ControlMessage::EnrollOperator(_)
             | ControlMessage::RemoveOperator(_) => {
                 panic!("unexpected control message")

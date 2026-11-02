@@ -78,8 +78,9 @@ pub mod remote {
 pub mod control_plane {
     pub use orion_control_plane::{
         ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
-        ActionTargetParseError, HostFacts, HostMetricsSample, HostTemperature, LinkStatusSnapshot,
-        NodeHostFacts, action_names, action_status_keys, update_action,
+        ActionTargetParseError, BlobBegin, BlobChunk, BlobState, BlobStatus, HostFacts,
+        HostMetricsSample, HostTemperature, LinkStatusSnapshot, NodeHostFacts, action_names,
+        action_status_keys, update_action,
     };
     pub use orion_control_plane::{
         AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, AvailabilityState, ClientEvent,

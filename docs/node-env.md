@@ -242,6 +242,16 @@ ORION_NODE_LOCAL_PROVIDER_ALLOW=user:atlas
 A refused caller gets an authorization error naming its uid, gid and groups and these variables. Embedders set the same with `NodeAppBuilder::with_local_authentication_mode` and
 `with_local_access_allow(LocalAccessAllowList::new().allow_uid(0).allow_gid(..))`.
 
+### Blob push limits
+
+Blob push (see [blobs.md](blobs.md)) stores files that local clients push in chunks.
+
+| Variable | Default | Valid values | Failure behavior |
+| --- | --- | --- | --- |
+| `ORION_NODE_BLOB_DIR` | unset (`<state dir>/blobs`) | Filesystem path | Blob push is off when neither this nor `ORION_NODE_STATE_DIR` is set. |
+| `ORION_NODE_BLOB_MAX_BYTES` | `2147483648` | Integer bytes, minimum `1` | Invalid integer fails startup. |
+| `ORION_NODE_BLOB_CHUNK_MAX_BYTES` | `1048576` | Integer bytes, clamped to `1`..`4194304` | Invalid integer fails startup. |
+
 ## Peer Discovery
 
 mDNS/DNS-SD discovery and enrollment (feature `discovery-mdns`, off by default). Discovered peers

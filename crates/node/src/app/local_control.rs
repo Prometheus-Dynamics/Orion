@@ -39,6 +39,11 @@ impl NodeApp {
 
         let response = match message {
             ControlMessage::ClientHello(hello) => self.register_local_client(source, hello),
+            ControlMessage::BeginBlob(_)
+            | ControlMessage::WriteBlobChunk(_)
+            | ControlMessage::CommitBlob(_)
+            | ControlMessage::QueryBlobs(_)
+            | ControlMessage::DeleteBlob(_) => self.apply_local_blob_message(message),
             ControlMessage::ProviderState(update) => {
                 self.apply_provider_state_update(source, update)?;
                 Ok(ControlMessage::Accepted)
@@ -255,6 +260,8 @@ impl NodeApp {
             | ControlMessage::Discovery(_)
             | ControlMessage::EnrollmentChallenge(_)
             | ControlMessage::ActionResults(_)
+            | ControlMessage::Blob(_)
+            | ControlMessage::Blobs(_)
             | ControlMessage::Operators(_)
             | ControlMessage::Accepted
             | ControlMessage::Rejected(_) => Ok(ControlMessage::Rejected(

@@ -1,4 +1,5 @@
 mod actions;
+mod blobs;
 mod client;
 mod control;
 mod discovery;
@@ -17,6 +18,7 @@ pub use actions::{
     ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
     ActionTargetParseError, action_names, action_status_keys, update_action,
 };
+pub use blobs::{BlobBegin, BlobChunk, BlobState, BlobStatus};
 pub use client::{
     ClientEvent, ClientEventKind, ClientEventPoll, ClientHello, ClientRole, ClientSession,
     ExecutorStateUpdate, ExecutorWorkloadQuery, ObservedStateUpdate, PeerEnrollment,

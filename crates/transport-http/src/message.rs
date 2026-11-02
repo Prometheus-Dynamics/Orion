@@ -130,7 +130,14 @@ impl HttpRequestPayload {
                 | ControlMessage::EnrollOperator(_)
                 | ControlMessage::RemoveOperator(_)
                 | ControlMessage::DeclareStream(_)
-                | ControlMessage::PublishSamples(_) => {
+                | ControlMessage::PublishSamples(_)
+                | ControlMessage::BeginBlob(_)
+                | ControlMessage::WriteBlobChunk(_)
+                | ControlMessage::CommitBlob(_)
+                | ControlMessage::QueryBlobs(_)
+                | ControlMessage::DeleteBlob(_)
+                | ControlMessage::Blob(_)
+                | ControlMessage::Blobs(_) => {
                     Err(crate::HttpTransportError::UnsupportedControlMessage)
                 }
             },

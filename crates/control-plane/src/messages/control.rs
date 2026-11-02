@@ -1,4 +1,5 @@
 use super::actions::{ActionQuery, ActionReport, ActionRequest, ActionResult};
+use super::blobs::{BlobBegin, BlobChunk, BlobStatus};
 use super::client::{
     ClientEvent, ClientEventPoll, ClientHello, ClientSession, ExecutorStateUpdate,
     ExecutorWorkloadQuery, PeerEnrollment, PeerIdentityUpdate, ProviderLeaseQuery,
@@ -100,6 +101,19 @@ pub enum ControlMessage {
     /// A handler's progress or final report for an action it received.
     ReportActionResult(Box<ActionReport>),
     ActionResults(Vec<ActionResult>),
+    /// Starts a blob (or resumes one with the same size and digest); answered with `Blob`.
+    BeginBlob(BlobBegin),
+    /// Writes one chunk at the blob's `received` offset; answered with `Blob` (the status says
+    /// where to resume when the offset did not match).
+    WriteBlobChunk(BlobChunk),
+    /// Verifies a fully received blob in the background; answered with `Blob` (`Verifying`).
+    CommitBlob(String),
+    /// Lists blobs, or one blob by id; answered with `Blobs`.
+    QueryBlobs(Option<String>),
+    /// Removes a blob's bytes and record; answered with `Accepted`.
+    DeleteBlob(String),
+    Blob(BlobStatus),
+    Blobs(Vec<BlobStatus>),
     /// A remote operator introduces itself (signed, peer transports only); answered with
     /// `HttpResponsePayload::OperatorWelcome`. An unknown operator's hello is recorded as a
     /// pending enrollment (`docs/remote-operator.md`).

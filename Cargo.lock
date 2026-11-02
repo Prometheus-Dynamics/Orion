@@ -1507,6 +1507,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tikv-jemallocator",
  "tokio",

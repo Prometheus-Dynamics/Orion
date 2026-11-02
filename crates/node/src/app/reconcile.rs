@@ -119,6 +119,13 @@ impl NodeApp {
             | ControlMessage::ReportActionResult(_)
             | ControlMessage::ActionResults(_)
             | ControlMessage::ClaimNodeActions(_)
+            | ControlMessage::BeginBlob(_)
+            | ControlMessage::WriteBlobChunk(_)
+            | ControlMessage::CommitBlob(_)
+            | ControlMessage::QueryBlobs(_)
+            | ControlMessage::DeleteBlob(_)
+            | ControlMessage::Blob(_)
+            | ControlMessage::Blobs(_)
             | ControlMessage::OperatorHello
             | ControlMessage::OpenSession(_)
             | ControlMessage::DeclareStream(_)

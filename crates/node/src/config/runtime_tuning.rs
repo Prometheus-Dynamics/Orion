@@ -126,6 +126,8 @@ pub struct NodeRuntimeTuning {
     pub host_facts: super::host_actions::HostFactsTuning,
     /// Action deadlines and result registry bounds (`docs/actions.md`).
     pub actions: super::host_actions::ActionTuning,
+    /// Blob push (`docs/blobs.md`).
+    pub blobs: super::blob_tuning::BlobTuning,
 }
 
 impl NodeRuntimeTuning {
@@ -489,6 +491,7 @@ impl NodeRuntimeTuning {
             placement: super::placement::PlacementTuning::from_env()?,
             host_facts: super::host_actions::HostFactsTuning::from_env()?,
             actions: super::host_actions::ActionTuning::from_env()?,
+            blobs: super::blob_tuning::BlobTuning::from_env()?,
         };
         tuning.normalize();
         Ok(tuning)
@@ -540,6 +543,7 @@ impl NodeRuntimeTuning {
         self.status_max_total_bytes = self.status_max_total_bytes.max(self.status_max_value_bytes);
         self.placement.normalize();
         self.actions.normalize();
+        self.blobs.normalize();
     }
 }
 
@@ -591,6 +595,7 @@ impl Default for NodeRuntimeTuning {
             placement: super::placement::PlacementTuning::default(),
             host_facts: Default::default(),
             actions: Default::default(),
+            blobs: Default::default(),
         }
     }
 }

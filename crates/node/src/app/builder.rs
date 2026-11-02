@@ -454,6 +454,11 @@ impl NodeAppBuilder {
                     crate::host_facts::LayeredHostFactsSource::with_overlay,
                 ))
             };
+        let blobs = super::blob_store::BlobStore::open_configured(
+            &config.runtime_tuning.blobs,
+            config.state_dir.as_deref(),
+        )
+        .map_err(super::NodeError::Config)?;
         let state = Arc::new(NodeState {
             persisted: PersistedState {
                 store: RwLock::new(store),
@@ -497,6 +502,7 @@ impl NodeAppBuilder {
             status: Default::default(),
             streams: Default::default(),
             actions: super::actions::ActionsState::with_handlers(self.action_handlers),
+            blobs,
             host_facts: super::host_facts::HostFactsState::new(host_facts_source),
             #[cfg(feature = "link-gateway")]
             links: Default::default(),

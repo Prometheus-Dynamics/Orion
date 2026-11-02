@@ -133,7 +133,12 @@ fn provider_lane_request(request: &ControlRequest) -> bool {
         | ControlOperation::UnsubscribeStream
         | ControlOperation::WatchActionRequests
         | ControlOperation::ClaimNodeActions
-        | ControlOperation::ReportActionResult => true,
+        | ControlOperation::ReportActionResult
+        | ControlOperation::BeginBlob
+        | ControlOperation::WriteBlobChunk
+        | ControlOperation::CommitBlob
+        | ControlOperation::QueryBlobs
+        | ControlOperation::DeleteBlob => true,
         _ => false,
     }
 }
@@ -531,6 +536,18 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::ReportActionResult,
             ) => self
                 .authorize_local_role(source, ClientRole::Provider)
+                .or_else(|_| self.authorize_local_role(source, ClientRole::Executor)),
+            // Blob push: operators, providers and executors may push files (`docs/blobs.md`).
+            (
+                ControlPrincipal::Local { source, .. },
+                ControlOperation::BeginBlob
+                | ControlOperation::WriteBlobChunk
+                | ControlOperation::CommitBlob
+                | ControlOperation::QueryBlobs
+                | ControlOperation::DeleteBlob,
+            ) => self
+                .authorize_local_role(source, ClientRole::ControlPlane)
+                .or_else(|_| self.authorize_local_role(source, ClientRole::Provider))
                 .or_else(|_| self.authorize_local_role(source, ClientRole::Executor)),
             (
                 ControlPrincipal::Local { source, .. },

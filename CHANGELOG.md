@@ -10,6 +10,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `orion-nt4` example `nt4-latency` (a PhotonVision camera latency tool with an AprilTag page) is removed from this repository and moves to the PhotonVision tooling. The `[[example]]` entry, its tests and its README section are gone with it. Public `orion-nt4` API is unchanged.
 
+### Added (blob push)
+
+- Blob push over local IPC: `BeginBlob`, `WriteBlobChunk`, `CommitBlob`, `QueryBlobs`, `DeleteBlob` (control protocol v7). Chunks resume by offset, the SHA-256 is checked on the node in the background, and blobs live in `ORION_NODE_BLOB_DIR` (default `<state dir>/blobs`) under `ORION_NODE_BLOB_MAX_BYTES` (2 GiB) with chunks up to `ORION_NODE_BLOB_CHUNK_MAX_BYTES` (1 MiB). `LocalControlPlaneClient::push_blob` pushes a file. See [docs/blobs.md](docs/blobs.md).
+
 ### Added (long-running jobs)
 
 - Long-running jobs on the action lane: `ActionState::Cancelled` (control protocol v6, the wire change) is the final state of a job stopped by its `<name>.cancel` companion action. Re-attaching by resending the same request, and progress via `Running { progress }`, were already there. Documented in [docs/actions.md](docs/actions.md#long-running-jobs). The action deadline cap default (`ORION_NODE_ACTION_MAX_DEADLINE_MS`) rises from 10 minutes to one hour.

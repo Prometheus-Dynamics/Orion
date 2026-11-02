@@ -31,6 +31,7 @@ use crate::{
 use orion_transport_ipc::{ControlEnvelope, UnixControlClient, UnixControlStreamClient};
 
 mod actions;
+mod blobs;
 mod caller;
 mod discovery;
 mod metrics;

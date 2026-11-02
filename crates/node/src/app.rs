@@ -40,6 +40,8 @@ mod remote_sessions;
 mod robot_link;
 mod safe_mode;
 pub use safe_mode::SafeModeCause;
+mod blob_store;
+mod local_blobs;
 mod startup;
 mod startup_loops;
 mod state_access;
