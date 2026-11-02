@@ -238,3 +238,63 @@ fn disabled_mode_ignores_credentials() {
     let (uid, gid) = stranger();
     hello_as(&app, uid, gid, &[]).expect("disabled admits every caller");
 }
+
+#[test]
+fn provider_allow_list_admits_the_provider_lane_only() {
+    use orion::control_plane::{ProviderRecord, ProviderStateUpdate};
+    let (uid, gid) = stranger();
+    let app = NodeApp::builder()
+        .config(NodeConfig::for_local_node(NodeId::new("node-main")))
+        .with_local_authentication_mode(LocalAuthenticationMode::SameUser)
+        .with_local_provider_allow(crate::auth::LocalAccessAllowList::new().allow_uid(uid))
+        .try_build()
+        .expect("node app should build");
+    let send = |message: ControlMessage| {
+        app.serve_control_request(crate::service::ControlRequest::from_local_message(
+            crate::ControlSurface::LocalIpc,
+            LocalAddress::new("atlas-agent"),
+            LocalAddress::new("orion"),
+            message,
+            Some(UnixPeerIdentity {
+                pid: Some(std::process::id()),
+                uid,
+                gid,
+                groups: Vec::new(),
+            }),
+        ))
+    };
+
+    send(ControlMessage::ClientHello(ClientHello {
+        client_name: "atlas-agent".into(),
+        role: ClientRole::Provider,
+    }))
+    .expect("a provider-allow caller registers as a provider");
+    send(ControlMessage::ProviderState(ProviderStateUpdate {
+        provider: ProviderRecord::builder(
+            orion::ProviderId::new("atlas-agent"),
+            NodeId::new("node-main"),
+        )
+        .build(),
+        resources: Vec::new(),
+    }))
+    .expect("it publishes its provider state");
+    send(ControlMessage::ClaimNodeActions(vec!["update".into()]))
+        .expect("and claims node actions to handle");
+
+    let err = send(ControlMessage::WatchState(StateWatch::desired(
+        Revision::ZERO,
+    )))
+    .expect_err("the provider lane excludes control-plane reads");
+    assert!(
+        matches!(&err, NodeError::Authorization(message) if message.contains("ORION_NODE_LOCAL_PROVIDER_ALLOW")),
+        "the refusal names the provider knob: {err:?}"
+    );
+
+    // A provider-allow caller cannot take the control-plane role.
+    let err = send(ControlMessage::ClientHello(ClientHello {
+        client_name: "atlas-control".into(),
+        role: ClientRole::ControlPlane,
+    }))
+    .expect_err("a control-plane hello needs the admin grant");
+    assert!(matches!(err, NodeError::Authorization(_)), "{err:?}");
+}

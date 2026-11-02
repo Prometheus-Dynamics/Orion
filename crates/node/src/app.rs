@@ -734,6 +734,7 @@ pub struct NodeAppBuilder {
     audit_log_path: Option<PathBuf>,
     local_authentication_mode: Option<LocalAuthenticationMode>,
     local_access_allow: Option<crate::auth::LocalAccessAllowList>,
+    local_provider_allow: Option<crate::auth::LocalAccessAllowList>,
     control_middlewares: Vec<ControlMiddlewareHandle>,
     auto_startup_replay: bool,
     safe_mode: Option<bool>,

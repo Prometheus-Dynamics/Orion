@@ -22,7 +22,10 @@ An example agent with a fake updater is in
   **not** need to register a provider: claims only need a session.
 - Access: run it in the node's group (`Group=orion` or `SupplementaryGroups=orion`) with
   `ORION_NODE_LOCAL_AUTH=same-user-or-group`, or list it in `ORION_NODE_LOCAL_AUTH_ALLOW` (see
-  "Local IPC access" in [node-env.md](node-env.md)).
+  "Local IPC access" in [node-env.md](node-env.md)). A device agent that should only handle
+  actions and publish its own provider state, and nothing else, is listed in
+  `ORION_NODE_LOCAL_PROVIDER_ALLOW` instead; it may then register as a provider and claim actions
+  without operator rights.
 - Order it `After=orion-node.service` with `Wants=orion-node.service`, but let it start without
   the node: it retries until the sockets accept (the example uses a 1 s fixed-delay retry policy
   without a limit). Nothing on the device may depend on the agent being connected.

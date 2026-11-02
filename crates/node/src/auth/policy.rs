@@ -1,7 +1,7 @@
 use super::{
     AuthenticatedOperator, AuthenticatedPeer, AuthorizationLookup, LOCAL_AUTH_ALLOW_ENV,
-    LocalAccessAllowList, LocalAuthenticationMode, NodeSecurity, OperatorAuthentication,
-    PeerAuthenticationMode, PeerObservedScope,
+    LOCAL_PROVIDER_ALLOW_ENV, LocalAccessAllowList, LocalAccessGrants, LocalAuthenticationMode,
+    NodeSecurity, OperatorAuthentication, PeerAuthenticationMode, PeerObservedScope,
     crypto::{current_effective_gid, current_effective_uid},
     transport_binding_from_hello,
 };
@@ -94,10 +94,48 @@ struct NodeSecurityAuthorizer {
     security: Arc<NodeSecurity>,
     peer_authentication: PeerAuthenticationMode,
     local_authentication: LocalAuthenticationMode,
-    local_allow: LocalAccessAllowList,
+    grants: LocalAccessGrants,
     local_uid: u32,
     local_gid: u32,
     lookup: Arc<dyn AuthorizationLookup>,
+}
+
+/// Operations a caller admitted only by `ORION_NODE_LOCAL_PROVIDER_ALLOW` may send: the provider
+/// and executor lane (publishing state, status and streams, and handling actions). The role a
+/// `ClientHello` claims must be `Provider` or `Executor`; the role checks of each operation still
+/// apply after this.
+fn provider_lane_request(request: &ControlRequest) -> bool {
+    match request.operation() {
+        ControlOperation::ClientHello => {
+            let crate::service::ControlRequestBody::Control(message) = &request.body else {
+                return false;
+            };
+            matches!(
+                message.as_ref(),
+                ControlMessage::ClientHello(hello)
+                    if matches!(hello.role, ClientRole::Provider | ClientRole::Executor)
+            )
+        }
+        ControlOperation::Ping
+        | ControlOperation::Pong
+        | ControlOperation::ProviderState
+        | ControlOperation::ExecutorState
+        | ControlOperation::QueryProviderLeases
+        | ControlOperation::WatchProviderLeases
+        | ControlOperation::QueryExecutorWorkloads
+        | ControlOperation::WatchExecutorWorkloads
+        | ControlOperation::PublishStatus
+        | ControlOperation::QueryStatus
+        | ControlOperation::WatchStatus
+        | ControlOperation::DeclareStream
+        | ControlOperation::PublishSamples
+        | ControlOperation::SubscribeStream
+        | ControlOperation::UnsubscribeStream
+        | ControlOperation::WatchActionRequests
+        | ControlOperation::ClaimNodeActions
+        | ControlOperation::ReportActionResult => true,
+        _ => false,
+    }
 }
 
 impl NodeSecurityAuthorizer {
@@ -105,7 +143,7 @@ impl NodeSecurityAuthorizer {
         security: &Arc<NodeSecurity>,
         peer_authentication: PeerAuthenticationMode,
         local_authentication: LocalAuthenticationMode,
-        local_allow: LocalAccessAllowList,
+        grants: LocalAccessGrants,
         local_uid: u32,
         local_gid: u32,
         lookup: Arc<dyn AuthorizationLookup>,
@@ -114,7 +152,7 @@ impl NodeSecurityAuthorizer {
             security: security.clone(),
             peer_authentication,
             local_authentication,
-            local_allow,
+            grants,
             local_uid,
             local_gid,
             lookup,
@@ -137,21 +175,35 @@ impl NodeSecurityAuthorizer {
             LocalAuthenticationMode::SameUserOrGroupOrRoot => {
                 same_user || same_group || identity.uid == 0
             }
-        } || self.local_allow.admits(identity);
-        if !allowed {
+        } || self.grants.admin.admits(identity);
+        if allowed {
+            return Ok(());
+        }
+        if self.grants.provider.admits(identity) {
+            if provider_lane_request(request) {
+                return Ok(());
+            }
             return Err(NodeError::Authorization(format!(
-                "local caller uid {} gid {} (groups {:?}) does not satisfy {:?} policy for node \
-                 uid {} gid {}; admit it with ORION_NODE_LOCAL_AUTH (same-user-or-group, \
-                 same-user-or-group-or-root) or {LOCAL_AUTH_ALLOW_ENV} (see docs/node-env.md)",
+                "local caller uid {} gid {} is admitted by {LOCAL_PROVIDER_ALLOW_ENV} for the \
+                 provider lane only; {:?} needs {LOCAL_AUTH_ALLOW_ENV} or ORION_NODE_LOCAL_AUTH \
+                 (see docs/node-env.md)",
                 identity.uid,
                 identity.gid,
-                identity.groups,
-                self.local_authentication,
-                self.local_uid,
-                self.local_gid
+                request.operation()
             )));
         }
-        Ok(())
+        Err(NodeError::Authorization(format!(
+            "local caller uid {} gid {} (groups {:?}) does not satisfy {:?} policy for node \
+             uid {} gid {}; admit it with ORION_NODE_LOCAL_AUTH (same-user-or-group, \
+             same-user-or-group-or-root), {LOCAL_AUTH_ALLOW_ENV}, or {LOCAL_PROVIDER_ALLOW_ENV} \
+             for providers and executors (see docs/node-env.md)",
+            identity.uid,
+            identity.gid,
+            identity.groups,
+            self.local_authentication,
+            self.local_uid,
+            self.local_gid
+        )))
     }
 
     fn authorize_local_role(
@@ -544,6 +596,25 @@ impl PeerSecurityMiddleware {
         local_allow: LocalAccessAllowList,
         lookup: Arc<dyn AuthorizationLookup>,
     ) -> Self {
+        Self::with_local_grants(
+            security,
+            local_authentication,
+            LocalAccessGrants {
+                admin: local_allow,
+                provider: LocalAccessAllowList::new(),
+            },
+            lookup,
+        )
+    }
+
+    /// Like [`Self::with_local_allow`], also admitting the provider lane for `grants.provider`
+    /// (`ORION_NODE_LOCAL_PROVIDER_ALLOW`, see `docs/node-env.md`).
+    pub(crate) fn with_local_grants(
+        security: &Arc<NodeSecurity>,
+        local_authentication: LocalAuthenticationMode,
+        grants: LocalAccessGrants,
+        lookup: Arc<dyn AuthorizationLookup>,
+    ) -> Self {
         let local_uid = current_effective_uid();
         let local_gid = current_effective_gid();
         Self {
@@ -553,7 +624,7 @@ impl PeerSecurityMiddleware {
                     security,
                     security.mode(),
                     local_authentication,
-                    local_allow,
+                    grants,
                     local_uid,
                     local_gid,
                     lookup,

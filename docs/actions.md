@@ -210,6 +210,7 @@ The owner answers a peer's `QueryActions` only with actions that peer forwarded.
 | --- | --- |
 | Local client, role `ControlPlane` (`orionctl`, operators) | `RunAction`, `QueryActions`, `WatchActions` |
 | Local client, role `Provider` or `Executor` | `WatchActionRequests` (its local providers or executors, matching role), `ClaimNodeActions`, `ReportActionResult` (for actions delivered to it) |
+| Local client admitted only by `ORION_NODE_LOCAL_PROVIDER_ALLOW` | The provider lane only: `ClientHello` with role `Provider` or `Executor`, and the handler operations above (see "Local IPC access" in [node-env.md](node-env.md)). No `RunAction` or `QueryActions`. |
 | Peer node | `RunAction`, `QueryActions` and (forwarded) `QueryStatus` only when the request is **authenticated** (ed25519 signed) **and** the peer is **enrolled** (configured, pinned, or enrolled through discovery), whatever `ORION_NODE_PEER_AUTH` says; with `disabled` peer authentication, peers cannot submit actions. |
 | Remote operator (`operator:<name>`, [remote-operator.md](remote-operator.md)) | `RunAction` for action names matching its policy (`*`, `prefix*`, exact; the node default is `ORION_NODE_OPERATOR_ACTIONS`, empty by default); `QueryActions` (every action with read access, else its own); `requested_by` is the operator id (`peer:<node>/operator:<name>` on the owner of a forwarded action). Only enrolled operators, over the signed peer transports. |
 | Anyone else (`orionctl --http`, unauthenticated or unknown peers, unenrolled operators) | Nothing. |

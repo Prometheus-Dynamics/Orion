@@ -10,6 +10,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `orion-nt4` example `nt4-latency` (a PhotonVision camera latency tool with an AprilTag page) is removed from this repository and moves to the PhotonVision tooling. The `[[example]]` entry, its tests and its README section are gone with it. Public `orion-nt4` API is unchanged.
 
+### Added (provider rights)
+
+- `ORION_NODE_LOCAL_PROVIDER_ALLOW` (see [docs/node-env.md](docs/node-env.md#local-ipc-access)): a local caller admitted only by this list may register as a provider or executor, publish its state, status and streams, and handle actions, but not run control-plane operations. Default unset: nothing changes.
+
 ### Changed
 
 - Status lane values may be up to `ORION_NODE_STATUS_MAX_VALUE_BYTES` (default 4096 bytes, was 1024; at most 64 KiB). The node-wide `ORION_NODE_STATUS_MAX_BYTES` budget (default 4 MiB) bounds the memory of all held values, so a batch that would exceed it is refused whole. No wire change: the value types are the same. See [docs/node-env.md](docs/node-env.md#volatile-status-lane-limits).

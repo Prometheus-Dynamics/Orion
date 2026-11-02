@@ -193,6 +193,7 @@ drop-in to disable the watchdog. Start-up (state replay) is not covered by the w
 | `ORION_NODE_HTTP_MTLS` | `disabled` | `disabled`, `optional`, `required` | Invalid mode fails startup. |
 | `ORION_NODE_LOCAL_AUTH` | `same-user` | `disabled`, `same-user`, `same-user-or-group`, `same-user-or-group-or-root` (see "Local IPC access" below) | Invalid mode fails startup. |
 | `ORION_NODE_LOCAL_AUTH_ALLOW` | unset | Comma-separated extra callers admitted in every mode but `disabled`: `root`, `uid:<n>`, `gid:<n>`, `user:<name>`, `group:<name>` | A malformed entry or an unknown user or group name fails startup. |
+| `ORION_NODE_LOCAL_PROVIDER_ALLOW` | unset | Comma-separated callers (same syntax as `ORION_NODE_LOCAL_AUTH_ALLOW`) admitted to the provider lane only: registering as a provider or executor, publishing its state, status and streams, and handling actions. Not admitted to control-plane operations. | A malformed entry or an unknown user or group name fails startup. |
 | `ORION_NODE_LABELS` | unset | Comma-separated `key=value` or bare `key` labels, published in the node's observed record and matched by workload node selectors (see `docs/placement.md`). Blank terms are ignored; the last value of a repeated key wins. | Non-UTF-8 value fails startup. |
 
 ### Local IPC access
@@ -226,8 +227,19 @@ ORION_NODE_LOCAL_AUTH=same-user-or-group
 ORION_NODE_LOCAL_AUTH_ALLOW=root,group:wheel
 ```
 
-A refused caller gets an authorization error naming its uid, gid and groups and these two
-variables. Embedders set the same with `NodeAppBuilder::with_local_authentication_mode` and
+`ORION_NODE_LOCAL_PROVIDER_ALLOW` admits a narrower set: a caller in it that is not admitted by the
+mode or `ORION_NODE_LOCAL_AUTH_ALLOW` may register as a **provider or executor** (`ClientHello` with
+role `Provider` or `Executor`), publish its provider or executor state, status and streams, and
+handle actions (`WatchActionRequests`, `ClaimNodeActions`, `ReportActionResult`). Every other
+operation, such as `RunAction`, `Mutations`, `WatchState` or `PollClientEvents`, is refused for it.
+This is how a device agent that is not the node's own user (for example an on-device Atlas agent)
+can be a provider and handle actions without operator rights:
+
+```sh
+ORION_NODE_LOCAL_PROVIDER_ALLOW=user:atlas
+```
+
+A refused caller gets an authorization error naming its uid, gid and groups and these variables. Embedders set the same with `NodeAppBuilder::with_local_authentication_mode` and
 `with_local_access_allow(LocalAccessAllowList::new().allow_uid(0).allow_gid(..))`.
 
 ## Peer Discovery

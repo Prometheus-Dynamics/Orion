@@ -17,7 +17,9 @@ use crypto::{
 };
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use getrandom::{SysRng, rand_core::UnwrapErr};
-pub use local_access::{LOCAL_AUTH_ALLOW_ENV, LocalAccessAllowList};
+pub use local_access::{
+    LOCAL_AUTH_ALLOW_ENV, LOCAL_PROVIDER_ALLOW_ENV, LocalAccessAllowList, LocalAccessGrants,
+};
 pub use modes::{LocalAuthenticationMode, PeerAuthenticationMode};
 use orion::transport::http::HttpRequestPayload;
 use orion_control_plane::{ClientSession, ControlMessage, PeerHello};

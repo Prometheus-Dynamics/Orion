@@ -8,8 +8,8 @@ use super::{
 };
 use crate::app::tls_bootstrap::resolve_http_server_tls_paths;
 use crate::auth::{
-    LocalAccessAllowList, LocalAuthenticationMode, NodeSecurity, PeerSecurityMiddleware,
-    RobotLinkTrust,
+    LocalAccessAllowList, LocalAccessGrants, LocalAuthenticationMode, NodeSecurity,
+    PeerSecurityMiddleware, RobotLinkTrust,
 };
 use crate::config::{NodeConfig, NodeRuntimeTuning, normalize_runtime_tuning_duration};
 use crate::peer::{PeerConfig, PeerState};
@@ -59,6 +59,7 @@ impl Default for NodeAppBuilder {
             audit_log_path: None,
             local_authentication_mode: None,
             local_access_allow: None,
+            local_provider_allow: None,
             control_middlewares: Vec::new(),
             auto_startup_replay: true,
             safe_mode: None,
@@ -236,6 +237,13 @@ impl NodeAppBuilder {
         self
     }
 
+    /// Admits these local callers to the provider lane only (providers and executors that publish
+    /// state and handle actions), instead of reading `ORION_NODE_LOCAL_PROVIDER_ALLOW`.
+    pub fn with_local_provider_allow(mut self, allow: LocalAccessAllowList) -> Self {
+        self.local_provider_allow = Some(allow);
+        self
+    }
+
     pub fn with_http_tls_files(
         mut self,
         cert_path: impl Into<PathBuf>,
@@ -387,6 +395,10 @@ impl NodeAppBuilder {
             Some(list) => list,
             None => LocalAccessAllowList::try_from_env()?,
         };
+        let local_provider_allow = match self.local_provider_allow {
+            Some(list) => list,
+            None => LocalAccessAllowList::try_from_provider_env()?,
+        };
         let http_mutual_tls_mode = self
             .http_mutual_tls_mode
             .map(Ok)
@@ -537,10 +549,13 @@ impl NodeAppBuilder {
             #[cfg(feature = "transport-quic")]
             quic: self.quic.unwrap_or_default(),
         };
-        let mut control_middlewares = vec![Arc::new(PeerSecurityMiddleware::with_local_allow(
+        let mut control_middlewares = vec![Arc::new(PeerSecurityMiddleware::with_local_grants(
             &app.security,
             local_authentication_mode,
-            local_access_allow,
+            LocalAccessGrants {
+                admin: local_access_allow,
+                provider: local_provider_allow,
+            },
             local_sessions,
         )) as ControlMiddlewareHandle];
         control_middlewares.extend(self.control_middlewares);

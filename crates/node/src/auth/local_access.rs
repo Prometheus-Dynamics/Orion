@@ -9,6 +9,20 @@ use std::ffi::CString;
 /// Environment variable holding the allow-list.
 pub const LOCAL_AUTH_ALLOW_ENV: &str = "ORION_NODE_LOCAL_AUTH_ALLOW";
 
+/// Environment variable holding the provider allow-list: callers admitted only to register as a
+/// provider or executor and handle actions (see [`LocalAccessGrants`]).
+pub const LOCAL_PROVIDER_ALLOW_ENV: &str = "ORION_NODE_LOCAL_PROVIDER_ALLOW";
+
+/// The two local allow-lists: `admin` admits callers to every local operation (on top of
+/// `ORION_NODE_LOCAL_AUTH`), `provider` admits callers to the provider lane only, the operations
+/// a provider or executor client needs to publish its state and handle actions. A caller in
+/// `provider` is refused every other operation, such as `RunAction` or `Mutations`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LocalAccessGrants {
+    pub admin: LocalAccessAllowList,
+    pub provider: LocalAccessAllowList,
+}
+
 /// Local callers admitted in addition to the [`LocalAuthenticationMode`](super::LocalAuthenticationMode)
 /// (which keeps its meaning): users by uid and groups by gid. A group admits a caller whose
 /// primary group or one of whose supplementary groups it is.
@@ -59,11 +73,16 @@ impl LocalAccessAllowList {
 
     /// Parses an allow-list (see the type docs). Blank entries are ignored.
     pub fn parse(spec: &str) -> Result<Self, NodeError> {
+        Self::parse_named(spec, LOCAL_AUTH_ALLOW_ENV)
+    }
+
+    /// Parses an allow-list read from the variable `var` (named in the errors).
+    pub fn parse_named(spec: &str, var: &str) -> Result<Self, NodeError> {
         let mut list = Self::new();
         for entry in spec.split(',').map(str::trim).filter(|e| !e.is_empty()) {
             let invalid = |reason: &str| {
                 NodeError::Config(format!(
-                    "invalid {LOCAL_AUTH_ALLOW_ENV} entry `{entry}`: {reason}; expected `root`, \
+                    "invalid {var} entry `{entry}`: {reason}; expected `root`, \
                      `uid:<n>`, `gid:<n>`, `user:<name>` or `group:<name>`"
                 ))
             };
@@ -100,12 +119,21 @@ impl LocalAccessAllowList {
 
     /// Reads `ORION_NODE_LOCAL_AUTH_ALLOW` (empty when unset).
     pub fn try_from_env() -> Result<Self, NodeError> {
-        match std::env::var(LOCAL_AUTH_ALLOW_ENV) {
-            Ok(value) => Self::parse(&value),
+        Self::try_from_named_env(LOCAL_AUTH_ALLOW_ENV)
+    }
+
+    /// Reads `ORION_NODE_LOCAL_PROVIDER_ALLOW` (empty when unset).
+    pub fn try_from_provider_env() -> Result<Self, NodeError> {
+        Self::try_from_named_env(LOCAL_PROVIDER_ALLOW_ENV)
+    }
+
+    fn try_from_named_env(var: &str) -> Result<Self, NodeError> {
+        match std::env::var(var) {
+            Ok(value) => Self::parse_named(&value, var),
             Err(std::env::VarError::NotPresent) => Ok(Self::new()),
-            Err(std::env::VarError::NotUnicode(_)) => Err(NodeError::Config(format!(
-                "{LOCAL_AUTH_ALLOW_ENV} must be valid unicode"
-            ))),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err(NodeError::Config(format!("{var} must be valid unicode")))
+            }
         }
     }
 }
