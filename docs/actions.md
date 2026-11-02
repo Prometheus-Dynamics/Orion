@@ -130,6 +130,7 @@ Accepted ──> Running { progress } ──> Succeeded | Failed { reason }
     │                                       ^
     └──> Rejected { reason }  (no handler, unknown target, refused by the handler)
     └──> TimedOut              (deadline passed before a final report)
+    └──> Cancelled             (the handler stopped the job at a cancel request; see below)
 ```
 
 - The node that receives a `RunAction` validates it, stamps `requested_by` (`local:<client name>`
@@ -243,7 +244,7 @@ status`, `watch_status`) see it and a handler can republish it after a restart:
 
 | Key | Value |
 | --- | --- |
-| `action.<action_id>.state` | `String`: `accepted`, `running`, `succeeded`, `failed`, `rejected`, or `timed_out` |
+| `action.<action_id>.state` | `String`: `accepted`, `running`, `succeeded`, `failed`, `rejected`, `timed_out`, or `cancelled` |
 | `action.<action_id>.progress` | `UInt`: per-mille, 0 to 1000 (like `ActionState::Running`) |
 | `action.<action_id>.error` | `String`: the failure or rejection reason |
 
@@ -273,6 +274,23 @@ Orion implements none of these; handlers that implement one follow its conventio
 | `update.cancel` | none. Aborts a download or stage in progress, or forgets a staged update; `phase = "cancelled"` (or `"idle"` when nothing was cancelled). |
 | `update.rollback` | none. Boots back to the previous confirmed slot; `Succeeded` with `phase = "rebooting"` before rebooting. |
 
+## Long-running jobs
+
+A job is an action whose handler keeps running for minutes (a flash, an image write). It uses the
+same lane as every action, so there is no job-specific message:
+
+| Need | How |
+| --- | --- |
+| Start | `RunAction` with a client-chosen `action_id`, a generous `deadline_ms` (up to `ORION_NODE_ACTION_MAX_DEADLINE_MS`, one hour by default), and `wait_ms` if the caller wants to wait a little. |
+| Progress | The handler reports `ActionState::Running { progress }` (per-mille) through `ActionReporter::progress`, and publishes `action.<id>.progress` status keys. `QueryActions`, `WatchActions` and `orionctl get actions` show it. |
+| Re-attach after a disconnect | Send the same request again (same id, target, name and arguments): the node answers with the job's current state and does **not** deliver it to the handler twice. `QueryActions` by `action_id` does the same without resending. Records live in node memory until `ORION_NODE_ACTION_RESULT_TTL_MS` after they finish, so a job that finished longer ago is gone; keep the durable outcome in the device's own state (the `update.*` pattern in [device-agent.md](device-agent.md)). |
+| Cancel | Send the companion action `<name>.cancel` to the same target (for `flash` it is `flash.cancel`). Its handler is the job's handler, so it claims both names. The handler stops the work, reports the companion `Succeeded` (or `Rejected` with a reason), and reports the job itself `Cancelled`. |
+| Outcome | `Succeeded`, `Failed { reason }`, `Cancelled`, or `TimedOut` at the deadline. A cancel that the handler cannot honour is `Failed` or ignored; the job keeps its last state until it reports final. |
+
+`Cancelled` is a final state. A handler that reports it must have stopped the work. A job whose
+handler disconnects before a final report becomes `Failed` (see "Disconnects" in
+[device-agent.md](device-agent.md)).
+
 ## Limits
 
 Action ids, names, argument and output keys are at most 128 bytes; at most 32 arguments and 32
@@ -285,7 +303,7 @@ These limits are the node's; the MCU link protocol has its own, smaller frame li
 | Variable | Default |
 | --- | --- |
 | `ORION_NODE_ACTION_DEFAULT_DEADLINE_MS` | `30000` |
-| `ORION_NODE_ACTION_MAX_DEADLINE_MS` | `600000` |
+| `ORION_NODE_ACTION_MAX_DEADLINE_MS` | `3600000` |
 | `ORION_NODE_ACTION_RESULT_TTL_MS` | `600000` |
 | `ORION_NODE_ACTION_MAX_TRACKED` | `256` |
 | `ORION_NODE_ACTION_MAX_WAIT_MS` | `2000` (longest unary answer held for `wait_ms`) |

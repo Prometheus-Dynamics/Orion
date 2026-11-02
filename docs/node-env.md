@@ -479,7 +479,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_TOMBSTONE_RETENTION_MS` | `604800000` | How long desired-state tombstones (deletes) are kept before collection. A node offline for longer than this can resurrect deleted objects. See `docs/peer-sync.md`. |
 | `ORION_NODE_HOST_FACTS_REFRESH_MS` | `10000` | How often host facts are sampled; `0` turns them off. Status-lane host metrics live three intervals (see `docs/host-facts.md`). |
 | `ORION_NODE_ACTION_DEFAULT_DEADLINE_MS` | `30000` | Deadline of actions submitted with `deadline_ms = 0` (at most the maximum). |
-| `ORION_NODE_ACTION_MAX_DEADLINE_MS` | `600000` | Longest accepted action deadline; longer ones are capped. |
+| `ORION_NODE_ACTION_MAX_DEADLINE_MS` | `3600000` | Longest accepted action deadline (one hour, for long-running jobs); longer ones are capped. |
 | `ORION_NODE_ACTION_RESULT_TTL_MS` | `600000` | How long a finished action's result stays queryable. |
 | `ORION_NODE_ACTION_MAX_TRACKED` | `256` | Most actions tracked at once; the oldest finished results are evicted first, and new requests are refused while every tracked action is still running. |
 | `ORION_NODE_ACTION_MAX_WAIT_MS` | `2000` | Longest time the node holds one unary answer to a `RunAction` with `wait_ms` (callers resend to keep waiting). Keep it below the transport I/O timeouts. |

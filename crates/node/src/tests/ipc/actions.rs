@@ -601,3 +601,78 @@ fn claimed_node_actions_go_to_the_claiming_client_and_conflicts_are_refused() {
         "the name is free again"
     );
 }
+
+#[test]
+fn long_running_job_reports_progress_reattaches_and_cancels_by_companion_action() {
+    let app = actions_app("node-actions-jobs");
+    let flasher = hello(&app, "flasher", ClientRole::Provider);
+    let operator = hello(&app, "operator-jobs", ClientRole::ControlPlane);
+    assert_eq!(
+        claim(&app, &flasher, &["flash", "flash.cancel"]).expect("claim"),
+        ControlMessage::Accepted
+    );
+    let node = ActionTarget::Node(NodeId::new("node-actions-jobs"));
+    let job = || {
+        ActionRequest::new("job-1", node.clone(), "flash")
+            .with_arg("sha256", TypedConfigValue::String("ab".into()))
+    };
+
+    assert_eq!(run(&app, &operator, job()).state, ActionState::Accepted);
+    assert_eq!(polled_requests(&app, &flasher).len(), 1);
+    report(
+        &app,
+        &flasher,
+        ActionReport::new(
+            "job-1",
+            ActionState::Running {
+                progress: Some(250),
+            },
+        ),
+    )
+    .expect("progress is reported");
+
+    // Re-attach (after a client disconnect, say): the same request answers with the running job
+    // and does not deliver it to the handler a second time.
+    assert_eq!(
+        run(&app, &operator, job()).state,
+        ActionState::Running {
+            progress: Some(250)
+        }
+    );
+    assert!(polled_requests(&app, &flasher).is_empty());
+
+    // Cancel: the companion action `<name>.cancel` on the same target reaches the same handler.
+    let cancel = run(
+        &app,
+        &operator,
+        ActionRequest::new("job-1.cancel", node.clone(), "flash.cancel"),
+    );
+    assert_eq!(cancel.state, ActionState::Accepted);
+    let delivered = polled_requests(&app, &flasher);
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(delivered[0].name, "flash.cancel");
+    report(
+        &app,
+        &flasher,
+        ActionReport::new("job-1.cancel", ActionState::Succeeded),
+    )
+    .expect("the cancel is acknowledged");
+    report(
+        &app,
+        &flasher,
+        ActionReport::new("job-1", ActionState::Cancelled),
+    )
+    .expect("the job reports that it stopped");
+
+    let stopped = current(&app, "job-1");
+    assert_eq!(stopped.state, ActionState::Cancelled);
+    assert_eq!(stopped.state.as_str(), "cancelled");
+    // A final state never changes, even if the handler reports again.
+    report(
+        &app,
+        &flasher,
+        ActionReport::new("job-1", ActionState::Succeeded),
+    )
+    .expect("late reports are accepted and ignored");
+    assert_eq!(current(&app, "job-1").state, ActionState::Cancelled);
+}

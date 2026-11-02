@@ -319,10 +319,13 @@ pub enum ActionState {
     },
     /// The deadline passed before the handler reported a final state.
     TimedOut,
+    /// The handler stopped the action at a cancel request (`<name>.cancel`, see `docs/actions.md`,
+    /// "Long-running jobs").
+    Cancelled,
 }
 
 impl ActionState {
-    /// `accepted`, `running`, `succeeded`, `failed`, `rejected`, or `timed_out`.
+    /// `accepted`, `running`, `succeeded`, `failed`, `rejected`, `timed_out`, or `cancelled`.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
@@ -331,6 +334,7 @@ impl ActionState {
             Self::Failed { .. } => "failed",
             Self::Rejected { .. } => "rejected",
             Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -438,18 +442,25 @@ impl ActionResult {
     pub fn as_resource_action_result(&self) -> Option<ResourceActionResult> {
         let status = match &self.state {
             ActionState::Succeeded => ResourceActionStatus::Applied,
-            ActionState::Failed { .. } | ActionState::Rejected { .. } | ActionState::TimedOut => {
-                ResourceActionStatus::Failed
-            }
+            ActionState::Failed { .. }
+            | ActionState::Rejected { .. }
+            | ActionState::TimedOut
+            | ActionState::Cancelled => ResourceActionStatus::Failed,
             ActionState::Accepted | ActionState::Running { .. } => return None,
         };
         Some(ResourceActionResult {
             action_kind: self.name.clone(),
             status,
             data: None,
-            error: self.state.reason().map(Into::into).or_else(|| {
-                matches!(self.state, ActionState::TimedOut).then(|| String::from("timed out"))
-            }),
+            error: self
+                .state
+                .reason()
+                .map(Into::into)
+                .or_else(|| match self.state {
+                    ActionState::TimedOut => Some(String::from("timed out")),
+                    ActionState::Cancelled => Some(String::from("cancelled")),
+                    _ => None,
+                }),
         })
     }
 }

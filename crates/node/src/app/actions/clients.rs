@@ -269,7 +269,7 @@ impl NodeApp {
     ) -> Result<(), NodeError> {
         if matches!(report.state, ActionState::Accepted | ActionState::TimedOut) {
             return Err(NodeError::Action(
-                "handlers report Running, Succeeded, Failed, or Rejected".into(),
+                "handlers report Running, Succeeded, Failed, Rejected, or Cancelled".into(),
             ));
         }
         let route = self

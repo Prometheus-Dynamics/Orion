@@ -45,7 +45,9 @@ use core::fmt;
 ///   `HttpResponsePayload::Session`); live streams (`DeclareStream`, `PublishSamples`,
 ///   `SubscribeStream`, `UnsubscribeStream`, `ClientEventKind::StreamCatalog` / `StreamData` /
 ///   `StreamReset` / `StreamDemand` and their types, `NodeResourceUsageSnapshot::streams`).
-pub const CONTROL_PROTOCOL_VERSION: u16 = 5;
+/// - `6`: `ActionState::Cancelled`, the terminal state of a long-running job stopped by its
+///   `<name>.cancel` companion action (`docs/actions.md`, "Long-running jobs").
+pub const CONTROL_PROTOCOL_VERSION: u16 = 6;
 
 /// Fingerprint of the archived layout of the control-protocol types at
 /// [`CONTROL_PROTOCOL_VERSION`].

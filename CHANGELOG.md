@@ -10,6 +10,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `orion-nt4` example `nt4-latency` (a PhotonVision camera latency tool with an AprilTag page) is removed from this repository and moves to the PhotonVision tooling. The `[[example]]` entry, its tests and its README section are gone with it. Public `orion-nt4` API is unchanged.
 
+### Added (long-running jobs)
+
+- Long-running jobs on the action lane: `ActionState::Cancelled` (control protocol v6, the wire change) is the final state of a job stopped by its `<name>.cancel` companion action. Re-attaching by resending the same request, and progress via `Running { progress }`, were already there. Documented in [docs/actions.md](docs/actions.md#long-running-jobs). The action deadline cap default (`ORION_NODE_ACTION_MAX_DEADLINE_MS`) rises from 10 minutes to one hour.
+
 ### Added (provider rights)
 
 - `ORION_NODE_LOCAL_PROVIDER_ALLOW` (see [docs/node-env.md](docs/node-env.md#local-ipc-access)): a local caller admitted only by this list may register as a provider or executor, publish its state, status and streams, and handle actions, but not run control-plane operations. Default unset: nothing changes.
