@@ -221,7 +221,7 @@ its dev version.
 
 ### Persistence
 
-- [ ] Find the device trigger of the 5 s idle persist. On the Raze board `state persistence
+- [ ] Find the device trigger of the 5 s idle persist. On the reference board `state persistence
       succeeded` logged every 5 s (the reconcile backstop) with nothing changing. On the bench an
       idle node writes nothing (0 writes in 600 ms, also with a provider re-publishing identical
       snapshots), so the trigger is a reconcile flag (`runtime_changed` or `applied_revision_changed`)
