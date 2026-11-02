@@ -31,6 +31,7 @@ mod executor;
 mod graph;
 #[cfg(feature = "ipc")]
 mod provider;
+#[cfg(feature = "ipc")]
 mod publish;
 #[cfg(feature = "ipc")]
 mod publisher;

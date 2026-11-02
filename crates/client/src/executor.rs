@@ -48,7 +48,7 @@ where
     /// Skips a snapshot publish whose encoded message is identical to the last one the node
     /// accepted, sending it again once `refresh` has elapsed. Keep `refresh` well below the
     /// node's local session TTL (300 s by default). Off unless this is called; see
-    /// [`crate::publish`] for the revision-sync latency it trades for fewer publishes.
+    /// the crate-internal `publish` module for the revision-sync latency it trades for fewer publishes.
     pub fn with_publish_refresh(mut self, refresh: Duration) -> Self {
         self.dedupe = Some(Arc::new(PublishDedupe::new(refresh)));
         self
