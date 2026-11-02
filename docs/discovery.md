@@ -201,55 +201,55 @@ that comes from `ORION_NODE_PEERS` is registered again at the next start (and th
 it is revoked); remove it from the variable as well. The difference to `orionctl peers revoke` is
 that `remove` also unregisters the peer from sync and forgets its enrollment.
 
-## Robot links: trust without a shared key
+## Private links: trust without a shared key
 
-Problem: in open mode (`ORION_NODE_PEER_AUTH=disabled`, the FRC default: the robot network is
-open by design) nothing is signed, discovery is off, and a shared enrollment key is the only
-automatic way for the nodes of one robot to find and trust each other. Nobody wants to hand that
-key out on an open robot network.
+Problem: in open mode (`ORION_NODE_PEER_AUTH=disabled`, the default for a closed private network,
+where the link is open by design) nothing is signed, discovery is off, and a shared enrollment key is the only
+automatic way for the nodes of one device to find and trust each other. Nobody wants to hand that
+key out on an open private network.
 
 Rule: a peer is trusted without a shared key only when all of these hold.
 
 1. **Open mode only.** `ORION_NODE_PEER_AUTH=disabled`. With `optional` or `required` nothing
    changes: the rules above (configured, enrolled, pinned on first contact in `optional`, or the
    enrollment key) stay as they are.
-2. **A robot link.** The peer's connection comes from an address inside a subnet the robot declares
-   as its own link (`ORION_NODE_ROBOT_LINKS`, for example the USB gadget network or the robot
+2. **A private link.** The peer's connection comes from an address inside a subnet the device declares
+   as its own link (`ORION_NODE_ROBOT_LINKS`, for example the USB gadget network or the private
    Ethernet). Off-link peers are never trusted this way, whatever they claim.
-3. **Key pinned on first use (TOFU).** The first ed25519 key a node id presents over a robot link
+3. **Key pinned on first use (TOFU).** The first ed25519 key a node id presents over a private link
    is pinned in the trust store. A later key for the same node id is refused, as is a key that is
-   not the pinned one, even from the robot link. Re-keying a robot node needs an explicit
+   not the pinned one, even from the private link. Re-keying a device node needs an explicit
    `orionctl peers remove` and `enroll`, like any other peer.
-4. **Opt-in through configuration.** `ORION_NODE_PEER_AUTO_TRUST=off|robot-link`. The default is
-   `robot-link` in open mode and `off` otherwise. `robot-link` with no `ORION_NODE_ROBOT_LINKS`
+4. **Opt-in through configuration.** `ORION_NODE_PEER_AUTO_TRUST=off|private-link`. The default is
+   `private-link` in open mode and `off` otherwise. `private-link` with no `ORION_NODE_ROBOT_LINKS`
    fails startup when set explicitly; the default with no subnets is simply off.
 
-Decision, applied per presented key (see `auth/robot_link.rs`):
+Decision, applied per presented key (see `auth/private_link.rs`):
 
 | Mode | Auto-trust | Link | Pinned for node id | Result |
 | --- | --- | --- | --- | --- |
 | `optional` or `required` | any | any | any | refused: security on, nothing changes here |
 | `disabled` | `off` | any | any | refused: not enabled |
-| `disabled` | `robot-link` | not a robot link | any | refused: off-link |
-| `disabled` | `robot-link` | robot link | none | trusted, key pinned (first use) |
-| `disabled` | `robot-link` | robot link | same key | trusted (already pinned) |
-| `disabled` | `robot-link` | robot link | other key | refused: pinned-key mismatch |
+| `disabled` | `private-link` | not a private link | any | refused: off-link |
+| `disabled` | `private-link` | private link | none | trusted, key pinned (first use) |
+| `disabled` | `private-link` | private link | same key | trusted (already pinned) |
+| `disabled` | `private-link` | private link | other key | refused: pinned-key mismatch |
 
 Limits, stated plainly:
 
-- Trust on first use means the first host that answers on a robot link as a node id pins that
-  id. Keep robot links private: a host on the USB gadget network or the robot Ethernet is a robot
-  peer. This is the same model as `optional` mode, restricted to the link.
+- Trust on first use means the first host that answers on a private link as a node id pins that
+  id. Keep private links private: a host on the USB gadget network or the private Ethernet is
+  trusted as a peer. This is the same model as `optional` mode, restricted to the link.
 - Source addresses are checked on the connection, not claimed in the message, so a host off the
-  link cannot take the robot-link path by claiming to be on it. Addresses on the robot link can be
+  link cannot take the private-link path by claiming to be on it. Addresses on the private link can be
   spoofed by another host on that same link, which is why the link itself must be private.
 - Trusted peers are pinned, not enrolled: they do not appear as `enrolled` in `orionctl`, and
   removing one (`orionctl peers remove`) revokes it as usual.
 
 ### On the wire
 
-Open-mode nodes have no shared key, so the hello is what carries the proof. A node with robot-link
-trust on (`ORION_NODE_ROBOT_LINKS` set and `ORION_NODE_PEER_AUTO_TRUST=robot-link`, which is the
+Open-mode nodes have no shared key, so the hello is what carries the proof. A node with private-link
+trust on (`ORION_NODE_ROBOT_LINKS` set and `ORION_NODE_PEER_AUTO_TRUST=private-link`, which is the
 open-mode default) signs two messages with its ed25519 node identity key, using the same signed
 request envelope as the other peers (`AuthenticatedPeerRequest`; the signature covers the message
 and a nonce):
@@ -259,12 +259,12 @@ and a nonce):
    `port` is the port its `orion+tcp` listener is bound to (the source port of a connection is
    ephemeral and useless here).
 
-Every other message stays unsigned, and a node without robot-link trust signs nothing.
+Every other message stays unsigned, and a node without private-link trust signs nothing.
 
 The receiver (open mode only) verifies the signature and checks the nonce, but the authenticator
-pins nothing. The robot-link policy then decides, with the address the connection came from:
+pins nothing. The private-link policy then decides, with the address the connection came from:
 
-- **Hello**: the rule above (`trust_robot_link_peer`): the key is pinned on first use, a changed key
+- **Hello**: the rule above (`trust_private_link_peer`): the key is pinned on first use, a changed key
   or an off-link address is refused.
 - **RobotLinkListener**: the same check, then the sender is registered for sync at
   `orion+tcp://<connection address>:<port>`, unless the node id is already a peer (a configured
@@ -276,7 +276,7 @@ so nothing is trusted that way.
 
 Compatibility:
 
-- An **unsigned hello** (a node without robot-link trust, or one built before this change) is
+- An **unsigned hello** (a node without private-link trust, or one built before this change) is
   handled exactly as before: no trust, no registration.
 - With **security on** (`optional` or `required`) the hello and requests are signed and verified as
   before, and a `RobotLinkListener` is refused: it only means something in open mode.
@@ -284,10 +284,10 @@ Compatibility:
   does not change and `CONTROL_PROTOCOL_VERSION` is not bumped, so mixed clusters keep syncing. An
   older node cannot decode the announcement and answers with an error, which the sender ignores.
 - An older open-mode node that receives a signed hello applies its own pre-change rule for signed
-  requests and pins the sender's key on first contact, since it knows nothing about robot links.
-  Turn robot links on for all nodes of one robot together.
+  requests and pins the sender's key on first contact, since it knows nothing about private links.
+  Turn private links on for all nodes of one device together.
 
-Limits: the robot link has to be private (see above), and the registered address is the connection
+Limits: the private link has to be private (see above), and the registered address is the connection
 address, so a peer that moves to a new address is re-registered by its next hello and announcement.
 
 ## Threat model

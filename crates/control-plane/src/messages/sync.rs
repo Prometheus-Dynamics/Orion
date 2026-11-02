@@ -21,8 +21,8 @@ pub struct PeerHello {
     pub transport_binding_signature: Option<Vec<u8>>,
 }
 
-/// The sender's `orion+tcp` listener port, announced to a robot-link peer right after its signed
-/// hello (`docs/discovery.md`, "Robot links"). The receiver registers the sender at
+/// The sender's `orion+tcp` listener port, announced to a private-link peer right after its signed
+/// hello (`docs/discovery.md`, "Private links"). The receiver registers the sender at
 /// `orion+tcp://<connection address>:<port>`. Trust comes from the signed request, never from
 /// this message's contents.
 #[derive(

@@ -252,7 +252,7 @@ fn provider_allow_list_admits_the_provider_lane_only() {
     let send = |message: ControlMessage| {
         app.serve_control_request(crate::service::ControlRequest::from_local_message(
             crate::ControlSurface::LocalIpc,
-            LocalAddress::new("atlas-agent"),
+            LocalAddress::new("device-agent"),
             LocalAddress::new("orion"),
             message,
             Some(UnixPeerIdentity {
@@ -265,13 +265,13 @@ fn provider_allow_list_admits_the_provider_lane_only() {
     };
 
     send(ControlMessage::ClientHello(ClientHello {
-        client_name: "atlas-agent".into(),
+        client_name: "device-agent".into(),
         role: ClientRole::Provider,
     }))
     .expect("a provider-allow caller registers as a provider");
     send(ControlMessage::ProviderState(ProviderStateUpdate {
         provider: ProviderRecord::builder(
-            orion::ProviderId::new("atlas-agent"),
+            orion::ProviderId::new("device-agent"),
             NodeId::new("node-main"),
         )
         .build(),
@@ -299,7 +299,7 @@ fn provider_allow_list_admits_the_provider_lane_only() {
 
     // A provider-allow caller cannot take the control-plane role.
     let err = send(ControlMessage::ClientHello(ClientHello {
-        client_name: "atlas-control".into(),
+        client_name: "device-control".into(),
         role: ClientRole::ControlPlane,
     }))
     .expect_err("a control-plane hello needs the admin grant");

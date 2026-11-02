@@ -396,19 +396,19 @@ async fn actions_are_forwarded_to_the_owning_node_over_orion_tcp() {
     }
 }
 
-/// Turns on robot-link trust for `node` with `link` as its robot network (open mode).
-fn robot_link_on(node: &TcpNode, link: &str) {
-    node.app.security.set_robot_link_trust(
-        crate::auth::RobotLinkTrust::from_settings(
+/// Turns on private-link trust for `node` with `link` as its private network (open mode).
+fn private_link_on(node: &TcpNode, link: &str) {
+    node.app.security.set_private_link_trust(
+        crate::auth::PrivateLinkTrust::from_settings(
             crate::PeerAuthenticationMode::Disabled,
-            Some("robot-link"),
+            Some("private-link"),
             Some(link),
         )
-        .expect("robot link should parse"),
+        .expect("private link should parse"),
     );
 }
 
-/// Registers `peer` on `node` by address only: no key, so trust must come from the robot link.
+/// Registers `peer` on `node` by address only: no key, so trust must come from the private link.
 fn register_by_address(node: &TcpNode, peer: &TcpNode) {
     node.app
         .register_peer(PeerConfig::new(
@@ -426,14 +426,14 @@ fn pinned_key_of(node: &TcpNode, peer: &TcpNode) -> Option<orion_core::PublicKey
 }
 
 #[tokio::test]
-async fn open_mode_peers_on_a_robot_link_auto_sync() {
+async fn open_mode_peers_on_a_private_link_auto_sync() {
     let mode = crate::PeerAuthenticationMode::Disabled;
     let (a, b) = (
         tcp_node("node-a", mode).await,
         tcp_node("node-b", mode).await,
     );
-    robot_link_on(&a, "127.0.0.0/8");
-    robot_link_on(&b, "127.0.0.0/8");
+    private_link_on(&a, "127.0.0.0/8");
+    private_link_on(&b, "127.0.0.0/8");
     // Only a knows b; b learns a from a's signed hello and registers it.
     register_by_address(&a, &b);
     assert!(b.app.peer_state_for_test(&NodeId::new("node-a")).is_none());
@@ -466,15 +466,15 @@ async fn open_mode_peers_on_a_robot_link_auto_sync() {
 }
 
 #[tokio::test]
-async fn open_mode_peers_off_the_robot_link_are_not_trusted_or_registered() {
+async fn open_mode_peers_off_the_private_link_are_not_trusted_or_registered() {
     let mode = crate::PeerAuthenticationMode::Disabled;
     let (a, b) = (
         tcp_node("node-a", mode).await,
         tcp_node("node-b", mode).await,
     );
-    // The robot network is elsewhere: a's connection from 127.0.0.1 is off the link.
-    robot_link_on(&a, "10.0.0.0/8");
-    robot_link_on(&b, "10.0.0.0/8");
+    // The private network is elsewhere: a's connection from 127.0.0.1 is off the link.
+    private_link_on(&a, "10.0.0.0/8");
+    private_link_on(&b, "10.0.0.0/8");
     register_by_address(&a, &b);
     sync(&a, &b).await;
 
@@ -486,22 +486,22 @@ async fn open_mode_peers_off_the_robot_link_are_not_trusted_or_registered() {
 }
 
 #[tokio::test]
-async fn open_mode_refuses_a_changed_key_on_a_robot_link() {
+async fn open_mode_refuses_a_changed_key_on_a_private_link() {
     let mode = crate::PeerAuthenticationMode::Disabled;
     let (a, b) = (
         tcp_node("node-a", mode).await,
         tcp_node("node-b", mode).await,
     );
-    robot_link_on(&a, "127.0.0.0/8");
-    robot_link_on(&b, "127.0.0.0/8");
+    private_link_on(&a, "127.0.0.0/8");
+    private_link_on(&b, "127.0.0.0/8");
     register_by_address(&a, &b);
     sync(&a, &b).await;
     let first_key = a.app.security.public_key_hex();
     assert_eq!(pinned_key_of(&b, &a), Some(first_key.clone()));
 
-    // A re-keyed node-a (a fresh identity under the same id) on the same robot link.
+    // A re-keyed node-a (a fresh identity under the same id) on the same private link.
     let rekeyed = tcp_node("node-a", mode).await;
-    robot_link_on(&rekeyed, "127.0.0.0/8");
+    private_link_on(&rekeyed, "127.0.0.0/8");
     register_by_address(&rekeyed, &b);
     let err = rekeyed
         .app
@@ -528,8 +528,8 @@ async fn unsigned_open_mode_peers_still_sync_and_are_not_trusted() {
         tcp_node("node-a", mode).await,
         tcp_node("node-b", mode).await,
     );
-    // a has no robot-link policy: its hello is unsigned, as from a node built before this change.
-    robot_link_on(&b, "127.0.0.0/8");
+    // a has no private-link policy: its hello is unsigned, as from a node built before this change.
+    private_link_on(&b, "127.0.0.0/8");
     register_by_address(&a, &b);
     write_local(
         &a.app,
@@ -550,14 +550,14 @@ async fn unsigned_open_mode_peers_still_sync_and_are_not_trusted() {
 }
 
 #[tokio::test]
-async fn security_on_never_registers_peers_from_the_robot_link_path() {
+async fn security_on_never_registers_peers_from_the_private_link_path() {
     let mode = crate::PeerAuthenticationMode::Optional;
     let (a, b) = (
         tcp_node("node-a", mode).await,
         tcp_node("node-b", mode).await,
     );
-    robot_link_on(&a, "127.0.0.0/8");
-    robot_link_on(&b, "127.0.0.0/8");
+    private_link_on(&a, "127.0.0.0/8");
+    private_link_on(&b, "127.0.0.0/8");
     // Optional mode keeps its own rules: a's signed hello is authenticated as before, and b
     // registers nothing it was not configured with.
     register_by_address(&a, &b);

@@ -137,7 +137,7 @@ pub enum ControlMessage {
     /// backfill, then `StreamData` events.
     SubscribeStream(StreamSubscription),
     UnsubscribeStream(StreamRef),
-    /// Announces the sender's `orion+tcp` listener port after a signed hello on a robot link
+    /// Announces the sender's `orion+tcp` listener port after a signed hello on a private link
     /// (open mode only, `docs/discovery.md`); answered with `Accepted`.
     RobotLinkListener(RobotLinkListener),
 }

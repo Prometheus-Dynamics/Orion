@@ -56,7 +56,7 @@ systemd" below covers the service side:
   - `http://`/`https://` entries in `ORION_NODE_PEERS`, `ORION_NODE_HTTP_PROBE_ADDR`, `ORION_NODE_HTTP_TLS_CERT`, `ORION_NODE_HTTP_TLS_KEY`, and `ORION_NODE_HTTP_TLS_AUTO` fail startup with an error that names the missing feature. `orion+tcp://` peers likewise need the `peer-tcp` feature.
   - Embedders that pass peers or HTTP TLS files to `NodeApp::builder()` get the same error from `try_build()`.
 - set `ORION_NODE_RUNTIME_WORKER_THREADS=1` or `2` and lower `ORION_NODE_MAX_MUTATION_HISTORY*` and worker queue capacities to fit the device memory budget
-- on glibc targets, keep the packaged unit's malloc settings: `MALLOC_ARENA_MAX=1` with 64 KiB `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TOP_PAD_` and `MALLOC_TRIM_THRESHOLD_`. On a CM5 with one pipeline, after three workload rewrites, they held 8.4 MiB PSS against 13.6 MiB with `MALLOC_ARENA_MAX=2` alone. On a Raze (CM5) under HeliOS's load, the packaged node after 7 days (2026-10-31): 9.8 MiB PSS, 11.3 MiB RSS, 6.9 MiB private dirty, 0 restarts
+- on glibc targets, keep the packaged unit's malloc settings: `MALLOC_ARENA_MAX=1` with 64 KiB `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TOP_PAD_` and `MALLOC_TRIM_THRESHOLD_`. On a reference board with one pipeline, after three workload rewrites, they held 8.4 MiB PSS against 13.6 MiB with `MALLOC_ARENA_MAX=2` alone. On a reference board (reference board) under the device runtime's load, the packaged node after 7 days (2026-10-31): 9.8 MiB PSS, 11.3 MiB RSS, 6.9 MiB private dirty, 0 restarts
 - keep the default allocator (glibc malloc). In every appliance soak run, the opt-in `alloc-jemalloc` and `alloc-mimalloc` features below used more memory than glibc
 - check transparent huge pages (THP) on the device: `cat /sys/kernel/mm/transparent_hugepage/enabled` and `grep AnonHugePages /proc/$(pidof orion-node)/smaps_rollup`. With THP set to `always`, the kernel can back sparsely used heap regions with whole huge pages. On a kernel with 16 KiB pages (common on small arm64 boards), a PMD huge page is 32 MiB instead of 2 MiB, so check `getconf PAGESIZE` too. If `AnonHugePages` is a large share of `Anonymous`, boot with `transparent_hugepage=madvise` (or write `madvise` to that sysfs file)
 
@@ -186,8 +186,8 @@ drop-in to disable the watchdog. Start-up (state replay) is not covered by the w
 | --- | --- | --- | --- |
 | `ORION_NODE_PEERS` | unset | Comma-separated `node-id=<url>` entries where `<url>` is `http://host:port`, `https://host:port` (feature `transport-http`) or `orion+tcp://host:port` (feature `peer-tcp`); optional `|ca=/path` (HTTPS) and trusted public key segments. HTTP and TCP peers can be mixed. | Invalid entry format, an unknown scheme, or a scheme whose feature is not compiled in fails startup. |
 | `ORION_NODE_PEER_AUTH` | `optional` | `disabled`, `optional`, `required` | Invalid mode fails startup. |
-| `ORION_NODE_ROBOT_LINKS` | unset | Comma-separated IPv4 or IPv6 subnets (`192.0.2.0/24`, `fd00:7::/64`) or single addresses that are the robot's own links (USB gadget network, robot Ethernet). See "Robot links" in `docs/discovery.md`. | Invalid subnet or prefix fails startup. |
-| `ORION_NODE_PEER_AUTO_TRUST` | `robot-link` with `ORION_NODE_PEER_AUTH=disabled`, otherwise `off` | `off`, `robot-link` | Invalid value fails startup. `robot-link` without `ORION_NODE_ROBOT_LINKS` fails startup when set explicitly; as the default it is off. With security on (`optional`, `required`) it never applies. |
+| `ORION_NODE_ROBOT_LINKS` | unset | Comma-separated IPv4 or IPv6 subnets (`192.0.2.0/24`, `fd00:7::/64`) or single addresses that are the device's own links (USB gadget network, private Ethernet). See "Private links" in `docs/discovery.md`. | Invalid subnet or prefix fails startup. |
+| `ORION_NODE_PEER_AUTO_TRUST` | `private-link` with `ORION_NODE_PEER_AUTH=disabled`, otherwise `off` | `off`, `private-link` | Invalid value fails startup. `private-link` without `ORION_NODE_ROBOT_LINKS` fails startup when set explicitly; as the default it is off. With security on (`optional`, `required`) it never applies. |
 | `ORION_NODE_PEER_SYNC_MODE` | `parallel` | `serial`, `parallel` | Invalid mode fails startup. |
 | `ORION_NODE_PEER_SYNC_MAX_IN_FLIGHT` | `4` | Integer, minimum effective value `1` | Invalid integer fails startup. |
 | `ORION_NODE_HTTP_MTLS` | `disabled` | `disabled`, `optional`, `required` | Invalid mode fails startup. |
@@ -232,11 +232,11 @@ mode or `ORION_NODE_LOCAL_AUTH_ALLOW` may register as a **provider or executor**
 role `Provider` or `Executor`), publish its provider or executor state, status and streams, and
 handle actions (`WatchActionRequests`, `ClaimNodeActions`, `ReportActionResult`). Every other
 operation, such as `RunAction`, `Mutations`, `WatchState` or `PollClientEvents`, is refused for it.
-This is how a device agent that is not the node's own user (for example an on-device Atlas agent)
+This is how a device agent that is not the node's own user (for example an on-device agent)
 can be a provider and handle actions without operator rights:
 
 ```sh
-ORION_NODE_LOCAL_PROVIDER_ALLOW=user:atlas
+ORION_NODE_LOCAL_PROVIDER_ALLOW=user:device-agent
 ```
 
 A refused caller gets an authorization error naming its uid, gid and groups and these variables. Embedders set the same with `NodeAppBuilder::with_local_authentication_mode` and

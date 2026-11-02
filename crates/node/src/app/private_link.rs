@@ -1,12 +1,12 @@
-//! Robot-link peers in open mode (`docs/discovery.md`, "Robot links").
+//! Private-link peers in open mode (`docs/discovery.md`, "Private links").
 //!
-//! A robot-link hello is signed by its sender and verified by the authenticator, which leaves a
-//! [`RobotLinkProof`] on the request. This module applies the robot-link policy to it: the key is
-//! pinned on first use from a robot link, and the peer is then registered for sync at the address
+//! A private-link hello is signed by its sender and verified by the authenticator, which leaves a
+//! [`PrivateLinkProof`] on the request. This module applies the private-link policy to it: the key is
+//! pinned on first use from a private link, and the peer is then registered for sync at the address
 //! the connection came from, on the port the sender announced.
 
 use super::{AuditEventKind, NodeApp};
-use crate::auth::RobotLinkProof;
+use crate::auth::PrivateLinkProof;
 use crate::peer::{PeerConfig, PeerState};
 #[cfg(peer_sync)]
 use orion::NodeId;
@@ -17,12 +17,12 @@ use tracing::debug;
 use tracing::warn;
 
 impl NodeApp {
-    /// Applies the robot-link policy to a request whose signature verified. A refused trust
+    /// Applies the private-link policy to a request whose signature verified. A refused trust
     /// decision is logged and the request is still answered as usual: refusing it would fail sync
     /// with a peer that merely lacks the policy, and the peer is then simply not registered.
-    pub(crate) fn note_robot_link_message(
+    pub(crate) fn note_private_link_message(
         &self,
-        proof: &RobotLinkProof,
+        proof: &PrivateLinkProof,
         remote: Option<IpAddr>,
         message: &ControlMessage,
     ) {
@@ -37,9 +37,9 @@ impl NodeApp {
         };
         if let Err(err) =
             self.security
-                .trust_robot_link_peer(&proof.node_id, remote, proof.public_key)
+                .trust_private_link_peer(&proof.node_id, remote, proof.public_key)
         {
-            warn!(peer = %proof.node_id, error = %err, "robot-link peer not trusted");
+            warn!(peer = %proof.node_id, error = %err, "private-link peer not trusted");
             return;
         }
         let (Some(port), Some(remote)) = (announced_port, remote) else {
@@ -65,18 +65,18 @@ impl NodeApp {
                 AuditEventKind::PeerEnrolled,
                 Some(proof.node_id.as_str().to_owned()),
                 format!(
-                    "registered robot-link peer `{}` at `{base_url}`",
+                    "registered private-link peer `{}` at `{base_url}`",
                     proof.node_id
                 ),
             );
         }
     }
 
-    /// Tells a robot-link peer which port this node listens on, right after a successful hello.
-    /// Only a node with robot-link trust on and a running listener announces; anything else is
+    /// Tells a private-link peer which port this node listens on, right after a successful hello.
+    /// Only a node with private-link trust on and a running listener announces; anything else is
     /// best effort and never fails the sync round.
     #[cfg(peer_sync)]
-    pub(crate) async fn announce_robot_link_listener<
+    pub(crate) async fn announce_private_link_listener<
         T: super::peer_transport::PeerSyncTransport,
     >(
         &self,
@@ -84,7 +84,7 @@ impl NodeApp {
         transport: &T,
     ) {
         if self.security.mode() != crate::PeerAuthenticationMode::Disabled
-            || !self.security.signs_robot_link_messages()
+            || !self.security.signs_private_link_messages()
         {
             return;
         }
@@ -96,7 +96,7 @@ impl NodeApp {
             port: listener.port(),
         });
         if let Err(err) = transport.send_control(self, node_id, announcement).await {
-            debug!(peer = %node_id, error = %err, "robot-link listener announcement failed");
+            debug!(peer = %node_id, error = %err, "private-link listener announcement failed");
         }
     }
 }

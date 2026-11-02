@@ -1,7 +1,7 @@
 //! Heap footprint of pipeline-shaped workloads, measured in-process.
 //!
-//! Each workload mirrors a HeliOS pipeline: an `ArtifactRecord` plus a `WorkloadRecord` whose
-//! config carries the inline Daedalus GraphDocument JSON (`graph.inline`, a string of
+//! Each workload mirrors a device pipeline: an `ArtifactRecord` plus a `WorkloadRecord` whose
+//! config carries the inline graph document JSON (`graph.inline`, a string of
 //! `HELIOS_MEM_PAYLOAD_BYTES` bytes). Writes go through the same `ControlMessage::Mutations` path
 //! the IPC clients use, so persistence and the mutation history run as they do in the node.
 //!
@@ -127,11 +127,11 @@ fn glibc_heap() -> (usize, usize, usize) {
     (0, 0, 0)
 }
 
-/// Graph JSON of about `target_bytes`, shaped like an inline Daedalus GraphDocument.
+/// Graph JSON of about `target_bytes`, shaped like an inline graph document.
 fn graph_document(revision: usize, target_bytes: usize) -> String {
     let mut out = String::with_capacity(target_bytes + 256);
     out.push_str(&format!(
-        r#"{{"format":"daedalus.graph","schema_version":1,"requires":[{{"id":"styx.frames","version":"1.0.0"}}],"metadata":{{"revision":{revision}}},"graph":{{"nodes":["#
+        r#"{{"format":"graph.document","schema_version":1,"requires":[{{"id":"media.frames","version":"1.0.0"}}],"metadata":{{"revision":{revision}}},"graph":{{"nodes":["#
     ));
     let mut index = 0usize;
     while out.len() < target_bytes {
@@ -150,7 +150,7 @@ fn graph_document(revision: usize, target_bytes: usize) -> String {
 }
 
 fn pipeline_workload(index: usize, revision: usize, payload_bytes: usize) -> WorkloadRecord {
-    let config = WorkloadConfig::new("helios.engine.execution.config.v1")
+    let config = WorkloadConfig::new("pipeline.engine.execution.config.v1")
         .field("graph.kind", TypedConfigValue::String("inline".into()))
         .field(
             "graph.inline",
@@ -160,7 +160,7 @@ fn pipeline_workload(index: usize, revision: usize, payload_bytes: usize) -> Wor
         .field("nice", TypedConfigValue::Int(0));
     WorkloadRecord::builder(
         WorkloadId::new(format!("workload.pipeline.{index}")),
-        RuntimeType::new("helios.engine.v1"),
+        RuntimeType::new("pipeline.engine.v1"),
         ArtifactId::new(format!("artifact.pipeline.{index}")),
     )
     .desired_state(DesiredState::Stopped)
@@ -284,7 +284,7 @@ fn workload_artifact_memory_footprint() {
     let empty = sample(&app, "empty", base_live);
     print_phase(&empty);
 
-    // Creation: one artifact and one workload per pipeline, in one batch each (as HeliOS writes).
+    // Creation: one artifact and one workload per pipeline, in one batch each (as the pipeline writes).
     reset_peak();
     for index in 0..workloads {
         send_mutations(
@@ -371,10 +371,10 @@ fn workload_artifact_memory_footprint() {
     );
 }
 
-/// Device-like load: the HeliOS pipeline plus the other clients a CM5 node serves at once.
+/// Device-like load: the device pipeline plus the other clients a reference node serves at once.
 ///
 /// Two providers publish `HELIOS_MEM_PROVIDER_RESOURCES` observed resources each (cameras and
-/// lemnos devices) every few rounds, an executor (the engine) publishes a status entry every round
+/// device-driver devices) every few rounds, an executor (the engine) publishes a status entry every round
 /// (the 30 Hz status lane), and the pipeline is rewritten every `HELIOS_MEM_PIPELINE_EVERY` rounds.
 /// Four watchers subscribe: two poll every round (the API), two never poll (a slow watcher), so
 /// their queued events are never drained.
@@ -407,13 +407,13 @@ fn device_like_load_footprint() {
     let app = builder.try_build().expect("node app should build");
 
     connect(&app, "orionctl.mem", ClientRole::ControlPlane);
-    let engine = connect(&app, "helios-engine", ClientRole::Executor);
-    let peripherals = connect(&app, "helios-peripherals", ClientRole::Provider);
-    let lemnos = connect(&app, "lemnos-orion", ClientRole::Provider);
-    let api_state = connect(&app, "helios-api.state", ClientRole::ControlPlane);
-    let api_status = connect(&app, "helios-api.status", ClientRole::ControlPlane);
-    let slow_state = connect(&app, "helios-api.state.slow", ClientRole::ControlPlane);
-    let slow_status = connect(&app, "lemnos.status.slow", ClientRole::ControlPlane);
+    let engine = connect(&app, "pipeline-engine", ClientRole::Executor);
+    let peripherals = connect(&app, "pipeline-peripherals", ClientRole::Provider);
+    let device_driver = connect(&app, "device-driver", ClientRole::Provider);
+    let api_state = connect(&app, "viewer-api.state", ClientRole::ControlPlane);
+    let api_status = connect(&app, "viewer-api.status", ClientRole::ControlPlane);
+    let slow_state = connect(&app, "viewer-api.state.slow", ClientRole::ControlPlane);
+    let slow_status = connect(&app, "device.status.slow", ClientRole::ControlPlane);
 
     expect_accepted(&app, &api_state, watch_state(true));
     expect_accepted(&app, &api_status, watch_status());
@@ -442,7 +442,7 @@ fn device_like_load_footprint() {
             executor: ExecutorRecord {
                 executor_id: ExecutorId::new("executor.engine"),
                 node_id: NodeId::new("node-mem"),
-                runtime_types: vec![RuntimeType::new("helios.engine.v1")],
+                runtime_types: vec![RuntimeType::new("pipeline.engine.v1")],
             },
             workloads: vec![pipeline_workload(0, 0, payload_bytes)],
             resources: Vec::new(),
@@ -463,9 +463,9 @@ fn device_like_load_footprint() {
         );
         provider_update(
             &app,
-            &lemnos,
-            "provider.lemnos.orion",
-            "lemnos.device",
+            &device_driver,
+            "provider.device-driver",
+            "device.record",
             provider_resources,
             0,
         );
@@ -511,9 +511,9 @@ fn device_like_load_footprint() {
             );
             provider_update(
                 &app,
-                &lemnos,
-                "provider.lemnos.orion",
-                "lemnos.device",
+                &device_driver,
+                "provider.device-driver",
+                "device.record",
                 provider_resources,
                 round,
             );
@@ -691,7 +691,7 @@ fn unpolled_state_watch_builds_its_snapshot_on_first_poll() {
         .try_build()
         .expect("node app should build");
     connect(&app, "orionctl.mem", ClientRole::ControlPlane);
-    let watcher = connect(&app, "helios-api.lazy", ClientRole::ControlPlane);
+    let watcher = connect(&app, "viewer-api.lazy", ClientRole::ControlPlane);
     expect_accepted(&app, &watcher, watch_state(false));
 
     for index in 0..3 {

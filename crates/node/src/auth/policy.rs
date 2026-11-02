@@ -38,14 +38,14 @@ impl Authenticator for NodeSecurityAuthenticator {
         };
 
         match request.context.peer_auth.as_ref() {
-            // Open mode: a robot-link hello or listener announcement is verified, not trusted; the
-            // robot-link policy decides on it (`docs/discovery.md`, "Robot links").
+            // Open mode: a private-link hello or listener announcement is verified, not trusted; the
+            // private-link policy decides on it (`docs/discovery.md`, "Private links").
             Some(auth)
                 if self.security.mode() == PeerAuthenticationMode::Disabled
-                    && request.operation().is_robot_link_message() =>
+                    && request.operation().is_private_link_message() =>
             {
-                let proof = self.security.verify_robot_link_request(auth, &payload)?;
-                request.context.robot_link = Some(proof);
+                let proof = self.security.verify_private_link_request(auth, &payload)?;
+                request.context.private_link = Some(proof);
                 Ok(())
             }
             // Remote operators are a principal kind of their own: their keys live in the operator

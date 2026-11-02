@@ -26,7 +26,7 @@ impl NodeApp {
         }
         match message {
             ControlMessage::Hello(_) => Ok(HttpResponsePayload::Hello(self.peer_hello()?)),
-            // Acted on by `note_robot_link_message` before dispatch; only the acknowledgement is left.
+            // Acted on by `note_private_link_message` before dispatch; only the acknowledgement is left.
             ControlMessage::RobotLinkListener(_) => Ok(HttpResponsePayload::Accepted),
             ControlMessage::SyncRequest(request) => self.build_sync_response(request),
             ControlMessage::SyncSummaryRequest(request) => Ok(HttpResponsePayload::Summary(

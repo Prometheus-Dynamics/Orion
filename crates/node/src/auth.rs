@@ -5,7 +5,7 @@ mod operators;
 #[cfg(feature = "peer-tcp")]
 mod peer_response;
 mod policy;
-mod robot_link;
+mod private_link;
 mod store;
 
 use crate::lock::{read_rwlock, write_rwlock};
@@ -41,8 +41,8 @@ pub use orion_auth::{
     PeerRequestPayload, TRANSPORT_BINDING_VERSION,
 };
 pub use policy::PeerSecurityMiddleware;
-pub(crate) use robot_link::RobotLinkProof;
-pub use robot_link::RobotLinkTrust;
+pub(crate) use private_link::PrivateLinkProof;
+pub use private_link::PrivateLinkTrust;
 use store::{
     AuthStateWorker, load_next_outbound_nonce, load_or_create_identity, load_seen_nonces,
     load_trusted_peer_state,
@@ -106,8 +106,8 @@ pub struct NodeSecurity {
     next_nonce: Arc<AtomicU64>,
     /// Remote operators (`docs/remote-operator.md`), persisted in `trusted-operators.json`.
     operators: Arc<RwLock<operators::OperatorTrust>>,
-    /// Robot-link trust in open mode (`docs/discovery.md`, "Robot links").
-    robot_link: Arc<RwLock<RobotLinkTrust>>,
+    /// Private-link trust in open mode (`docs/discovery.md`, "Private links").
+    private_link: Arc<RwLock<PrivateLinkTrust>>,
 }
 
 // Security-state locking contract:
@@ -186,7 +186,7 @@ impl NodeSecurity {
             seen_nonces,
             next_nonce,
             operators,
-            robot_link: Arc::new(RwLock::new(RobotLinkTrust::default())),
+            private_link: Arc::new(RwLock::new(PrivateLinkTrust::default())),
         })
     }
 
@@ -436,10 +436,10 @@ impl NodeSecurity {
         Ok(())
     }
 
-    /// Open mode signs only what robot-link trust needs (the hello and the listener announcement),
-    /// and only on a node with robot-link trust on. Everything else stays unsigned, as before.
+    /// Open mode signs only what private-link trust needs (the hello and the listener announcement),
+    /// and only on a node with private-link trust on. Everything else stays unsigned, as before.
     fn signs_in_open_mode(&self, payload: &HttpRequestPayload) -> bool {
-        self.signs_robot_link_messages()
+        self.signs_private_link_messages()
             && matches!(
                 payload,
                 HttpRequestPayload::Control(message)
@@ -562,14 +562,14 @@ impl NodeSecurity {
         })
     }
 
-    /// Verifies a robot-link request signed in open mode. Unlike [`Self::authenticate_request`] it
-    /// pins nothing: the robot-link policy decides on the verified key. The nonce is still
+    /// Verifies a private-link request signed in open mode. Unlike [`Self::authenticate_request`] it
+    /// pins nothing: the private-link policy decides on the verified key. The nonce is still
     /// checked, so a captured hello cannot be replayed.
-    pub(crate) fn verify_robot_link_request(
+    pub(crate) fn verify_private_link_request(
         &self,
         auth: &PeerRequestAuth,
         payload: &PeerRequestPayload,
-    ) -> Result<RobotLinkProof, NodeError> {
+    ) -> Result<PrivateLinkProof, NodeError> {
         let public_key = parse_public_key_bytes(&auth.public_key)?;
         let signature = parse_signature_bytes(&auth.signature)?;
         self.ensure_peer_is_not_revoked(&auth.node_id)?;
@@ -581,7 +581,7 @@ impl NodeSecurity {
             .copied();
         if pinned.is_some_and(|pinned| pinned != public_key) {
             return Err(NodeError::Authentication(format!(
-                "peer {} presented a key other than the one pinned on its robot link",
+                "peer {} presented a key other than the one pinned on its private link",
                 auth.node_id
             )));
         }
@@ -599,7 +599,7 @@ impl NodeSecurity {
             )
             .map_err(|err| NodeError::Authentication(err.to_string()))?;
         self.record_and_validate_nonce(&auth.node_id, auth.nonce)?;
-        Ok(RobotLinkProof {
+        Ok(PrivateLinkProof {
             node_id: auth.node_id.clone(),
             public_key,
         })

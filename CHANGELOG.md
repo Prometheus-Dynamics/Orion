@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed (private links, breaking config value)
+
+- The robot-link trust path is named "private link" in the code and docs. `ORION_NODE_PEER_AUTO_TRUST` takes `private-link` (was `robot-link`); any other value still fails startup. `ORION_NODE_ROBOT_LINKS` and the `RobotLinkListener` control message keep their names: the variable is configuration and the message is on the wire.
+
 ### Removed (breaking, dev tooling and examples only)
 
 - `orion-nt4` example `nt4-latency` (a PhotonVision camera latency tool with an AprilTag page) is removed from this repository and moves to the PhotonVision tooling. The `[[example]]` entry, its tests and its README section are gone with it. Public `orion-nt4` API is unchanged.

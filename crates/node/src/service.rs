@@ -78,9 +78,9 @@ pub struct ControlRequestContext {
     pub session: Option<LocalAddress>,
     /// The remote end's address on the `orion+tcp` transport (for network auto-enrollment).
     pub remote_addr: Option<std::net::IpAddr>,
-    /// Set when the request is an open-mode robot-link message whose signature verified
-    /// (`docs/discovery.md`, "Robot links"). Trust is decided later, on the robot-link policy.
-    pub(crate) robot_link: Option<crate::auth::RobotLinkProof>,
+    /// Set when the request is an open-mode private-link message whose signature verified
+    /// (`docs/discovery.md`, "Private links"). Trust is decided later, on the private-link policy.
+    pub(crate) private_link: Option<crate::auth::PrivateLinkProof>,
 }
 
 impl ControlRequestContext {
@@ -94,7 +94,7 @@ impl ControlRequestContext {
             local_identity: None,
             session: None,
             remote_addr: None,
-            robot_link: None,
+            private_link: None,
         }
     }
 
@@ -131,7 +131,7 @@ impl ControlRequestContext {
             local_identity,
             session: None,
             remote_addr: None,
-            robot_link: None,
+            private_link: None,
         }
     }
 
@@ -236,8 +236,8 @@ impl ControlOperation {
         matches!(self, Self::EnrollmentHello | Self::EnrollmentConfirm)
     }
 
-    /// Open-mode messages that robot-link trust reads (`docs/discovery.md`, "Robot links").
-    pub fn is_robot_link_message(self) -> bool {
+    /// Open-mode messages that private-link trust reads (`docs/discovery.md`, "Private links").
+    pub fn is_private_link_message(self) -> bool {
         matches!(self, Self::Hello | Self::RobotLinkListener)
     }
 }
@@ -565,9 +565,9 @@ impl RequestService<ControlRequest> for NodeControlService {
                         .map(|response| ControlResponse::Http(Box::new(response)))
                 }
                 ControlSurface::PeerHttp | ControlSurface::PeerTcp => {
-                    if let Some(proof) = context.robot_link.as_ref() {
+                    if let Some(proof) = context.private_link.as_ref() {
                         self.app
-                            .note_robot_link_message(proof, context.remote_addr, &message);
+                            .note_private_link_message(proof, context.remote_addr, &message);
                     }
                     self.app
                         .apply_control_message(

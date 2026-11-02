@@ -1,14 +1,14 @@
-//! Robot-link peer trust (`docs/discovery.md`, "Robot links: trust without a shared key").
+//! Private-link peer trust (`docs/discovery.md`, "Private links: trust without a shared key").
 //!
 //! In open mode (`ORION_NODE_PEER_AUTH=disabled`) a peer is trusted without a shared key only when
-//! its connection comes from a subnet the robot declares as its own link, and its key is pinned on
+//! its connection comes from a subnet the device declares as its own link, and its key is pinned on
 //! first use. Everything else, including every `optional` and `required` setting, is decided by
 //! the rules in `auth.rs`, unchanged.
 //!
 //! The wire part: in open mode a node signs its hello and its listener announcement with its node
 //! identity key (`NodeSecurity::wrap_http_payload`), and the receiver verifies the signature
-//! without pinning anything (`NodeSecurity::verify_robot_link_request`). The decision below then
-//! runs with the connection's address; `NodeApp::note_robot_link_message` acts on it.
+//! without pinning anything (`NodeSecurity::verify_private_link_request`). The decision below then
+//! runs with the connection's address; `NodeApp::note_private_link_message` acts on it.
 use super::NodeSecurity;
 use super::modes::PeerAuthenticationMode;
 use crate::NodeError;
@@ -16,10 +16,10 @@ use crate::lock::{read_rwlock, write_rwlock};
 use orion::NodeId;
 use std::net::IpAddr;
 
-/// A robot-link request whose signature verified: the signer's node id and key. Nothing is
-/// trusted yet; the robot-link policy decides on it.
+/// A private-link request whose signature verified: the signer's node id and key. Nothing is
+/// trusted yet; the private-link policy decides on it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RobotLinkProof {
+pub(crate) struct PrivateLinkProof {
     pub(crate) node_id: NodeId,
     pub(crate) public_key: [u8; 32],
 }
@@ -28,7 +28,7 @@ pub(crate) struct RobotLinkProof {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PeerAutoTrust {
     Off,
-    RobotLink,
+    PrivateLink,
 }
 
 /// A network prefix (`192.0.2.0/24`, `fd00::/64`), or one address (`192.0.2.7`).
@@ -90,14 +90,14 @@ fn octets(ip: IpAddr) -> Vec<u8> {
     }
 }
 
-/// The robot's declared links and whether robot-link trust is on.
+/// The device's declared links and whether private-link trust is on.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RobotLinkTrust {
+pub struct PrivateLinkTrust {
     pub mode: PeerAutoTrust,
     pub links: Vec<Subnet>,
 }
 
-impl Default for RobotLinkTrust {
+impl Default for PrivateLinkTrust {
     fn default() -> Self {
         Self {
             mode: PeerAutoTrust::Off,
@@ -106,7 +106,7 @@ impl Default for RobotLinkTrust {
     }
 }
 
-impl RobotLinkTrust {
+impl PrivateLinkTrust {
     /// Reads `ORION_NODE_ROBOT_LINKS` and `ORION_NODE_PEER_AUTO_TRUST` (see
     /// [`Self::from_settings`]).
     pub fn try_from_env(peer_authentication: PeerAuthenticationMode) -> Result<Self, NodeError> {
@@ -124,8 +124,8 @@ impl RobotLinkTrust {
         )
     }
 
-    /// Builds the policy from the raw settings. Auto-trust defaults to `robot-link` in open mode
-    /// and to `off` otherwise. `robot-link` without any link is off when it is the default, and
+    /// Builds the policy from the raw settings. Auto-trust defaults to `private-link` in open mode
+    /// and to `off` otherwise. `private-link` without any link is off when it is the default, and
     /// an error when it was asked for explicitly.
     pub fn from_settings(
         peer_authentication: PeerAuthenticationMode,
@@ -140,22 +140,22 @@ impl RobotLinkTrust {
             .map(Subnet::parse)
             .collect::<Result<Vec<_>, _>>()?;
         let default = if peer_authentication == PeerAuthenticationMode::Disabled {
-            "robot-link"
+            "private-link"
         } else {
             "off"
         };
         let choices = [
             ("off", PeerAutoTrust::Off),
-            ("robot-link", PeerAutoTrust::RobotLink),
+            ("private-link", PeerAutoTrust::PrivateLink),
         ];
         let mode = match auto_trust {
             Some(value) => parse_choice_value(value, &choices)?,
             None => parse_choice_value(default, &choices)?,
         };
-        if mode == PeerAutoTrust::RobotLink && links.is_empty() {
+        if mode == PeerAutoTrust::PrivateLink && links.is_empty() {
             if auto_trust.is_some() {
                 return Err(NodeError::Config(
-                    "ORION_NODE_PEER_AUTO_TRUST=robot-link needs ORION_NODE_ROBOT_LINKS".into(),
+                    "ORION_NODE_PEER_AUTO_TRUST=private-link needs ORION_NODE_ROBOT_LINKS".into(),
                 ));
             }
             return Ok(Self::default());
@@ -175,14 +175,14 @@ fn parse_choice_value<T: Copy>(value: &str, choices: &[(&str, T)]) -> Result<T, 
         .find_map(|(name, choice)| (*name == normalized).then_some(*choice))
         .ok_or_else(|| {
             NodeError::Config(format!(
-                "ORION_NODE_PEER_AUTO_TRUST must be off or robot-link: {value}"
+                "ORION_NODE_PEER_AUTO_TRUST must be off or private-link: {value}"
             ))
         })
 }
 
-/// Why a presented key is or is not trusted through the robot link.
+/// Why a presented key is or is not trusted through the private link.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RobotLinkDecision {
+pub(crate) enum PrivateLinkDecision {
     Trust,
     RefusedSecurityOn,
     RefusedAutoTrustOff,
@@ -190,75 +190,75 @@ pub(crate) enum RobotLinkDecision {
     RefusedKeyMismatch,
 }
 
-/// The rule of `docs/discovery.md`, "Robot links": open mode, auto-trust on, a connection from a
-/// robot link, and the presented key is the pinned one or none is pinned yet.
+/// The rule of `docs/discovery.md`, "Private links": open mode, auto-trust on, a connection from a
+/// private link, and the presented key is the pinned one or none is pinned yet.
 pub(crate) fn decide(
     mode: PeerAuthenticationMode,
-    policy: &RobotLinkTrust,
+    policy: &PrivateLinkTrust,
     remote: Option<IpAddr>,
     pinned: Option<&[u8; 32]>,
     presented: &[u8; 32],
-) -> RobotLinkDecision {
+) -> PrivateLinkDecision {
     if mode != PeerAuthenticationMode::Disabled {
-        return RobotLinkDecision::RefusedSecurityOn;
+        return PrivateLinkDecision::RefusedSecurityOn;
     }
     if policy.mode == PeerAutoTrust::Off {
-        return RobotLinkDecision::RefusedAutoTrustOff;
+        return PrivateLinkDecision::RefusedAutoTrustOff;
     }
     match remote {
         Some(remote) if policy.on_a_link(remote) => {}
-        _ => return RobotLinkDecision::RefusedOffLink,
+        _ => return PrivateLinkDecision::RefusedOffLink,
     }
     match pinned {
-        Some(pinned) if pinned != presented => RobotLinkDecision::RefusedKeyMismatch,
-        _ => RobotLinkDecision::Trust,
+        Some(pinned) if pinned != presented => PrivateLinkDecision::RefusedKeyMismatch,
+        _ => PrivateLinkDecision::Trust,
     }
 }
 
 impl NodeSecurity {
-    /// Sets the robot-link policy (`ORION_NODE_ROBOT_LINKS`, `ORION_NODE_PEER_AUTO_TRUST`).
-    pub fn set_robot_link_trust(&self, trust: RobotLinkTrust) {
-        *write_rwlock(self.robot_link.write(), "robot_link") = trust;
+    /// Sets the private-link policy (`ORION_NODE_ROBOT_LINKS`, `ORION_NODE_PEER_AUTO_TRUST`).
+    pub fn set_private_link_trust(&self, trust: PrivateLinkTrust) {
+        *write_rwlock(self.private_link.write(), "private_link") = trust;
     }
 
-    /// Whether this node signs its open-mode hello and listener announcement: robot-link trust is
+    /// Whether this node signs its open-mode hello and listener announcement: private-link trust is
     /// on, so the peers it talks to may want to pin its key.
-    pub(crate) fn signs_robot_link_messages(&self) -> bool {
-        read_rwlock(self.robot_link.read(), "robot_link").mode == PeerAutoTrust::RobotLink
+    pub(crate) fn signs_private_link_messages(&self) -> bool {
+        read_rwlock(self.private_link.read(), "private_link").mode == PeerAutoTrust::PrivateLink
     }
 
-    /// Trusts `node_id` with `public_key` if the robot-link rule allows it, pinning the key on first
+    /// Trusts `node_id` with `public_key` if the private-link rule allows it, pinning the key on first
     /// use. `remote` is the address the connection comes from. Errors refuse the peer.
-    pub(crate) fn trust_robot_link_peer(
+    pub(crate) fn trust_private_link_peer(
         &self,
         node_id: &NodeId,
         remote: Option<IpAddr>,
         public_key: [u8; 32],
     ) -> Result<(), NodeError> {
         self.ensure_peer_is_not_revoked(node_id)?;
-        let policy = read_rwlock(self.robot_link.read(), "robot_link").clone();
+        let policy = read_rwlock(self.private_link.read(), "private_link").clone();
         let pinned = read_rwlock(self.trusted_peer_state.read(), "trusted_peer_state")
             .peers
             .get(node_id)
             .copied();
         match decide(self.mode, &policy, remote, pinned.as_ref(), &public_key) {
-            RobotLinkDecision::Trust => {
+            PrivateLinkDecision::Trust => {
                 if pinned.is_none() {
                     self.pin_or_validate_trusted_peer(node_id, public_key)?;
                 }
                 Ok(())
             }
-            RobotLinkDecision::RefusedSecurityOn => Err(NodeError::Authorization(format!(
-                "peer {node_id}: robot-link trust applies only in open mode (ORION_NODE_PEER_AUTH=disabled)"
+            PrivateLinkDecision::RefusedSecurityOn => Err(NodeError::Authorization(format!(
+                "peer {node_id}: private-link trust applies only in open mode (ORION_NODE_PEER_AUTH=disabled)"
             ))),
-            RobotLinkDecision::RefusedAutoTrustOff => Err(NodeError::Authorization(format!(
-                "peer {node_id}: robot-link trust is off (ORION_NODE_PEER_AUTO_TRUST)"
+            PrivateLinkDecision::RefusedAutoTrustOff => Err(NodeError::Authorization(format!(
+                "peer {node_id}: private-link trust is off (ORION_NODE_PEER_AUTO_TRUST)"
             ))),
-            RobotLinkDecision::RefusedOffLink => Err(NodeError::Authorization(format!(
-                "peer {node_id}: not on a robot link (ORION_NODE_ROBOT_LINKS)"
+            PrivateLinkDecision::RefusedOffLink => Err(NodeError::Authorization(format!(
+                "peer {node_id}: not on a private link (ORION_NODE_ROBOT_LINKS)"
             ))),
-            RobotLinkDecision::RefusedKeyMismatch => Err(NodeError::Authentication(format!(
-                "peer {node_id} presented a key other than the one pinned on its robot link"
+            PrivateLinkDecision::RefusedKeyMismatch => Err(NodeError::Authentication(format!(
+                "peer {node_id} presented a key other than the one pinned on its private link"
             ))),
         }
     }
@@ -275,9 +275,9 @@ mod tests {
     fn open_node_with_link(link: &str) -> NodeSecurity {
         let security = NodeSecurity::load_or_create(NodeId::new("node-a"), Disabled, &[], None, 16)
             .expect("security should build without storage");
-        security.set_robot_link_trust(
-            RobotLinkTrust::from_settings(Disabled, Some("robot-link"), Some(link))
-                .expect("robot link should parse"),
+        security.set_private_link_trust(
+            PrivateLinkTrust::from_settings(Disabled, Some("private-link"), Some(link))
+                .expect("private link should parse"),
         );
         security
     }
@@ -322,35 +322,35 @@ mod tests {
 
     #[test]
     fn settings_default_on_only_in_open_mode_and_need_a_link() {
-        let open = RobotLinkTrust::from_settings(Disabled, None, Some("192.0.2.0/24"))
+        let open = PrivateLinkTrust::from_settings(Disabled, None, Some("192.0.2.0/24"))
             .expect("defaults should parse");
-        assert_eq!(open.mode, PeerAutoTrust::RobotLink);
+        assert_eq!(open.mode, PeerAutoTrust::PrivateLink);
         assert_eq!(open.links.len(), 1);
 
-        let secured = RobotLinkTrust::from_settings(Optional, None, Some("192.0.2.0/24"))
+        let secured = PrivateLinkTrust::from_settings(Optional, None, Some("192.0.2.0/24"))
             .expect("defaults should parse");
         assert_eq!(secured.mode, PeerAutoTrust::Off, "security on keeps it off");
 
-        let no_link = RobotLinkTrust::from_settings(Disabled, None, None)
+        let no_link = PrivateLinkTrust::from_settings(Disabled, None, None)
             .expect("default without links is off, not an error");
-        assert_eq!(no_link, RobotLinkTrust::default());
+        assert_eq!(no_link, PrivateLinkTrust::default());
 
         assert!(
-            RobotLinkTrust::from_settings(Disabled, Some("robot-link"), None).is_err(),
-            "asking for robot-link without a link fails startup"
+            PrivateLinkTrust::from_settings(Disabled, Some("private-link"), None).is_err(),
+            "asking for private-link without a link fails startup"
         );
-        assert!(RobotLinkTrust::from_settings(Disabled, Some("sometimes"), None).is_err());
+        assert!(PrivateLinkTrust::from_settings(Disabled, Some("sometimes"), None).is_err());
     }
 
     #[test]
-    fn auto_trust_pins_the_first_key_on_a_robot_link() {
+    fn auto_trust_pins_the_first_key_on_a_private_link() {
         let security = open_node_with_link("192.0.2.0/24");
         security
-            .trust_robot_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
-            .expect("first use on the robot link should be trusted");
+            .trust_private_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
+            .expect("first use on the private link should be trusted");
         assert_eq!(pinned_key(&security, "node-b"), Some(KEY_A));
         security
-            .trust_robot_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
+            .trust_private_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
             .expect("the same key again is still trusted");
     }
 
@@ -358,15 +358,15 @@ mod tests {
     fn auto_trust_refuses_a_peer_off_the_link() {
         let security = open_node_with_link("192.0.2.0/24");
         let err = security
-            .trust_robot_link_peer(&NodeId::new("node-b"), ip("203.0.113.5"), KEY_A)
+            .trust_private_link_peer(&NodeId::new("node-b"), ip("203.0.113.5"), KEY_A)
             .expect_err("a peer off the link is never auto-trusted");
-        assert!(err.to_string().contains("not on a robot link"), "{err}");
+        assert!(err.to_string().contains("not on a private link"), "{err}");
         assert_eq!(pinned_key(&security, "node-b"), None);
 
         let unknown_source = security
-            .trust_robot_link_peer(&NodeId::new("node-b"), None, KEY_A)
+            .trust_private_link_peer(&NodeId::new("node-b"), None, KEY_A)
             .expect_err("a connection without a source address is off the link");
-        assert!(unknown_source.to_string().contains("not on a robot link"));
+        assert!(unknown_source.to_string().contains("not on a private link"));
     }
 
     #[test]
@@ -374,13 +374,17 @@ mod tests {
         for mode in [Optional, Required] {
             let security = NodeSecurity::load_or_create(NodeId::new("node-a"), mode, &[], None, 16)
                 .expect("security should build without storage");
-            security.set_robot_link_trust(
-                RobotLinkTrust::from_settings(Disabled, Some("robot-link"), Some("192.0.2.0/24"))
-                    .expect("robot link should parse"),
+            security.set_private_link_trust(
+                PrivateLinkTrust::from_settings(
+                    Disabled,
+                    Some("private-link"),
+                    Some("192.0.2.0/24"),
+                )
+                .expect("private link should parse"),
             );
             let err = security
-                .trust_robot_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
-                .expect_err("security on: robot-link trust never applies");
+                .trust_private_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
+                .expect_err("security on: private-link trust never applies");
             assert!(err.to_string().contains("open mode"), "{err}");
             assert_eq!(pinned_key(&security, "node-b"), None);
         }
@@ -390,10 +394,10 @@ mod tests {
     fn auto_trust_refuses_a_changed_key_for_a_pinned_peer() {
         let security = open_node_with_link("192.0.2.0/24");
         security
-            .trust_robot_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
+            .trust_private_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
             .expect("first use should be trusted");
         let err = security
-            .trust_robot_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_B)
+            .trust_private_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_B)
             .expect_err("a different key for a pinned peer is refused, even on the link");
         assert!(err.to_string().contains("pinned"), "{err}");
         assert_eq!(
@@ -408,8 +412,8 @@ mod tests {
         let security = NodeSecurity::load_or_create(NodeId::new("node-a"), Disabled, &[], None, 16)
             .expect("security should build without storage");
         let err = security
-            .trust_robot_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
-            .expect_err("without a robot link configured nothing is auto-trusted");
+            .trust_private_link_peer(&NodeId::new("node-b"), ip("192.0.2.20"), KEY_A)
+            .expect_err("without a private link configured nothing is auto-trusted");
         assert!(err.to_string().contains("off"), "{err}");
     }
 }

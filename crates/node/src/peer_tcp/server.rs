@@ -43,7 +43,7 @@ impl NodeApp {
             addr: addr.to_string(),
             message: err.to_string(),
         })?;
-        // Robot-link peers learn the listener port from the announcement (`docs/discovery.md`).
+        // Private-link peers learn the listener port from the announcement (`docs/discovery.md`).
         let _ = self.peer_tcp_bound.set(local_addr);
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let app = self.clone();
