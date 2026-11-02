@@ -32,10 +32,15 @@ when, blocked by.
       capped in bytes (a plain knob with a default) or coalesce to the latest list, and the
       device-like footprint harness shows a slow watcher holding at most the cap. Blocked by:
       nothing.
-- [ ] **riscv64 and armv7 builds.** Why: the K230D (riscv64) and Flame (RV1106G2, Cortex-A7) run
-      orion-node and orionctl. Done when: the IPC-only node and orionctl build for
-      riscv64gc-unknown-linux-gnu/musl and armv7-unknown-linux-gnueabihf in CI, and the node tests
-      pass under qemu for one of them. Blocked by: nothing.
+- [x] **riscv64 and armv7 builds.** Why: the K230D (riscv64) and Flame (RV1106G2, Cortex-A7) run
+      orion-node and orionctl. Done in 81406f9 (CI job `cross32`, `scripts/ci-jobs.sh cross32`); the
+      IPC-only build's dead-code warning was already handled upstream. The IPC-only orion-node and orionctl build in release for
+      riscv64gc-unknown-linux-gnu and armv7-unknown-linux-gnueabihf; the orion-node tests (235 unit
+      plus all integration binaries) pass under qemu-riscv64 with `--test-threads=1`, and orionctl's
+      tests pass under it too. Stripped release sizes (opt-level z, fat LTO): riscv64gc orion-node
+      3,166,224 B, orionctl 1,844,704 B; armv7 orion-node 3,052,712 B, orionctl 1,851,432 B. Checked
+      locally with zig cc against glibc 2.39 and a Debian trixie sysroot; the GitHub job is the
+      first run on ubuntu-latest. Blocked by: nothing.
 - [x] **Memory on the device.** The packaged unit's malloc settings (6a70758: one arena, 64 KiB
       mmap/trim/top-pad) on Raze #1 under HeliOS's load: PSS 9.8 MiB, RSS 11.3 MiB, private dirty
       6.9 MiB after 7 days (13.6 MiB before 6a70758). Recorded in docs/node-env.md.
