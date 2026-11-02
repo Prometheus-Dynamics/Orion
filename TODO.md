@@ -210,6 +210,20 @@ its dev version.
 - [x] The packaged service on the board image (16 KiB pages): `Type=notify`, `WatchdogUSec=30s`,
       StatusText "serving node=node-…", 0 restarts in 7 days (reference board #1, 2026-10-31).
 
+### Persistence
+
+- [ ] **Snapshot write ordering race.** Why: under concurrent writes (the apply path's immediate
+      observed write, and the reconcile loop's writes), a persisted bundle's manifest can name an
+      observed revision that the observed file does not hold. Then `load_snapshot_sections` fails
+      with "snapshot manifest revisions do not match section files", and the state cannot be
+      restored at startup. Seen 6 times in 120 runs of
+      `desired_commits_stay_durable_and_carry_pending_observed_state` under heavy CPU load, with the
+      mismatch still present after the writes had stopped. Suspected mechanism, not yet confirmed:
+      bundles are captured on one thread and queued in another order, and a bundle that reuses the
+      existing observed bytes writes a manifest from its capture time. Done when: capture and
+      enqueue are ordered (or the manifest records the revisions it wrote), and that test stays green
+      across 200 stressed runs. Blocked by: nothing.
+
 ### CI
 
 - [ ] Watch the first GitHub run of the new jobs: node feature matrix, IPC-only tests, allocator

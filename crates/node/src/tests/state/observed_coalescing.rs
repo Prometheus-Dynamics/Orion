@@ -187,18 +187,35 @@ async fn desired_commits_stay_durable_and_carry_pending_observed_state() {
     let source = LocalAddress::new("coalesce-provider");
     register_provider_client(&app, &source);
     let handle = app.spawn_reconcile_loop(Duration::from_millis(5));
+    // The first change must take the deferred path, so wait until the coalescer is running. Before
+    // that a change is written at once, and a write racing the reconcile loop's writes is not what
+    // this test is about.
+    let coalescer_deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !app
+        .observability_snapshot()
+        .resource_usage
+        .observed_persistence
+        .coalescing
+    {
+        assert!(
+            std::time::Instant::now() < coalescer_deadline,
+            "the observed-state coalescer should start with the reconcile loop"
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
     let storage = NodeStorage::new(&state_dir);
+    // A read can race a flush that is still writing the manifest and the sections, and then fails
+    // with a torn snapshot; that is not a result, so the wait below treats it as not yet flushed.
     let persisted_label = |storage: &NodeStorage| {
-        storage
-            .load_snapshot_sections()
-            .expect("snapshot should load")
-            .and_then(|sections| {
+        storage.load_snapshot_sections().map(|sections| {
+            sections.and_then(|sections| {
                 sections
                     .observed
                     .resources
                     .get(&ResourceId::new("resource.coalesce.camera"))
                     .and_then(|resource| resource.labels.first().cloned())
             })
+        })
     };
 
     // The first deferred change after an idle period is flushed at once; the next one waits for
@@ -206,7 +223,7 @@ async fn desired_commits_stay_durable_and_carry_pending_observed_state() {
     app.apply_local_control_message(&source, provider_update(&app, 0))
         .expect("provider state should apply");
     let flush_deadline = std::time::Instant::now() + interval / 2;
-    while persisted_label(&storage).as_deref() != Some("generation=0") {
+    while persisted_label(&storage).ok().flatten().as_deref() != Some("generation=0") {
         assert!(
             std::time::Instant::now() < flush_deadline,
             "the first change after an idle period should be flushed well before the interval"
@@ -221,7 +238,12 @@ async fn desired_commits_stay_durable_and_carry_pending_observed_state() {
         .resource_usage
         .observed_persistence;
     assert!(usage.pending, "the second change waits for the interval");
-    assert_eq!(persisted_label(&storage).as_deref(), Some("generation=0"));
+    assert_eq!(
+        persisted_label(&storage)
+            .expect("snapshot should load")
+            .as_deref(),
+        Some("generation=0")
+    );
 
     let before = state_writes(&app);
     let mut desired = app.state_snapshot().state.desired;
@@ -239,7 +261,12 @@ async fn desired_commits_stay_durable_and_carry_pending_observed_state() {
             >= 1
     );
     // The durable desired write carried the pending observed change with it.
-    assert_eq!(persisted_label(&storage).as_deref(), Some("generation=1"));
+    assert_eq!(
+        persisted_label(&storage)
+            .expect("snapshot should load")
+            .as_deref(),
+        Some("generation=1")
+    );
 
     handle.shutdown().await;
     let _ = std::fs::remove_dir_all(state_dir);
