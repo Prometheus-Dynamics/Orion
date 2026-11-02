@@ -228,7 +228,8 @@ its dev version.
 - [x] CI on `dev` pushes: `ci.yml` runs on `dev`, `main` and `master` pushes (skipped for pushes
       that only touch `docs/` or Markdown), with per-ref concurrency and cancel-in-progress. The
       long jobs run on schedule or dispatch only: `cross32`, and the Docker suites in
-      `ci-docker.yml` (which no longer run on pull requests or pushes).
+      `ci-docker.yml` (which no longer run on pull requests or pushes). Per-push wall time on the
+      first dev push: 7 min 40 s (run 41434714329); the longest job is `docs-and-lints` at 7.5 min.
 - [ ] Watch `cross32` and `ci-docker` on the next weekly schedule: they have no per-push run now.
 
 ### Release
