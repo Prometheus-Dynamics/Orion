@@ -10,7 +10,7 @@ first; the other items below are still needed, after it.
 
 - [ ] **aarch64 appliance soak** on the reference board (below, under freeze items).
 - [x] **Unknown arguments start a node** (below): `orion-node --version` on the reference board. Done in 6bf46ce; on dev.
-- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total not yet in the usage snapshot or metrics (wire change, for v7).
+- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total not yet in the usage snapshot or metrics (queued in "4. Protocol v7 window").
 - [ ] **Protocol v7 on the reference board:** once the current pin is proven on the board, the v7 window
       (the device library's orion-v7 merge, the consuming products together, the images' orion-node).
 
@@ -42,8 +42,8 @@ when, blocked by.
       256 full-list events; the K230D has 128 MB for everything. Done when: per-client queues are
       capped in bytes (a plain knob with a default) or coalesce to the latest list, and the
       device-like footprint harness shows a slow watcher holding at most the cap. Blocked by:
-      nothing. Done in 737579d (byte cap on client event queues); byte total in the usage snapshot
-      and metrics is item 4 of the finish list and the v7 list.
+      nothing. Done in 737579d (byte cap on client event queues). Still open: the byte total in the
+      usage snapshot and metrics, queued under "4. Protocol v7 window" below.
 - [x] **riscv64 and armv7 builds.** Why: the K230D (riscv64) and Flame (RV1106G2, Cortex-A7) run
       orion-node and orionctl. Done in 81406f9 (CI job `cross32`, `scripts/ci-jobs.sh cross32`); the
       IPC-only build's dead-code warning was already handled upstream. The IPC-only orion-node and orionctl build in release for
@@ -65,6 +65,46 @@ its dev version.
 - [ ] Tag the release; the consuming products and the Gaia `orion` source pin the tag instead of a `rev`.
 - [ ] Gates on the release commit: fmt, clippy -D warnings, tests, the node feature matrix and the
       file-size check.
+
+### 4. Protocol v7 window: queued wire changes
+
+`CONTROL_PROTOCOL_VERSION` is 7 on dev (blob push) and 5 on main; no consumer image runs 7 yet.
+Decision (2026-11-03): while no released image or consumer pin speaks 7, the changes below ride v7
+(new layout fingerprint, same number) and land together, once, just before the v7 window opens
+(the device library's orion-v7 merge, the consuming products and the images' orion-node move
+together). Once anything pins a v7 rev, whatever is left here becomes v8. Nothing below is on the
+wire yet. Each change updates the layout fingerprint
+(`crates/orion/tests/control_protocol_layout.rs`), the canonical encoding fixture if it touches
+signed types, the version history in `crates/core/src/protocol.rs`, and the docs named.
+
+Control protocol:
+
+- [ ] **Client event queue bytes.** `NodeResourceUsageSnapshot` gains the per-client queued bytes
+      and the byte limit next to the event counts (737579d added the cap); `orionctl get memory`
+      shows them. The Prometheus gauge `orion_local_client_event_queue_bytes` is text, not wire, but
+      ships with it. Docs: node-env.md (`ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES`).
+- [ ] **U3 update records.** `UpdateIntentRecord` as a new desired section with HLC stamps (peer
+      sync and persisted-state migration with it), `UpdateStatusRecord` in the observed slice,
+      their mutations, and the query / response payloads behind `orionctl get updates`. Docs:
+      update-recovery.md (U3), device-agent.md.
+- [ ] **Action counters in `resource_usage`.** Pending / running / finished counts and the
+      result-history bytes in `NodeResourceUsageSnapshot`. Docs: actions.md.
+- [ ] **Peer `ActionWatch`.** A forwarding node subscribes to the owner's action results over
+      `orion+tcp` instead of polling it (additive messages). Docs: actions.md, peer-sync.md.
+- [ ] **Replicated host metrics.** A small, selected set of volatile host metrics carried in peer
+      sync (or a peer push) so peers see each other's load without the node-local status lane.
+      Docs: host-facts.md, peer-sync.md.
+- [ ] **Stale peer state.** If the tombstone-safety refusal (peer older than
+      `ORION_NODE_TOMBSTONE_RETENTION_MS`) needs a field in the peer status that operators query,
+      it goes here; until then it is logged and recorded node-side only.
+
+Link protocol (`LINK_PROTOCOL_VERSION`, separate from the control protocol; bump it on its own):
+
+- [ ] **Link devices as action handlers**: a link message kind for action requests and results.
+- [ ] **U8 firmware transfer**: kinds `0x20`-`0x2F` reserved; `DeviceInfo` and chunked transfer.
+
+Not wire changes (no bump needed): persisted-state formats (they migrate), Prometheus metric
+names, env knobs, and the per-client byte cap itself.
 
 ## Done
 
