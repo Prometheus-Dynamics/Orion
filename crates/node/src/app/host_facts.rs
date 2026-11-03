@@ -61,6 +61,7 @@ fn read_proc_stat() -> Option<crate::host_facts::ProcStat> {
 impl NodeApp {
     /// The replicated subset of the latest host sample, carried by the next observed-state push
     /// to peers (`peer_observed.rs`). `None` before the first sample.
+    #[cfg_attr(not(peer_sync), allow(dead_code))]
     pub(crate) fn replicated_host_metrics(&self) -> Option<ReplicatedHostMetrics> {
         self.observability_read()
             .host_facts
