@@ -684,3 +684,75 @@ async fn firmware_requests_are_refused_before_a_transfer_starts() {
     ));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The trial's health check fails: the device resets instead of confirming, and its bootloader
+/// reverts the trial on that second boot. The device comes back on the old version, which the host
+/// reports as a rollback.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_trial_that_fails_its_health_check_rolls_back_and_the_action_says_so() {
+    let mut flash = Flash::factory("1.2");
+    flash.unhealthy_trial = true;
+    let (app, device, gateway, link, dir) = setup("fw-rollback", flash).await;
+    committed(&app, "app-1-3", &image(1_500)).await;
+
+    app.run_action(
+        update_request("fw-rollback-1", &link, "app-1-3", "1.3", None),
+        "test",
+    )
+    .expect("accepted");
+    let (done, _) = settle(&app, "fw-rollback-1").await;
+
+    match &done.state {
+        ActionState::Failed { reason } => {
+            assert!(reason.contains("rolled back"), "reason: {reason}");
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+    assert!(
+        wait_until(WAIT, || device.is_connected()).await,
+        "the device comes back on its previous image"
+    );
+    let flash = device.flash();
+    assert_eq!(
+        flash.active, 0,
+        "the bootloader reverted to the previous slot"
+    );
+    assert_eq!(flash.slots[0].version, "1.2", "the old version runs");
+    assert!(!flash.trial, "the reverted image is not on trial");
+    gateway.shutdown().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The bootloader reverts a trial before the host ever sees the new version. The protocol has no
+/// explicit rollback status (`XferStatus` and `DeviceInfo` carry none), so the host only sees the
+/// old version come back: it re-sends the activation a bounded number of times, then reports the
+/// image as not activated, and the device still runs the old version.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_trial_reverted_before_the_host_sees_it_is_reported_as_not_activated() {
+    let mut flash = Flash::factory("1.2");
+    flash.revert_on_first_boot = true;
+    let (app, device, gateway, link, dir) = setup("fw-reverted", flash).await;
+    committed(&app, "app-1-3", &image(1_500)).await;
+
+    app.run_action(
+        update_request("fw-reverted-1", &link, "app-1-3", "1.3", None),
+        "test",
+    )
+    .expect("accepted");
+    let (done, _) = settle(&app, "fw-reverted-1").await;
+
+    match &done.state {
+        ActionState::Failed { reason } => {
+            assert!(
+                reason.contains("did not come back running the new version"),
+                "reason: {reason}"
+            );
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+    let flash = device.flash();
+    assert_eq!(flash.active, 0, "the old slot runs");
+    assert_eq!(flash.slots[0].version, "1.2");
+    gateway.shutdown().await;
+    let _ = std::fs::remove_dir_all(dir);
+}

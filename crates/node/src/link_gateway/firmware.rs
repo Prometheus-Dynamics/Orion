@@ -324,7 +324,12 @@ impl FirmwareJob {
                 device_name,
                 max_frame,
                 ..
-            } if device_name == &self.device => self.driver.on_connected(*max_frame),
+            } if device_name == &self.device => {
+                // A new session's state is unknown until its `DeviceInfo`: the health gate of the
+                // old session does not open a `Confirm` to a device that may have rebooted.
+                self.driver.set_confirm_gate(false);
+                self.driver.on_connected(*max_frame);
+            }
             HostEvent::DeviceInfo { device_name, info } if device_name == &self.device => {
                 self.apply_info(info);
             }

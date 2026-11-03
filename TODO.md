@@ -473,9 +473,10 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       `FirmwareTransfer` from the CAN link task (chunks of at most 32 CAN frames, device and frame
       limits applied), one job per device; `link.release` and `link.attach` release one device and
       keep the bus open. Simulated-bus tests, and `can_firmware_on_vcan0` in the `lints` job.
-- [ ] **U8 end-to-end `RolledBack` test over a pty**: a trial whose health check fails rolls back
-      through the node's serial gateway to `Failed` with the rolled-back reason; the device's explicit
-      rollback status, if the protocol gets one.
+- [x] **U8 end-to-end `RolledBack` test over a pty**: a trial whose health check fails rolls back
+      through the node's serial gateway to `Failed` with the rolled-back reason, and a bootloader that
+      reverts before the host sees the trial is `Failed` as not activated. The protocol has no explicit
+      rollback status, so none is tested.
 - [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
       MCU with an A/B bootloader over UART and CAN.
 

@@ -746,7 +746,10 @@ a neighbour on an in-memory bus: a transfer that reaches only the addressed devi
 attach, a refused update to a released device, and a handoff; plus `can_firmware_on_vcan0`, which
 needs `vcan0`). Serial tests: `crates/node/src/link_gateway/tests/firmware.rs`, a simulated two-slot
 device on a pseudo-terminal (a trial update with progress, a refused confirmation, a handoff, release
-and attach, and the refused requests).
+and attach, the refused requests, and the rollbacks: a trial whose health check fails reverts on the
+bootloader's second boot and fails with `rolled back`, and a trial reverted before the host sees it
+fails with `did not come back running the new version`; the protocol has no explicit rollback
+status, so the old version coming back is the only signal).
 
 ## Recovery when Orion is unavailable
 
