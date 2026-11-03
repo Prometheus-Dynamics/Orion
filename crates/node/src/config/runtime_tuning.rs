@@ -26,6 +26,9 @@ const DEFAULT_LOCAL_RATE_LIMIT_MAX_MESSAGES: u32 = 256;
 const DEFAULT_LOCAL_SESSION_TTL_MS: u64 = 300_000;
 const DEFAULT_LOCAL_STREAM_SEND_QUEUE_CAPACITY: usize = 64;
 const DEFAULT_LOCAL_CLIENT_EVENT_QUEUE_LIMIT: usize = 256;
+/// Bytes a client's pending events may be charged in total. Full executor and provider lists are
+/// charged their encoded size, so 256 of them cannot pile up for a slow watcher.
+const DEFAULT_LOCAL_CLIENT_EVENT_QUEUE_BYTES: usize = 1024 * 1024;
 const DEFAULT_OBSERVABILITY_EVENT_LIMIT: usize = 128;
 /// Each queued persist carries its own encoded history, so the queue is kept short.
 const DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY: usize = 32;
@@ -73,6 +76,7 @@ pub struct NodeRuntimeTuning {
     pub local_session_ttl: Duration,
     pub local_stream_send_queue_capacity: usize,
     pub local_client_event_queue_limit: usize,
+    pub local_client_event_queue_bytes: usize,
     pub observability_event_limit: usize,
     pub transport_max_payload_bytes: usize,
     pub transport_io_timeout: Duration,
@@ -217,6 +221,12 @@ impl NodeRuntimeTuning {
 
     pub fn with_local_client_event_queue_limit(mut self, limit: usize) -> Self {
         self.local_client_event_queue_limit = limit;
+        self.normalize();
+        self
+    }
+
+    pub fn with_local_client_event_queue_bytes(mut self, bytes: usize) -> Self {
+        self.local_client_event_queue_bytes = bytes;
         self.normalize();
         self
     }
@@ -402,6 +412,10 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT",
                 DEFAULT_LOCAL_CLIENT_EVENT_QUEUE_LIMIT,
             )?,
+            local_client_event_queue_bytes: parse_env_or(
+                "ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES",
+                DEFAULT_LOCAL_CLIENT_EVENT_QUEUE_BYTES,
+            )?,
             observability_event_limit: parse_env_or(
                 "ORION_NODE_OBSERVABILITY_EVENT_LIMIT",
                 DEFAULT_OBSERVABILITY_EVENT_LIMIT,
@@ -517,6 +531,7 @@ impl NodeRuntimeTuning {
         self.local_session_ttl = normalize_runtime_tuning_duration(self.local_session_ttl);
         self.local_stream_send_queue_capacity = self.local_stream_send_queue_capacity.max(1);
         self.local_client_event_queue_limit = self.local_client_event_queue_limit.max(1);
+        self.local_client_event_queue_bytes = self.local_client_event_queue_bytes.max(1);
         self.observability_event_limit = self.observability_event_limit.max(1);
         self.transport_max_payload_bytes = self.transport_max_payload_bytes.max(1);
         self.transport_io_timeout = normalize_runtime_tuning_duration(self.transport_io_timeout);
@@ -570,6 +585,7 @@ impl Default for NodeRuntimeTuning {
             local_session_ttl: Duration::from_millis(DEFAULT_LOCAL_SESSION_TTL_MS),
             local_stream_send_queue_capacity: DEFAULT_LOCAL_STREAM_SEND_QUEUE_CAPACITY,
             local_client_event_queue_limit: DEFAULT_LOCAL_CLIENT_EVENT_QUEUE_LIMIT,
+            local_client_event_queue_bytes: DEFAULT_LOCAL_CLIENT_EVENT_QUEUE_BYTES,
             observability_event_limit: DEFAULT_OBSERVABILITY_EVENT_LIMIT,
             transport_max_payload_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
             transport_io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
@@ -679,6 +695,10 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
         (
             "ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT",
             tuning.local_client_event_queue_limit.to_string(),
+        ),
+        (
+            "ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES",
+            tuning.local_client_event_queue_bytes.to_string(),
         ),
         (
             "ORION_NODE_OBSERVABILITY_EVENT_LIMIT",

@@ -1,6 +1,6 @@
 use super::NodeApp;
 use crate::app::local_clients::{
-    PendingClientStreamFlush, archive_fingerprint, enqueue_executor_workloads_event,
+    PendingClientStreamFlush, archive_digest, digest_bytes, enqueue_executor_workloads_event,
     enqueue_provider_leases_event, enqueue_state_snapshot_event, execute_client_stream_flush,
     finalize_client_stream_flush, prepare_client_stream_flush, reserve_state_snapshot_event,
 };
@@ -97,16 +97,32 @@ impl NodeApp {
             // Compare by reference and clone only the lists that actually changed.
             let executor_update = executor_watch.and_then(|(executor_id, last)| {
                 let workloads = executor_workloads_by_id.get(&executor_id)?.as_ref()?;
-                let fingerprint = archive_fingerprint(workloads);
-                (fingerprint.is_none() || fingerprint != last)
-                    .then(|| (executor_id, last, fingerprint, workloads.clone()))
+                let digest = archive_digest(workloads);
+                let fingerprint = digest.map(|(fingerprint, _)| fingerprint);
+                (fingerprint.is_none() || fingerprint != last).then(|| {
+                    (
+                        executor_id,
+                        last,
+                        fingerprint,
+                        digest_bytes(digest),
+                        workloads.clone(),
+                    )
+                })
             });
 
             let provider_update = provider_watch.and_then(|(provider_id, last)| {
                 let leases = provider_leases_by_id.get(&provider_id)?;
-                let fingerprint = archive_fingerprint(leases);
-                (fingerprint.is_none() || fingerprint != last)
-                    .then(|| (provider_id, last, fingerprint, leases.clone()))
+                let digest = archive_digest(leases);
+                let fingerprint = digest.map(|(fingerprint, _)| fingerprint);
+                (fingerprint.is_none() || fingerprint != last).then(|| {
+                    (
+                        provider_id,
+                        last,
+                        fingerprint,
+                        digest_bytes(digest),
+                        leases.clone(),
+                    )
+                })
             });
 
             if state_behind.is_some() || executor_update.is_some() || provider_update.is_some() {
@@ -143,7 +159,8 @@ impl NodeApp {
                     }
                 }
 
-                if let Some((executor_id, last, fingerprint, workloads)) = executor_update
+                if let Some((executor_id, last, fingerprint, encoded_bytes, workloads)) =
+                    executor_update
                     && client.executor_watch.as_ref().is_some_and(|watch| {
                         watch.executor_id == executor_id && watch.last_fingerprint == last
                     })
@@ -151,10 +168,11 @@ impl NodeApp {
                     if let Some(watch) = client.executor_watch.as_mut() {
                         watch.last_fingerprint = fingerprint;
                     }
-                    enqueue_executor_workloads_event(client, executor_id, workloads);
+                    enqueue_executor_workloads_event(client, executor_id, workloads, encoded_bytes);
                 }
 
-                if let Some((provider_id, last, fingerprint, leases)) = provider_update
+                if let Some((provider_id, last, fingerprint, encoded_bytes, leases)) =
+                    provider_update
                     && client.provider_watch.as_ref().is_some_and(|watch| {
                         watch.provider_id == provider_id && watch.last_fingerprint == last
                     })
@@ -162,7 +180,7 @@ impl NodeApp {
                     if let Some(watch) = client.provider_watch.as_mut() {
                         watch.last_fingerprint = fingerprint;
                     }
-                    enqueue_provider_leases_event(client, provider_id, leases);
+                    enqueue_provider_leases_event(client, provider_id, leases, encoded_bytes);
                 }
 
                 if let Some(flush) = prepare_client_stream_flush(&source, client) {

@@ -205,6 +205,11 @@ impl NodeAppBuilder {
         self
     }
 
+    pub fn with_local_client_event_queue_bytes(mut self, bytes: usize) -> Self {
+        self.runtime_tuning_mut().local_client_event_queue_bytes = bytes;
+        self
+    }
+
     pub fn with_transport_max_payload_bytes(mut self, max_payload_bytes: usize) -> Self {
         self.runtime_tuning_mut().transport_max_payload_bytes = max_payload_bytes;
         self

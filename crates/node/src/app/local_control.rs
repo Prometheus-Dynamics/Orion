@@ -1,7 +1,7 @@
 use super::{
     NodeApp, NodeError,
     local_clients::{
-        ExecutorWatchState, ProviderWatchState, archive_fingerprint,
+        ExecutorWatchState, ProviderWatchState, archive_digest, digest_bytes,
         enqueue_executor_workloads_event, enqueue_provider_leases_event,
         enqueue_state_snapshot_event, insert_state_snapshot_event, reserve_state_snapshot_event,
     },
@@ -494,6 +494,7 @@ impl NodeApp {
                 session.clone(),
                 now_ms,
                 self.config.runtime_tuning.local_client_event_queue_limit,
+                self.config.runtime_tuning.local_client_event_queue_bytes,
             );
         });
         self.with_observability_txn(|txn| {
@@ -624,12 +625,18 @@ impl NodeApp {
         query: orion::control_plane::ExecutorWorkloadQuery,
     ) -> Result<(), NodeError> {
         let workloads = self.executor_workloads(source, &query)?;
+        let digest = archive_digest(&workloads);
         self.with_client_mut(source, |client| {
             client.executor_watch = Some(ExecutorWatchState {
                 executor_id: query.executor_id.clone(),
-                last_fingerprint: archive_fingerprint(&workloads),
+                last_fingerprint: digest.map(|(fingerprint, _)| fingerprint),
             });
-            enqueue_executor_workloads_event(client, query.executor_id, workloads);
+            enqueue_executor_workloads_event(
+                client,
+                query.executor_id,
+                workloads,
+                digest_bytes(digest),
+            );
         })
     }
 
@@ -639,12 +646,13 @@ impl NodeApp {
         query: orion::control_plane::ProviderLeaseQuery,
     ) -> Result<(), NodeError> {
         let leases = self.provider_leases(source, &query)?;
+        let digest = archive_digest(&leases);
         self.with_client_mut(source, |client| {
             client.provider_watch = Some(ProviderWatchState {
                 provider_id: query.provider_id.clone(),
-                last_fingerprint: archive_fingerprint(&leases),
+                last_fingerprint: digest.map(|(fingerprint, _)| fingerprint),
             });
-            enqueue_provider_leases_event(client, query.provider_id, leases);
+            enqueue_provider_leases_event(client, query.provider_id, leases, digest_bytes(digest));
         })
     }
 

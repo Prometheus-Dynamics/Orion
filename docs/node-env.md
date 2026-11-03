@@ -478,7 +478,8 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES` | `256` | Max local messages per rate-limit window. |
 | `ORION_NODE_LOCAL_SESSION_TTL_MS` | `300000` | Local session TTL. |
 | `ORION_NODE_LOCAL_STREAM_SEND_QUEUE_CAPACITY` | `64` | Per-stream send queue capacity. |
-| `ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT` | `256` | Local client event backlog limit. |
+| `ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT` | `256` | Local client event backlog limit (by count). |
+| `ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES` | `1048576` | Local client event backlog limit by bytes. Full executor and provider lists are charged their encoded length; other events a fixed 256 bytes, and stream samples their data. Overflow drops the oldest events, as for the count limit (counted in `orion_local_client_dropped_events`); the newest event is always kept, so one event larger than the limit is held alone. The byte total is not yet in the usage snapshot or metrics (a wire change, for the protocol window). |
 | `ORION_NODE_OBSERVABILITY_EVENT_LIMIT` | `128` | Retained observability events. |
 | `ORION_NODE_TRANSPORT_MAX_PAYLOAD_BYTES` | `8388608` | Max inbound HTTP, IPC, TCP, and QUIC payload bytes before transport decode. |
 | `ORION_NODE_TRANSPORT_IO_TIMEOUT_MS` | `5000` | Per-operation transport connect/read/write/handshake timeout. |
