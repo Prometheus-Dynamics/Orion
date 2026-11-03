@@ -344,7 +344,13 @@ async fn node_handlers_run_report_progress_and_fail() {
         )
         .try_build()
         .expect("node app should build");
-    assert_eq!(app.action_handler_names(), vec!["restart-unit"]);
+    // The link actions are node handlers too when the link gateway is built in.
+    let names: Vec<String> = app
+        .action_handler_names()
+        .into_iter()
+        .filter(|name| !name.starts_with("link."))
+        .collect();
+    assert_eq!(names, vec!["restart-unit"]);
     let node = ActionTarget::Node(NodeId::new("node-actions-handler"));
 
     let accepted = app

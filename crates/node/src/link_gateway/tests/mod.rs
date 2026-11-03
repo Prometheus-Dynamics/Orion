@@ -5,6 +5,7 @@
 mod actions;
 mod can;
 mod config;
+mod firmware;
 mod persist;
 mod serial;
 mod status;

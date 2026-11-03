@@ -498,6 +498,9 @@ impl NodeAppBuilder {
             config.state_dir.as_deref(),
         )
         .map_err(super::NodeError::Config)?;
+        // The link actions (`docs/actions.md`, "Link firmware") are node handlers too; an
+        // embedder's handler of the same name wins.
+        let action_handlers = with_link_actions(self.action_handlers);
         let state = Arc::new(NodeState {
             persisted: PersistedState {
                 store: RwLock::new(store),
@@ -541,7 +544,7 @@ impl NodeAppBuilder {
             cluster: Default::default(),
             status: Default::default(),
             streams: Default::default(),
-            actions: super::actions::ActionsState::with_handlers(self.action_handlers),
+            actions: super::actions::ActionsState::with_handlers(action_handlers),
             blobs,
             host_facts: super::host_facts::HostFactsState::new(host_facts_source),
             #[cfg(feature = "link-gateway")]
@@ -680,4 +683,23 @@ impl NodeAppBuilder {
 
         Ok(app)
     }
+}
+
+/// Adds the link actions (`docs/actions.md`, "Link firmware") to the node's handlers when the link
+/// gateway is built in on Linux. An embedder's handler of the same name wins.
+#[cfg(all(feature = "link-gateway", target_os = "linux"))]
+fn with_link_actions(
+    mut handlers: BTreeMap<String, Arc<dyn crate::actions::ActionHandler>>,
+) -> BTreeMap<String, Arc<dyn crate::actions::ActionHandler>> {
+    for (name, handler) in crate::link_gateway::firmware::builtin_handlers() {
+        handlers.entry(name).or_insert(handler);
+    }
+    handlers
+}
+
+#[cfg(not(all(feature = "link-gateway", target_os = "linux")))]
+fn with_link_actions(
+    handlers: BTreeMap<String, Arc<dyn crate::actions::ActionHandler>>,
+) -> BTreeMap<String, Arc<dyn crate::actions::ActionHandler>> {
+    handlers
 }

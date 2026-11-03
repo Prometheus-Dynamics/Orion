@@ -849,9 +849,14 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         #[cfg(feature = "actions")]
         if let Some(outgoing) = self.select_action(max_frame) {
             return Some(outgoing);
+        }
         #[cfg(feature = "xfer")]
         if let Some(reply) = self.xfer.take_reply() {
-            let result = reply.encode(seq, control);
+            let buf = self
+                .control
+                .get_mut(..max_frame.min(CONTROL_MAX))
+                .unwrap_or_default();
+            let result = reply.encode(seq, buf);
             return self.control_frame(Source::Control, result);
         }
         #[cfg(feature = "xfer")]

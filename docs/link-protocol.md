@@ -534,6 +534,12 @@ Status codes (`u8`): 0 ok, 1 bad chunk CRC, 2 bad offset, 3 bad digest, 4 flash,
   minus `max_chunk_for_frame`, and the sink's own limit) and the negotiated frame size, so a chunk
   always fits one frame and one CAN FD message.
 
+The node's gateway drives this transfer for a serial link: the `link.firmware.update` action
+(`docs/actions.md`, "Link firmware") runs one committed blob on the link's session, resumes from the
+device's `next_offset` after a reconnect, and sends `Confirm` once the device reports the target
+version. Serial links only: a CAN link refuses the job, because the CAN transfer is still open
+(`docs/update-recovery.md`, "What landed in U8").
+
 ## Versioning
 
 `LINK_PROTOCOL_VERSION` is independent of `CONTROL_PROTOCOL_VERSION`, so the node's IPC protocol can

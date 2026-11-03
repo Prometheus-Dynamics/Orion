@@ -14,6 +14,9 @@
 
 pub(super) mod actions;
 mod persist;
+// The serial and CAN tasks that use the slots are Linux-only.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) mod slots;
 
 use super::{NodeApp, NodeError};
 use crate::control_plane::LinkStatusSnapshot;
@@ -38,6 +41,8 @@ pub(super) struct LinkBridgeState {
     action_senders:
         Mutex<BTreeMap<String, tokio::sync::mpsc::UnboundedSender<actions::LinkActionCommand>>>,
     status: Mutex<BTreeMap<String, LinkStatusSnapshot>>,
+    /// Per-link control slots: firmware jobs and release flags (`slots.rs`).
+    slots: Mutex<BTreeMap<String, slots::LinkSlot>>,
     desired_changed: tokio::sync::watch::Sender<u64>,
     /// Last content of `link-devices.rkyv`. `None` until the gateway restored it, so nothing is
     /// written over a file that has not been read.
@@ -50,6 +55,7 @@ impl Default for LinkBridgeState {
             owners: Mutex::new(BTreeMap::new()),
             action_senders: Mutex::new(BTreeMap::new()),
             status: Mutex::new(BTreeMap::new()),
+            slots: Mutex::new(BTreeMap::new()),
             desired_changed: tokio::sync::watch::Sender::new(0),
             persisted: Mutex::new(None),
         }

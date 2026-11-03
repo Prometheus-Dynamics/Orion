@@ -13,6 +13,8 @@ mod config;
 #[cfg(target_os = "linux")]
 mod events;
 #[cfg(target_os = "linux")]
+pub(crate) mod firmware;
+#[cfg(target_os = "linux")]
 mod serial;
 #[cfg(target_os = "linux")]
 mod serial_link;

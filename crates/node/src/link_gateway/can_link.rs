@@ -52,6 +52,7 @@ pub(super) async fn run<P: CanIo>(
     let mut pending: Option<BusFrame> = None;
     let mut commands = ctx.open_actions();
     let mut commands_open = true;
+    ctx.open_can_slot();
 
     loop {
         if socket.is_none() && Instant::now() >= reopen_at {

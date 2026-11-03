@@ -18,6 +18,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   failure, and `HostSession::send_xfer`. The mcu-template gains an `xfer` feature and a
   `uart-xfer` size variant (`scripts/mcu-size.sh`). Docs: `docs/link-protocol.md`,
   `docs/update-recovery.md`.
+- Node actions for MCU firmware over serial links (U8): `link.firmware.update` streams a committed
+  blob through the firmware transfer with progress, trial confirmation and rollback reporting;
+  `link.release` and `link.attach` stop and restore a serial link's port. CAN firmware is not yet
+  supported. Docs: `docs/actions.md` ("Link firmware"), `docs/link-protocol.md`,
+  `docs/update-recovery.md`.
 
 ### Changed (protocol 1 reset, breaking)
 

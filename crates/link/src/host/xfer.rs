@@ -440,7 +440,9 @@ impl FirmwareTransfer {
                     self.fail(Failure::RolledBack);
                 }
             }
-            Phase::AwaitHandoff => self.fail(Failure::NotActivated),
+            // The device may still report (its activation message) before the link goes
+            // quiet; the handoff completes on `on_lost`, so reports are not failures here.
+            Phase::AwaitHandoff => {}
             _ => {}
         }
     }

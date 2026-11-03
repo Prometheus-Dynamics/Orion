@@ -1,10 +1,18 @@
 //! The task serving one serial link (one device, `HostSession<Stream>`).
+//!
+//! Besides the device's traffic, the task takes two things from the node: device actions (see
+//! `actions`), and the link's control (`link.release` / `link.attach`, and firmware jobs). A
+//! released link serves no port until it is attached; a firmware job runs in this task, because
+//! it owns the session (`firmware.rs`).
 
 use super::SerialLinkConfig;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, REOPEN_DELAY};
+use super::firmware::{DeviceSeen, FirmwareJob};
 use super::serial::SerialPort;
+use crate::actions::ActionOutcome;
+use crate::app::{FirmwareCommand, SerialSlot};
 use orion_link::Stream;
-use orion_link::host::{ActionSendError, HostConfig, HostSession};
+use orion_link::host::{ActionSendError, HostConfig, HostEvent, HostSession};
 use std::time::Instant;
 use tokio::sync::watch;
 
@@ -20,7 +28,7 @@ pub(super) async fn run(
 ) {
     let mut tick = tokio::time::interval(LinkContext::tick_period(host.heartbeat_ms));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut session = HostSession::stream(host);
+    let mut session = HostSession::stream(host.clone());
     let mut desired = ctx.app.link_desired_changes();
     let mut port: Option<SerialPort> = None;
     let mut reopen_at = Instant::now();
@@ -29,9 +37,19 @@ pub(super) async fn run(
     let mut buf = vec![0u8; 4096];
     let mut commands = ctx.open_actions();
     let mut commands_open = true;
+    let SerialSlot {
+        mut jobs,
+        mut released,
+    } = ctx.open_serial_slot();
+    let mut jobs_open = true;
+    let mut release_open = true;
+    // The release state this task has applied (the node's flag may be ahead of it for a moment).
+    let mut held = false;
+    let mut seen = DeviceSeen::default();
+    let mut job: Option<FirmwareJob> = None;
 
     loop {
-        if port.is_none() && Instant::now() >= reopen_at {
+        if port.is_none() && !held && Instant::now() >= reopen_at {
             match SerialPort::open(&config) {
                 Ok(opened) => {
                     port = Some(opened);
@@ -74,13 +92,72 @@ pub(super) async fn run(
                 }),
                 None => commands_open = false,
             },
+            command = jobs.recv(), if jobs_open => match command {
+                Some(command) => start_job(
+                    &mut job,
+                    command,
+                    &ctx.name,
+                    *released.borrow(),
+                    &seen,
+                ),
+                None => jobs_open = false,
+            },
+            changed = released.changed(), if release_open => {
+                if changed.is_err() {
+                    release_open = false;
+                }
+            }
             _ = tick.tick() => {}
+        }
+
+        // Release or attach, as the node's flag now says.
+        let wanted = *released.borrow();
+        if wanted != held {
+            held = wanted;
+            if held {
+                port = None;
+                tx.clear();
+                ctx.status.open = false;
+                if let Some(device) = session.device_name().map(str::to_owned) {
+                    // The device is lost to this node until it is attached again.
+                    let lost = HostEvent::DeviceLost {
+                        device_name: device,
+                    };
+                    seen.on_event(&lost);
+                    ctx.handle(lost);
+                }
+                session = HostSession::stream(host.clone());
+                if let Some(running) = job.take() {
+                    running.finish(ActionOutcome::failed(
+                        "link released during the firmware transfer",
+                    ));
+                }
+            } else {
+                reopen_at = Instant::now();
+            }
         }
 
         session.poll(ctx.now_ms());
         while let Some(event) = session.next_event() {
+            seen.on_event(&event);
+            if let Some(running) = job.as_mut() {
+                running.on_event(&event);
+            }
             if let LeaseAction::Set(leases) = ctx.handle(event) {
                 session.set_leases(leases);
+            }
+        }
+        if let Some(mut running) = job.take() {
+            match running.drive(ctx.now_ms(), |request| session.send_xfer(request)) {
+                None => job = Some(running),
+                Some(end) => {
+                    if end.handoff {
+                        // The device's bootloader owns the port now; it is not reopened until the
+                        // link is attached again.
+                        let _ = ctx.app.link_set_released(&ctx.name, true);
+                    }
+                    running.finish(end.outcome);
+                }
             }
         }
         if refresh || Instant::now() >= lease_refresh_at {
@@ -126,8 +203,38 @@ pub(super) async fn run(
         ctx.publish_status();
     }
     drop(port);
+    if let Some(running) = job.take() {
+        running.finish(ActionOutcome::failed(
+            "link closed before the firmware transfer finished",
+        ));
+    }
     update_stats(&mut ctx, &session);
     ctx.close();
+}
+
+/// Accepts a firmware job, or refuses it: a released link, a job already running, or a device that
+/// is not connected now (the job does not wait for one; the action's deadline bounds a wait).
+fn start_job(
+    job: &mut Option<FirmwareJob>,
+    command: FirmwareCommand,
+    link: &str,
+    released: bool,
+    seen: &DeviceSeen,
+) {
+    let reason = if released {
+        format!("link {link} is released; run link.attach first")
+    } else if job.is_some() {
+        format!("a firmware transfer is already running on link {link}")
+    } else if !seen.is_connected(&command.device) {
+        format!(
+            "device `{}` is not connected on link {link}",
+            command.device
+        )
+    } else {
+        *job = Some(FirmwareJob::start(command, seen));
+        return;
+    };
+    command.reject(reason);
 }
 
 fn update_stats(ctx: &mut LinkContext, session: &HostSession<Stream>) {

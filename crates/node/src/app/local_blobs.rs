@@ -5,6 +5,18 @@ use super::{NodeApp, NodeError};
 use orion::control_plane::ControlMessage;
 
 impl NodeApp {
+    /// The committed file of blob `id` (`docs/blobs.md`), for node-side readers such as the link
+    /// firmware action (`docs/update-recovery.md`).
+    #[cfg(feature = "link-gateway")]
+    pub(crate) fn committed_blob_path(&self, id: &str) -> Result<std::path::PathBuf, String> {
+        let store = self.state.blobs.as_ref().ok_or_else(|| {
+            "blob push is off: set ORION_NODE_BLOB_DIR or ORION_NODE_STATE_DIR".to_owned()
+        })?;
+        store.committed_path(id)
+    }
+}
+
+impl NodeApp {
     /// Serves one blob message. Roles and admission are checked by the authorizer first.
     pub(crate) fn apply_local_blob_message(
         &self,

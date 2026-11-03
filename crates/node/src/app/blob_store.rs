@@ -338,6 +338,21 @@ impl BlobStore {
     fn final_path(&self, id: &str) -> PathBuf {
         self.dir.join(id)
     }
+
+    /// The file of a committed blob, for a node-side reader (the link firmware action). Fails
+    /// unless the blob exists and is committed.
+    #[cfg(feature = "link-gateway")]
+    pub(crate) fn committed_path(&self, id: &str) -> Result<PathBuf, String> {
+        let inner = self.lock();
+        match inner.entries.get(id) {
+            Some(entry) if matches!(entry.state, EntryState::Committed) => Ok(self.final_path(id)),
+            Some(entry) => Err(format!(
+                "blob `{id}` is {}, not committed",
+                state_name(&entry.state)
+            )),
+            None => Err(format!("no blob `{id}`")),
+        }
+    }
 }
 
 fn state_name(state: &EntryState) -> &'static str {

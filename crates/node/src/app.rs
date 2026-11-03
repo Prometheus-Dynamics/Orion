@@ -11,6 +11,8 @@ mod host_facts;
 mod link_bridge;
 #[cfg(feature = "link-gateway")]
 pub(crate) use link_bridge::actions::LinkActionCommand;
+#[cfg(feature = "link-gateway")]
+pub(crate) use link_bridge::slots::{FirmwareCommand, JobReport, SerialSlot};
 mod local_clients;
 mod local_control;
 mod maintenance_admin;

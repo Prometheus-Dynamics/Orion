@@ -703,10 +703,25 @@ sequenceDiagram
   `DeviceInfo` buffer, the reply and transfer state, and a 6-byte larger control buffer). A port's
   flash driver adds its own code and buffers on top.
 
-**Not landed (the gateway part of U8):** `link.release` and `link.attach` actions, and the node
-action that pulls an image from a blob (`docs/blobs.md`), streams it through the driver over the
-gateway's session, reports `Running { progress }`, and confirms when the device reports the new
-version. These stay in `crates/node` (`link_gateway/firmware.rs`) and are the remaining U8 work.
+**Gateway (landed, serial links only).** In `crates/node` (`link_gateway/firmware.rs`, with the
+serial link task in `link_gateway/serial_link.rs`) three node actions are registered when the
+`link-gateway` feature is built in (`docs/actions.md`, "Link firmware"):
+
+- `link.release` and `link.attach` (`link` and `device` arguments): a released link closes its port,
+  marks its device lost (the device's providers become unavailable) and does not reopen until it is
+  attached again. A link released after a handoff stays released in the same way.
+- `link.firmware.update`: streams a committed blob (`docs/blobs.md`) through the host driver on the
+  link's session, one job per link. It reports `Running { progress }` from the bytes the device
+  acknowledged, confirms the trial once the device reports the target version, and ends `Succeeded`
+  (`phase = "installed"`, or `"handoff"` followed by a release), or `Failed` with a reason. A
+  rollback is reported as `rolled back`: the device's bootloader reverted the image.
+
+The health gate before `Confirm` is the device reporting the target version. The provider's own
+health (the gate of the design above) is not checked yet. **CAN firmware is still open:** a CAN link
+refuses the job with `firmware transfer is not supported on CAN links yet`, and release and attach
+are serial-only too. Tests: `crates/node/src/link_gateway/tests/firmware.rs`, a simulated two-slot
+device on a pseudo-terminal (a trial update with progress, a refused confirmation, a handoff,
+release and attach, and the refused requests).
 
 ## Recovery when Orion is unavailable
 
@@ -747,7 +762,7 @@ critical path at all. Each milestone is independently useful and testable.
 | U5 | External rollout controller | `RolloutRecord`, waves, `max_unavailable`, health gate, monotonic halt; `orionctl rollout` as the first controller. | U4 |
 | U6 | Cross-version rollouts | Frozen rollout beacon; state-dir snapshot before a slot switch; documented "sync-compatible" flag per release; a test that runs N and N+1 nodes through a rollout. | U5 |
 | U7 | Leaderless rollouts | Wave assignment and gate evaluation in `orion-cluster` (rendezvous order, own-intent writes, convergent halt); property tests like placement's. | U5 |
-| U8 | MCU firmware over the link | Kinds `0x20`–`0x28` and the `xfer` feature in device and host sessions (landed); still open: gateway `link.release` / `link.attach` and the node firmware action with confirm and rollback. Simulator test with link loss and resume and the size budget (landed). | U4 |
+| U8 | MCU firmware over the link | Kinds `0x20`–`0x28` and the `xfer` feature in device and host sessions, the simulator tests and the size budget (landed); gateway `link.release` / `link.attach` and `link.firmware.update` with confirm and rollback on serial links (landed). Still open: firmware over CAN. | U4 |
 | U9 | Hardware validation | Real A/B writer on a Linux board, power-cut and watchdog fault injection at every phase, an MCU with an A/B bootloader over UART and CAN. | U4, U8 |
 
 U1 and U2 have no dependencies and can start immediately. U3 was batched with other pending

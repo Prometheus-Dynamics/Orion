@@ -307,6 +307,35 @@ Orion implements none of these; handlers that implement one follow its conventio
 | `update` | `image_url` (`String`, downloaded by the handler) or `transfer_id` (`String`, reserved), `sha256` (`String`, hex digest), `size` (`UInt`, bytes). Typically claimed by a device agent. Asynchronous: reports `Succeeded` with `phase = "staging"` once the download and stage started; the `update.*` status keys plus the image version in the host facts are the outcome. The full contract is in [device-agent.md](device-agent.md). |
 | `update.cancel` | none. Aborts a download or stage in progress, or forgets a staged update; `phase = "cancelled"` (or `"idle"` when nothing was cancelled). |
 | `update.rollback` | none. Boots back to the previous confirmed slot; `Succeeded` with `phase = "rebooting"` before rebooting. |
+| `link.release` | `link` (`String`), `device` (`String`, a device that has published on that link). Stops the link serving its port: the port closes, the device is lost (its providers become unavailable), and the link does not reopen until `link.attach`. `Succeeded` with `state = "released"`, `link`, `device`. Serial links only. |
+| `link.attach` | `link`, `device`, as for `link.release`. Reopens a released link. `Succeeded` with `state = "attached"`. Serial links only. |
+| `link.firmware.update` | `link` (`String`), `device` (`String`, the connected device), `blob` (`String`, a committed blob, `docs/blobs.md`), `component` and `version` (`String`, at most 64 bytes each), `target_slot` (`UInt`), `activate` (`String`, `trial` by default, or `handoff`). Asynchronous: `Running` with per-mille progress while the image moves. Outcomes below. |
+
+### Link firmware
+
+`link.firmware.update` writes a committed blob to a device over its serial link with the firmware
+transfer (`docs/link-protocol.md`, "Firmware transfer"; `docs/update-recovery.md`, "MCU firmware over
+the link protocol"). The link's task runs the transfer, because it owns the session. The action's
+outcome:
+
+- `Succeeded` with `phase = "installed"`, `version` and `active_slot` (`trial` activation): the
+  device runs the new version and the node confirmed the trial once the device reported it.
+- `Succeeded` with `phase = "handoff"` and `version` (`handoff` activation): the device handed its
+  port to its bootloader. The link is released afterwards; `link.attach` gives it back.
+- `Failed` with the reason. The device refused a step (`the device refused the transfer: ...`), the
+  trial was not confirmed and the device's bootloader reverted the image (`rolled back: ...`), the
+  device did not come back on the new version, or a timeout passed. The action deadline bounds a
+  wait for the device too, as for every action.
+- `Rejected` before anything is sent: an argument is missing or invalid, the blob is not committed,
+  the link is not running or is released, the device is not connected on that link, another firmware
+  transfer runs on the link, or the link is a CAN link (`firmware transfer is not supported on CAN
+  links yet`).
+
+A link runs one transfer at a time. The transfer id is a function of the blob, component and
+version, so a retry of the same update resumes at the device's offset. Releasing a link while its
+transfer runs fails the transfer. Deadlines are the node's (`docs/actions.md`, "Long-running jobs").
+Tests: `crates/node/src/link_gateway/tests/firmware.rs` (a simulated two-slot device on a
+pseudo-terminal).
 
 ## Long-running jobs
 
