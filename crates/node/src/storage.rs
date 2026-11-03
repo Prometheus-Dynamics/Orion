@@ -47,8 +47,12 @@ pub(crate) const CLUSTER_STATE_FILES: [&str; 6] = [
     MUTATION_HISTORY_BASELINE_FILE,
 ];
 
+#[cfg(feature = "link-gateway")]
+mod link_devices;
 mod migrate_v3;
 mod migrate_v4;
+#[cfg(feature = "link-gateway")]
+pub(crate) use link_devices::LinkDeviceRecord;
 pub use migrate_v3::StateMigrationReport;
 
 #[derive(Clone, Debug, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]

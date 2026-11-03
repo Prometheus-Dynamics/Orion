@@ -65,6 +65,9 @@ impl NodeApp {
         &self,
         links: Vec<LinkConfig>,
     ) -> Result<LinkGatewayHandle, NodeError> {
+        // Before any link task: providers of a previous run are unavailable until their device
+        // reconnects, and links no longer configured are forgotten (`docs/link-protocol.md`).
+        self.restore_link_devices(&links)?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         #[cfg(not(target_os = "linux"))]
         {

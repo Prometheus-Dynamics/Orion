@@ -209,9 +209,16 @@ names, env knobs, and the per-client byte cap itself.
       tests, `link_device_sim` example.
 - [x] `link_status` over the control protocol (control protocol v4): `NodeObservabilitySnapshot::links`
       (`LinkStatusSnapshot`), `orionctl get links`, `orion_link_*` Prometheus families.
-- [ ] Gateway follow-ups: persist which providers belong to link devices, so a node that crashed
+- [x] Gateway follow-ups: persist which providers belong to link devices, so a node that crashed
       (no graceful shutdown) can mark them unavailable at startup instead of waiting for the device;
-      run the `vcan0` test in CI.
+      run the `vcan0` test in CI. Done: `<state dir>/link-devices.rkyv` (own format version, written
+      on change, restored by `start_link_gateway` as unavailable and reserved for the device until it
+      reconnects; links no longer configured are forgotten), tests in `link_gateway/tests/persist.rs`.
+      vcan0 decision: the `lints` job runs `vcan0_up` (`scripts/ci-jobs.sh`: `sudo -n modprobe vcan`,
+      `ip link add dev vcan0 type vcan`, `ip link set up`), best effort, never failing the job, then
+      `can_gateway_on_vcan0 -- --ignored`, which skips itself when `vcan0` is missing. GitHub's
+      ubuntu-latest runners have passwordless sudo and the vcan module in linux-modules-extra, so the
+      test is expected to run there; this was not verified on a runner (no sudo locally).
 - [ ] Executor role on the link (`ExecutorState` / `Workloads`, kinds reserved) and the volatile
       `Status` lane.
 - [ ] Real hardware bring-up: run the template and the gateway on real hardware (one Cortex-M and

@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added (link device providers persist across restarts)
+
+- The gateway persists which providers link devices own (`<state dir>/link-devices.rkyv`, a separate atomically written file with its own format version; the snapshot format is unchanged). A node that crashed without a shutdown marks those providers and their resources unavailable when the gateway starts, and keeps the ids reserved for their device until it reconnects. A link removed from `ORION_NODE_LINKS` is forgotten at the next start. See [docs/link-protocol.md](docs/link-protocol.md#gateway).
+- CI runs the ignored `can_gateway_on_vcan0` test: the `lints` job loads `vcan0` when the runner allows it and the test skips itself otherwise.
+
 ### Changed (private links, breaking config value)
 
 - The robot-link trust path is named "private link" in the code and docs. `ORION_NODE_PEER_AUTO_TRUST` takes `private-link` (was `robot-link`); any other value still fails startup. `ORION_NODE_ROBOT_LINKS` and the `RobotLinkListener` control message keep their names: the variable is configuration and the message is on the wire.

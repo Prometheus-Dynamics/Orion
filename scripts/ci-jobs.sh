@@ -62,6 +62,22 @@ step() {
 
 clippy() { cargo clippy --locked "$@" -- -D warnings; }
 
+# Brings up vcan0 for the ignored SocketCAN test (docs/testing.md). GitHub's Ubuntu runners have
+# passwordless sudo and ship the vcan module in linux-modules-extra. Where it cannot be loaded this
+# says so and returns success: can_gateway_on_vcan0 then skips itself (it checks /sys/class/net/vcan0).
+vcan0_up() {
+    if [[ -e /sys/class/net/vcan0 ]]; then
+        echo "vcan0 is already up"
+    elif sudo -n modprobe vcan 2>/dev/null \
+        && sudo -n ip link add dev vcan0 type vcan 2>/dev/null \
+        && sudo -n ip link set up vcan0; then
+        echo "vcan0 is up"
+    else
+        echo "vcan0 unavailable (no vcan module or no passwordless sudo): can_gateway_on_vcan0 will skip"
+    fi
+    return 0
+}
+
 # fmt, file sizes, and every test of the workspace with every feature on.
 job_workspace() {
     step workspace "fmt" cargo fmt --check
@@ -95,6 +111,10 @@ job_lints() {
         cargo test --locked -p orion-node --no-default-features --features peer-tcp,discovery-mdns,systemd-notify
     step lints "test orion-node [link-gateway]" \
         cargo test --locked -p orion-node --no-default-features --features link-gateway
+    step lints "vcan0 for the ignored SocketCAN test" vcan0_up
+    step lints "test orion-node [link-gateway] can_gateway_on_vcan0" \
+        cargo test --locked -p orion-node --no-default-features --features link-gateway \
+        --lib can_gateway_on_vcan0 -- --ignored
 
     # The remote operator client alone (no IPC client, no HTTP stack), with mDNS browsing, through
     # the facade, and orion-auth's shared signing / enrollment code.

@@ -273,6 +273,11 @@ link-gateway`, or `--no-default-features --features link-gateway` for an IPC-onl
 Linux. Setting `ORION_NODE_LINKS` in a build without the feature, or on another OS, fails startup
 with an error that says so. See the "Gateway" section of `docs/link-protocol.md`.
 
+With a state directory the gateway keeps `<state dir>/link-devices.rkyv`: the providers link devices
+own, restored at start as unavailable until their device reconnects (see "Restart" there). Removing a
+link from `ORION_NODE_LINKS` forgets its providers at the next start. The file is not part of the
+quarantined cluster state.
+
 | Variable | Default | Valid values | Failure behavior |
 | --- | --- | --- | --- |
 | `ORION_NODE_LINKS` | unset (no links) | `;`-separated `<kind>:<target>[?key=value&...]` entries, `kind` = `serial` or `can` | Any malformed entry, unknown or misplaced key, out-of-range value, duplicate key, or duplicate link fails startup with `NodeError::Config` naming the entry. A port or interface that cannot be opened does not fail startup; the link retries every second and logs the error. |

@@ -76,8 +76,14 @@ the slave: the provider appears, leases reach the device, a disconnect marks res
 a reconnect restores them, allowlist and ownership-collision rejection), and CAN bridging of several
 devices through `HostBus` over an in-memory bus.
 
+The restart tests (`link_gateway/tests/persist.rs`) cover the persisted link-owned providers: a crash
+leaves them unavailable after the restart, a reconnect makes them available, and a link removed from
+the config is forgotten.
+
 One test needs a real virtual CAN interface and is `#[ignore]`d; it skips itself when `vcan0` is
-missing:
+missing. The `lints` CI job (`scripts/ci-jobs.sh`, step "vcan0 for the ignored SocketCAN test") brings
+`vcan0` up with passwordless sudo on the GitHub runner and then runs the test; if the `vcan` module
+cannot be loaded, the step says so and the test skips. Locally, the same commands are:
 
 ```sh
 sudo modprobe vcan

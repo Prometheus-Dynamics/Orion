@@ -1,8 +1,10 @@
 //! Link gateway tests: config parsing, serial end-to-end over pseudo-terminals, and CAN bridging
-//! over an in-memory bus (plus an ignored test on a real `vcan0`).
+//! over an in-memory bus (plus an ignored test on a real `vcan0`), and link-owned providers across
+//! a restart.
 
 mod can;
 mod config;
+mod persist;
 mod serial;
 mod status;
 

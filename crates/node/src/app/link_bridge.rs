@@ -12,8 +12,11 @@
 //!   survive a reconnect;
 //! - device status batches go to the volatile status lane under the device's provider subject.
 
+mod persist;
+
 use super::{NodeApp, NodeError};
 use crate::link_gateway::LinkStatus;
+use crate::storage::LinkDeviceRecord;
 use orion::{
     ProviderId, ResourceId,
     control_plane::{
@@ -32,6 +35,9 @@ pub(super) struct LinkBridgeState {
     owners: Mutex<BTreeMap<ProviderId, ProviderOwner>>,
     status: Mutex<BTreeMap<String, LinkStatus>>,
     desired_changed: tokio::sync::watch::Sender<u64>,
+    /// Last content of `link-devices.rkyv`. `None` until the gateway restored it, so nothing is
+    /// written over a file that has not been read.
+    persisted: Mutex<Option<Vec<LinkDeviceRecord>>>,
 }
 
 impl Default for LinkBridgeState {
@@ -40,6 +46,7 @@ impl Default for LinkBridgeState {
             owners: Mutex::new(BTreeMap::new()),
             status: Mutex::new(BTreeMap::new()),
             desired_changed: tokio::sync::watch::Sender::new(0),
+            persisted: Mutex::new(None),
         }
     }
 }
@@ -146,17 +153,21 @@ impl NodeApp {
             provider,
             resources: resources.clone(),
         });
-        if let Err(error) = applied {
-            let mut owners = lock(&self.state.links.owners);
-            match previous {
-                Some(previous) => owners.insert(provider_id, previous),
-                None => owners.remove(&provider_id),
-            };
-            return Err(LinkRejection(format!(
-                "the node rejected the snapshot: {error}"
-            )));
-        }
-        Ok(self.link_leases_for(&provider_id, &resources))
+        let result = match applied {
+            Ok(()) => Ok(self.link_leases_for(&provider_id, &resources)),
+            Err(error) => {
+                let mut owners = lock(&self.state.links.owners);
+                match previous {
+                    Some(previous) => owners.insert(provider_id, previous),
+                    None => owners.remove(&provider_id),
+                };
+                Err(LinkRejection(format!(
+                    "the node rejected the snapshot: {error}"
+                )))
+            }
+        };
+        self.persist_link_devices();
+        result
     }
 
     fn check_device_snapshot(
