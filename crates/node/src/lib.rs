@@ -28,6 +28,7 @@ mod lock;
 ))]
 mod managed_transport;
 mod peer;
+mod peer_sync_times;
 #[cfg(feature = "peer-tcp")]
 mod peer_tcp;
 mod service;

@@ -22,6 +22,7 @@ mod peer_observed;
 mod peer_sync;
 #[cfg(feature = "transport-http")]
 mod peer_sync_client;
+mod peer_sync_freshness;
 mod peer_sync_parallel;
 mod peer_sync_response;
 mod peer_sync_state;

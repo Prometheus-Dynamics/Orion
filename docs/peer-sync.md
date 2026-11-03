@@ -154,11 +154,49 @@ Remote tombstones that are already past retention are not stored and not pulled 
 two nodes whose clocks disagree slightly about expiry do not hand the same tombstone back and
 forth. An expired tombstone still deletes an older live copy if one exists.
 
-The retention window is a real bound: **a node that has been disconnected for longer than the
-retention window can resurrect objects that were deleted while it was away**, because the
-tombstones are gone everywhere else. Reset such a node's state directory (or let it rejoin with an
-empty desired state) instead of letting it sync its stale copy back. `tombstones` and
-`tombstones_collected` are reported in the observability snapshot.
+The retention window is a real bound, and the stale-peer guard below enforces it: a peer that
+has been disconnected for longer than the retention window is refused, so it cannot resurrect
+objects that were deleted while it was away. `tombstones` and `tombstones_collected` are reported
+in the observability snapshot.
+
+### Stale peers
+
+Each registered peer has a **sync clock**: the time this node last completed a sync round with it
+(`PeerState::last_successful_sync_ms`). The clock is persisted in `peer-sync-times.json` in the
+state directory (format version 1, `{"version": 1, "last_successful_sync_ms": {"<node-id>": <ms>}}`),
+so a restart cannot reset it.
+
+- **Refused.** When the clock is older than `ORION_NODE_TOMBSTONE_RETENTION_MS`, the peer is stale.
+  This node then does not sync with it in either direction: its sync rounds are skipped (no pull,
+  no push), and it answers the peer's `Hello`, summary, diff, snapshot and mutation requests with
+  an authorization error. Observed-state updates and queries are not refused.
+- **Visible.** The peer's sync status is `error` and its last error names the peer, the age, the
+  retention and the reset commands (the peer trust status shows it, `orionctl peers list` shows it). A warning is
+  logged at most once a minute per peer. Stale peers are skipped silently by the sync loop, so the
+  loop does not log an error on every tick.
+- **Reset.** Only an operator resets a stale peer: `orionctl peers remove <node-id>` forgets its
+  clock (and revokes its key), then `orionctl peers enroll <node-id>` registers it with a fresh
+  clock. Removing the peer from `ORION_NODE_PEERS` is needed too if it is configured there. Reset the
+  peer's own state before re-adding it: a stale node's copy of the deleted objects is trusted again
+  once it is re-enrolled.
+- **Clock start.** A peer registered on this node starts its clock when it is registered (startup
+  from `ORION_NODE_PEERS` or discovery, or a runtime enrollment). If `peer-sync-times.json` already
+  has a record for the peer, the record is kept instead, so restarts and re-registrations do not
+  renew the window.
+- **Upgrades.** A state directory from before this guard has no `peer-sync-times.json`. Every
+  configured peer then starts its clock at the first start of the new build. Clusters therefore keep
+  syncing after the upgrade, and a peer that was already disconnected for longer than the window
+  gets one retention window of grace. That is the only case where the clock is not a true record.
+- **Persistence lag.** The file is written at most once a minute per peer, so after a crash the
+  recorded time can be up to a minute older than the real one. That only makes the guard stricter.
+- **Without a state directory** the clock lives in memory only and starts at process start.
+
+This is what keeps "tombstones are collected after the retention" safe. A peer that is refused
+keeps its own copy of the deleted objects until it is reset, and that is the intended outcome: its
+copy is not merged back in. Mutations received from a peer the guard refuses are not stored.
+
+The clock is not part of the control protocol. Showing the last successful sync time in the peer
+status needs a new field in the peer status messages, which is deferred to control protocol v7.
 
 ## Sync protocol
 

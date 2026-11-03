@@ -46,6 +46,10 @@ impl NodeApp {
         if self.peer_sync_paused() || self.peer_sync_disabled() {
             return Ok(());
         }
+        // A stale peer is marked (status and last error) and skipped; it is not a backoff failure.
+        if self.refuse_stale_peer(node_id).is_some() {
+            return Ok(());
+        }
         let started = Instant::now();
         let Some(peer) = self.peer_ready_for_sync(node_id)? else {
             return Ok(());
@@ -68,8 +72,23 @@ impl NodeApp {
         }
     }
 
-    /// One sync round over an explicit transport.
+    /// One sync round over an explicit transport. A round that completes (even with rejected
+    /// versions) is a successful sync exchange for the stale-peer guard.
     pub(crate) async fn sync_peer_over<T: PeerSyncTransport>(
+        &self,
+        node_id: &NodeId,
+        peer: &PeerState,
+        transport: &T,
+    ) -> Result<PeerSyncRound, NodeError> {
+        if let Some(reason) = self.refuse_stale_peer(node_id) {
+            return Err(NodeError::Authorization(reason));
+        }
+        let round = self.run_peer_sync_round(node_id, peer, transport).await?;
+        self.note_successful_sync_round(node_id);
+        Ok(round)
+    }
+
+    async fn run_peer_sync_round<T: PeerSyncTransport>(
         &self,
         node_id: &NodeId,
         peer: &PeerState,

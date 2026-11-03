@@ -433,11 +433,41 @@ impl NodeAppBuilder {
             http_tls_key_path.clone(),
             PeerTransportSecurityMode::from(http_mutual_tls_mode),
         ));
-        let peers = peer_configs
+        // Each configured peer starts its sync clock from `peer-sync-times.json` (see
+        // `docs/peer-sync.md`, "Stale peers"); a peer without a record starts it now.
+        let stored_sync_times = match config.state_dir.as_deref() {
+            Some(state_dir) => crate::peer_sync_times::load(state_dir).map_err(|err| {
+                super::NodeError::Config(format!("failed to load peer sync times: {err}"))
+            })?,
+            None => Default::default(),
+        };
+        let load_time_ms = super::NodeApp::current_time_ms();
+        let peers: std::collections::BTreeMap<orion::NodeId, PeerState> = peer_configs
             .clone()
             .into_iter()
-            .map(|peer| (peer.node_id.clone(), PeerState::from_config(peer)))
+            .map(|peer| {
+                let mut state = PeerState::from_config(peer);
+                state.last_successful_sync_ms = Some(
+                    stored_sync_times
+                        .get(state.node_id.as_str())
+                        .copied()
+                        .unwrap_or(load_time_ms),
+                );
+                (state.node_id.clone(), state)
+            })
             .collect();
+        if let Some(state_dir) = config.state_dir.as_deref() {
+            let clocks = peers
+                .iter()
+                .filter_map(|(node_id, peer)| {
+                    peer.last_successful_sync_ms
+                        .map(|at| (node_id.to_string(), at))
+                })
+                .collect::<Vec<_>>();
+            crate::peer_sync_times::update(state_dir, |records| records.extend(clocks)).map_err(
+                |err| super::NodeError::Config(format!("failed to persist peer sync times: {err}")),
+            )?;
+        }
         let observability_event_limit = config.runtime_tuning.observability_event_limit;
         let persistence_worker_queue_capacity =
             config.runtime_tuning.persistence_worker_queue_capacity;

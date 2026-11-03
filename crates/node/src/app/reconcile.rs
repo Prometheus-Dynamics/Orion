@@ -2,6 +2,7 @@ use super::{
     NodeApp, NodeError,
     desired_state::{merge_observed_state, merge_peer_observed_state},
     desired_writes::WriteOrigin,
+    peer_sync_freshness::moves_desired_state,
 };
 #[cfg(test)]
 use orion::control_plane::StateSnapshot;
@@ -23,6 +24,11 @@ impl NodeApp {
     ) -> Result<HttpResponsePayload, NodeError> {
         if let Some(peer) = peer.as_ref() {
             self.note_peer_heard(peer);
+            if moves_desired_state(&message)
+                && let Some(reason) = self.refuse_stale_peer(peer)
+            {
+                return Err(NodeError::Authorization(reason));
+            }
         }
         match message {
             ControlMessage::Hello(_) => Ok(HttpResponsePayload::Hello(self.peer_hello()?)),

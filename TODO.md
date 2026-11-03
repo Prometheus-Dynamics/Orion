@@ -94,9 +94,9 @@ Control protocol:
 - [ ] **Replicated host metrics.** A small, selected set of volatile host metrics carried in peer
       sync (or a peer push) so peers see each other's load without the node-local status lane.
       Docs: host-facts.md, peer-sync.md.
-- [ ] **Stale peer state.** If the tombstone-safety refusal (peer older than
-      `ORION_NODE_TOMBSTONE_RETENTION_MS`) needs a field in the peer status that operators query,
-      it goes here; until then it is logged and recorded node-side only.
+- [ ] **Stale peer state.** The last successful sync time and a stale flag in the peer status
+      messages (`orionctl get peers`). Since 54abc8c a stale peer is refused and its status is an
+      error naming the reset commands; the clock itself is node-side only (`peer-sync-times.json`).
 
 Link protocol (`LINK_PROTOCOL_VERSION`, separate from the control protocol; bump it on its own):
 
@@ -388,9 +388,13 @@ none of these are app-specific features.
 - [x] **Per-object conflict resolution** for desired state using a hybrid logical clock (HLC):
       per-object stamps and tombstones, last writer wins, bounded drift, tombstone retention, and
       migration of older state directories. See `docs/peer-sync.md`.
-  - [ ] Tombstone retention is time-based only; a node offline longer than
-        `ORION_NODE_TOMBSTONE_RETENTION_MS` can resurrect deleted objects. Consider refusing to
-        sync stale nodes (last successful sync older than the retention) until they are reset.
+  - [x] Tombstone retention is time-based only; a node offline longer than
+        `ORION_NODE_TOMBSTONE_RETENTION_MS` can resurrect deleted objects. Done: a peer whose last
+        completed sync round is older than the retention is refused in both directions and marked
+        stale until an operator resets it (`orionctl peers remove`, then `orionctl peers enroll`).
+        The sync clock is persisted in `peer-sync-times.json`. Exposing the clock in the peer
+        status needs a wire change, deferred to control protocol v7. See `docs/peer-sync.md`,
+        "Stale peers".
 - [x] **Remove `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`.** It is enforced exactly
       like `Exclusive` and only appears in two client examples.
 

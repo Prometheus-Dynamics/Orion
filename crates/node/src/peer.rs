@@ -11,6 +11,11 @@ const MAX_BACKOFF_EXPONENT: u32 = 10;
 const MIN_BACKOFF_MS: u128 = 1;
 const FNV1A_OFFSET_BASIS: u64 = 1_469_598_103_934_665_603;
 const FNV1A_PRIME: u64 = 1_099_511_628_211;
+/// Shortest spacing between two writes of one peer's sync time to `peer-sync-times.json`.
+#[cfg(peer_sync)]
+const SYNC_TIME_PERSIST_INTERVAL_MS: u64 = 60_000;
+/// Shortest spacing between two "peer is stale" warnings for one peer.
+const STALE_WARNING_INTERVAL_MS: u64 = 60_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PeerConfig {
@@ -134,6 +139,14 @@ pub struct PeerState {
     /// Fingerprint of the local observed slice last pushed to this peer, and when.
     pub observed_pushed_fingerprint: Option<u64>,
     pub observed_pushed_at_ms: Option<u64>,
+    /// When this node last completed a sync round with the peer (`docs/peer-sync.md`, "Stale
+    /// peers"). Persisted in `peer-sync-times.json`; a peer whose value is older than
+    /// `ORION_NODE_TOMBSTONE_RETENTION_MS` is refused.
+    pub last_successful_sync_ms: Option<u64>,
+    /// The value last written to `peer-sync-times.json` for this peer. Not persisted itself.
+    last_sync_time_persisted_ms: Option<u64>,
+    /// When a "peer is stale" warning was last logged for this peer. Not persisted itself.
+    stale_warned_at_ms: Option<u64>,
 }
 
 impl PeerState {
@@ -163,6 +176,9 @@ impl PeerState {
             next_sync_allowed_at_ms: None,
             observed_pushed_fingerprint: None,
             observed_pushed_at_ms: None,
+            last_successful_sync_ms: None,
+            last_sync_time_persisted_ms: None,
+            stale_warned_at_ms: None,
         }
     }
 
@@ -240,6 +256,39 @@ impl PeerState {
 
     pub fn set_last_error_kind(&mut self, kind: Option<PeerSyncErrorKind>) {
         self.last_error_kind = kind;
+    }
+
+    /// Records a completed sync round at `now_ms`. Returns whether the new value must be written
+    /// to `peer-sync-times.json` now (at most once per `SYNC_TIME_PERSIST_INTERVAL_MS`).
+    #[cfg(peer_sync)]
+    pub fn record_successful_sync(&mut self, now_ms: u64) -> bool {
+        self.last_successful_sync_ms = Some(now_ms);
+        let due = self
+            .last_sync_time_persisted_ms
+            .is_none_or(|at| now_ms.saturating_sub(at) >= SYNC_TIME_PERSIST_INTERVAL_MS);
+        if due {
+            self.last_sync_time_persisted_ms = Some(now_ms);
+        }
+        due
+    }
+
+    /// Marks the peer as refused by the stale-peer guard: the sync status is an error whose text
+    /// is `reason`, so it shows wherever the peer's status is reported.
+    pub fn mark_stale(&mut self, reason: String) {
+        self.sync_status = PeerSyncStatus::Error;
+        self.last_error = Some(reason);
+        self.last_error_kind = Some(PeerSyncErrorKind::AuthPolicy);
+    }
+
+    /// Whether a "peer is stale" warning may be logged at `now_ms`; records it when so.
+    pub fn stale_warning_due(&mut self, now_ms: u64) -> bool {
+        let due = self
+            .stale_warned_at_ms
+            .is_none_or(|at| now_ms.saturating_sub(at) >= STALE_WARNING_INTERVAL_MS);
+        if due {
+            self.stale_warned_at_ms = Some(now_ms);
+        }
+        due
     }
 
     pub fn note_sync_failure(
@@ -401,6 +450,40 @@ mod tests {
         );
         assert!(peer_tcp_authority("orion+tcp://host").is_err());
         assert!(peer_tcp_authority("http://host:1").is_err());
+    }
+
+    #[cfg(peer_sync)]
+    #[test]
+    fn sync_clock_persists_at_most_once_per_interval_and_marks_stale() {
+        let mut peer = PeerState::from_config(PeerConfig::new("node-peer", "http://peer.test"));
+        assert!(
+            peer.record_successful_sync(1_000),
+            "first sync is always written"
+        );
+        assert_eq!(peer.last_successful_sync_ms, Some(1_000));
+        assert!(
+            !peer.record_successful_sync(2_000),
+            "within the persist interval"
+        );
+        assert_eq!(
+            peer.last_successful_sync_ms,
+            Some(2_000),
+            "memory is always current"
+        );
+        assert!(peer.record_successful_sync(1_000 + SYNC_TIME_PERSIST_INTERVAL_MS));
+
+        peer.mark_stale("too old".into());
+        assert_eq!(peer.sync_status, PeerSyncStatus::Error);
+        assert_eq!(peer.last_error.as_deref(), Some("too old"));
+        assert_eq!(peer.last_error_kind, Some(PeerSyncErrorKind::AuthPolicy));
+    }
+
+    #[test]
+    fn stale_warnings_are_rate_limited_per_peer() {
+        let mut peer = PeerState::from_config(PeerConfig::new("node-peer", "http://peer.test"));
+        assert!(peer.stale_warning_due(0));
+        assert!(!peer.stale_warning_due(STALE_WARNING_INTERVAL_MS - 1));
+        assert!(peer.stale_warning_due(STALE_WARNING_INTERVAL_MS));
     }
 
     #[test]

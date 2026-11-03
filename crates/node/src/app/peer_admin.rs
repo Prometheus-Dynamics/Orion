@@ -44,13 +44,15 @@ impl NodeApp {
     }
 
     /// Removes a peer (`orionctl peers remove`): revokes its key (persisted, so neither a
-    /// restart nor shared-key enrollment trusts it again), stops syncing with it and forgets a
-    /// discovery enrollment. Enrolling it again with `orionctl peers enroll` lifts the revocation.
+    /// restart nor shared-key enrollment trusts it again), stops syncing with it, forgets its
+    /// sync clock (a re-added peer starts fresh, `docs/peer-sync.md`) and forgets a discovery
+    /// enrollment. Enrolling it again with `orionctl peers enroll` lifts the revocation.
     /// Returns whether anything changed.
     pub fn remove_peer(&self, node_id: &NodeId) -> Result<bool, NodeError> {
         let revoked = self.security.revoke_peer(node_id)?;
         let unconfigured = self.security.unconfigure_peer(node_id)?;
         let unregistered = self.with_peers_mut(|peers| peers.remove(node_id).is_some());
+        self.forget_peer_sync_time(node_id)?;
         self.evict_peer_client(node_id);
         #[cfg(feature = "peer-tcp")]
         self.peer_tcp_clients_lock().remove(node_id);

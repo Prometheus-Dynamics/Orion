@@ -32,6 +32,7 @@ mod remote_operator;
 mod remote_operator_actions;
 #[cfg(feature = "peer-tcp")]
 mod remote_session;
+mod stale_peers;
 #[cfg(feature = "peer-tcp")]
 mod streams;
 

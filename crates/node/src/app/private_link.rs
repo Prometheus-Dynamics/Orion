@@ -49,6 +49,13 @@ impl NodeApp {
             "orion+tcp://{}",
             SocketAddr::new(remote.to_canonical(), port)
         );
+        let clock = match self.sync_clock_start_for(&proof.node_id) {
+            Ok(clock) => clock,
+            Err(err) => {
+                warn!(peer = %proof.node_id, error = %err, "private-link peer not registered");
+                return;
+            }
+        };
         let registered = self.with_peers_mut(|peers| {
             if peers.contains_key(&proof.node_id) {
                 return false;
@@ -57,9 +64,14 @@ impl NodeApp {
                 proof.node_id.clone(),
                 orion_core::PeerBaseUrl::new(base_url.clone()),
             );
-            peers.insert(proof.node_id.clone(), PeerState::from_config(config));
+            let mut state = PeerState::from_config(config);
+            state.last_successful_sync_ms = Some(clock);
+            peers.insert(proof.node_id.clone(), state);
             true
         });
+        if registered && let Err(err) = self.persist_peer_sync_times() {
+            warn!(peer = %proof.node_id, error = %err, "failed to persist the private-link peer's sync time");
+        }
         if registered {
             self.record_audit_event(
                 AuditEventKind::PeerEnrolled,

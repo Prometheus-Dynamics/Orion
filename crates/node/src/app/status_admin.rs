@@ -564,13 +564,17 @@ impl NodeApp {
     pub fn register_peer(&self, peer: PeerConfig) -> Result<NodeId, NodeError> {
         let node_id = peer.node_id.clone();
         self.security.configure_peer(&peer)?;
+        let clock = self.sync_clock_start_for(&node_id)?;
         self.with_peers_mut(|peers| {
             if peers.contains_key(&node_id) {
                 return Err(NodeError::DuplicatePeer(node_id.clone()));
             }
-            peers.insert(node_id.clone(), PeerState::from_config(peer));
+            let mut state = PeerState::from_config(peer);
+            state.last_successful_sync_ms = Some(clock);
+            peers.insert(node_id.clone(), state);
             Ok(())
         })?;
+        self.persist_peer_sync_times()?;
         Ok(node_id)
     }
 
@@ -578,6 +582,7 @@ impl NodeApp {
         self.security.configure_peer(&peer)?;
         let node_id = peer.node_id.clone();
         let base_url = peer.base_url.clone();
+        let clock = self.sync_clock_start_for(&node_id)?;
         self.with_peers_mut(|peers| match peers.get_mut(&node_id) {
             Some(existing) => {
                 existing.base_url = peer.base_url;
@@ -585,9 +590,12 @@ impl NodeApp {
                 existing.last_error = None;
             }
             None => {
-                peers.insert(node_id.clone(), PeerState::from_config(peer));
+                let mut state = PeerState::from_config(peer);
+                state.last_successful_sync_ms = Some(clock);
+                peers.insert(node_id.clone(), state);
             }
         });
+        self.persist_peer_sync_times()?;
         self.record_audit_event(
             AuditEventKind::PeerEnrolled,
             Some(node_id.as_str().to_owned()),
