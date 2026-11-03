@@ -10,7 +10,7 @@ first; the other items below are still needed, after it.
 
 - [ ] **aarch64 appliance soak** on the reference board (below, under freeze items).
 - [x] **Unknown arguments start a node** (below): `orion-node --version` on the reference board. Done in 6bf46ce; on dev.
-- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total not yet in the usage snapshot or metrics (queued in "4. Protocol v7 window").
+- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total now in the usage snapshot and metrics (protocol v7 window, usage-peer-wire).
 - [ ] **Protocol v7 on the reference board:** once the current pin is proven on the board, the v7 window
       (the device library's orion-v7 merge, the consuming products together, the images' orion-node).
 
@@ -98,6 +98,9 @@ Control protocol:
       result-history bytes in `NodeResourceUsageSnapshot`. Docs: actions.md.
 - [ ] **Peer `ActionWatch`.** A forwarding node subscribes to the owner's action results over
       `orion+tcp` instead of polling it (additive messages). Docs: actions.md, peer-sync.md.
+      Not done on `usage-peer-wire`: blocked on a peer-scoped push session (operator sessions are
+      enrolled-operator only), origin-filtered action watches, and an outgoing push client on the
+      forwarding node. Today the forwarder resends `RunAction` with `wait_ms` while running.
 - [x] **Replicated host metrics** (done on `usage-peer-wire`: `ObservedStateUpdate::host`, see docs/host-facts.md "Replicated load"). A small, selected set of volatile host metrics carried in peer
       sync (or a peer push) so peers see each other's load without the node-local status lane.
       Docs: host-facts.md, peer-sync.md.
