@@ -406,20 +406,15 @@ async fn orionctl_get_reports_health_readiness_observability_and_snapshot() {
     assert!(workload_stdout.contains("workload id=workload.get"));
     assert!(workload_stdout.contains("assigned_node=node.orionctl.get"));
 
-    let events_summary = run_orionctl([
-        "get",
-        "events",
-        "--socket",
-        &harness.ipc_socket.to_string_lossy(),
-    ]);
+    // The node records the mutation's event on its own schedule, so poll `get events` until it
+    // shows up (bounded) instead of reading the log once.
+    let (events_summary, _) =
+        poll_until_event(&harness.ipc_socket, "kind=mutation_apply", "status=success");
     assert!(
         events_summary.status.success(),
         "{}",
         output_text(&events_summary)
     );
-    let events_stdout = String::from_utf8_lossy(&events_summary.stdout);
-    assert!(events_stdout.contains("kind=mutation_apply"));
-    assert!(events_stdout.contains("status=success"));
 
     let filtered_nodes = run_orionctl([
         "get",
@@ -553,4 +548,28 @@ async fn orionctl_supports_toml_structured_output() {
     let toml: toml::Value = toml::from_str(&String::from_utf8_lossy(&toml_output.stdout))
         .expect("toml output should parse");
     assert!(toml.get("value").is_some());
+}
+
+/// Runs `orionctl get events` until its output contains both `needle` and `also`, or fails after
+/// five seconds with the last output. Returns the last run and its stdout.
+fn poll_until_event(
+    socket: &std::path::Path,
+    needle: &str,
+    also: &str,
+) -> (std::process::Output, String) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let run = run_orionctl(["get", "events", "--socket", &socket.to_string_lossy()]);
+        let stdout = String::from_utf8_lossy(&run.stdout).into_owned();
+        if (stdout.contains(needle) && stdout.contains(also))
+            || std::time::Instant::now() >= deadline
+        {
+            assert!(
+                stdout.contains(needle) && stdout.contains(also),
+                "no event matching `{needle}` and `{also}` within 5 s:\n{stdout}"
+            );
+            return (run, stdout);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }

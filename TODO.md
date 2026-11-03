@@ -235,10 +235,16 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
 - [ ] **orionctl `get events` test.** Failure: `crates/orionctl/tests/cli_get.rs:421`, "assertion failed:
       events_stdout.contains("kind=mutation_apply")" in `orionctl_get_reports_health_readiness_observability_and_snapshot`.
       Suspected race: the test reads the events before the node has recorded this one. Poll until it appears.
+      Status: the test now polls `get events` for up to 5 s (`poll_until_event`). Not reproduced: 200
+      runs under load on the old code, 0 failures, so the fix is not proven under load yet.
 - [ ] **Unsupported-runtime log count.** Failure: `crates/node/src/tests/runtime/unsupported_runtime.rs:230`,
       "assertion `left == right` failed, left: 0, right: 1" for `logs.count("nobody.exec.v1", "WARN")` in
       `truly_unsupported_type_is_reported_once_and_does_not_block_others`. Suspected cause: the captured log is shared
       with parallel tests, or the warning arrives after the 20 ticks. Capture logs per test and wait for the warning.
+      Status: not reproduced. 200 runs of the module and 30 runs of the whole node lib binary under
+      CPU load: 0 failures, so no fix yet. If it recurs, the candidate is tracing's cached callsite
+      interest: call `tracing::callsite::rebuild_interest_cache()` after `set_default` in `capture_logs`.
+      Not changed in this commit.
 
 ### Needs the device (arm64 board)
 
