@@ -1,5 +1,7 @@
 use orion_node::{NodeApp, NodeProcessConfig};
 use std::io;
+
+mod cli;
 use tracing::info;
 use tracing::warn;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -149,6 +151,21 @@ async fn wait_for_shutdown(
 }
 
 fn main() -> Result<(), orion_node::NodeError> {
+    match cli::parse_args(std::env::args_os().skip(1)) {
+        cli::Action::Run => {}
+        cli::Action::Version => {
+            println!("orion-node {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        cli::Action::Help => {
+            println!("{}", cli::USAGE);
+            return Ok(());
+        }
+        cli::Action::Unexpected(arg) => {
+            eprintln!("orion-node: unexpected argument '{arg}'\n\n{}", cli::USAGE);
+            std::process::exit(2);
+        }
+    }
     init_tracing();
     let process = NodeProcessConfig::try_from_env()?;
     let runtime = process.runtime_threads.build_runtime().map_err(|err| {
