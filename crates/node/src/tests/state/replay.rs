@@ -221,7 +221,10 @@ fn replay_recovers_from_history_when_snapshot_is_missing() {
     let storage = NodeStorage::new(state_dir.clone());
     assert!(storage.snapshot_manifest_path().exists());
     assert!(storage.snapshot_desired_path().exists());
-    assert!(storage.snapshot_observed_path().exists());
+    assert!(
+        !storage.snapshot_observed_path().exists(),
+        "observed state is not persisted"
+    );
     assert!(storage.snapshot_applied_path().exists());
 
     fs::remove_file(state_dir.join("snapshot-manifest.rkyv"))

@@ -135,15 +135,10 @@ fn format_4_state_keeps_every_record_and_stamp() {
         stamp,
         "the replayed history keeps its stamps"
     );
-    assert_eq!(state.observed.revision, Revision::new(3));
-    assert_eq!(
-        state.observed.nodes[&NodeId::new("node-a")]
-            .clock
-            .as_ref()
-            .map(|clock| clock.source.clone()),
-        Some(ClockSourceKind::Ptp),
-        "observed records are converted, not reset"
-    );
+    // Observed state is runtime status: the migration still converts it, but a restart does not
+    // load it, so it comes back empty and is republished by its owners.
+    assert_eq!(state.observed.revision, Revision::ZERO);
+    assert!(state.observed.nodes.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
 

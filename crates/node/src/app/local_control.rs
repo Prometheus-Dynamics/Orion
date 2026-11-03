@@ -730,7 +730,7 @@ impl NodeApp {
         let created = self.ensure_provider_record(snapshot.provider.clone())?;
         let changed = self.with_store_mut(|store| store.apply_provider_snapshot(snapshot))?;
         if changed {
-            self.persist_observed_state()?;
+            self.note_observed_change();
         }
         // Clients re-publish identical snapshots several times a second: a pass is only needed
         // when observed state moved or a new record was written.
@@ -765,7 +765,7 @@ impl NodeApp {
             })
         })?;
         if changed {
-            self.persist_observed_state()?;
+            self.note_observed_change();
         }
         if changed || created {
             self.reconcile_after_change()?;

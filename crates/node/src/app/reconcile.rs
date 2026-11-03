@@ -434,7 +434,7 @@ impl NodeApp {
             }
         });
         if state_changed {
-            let persisted = self.persist_observed_state();
+            let persisted = self.persist_applied_state();
             self.request_reconcile();
             persisted?;
         }

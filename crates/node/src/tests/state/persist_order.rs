@@ -74,6 +74,7 @@ fn older_persist_cannot_commit_over_a_newer_snapshot() {
         .resources
         .get(&ResourceId::new("resource.coalesce.camera"))
         .and_then(|resource| resource.labels.first().cloned());
-    assert_eq!(label.as_deref(), Some("generation=1"));
+    // Observed state is not persisted, so no observed label survives the restart.
+    assert_eq!(label, None);
     let _ = std::fs::remove_dir_all(state_dir);
 }

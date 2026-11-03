@@ -215,11 +215,10 @@ impl NodeStorage {
             desired_section_fingerprints,
             desired_section_counts,
         };
-        let observed_bytes = encode_to_vec(&snapshot.observed)?;
         let applied_bytes = encode_to_vec(&snapshot.applied)?;
         let manifest_bytes = encode_to_vec(&manifest)?;
 
-        self.atomic_write(&self.snapshot_observed_path(), &observed_bytes)?;
+        let _ = std::fs::remove_file(self.snapshot_observed_path());
         self.atomic_write(&self.snapshot_applied_path(), &applied_bytes)?;
         self.atomic_write(&self.snapshot_manifest_path(), &manifest_bytes)
     }
@@ -229,7 +228,6 @@ impl NodeStorage {
         &self,
         desired: &EncodedDesiredSnapshot,
         observed_revision: Revision,
-        observed_bytes: Option<&[u8]>,
         applied_revision: Revision,
         applied_bytes: Option<&[u8]>,
         rewrite_desired: bool,
@@ -291,19 +289,8 @@ impl NodeStorage {
         };
         let manifest_bytes = encode_archive(&manifest)?;
 
-        match observed_bytes {
-            Some(observed_bytes) => {
-                self.atomic_write_with(&self.snapshot_observed_path(), observed_bytes, dir_sync)?
-            }
-            None => {
-                if !has_existing_manifest || !self.snapshot_observed_path().exists() {
-                    return Err(NodeError::Storage(
-                        "cannot reuse observed snapshot bytes without an existing observed snapshot"
-                            .into(),
-                    ));
-                }
-            }
-        }
+        // Observed state is not persisted. A file from before that change is stale and goes.
+        let _ = std::fs::remove_file(self.snapshot_observed_path());
         match applied_bytes {
             Some(applied_bytes) => {
                 self.atomic_write_with(&self.snapshot_applied_path(), applied_bytes, dir_sync)?
@@ -497,17 +484,14 @@ impl NodeStorage {
             return Ok(None);
         };
 
-        let observed_bytes = std::fs::read(self.snapshot_observed_path())
-            .map_err(|err| NodeError::Storage(err.to_string()))?;
         let applied_bytes = std::fs::read(self.snapshot_applied_path())
             .map_err(|err| NodeError::Storage(err.to_string()))?;
-
-        let observed: ObservedClusterState = decode_from_slice(&observed_bytes)?;
         let applied: AppliedClusterState = decode_from_slice(&applied_bytes)?;
 
-        if observed.revision != manifest.observed_revision
-            || applied.revision != manifest.applied_revision
-        {
+        // Observed state is runtime status, rebuilt after a restart: executors and providers
+        // republish it on reconnect, so nothing is read back for it.
+        let observed = ObservedClusterState::default();
+        if applied.revision != manifest.applied_revision {
             return Err(NodeError::Storage(
                 "snapshot manifest revisions do not match section files".into(),
             ));

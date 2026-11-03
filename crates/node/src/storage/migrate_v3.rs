@@ -546,10 +546,8 @@ mod tests {
             desired.tombstones.workloads[&WorkloadId::new("workload.old")],
             migrated
         );
-        assert_eq!(
-            app.state_snapshot().state.observed.revision,
-            Revision::new(7)
-        );
+        // Observed state is not loaded after a restart (it is republished), so it starts empty.
+        assert_eq!(app.state_snapshot().state.observed.revision, Revision::ZERO);
         let _ = std::fs::remove_dir_all(dir);
     }
 

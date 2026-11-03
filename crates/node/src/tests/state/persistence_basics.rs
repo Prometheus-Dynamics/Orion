@@ -184,9 +184,10 @@ fn observed_only_persist_reuses_unchanged_applied_and_history_files() {
             .replay_state()
             .expect("state replay should succeed")
     );
+    // Observed state is not persisted: a restart starts it empty, rebuilt by republishes.
     assert_eq!(
         replayed.state_snapshot().state.observed.revision,
-        Revision::new(1)
+        Revision::ZERO
     );
 
     let _ = fs::remove_dir_all(state_dir);

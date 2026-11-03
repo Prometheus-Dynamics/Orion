@@ -153,9 +153,9 @@ impl NodeApp {
         // Command application is intentionally serialized by reconcile order for this release.
         let (report, outcome) =
             self.dispatch_reconcile_report(executors, report, runtime_changed)?;
-        if outcome.runtime_changed || outcome.applied_revision_changed {
+        if outcome.applied_revision_changed {
             log_reconcile_persist(self, &outcome);
-            self.persist_observed_state_async().await?;
+            self.persist_applied_state_async().await?;
         }
         Ok((report, outcome))
     }
@@ -168,9 +168,9 @@ impl NodeApp {
     ) -> Result<(NodeTickReport, ReconcileOutcome), NodeError> {
         let (report, outcome) =
             self.dispatch_reconcile_report(executors, report, runtime_changed)?;
-        if outcome.runtime_changed || outcome.applied_revision_changed {
+        if outcome.applied_revision_changed {
             log_reconcile_persist(self, &outcome);
-            self.persist_observed_state()?;
+            self.persist_applied_state()?;
         }
         Ok((report, outcome))
     }

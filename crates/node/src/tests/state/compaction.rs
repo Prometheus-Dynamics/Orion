@@ -58,7 +58,10 @@ fn persistence_compacts_mutation_history_to_configured_bound() {
     assert_eq!(history.len(), 3);
     assert!(storage.snapshot_manifest_path().exists());
     assert!(storage.snapshot_desired_path().exists());
-    assert!(storage.snapshot_observed_path().exists());
+    assert!(
+        !storage.snapshot_observed_path().exists(),
+        "observed state is not persisted"
+    );
     assert!(storage.snapshot_applied_path().exists());
     assert!(
         state_dir.join("mutation-history-baseline.rkyv").exists(),
@@ -179,7 +182,10 @@ fn persistence_compacts_mutation_history_to_configured_byte_budget() {
     );
     assert!(storage.snapshot_manifest_path().exists());
     assert!(storage.snapshot_desired_path().exists());
-    assert!(storage.snapshot_observed_path().exists());
+    assert!(
+        !storage.snapshot_observed_path().exists(),
+        "observed state is not persisted"
+    );
     assert!(storage.snapshot_applied_path().exists());
 
     fs::remove_file(state_dir.join("snapshot-manifest.rkyv"))

@@ -61,15 +61,12 @@ const HISTORY_ARCHIVE_SLACK_BYTES: usize = 4096;
 pub(super) struct EncodedPersistedStateBundle {
     desired: EncodedDesiredSnapshot,
     observed_revision: Revision,
-    observed_bytes: Option<AlignedVec>,
     applied_revision: Revision,
     applied_bytes: Option<AlignedVec>,
     history_bytes: Option<AlignedVec>,
     baseline_revision: Revision,
     baseline_bytes: Option<AlignedVec>,
     snapshot_rewrite_cadence: u64,
-    /// Observed-content generation captured with this bundle (see `observed_persist`).
-    observed_generation: u64,
 }
 
 pub(super) fn persist_bundle_to_storage(
@@ -93,7 +90,6 @@ pub(super) fn persist_bundle_to_storage(
     storage.save_encoded_snapshot(
         &bundle.desired,
         bundle.observed_revision,
-        bundle.observed_bytes.as_deref(),
         bundle.applied_revision,
         bundle.applied_bytes.as_deref(),
         rewrite_desired,
@@ -166,18 +162,8 @@ impl NodeApp {
             .map(NodeStorage::load_snapshot_manifest)
             .transpose()?
             .flatten();
-        let (observed_generation, observed_content_changed) = self.observed_generation_to_capture();
         self.with_persisted_state_read(|store, history, baseline| {
             let encode_all_sections = manifest.is_none();
-            let observed_changed = observed_content_changed
-                || section_needs_rewrite(
-                    self.storage.as_ref(),
-                    &manifest,
-                    SnapshotSection::Observed,
-                )
-                || manifest
-                    .as_ref()
-                    .is_none_or(|manifest| store.observed.revision != manifest.observed_revision);
             let applied_changed =
                 section_needs_rewrite(self.storage.as_ref(), &manifest, SnapshotSection::Applied)
                     || manifest
@@ -199,11 +185,6 @@ impl NodeApp {
                     desired_snapshot_revision_only(&store.desired)
                 },
                 observed_revision: store.observed.revision,
-                observed_bytes: if encode_all_sections || observed_changed {
-                    Some(encode_archive(&store.observed)?)
-                } else {
-                    None
-                },
                 applied_revision: store.applied.revision,
                 applied_bytes: if encode_all_sections || applied_changed {
                     Some(encode_archive(&store.applied)?)
@@ -227,7 +208,6 @@ impl NodeApp {
                     Some(encode_archive(baseline)?)
                 },
                 snapshot_rewrite_cadence: self.config.runtime_tuning.snapshot_rewrite_cadence,
-                observed_generation,
             })
         })
     }
@@ -375,13 +355,12 @@ impl NodeApp {
         let result = async {
             // Wait for queue space before the gate: the gate is never held across an await.
             let reservation = worker.reserve_persist().await?;
-            let (observed_generation, reply) = {
+            let reply = {
                 let _order = self.persist_order_guard();
                 let bundle = self.capture_persist_bundle(storage)?;
-                (bundle.observed_generation, reservation.send(bundle))
+                reservation.send(bundle)
             };
             reply.wait().await?;
-            self.note_observed_generation_persisted(observed_generation);
             Ok(())
         }
         .await;
@@ -404,14 +383,12 @@ impl NodeApp {
             // Held through the write: this path waits for the worker anyway.
             let _order = self.persist_order_guard();
             let bundle = self.capture_persist_bundle(storage)?;
-            let observed_generation = bundle.observed_generation;
             if let Some(worker) = &self.persistence_worker {
                 worker.persist_bundle_blocking(bundle)?;
             } else {
                 let storage = storage.clone();
                 run_possibly_blocking(|| persist_bundle_to_storage(&storage, &bundle))?;
             }
-            self.note_observed_generation_persisted(observed_generation);
             Ok(())
         })();
         match &result {
@@ -615,7 +592,6 @@ impl NodeApp {
 
 #[derive(Clone, Copy)]
 enum SnapshotSection {
-    Observed,
     Applied,
     MutationHistory,
 }
@@ -632,7 +608,6 @@ fn section_needs_rewrite(
         return true;
     }
     match section {
-        SnapshotSection::Observed => !storage.snapshot_observed_path().exists(),
         SnapshotSection::Applied => !storage.snapshot_applied_path().exists(),
         SnapshotSection::MutationHistory => !storage.mutation_history_path().exists(),
     }
@@ -714,9 +689,6 @@ mod tests {
         EncodedPersistedStateBundle {
             desired,
             observed_revision: Revision::ZERO,
-            observed_bytes: Some(
-                encode_archive(&ObservedClusterState::default()).expect("observed encodes"),
-            ),
             applied_revision: Revision::ZERO,
             applied_bytes: Some(
                 encode_archive(&AppliedClusterState::default()).expect("applied encodes"),
@@ -725,7 +697,6 @@ mod tests {
             baseline_revision: Revision::ZERO,
             baseline_bytes: None,
             snapshot_rewrite_cadence: cadence,
-            observed_generation: 0,
         }
     }
 

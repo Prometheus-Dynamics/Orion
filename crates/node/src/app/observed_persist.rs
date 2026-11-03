@@ -36,12 +36,6 @@ struct CoalescerFlags {
 pub(super) struct ObservedPersistState {
     flags: Mutex<CoalescerFlags>,
     wake: tokio::sync::Notify,
-    /// Bumped on every observed change. Resource and workload changes do not always move
-    /// `ObservedClusterState::revision`, so the revision alone cannot tell whether the observed
-    /// section must be rewritten; a write re-encodes it while `content_generation` is ahead of
-    /// `persisted_generation` (the generation captured by the last successful write).
-    content_generation: AtomicU64,
-    persisted_generation: AtomicU64,
     coalesced_total: AtomicU64,
     flushes_total: AtomicU64,
     absorbed_total: AtomicU64,
@@ -97,45 +91,23 @@ impl NodeApp {
         true
     }
 
-    /// The observed generation to capture, and whether the observed section must be re-encoded.
-    pub(super) fn observed_generation_to_capture(&self) -> (u64, bool) {
-        let state = &self.state.observed_persist;
-        let generation = state.content_generation.load(Ordering::SeqCst);
-        (
-            generation,
-            generation != state.persisted_generation.load(Ordering::SeqCst),
-        )
-    }
-
-    /// Records that a write captured observed generation `generation` and succeeded.
-    pub(super) fn note_observed_generation_persisted(&self, generation: u64) {
-        self.state
-            .observed_persist
-            .persisted_generation
-            .fetch_max(generation, Ordering::SeqCst);
-    }
-
-    fn mark_observed_content_changed(&self) {
-        self.state
-            .observed_persist
-            .content_generation
-            .fetch_add(1, Ordering::SeqCst);
-    }
-
-    /// Persists an observed or applied state change, coalesced when a coalescer runs.
-    pub(super) fn persist_observed_state(&self) -> Result<(), NodeError> {
-        self.mark_observed_content_changed();
+    /// Observed state is runtime status: it is never written. Reconcile re-derives it after a
+    /// restart, and executors and providers republish it on reconnect. A change only wakes the
+    /// observed watchers.
+    pub(super) fn note_observed_change(&self) {
         self.notify_observed_watchers();
+    }
+
+    /// Persists an applied-revision change, coalesced when a coalescer runs.
+    pub(super) fn persist_applied_state(&self) -> Result<(), NodeError> {
         if self.defer_observed_persist() {
             return Ok(());
         }
         self.persist_state()
     }
 
-    /// Async variant of [`Self::persist_observed_state`].
-    pub(super) async fn persist_observed_state_async(&self) -> Result<(), NodeError> {
-        self.mark_observed_content_changed();
-        self.notify_observed_watchers();
+    /// Async variant of [`Self::persist_applied_state`].
+    pub(super) async fn persist_applied_state_async(&self) -> Result<(), NodeError> {
         if self.defer_observed_persist() {
             return Ok(());
         }

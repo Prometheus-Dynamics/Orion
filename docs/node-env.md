@@ -390,29 +390,34 @@ capped at `ORION_NODE_ACTION_MAX_DEADLINE_MS` (all under Runtime Tuning). Progra
 `NodeAppBuilder::with_action_handler`.
 ### Observed-state write coalescing
 
-Desired state is durable: every desired-state commit (local or remote mutations, snapshot
-adoption, provider or executor record changes, leases) writes the state bundle and fsyncs it
+Desired state and identities are durable: every desired-state commit (local or remote mutations,
+snapshot adoption, provider or executor records, leases) writes the state bundle and fsyncs it
 before the commit is acknowledged.
 
-Observed and applied state change far more often (every provider or executor snapshot, peer
-observed updates, reconcile results) and are only a cache of what providers and executors report.
-While the reconcile loop runs (`NodeApp::spawn_reconcile_loop`, which `orion-node` always starts),
-those changes only mark the state dirty, and a background coalescer writes it at most once per
-`ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` (default `30000`):
+Observed state (provider, executor and resource status, workload observations) is never written.
+It is runtime status that its owners republish: after a restart it starts empty ("pending"),
+reconcile re-derives what it can, and executors and providers republish on reconnect (link devices
+resend theirs on every session). Observed changes only wake the observed watchers.
+
+Applied state (the applied revision) is still persisted. While the reconcile loop runs
+(`NodeApp::spawn_reconcile_loop`, which `orion-node` always starts) its changes are coalesced by a
+background coalescer, which writes at most once per `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS`
+(default `30000`):
 
 - the first change after an idle interval is written at once; changes within the interval after a
   write are collected into one write at the end of the interval;
-- a desired-state commit writes the full bundle, so it also carries any pending observed change;
+- a desired-state commit writes the full bundle, so it also carries any pending applied change;
 - graceful shutdown (stopping the reconcile loop) flushes pending changes;
-- `0` restores the previous behaviour (every observed change is written immediately), and embedded
-  users that never start the reconcile loop also keep immediate writes.
+- `0` writes every applied change immediately, and embedded users that never start the reconcile
+  loop also keep immediate writes.
 
-Crash semantics: after an unclean stop (power loss, `SIGKILL`) the persisted observed and applied
-state can be up to one interval stale. Nothing durable is lost: desired state is unaffected,
-providers and executors republish full snapshots when they reconnect (link devices resend theirs
-on every session), and reconcile re-derives applied state. `resource_usage.observed_persistence`
-(`orionctl get memory -o json`) reports the interval, whether a write is pending, and how many
-changes were coalesced.
+Crash semantics: after an unclean stop (power loss, `SIGKILL`) the persisted applied state can be up
+to one interval stale. Nothing durable is lost: desired state is unaffected and observed state was
+never durable. `resource_usage.observed_persistence` (`orionctl get memory -o json`) reports the
+interval, whether a write is pending, and how many changes were coalesced.
+
+A node upgraded from a format that stored observed state deletes the observed file on its first
+write; the observed section is not read back.
 
 ### Volatile status lane limits
 
@@ -497,7 +502,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_OPERATOR_OPEN_READ` | unset (none) | Comma-separated `status`, `streams`, `state`: what operators the node has not enrolled may read (signed requests still; no actions), including push sessions for it. For appliances that are open on their own networks by design. See "Open read and auto-enrollment" in `docs/remote-operator.md`. |
 | `ORION_NODE_OPERATOR_AUTO_ENROLL` | unset (none) | `<network>/<prefix>=<pattern>,...` rules separated by `;` (`172.31.0.0/16=reboot,usb-boot`): an operator whose hello comes from the network is enrolled with read access and those action patterns, without an administrator (never one an administrator removed, or one enrolled with another key). Persisted and audited as `network` enrollments. |
 | `ORION_NODE_CLOCK_REFRESH_MS` | `10000` | How often the node re-reads its clock state. The observed node record is only republished on meaningful change (see `docs/observability.md`, Clock Facts). |
-| `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` | `30000` | Shortest spacing between coalesced observed/applied state writes while the reconcile loop runs. `0` writes every change immediately (not normalized to `1`). Desired-state commits are never delayed. See "Observed-state write coalescing". |
+| `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` | `30000` | Shortest spacing between coalesced applied-state writes while the reconcile loop runs. `0` writes every change immediately (not normalized to `1`). Desired-state commits are never delayed. See "Observed-state write coalescing". |
 | `ORION_NODE_STATUS_MAX_ENTRIES` | `4096` | Node-wide cap on volatile status lane entries. |
 | `ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER` | `256` | Status lane entries one local client or link device may hold (clamped to the node-wide cap). |
 | `ORION_NODE_STATUS_MAX_TTL_MS` | `300000` | Longest status entry TTL, also used for entries published with `ttl_ms = 0`. |

@@ -522,14 +522,12 @@ mod tests {
         EncodedPersistedStateBundle {
             desired: desired_snapshot_revision_only(&desired),
             observed_revision: observed.revision,
-            observed_bytes: Some(encode_archive(&observed).expect("observed should encode")),
             applied_revision: applied.revision,
             applied_bytes: Some(encode_archive(&applied).expect("applied should encode")),
             history_bytes: Some(encode_archive(&history).expect("history should encode")),
             baseline_revision: Revision::ZERO,
             baseline_bytes: None,
             snapshot_rewrite_cadence: 1,
-            observed_generation: 0,
         }
     }
 }
