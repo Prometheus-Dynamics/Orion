@@ -235,3 +235,34 @@ async fn orionctl_describe_workload_renders_typed_graph_config_summary() {
     assert!(stdout.contains("binding_count=3"));
     assert!(stdout.contains("plugins=cv,slam@1.0.0"));
 }
+
+/// Two harnesses with the same node id (in one process here, as two test processes would be) must
+/// not share a socket: starting the second must not take over the first one's control socket.
+#[tokio::test(flavor = "multi_thread")]
+async fn harnesses_with_the_same_node_id_keep_their_own_sockets() {
+    let first = TestHarness::start("node.orionctl.isolation").await;
+    let mut desired = first._app.state_snapshot().state.desired;
+    desired.put_workload(
+        WorkloadRecord::builder("workload.first", "graph.exec.v1", "artifact.first")
+            .desired_state(DesiredState::Running)
+            .build(),
+    );
+    first._app.replace_desired(desired);
+
+    let _second = TestHarness::start("node.orionctl.isolation").await;
+
+    let workloads = run_orionctl([
+        "get",
+        "workloads",
+        "--socket",
+        &first.ipc_socket.to_string_lossy(),
+        "-o",
+        "json",
+    ]);
+    assert!(workloads.status.success(), "{}", output_text(&workloads));
+    assert!(
+        String::from_utf8_lossy(&workloads.stdout).contains("workload.first"),
+        "{}",
+        output_text(&workloads)
+    );
+}

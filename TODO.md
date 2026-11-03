@@ -379,6 +379,18 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       `fwd-long` report. Fix: poll every 5 ms (at most 200 messages per window, within the limit by construction),
       and count refused messages, which must be zero. Runs: 10 of 400 failed before; 0 of 400 after, under the
       same load.
+- [x] **orionctl tests share control sockets.** Failures: `cli_get::orionctl_get_reports_health_readiness_observability_and_snapshot`
+      ("failed to connect to unix socket: Connection refused") and `cli_describe::orionctl_describe_reports_full_object_state_and_blockers`
+      ("resource `resource.describe` not found"), about 1 in 40 full workspace runs under load. Cause: the harness
+      bound each node's control and stream sockets at fixed paths in the shared temp dir, named only by node id. The
+      server's bind removes whatever is at its path, so a second test process with the same node id took over the
+      first one's socket: connections were refused, or they reached a node without the test's state. Not a
+      server-not-listening race: the bind completes before `start` returns, and state is applied in-process before
+      the CLI runs. Proven: solo runs pass 40 of 40, eight at a time the describe test fails 35 of 40 and the get
+      test 43 of 80 with those two messages. Fix: each harness gets unique socket paths (process id and a sequence
+      number), removed on drop. Regression test `harnesses_with_the_same_node_id_keep_their_own_sockets` fails 3 of 3
+      on the old harness. Runs after: get 300 of 300 and describe 300 of 300, eight at a time, the two binaries
+      running concurrently.
 
 ### Needs the device (arm64 board)
 

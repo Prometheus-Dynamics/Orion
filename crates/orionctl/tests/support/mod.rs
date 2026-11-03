@@ -1,6 +1,11 @@
 #![allow(dead_code)]
 
-use std::{path::PathBuf, process::Command, time::Duration};
+use std::{
+    path::PathBuf,
+    process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
 use orion::{
     ArtifactId, NodeId, WorkloadId,
@@ -25,11 +30,26 @@ pub(crate) struct TestHarness {
     pub(crate) ipc_stream_socket: PathBuf,
 }
 
+static HARNESS_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A socket path no other harness uses: the node id alone names the default paths in the shared
+/// temp dir, and binding a socket removes whatever is at its path, so two test processes that
+/// started a node with the same id would take each other's socket.
+fn unique_socket_path(node_id: &str, kind: &str) -> PathBuf {
+    let seq = HARNESS_SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "orionctl-test-{node_id}-{}-{seq}-{kind}.sock",
+        std::process::id()
+    ))
+}
+
 impl TestHarness {
     pub(crate) async fn start(node_id: &str) -> Self {
+        let ipc_socket = unique_socket_path(node_id, "control");
+        let ipc_stream_socket = unique_socket_path(node_id, "stream");
         let config = NodeConfig::for_local_node(NodeId::new(node_id))
             .with_http_bind_addr("127.0.0.1:0".parse().expect("socket address should parse"))
-            .with_ipc_socket_path(NodeConfig::default_ipc_socket_path_for(node_id))
+            .with_ipc_socket_path(ipc_socket.clone())
             .with_reconcile_interval(Duration::from_millis(10))
             .with_peer_authentication(orion_node::PeerAuthenticationMode::Disabled)
             .with_peer_sync_execution(
@@ -40,15 +60,13 @@ impl TestHarness {
                 NodeConfig::try_runtime_tuning_from_env()
                     .expect("runtime tuning defaults should parse"),
             );
-        let ipc_socket = config.ipc_socket_path.clone();
-        let ipc_stream_socket = NodeConfig::default_ipc_stream_socket_path_for(node_id);
         let app = NodeApp::try_new(config.clone()).expect("node app should build");
         let (http_addr, http_server) = app
             .start_http_server_graceful(config.http_bind_addr)
             .await
             .expect("http server should start");
         let (_, ipc_server) = app
-            .start_ipc_server_graceful(&config.ipc_socket_path)
+            .start_ipc_server_graceful(&ipc_socket)
             .await
             .expect("ipc server should start");
         let (_, ipc_stream_server) = app
@@ -102,6 +120,13 @@ impl TestHarness {
             HttpResponsePayload::Snapshot(snapshot) => snapshot,
             other => panic!("expected snapshot response, got {other:?}"),
         }
+    }
+}
+
+impl Drop for TestHarness {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.ipc_socket);
+        let _ = std::fs::remove_file(&self.ipc_stream_socket);
     }
 }
 
