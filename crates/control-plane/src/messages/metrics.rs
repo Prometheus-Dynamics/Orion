@@ -107,6 +107,14 @@ pub struct PeerTrustRecord {
     pub learned_tls_root_cert_fingerprint: Option<String>,
     pub revoked: bool,
     pub sync_status: Option<PeerSyncStatus>,
+    /// Last completed sync round with this node (milliseconds since the Unix epoch); `None` when
+    /// none completed since this node last reset the peer.
+    #[serde(default)]
+    pub last_successful_sync_ms: Option<u64>,
+    /// The last successful sync is older than `ORION_NODE_TOMBSTONE_RETENTION_MS`: the peer is
+    /// refused until it is reset (`docs/peer-sync.md`, "Stale peers").
+    #[serde(default)]
+    pub stale: bool,
     pub last_error: Option<String>,
     pub last_error_kind: Option<PeerSyncErrorKind>,
     pub troubleshooting_hint: Option<String>,

@@ -6,9 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
-### Added (protocol v7: client event queue bytes)
+### Added (protocol v7 wire fields: usage, peer status)
 
 - `NodeResourceUsageSnapshot::local_streams` carries the queued bytes of the local client event queues next to the event counts: the configured byte limit, the total over all registered clients, and the largest per-client total. `orionctl get memory` shows them, and Prometheus gets `orion_local_client_event_queue_bytes{stat="total"|"max"}` and `orion_local_client_event_queue_byte_limit`. The layout fingerprint moved (the version stays 7, which is not released). See [docs/node-env.md](docs/node-env.md).
+- The peer status (`PeerTrustRecord`, `orionctl get peers`) carries the last successful sync time of each peer (`last_successful_sync_ms`) and a `stale` flag that is set when that time is older than `ORION_NODE_TOMBSTONE_RETENTION_MS`, the same test the stale-peer guard applies. See [docs/peer-sync.md](docs/peer-sync.md#stale-peers).
 - `NodeResourceUsageSnapshot::actions` (`ActionUsageSnapshot`) counts the tracked generic actions as pending, running and finished, and the approximate bytes of the retained final results. `orionctl get memory` shows them; Prometheus gets `orion_action_entries{stage}` and `orion_action_result_history_bytes`. See [docs/actions.md](docs/actions.md#counters).
 
 ### Added (link device providers persist across restarts)

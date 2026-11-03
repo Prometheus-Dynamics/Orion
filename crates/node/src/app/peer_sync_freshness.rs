@@ -35,7 +35,19 @@ fn stale_peer_reason(node_id: &NodeId, age_ms: u64, retention_ms: u64) -> String
 }
 
 impl NodeApp {
-    fn tombstone_retention_ms(&self) -> u64 {
+    /// Whether a peer whose last successful sync round was at `last_successful_sync_ms` is stale at
+    /// `now`: older than the tombstone retention. A peer that never completed a round is not stale
+    /// (it has nothing to be stale about yet).
+    pub(super) fn peer_sync_is_stale(
+        &self,
+        last_successful_sync_ms: Option<u64>,
+        now: u64,
+    ) -> bool {
+        last_successful_sync_ms
+            .is_some_and(|at| now.saturating_sub(at) > self.tombstone_retention_ms())
+    }
+
+    pub(super) fn tombstone_retention_ms(&self) -> u64 {
         self.config
             .runtime_tuning
             .tombstone_retention

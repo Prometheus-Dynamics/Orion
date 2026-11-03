@@ -101,7 +101,7 @@ Control protocol:
 - [ ] **Replicated host metrics.** A small, selected set of volatile host metrics carried in peer
       sync (or a peer push) so peers see each other's load without the node-local status lane.
       Docs: host-facts.md, peer-sync.md.
-- [ ] **Stale peer state.** The last successful sync time and a stale flag in the peer status
+- [x] **Stale peer state** (done on `usage-peer-wire`: `PeerTrustRecord::last_successful_sync_ms` and `stale`). The last successful sync time and a stale flag in the peer status
       messages (`orionctl get peers`). Since 54abc8c a stale peer is refused and its status is an
       error naming the reset commands; the clock itself is node-side only (`peer-sync-times.json`).
 

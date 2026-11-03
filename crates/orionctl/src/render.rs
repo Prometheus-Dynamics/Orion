@@ -92,7 +92,7 @@ pub(crate) fn print_peer_summary(snapshot: &PeerTrustSnapshot) {
     println!("peers http_mtls_mode={}", snapshot.http_mutual_tls_mode);
     for peer in &snapshot.peers {
         println!(
-            "peer node={} base_url={} configured_key={} trusted_key={} configured_tls_root={} learned_tls_fingerprint={} revoked={} sync_status={} last_error_kind={} last_error={} hint={}",
+            "peer node={} base_url={} configured_key={} trusted_key={} configured_tls_root={} learned_tls_fingerprint={} revoked={} sync_status={} last_successful_sync_ms={} stale={} last_error_kind={} last_error={} hint={}",
             peer.node_id,
             peer.base_url
                 .as_ref()
@@ -117,6 +117,10 @@ pub(crate) fn print_peer_summary(snapshot: &PeerTrustSnapshot) {
                 .as_ref()
                 .map(ToString::to_string)
                 .unwrap_or_else(|| "-".to_owned()),
+            peer.last_successful_sync_ms
+                .map(|at| at.to_string())
+                .unwrap_or_else(|| "-".to_owned()),
+            peer.stale,
             peer.last_error_kind
                 .as_ref()
                 .map(ToString::to_string)

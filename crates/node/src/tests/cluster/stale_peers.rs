@@ -259,3 +259,38 @@ async fn upgrade_starts_configured_peers_without_a_clock_record_at_load_time() {
     assert_eq!(persisted.get("node-b"), Some(&clock));
     let _ = std::fs::remove_dir_all(&state_dir);
 }
+
+#[test]
+fn peer_status_reports_the_last_successful_sync_and_the_stale_flag() {
+    let state_dir = temp_state_dir("stale-peer-status");
+    let a = node_with_stale_peer(&state_dir);
+    let stale = a
+        .peer_trust_status(&NodeId::new("node-b"))
+        .expect("status should read")
+        .expect("node-b is configured");
+    assert!(stale.stale, "a clock older than the retention is stale");
+    let at = stale
+        .last_successful_sync_ms
+        .expect("the persisted clock is reported");
+    assert!(NodeApp::wall_clock_ms().saturating_sub(at) >= LONG_AGO_MS);
+
+    // A configured peer starts its clock at this node's first start, so a new peer is not stale
+    // until the retention has passed without a sync round.
+    let fresh_dir = temp_state_dir("stale-peer-status-fresh");
+    let fresh = stale_guard_node(
+        "node-a",
+        &fresh_dir,
+        vec![PeerConfig::new("node-c", MEMORY_PEER_URL)],
+    );
+    let new_peer = fresh
+        .peer_trust_status(&NodeId::new("node-c"))
+        .expect("status should read")
+        .expect("node-c is configured");
+    let started = new_peer
+        .last_successful_sync_ms
+        .expect("a configured peer starts its clock");
+    assert!(NodeApp::wall_clock_ms().saturating_sub(started) < 60_000);
+    assert!(!new_peer.stale);
+    let _ = std::fs::remove_dir_all(&state_dir);
+    let _ = std::fs::remove_dir_all(&fresh_dir);
+}

@@ -441,6 +441,7 @@ impl NodeApp {
 
     pub fn peer_trust_statuses(&self) -> Result<Vec<PeerTrustStatus>, NodeError> {
         let peers = self.peers_read();
+        let now = Self::current_time_ms();
         let mut node_ids = self.security.configured_peer_node_ids()?;
         node_ids.extend(self.security.trust_store_node_ids()?);
         let mut statuses = node_ids
@@ -450,7 +451,12 @@ impl NodeApp {
                     .security
                     .trusted_peer_tls_root_cert_pem(&node_id)?
                     .map(|pem| format!("{:016x}", stable_fingerprint(&pem)));
+                let last_successful_sync_ms = peers
+                    .get(&node_id)
+                    .and_then(|peer| peer.last_successful_sync_ms);
                 Ok(PeerTrustStatus {
+                    last_successful_sync_ms,
+                    stale: self.peer_sync_is_stale(last_successful_sync_ms, now),
                     last_error_kind: peers
                         .get(&node_id)
                         .and_then(|peer| peer.last_error_kind.clone()),
