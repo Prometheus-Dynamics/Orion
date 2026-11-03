@@ -237,14 +237,16 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       Suspected race: the test reads the events before the node has recorded this one. Poll until it appears.
       Status: the test now polls `get events` for up to 5 s (`poll_until_event`). Not reproduced: 200
       runs under load on the old code, 0 failures, so the fix is not proven under load yet.
-- [ ] **Unsupported-runtime log count.** Failure: `crates/node/src/tests/runtime/unsupported_runtime.rs:230`,
-      "assertion `left == right` failed, left: 0, right: 1" for `logs.count("nobody.exec.v1", "WARN")` in
-      `truly_unsupported_type_is_reported_once_and_does_not_block_others`. Suspected cause: the captured log is shared
-      with parallel tests, or the warning arrives after the 20 ticks. Capture logs per test and wait for the warning.
-      Status: not reproduced. 200 runs of the module and 30 runs of the whole node lib binary under
-      CPU load: 0 failures, so no fix yet. If it recurs, the candidate is tracing's cached callsite
-      interest: call `tracing::callsite::rebuild_interest_cache()` after `set_default` in `capture_logs`.
-      Not changed in this commit.
+- [x] **Unsupported-runtime log count.** Failure: `crates/node/src/tests/runtime/unsupported_runtime.rs:230`,
+      "left: 0, right: 1" for `logs.count("nobody.exec.v1", "WARN")`. Cause: the IPC server reconciles on a
+      runtime worker thread after a publish; the test's subscriber was thread-local (`set_default` on the
+      test thread), so when that pass saw the workload first its warning went nowhere and the test thread's
+      passes stayed quiet under the warn-once rule. Proven by forcing the window (a pass on a spawned task
+      before the test's own ticks): fails every run with the old capture. Fix: `with_logs` installs the
+      subscriber on every runtime thread (`on_thread_start`), rebuilds callsite interest, and the asserts
+      wait for the warning. The forced pass stays in the test. Side finding: the same capture showed
+      `register_all` sends the provider before the executor, so a workload already desired warns once in
+      between; the "reconciles silently" test now registers first.
 
 ### Needs the device (arm64 board)
 
