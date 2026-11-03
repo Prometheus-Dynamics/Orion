@@ -107,8 +107,12 @@ wire change is in it, so protocol 1 is the layout the consumers adopt together.
 
 Follow-ups that do not change the wire:
 
-- [ ] **Peer watches, forwarder side:** the forwarding node's push client per owner, idle close,
-      fallback to the `RunAction` `wait_ms` resend (today it always resends).
+- [x] **Peer watches, forwarder side:** one push session per owner peer, opened lazily, closed after
+      60 s idle; pushes verified against the session's own `OpenSession` (signature, increasing
+      sequence, watched action ids); fallback to the `RunAction` `wait_ms` resend when the session is
+      refused or drops. Open: a test where a real owner refuses the session, and tests for forged or
+      out-of-order pushes (covered by review only); one shared push-verification helper in
+      `orion-auth` for the node and the operator client.
 - [ ] **Link gateway actions:** route an action for a link-owned provider to its device as
       `ActionRequest` and report the device's `ActionResult`; the device session queues and answers
       requests (docs/link-protocol.md, docs/actions.md).

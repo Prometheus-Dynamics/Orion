@@ -16,6 +16,8 @@
 mod clients;
 #[cfg(peer_sync)]
 mod forward;
+#[cfg(feature = "peer-tcp")]
+mod push;
 pub(crate) mod registry;
 mod wait;
 
@@ -61,8 +63,18 @@ pub(super) struct ActionsState {
     /// Node action names claimed by out-of-process local handlers (`ClaimNodeActions`).
     node_claims: Mutex<BTreeMap<String, LocalAddress>>,
     wake: tokio::sync::Notify,
-    /// Woken on every result change, for callers waiting on a `RunAction` with `wait_ms`.
+    /// Woken on every result change, for callers waiting on a `RunAction` with `wait_ms` (or on a
+    /// pushed result, see `push.rs`).
     changed: tokio::sync::Notify,
+    /// Push sessions this node opened to owner peers, by owner (`push.rs`).
+    #[cfg(feature = "peer-tcp")]
+    push_sessions: Mutex<BTreeMap<NodeId, push::PushSession>>,
+    /// `RunAction` resends after a push session could not deliver (tests read it).
+    #[cfg(all(test, feature = "peer-tcp"))]
+    resends: std::sync::atomic::AtomicU64,
+    /// Test switch: forwarders open no push sessions.
+    #[cfg(all(test, feature = "peer-tcp"))]
+    push_disabled: std::sync::atomic::AtomicBool,
 }
 
 impl ActionsState {

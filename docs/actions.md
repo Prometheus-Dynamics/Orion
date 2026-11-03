@@ -191,8 +191,9 @@ When the owner is another node, the submitting node forwards the request over th
 transport (`orion+tcp` or HTTP(S), the same `PeerSyncTransport` request/response that peer sync
 uses) as a `RunAction` with `wait_ms` (at most 750 ms, below the HTTP client's request timeout).
 The owner holds its answer until the action is final, so a short action completes in one round
-trip; while it runs, the submitting node resends the same request (the owner returns the existing
-action) instead of polling. It mirrors the owner's state and output into its own record. Its local deadline is
+trip; while it runs, the submitting node watches it over a push session (see
+[Peer watches](#peer-watches)) and resends the same request (the owner returns the existing action)
+only if that session cannot deliver. It mirrors the owner's state and output into its own record. Its local deadline is
 the request's deadline plus a 2 s grace, so the owner's own `TimedOut` arrives first. The owner
 never forwards again (one hop), so a stale view of who owns a target produces a `Rejected` result
 instead of a loop. A failed forward (unreachable peer, refused authentication) is recorded as
@@ -320,8 +321,16 @@ owner's results are pushed on that connection as they change.
 - **Authorization.** `OpenSession`, `WatchActions` and `Ping` from a peer are allowed only for a
   configured peer, under the same peer authentication as `RunAction` (signed `orion+tcp`).
 
-The forwarding side that opens these sessions is described in the forwarding section above; until
-it lands, forwarding keeps resending `RunAction` with `wait_ms`.
+**Forwarder side.** The submitting node sends the forwarded `RunAction` once. If the owner answers
+that the action is still running, the node asks the owner's push session to watch it
+(`WatchActions`, forwarded by this node) and waits for the pushed result; it sends no further
+`RunAction`. One push session per owner is opened on the first such action and closed after 60 s
+with nothing watched (keep-alive pings run while it is open). A pushed result is applied only if
+its action id is one this session watches, and each push must verify against the session's own
+`OpenSession` request with a sequence number that moves on; anything else ends the session. If the
+session refuses the watch or ends, the node falls back to resending `RunAction` with `wait_ms` until
+the action is final (`crates/node/src/app/actions/push.rs`). No wire message beyond the ones above
+is involved.
 
 ## Limits
 

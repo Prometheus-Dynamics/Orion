@@ -69,7 +69,24 @@ impl NodeApp {
                     .saturating_add(super::REMOTE_DEADLINE_GRACE_MS),
             );
         let mut first = true;
+        #[cfg(feature = "peer-tcp")]
+        let mut push_tried = false;
         while self.action_is_running(&action_id) {
+            // The submission is answered and the action is still running: the owner's push
+            // session delivers the rest (`push.rs`), without resends. Only one attempt: if the
+            // session cannot take the watch or drops, the request is resent as before.
+            #[cfg(feature = "peer-tcp")]
+            if !first && !push_tried {
+                push_tried = true;
+                if let Ok(alive) = self.push_watch(&node, &peer, &action_id).await
+                    && self.await_pushed_result(&action_id, &alive, deadline).await
+                {
+                    return;
+                }
+            }
+            if !first {
+                self.note_forward_resend();
+            }
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             let mut exchange = request.clone();
             exchange.wait_ms = forward_wait_ms(remaining);
@@ -109,14 +126,14 @@ impl NodeApp {
         }
     }
 
-    fn action_is_running(&self, action_id: &str) -> bool {
+    pub(super) fn action_is_running(&self, action_id: &str) -> bool {
         lock(&self.state.actions.registry)
             .get(action_id)
             .is_some_and(|entry| !entry.result.state.is_terminal())
     }
 
     /// Mirrors the owner's result (state and output) into the local entry.
-    fn apply_remote_action_result(&self, action_id: &str, results: Vec<ActionResult>) {
+    pub(super) fn apply_remote_action_result(&self, action_id: &str, results: Vec<ActionResult>) {
         let Some(remote) = results
             .into_iter()
             .find(|result| result.action_id == action_id)
@@ -131,5 +148,14 @@ impl NodeApp {
         if !unchanged {
             self.update_node_action(action_id, remote.state, remote.output);
         }
+    }
+
+    /// Counts one `RunAction` resend made by a forwarder (tests read the count).
+    fn note_forward_resend(&self) {
+        #[cfg(all(test, feature = "peer-tcp"))]
+        self.state
+            .actions
+            .resends
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
