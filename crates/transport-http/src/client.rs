@@ -5,6 +5,7 @@ use orion_transport_common::{
     DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT, DEFAULT_HTTP_CLIENT_REQUEST_TIMEOUT,
 };
 use reqwest::Method;
+use std::time::Duration;
 
 use crate::{
     ControlRoute, HttpCodec, HttpRequestPayload, HttpResponse, HttpResponsePayload,
@@ -28,20 +29,42 @@ enum BaseUrlScheme {
 
 impl HttpClient {
     /// Builds an HTTP client without panicking on TLS/client-builder failures.
+    ///
+    /// Connect timeout: `DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT` (500 ms). The timeout covers DNS,
+    /// the TCP connect and the TLS handshake. Use [`HttpClient::try_new_with_connect_timeout`] to
+    /// change it.
     pub fn try_new(base_url: impl Into<String>) -> Result<Self, HttpTransportError> {
-        Self::with_optional_tls(base_url, None)
+        Self::with_optional_tls(base_url, None, DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT)
+    }
+
+    /// Like [`HttpClient::try_new`], with `connect_timeout` in place of the default (covers DNS,
+    /// TCP connect and TLS handshake).
+    pub fn try_new_with_connect_timeout(
+        base_url: impl Into<String>,
+        connect_timeout: Duration,
+    ) -> Result<Self, HttpTransportError> {
+        Self::with_optional_tls(base_url, None, connect_timeout)
     }
 
     pub fn with_tls(
         base_url: impl Into<String>,
         tls: HttpClientTlsConfig,
     ) -> Result<Self, HttpTransportError> {
-        Self::with_optional_tls(base_url, Some(tls))
+        Self::with_optional_tls(base_url, Some(tls), DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT)
+    }
+
+    /// Like [`HttpClient::with_tls`], with `connect_timeout` in place of the default.
+    pub fn with_tls_and_connect_timeout(
+        base_url: impl Into<String>,
+        tls: HttpClientTlsConfig,
+        connect_timeout: Duration,
+    ) -> Result<Self, HttpTransportError> {
+        Self::with_optional_tls(base_url, Some(tls), connect_timeout)
     }
 
     pub fn with_dangerous_tls(base_url: impl Into<String>) -> Result<Self, HttpTransportError> {
         install_crypto_provider();
-        let client = default_http_client_builder()
+        let client = default_http_client_builder(DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT)
             .danger_accept_invalid_certs(true)
             .build()
             .map_err(|err| HttpTransportError::Tls(err.to_string()))?;
@@ -55,10 +78,11 @@ impl HttpClient {
     fn with_optional_tls(
         base_url: impl Into<String>,
         tls: Option<HttpClientTlsConfig>,
+        connect_timeout: Duration,
     ) -> Result<Self, HttpTransportError> {
         install_crypto_provider();
         let (base_url, scheme) = normalize_base_url(base_url.into())?;
-        let mut builder = default_http_client_builder();
+        let mut builder = default_http_client_builder(connect_timeout);
         if scheme == BaseUrlScheme::Http {
             if tls.is_some() {
                 return Err(HttpTransportError::Tls(
@@ -165,9 +189,9 @@ impl HttpClient {
     }
 }
 
-fn default_http_client_builder() -> reqwest::ClientBuilder {
+fn default_http_client_builder(connect_timeout: Duration) -> reqwest::ClientBuilder {
     reqwest::Client::builder()
-        .connect_timeout(DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT)
+        .connect_timeout(connect_timeout)
         .timeout(DEFAULT_HTTP_CLIENT_REQUEST_TIMEOUT)
 }
 

@@ -513,6 +513,7 @@ impl NodeApp {
     }
 
     pub fn revoke_peer_identity(&self, node_id: &NodeId) -> Result<bool, NodeError> {
+        let _membership = self.peer_membership_lock();
         let revoked = self.security.revoke_peer(node_id)?;
         if revoked {
             self.record_audit_event(

@@ -49,6 +49,7 @@ impl NodeApp {
     /// enrollment. Enrolling it again with `orionctl peers enroll` lifts the revocation.
     /// Returns whether anything changed.
     pub fn remove_peer(&self, node_id: &NodeId) -> Result<bool, NodeError> {
+        let _membership = self.peer_membership_lock();
         let revoked = self.security.revoke_peer(node_id)?;
         let unconfigured = self.security.unconfigure_peer(node_id)?;
         let unregistered = self.with_peers_mut(|peers| peers.remove(node_id).is_some());

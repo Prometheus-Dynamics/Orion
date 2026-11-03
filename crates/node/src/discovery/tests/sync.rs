@@ -294,3 +294,57 @@ async fn discovered_enrollments_survive_a_restart() {
     b.stop().await;
     let _ = std::fs::remove_dir_all(state_dir);
 }
+
+/// A removal that lands while an enrollment of the same peer is between its revocation check and
+/// its trust write must win: the enrollment may not clear the revocation and register the peer
+/// again. The enrollment is parked at the seam while a removal runs on another thread. Without
+/// the membership lock the removal finishes inside the window (the hook sees it before the trust
+/// write), and the enrollment then re-registers the peer. With it the removal waits for the
+/// enrollment, so the hook's bounded wait simply runs out. Only the final state is asserted.
+#[test]
+fn removal_is_not_undone_by_an_enrollment_past_its_revocation_check() {
+    use super::super::trust::AFTER_REVOCATION_CHECK;
+    let a = build_app("node-a", None);
+    let b_id = NodeId::new("node-b");
+    let url = orion_core::PeerBaseUrl::new("orion+tcp://127.0.0.1:9");
+    a.enroll_trusted_peer(
+        &b_id,
+        [7; 32],
+        url.clone(),
+        crate::discovery::store::EnrollmentMethod::EnrollmentKey,
+    )
+    .expect("initial enrollment should succeed");
+    assert!(a.is_registered_peer(&b_id));
+
+    let (checked_tx, checked_rx) = std::sync::mpsc::channel::<()>();
+    let (removed_tx, removed_rx) = std::sync::mpsc::channel::<()>();
+    let remover_app = a.clone();
+    let remove_id = b_id.clone();
+    let remover = std::thread::spawn(move || {
+        checked_rx.recv().expect("the enrollment reaches its check");
+        remover_app
+            .remove_peer(&remove_id)
+            .expect("remove should succeed");
+        let _ = removed_tx.send(());
+    });
+    AFTER_REVOCATION_CHECK.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            checked_tx.send(()).expect("the remover is waiting");
+            let _ = removed_rx.recv_timeout(Duration::from_secs(2));
+        }));
+    });
+    a.enroll_trusted_peer(
+        &b_id,
+        [7; 32],
+        url,
+        crate::discovery::store::EnrollmentMethod::EnrollmentKey,
+    )
+    .expect("the enrollment passed its check before the removal");
+    remover.join().expect("remover thread should finish");
+
+    assert!(
+        !a.is_registered_peer(&b_id),
+        "a removed peer must stay unregistered"
+    );
+    assert!(a.is_peer_revoked(&b_id).expect("revocation state"));
+}

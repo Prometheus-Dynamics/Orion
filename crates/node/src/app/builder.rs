@@ -522,6 +522,7 @@ impl NodeAppBuilder {
                 merge_metrics: Default::default(),
             },
             peers: PeerRegistryState {
+                membership: Default::default(),
                 peers: RwLock::new(peers),
                 peer_clients: RwLock::new(BTreeMap::new()),
                 #[cfg(feature = "peer-tcp")]

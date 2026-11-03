@@ -392,6 +392,37 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       on the old harness. Runs after: get 300 of 300 and describe 300 of 300, eight at a time, the two binaries
       running concurrently.
 
+- [x] **Removed peer re-enrolled under load.** Failure: `discovery::tests::sync::removed_peers_are_not_re_enrolled_by_the_shared_key`
+      (`crates/node/src/discovery/tests/sync.rs:221`, "assertion failed: !a.app.is_registered_peer(&b.id())").
+      Cause: a check-then-act race in `enroll_trusted_peer`. It checked the revocation, then wrote the
+      trust store and registered the peer. A `remove_peer` landing in that gap revoked and unregistered
+      the peer, and the trust write (`replace_trusted_peer_key`) cleared the revocation, so the stale
+      enrollment registered the removed peer again. Trace of the failing run: the enrollment passed its
+      check at 934.6 ms, the removal ran at 949 ms, and the enrollment saw `revoked_now=true` at 951.4 ms.
+      Fix: a peer membership lock (`PeerRegistryState::membership`, taken before the security and peer
+      locks) held by enrollment, restore, removal and revocation. Regression test
+      `removal_is_not_undone_by_an_enrollment_past_its_revocation_check` parks an enrollment between its
+      check and its write and removes the peer meanwhile; it fails without the lock and passes with it.
+      Runs: 300 of 300 whole-binary runs green under load after the fix (the pre-fix probe build failed
+      1 of 160 whole-binary runs; the pristine batch was at 249 of 300 with 0 failures when the stress was
+      stopped).
+- [x] **Stalled-handshake test: capacity release under load.**
+      `tests::tls::https_server_times_out_stalled_tls_handshakes_and_releases_capacity` (`crates/transport-http/src/tests/tls.rs`).
+      Failure: "valid HTTPS client should acquire capacity after stalled handshake times out:
+      RequestFailed { kind: Other, ... }". Cause: the test set the server io timeout to 20 ms. That
+      timeout bounds every connection's TLS handshake, not only the stalled one, so under load the valid
+      client's handshake missed it. The server dropped the valid connection, and the client saw
+      "Connection reset by peer" (probe run: server timeout 26 ms on the valid connection). The test also
+      waited a fixed 60 ms for the stall to time out. Second signature: `kind: Timeout` at the client's
+      500 ms connect timeout (reqwest's connect timeout covers DNS, TCP and TLS). Fix: the test waits for
+      the server to close the stalled socket (bounded to 60 s); the server io timeout is the product
+      default (5 s); TLS test clients use `HttpClient::with_tls_and_connect_timeout` with the same 5 s
+      (new public constructors, default 500 ms unchanged, documented in CHANGELOG [Unreleased]).
+      Runs: pristine code 3 of 3000 whole-binary runs failed (2 this test, 1 metrics test); after the
+      io-timeout change 1 of 1000 failed with the Timeout signature; with the stall test's client on the
+      new connect timeout, 1 of 500 failed in the roundtrip test (same 500 ms signature, which was not
+      yet on the new client); with every TLS test client on it, 0 of 500 failed under load.
+
 ### Needs the device (arm64 board)
 
 - [x] Transparent huge pages: not applicable on the reference board; its kernel has no THP

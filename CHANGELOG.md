@@ -8,6 +8,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `HttpClient::try_new_with_connect_timeout` and `HttpClient::with_tls_and_connect_timeout` set the
+  connect timeout of the HTTP control client. The timeout covers DNS, the TCP connect and the TLS
+  handshake. The default is unchanged (500 ms, `DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT`).
 - Explicit rollback status for firmware trials (U8). After its bootloader reverts a trial, the device
   reports it in `DeviceInfo` (an optional `rollback` field: the version, a `RollbackReason` of not
   confirmed, boot failure, verify failed, requested or other, and a short note). The sink reports it

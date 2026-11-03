@@ -11,6 +11,14 @@ use orion_control_plane::{DiscoveredPeerEnrollment, DiscoveredPeerState};
 use orion_core::{PeerBaseUrl, PublicKeyHex};
 use tracing::{info, warn};
 
+// Test seam: runs once on the calling thread between the revocation check of
+// `enroll_trusted_peer` and its trust write.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static AFTER_REVOCATION_CHECK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 impl NodeApp {
     /// Pins `public_key` for `node_id`, registers the peer at `base_url` for sync and records the
     /// enrollment in `discovered-peers.json`.
@@ -18,6 +26,9 @@ impl NodeApp {
     /// Shared-key enrollments never override an operator decision: they fail for removed
     /// (revoked) peers and for peers already trusted with another key. Operator enrollments
     /// replace the trusted key and lift a revocation.
+    ///
+    /// The whole change runs under the membership lock, so a removal cannot land between the
+    /// revocation check below and the trust write, which would lift the revocation again.
     pub(crate) fn enroll_trusted_peer(
         &self,
         node_id: &NodeId,
@@ -26,6 +37,7 @@ impl NodeApp {
         method: EnrollmentMethod,
     ) -> Result<(), NodeError> {
         PeerTransportKind::check_supported(base_url.as_str()).map_err(NodeError::Config)?;
+        let _membership = self.peer_membership_lock();
         let key_hex = hex(&public_key);
         let revoked = self.security.is_peer_revoked(node_id)?;
         let trusted = self.trusted_key_hex(node_id);
@@ -45,6 +57,13 @@ impl NodeApp {
                 )));
             }
         }
+        #[cfg(test)]
+        AFTER_REVOCATION_CHECK.with(|hook| {
+            let hook = hook.borrow_mut().take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        });
         if revoked
             || !same_key
             || self
@@ -80,6 +99,7 @@ impl NodeApp {
         let Some(state_dir) = self.state_dir() else {
             return Ok(0);
         };
+        let _membership = self.peer_membership_lock();
         let mut restored = 0;
         for record in store::load(state_dir)? {
             let node_id = NodeId::try_new(record.node_id.clone()).map_err(|err| {

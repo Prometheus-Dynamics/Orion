@@ -114,6 +114,11 @@ impl NodeApp {
         read_rwlock(self.state.peers.peers.read(), "node peer registry")
     }
 
+    /// Held by every peer membership change (see `PeerRegistryState::membership`).
+    pub(crate) fn peer_membership_lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        crate::lock::lock_mutex(self.state.peers.membership.lock(), "peer membership")
+    }
+
     pub(super) fn peers_lock(&self) -> RwLockWriteGuard<'_, PeerRegistry> {
         write_rwlock(self.state.peers.peers.write(), "node peer registry")
     }
@@ -397,6 +402,12 @@ pub(super) struct PersistedState {
 }
 
 pub(super) struct PeerRegistryState {
+    /// Serializes peer membership changes: shared-key and operator enrollment, restoring
+    /// discovered enrollments, removal and revocation. Each of them checks the revocation state
+    /// and then writes the trust store and the registry, and a removal must not land between
+    /// those steps (an enrollment would clear the revocation and register the removed peer
+    /// again). Taken before the security and peer locks.
+    pub(super) membership: std::sync::Mutex<()>,
     pub(super) peers: std::sync::RwLock<PeerRegistry>,
     pub(super) peer_clients: std::sync::RwLock<PeerClientRegistry>,
     /// Cached `orion+tcp` clients (one connection per peer).
