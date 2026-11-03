@@ -10,6 +10,12 @@ use std::collections::BTreeMap;
 
 pub(super) const RUNTIME: &str = "graph.exec.v1";
 
+/// Liveness and grace that cannot lapse during a test, for tests about where placement or leases
+/// land rather than about failover: the outcome then depends only on the converged state, never on
+/// how fast the rounds run (with a 300 ms liveness, a round slower than 300 ms on a loaded machine
+/// made a node look gone, so observers could compute another node).
+pub(super) const NEVER: Duration = Duration::from_secs(24 * 60 * 60);
+
 /// Executor that "runs" whatever it is told and reports it back as running.
 #[derive(Clone)]
 pub(super) struct RecordingExecutor {

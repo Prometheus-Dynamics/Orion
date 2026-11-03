@@ -348,7 +348,11 @@ async fn forwarded_actions_finish_in_one_round_trip() {
         .await
         .expect("sync b -> a");
 
+    // Every message the handler sends counts against its local client rate limit; a refused one is
+    // counted, and none may be (checked at the end).
+    let refused = Arc::new(AtomicUsize::new(0));
     let handler_app = b.app.clone();
+    let handler_refused = refused.clone();
     let handler = tokio::spawn(async move {
         let mut after = 0;
         loop {
@@ -360,13 +364,18 @@ async fn forwarded_actions_finish_in_one_round_trip() {
                 }),
             ) {
                 Ok(ControlMessage::ClientEvents(events)) => events,
-                _ => Vec::new(),
+                Ok(_) => Vec::new(),
+                Err(_) => {
+                    handler_refused.fetch_add(1, Ordering::Relaxed);
+                    Vec::new()
+                }
             };
             for event in events {
                 after = after.max(event.sequence);
                 if let ClientEventKind::ActionRequest(request) = event.event {
                     let app = handler_app.clone();
                     let source = source.clone();
+                    let refused = handler_refused.clone();
                     tokio::spawn(async move {
                         if let Some(TypedConfigValue::UInt(delay)) = request.args.get("delay_ms") {
                             tokio::time::sleep(Duration::from_millis(*delay)).await;
@@ -378,14 +387,22 @@ async fn forwarded_actions_finish_in_one_round_trip() {
                             .get("tx")
                             .map(|tx| BTreeMap::from([("rx".to_owned(), tx.clone())]))
                             .unwrap_or_default();
-                        let _ = app.apply_local_control_message(
-                            &source,
-                            ControlMessage::ReportActionResult(Box::new(report)),
-                        );
+                        if app
+                            .apply_local_control_message(
+                                &source,
+                                ControlMessage::ReportActionResult(Box::new(report)),
+                            )
+                            .is_err()
+                        {
+                            refused.fetch_add(1, Ordering::Relaxed);
+                        }
                     });
                 }
             }
-            tokio::time::sleep(Duration::from_millis(2)).await;
+            // The default local rate limit admits 256 messages per second. At 5 ms the poll loop
+            // sends at most 200 per second, so its own messages are never refused (2 ms exceeded
+            // the budget, and a refused result report left the action Accepted).
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
     });
 
@@ -428,4 +445,9 @@ async fn forwarded_actions_finish_in_one_round_trip() {
         "the owner held each answer instead of being polled: {exchanges} exchanges"
     );
     handler.abort();
+    assert_eq!(
+        refused.load(Ordering::Relaxed),
+        0,
+        "the handler's polls and reports stay within the local rate limit"
+    );
 }

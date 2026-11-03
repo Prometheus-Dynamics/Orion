@@ -20,11 +20,14 @@ fn holders(node: &ClusterNode, resource_id: &str) -> Vec<LeaseHolder> {
         .unwrap_or_default()
 }
 
-/// A cluster where only node-b has a camera.
-async fn camera_cluster(grace: Duration) -> (ClusterNode, ClusterNode, ClusterNode, ListProvider) {
-    let a = tcp_cluster_node("node-a", "", FAST, grace).await;
-    let b = tcp_cluster_node("node-b", "", FAST, grace).await;
-    let c = tcp_cluster_node("node-c", "", FAST, grace).await;
+/// A cluster where only node-b has a camera. `liveness` is how long a silent peer stays live.
+async fn camera_cluster(
+    liveness: Duration,
+    grace: Duration,
+) -> (ClusterNode, ClusterNode, ClusterNode, ListProvider) {
+    let a = tcp_cluster_node("node-a", "", liveness, grace).await;
+    let b = tcp_cluster_node("node-b", "", liveness, grace).await;
+    let c = tcp_cluster_node("node-c", "", liveness, grace).await;
     let provider = ListProvider::new("provider.cam-b", "node-b");
     provider.set(vec![camera(
         "resource.cam-b",
@@ -41,7 +44,7 @@ async fn camera_cluster(grace: Duration) -> (ClusterNode, ClusterNode, ClusterNo
 
 #[tokio::test]
 async fn workload_binds_a_remote_resource_and_both_sides_see_the_lease() {
-    let (a, b, c, _provider) = camera_cluster(Duration::from_secs(5)).await;
+    let (a, b, c, _provider) = camera_cluster(FAST, Duration::from_secs(5)).await;
     let all = [&a, &b, &c];
     write_local(
         &a.app,
@@ -105,7 +108,10 @@ async fn workload_binds_a_remote_resource_and_both_sides_see_the_lease() {
 
 #[tokio::test]
 async fn competing_workloads_for_an_exclusive_resource_resolve_deterministically() {
-    let (a, b, c, _provider) = camera_cluster(Duration::from_secs(5)).await;
+    // Liveness must not lapse here: the first pass below leases only while node-b is live, and
+    // the time from the last sync round to that pass is wall-clock work that a loaded machine can
+    // stretch past FAST. This test is about how competing leases resolve, not about liveness.
+    let (a, b, c, _provider) = camera_cluster(NEVER, Duration::from_secs(5)).await;
     let all = [&a, &b, &c];
     write_local(
         &a.app,
@@ -146,7 +152,7 @@ async fn competing_workloads_for_an_exclusive_resource_resolve_deterministically
 
 #[tokio::test]
 async fn binding_becomes_unavailable_when_the_owner_disappears_and_recovers() {
-    let (a, b, c, _provider) = camera_cluster(Duration::from_secs(30)).await;
+    let (a, b, c, _provider) = camera_cluster(FAST, Duration::from_secs(30)).await;
     let all = [&a, &b, &c];
     write_local(
         &a.app,
@@ -197,7 +203,7 @@ async fn binding_becomes_unavailable_when_the_owner_disappears_and_recovers() {
 #[tokio::test]
 async fn binding_moves_to_another_owner_after_the_grace_period() {
     let grace = Duration::from_millis(600);
-    let (a, b, c, _provider) = camera_cluster(grace).await;
+    let (a, b, c, _provider) = camera_cluster(FAST, grace).await;
     let provider_c = ListProvider::new("provider.cam-c", "node-c");
     provider_c.set(vec![camera(
         "resource.cam-c",

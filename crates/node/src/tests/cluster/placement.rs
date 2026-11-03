@@ -10,11 +10,6 @@ use orion::{
 const FAST: Duration = Duration::from_millis(300);
 /// Liveness and grace well above a round on a loaded machine, for tests where nothing may move.
 const STEADY: Duration = Duration::from_millis(3_000);
-/// Liveness and grace that cannot lapse during a test, for tests about where placement lands
-/// rather than about failover: the outcome then depends only on the converged state, never on how
-/// fast the rounds run (with `FAST`, a round slower than 300 ms on a loaded machine made a node
-/// look gone, so observers could compute another node).
-const NEVER: Duration = Duration::from_secs(24 * 60 * 60);
 
 fn decision_reason(node: &ClusterNode, workload_id: &str) -> Option<PlacementReason> {
     node.workload(workload_id)?

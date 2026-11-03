@@ -361,6 +361,24 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       wait for the warning. The forced pass stays in the test. Side finding: the same capture showed
       `register_all` sends the provider before the executor, so a workload already desired warns once in
       between; the "reconciles silently" test now registers first.
+- [x] **Competing leases on one exclusive camera.** Failure: `tests::cluster::binding::competing_workloads_for_an_exclusive_resource_resolve_deterministically`
+      (`crates/node/src/tests/cluster/binding.rs`), `holders(&a, "resource.cam-b").len()` 0 vs 1 after node-a's
+      first pass, 1 of 400 runs beside looping `cargo test --workspace --all-features`. Cause: a node leases a
+      remote resource only while its owner is live on that node, and liveness is wall-clock (the test's 300 ms
+      `FAST`). The work between the last sync round and node-a's first pass can stretch past 300 ms under load;
+      then node-b counts as gone and no lease is written. Proven: a 400 ms pause before that pass makes node-b
+      unreachable from node-a (`unreachable_peers`) and the assertion fails every run. Fix: the test is about
+      how competing leases resolve, not liveness, so it uses `NEVER` liveness (the placement suite's convention,
+      moved to `tests/cluster/fixtures.rs`). Runs: 1 of 400 failed before; 0 of 400 after, under the same load.
+- [x] **Forwarded action stuck at Accepted.** Failure: `tests::cluster::action_calls::forwarded_actions_finish_in_one_round_trip`
+      (`crates/node/src/tests/cluster/action_calls.rs`), `fwd-long` left Accepted at the 2 s cap. Measured 10 of
+      400 runs before. Cause: the test's provider handler polled its node every 2 ms, about 500 messages a second,
+      over the default local rate limit of 256 messages per 1 s window. Once the budget is spent the owner refuses
+      the handler's `ReportActionResult` (`RateLimitedClient`). The test ignored the refusal, so the owner never
+      learned the result and the forwarder kept waiting. Probe: every failing run shows that refusal on the
+      `fwd-long` report. Fix: poll every 5 ms (at most 200 messages per window, within the limit by construction),
+      and count refused messages, which must be zero. Runs: 10 of 400 failed before; 0 of 400 after, under the
+      same load.
 
 ### Needs the device (arm64 board)
 
