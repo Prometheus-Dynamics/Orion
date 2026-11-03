@@ -142,7 +142,7 @@ postcard encodings of the listed fields, in order.
 | `0x14` | `Status` | device → host | `Vec<StatusEntry>`; each `key: String`, `value: TypedConfigValue`, `ttl_ms: u32` | Volatile status values (see "Status" below). Fire-and-forget: never acknowledged or retransmitted. Added in version 1 as an additive kind. |
 | `0x20`-`0x2F` | reserved | | | Reserved for firmware transfer (`orion_link::wire::kind::FIRMWARE_FIRST`..`FIRMWARE_LAST`). Not implemented: these kinds are ignored like unknown kinds, and no version bump is needed to add them later. |
 | `0x30` | `ActionRequest` | host → device | `id: u32`, `name: String`, `payload: Vec<u8>` | Asks the device to run a named action (see "Actions" below). Added in version 1 as an additive kind. |
-| `0x31` | `ActionResult` | device → host | `id: u32`, `state` (postcard enum: `0` Running, `1` Succeeded, `2` Failed, `3` Rejected), `payload: Vec<u8>` | The device's report on the request with the same `id`. Added in version 1 as an additive kind. |
+| `0x31` | `ActionResult` | device → host | `id: u32`, `state` (postcard enum: `0` Running, `1` Succeeded, `2` Failed, `3` Rejected), `payload: Vec<u8>` | The device's report on the request with the same `id`; the payload depends on the state (see "Actions"). Added in version 1 as an additive kind. |
 
 Reject reasons (one byte; unknown codes are reported as `Other(code)`):
 
@@ -185,6 +185,10 @@ operators with `orionctl get status`. Nothing is persisted.
   frame of the current session (sequence-number duplicate suppression applies) and never acks
   it. Status from a device without a session is answered with `Reject { NoSession }` like any
   other session traffic.
+- **Gateway actions.** A `Running` result is forwarded to the node as progress; a final one ends the
+  action. The gateway matches `id` to the requests it sent on this link and to the device they went
+  to, so a result from another device or for an unknown id is dropped. A device lost, restarted, or
+  a link closed while an action is in flight fails it (see "Actions" above and `docs/actions.md`).
 - **Gateway.** Status is accepted only after the device's provider snapshot was accepted on that
   link; otherwise it is dropped and counted in `LinkStatus::status_rejects`. Accepted batches
   count in `status_batches`. TTL `0` means the node maximum (`ORION_NODE_STATUS_MAX_TTL_MS`),
@@ -193,17 +197,57 @@ operators with `orionctl get status`. Nothing is persisted.
 
 ### Actions
 
-A device can be an action handler for its provider (`docs/actions.md`). The host sends
-`ActionRequest { id, name, payload }`, and the device reports `ActionResult { id, state, payload }`
-with the same `id`: `Running` while it works, then `Succeeded` (payload is the output), `Failed` or
-`Rejected` (payload is the reason). The name and the payload encoding belong to the handler; the
-link layer only carries them. `payload` is bounded by the frame size like every body.
+A device can be an action handler for its provider (`docs/actions.md`, "Link devices"). The node
+routes an action whose target is that provider (or one of its resources) to the device; the host
+sends it as `ActionRequest { id, name, payload }` (kind `0x30`), and the device reports
+`ActionResult { id, state, payload }` (kind `0x31`) with the same `id`:
 
-The codec is in place for hosts and devices with the `alloc` feature (`Message::ActionRequest`,
-`Message::ActionResult`, `encode_action_request`), and the wire fixture pins the frames. Neither
-session acts on these kinds yet: a device or host session ignores them as it ignores any unknown
-kind. Routing a node action to a device's provider, and the device-side queue that answers it, are
-the remainder of this work (see `TODO.md`, "Protocol 1").
+| `state` | Meaning | `payload` |
+| --- | --- | --- |
+| `0` `Running` | Still working. | Optional progress: a `u16` varint, per-mille (`0..=1000`); empty when unknown. |
+| `1` `Succeeded` | Finished. | The output: an action map (below), empty for no output. |
+| `2` `Failed` | Finished unsuccessfully. | The reason, UTF-8. |
+| `3` `Rejected` | Refused without running (unknown name, bad arguments, busy). | The reason, UTF-8. |
+
+`id` is chosen by the host and is unique among the requests it has outstanding to that device. The
+name and the meaning of `payload` belong to the handler, as with node actions: the link layer only
+carries them.
+
+**Action map.** Arguments (request payload) and output (`Succeeded` payload) are the postcard
+encoding of a map: a varint count, then `(key, value)` pairs in key order. A key is a string, and a
+value is a varint variant index followed by its body, from `TypedConfigValue`: `0` `Bool` (one byte,
+`0` or `1`), `1` `Int` (zigzag varint), `2` `UInt` (varint), `3` `String` (length-prefixed UTF-8),
+`4` `Bytes` (length-prefixed), `5` `F64` (eight bytes, little endian). An empty payload is an empty
+map. `orion_link::message::{encode_action_map, decode_action_map}` implement it.
+
+**Device side.** One action runs at a time per device. `DeviceSession::action()` (feature
+`actions` of `orion-link`) returns the request until the first report on it;
+`report_progress` / `report_action` queue `Running` and final results, and `DeviceEvent::
+ActionRequested` announces a request. A request for another id while one runs is answered at once
+with `Rejected` and the reason `busy`. A request for the running id is a repeat and is ignored. The
+device frees itself once it has sent a final result, and only then accepts the next request. The
+request's name and payload are copied into the session's buffer, which the first report overwrites
+(so read them before reporting). Newer reports replace unsent ones, and a final result is never
+replaced. A device handler should always end with a final report: a device that never reports stays
+busy, and the node times the action out at its deadline.
+
+Action results, like `Status`, are not acknowledged or retransmitted. A final result lost on the
+link is reported by the node as `TimedOut` when the deadline passes, so give actions a deadline.
+The device buffers one request: the buffer and the busy refusal cost one receive-sized buffer and
+eight bytes of control buffer, only with the `actions` feature (`scripts/mcu-size.sh`,
+`uart-actions`).
+
+**Host side.** `HostSession::send_action(id, name, payload)` (and `HostBus::send_action`) queues a
+request for a connected device and fails with `NotConnected`, `TooLarge` (the negotiated frame
+size) or `Congested` rather than queueing unbounded work. Results arrive as
+`HostEvent::ActionResult { device_name, id, state, payload }`, only from the device the request
+went to and only within its session. A device lost or replaced mid-action is reported by
+`DeviceLost` or `DeviceConnected`; the node fails the actions in flight on it.
+
+**No declaration.** A device does not declare the action names it handles: no provider record
+carries them, and a declaration would add reliable state to the minimal device. The node sends any
+name to the device that publishes the target provider, and the device refuses the names it does not
+handle (`Rejected`, reason `unknown action` in the reference simulator).
 
 ### Session lifecycle
 
@@ -328,6 +372,10 @@ release, LTO, `--gc-sections`): about 7.8 KB of flash and 0.7 KB of static RAM o
 (`thumbv6m-none-eabi`) for UART, 8.1 KB for CAN; 7.7 KB on Cortex-M4F; 9.7 KB on RV32IMC. No
 `core::fmt`, no panic machinery, and no atomics are linked, so cores without compare-and-swap work
 as well. `scripts/mcu-size.sh` reports every target, and CI enforces a size budget.
+
+With feature `actions` (device side of protocol 1 actions, see "Actions") the minimal UART build
+grows by about 0.6 KB of flash and 160 bytes of RAM on Cortex-M0+ (`uart-actions` in
+`scripts/mcu-size.sh`); the default build is unchanged.
 
 `examples/mcu-template` is a complete, chip-agnostic starting point (`embedded-io` UART and
 `embedded-can` ports and C entry points, no allocator by default), and

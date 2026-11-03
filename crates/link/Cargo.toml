@@ -25,6 +25,10 @@ default = ["stats"]
 # The minimal device path: the hand-written postcard-compatible codec with borrowed views (`wire`)
 # and the sans-IO device session (`device`). No allocator, no dependencies.
 device = []
+# Device-side actions (protocol 1): one `ActionRequest` in flight, its result reports, and the
+# `ActionRequested` event. Adds one receive-sized buffer and a few bytes of state to the device
+# session; off, the minimal device build is unchanged.
+actions = ["device"]
 # Device session counters (`device::DeviceStats`, `DeviceSession::stats`). Off, the counters cost
 # no RAM (about 56 bytes on 32-bit targets) and no flash (about 100 bytes).
 stats = []

@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::vec::Vec;
 
-use super::{HostConfig, HostEvent, HostSession};
+use super::{ActionSendError, HostConfig, HostEvent, HostSession};
 use crate::message::LeaseRecord;
 use crate::packet::{CanLinkIds, Segment};
 use crate::transport::Packet;
@@ -213,6 +213,24 @@ impl HostBus {
     #[must_use]
     pub fn session(&self, address: u32) -> Option<&HostSession<Packet>> {
         self.devices.get(&address).map(|device| &device.session)
+    }
+
+    /// Queues an `ActionRequest` for the device at `address`; see [`HostSession::send_action`].
+    ///
+    /// # Errors
+    ///
+    /// [`ActionSendError::NotConnected`] if no device is at `address`, or the session's error.
+    pub fn send_action(
+        &mut self,
+        address: u32,
+        id: u32,
+        name: &str,
+        payload: &[u8],
+    ) -> Result<(), ActionSendError> {
+        match self.devices.get_mut(&address) {
+            Some(device) => device.session.send_action(id, name, payload),
+            None => Err(ActionSendError::NotConnected),
+        }
     }
 
     /// Addresses that have a session (connected or not).

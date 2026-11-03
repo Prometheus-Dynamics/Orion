@@ -2,7 +2,7 @@
 
 use super::CanLinkConfig;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, REOPEN_DELAY};
-use orion_link::host::{BusFrame, HostBus, HostConfig};
+use orion_link::host::{ActionSendError, BusFrame, HostBus, HostConfig};
 use orion_link::{Packet, PacketStats};
 use std::future::Future;
 use std::io;
@@ -50,6 +50,8 @@ pub(super) async fn run<P: CanIo>(
     let mut reopen_at = Instant::now();
     let mut lease_refresh_at = Instant::now() + LEASE_REFRESH;
     let mut pending: Option<BusFrame> = None;
+    let mut commands = ctx.open_actions();
+    let mut commands_open = true;
 
     loop {
         if socket.is_none() && Instant::now() >= reopen_at {
@@ -80,6 +82,15 @@ pub(super) async fn run<P: CanIo>(
             },
             _ = retry(pending.is_some() && socket.is_some()) => {}
             changed = desired.changed() => refresh = changed.is_ok(),
+            command = commands.recv(), if commands_open => match command {
+                Some(command) => ctx.accept_action(command, |device, id, name, payload| {
+                    match bus.address_of(device) {
+                        Some(address) => bus.send_action(address, id, name, payload),
+                        None => Err(ActionSendError::NotConnected),
+                    }
+                }),
+                None => commands_open = false,
+            },
             _ = tick.tick() => {}
         }
 

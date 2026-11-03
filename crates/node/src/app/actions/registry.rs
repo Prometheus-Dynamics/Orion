@@ -34,6 +34,9 @@ pub(crate) enum ActionRoute {
     Client(LocalAddress),
     /// Forwarded to the peer that owns the target.
     Remote(NodeId),
+    /// Sent to the link device that publishes the target's provider (`link_bridge/actions.rs`).
+    #[cfg(feature = "link-gateway")]
+    Link { link: String, device: String },
 }
 
 #[derive(Debug)]
@@ -309,6 +312,23 @@ impl ActionRegistry {
             .filter(|entry| {
                 entry.route == ActionRoute::Client(address.clone())
                     && !entry.result.state.is_terminal()
+            })
+            .map(|entry| entry.result.action_id.clone())
+            .collect()
+    }
+
+    /// Ids of non-final actions routed to a link device (`device` `None`: to any device on `link`).
+    #[cfg(feature = "link-gateway")]
+    pub(crate) fn running_for_link(&self, link: &str, device: Option<&str>) -> Vec<String> {
+        self.entries
+            .values()
+            .filter(|entry| {
+                !entry.result.state.is_terminal()
+                    && matches!(
+                        &entry.route,
+                        ActionRoute::Link { link: l, device: d }
+                            if l == link && device.is_none_or(|device| device == d)
+                    )
             })
             .map(|entry| entry.result.action_id.clone())
             .collect()

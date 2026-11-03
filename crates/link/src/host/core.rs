@@ -12,6 +12,8 @@ use crate::frame::{FRAME_OVERHEAD, FrameView};
 use crate::message::{
     self, Hello, LeaseRecord, Message, ProviderState, RejectReason, Roles, Welcome, kind,
 };
+
+use super::ActionSendError;
 use crate::transport::seq_newer;
 
 use super::{HOST_MAX_FRAME, HostConfig, HostEvent, HostStats};
@@ -223,6 +225,19 @@ impl HostCore {
                 Ok(Message::ProviderState(state)) => self.on_state(frame.seq(), state, limit),
                 _ => self.decode_error(),
             },
+            kind::ACTION_RESULT => match Message::decode(frame) {
+                Ok(Message::ActionResult(result)) => {
+                    if let Some(device_name) = self.device_name().map(String::from) {
+                        self.emit(HostEvent::ActionResult {
+                            device_name,
+                            id: result.id,
+                            state: result.state,
+                            payload: result.payload,
+                        });
+                    }
+                }
+                _ => self.decode_error(),
+            },
             kind::STATUS => match message::decode_status(frame.payload()) {
                 Ok(entries) => {
                     self.stats.status_received = self.stats.status_received.wrapping_add(1);
@@ -250,6 +265,41 @@ impl HostCore {
 
     fn decode_error(&mut self) {
         self.stats.decode_errors = self.stats.decode_errors.wrapping_add(1);
+    }
+
+    /// Queues an `ActionRequest` for the connected device.
+    pub(crate) fn send_action(
+        &mut self,
+        id: u32,
+        name: &str,
+        payload: &[u8],
+    ) -> Result<(), ActionSendError> {
+        let Some(conn) = &self.conn else {
+            return Err(ActionSendError::NotConnected);
+        };
+        let max_frame = conn.max_frame;
+        if self.out.len() >= OUT_CAPACITY {
+            return Err(ActionSendError::Congested);
+        }
+        let seq = self.seq.wrapping_add(1);
+        let mut buf = vec![0u8; HOST_MAX_FRAME];
+        let frame_len =
+            message::encode_action_request(id, name, payload, seq, &mut buf).map_err(|_| {
+                ActionSendError::TooLarge {
+                    frame_len: HOST_MAX_FRAME,
+                    max_frame,
+                }
+            })?;
+        if frame_len > max_frame {
+            return Err(ActionSendError::TooLarge {
+                frame_len,
+                max_frame,
+            });
+        }
+        buf.truncate(frame_len);
+        self.seq = seq;
+        self.out.push_back(buf);
+        Ok(())
     }
 
     fn on_hello(&mut self, seq: u16, hello: Hello) {

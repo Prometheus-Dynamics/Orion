@@ -4,7 +4,7 @@ use super::SerialLinkConfig;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, REOPEN_DELAY};
 use super::serial::SerialPort;
 use orion_link::Stream;
-use orion_link::host::{HostConfig, HostSession};
+use orion_link::host::{ActionSendError, HostConfig, HostSession};
 use std::time::Instant;
 use tokio::sync::watch;
 
@@ -27,6 +27,8 @@ pub(super) async fn run(
     let mut lease_refresh_at = Instant::now() + LEASE_REFRESH;
     let mut tx: Vec<u8> = Vec::new();
     let mut buf = vec![0u8; 4096];
+    let mut commands = ctx.open_actions();
+    let mut commands_open = true;
 
     loop {
         if port.is_none() && Instant::now() >= reopen_at {
@@ -63,6 +65,15 @@ pub(super) async fn run(
                 Err(error) => failure = Some(("write", error)),
             },
             changed = desired.changed() => refresh = changed.is_ok(),
+            command = commands.recv(), if commands_open => match command {
+                Some(command) => ctx.accept_action(command, |device, id, name, payload| {
+                    match session.device_name() {
+                        Some(current) if current == device => session.send_action(id, name, payload),
+                        _ => Err(ActionSendError::NotConnected),
+                    }
+                }),
+                None => commands_open = false,
+            },
             _ = tick.tick() => {}
         }
 

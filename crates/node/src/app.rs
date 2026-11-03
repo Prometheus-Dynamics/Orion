@@ -9,6 +9,8 @@ mod hlc_state;
 mod host_facts;
 #[cfg(feature = "link-gateway")]
 mod link_bridge;
+#[cfg(feature = "link-gateway")]
+pub(crate) use link_bridge::actions::LinkActionCommand;
 mod local_clients;
 mod local_control;
 mod maintenance_admin;

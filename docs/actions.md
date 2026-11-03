@@ -160,7 +160,7 @@ On the owning node:
 | `Executor(id)` | The local client registered as the executor's handler. |
 | `Resource(id)` | The handler of the resource's provider, else the handler of the executor that realizes it. |
 
-No handler means `Rejected` with a reason naming the missing handler. Orion registers no handler
+A provider that a link device publishes is handled by that device when no local client handles it (see [Link devices](#link-devices)). No handler means `Rejected` with a reason naming the missing handler. Orion registers no handler
 by default, so every action is rejected until the embedder or a local client provides one.
 
 **In-process handlers** implement `orion_node::actions::ActionHandler` (any `Fn(ActionRequest,
@@ -184,6 +184,39 @@ its runtime, aborts it at the deadline, and records `ActionOutcome::Succeeded(ou
   registrations and claims and fails the actions still waiting for it with `Failed { reason:
   "handler disconnected" }`. The watch re-registers when it reconnects: after a node restart it retries
   without a limit, backing off from 50 ms to 5 s, whatever the service's retry policy says.
+
+### Link devices
+
+A microcontroller on a serial or CAN link (`docs/link-protocol.md`) is a provider like any other,
+and it can handle actions for its provider. An action whose target is that provider, or a resource
+of it, is routed to the device's link task, which sends it as an `ActionRequest` and reports the
+device's `ActionResult`s as the action's progress and outcome (`Running`, `Succeeded`, `Failed`,
+`Rejected`). The node adds nothing to the lifecycle: `wait_ms`, the deadline and `TimedOut`, the
+registry, and watches work as for any action.
+
+- **Routing.** The route exists while the device is connected and has an accepted provider
+  snapshot. An action for a device that is disconnected (or was never seen) is `Rejected`
+  ("no action handler is registered ..."), as with any provider without a handler.
+- **Arguments and output.** `args` are sent as a postcard map of `TypedConfigValue`s, and the
+  output comes back the same way (`docs/link-protocol.md`, "Action map").
+- **Names.** A device does not declare its action names. The node forwards every name, and the device
+  refuses the ones it does not handle with `Rejected`.
+- **One at a time.** A device runs one action at a time. A second request while one runs is
+  `Rejected` (`busy`) by the device; it is not queued on the node.
+- **Disconnect.** A device that disconnects, restarts, or is replaced fails the actions in flight on
+  it (`Failed`, reason "link device disconnected before the action finished"). A link that closes
+  fails its actions the same way.
+- **Deadlines.** The deadline is the node's, as for every action. A device that never reports is
+  `TimedOut` at it, and its requests stay busy on the device until it reports.
+- **Cancel.** No cancel reaches the device: the device is busy with the action, so a companion
+  `<name>.cancel` request would be refused. A handler that needs cancellation should watch for it
+  some other way (for example a status key) or use a deadline.
+- **Node-level names.** A link device does not claim node action names (`ClaimNodeActions` is for
+  local clients). Only provider and resource targets reach a device.
+
+Tests: `crates/node/src/link_gateway/tests/actions.rs` (routed action with its output, unknown name
+refused by the device, disconnect mid-action, deadline) and `crates/link/tests/session/actions.rs`
+(device and host session round trip, busy refusal, slot reuse after the final result).
 
 ### Across nodes
 

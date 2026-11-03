@@ -26,6 +26,25 @@ compatibility paths for older versions are gone.
 - `orion_link`: kinds `0x20`-`0x2F` are reserved for firmware transfer; `ActionRequest` (`0x30`) and
   `ActionResult` (`0x31`) are added to the `alloc` message layer (codec and fixture only: the sessions and
   the node gateway do not act on them yet). The minimal device build is unchanged in size.
+- `orion_link` `ActionResult` payloads, now used: `Running` carries an optional per-mille progress (a
+  `u16` varint, empty when unknown); `Succeeded` carries an action map and `Failed`/`Rejected` a UTF-8
+  reason (see `docs/link-protocol.md`, "Actions").
+
+### Added (link gateway actions)
+
+- Link devices handle actions for their provider. An action targeting a provider (or a resource of
+  it) that a link device publishes is sent to the device as `ActionRequest`; the device's
+  `ActionResult`s become the action's `Running`, `Succeeded`, `Failed` or `Rejected` state, with
+  `wait_ms`, deadlines and `TimedOut` as for every action. A device that disconnects, restarts, or
+  whose link closes mid-action fails it. Docs: [docs/actions.md](docs/actions.md#link-devices).
+- `orion_link` device session, feature `actions` (`crates/link`): `DeviceEvent::ActionRequested`,
+  `DeviceSession::action`, `report_action`, `report_progress`, and `ActionReportError`. One action runs
+  at a time; a request that arrives while one runs is refused as `busy`. Adds one receive-sized buffer
+  and a control-buffer byte to the device session with the feature; the default build is unchanged.
+- `orion_link` host session: `HostSession::send_action` / `HostBus::send_action` and
+  `HostEvent::ActionResult`, with `ActionSendError`.
+- `orion_link::message::{encode_action_map, decode_action_map}`: the argument and output encoding.
+- `scripts/mcu-size.sh` variant `uart-actions`.
 
 ### Added (peer watch tests, owner push switch)
 

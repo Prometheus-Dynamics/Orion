@@ -1,11 +1,16 @@
 //! Host-session events → node provider path, shared by serial and CAN links.
 
 use crate::NodeApp;
+use crate::app::LinkActionCommand;
 use crate::control_plane::LinkStatusSnapshot;
-use orion_link::host::HostEvent;
-use orion_link::message::LeaseRecord;
-use std::collections::BTreeSet;
+use orion::control_plane::ActionState;
+use orion::control_plane::TypedConfigValue;
+use orion_link::host::{ActionSendError, HostEvent};
+use orion_link::message::{LeaseRecord, LinkActionState, decode_action_map, encode_action_map};
+use orion_link::wire::decode_progress;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::{debug, info, warn};
 
 /// Delay before reopening a port or socket that failed.
@@ -22,6 +27,20 @@ pub(super) struct LinkContext {
     accepted: BTreeSet<String>,
     pub(super) status: LinkStatusSnapshot,
     last_logged_error: Option<String>,
+    /// Actions sent to this link's devices, by the id the device sees.
+    actions: SentActions,
+}
+
+/// Requests sent to devices of one link and not yet final. Ids are per link and wrap.
+#[derive(Default)]
+struct SentActions {
+    next_id: u32,
+    pending: BTreeMap<u32, SentAction>,
+}
+
+struct SentAction {
+    device: String,
+    action_id: String,
 }
 
 /// What to do with a device's lease set after an event.
@@ -43,7 +62,87 @@ impl LinkContext {
             accepted: BTreeSet::new(),
             status,
             last_logged_error: None,
+            actions: SentActions::default(),
         }
+    }
+
+    /// Registers this link for action requests; the receiver yields what the node routes here.
+    pub(super) fn open_actions(&self) -> UnboundedReceiver<LinkActionCommand> {
+        self.app.link_actions_open(&self.name)
+    }
+
+    /// Sends a routed action to its device through `send` (the link's session). A request that
+    /// cannot be sent fails the action at once.
+    pub(super) fn accept_action(
+        &mut self,
+        command: LinkActionCommand,
+        send: impl FnOnce(&str, u32, &str, &[u8]) -> Result<(), ActionSendError>,
+    ) {
+        let LinkActionCommand {
+            device,
+            action_id,
+            request,
+        } = command;
+        let payload = match encode_action_map(&request.args) {
+            Ok(payload) => payload,
+            Err(_) => {
+                self.app.report_link_action(
+                    &action_id,
+                    &self.name,
+                    &device,
+                    ActionState::Rejected {
+                        reason: "the arguments cannot be encoded for the device".into(),
+                    },
+                    BTreeMap::new(),
+                );
+                return;
+            }
+        };
+        let id = self.actions.next_id;
+        self.actions.next_id = self.actions.next_id.wrapping_add(1);
+        match send(&device, id, &request.name, &payload) {
+            Ok(()) => {
+                debug!(link = %self.name, device = %device, action_id = %action_id, id, name = %request.name, "action sent to link device");
+                self.actions
+                    .pending
+                    .insert(id, SentAction { device, action_id });
+            }
+            Err(error) => {
+                let state = send_failure(&device, &self.name, error);
+                self.app.report_link_action(
+                    &action_id,
+                    &self.name,
+                    &device,
+                    state,
+                    BTreeMap::new(),
+                );
+            }
+        }
+    }
+
+    /// Reports a device's `ActionResult` for an action this link sent it.
+    fn on_action_result(&mut self, device: &str, id: u32, state: LinkActionState, payload: &[u8]) {
+        let Some(sent) = self.actions.pending.get(&id) else {
+            debug!(link = %self.name, device = %device, id, "action result for an unknown request");
+            return;
+        };
+        if sent.device != device {
+            debug!(link = %self.name, device = %device, id, "action result from another device");
+            return;
+        }
+        let action_id = sent.action_id.clone();
+        if state != LinkActionState::Running {
+            self.actions.pending.remove(&id);
+        }
+        let (state, output) = report_state(state, payload);
+        self.app
+            .report_link_action(&action_id, &self.name, device, state, output);
+    }
+
+    /// Fails the actions in flight on `device` (it disconnected or restarted).
+    fn fail_device_actions(&mut self, device: &str, reason: &str) {
+        self.actions.pending.retain(|_, sent| sent.device != device);
+        self.app.fail_link_actions(&self.name, Some(device), reason);
     }
 
     /// Monotonic milliseconds since the link started (the sessions' clock).
@@ -128,7 +227,20 @@ impl LinkContext {
             HostEvent::DeviceLost { device_name } => {
                 info!(link = %self.name, device = %device_name, "link device lost; marking its resources unavailable");
                 self.accepted.remove(&device_name);
+                self.fail_device_actions(
+                    &device_name,
+                    "link device disconnected before the action finished",
+                );
                 self.app.link_device_lost(&self.name, &device_name);
+                LeaseAction::Keep
+            }
+            HostEvent::ActionResult {
+                device_name,
+                id,
+                state,
+                payload,
+            } => {
+                self.on_action_result(&device_name, id, state, &payload);
                 LeaseAction::Keep
             }
             HostEvent::DeviceRejected {
@@ -196,6 +308,10 @@ impl LinkContext {
     pub(super) fn close(&mut self) {
         self.accepted.clear();
         self.status.open = false;
+        self.actions.pending.clear();
+        self.app
+            .fail_link_actions(&self.name, None, "link closed before the action finished");
+        self.app.link_actions_closed(&self.name);
         self.app.link_closed(&self.name);
         self.publish_status();
         info!(
@@ -207,5 +323,62 @@ impl LinkContext {
             sessions = self.status.sessions,
             "link closed"
         );
+    }
+}
+
+/// The node-side state of a device's report, from its `ActionResult` (`docs/link-protocol.md`).
+/// A `Succeeded` whose output does not decode is a failure.
+fn report_state(
+    state: LinkActionState,
+    payload: &[u8],
+) -> (ActionState, BTreeMap<String, TypedConfigValue>) {
+    match state {
+        LinkActionState::Running => (
+            ActionState::Running {
+                progress: decode_progress(payload).ok().flatten().map(|v| v.min(1000)),
+            },
+            BTreeMap::new(),
+        ),
+        LinkActionState::Succeeded => match decode_action_map(payload) {
+            Ok(output) => (ActionState::Succeeded, output),
+            Err(_) => (
+                ActionState::Failed {
+                    reason: "the device returned an output that does not decode".into(),
+                },
+                BTreeMap::new(),
+            ),
+        },
+        LinkActionState::Failed => (
+            ActionState::Failed {
+                reason: reason_text(payload, "the device reported a failure"),
+            },
+            BTreeMap::new(),
+        ),
+        LinkActionState::Rejected => (
+            ActionState::Rejected {
+                reason: reason_text(payload, "the device refused the action"),
+            },
+            BTreeMap::new(),
+        ),
+    }
+}
+
+fn reason_text(payload: &[u8], empty: &str) -> String {
+    if payload.is_empty() {
+        empty.to_owned()
+    } else {
+        String::from_utf8_lossy(payload).into_owned()
+    }
+}
+
+/// Why a request could not be sent to the device, as the action's state.
+fn send_failure(device: &str, link: &str, error: ActionSendError) -> ActionState {
+    match error {
+        ActionSendError::NotConnected => ActionState::Failed {
+            reason: format!("link device `{device}` on {link} is not connected"),
+        },
+        other => ActionState::Rejected {
+            reason: format!("link device `{device}` on {link}: {other}"),
+        },
     }
 }

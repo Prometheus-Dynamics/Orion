@@ -22,6 +22,7 @@
 //! assert_eq!(&buf[4..len - 4], b"\x09imu-board\x01\x80\x04");
 //! ```
 
+mod action;
 mod codec;
 mod decode;
 mod views;
@@ -29,6 +30,9 @@ mod views;
 #[cfg(feature = "alloc")]
 mod records;
 
+#[cfg(feature = "actions")]
+pub(crate) use action::ActionResultBody;
+pub use action::{ActionRequestView, ActionState, decode_progress};
 pub use codec::{Encode, RawVarint, Reader, Writer, encoded_len, str_from_utf8};
 pub use decode::{LeaseView, Leases, WelcomeView, decode_ack, decode_reject, decode_u64};
 pub use views::{

@@ -5,6 +5,8 @@ use crate::transport::seq_newer;
 use crate::wire::{
     self, Encode, HelloView, Leases, RawVarint, Reader, RejectReason, WelcomeView, kind,
 };
+#[cfg(feature = "actions")]
+use crate::wire::{ActionRequestView, ActionResultBody, ActionState};
 
 #[cfg(feature = "stats")]
 use super::DeviceStats;
@@ -26,6 +28,17 @@ const MIN_HEARTBEAT_MS: u32 = 10;
 
 /// Longest `Ping` / `Pong` frame: header, a `u64` varint, CRC.
 const PING_FRAME_MAX: usize = FRAME_OVERHEAD + 10;
+
+/// Size of the control buffer. With `actions` it also holds the refusal of a request that arrives
+/// while the device is busy: an `ActionResult` with a 4-byte reason and a `u32` id.
+#[cfg(feature = "actions")]
+const CONTROL_MAX: usize = PING_FRAME_MAX + 1;
+#[cfg(not(feature = "actions"))]
+const CONTROL_MAX: usize = PING_FRAME_MAX;
+
+/// Reason sent with the refusal of a request that arrives while another one is running.
+#[cfg(feature = "actions")]
+const BUSY_REASON: &[u8] = b"busy";
 
 /// Whether the millisecond deadline `at` has been reached at `now`.
 ///
@@ -64,6 +77,9 @@ pub(crate) enum Source {
     State,
     /// The newest unsent status batch.
     Status,
+    /// An `ActionResult` for the device's action (encoded in the action buffer).
+    #[cfg(feature = "actions")]
+    Action,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,10 +124,24 @@ struct Snapshot {
     next_at: Option<u32>,
 }
 
+/// The action the device is running (or has finished, until its final result is sent).
+#[cfg(feature = "actions")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActionSlot {
+    id: u32,
+    /// Lengths of the name and payload stored at the start of the action buffer.
+    name_len: usize,
+    payload_len: usize,
+    /// A result was reported, so the request bytes are gone (see `DeviceCore::action`).
+    reported: bool,
+    /// A final result was reported; the slot is freed once that result is sent.
+    finished: bool,
+}
+
 /// `ST` is the status buffer size: 0 for a device that never publishes status.
 pub(crate) struct DeviceCore<N, const RX: usize, const TX: usize, const ST: usize> {
     config: DeviceConfig<N>,
-    control: [u8; PING_FRAME_MAX],
+    control: [u8; CONTROL_MAX],
     snapshot_buf: [u8; TX],
     status_buf: [u8; ST],
     /// Payload of the last reported lease set of this session; outside a session, the `Hello`.
@@ -138,6 +168,21 @@ pub(crate) struct DeviceCore<N, const RX: usize, const TX: usize, const ST: usiz
     /// Earliest time for the next `Status` frame (`None`: any time).
     next_status_at: Option<u32>,
     events: EventQueue,
+    /// The one action in flight.
+    #[cfg(feature = "actions")]
+    action_slot: Option<ActionSlot>,
+    /// Holds the request bytes (name, then payload), then the encoded result being sent.
+    #[cfg(feature = "actions")]
+    action_buf: [u8; RX],
+    /// Body length and finality of the result waiting in `action_buf`.
+    #[cfg(feature = "actions")]
+    action_out: Option<(usize, bool)>,
+    /// The result being transmitted is final.
+    #[cfg(feature = "actions")]
+    out_final: bool,
+    /// A request id to refuse (the device was busy).
+    #[cfg(feature = "actions")]
+    refusal: Option<u32>,
     #[cfg(feature = "stats")]
     stats: DeviceStats,
 }
@@ -154,7 +199,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         let reject_backoff_ms = config.reject_retry_min_ms.max(1);
         Self {
             config,
-            control: [0; PING_FRAME_MAX],
+            control: [0; CONTROL_MAX],
             snapshot_buf: [0; TX],
             status_buf: [0; ST],
             leases_buf: [0; RX],
@@ -176,6 +221,16 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             pong: RawVarint::EMPTY,
             next_status_at: None,
             events: EventQueue::new(),
+            #[cfg(feature = "actions")]
+            action_slot: None,
+            #[cfg(feature = "actions")]
+            action_buf: [0; RX],
+            #[cfg(feature = "actions")]
+            action_out: None,
+            #[cfg(feature = "actions")]
+            out_final: false,
+            #[cfg(feature = "actions")]
+            refusal: None,
             #[cfg(feature = "stats")]
             stats: DeviceStats::default(),
         }
@@ -439,6 +494,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
                 Err(_) => self.decode_error(),
             },
             kind::LEASES => self.on_leases(payload),
+            #[cfg(feature = "actions")]
+            kind::ACTION_REQUEST => self.on_action_request(payload),
             kind::PING => match self.pong.read(&mut Reader::new(payload)) {
                 Ok(()) => {}
                 Err(_) => self.decode_error(),
@@ -479,6 +536,130 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         copy_prefix(dst, payload);
         self.leases_len = Some(payload.len());
         self.emit(DeviceEvent::LeasesChanged);
+    }
+
+    // ---- actions ---------------------------------------------------------------------------
+
+    /// Accepts one request (one action in flight). A repeat of the running request is ignored;
+    /// any other request while the device is busy is refused with `busy`.
+    #[cfg(feature = "actions")]
+    fn on_action_request(&mut self, payload: &[u8]) {
+        let request = match ActionRequestView::decode(payload) {
+            Ok(request) => request,
+            Err(_) => {
+                self.decode_error();
+                return;
+            }
+        };
+        if let Some(slot) = self.action_slot {
+            if slot.id != request.id {
+                self.refusal = Some(request.id);
+            }
+            return;
+        }
+        let name_len = request.name.len();
+        let total = name_len.saturating_add(request.payload.len());
+        let Some(buf) = self.action_buf.get_mut(..total) else {
+            self.refusal = Some(request.id);
+            return;
+        };
+        copy_prefix(buf, request.name.as_bytes());
+        if let Some(rest) = buf.get_mut(name_len..) {
+            copy_prefix(rest, request.payload);
+        }
+        self.action_slot = Some(ActionSlot {
+            id: request.id,
+            name_len,
+            payload_len: request.payload.len(),
+            reported: false,
+            finished: false,
+        });
+        self.emit(DeviceEvent::ActionRequested);
+    }
+
+    /// The request the device should run. Available until the first report: a report overwrites
+    /// the request bytes.
+    #[cfg(feature = "actions")]
+    pub(crate) fn action(&self) -> Option<ActionRequestView<'_>> {
+        let slot = self.action_slot?;
+        if slot.reported {
+            return None;
+        }
+        let end = slot.name_len.checked_add(slot.payload_len)?;
+        let name = wire::str_from_utf8(self.action_buf.get(..slot.name_len)?).ok()?;
+        let payload = self.action_buf.get(slot.name_len..end)?;
+        Some(ActionRequestView {
+            id: slot.id,
+            name,
+            payload,
+        })
+    }
+
+    /// Queues a result for the running action. Returns whether a result being transmitted was
+    /// aborted (the caller then resets its transmit cursor).
+    #[cfg(feature = "actions")]
+    pub(crate) fn report_action(
+        &mut self,
+        state: ActionState,
+        payload: &[u8],
+    ) -> Result<bool, super::ActionReportError> {
+        use super::ActionReportError;
+        let slot = self.action_slot.ok_or(ActionReportError::NoAction)?;
+        if slot.finished {
+            return Err(ActionReportError::Finished);
+        }
+        let body = ActionResultBody {
+            id: slot.id,
+            state,
+            payload,
+        };
+        let frame_len = frame::frame_len(wire::encoded_len(&body));
+        let max_frame = self.max_frame().min(Self::LOCAL_MAX);
+        if frame_len > max_frame {
+            return Err(ActionReportError::TooLarge {
+                frame_len,
+                max_frame,
+            });
+        }
+        let aborted = self.out.is_some_and(|out| out.source == Source::Action);
+        if aborted {
+            self.out = None;
+            bump!(self, aborted_frames);
+        }
+        let body_len = wire::write_payload(&body, &mut self.action_buf);
+        self.action_out = Some((body_len, state.is_final()));
+        self.action_slot = Some(ActionSlot {
+            reported: true,
+            finished: state.is_final(),
+            ..slot
+        });
+        Ok(aborted)
+    }
+
+    /// Encodes the queued action result for transmission.
+    #[cfg(feature = "actions")]
+    fn select_action(&mut self, max_frame: usize) -> Option<Outgoing> {
+        let (body_len, is_final) = self.action_out.take()?;
+        if frame::frame_len(body_len) > max_frame {
+            // Cannot be sent under the negotiated frame size. A final result is dropped, which
+            // frees the device for its next request.
+            if is_final {
+                self.action_slot = None;
+            }
+            return None;
+        }
+        let seq = self.next_seq();
+        let len = frame::encode_in_place(
+            FrameHeader::new(kind::ACTION_RESULT, seq),
+            body_len,
+            &mut self.action_buf,
+        )
+        .ok()?;
+        self.out_final = is_final;
+        Some(Outgoing {
+            source: Source::Action,
+            len,
+        })
     }
 
     // ---- publish ---------------------------------------------------------------------------
@@ -547,6 +728,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             Source::Hello => &self.leases_buf,
             Source::State => &self.snapshot_buf,
             Source::Status => &self.status_buf,
+            #[cfg(feature = "actions")]
+            Source::Action => &self.action_buf,
         };
         buf.get(..out.len)
     }
@@ -557,6 +740,10 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             return;
         };
         bump!(self, frames_sent);
+        #[cfg(feature = "actions")]
+        if out.source == Source::Action && self.out_final {
+            self.action_slot = None;
+        }
         if out.source == Source::State {
             let cap = self
                 .session()
@@ -591,7 +778,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         };
         let control = self
             .control
-            .get_mut(..max_frame.min(PING_FRAME_MAX))
+            .get_mut(..max_frame.min(CONTROL_MAX))
             .unwrap_or_default();
         if !self.pong.is_empty() {
             let result = wire::encode_frame_dyn(kind::PONG, seq, &self.pong, control);
@@ -603,6 +790,20 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             // The host only echoes `now_ms`, so the session's 32-bit clock is enough.
             let result = wire::encode_frame_dyn(kind::PING, seq, &self.now, control);
             return self.control_frame(Source::Control, result);
+        }
+        #[cfg(feature = "actions")]
+        if let Some(id) = self.refusal.take() {
+            let refusal = ActionResultBody {
+                id,
+                state: ActionState::Rejected,
+                payload: BUSY_REASON,
+            };
+            let result = wire::encode_frame_dyn(kind::ACTION_RESULT, seq, &refusal, control);
+            return self.control_frame(Source::Control, result);
+        }
+        #[cfg(feature = "actions")]
+        if let Some(outgoing) = self.select_action(max_frame) {
+            return Some(outgoing);
         }
         self.select_snapshot()
             .or_else(|| self.select_status(max_frame))

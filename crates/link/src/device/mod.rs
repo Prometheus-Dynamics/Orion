@@ -158,6 +158,38 @@ impl ::core::fmt::Display for PublishError {
 #[cfg(feature = "std")]
 impl std::error::Error for PublishError {}
 
+/// Why a [`DeviceSession::report_action`] was refused. The device keeps running its action.
+#[cfg(feature = "actions")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ActionReportError {
+    /// No action is running on the device.
+    NoAction,
+    /// A final result was already reported for the running action.
+    Finished,
+    /// The result does not fit the negotiated frame size (or the buffer).
+    TooLarge {
+        /// Encoded frame length of the result.
+        frame_len: usize,
+        /// Limit it has to fit.
+        max_frame: usize,
+    },
+}
+
+#[cfg(all(feature = "actions", feature = "std"))]
+impl ::core::fmt::Display for ActionReportError {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        match self {
+            Self::NoAction => f.write_str("no action is running"),
+            Self::Finished => f.write_str("the action already has a final result"),
+            Self::TooLarge {
+                frame_len,
+                max_frame,
+            } => write!(f, "result needs {frame_len} bytes, limit is {max_frame}"),
+        }
+    }
+}
+
 /// Counters kept by a [`DeviceSession`] (wrapping). Transport-level drops are in
 /// [`DeviceSession::decoder`]`().stats()`. Only with feature `stats`; without it the counters are
 /// not compiled in.
@@ -297,6 +329,51 @@ impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>, const ST: us
     /// Whether a status batch is waiting to be sent.
     pub fn status_pending(&self) -> bool {
         self.core.status_pending()
+    }
+
+    /// The action the host asked this device to run, until the first report on it. The name and
+    /// payload borrow from the session's buffer: copy what you need before reporting. Only one
+    /// action runs at a time; a request that arrives while one is running is refused as busy.
+    #[cfg(feature = "actions")]
+    pub fn action(&self) -> Option<crate::wire::ActionRequestView<'_>> {
+        self.core.action()
+    }
+
+    /// Reports a final or running state for the action (see `docs/link-protocol.md`, "Actions").
+    /// A final state (`Succeeded`, `Failed`, `Rejected`) frees the device for its next request
+    /// once it is sent. Newer reports replace unsent ones.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionReportError`] if no action runs, the action is already final, or the result does
+    /// not fit the negotiated frame size.
+    #[cfg(feature = "actions")]
+    pub fn report_action(
+        &mut self,
+        state: crate::wire::ActionState,
+        payload: &[u8],
+    ) -> Result<(), ActionReportError> {
+        if self.core.report_action(state, payload)? {
+            self.cursor = T::Cursor::default();
+        }
+        Ok(())
+    }
+
+    /// Reports progress of the running action, in per-mille (`0..=1000`).
+    ///
+    /// # Errors
+    ///
+    /// As [`DeviceSession::report_action`].
+    #[cfg(feature = "actions")]
+    pub fn report_progress(&mut self, per_mille: u16) -> Result<(), ActionReportError> {
+        let mut buf = [0u8; 3];
+        let mut writer = crate::wire::Writer::new(&mut buf);
+        writer.varint(u64::from(per_mille));
+        let len = writer.len().min(buf.len());
+        self.report_action(
+            crate::wire::ActionState::Running,
+            buf.get(..len).unwrap_or_default(),
+        )
     }
 
     /// The current lease set (empty when not connected or before the host sent one). Strings

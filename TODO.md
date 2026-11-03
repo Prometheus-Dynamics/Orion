@@ -123,9 +123,11 @@ Follow-ups that do not change the wire:
       signature, another `OpenSession`'s binding, replayed and out-of-order sequence, unwatched
       action), each refused with the action completing by resend. The sequence check is shared:
       `orion_auth::peer_tcp::check_push_sequence` (node and `orion-client`).
-- [ ] **Link gateway actions:** route an action for a link-owned provider to its device as
+- [x] **Link gateway actions:** route an action for a link-owned provider to its device as
       `ActionRequest` and report the device's `ActionResult`; the device session queues and answers
-      requests (docs/link-protocol.md, docs/actions.md).
+      requests (docs/link-protocol.md, docs/actions.md). Done on link-actions: one request in flight
+      per device (`busy` refusal), progress and output, disconnect fails in-flight actions; no
+      cancel companion (the device is busy) and no name declarations (docs/actions.md, "Link devices").
 - [ ] **U8 firmware transfer** in the reserved kinds (`DeviceInfo`, chunked transfer).
 
 Not protocol changes: Prometheus metric names, env knobs, and persisted side files with their own

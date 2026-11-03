@@ -47,8 +47,8 @@ pub use bus::{BusEvent, BusFrame, HostBus};
 
 use self::core::HostCore;
 use crate::message::{
-    LeaseRecord, NodeId, ProviderRecord, ProviderState, RejectReason, ResourceRecord, Roles,
-    StatusEntry,
+    LeaseRecord, LinkActionState, NodeId, ProviderRecord, ProviderState, RejectReason,
+    ResourceRecord, Roles, StatusEntry,
 };
 use crate::packet::Segment;
 use crate::stream::max_encoded_len;
@@ -163,7 +163,54 @@ pub enum HostEvent {
         /// Negotiated frame limit.
         max_frame: usize,
     },
+    /// The device reported on an action the host sent it (`HostSession::send_action`). The
+    /// gateway matches `id` to its own record of the request.
+    ActionResult {
+        /// The device that sent it.
+        device_name: String,
+        /// The `id` of the request.
+        id: u32,
+        /// The state reported.
+        state: LinkActionState,
+        /// Progress (`Running`), output (`Succeeded`) or reason (`Failed`, `Rejected`), as sent.
+        payload: Vec<u8>,
+    },
 }
+
+/// Why [`HostSession::send_action`] did not queue a request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ActionSendError {
+    /// No session with the device is up.
+    NotConnected,
+    /// The request does not fit the negotiated frame size.
+    TooLarge {
+        /// Encoded frame length of the request.
+        frame_len: usize,
+        /// Negotiated frame limit.
+        max_frame: usize,
+    },
+    /// Too many frames are waiting for the gateway to write them.
+    Congested,
+}
+
+impl std::fmt::Display for ActionSendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotConnected => f.write_str("the device is not connected"),
+            Self::TooLarge {
+                frame_len,
+                max_frame,
+            } => write!(
+                f,
+                "the request needs {frame_len} bytes, the device accepts {max_frame}"
+            ),
+            Self::Congested => f.write_str("the link's output queue is full"),
+        }
+    }
+}
+
+impl std::error::Error for ActionSendError {}
 
 /// Counters kept by a [`HostSession`] (wrapping). Transport-level drops are in
 /// [`HostSession::decoder`]`().stats()`.
@@ -239,6 +286,23 @@ impl<T: Transport> HostSession<T> {
     /// it is also re-sent after every `Pong` and on every new session. Returns whether it changed.
     pub fn set_leases(&mut self, leases: Vec<LeaseRecord>) -> bool {
         self.core.set_leases(leases)
+    }
+
+    /// Queues an `ActionRequest` for the connected device. Its results arrive as
+    /// [`HostEvent::ActionResult`] with the same `id`. The device runs one action at a time and
+    /// refuses the others (`Rejected`, reason `busy`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionSendError`] if there is no session, the request is too large, or the output queue
+    /// is full.
+    pub fn send_action(
+        &mut self,
+        id: u32,
+        name: &str,
+        payload: &[u8],
+    ) -> Result<(), ActionSendError> {
+        self.core.send_action(id, name, payload)
     }
 
     /// The current lease set.

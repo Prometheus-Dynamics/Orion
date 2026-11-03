@@ -2,6 +2,7 @@
 //! over an in-memory bus (plus an ignored test on a real `vcan0`), and link-owned providers across
 //! a restart.
 
+mod actions;
 mod can;
 mod config;
 mod persist;

@@ -34,6 +34,32 @@ pub(crate) use codec::decode_leases;
 pub(crate) use codec::{decode_status, encode_with};
 pub use codec::{encode_action_request, encode_leases, encode_provider_state, encode_status};
 
+/// Encodes action arguments or an action's output: the postcard encoding of the map (a count, then
+/// `(key, value)` pairs in key order). See `docs/link-protocol.md`, "Action payloads".
+///
+/// # Errors
+///
+/// [`MessageError::Encode`] if serialization fails (it does not for these types).
+pub fn encode_action_map(
+    map: &alloc::collections::BTreeMap<String, TypedConfigValue>,
+) -> Result<Vec<u8>, MessageError> {
+    postcard::to_allocvec(map).map_err(|_| MessageError::Encode)
+}
+
+/// Decodes the map [`encode_action_map`] writes. An empty payload is an empty map.
+///
+/// # Errors
+///
+/// [`MessageError::Decode`] (kind 0) if the payload is not such a map.
+pub fn decode_action_map(
+    payload: &[u8],
+) -> Result<alloc::collections::BTreeMap<String, TypedConfigValue>, MessageError> {
+    if payload.is_empty() {
+        return Ok(alloc::collections::BTreeMap::new());
+    }
+    postcard::from_bytes(payload).map_err(|_| MessageError::Decode { kind: 0 })
+}
+
 // Kind numbers, roles, and reject reasons are shared with the minimal device path.
 pub use crate::wire::{RejectReason, Roles, kind};
 
@@ -145,7 +171,8 @@ pub struct ActionResult {
     pub id: u32,
     /// The action's state.
     pub state: LinkActionState,
-    /// Output for `Succeeded`, a reason for `Failed` and `Rejected`, empty for `Running`.
+    /// Output (an action map, see [`encode_action_map`]) for `Succeeded`, a UTF-8 reason for
+    /// `Failed` and `Rejected`, and an optional progress (a `u16` varint, per-mille) for `Running`.
     #[serde(deserialize_with = "codec::bounded_vec")]
     pub payload: Vec<u8>,
 }

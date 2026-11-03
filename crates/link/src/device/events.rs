@@ -35,6 +35,10 @@ pub enum DeviceEvent {
         /// Negotiated maximum frame length.
         max_frame: usize,
     },
+    /// The host asked the device to run an action (feature `actions`). Read it with
+    /// [`super::DeviceSession::action`] and answer with `report_action` / `report_progress`.
+    #[cfg(feature = "actions")]
+    ActionRequested,
 }
 
 // Queued events are stored as plain integers (a tag and two words each). Integer arrays let a
@@ -46,6 +50,8 @@ const STATE_ACKED: u8 = 3;
 const DISCONNECTED: u8 = 4;
 const REJECTED: u8 = 5;
 const STATE_TOO_LARGE: u8 = 6;
+#[cfg(feature = "actions")]
+const ACTION_REQUESTED: u8 = 7;
 
 fn pack(event: DeviceEvent) -> (u8, usize, usize) {
     match event {
@@ -58,6 +64,8 @@ fn pack(event: DeviceEvent) -> (u8, usize, usize) {
             frame_len,
             max_frame,
         } => (STATE_TOO_LARGE, frame_len, max_frame),
+        #[cfg(feature = "actions")]
+        DeviceEvent::ActionRequested => (ACTION_REQUESTED, 0, 0),
     }
 }
 
@@ -74,6 +82,8 @@ fn unpack(tag: u8, a: usize, b: usize) -> Option<DeviceEvent> {
             frame_len: a,
             max_frame: b,
         },
+        #[cfg(feature = "actions")]
+        ACTION_REQUESTED => DeviceEvent::ActionRequested,
         _ => return None,
     })
 }

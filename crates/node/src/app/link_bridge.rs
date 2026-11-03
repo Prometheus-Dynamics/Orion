@@ -12,6 +12,7 @@
 //!   survive a reconnect;
 //! - device status batches go to the volatile status lane under the device's provider subject.
 
+pub(super) mod actions;
 mod persist;
 
 use super::{NodeApp, NodeError};
@@ -33,6 +34,9 @@ use tracing::warn;
 /// Shared bridge state, one per node.
 pub(super) struct LinkBridgeState {
     owners: Mutex<BTreeMap<ProviderId, ProviderOwner>>,
+    /// Command channels of the running link tasks, by link name (`actions.rs`).
+    action_senders:
+        Mutex<BTreeMap<String, tokio::sync::mpsc::UnboundedSender<actions::LinkActionCommand>>>,
     status: Mutex<BTreeMap<String, LinkStatusSnapshot>>,
     desired_changed: tokio::sync::watch::Sender<u64>,
     /// Last content of `link-devices.rkyv`. `None` until the gateway restored it, so nothing is
@@ -44,6 +48,7 @@ impl Default for LinkBridgeState {
     fn default() -> Self {
         Self {
             owners: Mutex::new(BTreeMap::new()),
+            action_senders: Mutex::new(BTreeMap::new()),
             status: Mutex::new(BTreeMap::new()),
             desired_changed: tokio::sync::watch::Sender::new(0),
             persisted: Mutex::new(None),

@@ -16,6 +16,7 @@
 mod clients;
 #[cfg(peer_sync)]
 mod forward;
+
 #[cfg(feature = "peer-tcp")]
 mod push;
 pub(crate) mod registry;
@@ -97,7 +98,7 @@ fn millis(duration: Duration) -> u64 {
 }
 
 impl NodeApp {
-    fn action_registry(&self) -> MutexGuard<'_, ActionRegistry> {
+    pub(crate) fn action_registry(&self) -> MutexGuard<'_, ActionRegistry> {
         lock(&self.state.actions.registry)
     }
 
@@ -333,6 +334,10 @@ impl NodeApp {
             target @ (ActionTarget::Provider(_) | ActionTarget::Executor(_)) => self
                 .client_action_handler(target)
                 .map(ActionRoute::Client)
+                .or_else(|| match target {
+                    ActionTarget::Provider(provider) => self.link_action_route(provider),
+                    _ => None,
+                })
                 .ok_or_else(|| no_handler(target)),
             ActionTarget::Resource(id) => {
                 let candidates = {
@@ -356,10 +361,15 @@ impl NodeApp {
                         })
                         .unwrap_or_default()
                 };
+                let link_route = candidates.iter().find_map(|target| match target {
+                    ActionTarget::Provider(provider) => self.link_action_route(provider),
+                    _ => None,
+                });
                 candidates
                     .iter()
                     .find_map(|target| self.client_action_handler(target))
                     .map(ActionRoute::Client)
+                    .or(link_route)
                     .ok_or_else(|| no_handler(&request.target))
             }
         }
@@ -372,6 +382,13 @@ impl NodeApp {
             ActionRoute::Node => self.spawn_node_action(request),
             ActionRoute::Client(address) => {
                 if let Err(reason) = self.deliver_action_request(&address, request) {
+                    self.finish_action(&action_id, ActionState::Rejected { reason });
+                }
+                return;
+            }
+            #[cfg(feature = "link-gateway")]
+            ActionRoute::Link { link, device } => {
+                if let Err(reason) = self.deliver_link_action(&link, &device, &action_id, request) {
                     self.finish_action(&action_id, ActionState::Rejected { reason });
                 }
                 return;
@@ -440,7 +457,7 @@ impl NodeApp {
         }
     }
 
-    fn finish_action(&self, action_id: &str, state: ActionState) {
+    pub(crate) fn finish_action(&self, action_id: &str, state: ActionState) {
         self.update_node_action(action_id, state, BTreeMap::new());
     }
 
@@ -511,6 +528,14 @@ impl NodeApp {
                 }
             }
         }
+    }
+}
+
+/// Without the link gateway no provider is owned by a link device.
+#[cfg(not(feature = "link-gateway"))]
+impl NodeApp {
+    pub(super) fn link_action_route(&self, _provider: &orion::ProviderId) -> Option<ActionRoute> {
+        None
     }
 }
 

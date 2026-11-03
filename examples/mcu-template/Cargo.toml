@@ -38,6 +38,9 @@ ffi-uart = []
 ffi-can = []
 # Session counters (`session().stats()`); off in the minimal builds.
 stats = ["orion-link/stats"]
+# Device-side actions (`orion-link/actions`): one request at a time, results reported by the
+# application. Off in the minimal builds.
+actions = ["orion-link/actions"]
 
 [dependencies]
 embedded-can = "0.4"
