@@ -564,6 +564,22 @@ impl RequestService<ControlRequest> for NodeControlService {
                         )
                         .map(|response| ControlResponse::Http(Box::new(response)))
                 }
+                ControlSurface::PeerHttp | ControlSurface::PeerTcp
+                    if matches!(context.principal, ControlPrincipal::Peer(_))
+                        && context.session.is_some()
+                        && !matches!(*message, ControlMessage::OpenSession(_)) =>
+                {
+                    let ControlPrincipal::Peer(peer) = &context.principal else {
+                        unreachable!("guarded above")
+                    };
+                    self.app
+                        .apply_peer_session_message(
+                            &peer.node_id,
+                            context.session.as_ref(),
+                            *message,
+                        )
+                        .map(|response| ControlResponse::Http(Box::new(response)))
+                }
                 ControlSurface::PeerHttp | ControlSurface::PeerTcp => {
                     if let Some(proof) = context.private_link.as_ref() {
                         self.app

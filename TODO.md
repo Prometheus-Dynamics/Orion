@@ -98,9 +98,9 @@ Control protocol:
       result-history bytes in `NodeResourceUsageSnapshot`. Docs: actions.md.
 - [ ] **Peer `ActionWatch`.** A forwarding node subscribes to the owner's action results over
       `orion+tcp` instead of polling it (additive messages). Docs: actions.md, peer-sync.md.
-      Not done on `usage-peer-wire`: blocked on a peer-scoped push session (operator sessions are
-      enrolled-operator only), origin-filtered action watches, and an outgoing push client on the
-      forwarding node. Today the forwarder resends `RunAction` with `wait_ms` while running.
+      Owner side done on `usage-peer-wire` (commit A): a configured peer's push session, narrowed
+      to its forwarded actions (`ActionQuery::forwarded_by`). Forwarder push client and fallback
+      (commit B) still to do; until then the forwarder resends `RunAction` with `wait_ms`.
 - [x] **Replicated host metrics** (done on `usage-peer-wire`: `ObservedStateUpdate::host`, see docs/host-facts.md "Replicated load"). A small, selected set of volatile host metrics carried in peer
       sync (or a peer push) so peers see each other's load without the node-local status lane.
       Docs: host-facts.md, peer-sync.md.

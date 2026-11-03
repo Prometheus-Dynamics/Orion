@@ -55,7 +55,8 @@ use core::fmt;
 ///   `NodeResourceUsageSnapshot::actions` (`ActionUsageSnapshot`), and the peer sync clock in the
 ///   peer status: `PeerTrustRecord::last_successful_sync_ms` and `stale`; replicated host metrics
 ///   (`ObservedStateUpdate::host`, `ReplicatedHostMetrics`, `NodeObservabilitySnapshot::peer_host_metrics`,
-///   `PeerHostMetricsSnapshot`; `docs/host-facts.md`, "Replicated load").
+///   `PeerHostMetricsSnapshot`; `docs/host-facts.md`, "Replicated load"), and `ActionQuery::forwarded_by`
+///   (a configured peer's push session for the actions it forwarded; `docs/actions.md`, "Peer watches").
 pub const CONTROL_PROTOCOL_VERSION: u16 = 7;
 
 /// Fingerprint of the archived layout of the control-protocol types at
@@ -64,7 +65,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 7;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0xaaf6_4230_4168_56fb;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x992d_05e5_490a_cc03;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";
