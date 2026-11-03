@@ -129,13 +129,14 @@ impl<const N: usize> Reassembler<N> {
     /// [`PacketError::Orphan`], [`PacketError::OutOfOrder`], [`PacketError::Interrupted`],
     /// [`PacketError::Overflow`], or [`PacketError::Frame`]. The reassembler stays usable.
     pub fn push(&mut self, segment: &[u8]) -> Result<Option<FrameView<'_>>, PacketError> {
-        self.push_status(segment)?;
-        if self.finished {
-            Ok(frame::view_unchecked(
+        // Matched rather than `?`-ed: moving the `Result` through a temporary copies its 7-byte
+        // payload with `memcpy` on Cortex-M0+.
+        match self.push_status(segment) {
+            Err(err) => Err(err),
+            Ok(false) => Ok(None),
+            Ok(true) => Ok(frame::view_unchecked(
                 self.buf.get(..self.len).unwrap_or_default(),
-            ))
-        } else {
-            Ok(None)
+            )),
         }
     }
 

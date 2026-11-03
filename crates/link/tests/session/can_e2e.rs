@@ -38,6 +38,7 @@ fn exercise(transport: Packet, seed: u64) {
     bus.node(5).up.drop_kinds = vec![kind::PROVIDER_STATE];
     publish(&mut bus, 5, 2);
     assert!(bus.run_until(2_000, |b| host_state(b, 5) == Some(resources("dev-5", 2))));
+    #[cfg(feature = "stats")]
     assert!(bus.nodes[0].device.stats().state_retransmits >= 1);
 
     // Lost lease segments are repaired within one heartbeat.

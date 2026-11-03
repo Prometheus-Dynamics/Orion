@@ -193,6 +193,7 @@ fn stale_acks_and_duplicates_are_ignored() {
     let seq = host.send(&mut device, &Message::Ack { seq: second });
     assert!(!device.state_pending());
     host.send_with_seq(&mut device, &Message::Ack { seq: second }, seq);
+    #[cfg(feature = "stats")]
     assert_eq!(device.stats().duplicates, 1);
     assert_eq!(events(&mut device), vec![DeviceEvent::StateAcked]);
 }
@@ -349,6 +350,7 @@ fn unknown_and_reserved_kinds_are_ignored() {
         device.receive(&wire);
     }
     assert!(events(&mut device).is_empty());
+    #[cfg(feature = "stats")]
     assert_eq!(device.stats().decode_errors, 0);
     assert!(device.is_connected());
 }

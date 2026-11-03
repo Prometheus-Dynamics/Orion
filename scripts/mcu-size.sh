@@ -31,16 +31,16 @@ read -r -a variants <<<"${MCU_SIZE_VARIANTS:-uart can uart-alloc}"
 # Budgets for the minimal UART device (RX = TX = 128), about 15-20% above what it needs today.
 # Raise them only together with an explanation of what the extra bytes buy.
 declare -A flash_budget=(
-    [thumbv6m-none-eabi]=9472
-    [thumbv7em-none-eabihf]=9216
-    [riscv32imc-unknown-none-elf]=11520
-    [riscv32imac-unknown-none-elf]=11520
+    [thumbv6m-none-eabi]=9280
+    [thumbv7em-none-eabihf]=9088
+    [riscv32imc-unknown-none-elf]=11456
+    [riscv32imac-unknown-none-elf]=11456
 )
 declare -A ram_budget=(
-    [thumbv6m-none-eabi]=1056
-    [thumbv7em-none-eabihf]=1056
-    [riscv32imc-unknown-none-elf]=1056
-    [riscv32imac-unknown-none-elf]=1056
+    [thumbv6m-none-eabi]=896
+    [thumbv7em-none-eabihf]=896
+    [riscv32imc-unknown-none-elf]=896
+    [riscv32imac-unknown-none-elf]=896
 )
 
 sysroot="$(rustc --print sysroot)"

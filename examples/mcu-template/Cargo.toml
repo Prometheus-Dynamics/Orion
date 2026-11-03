@@ -17,7 +17,7 @@ path = "src/lib.rs"
 crate-type = ["staticlib", "rlib"]
 
 [features]
-default = ["standalone", "ffi-uart"]
+default = ["standalone", "ffi-uart", "stats"]
 # Everything a standalone staticlib needs: a `#[panic_handler]` (only on bare-metal targets). The
 # default build uses no allocator at all. Rust firmware that has its own panic handler depends on
 # this crate with `default-features = false`.
@@ -36,6 +36,8 @@ panic-handler = []
 ffi-uart = []
 # C entry points over a CAN link instead.
 ffi-can = []
+# Session counters (`session().stats()`); off in the minimal builds.
+stats = ["orion-link/stats"]
 
 [dependencies]
 embedded-can = "0.4"

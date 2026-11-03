@@ -47,10 +47,11 @@ pub const ORION_EVENT_REJECTED: u32 = 1 << 3;
 /// `orion_poll` bit: the host acknowledged the latest snapshot.
 pub const ORION_EVENT_STATE_ACKED: u32 = 1 << 4;
 
+// The C API never publishes status, so the session has no status buffer (`0`).
 #[cfg(feature = "ffi-can")]
-type Session = orion_link::device::CanDevice<RX, TX, StoredName>;
+type Session = orion_link::device::CanDevice<RX, TX, StoredName, 0>;
 #[cfg(all(feature = "ffi-uart", not(feature = "ffi-can")))]
-type Session = orion_link::device::StreamDevice<RX, TX, StoredName>;
+type Session = orion_link::device::StreamDevice<RX, TX, StoredName, 0>;
 
 /// The session's device name: a view of the name stored in [`PORT`], so the session holds no
 /// copy of it.

@@ -307,8 +307,8 @@ of frames carrying the link's host→device identifier to `receive_segment`, and
 the controller can be busy) with the device→host identifier.
 
 Footprint (the `examples/mcu-template` staticlib with its C entry points, `RX = TX = 128`,
-release, LTO, `--gc-sections`): about 8.0 KB of flash and 0.9 KB of static RAM on Cortex-M0+
-(`thumbv6m-none-eabi`) for UART, 9.2 KB for CAN; 7.9 KB on Cortex-M4F; 9.9 KB on RV32IMC. No
+release, LTO, `--gc-sections`): about 7.8 KB of flash and 0.7 KB of static RAM on Cortex-M0+
+(`thumbv6m-none-eabi`) for UART, 8.1 KB for CAN; 7.7 KB on Cortex-M4F; 9.7 KB on RV32IMC. No
 `core::fmt`, no panic machinery, and no atomics are linked, so cores without compare-and-swap work
 as well. `scripts/mcu-size.sh` reports every target, and CI enforces a size budget.
 

@@ -19,17 +19,22 @@ workspace = true
 path = "src/lib.rs"
 
 [features]
-# The default build is the no_std, allocation-free framing layer only.
-default = []
+# The default build is the no_std, allocation-free framing layer, plus the session counters of
+# the device session (`stats`; they take no RAM or code unless `device` is enabled).
+default = ["stats"]
 # The minimal device path: the hand-written postcard-compatible codec with borrowed views (`wire`)
 # and the sans-IO device session (`device`). No allocator, no dependencies.
 device = []
+# Device session counters (`device::DeviceStats`, `DeviceSession::stats`). Off, the counters cost
+# no RAM (about 56 bytes on 32-bit targets) and no flash (about 100 bytes).
+stats = []
 # Typed link messages (postcard + serde over the shared Orion records) and record conveniences on
 # the device session. Still no_std; needs a global allocator. Implies `device`.
 alloc = ["device", "dep:orion-core", "dep:orion-control-plane", "dep:postcard", "dep:serde"]
 # The sans-IO host session (`host`) and `std::error::Error` impls. Implies `alloc`.
 std = [
     "alloc",
+    "stats",
     "orion-core/std",
     "orion-control-plane/std",
     "postcard/use-std",

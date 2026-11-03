@@ -6,8 +6,20 @@ use crate::wire::{
     self, Encode, HelloView, Leases, RawVarint, Reader, RejectReason, WelcomeView, kind,
 };
 
+#[cfg(feature = "stats")]
+use super::DeviceStats;
 use super::events::{DeviceEvent, EventQueue};
-use super::{DeviceConfig, DeviceStats, LinkState, NODE_ID_CAPACITY, PublishError};
+use super::{DeviceConfig, LinkState, NODE_ID_CAPACITY, PublishError};
+
+/// Counts one event in [`DeviceStats`]. Compiles to nothing without the `stats` feature.
+macro_rules! bump {
+    ($core:ident, $field:ident) => {
+        #[cfg(feature = "stats")]
+        {
+            $core.stats.$field = $core.stats.$field.wrapping_add(1);
+        }
+    };
+}
 
 /// Smallest heartbeat the device accepts from a host, so a bad `Welcome` cannot cause a ping flood.
 const MIN_HEARTBEAT_MS: u32 = 10;
@@ -96,11 +108,12 @@ struct Snapshot {
     next_at: Option<u32>,
 }
 
-pub(crate) struct DeviceCore<N, const RX: usize, const TX: usize> {
+/// `ST` is the status buffer size: 0 for a device that never publishes status.
+pub(crate) struct DeviceCore<N, const RX: usize, const TX: usize, const ST: usize> {
     config: DeviceConfig<N>,
     control: [u8; PING_FRAME_MAX],
     snapshot_buf: [u8; TX],
-    status_buf: [u8; TX],
+    status_buf: [u8; ST],
     /// Payload of the last reported lease set of this session; outside a session, the `Hello`.
     leases_buf: [u8; RX],
     leases_len: Option<usize>,
@@ -125,10 +138,11 @@ pub(crate) struct DeviceCore<N, const RX: usize, const TX: usize> {
     /// Earliest time for the next `Status` frame (`None`: any time).
     next_status_at: Option<u32>,
     events: EventQueue,
+    #[cfg(feature = "stats")]
     stats: DeviceStats,
 }
 
-impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
+impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCore<N, RX, TX, ST> {
     /// Largest frame this device can receive and send.
     const LOCAL_MAX: usize = if RX < TX { RX } else { TX };
 
@@ -142,7 +156,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
             config,
             control: [0; PING_FRAME_MAX],
             snapshot_buf: [0; TX],
-            status_buf: [0; TX],
+            status_buf: [0; ST],
             leases_buf: [0; RX],
             leases_len: None,
             node_id: [0; NODE_ID_CAPACITY],
@@ -162,6 +176,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
             pong: RawVarint::EMPTY,
             next_status_at: None,
             events: EventQueue::new(),
+            #[cfg(feature = "stats")]
             stats: DeviceStats::default(),
         }
     }
@@ -170,6 +185,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
         &self.config
     }
 
+    #[cfg(feature = "stats")]
     pub(crate) fn stats(&self) -> DeviceStats {
         self.stats
     }
@@ -231,7 +247,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
 
     fn emit(&mut self, event: DeviceEvent) {
         if !self.events.push(event) {
-            self.stats.events_dropped = self.stats.events_dropped.wrapping_add(1);
+            bump!(self, events_dropped);
         }
     }
 
@@ -259,7 +275,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
             }
         }
         if lost {
-            self.stats.host_timeouts = self.stats.host_timeouts.wrapping_add(1);
+            bump!(self, host_timeouts);
             self.reconnect();
         }
         let hello_due = self.hello_at.is_none_or(|at| reached(now, at));
@@ -297,7 +313,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
     // ---- receive ---------------------------------------------------------------------------
 
     pub(crate) fn handle_frame(&mut self, frame: &FrameView<'_>) {
-        self.stats.frames_received = self.stats.frames_received.wrapping_add(1);
+        bump!(self, frames_received);
         if !frame.header().is_current_version() {
             // REJECT is frozen across versions, so a host speaking another version can still
             // tell us why it refuses. Everything else from another version is ignored.
@@ -322,7 +338,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
     }
 
     fn decode_error(&mut self) {
-        self.stats.decode_errors = self.stats.decode_errors.wrapping_add(1);
+        bump!(self, decode_errors);
     }
 
     fn on_welcome(&mut self, seq: u16, welcome: &WelcomeView<'_>) {
@@ -354,7 +370,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
             next_ping_at: self.now.wrapping_add(heartbeat_ms),
             node_id_len,
         });
-        self.stats.connects = self.stats.connects.wrapping_add(1);
+        bump!(self, connects);
         self.hello_due = false;
         self.hello_backoff_ms = self.config.hello_retry_min_ms.max(1);
         self.reject_backoff_ms = self.config.reject_retry_min_ms.max(1);
@@ -394,7 +410,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
             return; // duplicate
         }
         self.leave_session();
-        self.stats.rejects = self.stats.rejects.wrapping_add(1);
+        bump!(self, rejects);
         self.emit(DeviceEvent::Rejected(reason));
         self.link = Link::Backoff;
         self.hello_due = false;
@@ -411,7 +427,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
             return;
         };
         if !seq_newer(frame.seq(), session.last_seq) {
-            self.stats.duplicates = self.stats.duplicates.wrapping_add(1);
+            bump!(self, duplicates);
             return;
         }
         session.last_seq = frame.seq();
@@ -472,7 +488,11 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
     /// caller must then reset its transmit cursor).
     fn stage(&mut self, source: Source, body: &dyn Encode) -> Result<(usize, bool), PublishError> {
         let frame_len = frame::frame_len(wire::encoded_len(body));
-        let max_frame = self.max_frame().min(TX);
+        let capacity = match source {
+            Source::Status => ST,
+            _ => TX,
+        };
+        let max_frame = self.max_frame().min(capacity);
         if frame_len > max_frame {
             return Err(PublishError::TooLarge {
                 frame_len,
@@ -482,9 +502,9 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
         let aborted = self.out.is_some_and(|out| out.source == source);
         if aborted {
             self.out = None;
-            self.stats.aborted_frames = self.stats.aborted_frames.wrapping_add(1);
+            bump!(self, aborted_frames);
         }
-        let buf = match source {
+        let buf: &mut [u8] = match source {
             Source::Status => &mut self.status_buf,
             _ => &mut self.snapshot_buf,
         };
@@ -509,7 +529,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
     pub(crate) fn publish_status(&mut self, body: &dyn Encode) -> Result<bool, PublishError> {
         let (payload_len, aborted) = self.stage(Source::Status, body)?;
         if self.status_len.replace(payload_len).is_some() {
-            self.stats.status_replaced = self.stats.status_replaced.wrapping_add(1);
+            bump!(self, status_replaced);
         }
         Ok(aborted)
     }
@@ -536,7 +556,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
         let Some(out) = self.out.take() else {
             return;
         };
-        self.stats.frames_sent = self.stats.frames_sent.wrapping_add(1);
+        bump!(self, frames_sent);
         if out.source == Source::State {
             let cap = self
                 .session()
@@ -599,7 +619,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
                 Some(Outgoing { source, len })
             }
             Err(_) => {
-                self.stats.encode_errors = self.stats.encode_errors.wrapping_add(1);
+                bump!(self, encode_errors);
                 None
             }
         }
@@ -612,13 +632,13 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
         let payload_len = self.status_len.take()?;
         if frame::frame_len(payload_len) > max_frame {
             // Published before a smaller frame size was negotiated.
-            self.stats.status_dropped = self.stats.status_dropped.wrapping_add(1);
+            bump!(self, status_dropped);
             return None;
         }
         let seq = self.next_seq();
         let header = FrameHeader::new(kind::STATUS, seq);
         let len = frame::encode_in_place(header, payload_len, &mut self.status_buf).ok()?;
-        self.stats.status_sent = self.stats.status_sent.wrapping_add(1);
+        bump!(self, status_sent);
         self.next_status_at = Some(self.now.wrapping_add(self.config.status_min_interval_ms));
         Some(Outgoing {
             source: Source::Status,
@@ -639,7 +659,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize> DeviceCore<N, RX, TX> {
         )
         .ok()?;
         if snapshot.seqs.is_some() {
-            self.stats.state_retransmits = self.stats.state_retransmits.wrapping_add(1);
+            bump!(self, state_retransmits);
         }
         let first = snapshot.seqs.map_or(seq, |(first, _)| first);
         self.snapshot = Some(Snapshot {

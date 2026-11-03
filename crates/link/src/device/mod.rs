@@ -42,14 +42,15 @@
 //! }
 //! ```
 //!
-//! Memory is fixed (`2 * RX + 2 * TX` plus about 350 bytes on 32-bit targets): the `RX`-byte
+//! Memory is fixed (`2 * RX + TX + ST` plus about 350 bytes on 32-bit targets): the `RX`-byte
 //! receive decoder, an `RX`-byte copy of the current lease set (which also holds the outgoing
-//! `Hello` outside a session), two `TX`-byte buffers (the encoded latest snapshot and the newest
-//! status batch), an 18-byte ping/pong buffer, the node id ([`NODE_ID_CAPACITY`] bytes), a 4-slot
-//! event queue, counters, and timers. Nothing allocates, panics, or formats. With feature
-//! `alloc`, the same session also accepts the full Orion records (`ProviderRecord`,
-//! `ResourceRecord`, `StatusEntry`) and decodes the lease set into `LeaseRecord`s
-//! (`DeviceSession::lease_records`).
+//! `Hello` outside a session), a `TX`-byte buffer for the encoded latest snapshot, an `ST`-byte
+//! buffer for the newest status batch (`ST` is 0 for a device that never publishes status, see
+//! [`DeviceSession`]), an 18-byte ping/pong buffer, the node id ([`NODE_ID_CAPACITY`] bytes), a
+//! 4-slot event queue, and timers. Counters ([`DeviceStats`]) are compiled in with feature
+//! `stats`. Nothing allocates, panics, or formats. With feature `alloc`, the same session also
+//! accepts the full Orion records (`ProviderRecord`, `ResourceRecord`, `StatusEntry`) and decodes
+//! the lease set into `LeaseRecord`s (`DeviceSession::lease_records`).
 
 mod core;
 mod events;
@@ -66,11 +67,11 @@ use crate::wire::{Leases, ProviderBody, ProviderStateView, ResourceBody, Roles, 
 pub const NODE_ID_CAPACITY: usize = 32;
 
 /// A device session over a COBS byte stream.
-pub type StreamDevice<const RX: usize, const TX: usize, N = &'static str> =
-    DeviceSession<Stream, RX, TX, N>;
+pub type StreamDevice<const RX: usize, const TX: usize, N = &'static str, const ST: usize = TX> =
+    DeviceSession<Stream, RX, TX, N, ST>;
 /// A device session over classic CAN or CAN FD.
-pub type CanDevice<const RX: usize, const TX: usize, N = &'static str> =
-    DeviceSession<Packet, RX, TX, N>;
+pub type CanDevice<const RX: usize, const TX: usize, N = &'static str, const ST: usize = TX> =
+    DeviceSession<Packet, RX, TX, N, ST>;
 
 /// Device identity and timing. Timing defaults suit links from 9600 baud UART to CAN FD.
 ///
@@ -158,7 +159,9 @@ impl ::core::fmt::Display for PublishError {
 impl std::error::Error for PublishError {}
 
 /// Counters kept by a [`DeviceSession`] (wrapping). Transport-level drops are in
-/// [`DeviceSession::decoder`]`().stats()`.
+/// [`DeviceSession::decoder`]`().stats()`. Only with feature `stats`; without it the counters are
+/// not compiled in.
+#[cfg(feature = "stats")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DeviceStats {
     /// Valid frames received.
@@ -196,14 +199,26 @@ pub struct DeviceStats {
 /// `T` is [`Stream`] or [`Packet`]; `RX` bounds received frames and `TX` bounds sent frames (both
 /// header + payload + CRC); `N` holds the device name. The device announces `min(RX, TX)` as its
 /// `max_frame`.
-pub struct DeviceSession<T: Transport, const RX: usize, const TX: usize, N = &'static str> {
+///
+/// `ST` bounds the status batches ([`DeviceSession::publish_status`]) and sizes their buffer. It
+/// defaults to `TX`. A device that never publishes status sets it to 0: the status buffer then
+/// takes no RAM, and `publish_status` reports [`PublishError::TooLarge`].
+pub struct DeviceSession<
+    T: Transport,
+    const RX: usize,
+    const TX: usize,
+    N = &'static str,
+    const ST: usize = TX,
+> {
     transport: T,
     rx: T::Decoder<RX>,
     cursor: T::Cursor,
-    core: DeviceCore<N, RX, TX>,
+    core: DeviceCore<N, RX, TX, ST>,
 }
 
-impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<T, RX, TX, N> {
+impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
+    DeviceSession<T, RX, TX, N, ST>
+{
     /// A new session, initially [`LinkState::Connecting`]. Nothing is sent before the first
     /// [`DeviceSession::poll`].
     ///
@@ -326,7 +341,8 @@ impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>> DeviceSessio
         self.core.config()
     }
 
-    /// Session counters.
+    /// Session counters (feature `stats`).
+    #[cfg(feature = "stats")]
     pub fn stats(&self) -> DeviceStats {
         self.core.stats()
     }
@@ -343,14 +359,18 @@ impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>> DeviceSessio
 }
 
 #[cfg(feature = "alloc")]
-impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<T, RX, TX, N> {
+impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
+    DeviceSession<T, RX, TX, N, ST>
+{
     /// The current lease set as `LeaseRecord`s (empty when there is none). Allocates.
     pub fn lease_records(&self) -> alloc::vec::Vec<crate::message::LeaseRecord> {
         crate::message::decode_leases(self.core.leases_payload()).unwrap_or_default()
     }
 }
 
-impl<const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<Stream, RX, TX, N> {
+impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
+    DeviceSession<Stream, RX, TX, N, ST>
+{
     /// Feeds received stream bytes, in chunks of any size (one byte from an RX interrupt is
     /// fine). Corrupt frames are dropped and counted by the decoder. Clock-free.
     pub fn receive(&mut self, bytes: &[u8]) {
@@ -392,7 +412,9 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<Stream, RX, 
     }
 }
 
-impl<const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<Packet, RX, TX, N> {
+impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
+    DeviceSession<Packet, RX, TX, N, ST>
+{
     /// Feeds the data of one received CAN frame. The caller filters by identifier (the link's
     /// host→device id) and skips remote frames. Clock-free.
     pub fn receive_segment(&mut self, data: &[u8]) {
@@ -459,7 +481,9 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<Packet, RX, 
 }
 
 #[cfg(feature = "embedded-can")]
-impl<const RX: usize, const TX: usize, N: AsRef<str>> DeviceSession<Packet, RX, TX, N> {
+impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
+    DeviceSession<Packet, RX, TX, N, ST>
+{
     /// Feeds a received [`embedded_can::Frame`] if it carries `ids.host_to_device`; other
     /// identifiers and remote frames are ignored. Returns whether the frame was for this link.
     pub fn receive_can_frame<F: embedded_can::Frame>(

@@ -35,14 +35,16 @@ With `device` (the minimal device path: still no allocator and no dependencies, 
   Host → device: `WelcomeView`, `decode_reject` / `decode_ack` / `decode_u64`, and `Leases`, an
   iterator of `LeaseView`s (strings borrowed from the receive buffer) over a payload validated
   up front. `str_from_utf8` is a compact UTF-8 validator; `kind`, `Roles`, `RejectReason`.
-- `device`: `DeviceSession<T, RX, TX, N>` with aliases `StreamDevice<RX, TX>` (COBS) and
+- `device`: `DeviceSession<T, RX, TX, N, ST>` with aliases `StreamDevice<RX, TX>` (COBS) and
   `CanDevice<RX, TX>` (CAN / CAN FD). `RX` and `TX` bound received and sent frames; `N` holds the
-  device name (`&'static str` by default, any `AsRef<str>`). Memory is fixed: `2 * RX + 2 * TX`
-  plus about 350 bytes on 32-bit targets: the receive decoder; a copy of the current lease set
-  (which also holds the outgoing `Hello` outside a session); the encoded latest snapshot for
-  retransmission; the newest status batch; and an 18-byte ping/pong buffer, the node id
-  (`NODE_ID_CAPACITY` = 32 bytes), a 4-slot event queue, counters, and timers. Time is kept as a
-  wrapping 32-bit millisecond clock internally, so 64-bit arithmetic stays out of small cores.
+  device name (`&'static str` by default, any `AsRef<str>`). `ST` bounds the status batches and
+  defaults to `TX`; a device that never publishes status passes `0` and takes no status RAM (the
+  C template does this). Memory is fixed: `2 * RX + TX + ST` plus about 350 bytes on 32-bit
+  targets: the receive decoder; a copy of the current lease set (which also holds the outgoing
+  `Hello` outside a session); the encoded latest snapshot for retransmission; the newest status
+  batch; and an 18-byte ping/pong buffer, the node id (`NODE_ID_CAPACITY` = 32 bytes), a 4-slot
+  event queue, and timers, plus the counters with feature `stats`. Time is kept as a wrapping
+  32-bit millisecond clock internally, so 64-bit arithmetic stays out of small cores.
 
   | Call | Purpose |
   | --- | --- |
@@ -103,8 +105,9 @@ carries the node id, read it with `node_id()`), `DeviceConfig` is generic over t
 
 | Feature | Effect |
 | --- | --- |
-| *(default)* | Framing only: no allocator, no dependencies. |
+| *(default)* | Framing only: no allocator, no dependencies. Also enables `stats`. |
 | `device` | `wire` and `device`: the minimal device path. No allocator, no dependencies. |
+| `stats` | `device::DeviceStats` and `DeviceSession::stats()`. Off, the counters take no RAM (about 56 bytes on 32-bit targets) and no flash (about 100 bytes). Implied by `std` and by the default features. |
 | `alloc` | `message` and the record conveniences on the device session; implies `device`; pulls `orion-core` and `orion-control-plane` (`default-features = false`), `postcard` (`alloc`), and `serde`. |
 | `std` | `host`, `Display`, and `std::error::Error` impls; implies `alloc` and enables `std` on those dependencies. |
 | `crc-table` | 1 KiB CRC table instead of 64 bytes, for roughly twice the CRC throughput. |
@@ -129,25 +132,27 @@ codec, framing; release, `opt-level = "z"`, LTO) with `--gc-sections`. Minimal d
 
 | Target | Link | Flash | Static RAM | of which compiler-builtins `mem*` |
 | --- | --- | --- | --- | --- |
-| `thumbv6m-none-eabi` (Cortex-M0/M0+) | UART | 8,048 B | 908 B | 204 B |
-| `thumbv6m-none-eabi` | CAN | 9,180 B | 932 B | 1,000 B |
-| `thumbv7em-none-eabihf` (Cortex-M4F) | UART | 7,856 B | 908 B | 290 B |
-| `thumbv7em-none-eabihf` | CAN | 9,078 B | 932 B | 1,252 B |
-| `riscv32imc-unknown-none-elf` | UART | 9,860 B | 908 B | 140 B |
-| `riscv32imc-unknown-none-elf` | CAN | 10,528 B | 932 B | 566 B |
-| `riscv32imac-unknown-none-elf` | UART | 9,860 B | 908 B | 140 B |
-| `riscv32imac-unknown-none-elf` | CAN | 10,528 B | 932 B | 566 B |
+| `thumbv6m-none-eabi` (Cortex-M0/M0+) | UART | 7,814 B | 724 B | 222 B |
+| `thumbv6m-none-eabi` | CAN | 8,066 B | 748 B | 222 B |
+| `thumbv7em-none-eabihf` (Cortex-M4F) | UART | 7,690 B | 724 B | 312 B |
+| `thumbv7em-none-eabihf` | CAN | 7,934 B | 748 B | 312 B |
+| `riscv32imc-unknown-none-elf` | UART | 9,652 B | 724 B | 136 B |
+| `riscv32imc-unknown-none-elf` | CAN | 9,792 B | 748 B | 136 B |
+| `riscv32imac-unknown-none-elf` | UART | 9,652 B | 724 B | 136 B |
+| `riscv32imac-unknown-none-elf` | CAN | 9,792 B | 748 B | 136 B |
 
 The full-record variant (`--features global-heap`: records, postcard/serde, the 8 KiB example
 heap) is 18.8 KB flash on Cortex-M4F and 21.4 KB on `riscv32imac`, plus 9.1 KB RAM. Before the
 minimal path existed, the template needed 26.9 KB flash and 1.2 KB RAM plus an 8 KiB heap on
 Cortex-M4F (31.1 KB on `riscv32imac`) and did not build for cores without compare-and-swap.
 
-Flash of the minimal UART build on Cortex-M0+, by component: device session state machine 3.1 KB,
-wire codec 2.1 KB, framing (COBS, CRC-32C, frame checks) 1.5 KB, template and C API 1.1 KB,
+Flash of the minimal UART build on Cortex-M0+, by component: device session state machine 2.9 KB,
+wire codec 2.1 KB, framing (COBS, CRC-32C, frame checks) 1.4 KB, template and C API 1.1 KB,
 compiler-builtins 0.2 KB. The binary contains no `core::fmt`, no panic machinery, no `memcpy`
-(UART), and no 64-bit multiply. CI (`link-no-std`) fails if the minimal UART build exceeds its
-per-target budget in `scripts/mcu-size.sh` (about 17% above these numbers);
+(UART or CAN), and no 64-bit multiply. The C template keeps no status buffer (its session has
+`ST = 0`) and the device counters are off (`stats` feature). CI (`link-no-std`) fails if the
+minimal UART build exceeds its per-target budget in `scripts/mcu-size.sh` (about 18% above these
+numbers);
 `MCU_SIZE_BREAKDOWN=1` prints the per-component split for every build.
 
 ## Tests
