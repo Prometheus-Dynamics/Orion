@@ -3,6 +3,17 @@
 Tracks Orion's integration with its first consumers and appliance hardening work. See
 [CHANGELOG.md](CHANGELOG.md) for the user-facing summary of what landed.
 
+## Alpha (Raze)
+
+The user, 2026-11-03: the next release is an alpha for the Raze (CM5) hardware only. These come
+first; the other items below are still needed, after it.
+
+- [ ] **aarch64 appliance soak** on the Raze (below, under freeze items).
+- [ ] **Unknown arguments start a node** (below): `orion-node --version` on the Raze.
+- [ ] **Byte-bounded watch queues** (below): the Raze runs HeliOS's watchers.
+- [ ] **Protocol v7 on the Raze:** once the current pin is proven on the board, the v7 window
+      (Lemnos orion-v7 merge, HeliOS and Atlas together, the PV images' orion-node).
+
 ## Next release (1.0.0)
 
 The release list: the 2026-10-27 feature freeze plus the hardware-support work added on 2026-10-30
