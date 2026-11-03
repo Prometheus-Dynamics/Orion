@@ -86,7 +86,7 @@ signed types, the version history in `crates/core/src/protocol.rs`, and the docs
 
 Control protocol:
 
-- [ ] **Client event queue bytes.** `NodeResourceUsageSnapshot` gains the per-client queued bytes
+- [x] **Client event queue bytes** (done on `usage-peer-wire`, CHANGELOG [Unreleased]). `NodeResourceUsageSnapshot` gains the per-client queued bytes
       and the byte limit next to the event counts (737579d added the cap); `orionctl get memory`
       shows them. The Prometheus gauge `orion_local_client_event_queue_bytes` is text, not wire, but
       ships with it. Docs: node-env.md (`ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES`).

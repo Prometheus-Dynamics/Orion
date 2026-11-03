@@ -49,7 +49,9 @@ use core::fmt;
 ///   `<name>.cancel` companion action (`docs/actions.md`, "Long-running jobs").
 /// - `7`: blob push (`docs/blobs.md`): `ControlMessage::BeginBlob`, `WriteBlobChunk`, `CommitBlob`,
 ///   `QueryBlobs`, `DeleteBlob`, `Blob`, `Blobs`; `BlobBegin`, `BlobChunk`, `BlobState`,
-///   `BlobStatus`.
+///   `BlobStatus`. Queued client event bytes next to the counts in
+///   `NodeResourceUsageSnapshot::local_streams` (`client_event_queue_byte_limit`,
+///   `queued_client_event_bytes_total` / `_max`).
 pub const CONTROL_PROTOCOL_VERSION: u16 = 7;
 
 /// Fingerprint of the archived layout of the control-protocol types at
@@ -58,7 +60,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 7;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x5561_4b70_cdf9_8a72;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x1d38_5e9c_c669_82ca;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

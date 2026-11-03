@@ -180,6 +180,12 @@ pub struct LocalStreamUsageSnapshot {
     pub queued_client_events_max: u64,
     /// Events discarded because a registered client's pending queue was full.
     pub dropped_client_events_total: u64,
+    /// Configured per-client pending byte limit (`ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES`).
+    pub client_event_queue_byte_limit: u64,
+    /// Bytes charged to the pending events of all registered clients, summed.
+    pub queued_client_event_bytes_total: u64,
+    /// Bytes charged to the pending events of the most loaded registered client.
+    pub queued_client_event_bytes_max: u64,
 }
 
 /// Queue depth for a bounded background worker.

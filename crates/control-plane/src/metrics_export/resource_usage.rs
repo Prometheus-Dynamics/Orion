@@ -233,6 +233,21 @@ fn append_local_stream_metrics(out: &mut String, node: &str, usage: &NodeResourc
         &[("node_id", node)],
         streams.client_event_queue_limit,
     );
+    append_total_max(
+        out,
+        node,
+        "orion_local_client_event_queue_bytes",
+        "Bytes charged to pending local client events, summed or per-client maximum.",
+        streams.queued_client_event_bytes_total,
+        streams.queued_client_event_bytes_max,
+    );
+    gauge(
+        out,
+        "orion_local_client_event_queue_byte_limit",
+        "Configured per-client pending byte limit.",
+        &[("node_id", node)],
+        streams.client_event_queue_byte_limit,
+    );
     gauge(
         out,
         "orion_local_client_dropped_events",

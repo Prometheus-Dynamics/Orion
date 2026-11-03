@@ -276,6 +276,9 @@ fn sample_resource_usage() -> NodeResourceUsageSnapshot {
             queued_client_events_total: 7,
             queued_client_events_max: 6,
             dropped_client_events_total: 2,
+            client_event_queue_byte_limit: 65536,
+            queued_client_event_bytes_total: 4096,
+            queued_client_event_bytes_max: 2048,
         },
         worker_queues: vec![
             WorkerQueueUsageSnapshot {

@@ -170,6 +170,8 @@ Exported metric families:
 | `orion_local_client_event_queue_depth` | gauge | `node_id`, `stat` | Pending client events; `stat` is `total` or `max`. |
 | `orion_local_client_event_queue_limit` | gauge | `node_id` | `ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT`. |
 | `orion_local_client_dropped_events` | gauge | `node_id` | Events dropped from full client queues, summed over currently registered clients. |
+| `orion_local_client_event_queue_bytes` | gauge | `node_id`, `stat` | Bytes charged to pending client events (`docs/node-env.md`, `ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES`); `stat` is `total` (all registered clients) or `max` (most loaded client). |
+| `orion_local_client_event_queue_byte_limit` | gauge | `node_id` | Configured per-client pending byte limit. |
 | `orion_worker_queue_depth`, `orion_worker_queue_capacity` | gauge | `node_id`, `queue` | `queue` is `persistence`, `auth_state`, or `audit_log`; only running workers are listed. |
 | `orion_worker_queue_dropped_total` | counter | `node_id`, `queue` | Records dropped by an overload policy (currently `audit_log`). |
 | `orion_registry_entries` | gauge | `node_id`, `registry` | `peers`, `local_clients`, `local_providers`, `local_executors`, `communication_endpoints`, `recent_events`, `auth_nonce_peers`, `auth_seen_nonces`. |

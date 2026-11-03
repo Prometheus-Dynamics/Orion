@@ -147,6 +147,7 @@ impl NodeApp {
             registered_clients: usize_to_u64(clients.len()),
             send_queue_capacity: usize_to_u64(tuning.local_stream_send_queue_capacity),
             client_event_queue_limit: usize_to_u64(tuning.local_client_event_queue_limit),
+            client_event_queue_byte_limit: usize_to_u64(tuning.local_client_event_queue_bytes),
             ..LocalStreamUsageSnapshot::default()
         };
         for client in clients.values() {
@@ -163,6 +164,12 @@ impl NodeApp {
             usage.queued_client_events_total =
                 usage.queued_client_events_total.saturating_add(queued);
             usage.queued_client_events_max = usage.queued_client_events_max.max(queued);
+            let queued_bytes = usize_to_u64(client.queued_events.bytes());
+            usage.queued_client_event_bytes_total = usage
+                .queued_client_event_bytes_total
+                .saturating_add(queued_bytes);
+            usage.queued_client_event_bytes_max =
+                usage.queued_client_event_bytes_max.max(queued_bytes);
             usage.dropped_client_events_total = usage
                 .dropped_client_events_total
                 .saturating_add(client.dropped_events);
