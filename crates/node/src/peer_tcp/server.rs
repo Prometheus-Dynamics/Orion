@@ -67,6 +67,20 @@ impl NodeApp {
             .execute_peer_tcp_request(request, session, remote)
             .await
         {
+            Err(err @ NodeError::Authentication(_)) => {
+                let error = err.to_string();
+                let peer = remote.to_string();
+                crate::auth::failure_log::record(crate::auth::failure_log::AuthFailure {
+                    side: "node serves peer request",
+                    peer: &peer,
+                    key_fingerprint: "none",
+                    check: "request",
+                    transcript_len: request.len(),
+                    nonce_len: 0,
+                    error: &error,
+                });
+                (STATUS_ERROR, error.into_bytes())
+            }
             Ok(response) => {
                 if let HttpResponsePayload::Session(welcome) = &response {
                     opened = Some(welcome.session_id.clone());

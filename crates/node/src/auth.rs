@@ -1,4 +1,5 @@
 mod crypto;
+pub(crate) mod failure_log;
 mod local_access;
 mod modes;
 mod operators;

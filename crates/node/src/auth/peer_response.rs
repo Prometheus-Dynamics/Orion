@@ -54,9 +54,25 @@ impl NodeSecurity {
             }
             return Ok(());
         };
-        let public_key = parse_public_key_bytes(&signature.public_key)?;
-        self.ensure_peer_is_not_revoked(responder)?;
-        self.validate_configured_or_trusted_peer_key(responder, public_key)?;
+        let fingerprint = orion_auth::crypto::key_fingerprint(&signature.public_key);
+        let fail = |check: &'static str, error: String| {
+            super::failure_log::record(super::failure_log::AuthFailure {
+                side: "node verifies peer response",
+                peer: responder.as_str(),
+                key_fingerprint: &fingerprint,
+                check,
+                transcript_len: 0,
+                nonce_len: 0,
+                error: &error,
+            });
+            NodeError::Authentication(error)
+        };
+        let public_key = parse_public_key_bytes(&signature.public_key)
+            .map_err(|err| fail("key", err.to_string()))?;
+        self.ensure_peer_is_not_revoked(responder)
+            .map_err(|err| fail("revoked", err.to_string()))?;
+        self.validate_configured_or_trusted_peer_key(responder, public_key)
+            .map_err(|err| fail("trusted key", err.to_string()))?;
         orion_auth::crypto::verify_peer_response(
             responder,
             &public_key,
@@ -66,9 +82,26 @@ impl NodeSecurity {
             signature,
         )
         .map_err(|err| {
-            NodeError::Authentication(format!(
-                "response signature from peer {responder} did not verify: {err}"
-            ))
+            let transcript_len = orion_auth::canonical_peer_response_bytes(
+                orion_auth::PEER_RESPONSE_AUTH_VERSION,
+                responder,
+                &public_key,
+                request,
+                status,
+                body,
+            )
+            .map_or(0, |bytes| bytes.len());
+            let error = format!("response signature from peer {responder} did not verify: {err}");
+            super::failure_log::record(super::failure_log::AuthFailure {
+                side: "node verifies peer response",
+                peer: responder.as_str(),
+                key_fingerprint: &fingerprint,
+                check: "signature",
+                transcript_len,
+                nonce_len: 0,
+                error: &error,
+            });
+            NodeError::Authentication(error)
         })
     }
 }
