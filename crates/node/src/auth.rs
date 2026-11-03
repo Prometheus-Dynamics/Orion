@@ -1,4 +1,5 @@
 mod crypto;
+#[cfg(feature = "peer-tcp")]
 pub(crate) mod failure_log;
 mod local_access;
 mod modes;
