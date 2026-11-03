@@ -25,7 +25,15 @@ when, blocked by.
 - [ ] **aarch64 appliance soak.** Why: the frozen soak item; orion-node runs on every board. Data so
       far (2026-10-31, reference board #1, the packaged node under the device runtime's real load): 7 days up, 0 restarts,
       PSS 9.8 MiB / RSS 11.3 MiB. Left: a release aarch64 build's 24 h PSS curve after warm-up,
-      recorded in docs/node-env.md. Blocked by: nothing (the coordinator lends reference board #1 on request).
+      recorded in docs/node-env.md. Running since 2026-11-02 11:55 UTC (board clock) on reference
+      board #1: the installed packaged release node under the device runtime's load, sampled every
+      10 min into `/var/lib/orion-soak/pss.csv` (epoch, pid, NRestarts, PSS/RSS/private dirty/anon
+      kB, threads) by `/var/lib/orion-soak/sample.sh` from the transient `orion-pss-soak.timer`,
+      which `orion-pss-soak-stop.timer` stops after 24 h. Transient timers do not survive a reboot:
+      a gap in the epochs means the board rebooted. First sample: PSS 5.4 MiB, RSS 8.2 MiB, private
+      dirty 4.1 MiB, 9 threads (just after a restart, so warm-up starts there). It measures the
+      board's current pin, not protocol 1, whose node the board's consumers cannot talk to yet.
+      Then: read the CSV, record the curve in docs/node-env.md.
 - [x] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate public types,
       aliases or client methods remain across orion-client/control-plane/node, and docs match.
       Blocked by: nothing. Done: removed `RemoteOperator::action` (kept `query_action`), the
@@ -319,12 +327,17 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
 
 ### Persistence
 
-- [ ] Find the device trigger of the 5 s idle persist. On the reference board `state persistence
-      succeeded` logged every 5 s (the reconcile backstop) with nothing changing. On the bench an
-      idle node writes nothing (0 writes in 600 ms, also with a provider re-publishing identical
-      snapshots), so the trigger is a reconcile flag (`runtime_changed` or `applied_revision_changed`)
-      that flips on the device. Run with `RUST_LOG=orion_node=debug` on the board and read the
-      `reconcile pass changed observed state; persisting` line that names the flag.
+- [x] Find the device trigger of the 5 s idle persist. Found 2026-11-02 on reference board #1 with
+      `RUST_LOG=orion_node=debug` (35 s capture): every reconcile pass logged `changed=false
+      runtime_changed=false applied_revision_changed=false`, so it was not a reconcile flag. The
+      board's build (pre-f84e233) counted an executor's republish of an identical snapshot with a
+      fresh `observed_at_ms` as an observed change; the observed coalescer (2 s default then) wrote
+      it on the next 5 s backstop pass. The bench did not reproduce it because its test publishers
+      sent no fresh timestamps. Fixed on dev by f84e233 (timestamp-only republishes are not
+      changes; default interval 30 s) and 9e2f85e (observed state is never written). To confirm on
+      the board once it runs a protocol 1 node: `state persistence succeeded` (debug level now) no
+      longer appears while idle. Side note from the capture: right after the restart the stream
+      socket saw ~11 session opens/s for ~35 s (clients reconnecting); no churn afterwards.
 
 ### CI
 
