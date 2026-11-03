@@ -9,7 +9,7 @@ use orion_control_plane::{
     AvailabilityState, DesiredState, ExecutorRecord, ResourceBinding, ResourceRecord,
     WorkloadObservedState, WorkloadRecord, WorkloadRequirement,
 };
-use orion_core::{ExecutorId, NodeId, ResourceId, WorkloadId};
+use orion_core::{NodeId, ResourceId, RuntimeType, WorkloadId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReconcileReport {
@@ -19,6 +19,19 @@ pub struct ReconcileReport {
     /// Requirements of local running workloads that neither local resources nor held
     /// cross-node leases satisfy. The node resolves them against remote resources.
     pub unsatisfied: Vec<UnsatisfiedRequirement>,
+    /// Local workloads this pass could neither start nor stop because no local executor
+    /// realizes their runtime type. They are skipped; the rest of the pass still runs. Use
+    /// [`Runtime::unsupported_workloads`] to name them.
+    pub unsupported_runtime_count: usize,
+}
+
+/// A local workload that no local executor can start or stop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnsupportedWorkload<'a> {
+    pub workload_id: &'a WorkloadId,
+    pub runtime_type: &'a RuntimeType,
+    /// Some executor registered on another node declares this runtime type.
+    pub executor_on_other_node: bool,
 }
 
 /// `missing` units of `requirement` of `workload_id` could not be bound.
@@ -165,6 +178,7 @@ impl Runtime {
         let mut desired_ids = BTreeSet::<WorkloadId>::new();
         let mut reserved_resource_ids = observed_active_resource_claim_counts(store);
         let mut unsatisfied = Vec::new();
+        let mut unsupported_runtime_count = 0_usize;
 
         for workload in store.local_desired_workloads_iter() {
             desired_ids.insert(workload.workload_id.clone());
@@ -176,6 +190,13 @@ impl Runtime {
 
             match workload.desired_state {
                 DesiredState::Running => {
+                    // No local executor realizes this runtime type, so nothing here can start
+                    // or stop the workload. It is skipped rather than failing the whole pass.
+                    if executor_for(&local_executors, &workload.runtime_type).is_none() {
+                        unsupported_runtime_count += 1;
+                        continue;
+                    }
+
                     let released_resource_ids = observed_resource_claim_counts(
                         observed.map(|record| record.resource_bindings.as_slice()),
                     );
@@ -218,22 +239,24 @@ impl Runtime {
                         // A cross-node lease this workload ran with is gone (released after the
                         // owner disappeared, or lost to a competing holder): the workload must
                         // stop using the resource. It starts again once it is bound again.
-                        commands.push(ExecutorCommand::Stop {
-                            executor_id: self
-                                .select_executor_id(&observed.runtime_type, &local_executors)?,
-                            workload_id: observed.workload_id.clone(),
-                        });
+                        push_stop(
+                            &mut commands,
+                            &mut unsupported_runtime_count,
+                            &local_executors,
+                            observed,
+                        );
                     }
                 }
                 DesiredState::Stopped => {
                     if let Some(observed) = observed
                         && is_active(observed.observed_state)
                     {
-                        commands.push(ExecutorCommand::Stop {
-                            executor_id: self
-                                .select_executor_id(&observed.runtime_type, &local_executors)?,
-                            workload_id: observed.workload_id.clone(),
-                        });
+                        push_stop(
+                            &mut commands,
+                            &mut unsupported_runtime_count,
+                            &local_executors,
+                            observed,
+                        );
                     }
                 }
             }
@@ -245,11 +268,12 @@ impl Runtime {
             }
 
             if is_active(observed.observed_state) {
-                commands.push(ExecutorCommand::Stop {
-                    executor_id: self
-                        .select_executor_id(&observed.runtime_type, &local_executors)?,
-                    workload_id: observed.workload_id.clone(),
-                });
+                push_stop(
+                    &mut commands,
+                    &mut unsupported_runtime_count,
+                    &local_executors,
+                    observed,
+                );
             }
         }
 
@@ -258,20 +282,69 @@ impl Runtime {
             desired_revision: store.desired.revision,
             commands,
             unsatisfied,
+            unsupported_runtime_count,
         })
     }
+}
 
-    fn select_executor_id(
+impl Runtime {
+    /// Local workloads that `reconcile` cannot start or stop because no local executor declares
+    /// their runtime type. Borrows from `store`, so naming them allocates nothing.
+    pub fn unsupported_workloads<'a>(
         &self,
-        runtime_type: &orion_core::RuntimeType,
-        executors: &[&ExecutorRecord],
-    ) -> Result<ExecutorId, RuntimeError> {
-        executors
-            .iter()
-            .find(|executor| executor.runtime_types.contains(runtime_type))
-            .map(|executor| executor.executor_id.clone())
-            .ok_or_else(|| RuntimeError::UnsupportedRuntimeType(runtime_type.clone()))
+        store: &'a LocalRuntimeStore,
+    ) -> impl Iterator<Item = UnsupportedWorkload<'a>> + 'a {
+        let running = store
+            .local_desired_workloads_iter()
+            .filter(|workload| workload.desired_state == DesiredState::Running);
+        let active = store
+            .local_observed_workloads_iter()
+            .filter(|workload| is_active(workload.observed_state));
+        running
+            .chain(active)
+            .filter(move |workload| {
+                !store
+                    .local_executors_iter()
+                    .any(|executor| executor.runtime_types.contains(&workload.runtime_type))
+            })
+            .map(move |workload| UnsupportedWorkload {
+                workload_id: &workload.workload_id,
+                runtime_type: &workload.runtime_type,
+                executor_on_other_node: store
+                    .desired
+                    .executors
+                    .values()
+                    .any(|executor| executor.runtime_types.contains(&workload.runtime_type)),
+            })
     }
+}
+
+/// Queues a stop for `observed` through the local executor that realizes its runtime type. With
+/// no such executor nothing here can stop it, so it is counted as unsupported instead.
+fn push_stop(
+    commands: &mut Vec<ExecutorCommand>,
+    unsupported_runtime_count: &mut usize,
+    executors: &[&ExecutorRecord],
+    observed: &WorkloadRecord,
+) {
+    match executor_for(executors, &observed.runtime_type) {
+        Some(executor) => commands.push(ExecutorCommand::Stop {
+            executor_id: executor.executor_id.clone(),
+            workload_id: observed.workload_id.clone(),
+        }),
+        None => *unsupported_runtime_count += 1,
+    }
+}
+
+/// The first local executor that declares `runtime_type`.
+fn executor_for<'a>(
+    executors: &[&'a ExecutorRecord],
+    runtime_type: &RuntimeType,
+) -> Option<&'a ExecutorRecord> {
+    executors
+        .iter()
+        .copied()
+        .find(|executor| executor.runtime_types.contains(runtime_type))
 }
 
 fn reserved_claim_count(

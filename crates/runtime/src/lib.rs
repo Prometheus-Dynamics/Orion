@@ -16,7 +16,7 @@ pub use provider::{
     ProviderDescriptor, ProviderIntegration, ProviderSnapshot,
     validate_requirement_against_resource,
 };
-pub use reconcile::{ReconcileReport, Runtime, UnsatisfiedRequirement};
+pub use reconcile::{ReconcileReport, Runtime, UnsatisfiedRequirement, UnsupportedWorkload};
 pub use state::{LocalRuntimeStore, RemoteLease, RuntimeSnapshot};
 
 #[cfg(test)]
@@ -129,6 +129,67 @@ mod tests {
         assert_eq!(plan.executor_id.as_str(), "executor.local");
         assert_eq!(plan.resource_bindings.len(), 1);
         assert_eq!(plan.resource_bindings[0].node_id.as_str(), "node-a");
+    }
+
+    #[test]
+    fn reconcile_skips_workload_without_local_executor_and_starts_the_rest() {
+        let mut store = runtime_store();
+        let mut supported = workload_record(DesiredState::Running);
+        supported.requirements.clear();
+        store.desired.put_workload(supported);
+        let mut unsupported = workload_record(DesiredState::Running);
+        unsupported.workload_id = WorkloadId::new("workload.unknown");
+        unsupported.runtime_type = RuntimeType::new("unknown.exec.v1");
+        unsupported.requirements.clear();
+        store.desired.put_workload(unsupported);
+
+        let runtime = Runtime::new(NodeId::new("node-a"));
+        let report = runtime
+            .reconcile(&store)
+            .expect("one unsupported workload must not fail the pass");
+
+        assert_eq!(
+            report.commands.len(),
+            1,
+            "the supported workload still starts"
+        );
+        assert!(
+            matches!(&report.commands[0], ExecutorCommand::Start(plan) if plan.workload.workload_id.as_str() == "workload.pose")
+        );
+        assert_eq!(report.unsupported_runtime_count, 1);
+        let named: Vec<_> = runtime
+            .unsupported_workloads(&store)
+            .map(|entry| {
+                (
+                    entry.workload_id.as_str().to_string(),
+                    entry.executor_on_other_node,
+                )
+            })
+            .collect();
+        assert_eq!(named, vec![("workload.unknown".to_string(), false)]);
+    }
+
+    #[test]
+    fn unsupported_workload_is_marked_when_an_executor_on_another_node_declares_it() {
+        let mut store = runtime_store();
+        let mut workload = workload_record(DesiredState::Running);
+        workload.runtime_type = RuntimeType::new("remote.exec.v1");
+        workload.requirements.clear();
+        store.desired.put_workload(workload);
+        store.desired.put_executor(ExecutorRecord {
+            executor_id: ExecutorId::new("executor.remote"),
+            node_id: NodeId::new("node-b"),
+            runtime_types: vec![RuntimeType::new("remote.exec.v1")],
+        });
+
+        let runtime = Runtime::new(NodeId::new("node-a"));
+        let report = runtime.reconcile(&store).expect("reconcile should succeed");
+
+        assert!(report.commands.is_empty());
+        assert_eq!(report.unsupported_runtime_count, 1);
+        let entries: Vec<_> = runtime.unsupported_workloads(&store).collect();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].executor_on_other_node);
     }
 
     #[test]

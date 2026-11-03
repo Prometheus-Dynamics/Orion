@@ -173,7 +173,7 @@ pub mod runtime {
     pub use orion_runtime::{
         ExecutorCommand, ExecutorDescriptor, ExecutorIntegration, ExecutorSnapshot,
         LocalRuntimeStore, ProviderDescriptor, ProviderIntegration, ProviderSnapshot,
-        ReconcileReport, Runtime, RuntimeError, RuntimeSnapshot, WorkloadPlan,
+        ReconcileReport, Runtime, RuntimeError, RuntimeSnapshot, UnsupportedWorkload, WorkloadPlan,
         validate_requirement_against_resource,
     };
 }
