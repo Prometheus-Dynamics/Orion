@@ -39,9 +39,21 @@ use std::vec::Vec;
 
 use crate::crc::{Crc32c, crc32c};
 use crate::wire::{
-    ActivateMode, DeviceInfoView, XferAbortView, XferAckView, XferResultView, XferStatus,
-    max_chunk_for_frame,
+    ActivateMode, DeviceInfoView, RollbackReason, XferAbortView, XferAckView, XferResultView,
+    XferStatus, max_chunk_for_frame,
 };
+
+/// A trial the device's bootloader rolled back, as the device reported it (owned copy of
+/// [`crate::wire::TrialRollback`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rollback {
+    /// Version of the rolled-back trial image.
+    pub version: String,
+    /// Why the bootloader rolled it back.
+    pub reason: RollbackReason,
+    /// The device's short note (empty if none).
+    pub note: String,
+}
 
 /// Device identity and firmware state, as the device reported it (owned copy of
 /// [`DeviceInfoView`]).
@@ -61,6 +73,8 @@ pub struct DeviceInfo {
     pub xfer_window: u8,
     /// Bootloader name and version (empty if unknown).
     pub bootloader: String,
+    /// The last trial the bootloader rolled back, if it reports one.
+    pub rollback: Option<Rollback>,
 }
 
 impl DeviceInfo {
@@ -75,6 +89,11 @@ impl DeviceInfo {
             xfer_max_chunk: view.xfer_max_chunk,
             xfer_window: view.xfer_window,
             bootloader: String::from(view.bootloader),
+            rollback: view.rollback.map(|rollback| Rollback {
+                version: String::from(rollback.version),
+                reason: rollback.reason,
+                note: String::from(rollback.note),
+            }),
         }
     }
 }
@@ -218,9 +237,14 @@ pub enum Failure {
     Device(XferStatus),
     /// Too many chunk or request retries without progress.
     Retries,
-    /// The device came back with the old version after the new one ran (its bootloader reverted).
-    RolledBack,
-    /// The device never came back with the new version after activation.
+    /// The device's bootloader rolled the trial back and reported why (see
+    /// [`FirmwareTransfer::rollback`] for the device's note).
+    RolledBack {
+        /// Why the bootloader rolled it back.
+        reason: RollbackReason,
+    },
+    /// The device did not come back running the new version after activation, and reported no
+    /// rollback (an older bootloader, or a device without the report). The silent fallback.
     NotActivated,
     /// A deadline passed (no reconnect, or no confirmation).
     Timeout,
@@ -280,6 +304,8 @@ pub struct FirmwareTransfer {
     /// Bytes the device has acknowledged.
     acked: u32,
     info: Option<DeviceInfo>,
+    /// The rollback the device reported for this transfer's trial (set when it failed that way).
+    rollback: Option<Rollback>,
     connected: bool,
     max_frame: usize,
     /// When the request in flight was sent (`None`: nothing in flight).
@@ -302,6 +328,7 @@ impl FirmwareTransfer {
             phase: Phase::Begin,
             acked: 0,
             info: None,
+            rollback: None,
             connected: false,
             max_frame: 0,
             pending_since: None,
@@ -389,6 +416,13 @@ impl FirmwareTransfer {
         self.info.as_ref()
     }
 
+    /// The rollback the device reported for this transfer's trial, when the transfer failed with
+    /// [`Failure::RolledBack`] (it carries the device's note, which the failure does not).
+    #[must_use]
+    pub fn rollback(&self) -> Option<&Rollback> {
+        self.rollback.as_ref()
+    }
+
     /// Sets the health gate: the device may be confirmed once this is `true` (after the trial
     /// came up). Until then the driver waits; a trial that stays unconfirmed times out.
     pub fn set_confirm_gate(&mut self, healthy: bool) {
@@ -420,7 +454,21 @@ impl FirmwareTransfer {
     pub fn on_info(&mut self, info: DeviceInfo) {
         let at_target = info.fw_version == self.plan.version;
         let trial = info.trial;
+        // A rollback report counts for this transfer's trial only, and only while the device runs
+        // something else (a report for the running version is stale).
+        let reported = info
+            .rollback
+            .clone()
+            .filter(|rollback| rollback.version == self.plan.version && !at_target);
         self.info = Some(info);
+        if let Some(rollback) = reported
+            && matches!(self.phase, Phase::AwaitTrial | Phase::Confirm)
+        {
+            let reason = rollback.reason;
+            self.rollback = Some(rollback);
+            self.fail(Failure::RolledBack { reason });
+            return;
+        }
         match self.phase {
             Phase::AwaitTrial | Phase::Activate => {
                 if at_target {
@@ -432,7 +480,7 @@ impl FirmwareTransfer {
                     }
                 } else if self.phase == Phase::AwaitTrial {
                     if self.seen_target {
-                        self.fail(Failure::RolledBack);
+                        self.fail(Failure::NotActivated);
                     } else if self.activate_attempts < self.config.max_activate_attempts {
                         // The activation did not reach the device: send it again.
                         self.set_phase(Phase::Activate);
@@ -445,7 +493,8 @@ impl FirmwareTransfer {
                 if at_target && !trial {
                     self.set_phase(Phase::Succeeded);
                 } else if !at_target {
-                    self.fail(Failure::RolledBack);
+                    // Back on the old version with no rollback report: the silent fallback.
+                    self.fail(Failure::NotActivated);
                 }
             }
             // The device may still report (its activation message) before the link goes
@@ -616,7 +665,9 @@ impl FirmwareTransfer {
                     self.fail(Failure::Timeout);
                     return Ok(None);
                 }
-                if !self.gate || self.pending_since.is_some() {
+                // Confirm only once this session reported its state: after a reconnect the device
+                // may have rebooted into a rollback, and the report must come first.
+                if !self.gate || self.pending_since.is_some() || self.info.is_none() {
                     return Ok(None);
                 }
                 self.pending_since = Some(now_ms);

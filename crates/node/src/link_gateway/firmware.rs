@@ -19,7 +19,7 @@ use orion::control_plane::{ActionRequest, TypedConfigValue};
 use orion_link::crc32c;
 use orion_link::host::HostEvent;
 use orion_link::host::xfer::{DeviceInfo, Failure, FirmwareTransfer, Phase, XferRequest};
-use orion_link::wire::ActivateMode;
+use orion_link::wire::{ActivateMode, RollbackReason};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::future::Future;
@@ -421,6 +421,25 @@ impl FirmwareJob {
                 ),
                 ("version".to_owned(), TypedConfigValue::String(version)),
             ])),
+            // The device said why its bootloader rolled the trial back: the result map says so too.
+            Phase::Failed(failure @ Failure::RolledBack { reason }) => {
+                let mut output = BTreeMap::from([(
+                    "rollback_reason".to_owned(),
+                    TypedConfigValue::String(reason.name().into()),
+                )]);
+                let note = self
+                    .driver
+                    .rollback()
+                    .map(|rollback| rollback.note.as_str())
+                    .filter(|note| !note.is_empty());
+                if let Some(note) = note {
+                    output.insert(
+                        "rollback_note".to_owned(),
+                        TypedConfigValue::String(note.into()),
+                    );
+                }
+                ActionOutcome::failed_with_output(failure_reason(failure), output)
+            }
             Phase::Failed(failure) => ActionOutcome::failed(failure_reason(failure)),
             _ => ActionOutcome::failed("the firmware transfer did not finish"),
         }
@@ -434,15 +453,24 @@ fn failure_reason(failure: Failure) -> String {
         Failure::Retries => {
             "the device stopped acknowledging the transfer (retry limit reached)".to_owned()
         }
-        Failure::RolledBack => "rolled back: the device came back on its previous image, so its \
-             bootloader reverted the new one"
-            .to_owned(),
+        Failure::RolledBack { reason } => format!("rolled back: {}", rollback_text(reason)),
         Failure::NotActivated => {
             "the device did not come back running the new version after activation".to_owned()
         }
         Failure::Timeout => {
             "timed out waiting for the device to run the new version and confirm it".to_owned()
         }
+    }
+}
+
+/// What a device's rollback reason says, for the action's failure reason.
+fn rollback_text(reason: RollbackReason) -> &'static str {
+    match reason {
+        RollbackReason::NotConfirmed => "the trial was not confirmed before the device rebooted",
+        RollbackReason::BootFailure => "the new image did not boot",
+        RollbackReason::VerifyFailed => "the new image failed verification at boot",
+        RollbackReason::Requested => "the device's application asked for the rollback",
+        RollbackReason::Other(_) => "the device gave no specific reason",
     }
 }
 
@@ -464,7 +492,12 @@ mod tests {
 
     #[test]
     fn failures_name_the_cause() {
-        assert!(failure_reason(Failure::RolledBack).contains("reverted"));
+        assert_eq!(
+            failure_reason(Failure::RolledBack {
+                reason: RollbackReason::NotConfirmed,
+            }),
+            "rolled back: the trial was not confirmed before the device rebooted"
+        );
         assert!(failure_reason(Failure::Timeout).contains("timed out"));
         assert!(
             failure_reason(Failure::Device(orion_link::wire::XferStatus::BadDigest))

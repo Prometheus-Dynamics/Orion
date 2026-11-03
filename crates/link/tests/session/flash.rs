@@ -3,7 +3,10 @@
 //! boot and reverts it on the second.
 
 use orion_link::crc32c;
-use orion_link::wire::{ActivateMode, FirmwareInfo, FirmwareSink, XferBeginView, XferStatus};
+use orion_link::wire::{
+    ActivateMode, FirmwareInfo, FirmwareSink, RollbackReason, TrialRollback, XferBeginView,
+    XferStatus,
+};
 
 /// One slot of the simulated flash.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +27,14 @@ pub(super) struct Staging {
     pub(super) verified: bool,
 }
 
+/// A trial the bootloader reverted, as the device keeps it for `DeviceInfo`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RolledBack {
+    pub(super) version: String,
+    pub(super) reason: RollbackReason,
+    pub(super) note: String,
+}
+
 /// A two-slot A/B device: flash, a bootloader that gives an unconfirmed trial one boot, and the
 /// `FirmwareSink` the device session calls.
 #[derive(Debug, Clone)]
@@ -38,6 +49,15 @@ pub(super) struct SimFlash {
     pub(super) reboot_pending: bool,
     /// Largest chunk the device advertises (`DeviceInfo`).
     pub(super) max_chunk: u16,
+    /// The device resets instead of confirming the trial (an unhealthy image): the bootloader then
+    /// finds an unconfirmed trial on its next boot.
+    pub(super) reset_on_confirm: bool,
+    /// The bootloader reverts a trial on its first boot, before the application runs.
+    pub(super) revert_on_first_boot: bool,
+    /// The bootloader reverts without reporting it (an older bootloader): `last_trial` is none.
+    pub(super) silent_revert: bool,
+    /// The last trial the bootloader reverted.
+    pub(super) rolled_back: Option<RolledBack>,
 }
 
 impl SimFlash {
@@ -60,14 +80,35 @@ impl SimFlash {
             staging: None,
             reboot_pending: false,
             max_chunk: 96,
+            reset_on_confirm: false,
+            revert_on_first_boot: false,
+            silent_revert: false,
+            rolled_back: None,
         }
     }
 
-    /// The bootloader's part of a power cycle: an unconfirmed trial reverts on its second boot.
+    /// The bootloader's part of a power cycle: an unconfirmed trial reverts on its second boot (or
+    /// on its first, with `revert_on_first_boot`), and the revert is recorded for the device to
+    /// report.
     pub(super) fn power_cycle(&mut self) {
         self.reboot_pending = false;
         if self.trial {
-            if self.trial_boots >= 1 {
+            let reason = if self.trial_boots >= 1 {
+                RollbackReason::NotConfirmed
+            } else {
+                RollbackReason::BootFailure
+            };
+            if self.trial_boots >= 1 || self.revert_on_first_boot {
+                let note = if reason == RollbackReason::BootFailure {
+                    "boot check failed"
+                } else {
+                    ""
+                };
+                self.rolled_back = Some(RolledBack {
+                    version: self.slots[usize::from(self.active)].version.clone(),
+                    reason,
+                    note: note.to_owned(),
+                });
                 self.active = self.previous;
                 self.trial = false;
                 self.trial_boots = 0;
@@ -89,6 +130,17 @@ impl FirmwareSink for SimFlash {
             window: 1,
             bootloader: "sim-boot 1",
         }
+    }
+
+    fn last_trial(&self) -> Option<TrialRollback<'_>> {
+        if self.silent_revert {
+            return None;
+        }
+        self.rolled_back.as_ref().map(|rolled| TrialRollback {
+            version: &rolled.version,
+            reason: rolled.reason,
+            note: &rolled.note,
+        })
     }
 
     fn begin(&mut self, begin: &XferBeginView<'_>) -> Result<u32, XferStatus> {
@@ -160,12 +212,18 @@ impl FirmwareSink for SimFlash {
         self.trial = true;
         self.trial_boots = 0;
         self.reboot_pending = true;
+        // A new trial starts: the previous one's rollback is no longer what the device reports.
+        self.rolled_back = None;
         Ok(())
     }
 
     fn confirm(&mut self, slot: u8) -> Result<(), XferStatus> {
         if slot != self.active || !self.trial {
             return Err(XferStatus::BadSlot);
+        }
+        if self.reset_on_confirm {
+            self.reboot_pending = true;
+            return Ok(());
         }
         self.trial = false;
         Ok(())

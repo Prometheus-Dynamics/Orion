@@ -486,8 +486,13 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       keep the bus open. Simulated-bus tests, and `can_firmware_on_vcan0` in the `lints` job.
 - [x] **U8 end-to-end `RolledBack` test over a pty**: a trial whose health check fails rolls back
       through the node's serial gateway to `Failed` with the rolled-back reason, and a bootloader that
-      reverts before the host sees the trial is `Failed` as not activated. The protocol has no explicit
-      rollback status, so none is tested.
+      reverts before the host sees the trial is `Failed` as not activated.
+- [x] **U8 explicit rollback status**: the device reports a reverted trial in `DeviceInfo` (a
+      `RollbackReason`: not confirmed, boot failure, verify failed, requested, other, and a short
+      note), the host ends `RolledBack { reason }`, and `link.firmware.update` fails `rolled back: <reason>`
+      with `rollback_reason` in its result. A bootloader that reports nothing keeps the `NotActivated`
+      fallback. Tested in the link simulator (both reason paths, the fallback), the pty gateway and the
+      in-memory CAN bus. Hardware bootloaders must implement `FirmwareSink::last_trial`.
 - [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
       MCU with an A/B bootloader over UART and CAN.
 

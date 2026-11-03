@@ -14,7 +14,10 @@ use orion::control_plane::{
 use orion_link::Stream;
 use orion_link::crc32c;
 use orion_link::device::{DeviceConfig, DeviceSession, StreamDevice};
-use orion_link::wire::{ActivateMode, FirmwareInfo, FirmwareSink, XferBeginView, XferStatus};
+use orion_link::wire::{
+    ActivateMode, FirmwareInfo, FirmwareSink, RollbackReason, TrialRollback, XferBeginView,
+    XferStatus,
+};
 use sha2::{Digest, Sha256};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::PathBuf;
@@ -47,6 +50,14 @@ pub(super) struct Staging {
     verified: bool,
 }
 
+/// A trial the bootloader reverted, as the device keeps it for `DeviceInfo`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RolledBack {
+    pub(super) version: String,
+    pub(super) reason: RollbackReason,
+    pub(super) note: String,
+}
+
 /// A two-slot A/B device: flash, a bootloader that reverts an unconfirmed trial on its second
 /// boot, and the switches the tests use (a refused confirmation, a handoff to the bootloader).
 #[derive(Debug, Clone)]
@@ -69,6 +80,10 @@ pub(super) struct Flash {
     pub(super) max_chunk: u16,
     /// Largest chunk written so far (the chunk budget check).
     pub(super) largest_write: usize,
+    /// The last trial the bootloader reverted.
+    pub(super) rolled_back: Option<RolledBack>,
+    /// Whether the device reports a rollback in `DeviceInfo` (false: an older bootloader).
+    pub(super) report_rollback: bool,
 }
 
 impl Flash {
@@ -96,6 +111,8 @@ impl Flash {
             revert_on_first_boot: false,
             max_chunk: CHUNK_MAX as u16,
             largest_write: 0,
+            rolled_back: None,
+            report_rollback: true,
         }
     }
 
@@ -104,11 +121,21 @@ impl Flash {
         self
     }
 
-    /// The bootloader's part of a power cycle.
+    /// The bootloader's part of a power cycle. A reverted trial is recorded with its reason.
     pub(super) fn power_cycle(&mut self) {
         self.reboot_pending = false;
         if self.trial {
             if self.trial_boots >= 1 || self.revert_on_first_boot {
+                let (reason, note) = if self.trial_boots >= 1 {
+                    (RollbackReason::NotConfirmed, "")
+                } else {
+                    (RollbackReason::BootFailure, "boot check failed")
+                };
+                self.rolled_back = Some(RolledBack {
+                    version: self.slots[usize::from(self.active)].version.clone(),
+                    reason,
+                    note: note.to_owned(),
+                });
                 self.active = self.previous;
                 self.trial = false;
                 self.trial_boots = 0;
@@ -130,6 +157,17 @@ impl FirmwareSink for Flash {
             window: 1,
             bootloader: "node-test-boot 1",
         }
+    }
+
+    fn last_trial(&self) -> Option<TrialRollback<'_>> {
+        if !self.report_rollback {
+            return None;
+        }
+        self.rolled_back.as_ref().map(|rolled| TrialRollback {
+            version: &rolled.version,
+            reason: rolled.reason,
+            note: &rolled.note,
+        })
     }
 
     fn begin(&mut self, begin: &XferBeginView<'_>) -> Result<u32, XferStatus> {
@@ -201,6 +239,8 @@ impl FirmwareSink for Flash {
                 self.trial = true;
                 self.trial_boots = 0;
                 self.reboot_pending = true;
+                // A new trial starts: the previous rollback is no longer what the device reports.
+                self.rolled_back = None;
                 Ok(())
             }
             // The bootloader takes over the port: the device goes silent (see the device loop).
@@ -704,10 +744,18 @@ async fn a_trial_that_fails_its_health_check_rolls_back_and_the_action_says_so()
 
     match &done.state {
         ActionState::Failed { reason } => {
-            assert!(reason.contains("rolled back"), "reason: {reason}");
+            assert!(
+                reason.contains("rolled back") && reason.contains("not confirmed"),
+                "reason: {reason}"
+            );
         }
         other => panic!("expected Failed, got {other:?}"),
     }
+    assert_eq!(
+        output_text(&done, "rollback_reason").as_deref(),
+        Some("not_confirmed"),
+        "the device's report is in the result: {done:?}"
+    );
     assert!(
         wait_until(WAIT, || device.is_connected()).await,
         "the device comes back on its previous image"
@@ -723,14 +771,56 @@ async fn a_trial_that_fails_its_health_check_rolls_back_and_the_action_says_so()
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// The bootloader reverts a trial before the host ever sees the new version. The protocol has no
-/// explicit rollback status (`XferStatus` and `DeviceInfo` carry none), so the host only sees the
-/// old version come back: it re-sends the activation a bounded number of times, then reports the
-/// image as not activated, and the device still runs the old version.
+/// The bootloader reverts a trial on its first boot, before the host ever sees the new version,
+/// and reports it: the action fails `rolled back` with the bootloader's reason and note.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_trial_reverted_before_the_host_sees_it_is_reported_as_not_activated() {
+async fn a_trial_reverted_on_first_boot_reports_its_reason() {
     let mut flash = Flash::factory("1.2");
     flash.revert_on_first_boot = true;
+    let (app, device, gateway, link, dir) = setup("fw-first-boot", flash).await;
+    committed(&app, "app-1-3", &image(1_500)).await;
+
+    app.run_action(
+        update_request("fw-first-boot-1", &link, "app-1-3", "1.3", None),
+        "test",
+    )
+    .expect("accepted");
+    let (done, _) = settle(&app, "fw-first-boot-1").await;
+
+    match &done.state {
+        ActionState::Failed { reason } => {
+            assert!(
+                reason.contains("rolled back") && reason.contains("did not boot"),
+                "reason: {reason}"
+            );
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+    assert_eq!(
+        output_text(&done, "rollback_reason").as_deref(),
+        Some("boot_failure")
+    );
+    assert_eq!(
+        output_text(&done, "rollback_note").as_deref(),
+        Some("boot check failed")
+    );
+    assert!(
+        wait_until(WAIT, || device.is_connected()).await,
+        "the device comes back on its previous image"
+    );
+    assert_eq!(device.flash().active, 0, "the old slot runs");
+    gateway.shutdown().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The same first-boot revert from a bootloader that reports nothing: the host has no rollback to
+/// name, so it re-sends the activation a bounded number of times and then reports the image as not
+/// activated. The device still runs the old version.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_silent_revert_is_reported_as_not_activated() {
+    let mut flash = Flash::factory("1.2");
+    flash.revert_on_first_boot = true;
+    flash.report_rollback = false;
     let (app, device, gateway, link, dir) = setup("fw-reverted", flash).await;
     committed(&app, "app-1-3", &image(1_500)).await;
 
@@ -750,6 +840,7 @@ async fn a_trial_reverted_before_the_host_sees_it_is_reported_as_not_activated()
         }
         other => panic!("expected Failed, got {other:?}"),
     }
+    assert_eq!(output_text(&done, "rollback_reason"), None);
     let flash = device.flash();
     assert_eq!(flash.active, 0, "the old slot runs");
     assert_eq!(flash.slots[0].version, "1.2");

@@ -17,6 +17,14 @@ pub enum ActionOutcome {
     Succeeded(BTreeMap<String, TypedConfigValue>),
     /// The action ran and failed.
     Failed(String),
+    /// The action ran and failed, and its result map says why (for example the device's rollback
+    /// reason). Built with [`ActionOutcome::failed_with_output`].
+    FailedWithOutput {
+        /// The failure reason.
+        reason: String,
+        /// The result map (bounded by the node, as for a success).
+        output: BTreeMap<String, TypedConfigValue>,
+    },
     /// The handler refused the request (for example invalid arguments) without running it.
     Rejected(String),
 }
@@ -31,6 +39,17 @@ impl ActionOutcome {
         Self::Failed(reason.into())
     }
 
+    /// Failure with a result map that explains it.
+    pub fn failed_with_output(
+        reason: impl Into<String>,
+        output: BTreeMap<String, TypedConfigValue>,
+    ) -> Self {
+        Self::FailedWithOutput {
+            reason: reason.into(),
+            output,
+        }
+    }
+
     pub fn rejected(reason: impl Into<String>) -> Self {
         Self::Rejected(reason.into())
     }
@@ -39,6 +58,7 @@ impl ActionOutcome {
         match self {
             Self::Succeeded(output) => (ActionState::Succeeded, output),
             Self::Failed(reason) => (ActionState::Failed { reason }, BTreeMap::new()),
+            Self::FailedWithOutput { reason, output } => (ActionState::Failed { reason }, output),
             Self::Rejected(reason) => (ActionState::Rejected { reason }, BTreeMap::new()),
         }
     }

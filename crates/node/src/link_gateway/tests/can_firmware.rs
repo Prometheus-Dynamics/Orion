@@ -308,6 +308,38 @@ async fn can_update_reaches_only_the_addressed_device() {
     bench.close().await;
 }
 
+/// The trial fails its health check on the bus: the device's bootloader reverts it and reports the
+/// reason, and the action says so (the same report the serial path reads).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn can_trial_rollback_is_reported_with_its_reason() {
+    let mut flash = can_flash("1.2");
+    flash.unhealthy_trial = true;
+    let bench = Bench::new("can-fw-rollback", flash).await;
+    committed(&bench.app, "app-1-3", &image(1_500)).await;
+
+    bench
+        .app
+        .run_action(
+            update_request("can-fw-rb-1", &bench.link, UPDATED, "app-1-3", "1.3", None),
+            "test",
+        )
+        .expect("accepted");
+    let (done, _) = settle(&bench.app, "can-fw-rb-1").await;
+
+    match &done.state {
+        ActionState::Failed { reason } => {
+            assert!(reason.contains("rolled back"), "reason: {reason}");
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+    assert_eq!(
+        output_text(&done, "rollback_reason").as_deref(),
+        Some("not_confirmed")
+    );
+    assert_eq!(bench.updated.flash().active, 0, "the old slot runs");
+    bench.close().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn can_release_takes_one_device_off_the_bus_and_attach_brings_it_back() {
     let bench = Bench::new("can-release", can_flash("1.2")).await;

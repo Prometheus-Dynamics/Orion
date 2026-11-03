@@ -332,8 +332,9 @@ The action's outcome:
 - `Succeeded` with `phase = "handoff"` and `version` (`handoff` activation): the device handed its
   port to its bootloader. The link is released afterwards; `link.attach` gives it back.
 - `Failed` with the reason. The device refused a step (`the device refused the transfer: ...`), the
-  trial was not confirmed and the device's bootloader reverted the image (`rolled back: ...`), the
-  device did not come back on the new version, or a timeout passed. The action deadline bounds a
+  device's bootloader reverted the trial and reported why (`rolled back: ...`, with the result's
+  `rollback_reason` and `rollback_note`), the device came back on the old version without a report,
+  or a timeout passed. The action deadline bounds a
   wait for the device too, as for every action.
 - `Rejected` before anything is sent: an argument is missing or invalid, the blob is not committed,
   the link is not running, the device is released or is not connected on that link, or another

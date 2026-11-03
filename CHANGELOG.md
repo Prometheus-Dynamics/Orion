@@ -8,6 +8,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- Explicit rollback status for firmware trials (U8). After its bootloader reverts a trial, the device
+  reports it in `DeviceInfo` (an optional `rollback` field: the version, a `RollbackReason` of not
+  confirmed, boot failure, verify failed, requested or other, and a short note). The sink reports it
+  through `device::FirmwareSink::last_trial` (default: none). The host's `FirmwareTransfer` ends
+  `RolledBack { reason }`, and `link.firmware.update` fails `rolled back: <reason>` with
+  `rollback_reason` (and `rollback_note`) in its result. A device that reports nothing keeps the
+  `did not come back running the new version` failure. Link protocol 1 is unreleased, so the
+  `DeviceInfo` body change is not a version bump; the fixture gains a rolled-back frame.
+  Docs: `docs/link-protocol.md`, `docs/update-recovery.md`, `docs/actions.md`.
 - Firmware transfer over the link (U8, feature `xfer` of `orion-link`; `LINK_PROTOCOL_VERSION`
   stays 1). Kinds `0x20`-`0x28`: `DeviceInfo`, `XferBegin`, `XferChunk` (offset, CRC-32C per chunk),
   `XferAck` (cumulative next offset, the resume point), `XferEnd`, `XferResult` (whole-image

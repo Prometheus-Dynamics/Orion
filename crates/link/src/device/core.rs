@@ -1017,12 +1017,19 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
 
     /// Encodes the firmware state as the pending `DeviceInfo` (see [`Self::info_due`]).
     #[cfg(feature = "xfer")]
-    pub(crate) fn encode_info(&mut self, info: &crate::wire::FirmwareInfo<'_>) {
+    pub(crate) fn encode_info(
+        &mut self,
+        info: &crate::wire::FirmwareInfo<'_>,
+        rollback: Option<crate::wire::TrialRollback<'_>>,
+    ) {
         let max_frame = self.max_frame();
-        if !self
-            .xfer
-            .encode_info(info, RX, max_frame, self.config.state_retry_min_ms)
-        {
+        if !self.xfer.encode_info(
+            info,
+            rollback,
+            RX,
+            max_frame,
+            self.config.state_retry_min_ms,
+        ) {
             bump!(self, encode_errors);
         }
     }

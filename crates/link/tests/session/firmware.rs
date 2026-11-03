@@ -11,7 +11,7 @@ use orion_link::host::xfer::{
 };
 use orion_link::host::{HostConfig, HostEvent, HostSession};
 use orion_link::message::NodeId;
-use orion_link::wire::{ActivateMode, XferStatus, kind};
+use orion_link::wire::{ActivateMode, RollbackReason, XferStatus, kind};
 use orion_link::{Stream, StreamDecoder, crc32c};
 
 use super::flash::SimFlash;
@@ -386,6 +386,81 @@ fn trial_without_confirm_rolls_back() {
     assert!(!flash.trial);
 }
 
+/// The trial is reset before it confirms (an unhealthy image): the bootloader reverts it on the
+/// next boot and reports why, so the host ends `RolledBack` with that reason, not by timeout.
+#[test]
+fn a_trial_reset_before_confirm_reports_not_confirmed() {
+    let data = image(10, 1_000);
+    let mut flash = SimFlash::factory("1.2");
+    flash.reset_on_confirm = true;
+    let mut bench = Bench::new(flash, default_driver(plan(&data, "1.3")), data);
+    bench.xfer.set_confirm_gate(true);
+    bench.run_until(600_000, Bench::finished);
+
+    assert_eq!(
+        bench.xfer.phase(),
+        Phase::Failed(Failure::RolledBack {
+            reason: RollbackReason::NotConfirmed,
+        }),
+        "{:?}",
+        bench.replies
+    );
+    let rollback = bench.xfer.rollback().expect("the device's report is kept");
+    assert_eq!(rollback.version, "1.3");
+    assert_eq!(rollback.reason, RollbackReason::NotConfirmed);
+    assert!(rollback.note.is_empty());
+    let flash = bench.device.firmware();
+    assert_eq!(flash.active, 0, "the old slot runs again");
+    assert!(!flash.trial);
+}
+
+/// The bootloader reverts the trial on its first boot, before the application runs. The device
+/// reports `BootFailure` with its note, and the host does not re-send the activation.
+#[test]
+fn a_trial_reverted_on_first_boot_reports_boot_failure() {
+    let data = image(11, 1_000);
+    let mut flash = SimFlash::factory("1.2");
+    flash.revert_on_first_boot = true;
+    let mut bench = Bench::new(flash, default_driver(plan(&data, "1.3")), data);
+    bench.xfer.set_confirm_gate(true);
+    bench.run_until(600_000, Bench::finished);
+
+    assert_eq!(
+        bench.xfer.phase(),
+        Phase::Failed(Failure::RolledBack {
+            reason: RollbackReason::BootFailure,
+        }),
+        "{:?}",
+        bench.replies
+    );
+    let rollback = bench.xfer.rollback().expect("the device's report is kept");
+    assert_eq!(rollback.reason, RollbackReason::BootFailure);
+    assert_eq!(rollback.note, "boot check failed");
+    assert_eq!(bench.device.firmware().active, 0, "the old slot runs again");
+}
+
+/// The same first-boot revert from a bootloader that reports nothing: the host falls back to
+/// `NotActivated` after its bounded activations.
+#[test]
+fn a_silent_revert_falls_back_to_not_activated() {
+    let data = image(12, 1_000);
+    let mut flash = SimFlash::factory("1.2");
+    flash.revert_on_first_boot = true;
+    flash.silent_revert = true;
+    let mut bench = Bench::new(flash, default_driver(plan(&data, "1.3")), data);
+    bench.xfer.set_confirm_gate(true);
+    bench.run_until(600_000, Bench::finished);
+
+    assert_eq!(
+        bench.xfer.phase(),
+        Phase::Failed(Failure::NotActivated),
+        "{:?}",
+        bench.replies
+    );
+    assert!(bench.xfer.rollback().is_none(), "nothing was reported");
+    assert_eq!(bench.device.firmware().active, 0);
+}
+
 #[test]
 fn begin_refused_for_the_active_slot() {
     let data = image(7, 300);
@@ -417,6 +492,7 @@ fn chunk_requests_fit_the_negotiated_frame() {
         xfer_max_chunk: 96,
         xfer_window: 1,
         bootloader: String::new(),
+        rollback: None,
     });
     let request = driver
         .poll(0, &mut reader)

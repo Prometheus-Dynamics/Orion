@@ -535,7 +535,7 @@ against the codec and against postcard through serde.
 
 | Kind | Name | Body |
 | --- | --- | --- |
-| `0x20` | `DeviceInfo` | `fw_version: str`, `active_slot: u8`, `slots: u8`, `trial: bool`, `xfer_max_chunk: u16`, `xfer_window: u8`, `bootloader: str` |
+| `0x20` | `DeviceInfo` | `fw_version: str`, `active_slot: u8`, `slots: u8`, `trial: bool`, `xfer_max_chunk: u16`, `xfer_window: u8`, `bootloader: str`, `rollback: option<(version: str, reason: u8, note: str)>` |
 | `0x21` | `XferBegin` | `xfer_id: u32`, `component: str`, `version: str`, `total_len: u32`, `chunk_len: u16`, `image_crc32c: u32`, `target_slot: u8` |
 | `0x22` | `XferChunk` | `xfer_id: u32`, `offset: u32`, `crc32c: u32` (of `data`), `data: bytes` |
 | `0x23` | `XferAck` | `xfer_id: u32`, `next_offset: u32`, `status: u8` |
@@ -548,9 +548,18 @@ against the codec and against postcard through serde.
 Status codes (`u8`): 0 ok, 1 bad chunk CRC, 2 bad offset, 3 bad digest, 4 flash, 5 no space,
 6 busy, 7 unsupported, 8 unknown transfer, 9 bad slot. Unknown codes decode as `Other`.
 
+Rollback report (the optional last field of `DeviceInfo`, `None` is a `0` tag): after the device's
+bootloader reverts a trial, it reports the rolled-back `version` (at most 64 bytes), a `reason` and a
+short `note` (at most 32 bytes, empty if none). Reason codes (`u8`): 1 not confirmed (the trial was
+not confirmed before the device rebooted, a reset or the watchdog), 2 boot failure (the image did not
+boot), 3 verify failed (the image failed verification at boot), 4 requested (the application asked
+for the rollback), 0 or any other code: other. The report stays in `DeviceInfo` until the next trial
+starts; a longer string is a decode error.
+
 - **Device.** `DeviceInfo` is sent after every `Welcome` and after every firmware change, and is
   resent until the host's `Ack` for one of its transmissions. A device whose firmware sink reports
-  zero slots never sends it. `XferBegin` is answered with an `XferAck` whose `next_offset` is what
+  zero slots never sends it. The sink's `last_trial()` supplies the rollback report (none by
+  default, so a sink whose bootloader reverts silently reports nothing). `XferBegin` is answered with an `XferAck` whose `next_offset` is what
   the sink already holds, which is the resume point. A chunk is accepted only at the next offset
   (a chunk that repeats stored bytes is acknowledged without a write, one that overlaps writes only
   its new tail, one past the next offset is `BadOffset`). Its CRC-32C is checked before it is
@@ -558,7 +567,8 @@ Status codes (`u8`): 0 ok, 1 bad chunk CRC, 2 bad offset, 3 bad digest, 4 flash,
   `next_offset`. `XferEnd` verifies the whole image once; a repeated `End` gets the same verdict.
   `Activate` needs a verified image (otherwise `XferAbort` with `BadDigest`).
 - **Host.** `HostSession::send_xfer` queues a request; `HostEvent::DeviceInfo` and
-  `HostEvent::Xfer` carry the replies. `host::xfer::FirmwareTransfer` is the sans-IO driver (see
+  `HostEvent::Xfer` carry the replies. A rollback report for the transfer's version ends the
+  transfer as `RolledBack { reason }` (a report for the running version is stale and ignored). `host::xfer::FirmwareTransfer` is the sans-IO driver (see
   `docs/update-recovery.md`, "MCU firmware over the link").
 - **Digest.** Length and CRC-32C of the whole image, not SHA-256 (see `docs/update-recovery.md`).
 - **Chunk size.** The host's chunk is at most the device's `xfer_max_chunk` (the receive buffer

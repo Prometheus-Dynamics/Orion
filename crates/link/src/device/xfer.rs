@@ -16,14 +16,15 @@
 use crate::crc::crc32c;
 use crate::frame::{self, FRAME_OVERHEAD, FrameHeader};
 use crate::wire::{
-    self, ActivateView, ConfirmView, DeviceInfoView, FirmwareInfo, FirmwareSink, XferAbortView,
-    XferAckView, XferBeginView, XferChunkView, XferEndView, XferResultView, XferStatus, kind,
-    max_chunk_for_frame,
+    self, ActivateView, ConfirmView, DeviceInfoView, FirmwareInfo, FirmwareSink, TrialRollback,
+    XferAbortView, XferAckView, XferBeginView, XferChunkView, XferEndView, XferResultView,
+    XferStatus, kind, max_chunk_for_frame,
 };
 
-/// Bytes reserved for the encoded `DeviceInfo` payload (a frame of at most this many bytes).
-/// Version and bootloader strings together must fit with the fixed fields (about 80 bytes).
-pub(crate) const INFO_CAPACITY: usize = 96;
+/// Bytes reserved for the encoded `DeviceInfo` payload (a frame of at most this many bytes). The
+/// version and bootloader strings, the fixed fields, and a worst-case rollback report (its version
+/// and note at their wire bounds) must fit: about 150 bytes.
+pub(crate) const INFO_CAPACITY: usize = 160;
 
 /// The reply slot's longest frame: the header, three varints and a status byte, CRC.
 pub(crate) const REPLY_FRAME_MAX: usize = FRAME_OVERHEAD + 15;
@@ -127,11 +128,12 @@ impl XferState {
         }
     }
 
-    /// Encodes `info` as the pending `DeviceInfo`. Returns false if it does not fit the info
-    /// buffer or `max_frame` (the previous report then stays pending).
+    /// Encodes `info` and the sink's last rollback as the pending `DeviceInfo`. Returns false if it
+    /// does not fit the info buffer or `max_frame` (the previous report then stays pending).
     pub(crate) fn encode_info(
         &mut self,
         info: &FirmwareInfo<'_>,
+        rollback: Option<TrialRollback<'_>>,
         rx: usize,
         max_frame: usize,
         state_retry_ms: u32,
@@ -153,6 +155,7 @@ impl XferState {
             xfer_max_chunk: max_chunk,
             xfer_window: info.window,
             bootloader: info.bootloader,
+            rollback: rollback.map(TrialRollback::clamped),
         };
         self.info_due = false;
         let limit = max_frame.min(INFO_CAPACITY);

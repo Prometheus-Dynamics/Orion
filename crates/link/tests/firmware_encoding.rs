@@ -14,8 +14,9 @@ use std::path::PathBuf;
 use orion_link::crc32c;
 use orion_link::frame::{self, FrameHeader};
 use orion_link::wire::{
-    self, ActivateMode, ActivateView, ConfirmView, DeviceInfoView, Encode, XferAbortView,
-    XferAckView, XferBeginView, XferChunkView, XferEndView, XferResultView, XferStatus, kind,
+    self, ActivateMode, ActivateView, ConfirmView, DeviceInfoView, Encode, RollbackReason,
+    TrialRollback, XferAbortView, XferAckView, XferBeginView, XferChunkView, XferEndView,
+    XferResultView, XferStatus, kind,
 };
 
 const FIXTURE: &str = "tests/fixtures/firmware_encodings.txt";
@@ -45,6 +46,29 @@ fn canonical() -> Vec<(&'static str, u8, Vec<u8>)> {
                     xfer_max_chunk: 103,
                     xfer_window: 1,
                     bootloader: "sim-boot 1",
+                    rollback: None,
+                },
+            ),
+        ),
+        (
+            "device_info.rolled_back",
+            kind::DEVICE_INFO,
+            frame_of(
+                kind::DEVICE_INFO,
+                12,
+                &DeviceInfoView {
+                    fw_version: "1.2",
+                    active_slot: 0,
+                    slots: 2,
+                    trial: false,
+                    xfer_max_chunk: 103,
+                    xfer_window: 1,
+                    bootloader: "sim-boot 1",
+                    rollback: Some(TrialRollback {
+                        version: "1.3",
+                        reason: RollbackReason::BootFailure,
+                        note: "boot check failed",
+                    }),
                 },
             ),
         ),
@@ -224,6 +248,11 @@ fn every_frame_decodes_back_to_its_fields() {
             kind::DEVICE_INFO => {
                 let info = DeviceInfoView::decode(payload).unwrap();
                 assert_eq!((info.fw_version, info.slots, info.trial), ("1.2", 2, false));
+                if let Some(rollback) = info.rollback {
+                    assert_eq!(rollback.version, "1.3");
+                    assert_eq!(rollback.reason, RollbackReason::BootFailure);
+                    assert_eq!(rollback.note, "boot check failed");
+                }
             }
             kind::XFER_BEGIN => {
                 let begin = XferBeginView::decode(payload).unwrap();
@@ -292,6 +321,29 @@ fn malformed_bodies_are_errors_not_panics() {
         DeviceInfoView::decode(&[0x02, b'a']).is_err(),
         "truncated string"
     );
+    // A rollback report whose note is past its wire bound is refused.
+    let long_note = frame_of(
+        kind::DEVICE_INFO,
+        1,
+        &DeviceInfoView {
+            fw_version: "1.2",
+            active_slot: 0,
+            slots: 2,
+            trial: false,
+            xfer_max_chunk: 103,
+            xfer_window: 1,
+            bootloader: "",
+            rollback: Some(TrialRollback {
+                version: "1.3",
+                reason: RollbackReason::NotConfirmed,
+                note: &"n".repeat(wire::MAX_ROLLBACK_NOTE_BYTES + 1),
+            }),
+        },
+    );
+    let payload = frame::decode(&long_note).expect("frame").payload().to_vec();
+    assert!(DeviceInfoView::decode(&payload).is_err(), "note too long");
+    assert_eq!(RollbackReason::from_code(42), RollbackReason::Other(42));
+    assert_eq!(RollbackReason::NotConfirmed.code(), 1);
     assert!(ActivateView::decode(&[1]).is_err(), "mode missing");
     // Unknown status and mode codes decode and keep their value.
     assert_eq!(XferStatus::from_code(42), XferStatus::Other(42));
@@ -324,6 +376,13 @@ mod postcard_twins {
     }
 
     #[derive(Serialize)]
+    struct Rollback<'a> {
+        version: &'a str,
+        reason: u8,
+        note: &'a str,
+    }
+
+    #[derive(Serialize)]
     struct Info<'a> {
         fw_version: &'a str,
         active_slot: u8,
@@ -332,6 +391,7 @@ mod postcard_twins {
         xfer_max_chunk: u16,
         xfer_window: u8,
         bootloader: &'a str,
+        rollback: Option<Rollback<'a>>,
     }
 
     #[test]
@@ -371,7 +431,12 @@ mod postcard_twins {
             data: b"abc",
         })
         .unwrap();
-        assert_eq!(chunk, frame::decode(&canonical()[2].2).unwrap().payload());
+        let chunk_frame = canonical()
+            .into_iter()
+            .find(|f| f.0 == "xfer_chunk")
+            .unwrap()
+            .2;
+        assert_eq!(chunk, frame::decode(&chunk_frame).unwrap().payload());
         let info = postcard::to_allocvec(&Info {
             fw_version: "1.2",
             active_slot: 0,
@@ -380,8 +445,40 @@ mod postcard_twins {
             xfer_max_chunk: 103,
             xfer_window: 1,
             bootloader: "sim-boot 1",
+            rollback: None,
         })
         .unwrap();
-        assert_eq!(info, frame::decode(&canonical()[0].2).unwrap().payload());
+        let (_, _, info_frame) = canonical()
+            .into_iter()
+            .find(|f| f.0 == "device_info")
+            .unwrap();
+        assert_eq!(info, frame::decode(&info_frame).unwrap().payload());
+        // A rollback report: an `Option` tag of 1, then the report's fields.
+        let rolled_back = postcard::to_allocvec(&Info {
+            rollback: Some(Rollback {
+                version: "1.3",
+                reason: 2,
+                note: "boot check failed",
+            }),
+            ..Info {
+                fw_version: "1.2",
+                active_slot: 0,
+                slots: 2,
+                trial: false,
+                xfer_max_chunk: 103,
+                xfer_window: 1,
+                bootloader: "sim-boot 1",
+                rollback: None,
+            }
+        })
+        .unwrap();
+        let (_, _, rolled_back_frame) = canonical()
+            .into_iter()
+            .find(|f| f.0 == "device_info.rolled_back")
+            .unwrap();
+        assert_eq!(
+            rolled_back,
+            frame::decode(&rolled_back_frame).unwrap().payload()
+        );
     }
 }

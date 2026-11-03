@@ -116,6 +116,110 @@ impl ActivateMode {
     }
 }
 
+/// Why the device's bootloader rolled a trial back, in [`TrialRollback`]. One byte on the wire.
+/// Unknown codes decode to [`Self::Other`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RollbackReason {
+    /// The trial was not confirmed before the device rebooted (a reset, or the watchdog).
+    NotConfirmed,
+    /// The new image did not boot (a fault or a hang before the application was up).
+    BootFailure,
+    /// The new image failed verification at boot (its length, CRC-32C or signature).
+    VerifyFailed,
+    /// The application asked for the rollback.
+    Requested,
+    /// Any other reason, or a code this build does not know.
+    Other(u8),
+}
+
+impl RollbackReason {
+    /// Wire code.
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::NotConfirmed => 1,
+            Self::BootFailure => 2,
+            Self::VerifyFailed => 3,
+            Self::Requested => 4,
+            Self::Other(code) => code,
+        }
+    }
+
+    /// Parses a wire code.
+    #[must_use]
+    pub const fn from_code(code: u8) -> Self {
+        match code {
+            1 => Self::NotConfirmed,
+            2 => Self::BootFailure,
+            3 => Self::VerifyFailed,
+            4 => Self::Requested,
+            other => Self::Other(other),
+        }
+    }
+
+    /// A stable name for logs and results (`other` for [`Self::Other`]).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::NotConfirmed => "not_confirmed",
+            Self::BootFailure => "boot_failure",
+            Self::VerifyFailed => "verify_failed",
+            Self::Requested => "requested",
+            Self::Other(_) => "other",
+        }
+    }
+}
+
+/// Longest trial version a [`TrialRollback`] carries, in bytes (the host's own version names fit).
+pub const MAX_ROLLBACK_VERSION_BYTES: usize = 64;
+
+/// Longest note a [`TrialRollback`] carries, in bytes.
+pub const MAX_ROLLBACK_NOTE_BYTES: usize = 32;
+
+/// The device's report that its bootloader rolled a trial back: the image of `version` was not
+/// kept, and the device runs the previous slot again. Sent in [`DeviceInfoView::rollback`] until
+/// the next trial starts. `note` is free text for the operator (empty if none).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrialRollback<'a> {
+    /// The version of the rolled-back trial image.
+    pub version: &'a str,
+    /// Why it was rolled back.
+    pub reason: RollbackReason,
+    /// Short free text (see [`MAX_ROLLBACK_NOTE_BYTES`]).
+    pub note: &'a str,
+}
+
+impl<'a> TrialRollback<'a> {
+    /// The report with its strings cut to the wire bounds, at a character boundary.
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            version: clamp_str(self.version, MAX_ROLLBACK_VERSION_BYTES),
+            reason: self.reason,
+            note: clamp_str(self.note, MAX_ROLLBACK_NOTE_BYTES),
+        }
+    }
+}
+
+fn clamp_str(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.get(..end).unwrap_or_default()
+}
+
+impl Encode for TrialRollback<'_> {
+    fn encode(&self, w: &mut Writer<'_>) {
+        self.version.encode(w);
+        w.byte(self.reason.code());
+        self.note.encode(w);
+    }
+}
+
 /// Largest chunk that fits a receive buffer of `rx` bytes once the chunk frame's own overhead is
 /// subtracted: frame header and CRC (8), and a worst-case `XferChunk` body prefix (three `u32`
 /// varints of 5 bytes each and a 2-byte length prefix).
@@ -143,6 +247,8 @@ pub struct DeviceInfoView<'a> {
     pub xfer_window: u8,
     /// The resident bootloader's name and version, if it reports one (empty otherwise).
     pub bootloader: &'a str,
+    /// The last trial the bootloader rolled back, if it reverted one (see [`TrialRollback`]).
+    pub rollback: Option<TrialRollback<'a>>,
 }
 
 impl Encode for DeviceInfoView<'_> {
@@ -154,6 +260,7 @@ impl Encode for DeviceInfoView<'_> {
         self.xfer_max_chunk.encode(w);
         self.xfer_window.encode(w);
         self.bootloader.encode(w);
+        self.rollback.encode(w);
     }
 }
 
@@ -173,6 +280,7 @@ impl<'a> DeviceInfoView<'a> {
             xfer_max_chunk: r.varint_u16()?,
             xfer_window: r.byte()?,
             bootloader: r.str()?,
+            rollback: read_rollback(&mut r)?,
         })
     }
 }
@@ -460,6 +568,25 @@ fn read_bool(r: &mut Reader<'_>) -> Result<bool, WireError> {
     r.option()
 }
 
+/// The optional rollback report at the end of a `DeviceInfo` body. Strings longer than their wire
+/// bounds are a decode error.
+fn read_rollback<'a>(r: &mut Reader<'a>) -> Result<Option<TrialRollback<'a>>, WireError> {
+    if !r.option()? {
+        return Ok(None);
+    }
+    let version = r.str()?;
+    let reason = RollbackReason::from_code(r.byte()?);
+    let note = r.str()?;
+    if version.len() > MAX_ROLLBACK_VERSION_BYTES || note.len() > MAX_ROLLBACK_NOTE_BYTES {
+        return Err(WireError::Decode);
+    }
+    Ok(Some(TrialRollback {
+        version,
+        reason,
+        note,
+    }))
+}
+
 /// The firmware state a device reports in [`DeviceInfoView`] and the transfer rules it applies.
 ///
 /// The session calls it from its own context (never from an interrupt); a port implements it over
@@ -511,6 +638,14 @@ pub trait FirmwareSink {
     ///
     /// Any status (for example [`XferStatus::BadSlot`] if `slot` is not running).
     fn confirm(&mut self, slot: u8) -> Result<(), XferStatus>;
+
+    /// The last trial the bootloader rolled back, if it reverted one since the last trial started.
+    /// The device reports it in `DeviceInfo`, so the host learns why its update did not stick
+    /// (`RolledBack` rather than "did not come back running the new version"). A sink whose
+    /// bootloader reverts silently keeps the default: none.
+    fn last_trial(&self) -> Option<TrialRollback<'_>> {
+        None
+    }
 }
 
 /// The state a [`FirmwareSink`] reports.

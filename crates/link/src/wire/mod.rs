@@ -40,8 +40,9 @@ pub use codec::{Encode, RawVarint, Reader, Writer, encoded_len, str_from_utf8};
 pub use decode::{LeaseView, Leases, WelcomeView, decode_ack, decode_reject, decode_u64};
 pub use firmware::{
     ActivateMode, ActivateView, ConfirmView, DeviceInfoView, FirmwareInfo, FirmwareSink,
-    NoFirmware, XferAbortView, XferAckView, XferBeginView, XferChunkView, XferEndView,
-    XferResultView, XferStatus, max_chunk_for_frame,
+    MAX_ROLLBACK_NOTE_BYTES, MAX_ROLLBACK_VERSION_BYTES, NoFirmware, RollbackReason, TrialRollback,
+    XferAbortView, XferAckView, XferBeginView, XferChunkView, XferEndView, XferResultView,
+    XferStatus, max_chunk_for_frame,
 };
 pub use views::{
     ActionResultView, ActionStatus, Availability, CapabilityView, ConfigField, Health, HelloView,

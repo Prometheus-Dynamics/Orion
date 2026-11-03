@@ -688,20 +688,27 @@ sequenceDiagram
   image, resends a chunk after `ack_timeout_ms` or on a refused chunk (up to `max_retries`), resumes
   from the device's offset after a reconnect, and then follows the trial: `Activate` (trial or
   handoff), wait for the device to report the new version, `Confirm` when the health gate passes,
-  and `Succeeded`, `Failed(RolledBack)` (the bootloader reverted), `Failed(NotActivated)` or
+  and `Succeeded`, `Failed(RolledBack { reason })` when the device reports that its bootloader
+  reverted the trial (the report is the `DeviceInfo` rollback field, see `docs/link-protocol.md`;
+  the device's note is on `FirmwareTransfer::rollback()`), `Failed(NotActivated)` when the device
+  came back on the old version without a report (an older bootloader: the silent fallback), or
   `Failed(Timeout)` otherwise. A handoff finishes when the link goes quiet.
 - Simulator tests (`crates/link/tests/session/firmware.rs`) run a two-slot device with a bootloader
   model against the driver over a link that can drop frames, corrupt a chunk with a valid frame CRC,
   or go dead for longer than the heartbeat timeout: full transfer with trial and confirm, resume
   after link loss, refused and resent chunk, lost frames, bad digest, refused active slot, and trial
-  without confirmation rolling back on the next power cycle.
-- Size (`scripts/mcu-size.sh`, RX = TX = 128): the minimal `uart` build grows by 12 bytes on
-  Cortex-M0+ (7814 to 7826 B), 8 on Cortex-M4F, 22 on RV32IMC, with no RAM change: the generic
-  sink parameter and one codec body the linker keeps. The `uart-xfer` variant (the placeholder
-  sink, so the session's transfer logic is linked) costs about 2.4 KB flash and 160 bytes RAM on
-  Cortex-M0+ (10202 B and 884 B against 7826 B and 724 B for `uart`; the RAM is the 96-byte
-  `DeviceInfo` buffer, the reply and transfer state, and a 6-byte larger control buffer). A port's
-  flash driver adds its own code and buffers on top.
+  without confirmation rolling back on the next power cycle. The explicit rollback status has its
+  own tests: a trial reset before it confirms ends `RolledBack { NotConfirmed }`, a trial reverted on
+  its first boot ends `RolledBack { BootFailure }` with the device's note, and a silent revert ends
+  `NotActivated`.
+- Size (`scripts/mcu-size.sh`, RX = TX = 128): the minimal `uart` and `can` builds are unchanged on
+  Cortex-M0+ and Cortex-M4F (7794 B and 724 B RAM for `uart`); RV32IMC and RV32IMAC move by -8 B, the
+  LLVM outliner renumbering shared code. The `uart-xfer` variant (the placeholder sink, so the
+  session's transfer logic is linked) grows with the rollback report: 10138 B to 11014 B flash on
+  Cortex-M0+ (+282 B on Cortex-M4F, +742 B on RV32IMC), and 884 B to 948 B RAM. The RAM is the
+  `DeviceInfo` buffer going from 96 to 160 bytes, so a worst-case rollback report (a 64-byte version
+  and a 32-byte note) fits; the flash includes a compiler-builtins `memcpy` the variable-length
+  copies now call. A port's flash driver adds its own code and buffers on top.
 
 **Gateway (landed, serial and CAN links).** In `crates/node` (`link_gateway/firmware.rs`, with the
 serial link task in `link_gateway/serial_link.rs` and the CAN bus task in `link_gateway/can_link.rs`)
@@ -716,7 +723,9 @@ three node actions are registered when the `link-gateway` feature is built in (`
   device's session, one job per device (per link on serial). It reports `Running { progress }` from
   the bytes the device acknowledged, confirms the trial once the device reports the target version,
   and ends `Succeeded` (`phase = "installed"`, or `"handoff"` followed by a release), or `Failed` with
-  a reason. A rollback is reported as `rolled back`: the device's bootloader reverted the image.
+  a reason. A rollback the device reports is `rolled back: <reason>`, and the result's output has
+`rollback_reason` (`not_confirmed`, `boot_failure`, `verify_failed`, `requested` or `other`) and, when
+the device sent one, `rollback_note`.
 
 The health gate before `Confirm` is the device reporting the target version. The provider's own
 health (the gate of the design above) is not checked yet.
@@ -747,9 +756,11 @@ attach, a refused update to a released device, and a handoff; plus `can_firmware
 needs `vcan0`). Serial tests: `crates/node/src/link_gateway/tests/firmware.rs`, a simulated two-slot
 device on a pseudo-terminal (a trial update with progress, a refused confirmation, a handoff, release
 and attach, the refused requests, and the rollbacks: a trial whose health check fails reverts on the
-bootloader's second boot and fails with `rolled back`, and a trial reverted before the host sees it
-fails with `did not come back running the new version`; the protocol has no explicit rollback
-status, so the old version coming back is the only signal).
+bootloader's second boot and fails with `rolled back: the trial was not confirmed before the device
+rebooted` (`rollback_reason = not_confirmed` in the result), a trial reverted on its first boot fails
+with `rolled back: the new image did not boot` (`boot_failure`, with the device's note), and a
+bootloader that reverts without reporting it fails with `did not come back running the new version`,
+the only signal such a device gives. The CAN bus test runs the health-check revert in memory.)
 
 ## Recovery when Orion is unavailable
 
@@ -790,7 +801,7 @@ critical path at all. Each milestone is independently useful and testable.
 | U5 | External rollout controller | `RolloutRecord`, waves, `max_unavailable`, health gate, monotonic halt; `orionctl rollout` as the first controller. | U4 |
 | U6 | Cross-version rollouts | Frozen rollout beacon; state-dir snapshot before a slot switch; documented "sync-compatible" flag per release; a test that runs N and N+1 nodes through a rollout. | U5 |
 | U7 | Leaderless rollouts | Wave assignment and gate evaluation in `orion-cluster` (rendezvous order, own-intent writes, convergent halt); property tests like placement's. | U5 |
-| U8 | MCU firmware over the link | Kinds `0x20`–`0x28` and the `xfer` feature in device and host sessions, the simulator tests and the size budget (landed); gateway `link.release` / `link.attach` and `link.firmware.update` with confirm and rollback on serial and CAN links (landed; a CAN release takes one device off the bus). | U4 |
+| U8 | MCU firmware over the link | Kinds `0x20`–`0x28` and the `xfer` feature in device and host sessions, the simulator tests and the size budget (landed); gateway `link.release` / `link.attach` and `link.firmware.update` with confirm and rollback on serial and CAN links (landed; a CAN release takes one device off the bus). The device reports its bootloader's rollback and the reason in `DeviceInfo` (`RolledBack { reason }`). | U4 |
 | U9 | Hardware validation | Real A/B writer on a Linux board, power-cut and watchdog fault injection at every phase, an MCU with an A/B bootloader over UART and CAN. | U4, U8 |
 
 U1 and U2 have no dependencies and can start immediately. U3 was batched with other pending

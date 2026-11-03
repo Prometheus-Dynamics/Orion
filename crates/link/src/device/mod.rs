@@ -325,7 +325,8 @@ impl<
     fn refresh_info(&mut self) {
         if self.core.info_due() {
             let info = self.firmware.info();
-            self.core.encode_info(&info);
+            let rollback = self.firmware.last_trial();
+            self.core.encode_info(&info, rollback);
         }
     }
 
