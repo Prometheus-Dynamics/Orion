@@ -9,8 +9,8 @@ The user, 2026-11-03: the next release is an alpha for the reference board hardw
 first; the other items below are still needed, after it.
 
 - [ ] **aarch64 appliance soak** on the reference board (below, under freeze items).
-- [x] **Unknown arguments start a node** (below): `orion-node --version` on the reference board. Done in 6bf46ce on `alpha-fixes`; not yet on dev.
-- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d on `alpha-fixes`; not yet on dev. Byte total not yet in the usage snapshot or metrics (wire change, for v7).
+- [x] **Unknown arguments start a node** (below): `orion-node --version` on the reference board. Done in 6bf46ce; on dev.
+- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total not yet in the usage snapshot or metrics (wire change, for v7).
 - [ ] **Protocol v7 on the reference board:** once the current pin is proven on the board, the v7 window
       (the device library's orion-v7 merge, the consuming products together, the images' orion-node).
 
@@ -29,20 +29,21 @@ when, blocked by.
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate public types,
       aliases or client methods remain across orion-client/control-plane/node, and docs match.
       Blocked by: nothing.
-- [ ] **Unknown arguments start a node.** Why: `orion-node --version` on a reference board (2026-10-31)
+- [x] **Unknown arguments start a node.** Why: `orion-node --version` on a reference board (2026-10-31)
       started a second node (`node.local`, sockets in /tmp) instead of printing a version or
       refusing. Done when: `--version` and `--help` work, and an unknown argument exits non-zero
-      without starting anything. Blocked by: nothing.
+      without starting anything. Blocked by: nothing. Done in 6bf46ce (exit 2 on unknown arguments).
 - [x] Retraction, action-watch reconnect, private-link peer trust, supervision and safe mode
       (3f86056, bbc505b, 83fce6b, 3a00507, 2ec9f08, a380034, 9ad7991).
 
 ### 2. Hardware support and memory (added 2026-10-30)
 
-- [ ] **Byte-bounded watch queues.** Why: a non-polling executor/lease watcher can still hold up to
+- [x] **Byte-bounded watch queues.** Why: a non-polling executor/lease watcher can still hold up to
       256 full-list events; the K230D has 128 MB for everything. Done when: per-client queues are
       capped in bytes (a plain knob with a default) or coalesce to the latest list, and the
       device-like footprint harness shows a slow watcher holding at most the cap. Blocked by:
-      nothing.
+      nothing. Done in 737579d (byte cap on client event queues); byte total in the usage snapshot
+      and metrics is item 4 of the finish list and the v7 list.
 - [x] **riscv64 and armv7 builds.** Why: the K230D (riscv64) and Flame (RV1106G2, Cortex-A7) run
       orion-node and orionctl. Done in 81406f9 (CI job `cross32`, `scripts/ci-jobs.sh cross32`); the
       IPC-only build's dead-code warning was already handled upstream. The IPC-only orion-node and orionctl build in release for
