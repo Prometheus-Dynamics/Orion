@@ -2,7 +2,10 @@
 
 use orion::{
     NodeId,
-    control_plane::{ActionQuery, ActionRequest, ActionResult, ActionState, TypedConfigValue},
+    control_plane::{
+        ActionQuery, ActionRequest, ActionResult, ActionState, ActionUsageSnapshot,
+        TypedConfigValue,
+    },
     transport::ipc::LocalAddress,
 };
 use std::collections::BTreeMap;
@@ -143,7 +146,45 @@ pub(crate) fn same_request(a: &ActionRequest, b: &ActionRequest) -> bool {
     a.target == b.target && a.name == b.name && a.args == b.args
 }
 
+/// Approximate bytes of a final result, as counted by [`ActionRegistry::usage`].
+fn result_bytes(result: &ActionResult) -> u64 {
+    let output: usize = result
+        .output
+        .iter()
+        .map(|(key, value)| key.len() + value_len(value))
+        .sum();
+    let reason = result.state.reason().map_or(0, str::len);
+    [
+        result.action_id.len(),
+        result.name.len(),
+        result.requested_by.len(),
+        reason,
+        output,
+    ]
+    .iter()
+    .fold(0u64, |total, bytes| total.saturating_add(*bytes as u64))
+}
+
 impl ActionRegistry {
+    /// Counts of the tracked actions by stage, and the bytes of the retained final results.
+    pub(crate) fn usage(&self) -> ActionUsageSnapshot {
+        let mut usage = ActionUsageSnapshot::default();
+        for entry in self.entries.values() {
+            let state = &entry.result.state;
+            if state.is_terminal() {
+                usage.finished += 1;
+                usage.result_history_bytes = usage
+                    .result_history_bytes
+                    .saturating_add(result_bytes(&entry.result));
+            } else if matches!(state, ActionState::Running { .. }) {
+                usage.running += 1;
+            } else {
+                usage.pending += 1;
+            }
+        }
+        usage
+    }
+
     pub(crate) fn get(&self, action_id: &str) -> Option<&ActionEntry> {
         self.entries.get(action_id)
     }
@@ -399,5 +440,43 @@ mod tests {
             .collect();
         merge_output(&mut output, big);
         assert_eq!(output.len(), MAX_ACTION_MAP_ENTRIES);
+    }
+
+    #[test]
+    fn usage_counts_each_stage_and_the_bytes_of_final_results() {
+        let mut registry = ActionRegistry::default();
+        registry.insert(entry("accepted", ActionState::Accepted, 1, 100));
+        registry.insert(entry(
+            "running",
+            ActionState::Running {
+                progress: Some(500),
+            },
+            2,
+            100,
+        ));
+        registry.insert(entry("done", ActionState::Succeeded, 3, 100));
+        registry.insert(entry(
+            "failed",
+            ActionState::Failed {
+                reason: "boom".to_owned(),
+            },
+            4,
+            100,
+        ));
+        let usage = registry.usage();
+        assert_eq!((usage.pending, usage.running, usage.finished), (1, 1, 2));
+        // Only final results count: "done" (id 4 + name 6) and "failed" (id 6 + name 6 + reason
+        // 4). The test results have no requester and no output.
+        assert_eq!(
+            usage.result_history_bytes as usize,
+            "done".len() + "locate".len() + "failed".len() + "locate".len() + "boom".len()
+        );
+
+        // A final result that leaves the registry stops being counted.
+        registry.evict_expired(10_000, 1);
+        let after = registry.usage();
+        assert_eq!(after.finished, 0);
+        assert_eq!(after.result_history_bytes, 0);
+        assert_eq!(after.pending + after.running, 2);
     }
 }

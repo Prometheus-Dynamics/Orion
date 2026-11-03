@@ -291,6 +291,17 @@ same lane as every action, so there is no job-specific message:
 handler disconnects before a final report becomes `Failed` (see "Disconnects" in
 [device-agent.md](device-agent.md)).
 
+## Counters
+
+The resource-usage snapshot (`NodeResourceUsageSnapshot::actions`, `orionctl get memory`) counts
+the tracked actions by stage: `pending` (accepted, not yet started by its handler), `running`
+(reported as running), and `finished` (any final state). `result_history_bytes` is the approximate
+size of the retained final results (their ids, names, requesters, reasons, and output keys and
+values), so an operator can see what the result TTL and `ORION_NODE_ACTION_MAX_TRACKED` hold. It is
+computed on demand from the registry and is not persisted. Prometheus:
+`orion_action_entries{stage="pending"|"running"|"finished"}` and
+`orion_action_result_history_bytes`.
+
 ## Limits
 
 Action ids, names, argument and output keys are at most 128 bytes; at most 32 arguments and 32

@@ -2,14 +2,15 @@
 #![cfg(feature = "std")]
 
 use orion_control_plane::{
-    CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot,
-    CommunicationFailureKind, CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
-    CommunicationStageMetricsSnapshot, CommunicationTransportKind, LatencyMetricsSnapshot,
-    LocalStreamUsageSnapshot, MetricsExportConfig, MutationHistoryUsageSnapshot,
-    NodeResourceUsageSnapshot, ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot,
-    RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot,
-    WorkerQueueUsageSnapshot, render_communication_metrics,
-    render_communication_metrics_with_config, render_resource_usage_metrics,
+    ActionUsageSnapshot, CommunicationEndpointScope, CommunicationEndpointSnapshot,
+    CommunicationFailureCountSnapshot, CommunicationFailureKind, CommunicationMetricsSnapshot,
+    CommunicationRecentMetricsSnapshot, CommunicationStageMetricsSnapshot,
+    CommunicationTransportKind, LatencyMetricsSnapshot, LocalStreamUsageSnapshot,
+    MetricsExportConfig, MutationHistoryUsageSnapshot, NodeResourceUsageSnapshot,
+    ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot, RegistryUsageSnapshot,
+    StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot, WorkerQueueUsageSnapshot,
+    render_communication_metrics, render_communication_metrics_with_config,
+    render_resource_usage_metrics,
 };
 use orion_core::NodeId;
 use std::collections::BTreeMap;
@@ -279,6 +280,12 @@ fn sample_resource_usage() -> NodeResourceUsageSnapshot {
             client_event_queue_byte_limit: 65536,
             queued_client_event_bytes_total: 4096,
             queued_client_event_bytes_max: 2048,
+        },
+        actions: ActionUsageSnapshot {
+            pending: 1,
+            running: 2,
+            finished: 5,
+            result_history_bytes: 900,
         },
         worker_queues: vec![
             WorkerQueueUsageSnapshot {

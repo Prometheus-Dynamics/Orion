@@ -94,7 +94,7 @@ Control protocol:
       sync and persisted-state migration with it), `UpdateStatusRecord` in the observed slice,
       their mutations, and the query / response payloads behind `orionctl get updates`. Docs:
       update-recovery.md (U3), device-agent.md.
-- [ ] **Action counters in `resource_usage`.** Pending / running / finished counts and the
+- [x] **Action counters in `resource_usage`** (done on `usage-peer-wire`; `NodeResourceUsageSnapshot::actions`). Pending / running / finished counts and the
       result-history bytes in `NodeResourceUsageSnapshot`. Docs: actions.md.
 - [ ] **Peer `ActionWatch`.** A forwarding node subscribes to the owner's action results over
       `orion+tcp` instead of polling it (additive messages). Docs: actions.md, peer-sync.md.

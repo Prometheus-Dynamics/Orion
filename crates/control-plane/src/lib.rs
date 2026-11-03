@@ -15,9 +15,9 @@ mod state;
 
 pub use messages::{
     ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
-    ActionTargetParseError, AuditLogBackpressureMode, Backfill, BlobBegin, BlobChunk, BlobState,
-    BlobStatus, ClientEvent, ClientEventKind, ClientEventPoll, ClientHello, ClientRole,
-    ClientSession, ClientSessionMetricsSnapshot, CommunicationEndpointScope,
+    ActionTargetParseError, ActionUsageSnapshot, AuditLogBackpressureMode, Backfill, BlobBegin,
+    BlobChunk, BlobState, BlobStatus, ClientEvent, ClientEventKind, ClientEventPoll, ClientHello,
+    ClientRole, ClientSession, ClientSessionMetricsSnapshot, CommunicationEndpointScope,
     CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot, CommunicationFailureKind,
     CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
     CommunicationStageMetricsSnapshot, CommunicationTransportKind, ControlMessage,

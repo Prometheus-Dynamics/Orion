@@ -89,6 +89,11 @@ impl NodeApp {
         lock(&self.state.actions.registry)
     }
 
+    /// Action counts for the resource-usage snapshot.
+    pub(super) fn actions_usage(&self) -> orion::control_plane::ActionUsageSnapshot {
+        self.action_registry().usage()
+    }
+
     /// Names of the node-side action handlers registered on this node.
     pub fn action_handler_names(&self) -> Vec<String> {
         self.state.actions.handlers.keys().cloned().collect()

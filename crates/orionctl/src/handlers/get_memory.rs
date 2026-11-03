@@ -103,6 +103,11 @@ fn render_memory_summary(snapshot: &NodeObservabilitySnapshot) -> String {
         streams.client_event_queue_byte_limit,
         streams.dropped_client_events_total,
     ));
+    let actions = &usage.actions;
+    out.push_str(&format!(
+        "actions pending={} running={} finished={} result_history_bytes={}\n",
+        actions.pending, actions.running, actions.finished, actions.result_history_bytes,
+    ));
     for queue in &usage.worker_queues {
         out.push_str(&format!(
             "worker_queue name={} depth={}/{} dropped={}\n",

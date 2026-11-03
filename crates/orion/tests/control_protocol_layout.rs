@@ -174,6 +174,7 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
         PersistenceMetricsSnapshot,
         TransportMetricsSnapshot,
         NodeResourceUsageSnapshot,
+        ActionUsageSnapshot,
         LocalStreamUsageSnapshot,
         MutationHistoryUsageSnapshot,
         ProcessMemorySnapshot,

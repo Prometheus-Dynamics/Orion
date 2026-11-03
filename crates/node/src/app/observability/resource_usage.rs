@@ -137,6 +137,7 @@ impl NodeApp {
             observed_persistence: self.observed_persistence_usage(),
             status_lane: self.status_lane_usage(),
             streams: self.streams_usage(),
+            actions: self.actions_usage(),
         }
     }
 
