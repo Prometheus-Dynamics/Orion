@@ -131,11 +131,14 @@ impl BusDevice {
     }
 
     fn last_leases(&self) -> Option<Vec<LeaseRecord>> {
-        self.events
+        // Release the events lock before taking the device lock: the device task holds the
+        // device lock while it pushes events, so holding both the other way round deadlocks.
+        let changed = self
+            .events
             .lock()
             .expect("events lock")
-            .contains(&DeviceEvent::LeasesChanged)
-            .then(|| self.device.lock().expect("device lock").lease_records())
+            .contains(&DeviceEvent::LeasesChanged);
+        changed.then(|| self.device.lock().expect("device lock").lease_records())
     }
 }
 

@@ -2,6 +2,12 @@ use super::*;
 use orion::control_plane::{NodeRecord, ObservabilityEventKind, ObservedClusterState};
 use std::time::Instant;
 
+/// A backstop no test outlives: with it, any pass after the first was woken by a trigger.
+const NO_BACKSTOP: Duration = Duration::from_secs(3600);
+/// How long a test waits for a pass it expects. Only reached on failure, so it is generous:
+/// a loaded runner delays a woken pass by hundreds of milliseconds without anything being wrong.
+const PASS_WAIT: Duration = Duration::from_secs(30);
+
 fn loop_test_app(node_id: &str, backstop: Duration) -> NodeApp {
     NodeApp::builder()
         .config(
@@ -41,34 +47,35 @@ async fn idle_reconcile_loop_only_runs_backstop_passes() {
     let app = loop_test_app("node.loop.idle", Duration::from_millis(200));
     let handle = app.spawn_reconcile_loop(Duration::from_millis(10));
 
+    let started = Instant::now();
     tokio::time::sleep(Duration::from_millis(500)).await;
     let reconciles = reconcile_count(&app);
+    let elapsed = started.elapsed();
     handle.shutdown().await;
 
-    // One startup pass plus two backstop passes; fixed 10ms polling would have run ~50.
+    // The startup pass, one per backstop period that actually elapsed (a loaded machine
+    // oversleeps), and one for rounding: 4 after 500 ms, where fixed 10ms polling runs ~50.
+    let most = 2 + u64::try_from(elapsed.as_millis() / 200).unwrap_or(u64::MAX);
     assert!(
-        (1..=4).contains(&reconciles),
-        "idle loop should only run startup and backstop passes, observed {reconciles}"
+        (1..=most).contains(&reconciles),
+        "idle loop should only run startup and backstop passes, observed {reconciles} in {elapsed:?}"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn desired_state_mutation_wakes_reconcile_loop_promptly() {
-    let app = loop_test_app("node.loop.mutation", Duration::from_secs(60));
+    let app = loop_test_app("node.loop.mutation", NO_BACKSTOP);
     let handle = app.spawn_reconcile_loop(Duration::from_millis(10));
-    wait_for_reconciles(&app, 1, Duration::from_secs(2)).await;
+    wait_for_reconciles(&app, 1, PASS_WAIT).await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(reconcile_count(&app), 1, "idle loop should not poll");
 
+    // With no backstop in reach, the second pass can only be the mutation's wake-up.
     add_node(&app, 0);
-    let elapsed = wait_for_reconciles(&app, 2, Duration::from_secs(2)).await;
+    wait_for_reconciles(&app, 2, PASS_WAIT).await;
     let snapshot = app.state_snapshot();
     handle.shutdown().await;
 
-    assert!(
-        elapsed < Duration::from_millis(500),
-        "mutation should wake the loop well before the backstop, took {elapsed:?}"
-    );
     assert_eq!(
         snapshot.state.applied.revision, snapshot.state.desired.revision,
         "woken pass should apply the new desired revision"
@@ -77,9 +84,9 @@ async fn desired_state_mutation_wakes_reconcile_loop_promptly() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn observed_update_wakes_reconcile_loop() {
-    let app = loop_test_app("node.loop.observed", Duration::from_secs(60));
+    let app = loop_test_app("node.loop.observed", NO_BACKSTOP);
     let handle = app.spawn_reconcile_loop(Duration::from_millis(10));
-    wait_for_reconciles(&app, 1, Duration::from_secs(2)).await;
+    wait_for_reconciles(&app, 1, PASS_WAIT).await;
 
     let mut observed = ObservedClusterState::default();
     observed.set_revision(Revision::new(1));
@@ -89,21 +96,17 @@ async fn observed_update_wakes_reconcile_loop() {
         host: None,
     })
     .expect("observed update should apply");
-    let elapsed = wait_for_reconciles(&app, 2, Duration::from_secs(2)).await;
+    // With no backstop in reach, the second pass can only be the update's wake-up.
+    wait_for_reconciles(&app, 2, PASS_WAIT).await;
     handle.shutdown().await;
-
-    assert!(
-        elapsed < Duration::from_millis(500),
-        "observed update should wake the loop well before the backstop, took {elapsed:?}"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn burst_of_mutations_coalesces_into_few_reconciles() {
-    let app = loop_test_app("node.loop.burst", Duration::from_secs(60));
+    let app = loop_test_app("node.loop.burst", NO_BACKSTOP);
     let interval = Duration::from_millis(50);
     let handle = app.spawn_reconcile_loop(interval);
-    wait_for_reconciles(&app, 1, Duration::from_secs(2)).await;
+    wait_for_reconciles(&app, 1, PASS_WAIT).await;
     let before = reconcile_count(&app);
 
     let started = std::time::Instant::now();
@@ -138,7 +141,7 @@ async fn burst_of_mutations_coalesces_into_few_reconciles() {
 
 #[test]
 fn unchanged_reconcile_updates_metrics_without_recording_an_event() {
-    let app = loop_test_app("node.loop.events", Duration::from_secs(60));
+    let app = loop_test_app("node.loop.events", NO_BACKSTOP);
     add_node(&app, 0);
     app.tick()
         .expect("first tick should apply the desired revision");

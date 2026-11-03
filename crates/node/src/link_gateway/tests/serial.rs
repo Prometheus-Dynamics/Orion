@@ -149,11 +149,10 @@ impl SimDevice {
     }
 
     pub(crate) fn last_leases(&self) -> Option<Vec<LeaseRecord>> {
-        self.events
-            .lock()
-            .expect("events lock")
-            .contains(&DeviceEvent::LeasesChanged)
-            .then(|| self.device.lock().expect("device lock").lease_records())
+        // Release the events lock before taking the device lock: the device task holds the
+        // device lock while it pushes events, so holding both the other way round deadlocks.
+        let changed = self.saw(|event| *event == DeviceEvent::LeasesChanged);
+        changed.then(|| self.device.lock().expect("device lock").lease_records())
     }
 
     pub(crate) fn saw(&self, predicate: impl Fn(&DeviceEvent) -> bool) -> bool {

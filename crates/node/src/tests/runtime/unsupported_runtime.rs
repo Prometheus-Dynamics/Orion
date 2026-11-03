@@ -4,7 +4,7 @@
 use super::*;
 use orion::control_plane::{ExecutorRecord, ProviderRecord, WorkloadRecord};
 use orion_client::{LocalNodeRuntime, LocalRuntimePublisher};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 const EXTERNAL_TYPE: &str = "example.engine.execution.v1";
 const NO_EXECUTOR: &str = "no local executor realizes this workload";
@@ -50,6 +50,16 @@ impl LogBuffer {
     }
 }
 
+/// Keeps a second dispatcher registered for the whole test binary. With only one registered,
+/// tracing-core computes a callsite's cached interest from the default of whichever thread
+/// registers it: another test's thread, with no subscriber, reaching the warning first caches
+/// "never" for the whole process, and the warning is lost. With two or more it asks every live
+/// dispatcher instead.
+fn keep_dispatchers_shared() {
+    static ANCHOR: OnceLock<tracing::Dispatch> = OnceLock::new();
+    ANCHOR.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default()));
+}
+
 /// Runs `test` on a two-worker runtime whose every thread (the test's, the workers and the
 /// blocking pool) logs into one buffer. A pass can run on any of them: the IPC server reconciles
 /// on a worker after a publish, so a subscriber set on the test thread alone misses its warning.
@@ -58,6 +68,7 @@ where
     F: FnOnce(LogBuffer) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    keep_dispatchers_shared();
     let buffer = LogBuffer::default();
     let dispatch = tracing::Dispatch::new(
         tracing_subscriber::fmt()
@@ -67,7 +78,7 @@ where
             .finish(),
     );
     let _guard = tracing::dispatcher::set_default(&dispatch);
-    // Callsites another test's thread registered first may have cached "never"; recompute.
+    // Callsites registered before this dispatcher existed cached interest without it; recompute.
     tracing::callsite::rebuild_interest_cache();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)

@@ -333,14 +333,24 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       whole-binary + 300 isolated runs under the same load, 0 environment failures.
       Left: `crates/client/src/tests/local_defaults.rs` and `crates/client/src/graph.rs` still set
       variables in the client's lib test binary (valid values, own lock); move them if one ever fails.
-- [ ] **Unsupported-runtime warning missing under load.** Still fails after the all-thread capture:
-      `truly_unsupported_type_is_reported_once_and_does_not_block_others`
-      (`crates/node/src/tests/runtime/unsupported_runtime.rs:269`, `wait_for` WARN left 0 right 1)
-      in 6 of 150 whole node lib binary runs beside looping workspace tests (2026-11-03), never alone.
-      Not the environment (same rate before and after the config-test move). Suspect the callsite
-      interest cache: another test thread re-registering the callsite between `rebuild_interest_cache`
-      and the pass. Also seen once each under that load: `discovery::tests::sync::removed_peers_are_not_re_enrolled_by_the_shared_key`,
-      `tests::runtime::reconcile_loop::idle_reconcile_loop_only_runs_backstop_passes` ("observed 5").
+- [x] **Unsupported-runtime warning missing under load.** `truly_unsupported_type_is_reported_once_and_does_not_block_others`
+      (`unsupported_runtime.rs:269`, WARN left 0 right 1): 3 of 180 whole node lib binary runs beside
+      looping workspace tests. Cause: with one dispatcher registered, tracing-core 0.1.36 caches a
+      callsite's interest from the default of whichever thread registers it (`Rebuilder::JustOne`), so
+      another test's thread without a subscriber reaching the warning first caches "never" for the
+      process. Shown with a standalone program (captured 0 without, 1 with a second dispatcher). Fix:
+      `with_logs` keeps a second, process-lived dispatcher registered. After: 0 of 210 runs.
+- [x] **Link sim device deadlock.** One whole-binary run hung (24 min) in
+      `serial_device_becomes_provider_gets_leases_and_survives_reconnect`: `SimDevice::last_leases`
+      held the events lock (a temporary living to the end of the statement) while taking the device
+      lock; the device task takes them the other way round. Same code in the CAN `BusDevice`. Fix: read
+      the events flag first, then lock the device. After: 0 hangs in 210 runs.
+- [x] **Reconcile-loop wake tests.** `desired_state_mutation_wakes_reconcile_loop_promptly` and
+      `observed_update_wakes_reconcile_loop` asserted the woken pass came within 500 ms; under heavy
+      load it took 650-730 ms (3 of 210 runs). The property is "woken, not the backstop": the tests now
+      use a one-hour backstop, so any second pass is the wake-up, and wait for it without a latency
+      bound. `idle_reconcile_loop_only_runs_backstop_passes` (once "observed 5", on code with the
+      environment leak, where safe mode adds a pass) bounds passes by the measured elapsed time.
 - [x] **Unsupported-runtime log count.** Failure: `crates/node/src/tests/runtime/unsupported_runtime.rs:230`,
       "left: 0, right: 1" for `logs.count("nobody.exec.v1", "WARN")`. Cause: the IPC server reconciles on a
       runtime worker thread after a publish; the test's subscriber was thread-local (`set_default` on the
