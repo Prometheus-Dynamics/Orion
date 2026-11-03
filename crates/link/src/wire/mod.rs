@@ -71,6 +71,25 @@ pub mod kind {
     pub const WORKLOADS: u8 = 0x13;
     /// `Status(Vec<StatusEntry>)`, device → host: volatile status values, fire-and-forget.
     pub const STATUS: u8 = 0x14;
+    /// First kind of the range reserved for firmware transfer (`0x20..=0x2F`, see
+    /// [`is_firmware`]). Reserved, not implemented: a build without firmware transfer decodes
+    /// these kinds as unknown and sessions ignore them.
+    pub const FIRMWARE_FIRST: u8 = 0x20;
+    /// Last kind of the range reserved for firmware transfer.
+    pub const FIRMWARE_LAST: u8 = 0x2F;
+    /// `ActionRequest { id, name, payload }`, host → device: run a named action. The device answers
+    /// with one or more `ActionResult`s carrying the same `id`. Additive in protocol 1.
+    pub const ACTION_REQUEST: u8 = 0x30;
+    /// `ActionResult { id, state, payload }`, device → host: the state of the action with that
+    /// `id`. Additive in protocol 1.
+    pub const ACTION_RESULT: u8 = 0x31;
+
+    /// Whether `kind` lies in the firmware-transfer range reserved by [`FIRMWARE_FIRST`] and
+    /// [`FIRMWARE_LAST`].
+    #[must_use]
+    pub const fn is_firmware(kind: u8) -> bool {
+        matches!(kind, FIRMWARE_FIRST..=FIRMWARE_LAST)
+    }
 }
 
 /// Roles a device announces in `Hello` (bit set, encoded as one byte).

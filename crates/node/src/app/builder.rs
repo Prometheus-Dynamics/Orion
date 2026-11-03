@@ -17,6 +17,7 @@ use crate::peer::{PeerConfig, PeerState};
 use crate::service::{ControlMiddleware, ControlMiddlewareHandle};
 use crate::storage::{
     CLUSTER_STATE_FILES, MAINTENANCE_STATE_FILE, NodeStorage, SNAPSHOT_FORMAT_VERSION,
+    UnsupportedSnapshotFormat,
 };
 use crate::transport_security::NodeTransportSecurityManager;
 #[cfg(feature = "transport-quic")]
@@ -36,7 +37,7 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use tracing::{info, warn};
+use tracing::{error, warn};
 
 impl Default for NodeAppBuilder {
     fn default() -> Self {
@@ -606,38 +607,28 @@ impl NodeAppBuilder {
         control_middlewares.extend(self.control_middlewares);
         app.control_middlewares = Arc::from(control_middlewares);
 
-        if let Some(storage) = app.storage.as_ref() {
-            if let Some(version) = storage.newer_snapshot_format()? {
-                quarantined = Some(super::safe_mode::quarantine_files(
-                    storage,
-                    &CLUSTER_STATE_FILES,
-                    format!(
-                        "snapshot format {version} is newer than this build reads ({SNAPSHOT_FORMAT_VERSION})"
-                    ),
-                )?);
-            } else {
-                match storage.migrate_legacy_state(orion::hlc_node_tag(app.config.node_id.as_str()))
-                {
-                    Ok(Some(report)) => info!(
-                        node = %app.config.node_id,
-                        from_format = report.from_format,
-                        to_format = report.to_format,
-                        desired_revision = %report.desired_revision,
-                        objects = report.objects,
-                        tombstones = report.tombstones,
-                        backup_dir = %report.backup_dir.display(),
-                        "migrated the state directory to the current snapshot format"
-                    ),
-                    Ok(None) => {}
-                    Err(err) => {
-                        quarantined = Some(super::safe_mode::quarantine_files(
-                            storage,
-                            &CLUSTER_STATE_FILES,
-                            format!("state migration failed: {err}"),
-                        )?);
-                    }
+        // A state directory in any other snapshot format is not read. Its cluster state files are
+        // moved aside (renamed, never deleted) and the node starts with an empty desired state, so
+        // a non-current state directory never blocks startup or sends the node into a restart loop.
+        if let Some(storage) = app.storage.as_ref()
+            && let Some(found) = storage.unsupported_snapshot_format()?
+        {
+            let found = match found {
+                UnsupportedSnapshotFormat::Found(version) => format!("format {version}"),
+                UnsupportedSnapshotFormat::Undecodable => {
+                    "a manifest this build cannot decode".to_owned()
                 }
-            }
+            };
+            let moved = storage.move_unsupported_format_aside(&CLUSTER_STATE_FILES)?;
+            error!(
+                node = %app.config.node_id,
+                found = %found,
+                expected = SNAPSHOT_FORMAT_VERSION,
+                moved_to = moved.as_ref().map(|dir| dir.display().to_string()).unwrap_or_default(),
+                "state directory holds snapshot {found}, but this orion-node reads snapshot format \
+                 {SNAPSHOT_FORMAT_VERSION}; the cluster state files were moved aside and the node \
+                 starts with an empty desired state"
+            );
         }
         app.seed_clock_from_desired();
         if self.auto_startup_replay && app.storage.is_some() {

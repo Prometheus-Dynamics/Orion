@@ -30,8 +30,8 @@ Examples:
 The rkyv control protocol is versioned by `orion_core::CONTROL_PROTOCOL_VERSION`. Clients and
 nodes built from different Orion releases reject each other with a typed `ProtocolMismatch
 { local, remote }` error (`IpcTransportError`, `HttpTransportError`, `ClientError`) before any
-payload is decoded (version 3 adds the status-lane messages; version 4 host facts, actions, and
-link status). If you write raw IPC frames yourself, use `control_preamble()` /
+payload is decoded (protocol 1 is the first release; see protocol-compatibility.md for what it
+covers). If you write raw IPC frames yourself, use `control_preamble()` /
 `check_control_preamble()` from `orion-transport-ipc`. See
 [protocol-compatibility.md](protocol-compatibility.md).
 
@@ -205,7 +205,7 @@ See [peer-sync.md](peer-sync.md) for the model. The public surface:
 - `MutationBatch::{stamps, stamped, is_stamped, check_stamps, versions}`.
 - `orion-node`: `NodeApp::start_peer_tcp_server(addr)` (feature `peer-tcp`), `NodeApp::hlc_now()`,
   `NodeApp::collect_expired_tombstones()`, `PeerTransportKind`, `PEER_TCP_SCHEME`,
-  `PeerTcpError`, `NodeStorage::migrate_legacy_state` / `StateMigrationReport`, and
+  `PeerTcpError`, `NodeStorage::unsupported_snapshot_format` / `UnsupportedSnapshotFormat`, and
   `NodeRuntimeTuning::{with_hlc_max_drift, with_tombstone_retention}`.
   `ControlSurface::PeerTcp` (with `ControlSurface::is_peer`) marks requests from `orion+tcp`
   peers for custom middleware.

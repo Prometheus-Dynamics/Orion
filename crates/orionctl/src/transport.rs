@@ -133,8 +133,8 @@ impl HttpTargetArgs {
     fn describe_http_error(&self, error: HttpTransportError) -> String {
         match error {
             HttpTransportError::ProtocolMismatch { local, remote } => format!(
-                "incompatible Orion control protocol: orionctl speaks v{local} but the orion-node \
-                 at {} speaks v{remote}; upgrade orionctl and orion-node together (they must come \
+                "incompatible Orion control protocol: orionctl speaks protocol {local} but the orion-node \
+                 at {} speaks protocol {remote}; upgrade orionctl and orion-node together (they must come \
                  from the same Orion release)",
                 self.http
             ),

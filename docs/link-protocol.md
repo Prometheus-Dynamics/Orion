@@ -140,6 +140,9 @@ postcard encodings of the listed fields, in order.
 | `0x12` | `ExecutorState` | device → host | | Reserved for the executor role. |
 | `0x13` | `Workloads` | host → device | | Reserved for the executor role. |
 | `0x14` | `Status` | device → host | `Vec<StatusEntry>`; each `key: String`, `value: TypedConfigValue`, `ttl_ms: u32` | Volatile status values (see "Status" below). Fire-and-forget: never acknowledged or retransmitted. Added in version 1 as an additive kind. |
+| `0x20`-`0x2F` | reserved | | | Reserved for firmware transfer (`orion_link::wire::kind::FIRMWARE_FIRST`..`FIRMWARE_LAST`). Not implemented: these kinds are ignored like unknown kinds, and no version bump is needed to add them later. |
+| `0x30` | `ActionRequest` | host → device | `id: u32`, `name: String`, `payload: Vec<u8>` | Asks the device to run a named action (see "Actions" below). Added in version 1 as an additive kind. |
+| `0x31` | `ActionResult` | device → host | `id: u32`, `state` (postcard enum: `0` Running, `1` Succeeded, `2` Failed, `3` Rejected), `payload: Vec<u8>` | The device's report on the request with the same `id`. Added in version 1 as an additive kind. |
 
 Reject reasons (one byte; unknown codes are reported as `Other(code)`):
 
@@ -187,6 +190,20 @@ operators with `orionctl get status`. Nothing is persisted.
   count in `status_batches`. TTL `0` means the node maximum (`ORION_NODE_STATUS_MAX_TTL_MS`),
   which also caps longer TTLs; node caps on keys, values, and entries per publisher apply (see
   `docs/node-env.md`), and a batch over a cap is refused whole.
+
+### Actions
+
+A device can be an action handler for its provider (`docs/actions.md`). The host sends
+`ActionRequest { id, name, payload }`, and the device reports `ActionResult { id, state, payload }`
+with the same `id`: `Running` while it works, then `Succeeded` (payload is the output), `Failed` or
+`Rejected` (payload is the reason). The name and the payload encoding belong to the handler; the
+link layer only carries them. `payload` is bounded by the frame size like every body.
+
+The codec is in place for hosts and devices with the `alloc` feature (`Message::ActionRequest`,
+`Message::ActionResult`, `encode_action_request`), and the wire fixture pins the frames. Neither
+session acts on these kinds yet: a device or host session ignores them as it ignores any unknown
+kind. Routing a node action to a device's provider, and the device-side queue that answers it, are
+the remainder of this work (see `TODO.md`, "Protocol 1").
 
 ### Session lifecycle
 
@@ -392,7 +409,7 @@ Bridging, kept generic (nothing about the device's resource types is assumed):
   connected devices), and the
   gateway logs device connects, publishes, losses, rejections, I/O errors (once per distinct
   error), and a counter summary when each link closes. The same counters are in the
-  observability snapshot's `links` section (control protocol v4): `orionctl get links`
+  observability snapshot's `links` section (control protocol 1): `orionctl get links`
   (`-o json|yaml|toml|metrics`) and the `orion_link_*` Prometheus families (see
   `docs/observability.md`). The devices' providers and resources are visible with
   `orionctl get providers` / `orionctl get resources` like any other.
@@ -435,7 +452,8 @@ numbers, body fields, or the postcard encoding of the shared records) fails unti
 `LINK_PROTOCOL_VERSION` is bumped and the fixture is regenerated with
 `ORION_UPDATE_LINK_ENCODINGS=1`. Additive changes (new kinds, appended body fields) need no bump:
 the `Status` body was added this way (the `status` fixture entry is appended, earlier entries are
-unchanged, and `LINK_PROTOCOL_VERSION` stays 1). Hosts and devices that predate it ignore the kind.
+unchanged, and `LINK_PROTOCOL_VERSION` stays 1). The action kinds (`0x30`, `0x31`) and the
+`alloc`-only bodies were added the same way. Hosts and devices that predate a kind ignore it.
 
 The device's hand-written codec (`orion_link::wire`) is held to the same fixture:
 `crates/link/tests/wire.rs` encodes every device → host message from views and compares the frames

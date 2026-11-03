@@ -19,8 +19,9 @@ use tracing::warn;
 pub enum SafeModeCause {
     /// The node identity key could not be read. Peer sync is off until the key is repaired.
     IdentityUnreadable { error: String },
-    /// Persisted state could not be decoded, or is from a newer snapshot format. It was moved to
-    /// `quarantine` and the node started with an empty desired state.
+    /// Persisted state could not be decoded. It was moved to `quarantine` and the node started with
+    /// an empty desired state. (A state directory in another snapshot format is not safe mode: see
+    /// `unsupported-format-<unix ms>/` in `docs/node-env.md`.)
     StateQuarantined { reason: String, quarantine: PathBuf },
     /// `ORION_NODE_SAFE_MODE` is set.
     Requested,

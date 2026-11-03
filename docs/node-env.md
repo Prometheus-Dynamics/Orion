@@ -323,8 +323,7 @@ observability keep working. Health shows `safe_mode: <cause>` in its reasons and
 
 Safe mode is also entered without the variable when:
 
-- persisted cluster state cannot be decoded, or the snapshot is from a newer format than this build
-  reads. The state files (`snapshot-*.rkyv`, `mutation-history*.rkyv`) are moved to
+- persisted cluster state cannot be decoded (a desired or applied section, say). The state files (`snapshot-*.rkyv`, `mutation-history*.rkyv`) are moved to
   `<state dir>/quarantine-<unix ms>/` and never deleted, and the node starts with an empty desired
   state. The same goes for an unreadable maintenance state file, which is moved on its own.
 - the node identity key (`node-identity.ed25519`) cannot be read. The node runs on a throwaway identity, does
@@ -342,16 +341,24 @@ alone is not enough while the marker exists.
 | `ORION_NODE_AUDIT_LOG` | unset | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_SHUTDOWN_AFTER_INIT_MS` | unset | Integer milliseconds | Invalid integer fails startup. Intended for tests and controlled automation, not steady-state production. |
 
-A state directory written by an `orion-node` before control protocol v3 (snapshot format 3) is
-migrated in place on the first start: the old files are kept in `<state dir>/legacy-format-3/`,
-the desired state is rewritten with per-object versions, and observed state is rebuilt from live
-reports. If the old files cannot be read, startup fails without overwriting anything. See
-"Upgrading from protocol v2" in `docs/peer-sync.md`.
+### State directory format
 
-A state directory written with control protocol v3 (snapshot format 4) is rewritten in snapshot
-format 5 (`NodeRecord::host`) on the first start, keeping every record, stamp, and revision; the
-old files are kept in `<state dir>/legacy-format-4/`. See "Upgrading from protocol v3" in
-`docs/host-facts.md`.
+The node reads one snapshot format, format 1, the layout of the first release. The manifest
+(`snapshot-manifest.rkyv`) names the format. A state directory holding any other format, or a
+manifest that does not decode with the current layout (a pre-release directory, or a damaged
+manifest), is not read and never blocks startup:
+
+- the cluster state files (`snapshot-*.rkyv`, `mutation-history*.rkyv`) are renamed into
+  `<state dir>/unsupported-format-<unix ms>/`; nothing is deleted;
+- the node logs one error that names the format it found, the format it reads (1), and the moved
+  directory;
+- the node starts with an empty desired state and gets its desired state back from peers and
+  local clients, as on a fresh node.
+
+This is not safe mode: the maintenance state and the other stores are left as they are. Damaged
+state in a readable directory (a decodable manifest whose applied or desired section does not
+decode) is quarantined to `<state dir>/quarantine-<unix ms>/` and starts safe mode, see "Safe
+mode" above.
 
 ## Clock Facts
 

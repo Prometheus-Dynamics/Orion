@@ -21,10 +21,14 @@ fn build(state_dir: &std::path::Path, safe_mode: Option<bool>) -> NodeApp {
 
 #[test]
 fn corrupt_state_is_quarantined_and_the_node_starts_in_safe_mode() {
+    // The manifest decodes (so the snapshot format is the current one), but the applied section
+    // does not: that is damaged state, which is quarantined and starts safe mode.
     let state_dir = temp_state_dir("safe-corrupt");
-    fs::create_dir_all(&state_dir).expect("state dir should be created");
-    fs::write(state_dir.join("snapshot-manifest.rkyv"), b"not-rkyv")
-        .expect("corrupt manifest should be written");
+    let app = build(&state_dir, None);
+    app.persist_state().expect("state should persist");
+    drop(app);
+    fs::write(state_dir.join("snapshot-applied.rkyv"), b"not-rkyv")
+        .expect("corrupt applied section should be written");
 
     let app = build(&state_dir, None);
 
@@ -38,10 +42,10 @@ fn corrupt_state_is_quarantined_and_the_node_starts_in_safe_mode() {
             .is_some_and(|name| name.to_string_lossy().starts_with("quarantine-"))
     );
     assert_eq!(
-        fs::read(quarantine.join("snapshot-manifest.rkyv")).expect("quarantined file should exist"),
+        fs::read(quarantine.join("snapshot-applied.rkyv")).expect("quarantined file should exist"),
         b"not-rkyv"
     );
-    assert!(!state_dir.join("snapshot-manifest.rkyv").exists());
+    assert!(!state_dir.join("snapshot-applied.rkyv").exists());
 
     let health = app.health_snapshot();
     assert!(
@@ -61,32 +65,84 @@ fn corrupt_state_is_quarantined_and_the_node_starts_in_safe_mode() {
     let _ = fs::remove_dir_all(state_dir);
 }
 
-#[test]
-fn newer_snapshot_format_is_quarantined_not_read() {
-    let state_dir = temp_state_dir("safe-newer");
+/// Rewrites the snapshot manifest of a persisted state directory with `rewrite`, then starts a node
+/// over it and returns the node and the state directory.
+fn start_over_rewritten_manifest(
+    label: &str,
+    rewrite: impl FnOnce(&std::path::Path),
+) -> (NodeApp, PathBuf) {
+    let state_dir = temp_state_dir(label);
     let app = build(&state_dir, None);
     app.persist_state().expect("state should persist");
     drop(app);
+    rewrite(&state_dir);
+    (build(&state_dir, None), state_dir)
+}
 
-    let storage = NodeStorage::new(state_dir.clone());
-    let mut manifest = storage
-        .load_snapshot_manifest()
-        .expect("manifest should load")
-        .expect("manifest should exist");
-    manifest.format_version = 99;
-    fs::write(
-        state_dir.join("snapshot-manifest.rkyv"),
-        orion::encode_to_vec(&manifest).expect("manifest should encode"),
-    )
-    .expect("newer manifest should be written");
+/// The directories `unsupported-format-<ms>` under a state directory.
+fn unsupported_format_dirs(state_dir: &std::path::Path) -> Vec<PathBuf> {
+    fs::read_dir(state_dir)
+        .expect("state dir should list")
+        .map(|entry| entry.expect("entry should read").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("unsupported-format-"))
+        })
+        .collect()
+}
 
-    let app = build(&state_dir, None);
-    match app.safe_mode() {
-        Some(SafeModeCause::StateQuarantined { reason, .. }) => {
-            assert!(reason.contains("newer"), "reason was {reason}");
-        }
-        other => panic!("expected quarantine for a newer format, got {other:?}"),
-    }
+#[test]
+fn snapshot_in_another_format_is_moved_aside_and_the_node_starts_fresh() {
+    // A manifest that decodes but names another format (here a newer one) is moved aside.
+    let (app, state_dir) = start_over_rewritten_manifest("safe-other-format", |state_dir| {
+        let storage = NodeStorage::new(state_dir.to_path_buf());
+        let mut manifest = storage
+            .load_snapshot_manifest()
+            .expect("manifest should load")
+            .expect("manifest should exist");
+        manifest.format_version = 99;
+        fs::write(
+            state_dir.join("snapshot-manifest.rkyv"),
+            orion::encode_to_vec(&manifest).expect("manifest should encode"),
+        )
+        .expect("manifest should be written");
+    });
+
+    // Not safe mode: the node is up with an empty desired state and nothing was deleted.
+    assert_eq!(app.safe_mode(), None);
+    assert!(app.state_snapshot().state.desired.providers.is_empty());
+    let moved = unsupported_format_dirs(&state_dir);
+    assert_eq!(
+        moved.len(),
+        1,
+        "one unsupported-format directory is expected"
+    );
+    assert!(moved[0].join("snapshot-manifest.rkyv").exists());
+    assert!(!state_dir.join("snapshot-manifest.rkyv").exists());
+
+    // The fresh state persists again and the moved files stay where they were.
+    app.persist_state().expect("fresh state should persist");
+    assert!(state_dir.join("snapshot-manifest.rkyv").exists());
+    assert!(moved[0].join("snapshot-manifest.rkyv").exists());
+
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn undecodable_snapshot_manifest_is_moved_aside_and_the_node_starts_fresh() {
+    // A manifest that does not decode with the current layout (an older layout, or damage).
+    let (app, state_dir) = start_over_rewritten_manifest("safe-undecodable", |state_dir| {
+        fs::write(
+            state_dir.join("snapshot-manifest.rkyv"),
+            b"not an archived manifest",
+        )
+        .expect("manifest should be written");
+    });
+
+    assert_eq!(app.safe_mode(), None);
+    assert_eq!(unsupported_format_dirs(&state_dir).len(), 1);
+    assert!(!state_dir.join("snapshot-manifest.rkyv").exists());
 
     let _ = fs::remove_dir_all(state_dir);
 }

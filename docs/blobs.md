@@ -3,7 +3,7 @@
 A local client streams a large file (an OS image, hundreds of megabytes) to the node in chunks.
 The node stores it under a configured directory, checks its SHA-256 and reports where it is. The
 transfer is resumable by offset and bounded in memory on both sides. It is a local IPC feature
-(control protocol v7); the HTTP and peer transports refuse blob messages.
+(control protocol 1); the HTTP and peer transports refuse blob messages.
 
 Use it for bytes that do not fit an action argument (`String` values 1 KiB, `Bytes` 64 KiB, one
 request 256 KiB). A device agent that needs the image then reads the committed file at the `path`

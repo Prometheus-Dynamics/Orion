@@ -4,7 +4,7 @@ A device agent is a small daemon shipped by a device package (not by Orion) that
 `orion-node`'s local IPC, claims node-level actions such as `update`, `update.cancel`,
 `update.rollback`, `reboot` and `locate`, runs
 them with the package's own tools, and keeps the durable outcome of the last update visible on the
-status lane. This page is the contract between such an agent, `orion-node` (control protocol v4),
+status lane. This page is the contract between such an agent, `orion-node` (control protocol 1),
 and the tools that drive it (a fleet tool through the remote operator client, `orionctl`, scripts).
 
 Orion implements none of the actions and never touches disks: image bytes come from the URL the

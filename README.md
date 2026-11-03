@@ -104,7 +104,7 @@ For runtime logging behavior and operator guidance, see [`docs/logging.md`](docs
 For preferred public constructors versus compatibility shims, see [`docs/public-api.md`](docs/public-api.md).
 For the current locking, blocking, and peer-sync concurrency audit, see [`docs/performance-concurrency.md`](docs/performance-concurrency.md).
 For the crate layout and layering, see [`docs/architecture-crate-map.md`](docs/architecture-crate-map.md).
-For peer sync transports, merge rules, tombstones, and the protocol v3 upgrade, see [`docs/peer-sync.md`](docs/peer-sync.md).
+For peer sync transports, merge rules, tombstones, and the merge model, see [`docs/peer-sync.md`](docs/peer-sync.md).
 
 ## Features
 

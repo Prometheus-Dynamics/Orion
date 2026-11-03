@@ -59,7 +59,7 @@ pub struct HlcTimestamp {
 }
 
 impl HlcTimestamp {
-    /// The smallest timestamp. Used for state migrated from before per-object versioning.
+    /// The smallest timestamp. Used for objects that carry no recorded stamp.
     pub const ZERO: Self = Self {
         physical_ms: 0,
         logical: 0,

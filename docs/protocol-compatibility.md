@@ -15,15 +15,14 @@ version that is checked **before** any archived payload is decoded.
 `orion_core::CONTROL_PROTOCOL_VERSION` (`crates/core/src/protocol.rs`) is the single source of
 truth. It is a `u16` that changes whenever the archived layout of a protocol type changes.
 
+Protocol 1 is the first release, so the table has one row. Each later change adds a row.
+
 | Version | Change |
 |---|---|
-| 1 | Implicit, unversioned layout before the preamble existed |
-| 2 | `NodeObservabilitySnapshot::resource_usage`; version preamble and header added |
-| 3 | `NodeRecord::clock` and `NodeObservabilitySnapshot::clock` (`NodeClockFacts`, `ClockSourceKind`); `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived` removed; volatile status lane: `PublishStatus`, `QueryStatus`, `WatchStatus`, `Status` control messages, `ClientEventKind::Status`, and the `observed_persistence` / `status_lane` resource-usage sections; per-object hybrid-logical-clock versions in desired state (`DesiredClusterState::stamps`/`tombstones` replace `workload_tombstones`, `DesiredStateSummary::stamps`/`tombstones`, `MutationBatch::stamps`), `NodeObservabilitySnapshot::desired_merge`; the `orion+tcp` peer transport uses the same preamble (see `docs/peer-sync.md`); peer discovery and enrollment: `QueryDiscovery`, `Discovery`, `EnrollDiscoveredPeer`, `RemovePeer`, `EnrollmentHello`, `EnrollmentChallenge`, `EnrollmentConfirm` control messages, `HttpResponsePayload::EnrollmentChallenge`, `NodeObservabilitySnapshot::discovery` (see `docs/discovery.md`); placement and cross-node binding: `WorkloadRecord::placement` (`WorkloadPlacement`, `LabelRequirement`, `PlacementDecision`, `PlacementReason`), `ResourceBinding::remote` (`RemoteBinding`), `LeaseRecord::holders` (`LeaseHolder`) (see `docs/placement.md`) |
-| 4 | Host facts: `NodeRecord::host` (`NodeHostFacts`), `NodeObservabilitySnapshot::host_facts` (`HostFacts`, `HostMetricsSample`, `HostTemperature`), `StatusSubject::Node` (see `docs/host-facts.md`); generic actions: `RunAction`, `QueryActions`, `WatchActions`, `WatchActionRequests`, `ClaimNodeActions`, `ReportActionResult`, `ActionResults` control messages, `ClientEventKind::ActionRequest` / `ActionResults`, `ActionRequest` (with `wait_ms`), `ActionResult`, `ActionReport`, `ActionState`, `ActionTarget`, `ActionQuery`, `HttpResponsePayload::Actions` and the `/v1/control/actions` route (see `docs/actions.md`); link gateway counters in `NodeObservabilitySnapshot::links` (`LinkStatusSnapshot`); remote operators: `OperatorHello`, `QueryOperators`, `Operators`, `EnrollOperator`, `RemoveOperator` control messages, `HttpResponsePayload::OperatorWelcome` / `Status` and the `/v1/control/operator` route, `OperatorId`, `OperatorPolicy`, `OperatorEnrollment`, `OperatorRecord`, `OperatorsSnapshot`, `OperatorWelcome`, `OperatorTrustState`, `OperatorEnrollmentMethod`, `EnrollmentHello::role` (`EnrollmentRole`, enrollment handshake version 2) (see `docs/remote-operator.md`). Persisted snapshot format 4 is migrated to 5. |
-| 5 | Remote push sessions: `ControlMessage::OpenSession` (`SessionOpen`), `HttpResponsePayload::Session` (`SessionWelcome`), push frames on `orion+tcp` (`PEER_TCP_STATUS_PUSH`); remote operators may send `WatchStatus`, `WatchState`, `WatchActions`, `SubscribeStream`, `UnsubscribeStream` and `Ping` inside a session (see "Push sessions" in `docs/remote-operator.md`); live streams: `DeclareStream`, `PublishSamples`, `SubscribeStream`, `UnsubscribeStream` control messages, `ClientEventKind::StreamCatalog` / `StreamData` / `StreamReset` / `StreamDemand` and their types (`StreamDecl`, `SeriesDecl`, `SampleChunk`, ...), `NodeResourceUsageSnapshot::streams` (`StreamsUsageSnapshot`) (see `docs/streams.md`) |
-| 6 | `ActionState::Cancelled`: the terminal state of a long-running job stopped by its `<name>.cancel` companion action (see "Long-running jobs" in `docs/actions.md`). Old peers would not decode the new variant. |
-| 7 | Blob push (`docs/blobs.md`): `ControlMessage::BeginBlob`, `WriteBlobChunk`, `CommitBlob`, `QueryBlobs`, `DeleteBlob`, `Blob`, `Blobs`; `BlobBegin`, `BlobChunk`, `BlobState`, `BlobStatus`. Local IPC only. |
+| 1 | The first release. Covers the cluster state envelope (desired, observed, and applied sections with per-object HLC stamps and tombstones); the local IPC and HTTP control surface (client sessions, state watches, status lanes, generic actions and their results, remote push sessions, live streams, blob push); peer sync and the `orion+tcp` frames; peer discovery and enrollment; host facts and node observability (resource usage, link gateway counters, host metrics). |
+
+Peers, `orionctl` builds, and client libraries that announce any other version are refused. The
+node does not negotiate or downgrade: both sides must speak the same version.
 
 ## Local IPC
 
@@ -69,21 +68,21 @@ metrics, and errors.
 `orionctl` against a node from another release (local socket):
 
 ```text
-incompatible Orion control protocol: this client speaks v2 but orion-node speaks v3; upgrade
+incompatible Orion control protocol: this client speaks protocol 1 but orion-node speaks protocol 2; upgrade
 orionctl/client libraries and orion-node together (they must come from the same Orion release)
 ```
 
 `orionctl --http`:
 
 ```text
-incompatible Orion control protocol: orionctl speaks v2 but the orion-node at http://node:9100
-speaks v3; upgrade orionctl and orion-node together (they must come from the same Orion release)
+incompatible Orion control protocol: orionctl speaks protocol 1 but the orion-node at http://node:9100
+speaks protocol 2; upgrade orionctl and orion-node together (they must come from the same Orion release)
 ```
 
 Peer nodes, and other users of `HttpClient` or `IpcTransportError` directly:
 
 ```text
-Orion control protocol mismatch: this side speaks v2, the remote side speaks v3; upgrade orionctl,
+Orion control protocol mismatch: this side speaks protocol 1, the remote side speaks protocol 2; upgrade orionctl,
 client libraries, and orion-node together so they share the same protocol version
 ```
 
@@ -101,7 +100,8 @@ with:
 
 To make the change:
 
-1. Increment `CONTROL_PROTOCOL_VERSION` and add a row to the table above.
+1. Increment `CONTROL_PROTOCOL_VERSION` and add a row to the table above (the first row, protocol 1,
+   is the released layout).
 2. Set `CONTROL_PROTOCOL_LAYOUT_FINGERPRINT` to the value printed by the failing test.
 3. Mention the bump in `CHANGELOG.md`.
 

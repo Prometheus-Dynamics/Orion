@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) use codec::decode_leases;
 #[cfg(feature = "std")]
 pub(crate) use codec::{decode_status, encode_with};
-pub use codec::{encode_leases, encode_provider_state, encode_status};
+pub use codec::{encode_action_request, encode_leases, encode_provider_state, encode_status};
 
 // Kind numbers, roles, and reject reasons are shared with the minimal device path.
 pub use crate::wire::{RejectReason, Roles, kind};
@@ -109,6 +109,47 @@ impl StatusEntry {
     }
 }
 
+/// A named action the host asks a device to run. Host → device, kind [`kind::ACTION_REQUEST`].
+///
+/// The names and the meaning of `payload` belong to the handler, as with node actions
+/// (`docs/actions.md`). The link layer only carries them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionRequest {
+    /// Host-chosen correlation id, unique among the device's outstanding actions. The device
+    /// echoes it in every [`ActionResult`] for this request.
+    pub id: u32,
+    /// Action name, free-form (see the well-known names in `docs/actions.md`).
+    pub name: String,
+    /// Arguments, encoded by the sender.
+    #[serde(deserialize_with = "codec::bounded_vec")]
+    pub payload: Vec<u8>,
+}
+
+/// State of an action on the device, in an [`ActionResult`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LinkActionState {
+    /// Accepted and in progress. A later result for the same id carries the outcome.
+    Running,
+    /// Finished successfully; the payload is the output.
+    Succeeded,
+    /// Finished unsuccessfully; the payload is the reason.
+    Failed,
+    /// Refused by the device without running; the payload is the reason.
+    Rejected,
+}
+
+/// The device's report on an [`ActionRequest`]. Device → host, kind [`kind::ACTION_RESULT`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionResult {
+    /// The `id` of the request this answers.
+    pub id: u32,
+    /// The action's state.
+    pub state: LinkActionState,
+    /// Output for `Succeeded`, a reason for `Failed` and `Rejected`, empty for `Running`.
+    #[serde(deserialize_with = "codec::bounded_vec")]
+    pub payload: Vec<u8>,
+}
+
 /// A decoded link message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -140,6 +181,10 @@ pub enum Message {
     },
     /// [`kind::STATUS`]: volatile status values of the device's provider.
     Status(Vec<StatusEntry>),
+    /// [`kind::ACTION_REQUEST`]: run a named action on the device.
+    ActionRequest(ActionRequest),
+    /// [`kind::ACTION_RESULT`]: the state of an action the device runs.
+    ActionResult(ActionResult),
     /// A kind this build does not handle (including the reserved kinds). Ignored by sessions.
     Unknown(u8),
 }

@@ -3,8 +3,7 @@
 Every `orion-node` keeps a full copy of the cluster's **desired state** (nodes, artifacts,
 workloads, resources, providers, executors, leases, update intents). Peer sync is the leaderless anti-entropy
 protocol that makes those copies converge. This document describes the transports it runs over,
-how concurrent writes are merged, how deletes are tracked, and what changed in control protocol
-v3.
+how concurrent writes are merged and how deletes are tracked.
 
 Observed state (what is actually running) is not merged like desired state: every node owns its
 own observed slice and pushes it to its peers (see "Observed state" below).
@@ -14,34 +13,7 @@ per intent (its requester), merged per object like the other sections. The targe
 on an intent is an `UpdateStatusRecord` in its own observed slice. See
 [update-recovery.md](update-recovery.md#data-model).
 
-## Behaviour before control protocol v3
-
-This section records how merging worked up to protocol v2, because it explains the earlier
-"bytewise max" behaviour and why the model changed.
-
-- Each node had one desired-state `Revision`: a counter that every `put_*`/`remove_*` incremented.
-  Peers compared revisions to decide who was "ahead".
-- **Remote revision higher**: the node sent its per-object content hashes and the peer answered
-  with a `MutationBatch` that overwrote every object whose hash differed and removed every object
-  the peer did not have. A node that had made more (unrelated) writes therefore overwrote the
-  other node's concurrent writes in the same section, and objects created only on the "behind"
-  node were deleted.
-- **Local revision higher**: the node replayed its mutation history since the peer's revision, or
-  pushed a full-section batch. History replay matched only the revision *number*, so it was also
-  applied to a peer that had diverged at the same revision.
-- **Equal revision, different fingerprint**: the nodes exchanged snapshots and merged them with
-  `merge_desired_cluster_state`: union of keys, and for a key present on both sides with different
-  content, the record whose **rkyv encoding is lexicographically larger** won ("bytewise max").
-  The merged state then *replaced* the state on both nodes. Only workloads had tombstones
-  (`workload_tombstones`, revision-stamped and compared against the other node's whole-state
-  revision); deleted nodes, artifacts, resources, providers, executors and leases came back from
-  any peer that still had them.
-
-So "bytewise max" was accurate for the equal-revision path, but the more common path was "the node
-with the higher write counter wins whole sections", and deletes were not durable. Neither rule is
-related to when a write happened, and the outcome could depend on sync order.
-
-## Model since control protocol v3
+## Model
 
 ### Hybrid logical clock
 
@@ -188,10 +160,10 @@ so a restart cannot reset it.
   from `ORION_NODE_PEERS` or discovery, or a runtime enrollment). If `peer-sync-times.json` already
   has a record for the peer, the record is kept instead, so restarts and re-registrations do not
   renew the window.
-- **Upgrades.** A state directory from before this guard has no `peer-sync-times.json`. Every
-  configured peer then starts its clock at the first start of the new build. Clusters therefore keep
-  syncing after the upgrade, and a peer that was already disconnected for longer than the window
-  gets one retention window of grace. That is the only case where the clock is not a true record.
+- **Missing file.** A state directory without `peer-sync-times.json` (a fresh one, or one moved
+  aside as unsupported) starts every configured peer's clock at the first start. Clusters keep
+  syncing, and a peer that was already disconnected for longer than the window gets one retention
+  window of grace. That is the only case where the clock is not a true record.
 - **Persistence lag.** The file is written at most once a minute per peer, so after a crash the
   recorded time can be up to a minute older than the real one. That only makes the guard stricter.
 - **Without a state directory** the clock lives in memory only and starts at process start.
@@ -200,8 +172,7 @@ This is what keeps "tombstones are collected after the retention" safe. A peer t
 keeps its own copy of the deleted objects until it is reset, and that is the intended outcome: its
 copy is not merged back in. Mutations received from a peer the guard refuses are not stored.
 
-The clock is part of the peer status (`PeerTrustRecord`, the answer to `QueryPeerTrust`, from
-control protocol v7). It carries `last_successful_sync_ms` (milliseconds since the Unix epoch; `None`
+The clock is part of the peer status (`PeerTrustRecord`, the answer to `QueryPeerTrust`). It carries `last_successful_sync_ms` (milliseconds since the Unix epoch; `None`
 only for a peer that is not configured and has no record) and `stale`, which applies the same test
 as the guard (the clock is older than `ORION_NODE_TOMBSTONE_RETENTION_MS`). `orionctl get peers`
 prints both as `last_successful_sync_ms=<ms|-> stale=<true|false>`. The flag is evaluated when the
@@ -370,35 +341,13 @@ codegen unit, stripped). Crates are the unique packages in `cargo tree -e normal
 `peer-tcp` adds about 230 KiB and no crates to the IPC-only build; clustering over HTTP instead
 costs about 2.4 MiB and 77 more crates (axum, hyper, reqwest, rustls and their dependencies).
 
-## Upgrading from protocol v2
+## Upgrading and state directories
 
-The changes above alter archived types (`DesiredClusterState`, `DesiredStateSummary`,
-`MutationBatch`, `NodeObservabilitySnapshot`; `PeerHello` is unchanged), so they ship in control
-protocol v3 together with the clock facts and status lane changes of the same release. v2 peers,
-`orionctl` builds and client libraries are refused with a `ProtocolMismatch` error. Upgrade every
-node of a cluster, `orionctl`, and providers or executors that embed `orion-client` together.
-
-Persisted state directories are migrated on first start:
-
-- The snapshot format version goes from 3 to 4. A node that finds a format-3 manifest decodes the
-  old desired snapshot, mutation history and history baseline with the v2 layouts, replays the
-  history, converts the result and rewrites all desired-state files in format 4 before it serves
-  anything. Every migrated object and every migrated workload tombstone gets the stamp
-  `(0, 0, local node tag)`, so any write made after the upgrade wins over pre-upgrade state, and
-  pre-upgrade conflicts between nodes resolve deterministically by node tag and content. The old
-  files are kept in `<state dir>/legacy-format-3/`; an interrupted migration restarts from there.
-- The observed snapshot is reset to an empty state (keeping its revision): observed records are
-  rebuilt from what providers, executors and peers report. The applied snapshot, the trust store,
-  the node identity, maintenance state and artifacts are unchanged.
-- Format-3 node records are read with their old layout (no `clock`); the clock facts are
-  reported again by the running node.
-- If the old files cannot be decoded (for example a state directory written by a different
-  pre-release, or desired state that still uses the removed
-  `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived`), startup fails with an error naming the
-  state directory and the files to move aside; nothing is overwritten. Moving `snapshot-*.rkyv`
-  and `mutation-history*.rkyv` out of the state directory starts the node with an empty desired
-  state that it then pulls from its peers.
-- A state directory written by this version cannot be read by an older `orion-node`.
+Protocol 1 is the first release, so there is no earlier protocol to upgrade from. A node refuses
+a peer, `orionctl` build or client library that announces another control protocol version with a
+`ProtocolMismatch` error that names both versions. A state directory in another snapshot format is
+moved aside and the node starts with an empty desired state that it pulls from its peers (see
+"State directory format" in [node-env.md](node-env.md)).
 
 ## Hooks for placement, cross-node binding and discovery
 

@@ -12,8 +12,8 @@ pub enum RemoteError {
     Transport(String),
     /// The node speaks a different control-protocol wire version than this client build.
     #[error(
-        "incompatible Orion control protocol: this client speaks v{local} but the node speaks \
-         v{remote}; use orion-client and orion-node from the same Orion release"
+        "incompatible Orion control protocol: this client speaks protocol {local} but the node speaks \
+         protocol {remote}; use orion-client and orion-node from the same Orion release"
     )]
     ProtocolMismatch { local: u16, remote: u16 },
     /// A response could not be decoded.

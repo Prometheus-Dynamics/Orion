@@ -44,8 +44,8 @@ way labels and resource types are (see [placement.md](placement.md)).
 | Volatile status lane ([observability.md](observability.md#volatile-status-lane)) | implemented (local only) | Fine-grained progress telemetry (percent, bytes, stage). |
 | Maintenance modes (`Cordoned`, `Draining`, `Maintenance`) and `schedulable` ([placement.md](placement.md)) | implemented | Drain a node before it reboots into a new image. |
 | Node labels and selectors ([placement.md](placement.md)) | implemented | Choose rollout targets and waves. |
-| Generic action mechanism: `ActionRequest` / `ActionResult` on the control plane; targets `Node`, `Provider`, `Resource`, `Executor`; free-form `name` + `args`; states `Accepted`, `Running { progress }`, `Succeeded`, `Failed`, `Rejected`, `TimedOut` | implemented, control protocol v4 ([actions.md](actions.md); node actions such as `update` can be claimed by an out-of-process device manager with `ClaimNodeActions`) | Delivering an intent to the device manager and imperative operations (abort, reboot, release a link). |
-| Host facts on the observed `NodeRecord`, including OS / image version | implemented, control protocol v4 ([host-facts.md](host-facts.md): `os_version`, `image_name`, `image_version`, `boot_id`) | The observed "what is installed" fact that intents are compared against. |
+| Generic action mechanism: `ActionRequest` / `ActionResult` on the control plane; targets `Node`, `Provider`, `Resource`, `Executor`; free-form `name` + `args`; states `Accepted`, `Running { progress }`, `Succeeded`, `Failed`, `Rejected`, `TimedOut` | implemented, control protocol 1 ([actions.md](actions.md); node actions such as `update` can be claimed by an out-of-process device manager with `ClaimNodeActions`) | Delivering an intent to the device manager and imperative operations (abort, reboot, release a link). |
+| Host facts on the observed `NodeRecord`, including OS / image version | implemented, control protocol 1 ([host-facts.md](host-facts.md): `os_version`, `image_name`, `image_version`, `boot_id`) | The observed "what is installed" fact that intents are compared against. |
 | Audit log ([audit-logging.md](audit-logging.md)) | implemented (trust events) | Who requested which update. |
 | MCU link protocol ([link-protocol.md](link-protocol.md)) | implemented (provider role, status) | Future in-band MCU firmware transfer. |
 
@@ -347,8 +347,7 @@ update is also a rolling Orion update. Two cases:
   accepted by any version that knows the beacon, so the fleet gate and `orionctl` can follow a
   rollout across the island boundary. Its layout never changes; extensions go in a new beacon kind.
 - **Order updates so nothing depends on cross-version sync.** All intents for a rollout are
-  written *before* the first node updates (each node has the full desired state locally, and state
-  migration carries the intents forward), so a node in the new island still knows its own intent
+  written *before* the first node updates (each node has the full desired state locally), so a node in the new island still knows its own intent
   and can commit or roll back without talking to the old island.
 - **Update order inside one machine**:
   1. canary Linux node (non-critical, ideally one that hosts redundant resources);
@@ -361,14 +360,12 @@ update is also a rolling Orion update. Two cases:
   device manager's identity endpoint is the fallback view.
 - **Make bumps rare.** Batch layout changes into one bump per release, prefer additive messages,
   and record in the release notes whether a release is "sync-compatible" with the previous one.
-- **State directory downgrade.** A state directory written by a newer `orion-node` cannot be read
-  by an older one ([peer-sync.md](peer-sync.md#upgrading-from-protocol-v2)). A rollback to the old
-  slot therefore needs a readable state directory. Rule: a format migration keeps the old files
-  (as `legacy-format-N/` already does) **until the update is committed**; on start, an older
-  binary that finds a newer manifest falls back to the legacy copy if it exists, otherwise starts
-  in safe mode with an empty desired state and pulls from peers of its own version. The device
-  manager can also snapshot the state directory before switching slots, since it controls the
-  partition layout.
+- **State directory downgrade.** A state directory written by one `orion-node` is not read by an
+  `orion-node` that expects another snapshot format: it is moved aside to
+  `<state dir>/unsupported-format-<unix ms>/` and the node starts with an empty desired state that
+  it pulls from peers ([node-env.md](node-env.md#state-directory-format)). A rollback to the old
+  slot therefore needs its own readable state directory. The device manager can snapshot the state
+  directory before switching slots, since it controls the partition layout.
 
 ## Delivery and progress
 
@@ -471,7 +468,7 @@ sequenceDiagram
     else kernel panic / hang before userspace
         BL->>BL: hardware watchdog reset, counter decrements, eventually slot A
     end
-    Note over N,DM: old slot A runs; old orion-node, state dir via legacy copy if needed
+    Note over N,DM: old slot A runs; old orion-node, state dir from its snapshot if needed
     DM-->>N: Failed / RolledBack for (v2, gen 1), installed v1
     N->>N: observed phase RolledBack, last_error
     N-->>P: observed slice: RolledBack
@@ -707,7 +704,7 @@ critical path at all. Each milestone is independently useful and testable.
 | U3 | **Done.** Data model | `UpdateIntentRecord` desired section, `UpdateStatusRecord` in the observed slice, protocol bump, layout fingerprint, `orionctl apply` / `get updates`, requester authorization (`ORION_NODE_UPDATE_REQUESTERS`), audit records. | U0 |
 | U4 | Delivery and resume | Reconciler that delivers intents as actions with the idempotency key, re-delivery and backoff, phase persistence, status-lane progress keys, drain integration; a fake device manager in `examples/` and tests that kill the node or the handler at every phase. | U3 |
 | U5 | External rollout controller | `RolloutRecord`, waves, `max_unavailable`, health gate, monotonic halt; `orionctl rollout` as the first controller. | U4 |
-| U6 | Cross-version rollouts | Frozen rollout beacon; legacy state-dir copy kept until commit and used on downgrade; documented "sync-compatible" flag per release; a test that runs N and N+1 nodes through a rollout. | U5 |
+| U6 | Cross-version rollouts | Frozen rollout beacon; state-dir snapshot before a slot switch; documented "sync-compatible" flag per release; a test that runs N and N+1 nodes through a rollout. | U5 |
 | U7 | Leaderless rollouts | Wave assignment and gate evaluation in `orion-cluster` (rendezvous order, own-intent writes, convergent halt); property tests like placement's. | U5 |
 | U8 | MCU firmware over the link | Reserve kinds `0x20`–`0x2F` now (doc + constants); later `DeviceInfo`, `xfer` feature in device and host sessions, gateway tunnelling and `link.release` / `link.attach` actions, simulator test with link loss and resume, size budget for the `xfer` feature. | U4 |
 | U9 | Hardware validation | Real A/B writer on a Linux board, power-cut and watchdog fault injection at every phase, an MCU with an A/B bootloader over UART and CAN. | U4, U8 |

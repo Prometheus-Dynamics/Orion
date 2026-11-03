@@ -71,8 +71,7 @@ let done = operator.wait_for_action("reboot-42", std::time::Duration::from_secs(
 
 **Push sessions.** `RemoteOperator::open_session(client_name)` opens a `RemoteSession` on a
 connection of its own; the node then pushes what the session watches as it happens, without
-polling (see "Push sessions" below). The polling watches remain for nodes before control
-protocol 5.
+polling (see "Push sessions" below). The polling watches remain available outside a session.
 
 **Watches poll.** Outside a session, `orion+tcp` is request/response only, so `watch_status` and
 `watch_actions` re-query every `poll_interval` (500 ms by default, `with_interval` changes it, minimum 50 ms) and
@@ -308,7 +307,7 @@ such an id cannot be configured or enrolled.
 
 ## Wire
 
-Control protocol v4 (unreleased additions in the same release as host facts and actions):
+Control protocol 1 (the first release):
 `ControlMessage::{OperatorHello, QueryOperators, Operators, EnrollOperator, RemoveOperator}`,
 `HttpResponsePayload::{OperatorWelcome, Status}`, the `/v1/control/operator` HTTP route (for
 `OperatorHello` and `QueryStatus` over a peer surface), `OperatorId`, `OperatorPolicy`,
