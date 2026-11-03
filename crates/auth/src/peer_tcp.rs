@@ -126,6 +126,35 @@ impl PeerTcpResponseFrame {
     }
 }
 
+/// Builds a push body, `[seq u64 LE][message]`: the sequence number the client checks, then the
+/// encoded `ControlMessage` (see [`split_push_body`]).
+pub fn encode_push_body(seq: u64, message: &[u8]) -> Vec<u8> {
+    let mut body = Vec::with_capacity(8 + message.len());
+    body.extend_from_slice(&seq.to_le_bytes());
+    body.extend_from_slice(message);
+    body
+}
+
+/// Splits a push body into its sequence number and encoded message.
+pub fn split_push_body(body: &[u8]) -> Result<(u64, &[u8]), PeerTcpFrameError> {
+    let (seq, message) = body
+        .split_first_chunk::<8>()
+        .ok_or_else(|| PeerTcpFrameError("a push without its sequence number".into()))?;
+    Ok((u64::from_le_bytes(*seq), message))
+}
+
+/// Checks that a push's sequence number `seq` moves on from `last_seq`, the last number accepted
+/// on the session (0 before the first push). A replayed or out-of-order push fails the check, and
+/// the session must end (`docs/remote-operator.md`, "Push sessions").
+pub fn check_push_sequence(last_seq: u64, seq: u64) -> Result<(), PeerTcpFrameError> {
+    if seq <= last_seq {
+        return Err(PeerTcpFrameError(format!(
+            "push {seq} replayed or out of order (after {last_seq})"
+        )));
+    }
+    Ok(())
+}
+
 /// The `host:port` of an `orion+tcp://host:port` URL.
 pub fn peer_tcp_authority(base_url: &str) -> Result<&str, String> {
     let rest = base_url
@@ -173,6 +202,16 @@ mod tests {
         assert!(PeerTcpResponseFrame::decode(&[PEER_TCP_STATUS_OK, 64, 1, 2]).is_err());
         assert!(PeerTcpResponseFrame::decode(&[7, 0, 0]).is_err());
         assert!(PeerTcpResponseFrame::decode(&[PEER_TCP_STATUS_OK, 1, 9, 0]).is_err());
+    }
+
+    #[test]
+    fn push_bodies_carry_an_advancing_sequence_number() {
+        let body = encode_push_body(7, b"message");
+        assert_eq!(split_push_body(&body), Ok((7, &b"message"[..])));
+        assert!(split_push_body(&[1, 2, 3]).is_err());
+        assert!(check_push_sequence(0, 1).is_ok());
+        assert!(check_push_sequence(1, 1).is_err(), "a replayed number");
+        assert!(check_push_sequence(2, 1).is_err(), "an out-of-order number");
     }
 
     #[test]

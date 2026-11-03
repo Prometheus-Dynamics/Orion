@@ -49,6 +49,12 @@ impl NodeApp {
         peer: &NodeId,
         open: SessionOpen,
     ) -> Result<HttpResponsePayload, NodeError> {
+        // Refused, not dropped: the forwarder resends its `RunAction` with `wait_ms` instead.
+        if !self.config.runtime_tuning.peer_push_sessions {
+            return Err(NodeError::Authorization(format!(
+                "peer {peer}: push sessions are disabled on this node (ORION_NODE_PEER_PUSH_SESSIONS=off)"
+            )));
+        }
         self.open_session_at(&peer_session_prefix(peer), format!("peer:{peer}"), open)
     }
 

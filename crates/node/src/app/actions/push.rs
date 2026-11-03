@@ -21,7 +21,7 @@ use orion::{
     decode_from_slice,
     transport::http::{HttpCodec, HttpRequestPayload, HttpResponsePayload},
 };
-use orion_auth::peer_tcp::PEER_TCP_STATUS_PUSH;
+use orion_auth::peer_tcp::{PEER_TCP_STATUS_PUSH, check_push_sequence, split_push_body};
 use orion_transport_ipc::{ControlFrameReadState, write_control_payload_frame};
 use std::{
     collections::{BTreeSet, VecDeque},
@@ -363,14 +363,8 @@ impl NodeApp {
                     frame.signature.as_ref(),
                 )
                 .map_err(|err| err.to_string())?;
-            let (seq, message) = frame
-                .body
-                .split_first_chunk::<8>()
-                .ok_or_else(|| "a push without its sequence number".to_owned())?;
-            let seq = u64::from_le_bytes(*seq);
-            if seq <= state.last_seq {
-                return Err(format!("push {seq} replayed or out of order"));
-            }
+            let (seq, message) = split_push_body(&frame.body).map_err(|err| err.to_string())?;
+            check_push_sequence(state.last_seq, seq).map_err(|err| err.to_string())?;
             state.last_seq = seq;
             let ControlMessage::ClientEvents(events) =
                 decode_from_slice::<ControlMessage>(message).map_err(|err| err.to_string())?

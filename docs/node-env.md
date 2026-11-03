@@ -511,6 +511,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_TRANSPORT_MAX_PAYLOAD_BYTES` | `8388608` | Max inbound HTTP, IPC, TCP, and QUIC payload bytes before transport decode. |
 | `ORION_NODE_TRANSPORT_IO_TIMEOUT_MS` | `5000` | Per-operation transport connect/read/write/handshake timeout. |
 | `ORION_NODE_TRANSPORT_MAX_CONCURRENT_CONNECTIONS` | `1024` | Max in-flight accepted connections per managed transport listener. |
+| `ORION_NODE_PEER_PUSH_SESSIONS` | `on` | `on`, `off` | Invalid value fails startup. `off`: this node refuses its configured peers' push sessions (`OpenSession`); the peers' forwarded actions then resend `RunAction` until final. `RunAction`, sync and the rest are unchanged. See "Peer watches" in `docs/actions.md`. |
 | `ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY` | `32` | Persistence worker queue capacity. |
 | `ORION_NODE_AUTH_STATE_WORKER_QUEUE_CAPACITY` | `128` | Auth state worker queue capacity. |
 | `ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY` | `1024` | Audit log worker queue capacity. |

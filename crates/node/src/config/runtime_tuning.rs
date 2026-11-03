@@ -1,3 +1,4 @@
+use super::parse_env_choice;
 use crate::NodeError;
 use orion::control_plane::ClockSourceKind;
 use orion_transport_common::{
@@ -81,6 +82,10 @@ pub struct NodeRuntimeTuning {
     pub transport_max_payload_bytes: usize,
     pub transport_io_timeout: Duration,
     pub transport_max_concurrent_connections: usize,
+    /// Whether this node opens its push sessions to configured peers' `OpenSession` requests:
+    /// off, the owner refuses a peer's push session and forwarders resend `RunAction` instead
+    /// (`ORION_NODE_PEER_PUSH_SESSIONS`, `docs/actions.md`, "Peer watches").
+    pub peer_push_sessions: bool,
     pub persistence_worker_queue_capacity: usize,
     pub auth_state_worker_queue_capacity: usize,
     pub audit_log_queue_capacity: usize,
@@ -434,6 +439,11 @@ impl NodeRuntimeTuning {
                 "ORION_NODE_TRANSPORT_MAX_CONCURRENT_CONNECTIONS",
                 DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
             )?,
+            peer_push_sessions: parse_env_choice(
+                "ORION_NODE_PEER_PUSH_SESSIONS",
+                "on",
+                &[("on", true), ("off", false)],
+            )?,
             persistence_worker_queue_capacity: parse_env_or(
                 "ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY",
                 DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY,
@@ -590,6 +600,7 @@ impl Default for NodeRuntimeTuning {
             transport_max_payload_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
             transport_io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
             transport_max_concurrent_connections: DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
+            peer_push_sessions: true,
             persistence_worker_queue_capacity: DEFAULT_PERSISTENCE_WORKER_QUEUE_CAPACITY,
             auth_state_worker_queue_capacity: DEFAULT_AUTH_STATE_WORKER_QUEUE_CAPACITY,
             audit_log_queue_capacity: DEFAULT_AUDIT_LOG_QUEUE_CAPACITY,
@@ -715,6 +726,15 @@ pub(crate) fn runtime_tuning_doc_defaults() -> Vec<(&'static str, String)> {
         (
             "ORION_NODE_TRANSPORT_MAX_CONCURRENT_CONNECTIONS",
             tuning.transport_max_concurrent_connections.to_string(),
+        ),
+        (
+            "ORION_NODE_PEER_PUSH_SESSIONS",
+            if tuning.peer_push_sessions {
+                "on"
+            } else {
+                "off"
+            }
+            .to_owned(),
         ),
         (
             "ORION_NODE_PERSISTENCE_WORKER_QUEUE_CAPACITY",

@@ -118,9 +118,11 @@ Follow-ups that do not change the wire:
 - [x] **Peer watches, forwarder side:** one push session per owner peer, opened lazily, closed after
       60 s idle; pushes verified against the session's own `OpenSession` (signature, increasing
       sequence, watched action ids); fallback to the `RunAction` `wait_ms` resend when the session is
-      refused or drops. Open: a test where a real owner refuses the session, and tests for forged or
-      out-of-order pushes (covered by review only); one shared push-verification helper in
-      `orion-auth` for the node and the operator client.
+      refused or drops. Tests in `tests/cluster/peer_watch.rs`: a real owner refusing the session
+      (`ORION_NODE_PEER_PUSH_SESSIONS=off`), and forged pushes from a fake owner on a real socket (bad
+      signature, another `OpenSession`'s binding, replayed and out-of-order sequence, unwatched
+      action), each refused with the action completing by resend. The sequence check is shared:
+      `orion_auth::peer_tcp::check_push_sequence` (node and `orion-client`).
 - [ ] **Link gateway actions:** route an action for a link-owned provider to its device as
       `ActionRequest` and report the device's `ActionResult`; the device session queues and answers
       requests (docs/link-protocol.md, docs/actions.md).

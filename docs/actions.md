@@ -320,6 +320,9 @@ owner's results are pushed on that connection as they change.
   for operator sessions.
 - **Authorization.** `OpenSession`, `WatchActions` and `Ping` from a peer are allowed only for a
   configured peer, under the same peer authentication as `RunAction` (signed `orion+tcp`).
+- **Owner switch.** `ORION_NODE_PEER_PUSH_SESSIONS=off` makes the owner refuse every peer's
+  `OpenSession` with an error, while it still serves `RunAction`. The forwarder then resends, as it
+  does when a session drops (`ORION_NODE_PEER_PUSH_SESSIONS` in [node-env.md](node-env.md)).
 
 **Forwarder side.** The submitting node sends the forwarded `RunAction` once. If the owner answers
 that the action is still running, the node asks the owner's push session to watch it
@@ -330,7 +333,10 @@ its action id is one this session watches, and each push must verify against the
 `OpenSession` request with a sequence number that moves on; anything else ends the session. If the
 session refuses the watch or ends, the node falls back to resending `RunAction` with `wait_ms` until
 the action is final (`crates/node/src/app/actions/push.rs`). No wire message beyond the ones above
-is involved.
+is involved. The sequence check is `orion_auth::peer_tcp::check_push_sequence`, shared with the
+remote operator client. `crates/node/src/tests/cluster/peer_watch.rs` covers a refused session, a
+bad signature, a push bound to another `OpenSession`, a replayed or out-of-order sequence number,
+and a push for an unwatched action: each is refused and the action completes by resend.
 
 ## Limits
 

@@ -13,7 +13,7 @@ use orion::{
     encode_to_vec,
     transport::ipc::{ControlEnvelope, IpcTransportError, LocalAddress},
 };
-use orion_auth::peer_tcp::PEER_TCP_STATUS_PUSH;
+use orion_auth::peer_tcp::{PEER_TCP_STATUS_PUSH, encode_push_body};
 use orion_transport_ipc::{ControlFrameReadState, write_control_payload_frame};
 use std::net::SocketAddr;
 use tokio::{net::TcpStream, sync::mpsc};
@@ -130,9 +130,7 @@ fn push_frame(
 ) -> Result<Vec<u8>, PeerTcpError> {
     let message =
         encode_to_vec(&envelope.message).map_err(|err| PeerTcpError::Decode(err.to_string()))?;
-    let mut body = Vec::with_capacity(8 + message.len());
-    body.extend_from_slice(&seq.to_le_bytes());
-    body.extend_from_slice(&message);
+    let body = encode_push_body(seq, &message);
     let signature = app
         .security
         .sign_peer_response(open_request, PEER_TCP_STATUS_PUSH, &body)

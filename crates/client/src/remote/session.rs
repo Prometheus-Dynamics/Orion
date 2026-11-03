@@ -13,7 +13,8 @@ use super::{
 use orion_auth::{
     crypto::verify_peer_response,
     peer_tcp::{
-        PEER_TCP_STATUS_OK, PEER_TCP_STATUS_PUSH, PeerTcpResponseFrame, peer_tcp_authority,
+        PEER_TCP_STATUS_OK, PEER_TCP_STATUS_PUSH, PeerTcpResponseFrame, check_push_sequence,
+        peer_tcp_authority, split_push_body,
     },
 };
 use orion_control_plane::{
@@ -438,16 +439,10 @@ fn verified_push(
         signature,
     )
     .map_err(|err| RemoteError::NodeAuthentication(err.to_string()))?;
-    let (seq, message) = frame
-        .body
-        .split_first_chunk::<8>()
-        .ok_or_else(|| RemoteError::Decode("a push event without its sequence number".into()))?;
-    let seq = u64::from_le_bytes(*seq);
-    if seq <= last_seq {
-        return Err(RemoteError::NodeAuthentication(format!(
-            "push event {seq} replayed or out of order (after {last_seq})"
-        )));
-    }
+    let (seq, message) =
+        split_push_body(&frame.body).map_err(|err| RemoteError::Decode(err.to_string()))?;
+    check_push_sequence(last_seq, seq)
+        .map_err(|err| RemoteError::NodeAuthentication(err.to_string()))?;
     match decode_from_slice::<ControlMessage>(message)
         .map_err(|err| RemoteError::Decode(err.to_string()))?
     {

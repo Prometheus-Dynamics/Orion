@@ -27,6 +27,12 @@ compatibility paths for older versions are gone.
   `ActionResult` (`0x31`) are added to the `alloc` message layer (codec and fixture only: the sessions and
   the node gateway do not act on them yet). The minimal device build is unchanged in size.
 
+### Added (peer watch tests, owner push switch)
+
+- `ORION_NODE_PEER_PUSH_SESSIONS=on|off` (default `on`): with `off` the owner refuses every peer's push session (`OpenSession`) and still serves `RunAction`, so forwarders resend. See [docs/actions.md](docs/actions.md#peer-watches) and [docs/node-env.md](docs/node-env.md).
+- Tests of the forwarder's push client (`tests/cluster/peer_watch.rs`): a refused session, and forged pushes from a fake owner on a real `orion+tcp` socket (bad signature, another `OpenSession`'s binding, replayed or out-of-order sequence, unwatched action). Each is refused, and the action completes by resend.
+- `orion_auth::peer_tcp`: `encode_push_body`, `split_push_body` and `check_push_sequence`, shared by the node push client, the remote operator client and the owner. The wire is unchanged.
+
 ### Added (update intents, U3)
 
 - Desired state gains an `update_intents` section: `UpdateIntentRecord` (target node, component, opaque target version, artifact, digest hint, handler action, arguments, generation, drain policy, paused flag), with HLC stamps and tombstones, merged over peer sync like the other sections. Writes are `DesiredStateMutation::PutUpdateIntent` / `RemoveUpdateIntent`. See [docs/update-recovery.md](docs/update-recovery.md#what-landed-in-u3).
