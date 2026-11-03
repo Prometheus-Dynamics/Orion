@@ -151,16 +151,17 @@ job_link() {
     local target features
     for target in "${lint_targets[@]}"; do
         for features in "" embedded-io,embedded-io-async,embedded-can,crc-table device \
-            device,embedded-io,embedded-can alloc alloc,embedded-io,embedded-can; do
+            device,embedded-io,embedded-can device,xfer alloc alloc,embedded-io,embedded-can; do
             step link "clippy orion-link [${features}] ${target}" \
                 clippy -p orion-link --no-default-features ${features:+--features "$features"} --target "$target"
         done
     done
     # Code generation on every core (atomics lowering differs per core).
     for target in "${all_targets[@]}"; do
-        step link "build --release orion-link [], [device], [alloc] ${target}" bash -c "
+        step link "build --release orion-link [], [device], [device,xfer], [alloc] ${target}" bash -c "
             cargo build --locked -p orion-link --release --no-default-features --target $target &&
             cargo build --locked -p orion-link --release --no-default-features --features device --target $target &&
+            cargo build --locked -p orion-link --release --no-default-features --features device,xfer --target $target &&
             cargo build --locked -p orion-link --release --no-default-features --features alloc --target $target"
     done
     step link "device path has no model, serde, or postcard dependency" bash -c '
@@ -180,6 +181,7 @@ job_link() {
     step link "clippy orion-link --all-targets [device], [alloc]" bash -c "
         cargo clippy --locked -p orion-link --no-default-features --features device --all-targets -- -D warnings &&
         cargo clippy --locked -p orion-link --no-default-features --features alloc --all-targets -- -D warnings"
+    step link "test orion-link [std,xfer]" cargo test --locked -p orion-link --no-default-features --features std,xfer
     step link "test orion-link --all-features" cargo test --locked -p orion-link --all-features
     step link "sim_device example" cargo run --locked -p orion-link --example sim_device --features std
 
@@ -196,6 +198,9 @@ job_link() {
             cargo clippy --locked --release --target $target -- -D warnings &&
             cargo clippy --locked --release --target $target --no-default-features --features standalone,ffi-can -- -D warnings"
     done
+    step link "mcu-template clippy [xfer] thumbv6m-none-eabi" bash -c "
+        cd examples/mcu-template &&
+        cargo clippy --locked --release --target thumbv6m-none-eabi --no-default-features --features standalone,ffi-uart,xfer -- -D warnings"
     for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
         step link "mcu-template clippy [global-heap] ${target}" bash -c "
             cd examples/mcu-template &&

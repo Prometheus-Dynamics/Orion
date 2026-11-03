@@ -54,12 +54,15 @@
 
 mod core;
 mod events;
+#[cfg(feature = "xfer")]
+mod xfer;
 
 pub use events::{DeviceEvent, EVENT_CAPACITY};
 
 use self::core::DeviceCore;
 use crate::packet::Segment;
 use crate::transport::{self, Packet, Stream, Transport};
+pub use crate::wire::{FirmwareInfo, FirmwareSink, NoFirmware};
 use crate::wire::{Leases, ProviderBody, ProviderStateView, ResourceBody, Roles, StatusBody};
 
 /// Longest node id kept from `Welcome` (longer ones are not reported by
@@ -67,11 +70,21 @@ use crate::wire::{Leases, ProviderBody, ProviderStateView, ResourceBody, Roles, 
 pub const NODE_ID_CAPACITY: usize = 32;
 
 /// A device session over a COBS byte stream.
-pub type StreamDevice<const RX: usize, const TX: usize, N = &'static str, const ST: usize = TX> =
-    DeviceSession<Stream, RX, TX, N, ST>;
+pub type StreamDevice<
+    const RX: usize,
+    const TX: usize,
+    N = &'static str,
+    const ST: usize = TX,
+    F = NoFirmware,
+> = DeviceSession<Stream, RX, TX, N, ST, F>;
 /// A device session over classic CAN or CAN FD.
-pub type CanDevice<const RX: usize, const TX: usize, N = &'static str, const ST: usize = TX> =
-    DeviceSession<Packet, RX, TX, N, ST>;
+pub type CanDevice<
+    const RX: usize,
+    const TX: usize,
+    N = &'static str,
+    const ST: usize = TX,
+    F = NoFirmware,
+> = DeviceSession<Packet, RX, TX, N, ST, F>;
 
 /// Device identity and timing. Timing defaults suit links from 9600 baud UART to CAN FD.
 ///
@@ -241,15 +254,19 @@ pub struct DeviceSession<
     const TX: usize,
     N = &'static str,
     const ST: usize = TX,
+    F = NoFirmware,
 > {
     transport: T,
     rx: T::Decoder<RX>,
     cursor: T::Cursor,
     core: DeviceCore<N, RX, TX, ST>,
+    /// The device's firmware (feature `xfer`); [`NoFirmware`] for a device without it. Zero-sized
+    /// in that case.
+    firmware: F,
 }
 
 impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
-    DeviceSession<T, RX, TX, N, ST>
+    DeviceSession<T, RX, TX, N, ST, NoFirmware>
 {
     /// A new session, initially [`LinkState::Connecting`]. Nothing is sent before the first
     /// [`DeviceSession::poll`].
@@ -258,11 +275,56 @@ impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>, const ST: us
     /// builds the session in place rather than on the stack.
     #[inline(always)]
     pub fn new(config: DeviceConfig<N>, transport: T) -> Self {
+        Self::with_firmware(config, transport, NoFirmware)
+    }
+}
+
+impl<
+    T: Transport,
+    const RX: usize,
+    const TX: usize,
+    N: AsRef<str>,
+    const ST: usize,
+    F: FirmwareSink,
+> DeviceSession<T, RX, TX, N, ST, F>
+{
+    /// A new session with a firmware sink (feature `xfer` for the transfer messages; without it
+    /// the sink is kept but never called).
+    #[inline(always)]
+    pub fn with_firmware(config: DeviceConfig<N>, transport: T, firmware: F) -> Self {
         Self {
             transport,
             rx: T::Decoder::<RX>::default(),
             cursor: T::Cursor::default(),
             core: DeviceCore::new(config),
+            firmware,
+        }
+    }
+
+    /// The firmware sink, for the firmware's own use (for example to read its boot state).
+    pub fn firmware(&self) -> &F {
+        &self.firmware
+    }
+
+    /// The firmware sink, mutably.
+    pub fn firmware_mut(&mut self) -> &mut F {
+        &mut self.firmware
+    }
+
+    /// Tells the host the firmware state changed (feature `xfer`): a fresh `DeviceInfo` is sent
+    /// at the next transmission. Call after a boot or any change the sink did not make itself.
+    #[cfg(feature = "xfer")]
+    pub fn firmware_changed(&mut self) {
+        self.core.firmware_changed();
+    }
+
+    /// Encodes the sink's current state into the pending `DeviceInfo` if one is due (feature
+    /// `xfer`). Called before every transmission.
+    #[cfg(feature = "xfer")]
+    fn refresh_info(&mut self) {
+        if self.core.info_due() {
+            let info = self.firmware.info();
+            self.core.encode_info(&info);
         }
     }
 
@@ -436,8 +498,14 @@ impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>, const ST: us
 }
 
 #[cfg(feature = "alloc")]
-impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
-    DeviceSession<T, RX, TX, N, ST>
+impl<
+    T: Transport,
+    const RX: usize,
+    const TX: usize,
+    N: AsRef<str>,
+    const ST: usize,
+    F: FirmwareSink,
+> DeviceSession<T, RX, TX, N, ST, F>
 {
     /// The current lease set as `LeaseRecord`s (empty when there is none). Allocates.
     pub fn lease_records(&self) -> alloc::vec::Vec<crate::message::LeaseRecord> {
@@ -445,8 +513,8 @@ impl<T: Transport, const RX: usize, const TX: usize, N: AsRef<str>, const ST: us
     }
 }
 
-impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
-    DeviceSession<Stream, RX, TX, N, ST>
+impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize, F: FirmwareSink>
+    DeviceSession<Stream, RX, TX, N, ST, F>
 {
     /// Feeds received stream bytes, in chunks of any size (one byte from an RX interrupt is
     /// fine). Corrupt frames are dropped and counted by the decoder. Clock-free.
@@ -455,7 +523,7 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
         while !rest.is_empty() {
             let (used, result) = self.rx.push_slice(rest);
             if let Ok(Some(frame)) = result {
-                self.core.handle_frame(&frame);
+                self.core.handle_frame(&frame, &mut self.firmware);
             }
             if used == 0 {
                 break;
@@ -469,6 +537,8 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
     /// returns 0, or as often as the UART can take bytes.
     pub fn transmit(&mut self, out: &mut [u8]) -> usize {
         let mut written = 0;
+        #[cfg(feature = "xfer")]
+        self.refresh_info();
         loop {
             let rest = out.get_mut(written..).unwrap_or_default();
             if rest.is_empty() {
@@ -489,14 +559,14 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
     }
 }
 
-impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
-    DeviceSession<Packet, RX, TX, N, ST>
+impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize, F: FirmwareSink>
+    DeviceSession<Packet, RX, TX, N, ST, F>
 {
     /// Feeds the data of one received CAN frame. The caller filters by identifier (the link's
     /// host→device id) and skips remote frames. Clock-free.
     pub fn receive_segment(&mut self, data: &[u8]) {
         if let Ok(Some(frame)) = self.rx.push(data) {
-            self.core.handle_frame(&frame);
+            self.core.handle_frame(&frame, &mut self.firmware);
         }
     }
 
@@ -524,6 +594,8 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
     /// (and the `memcpy` routine) on small cores.
     pub fn transmit_segment(&mut self, out: &mut [u8]) -> usize {
         let mtu = self.transport.mtu;
+        #[cfg(feature = "xfer")]
+        self.refresh_info();
         let Some(frame) = self.core.next_frame() else {
             return 0;
         };
@@ -540,6 +612,8 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
 
     fn segment(&mut self, commit: bool) -> Option<Segment> {
         let mtu = self.transport.mtu;
+        #[cfg(feature = "xfer")]
+        self.refresh_info();
         let frame = self.core.next_frame()?;
         match transport::segment_step(frame, mtu, &mut self.cursor, commit) {
             Some((segment, done)) => {
@@ -558,15 +632,15 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
 }
 
 #[cfg(feature = "embedded-can")]
-impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
-    DeviceSession<Packet, RX, TX, N, ST>
+impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize, F: FirmwareSink>
+    DeviceSession<Packet, RX, TX, N, ST, F>
 {
     /// Feeds a received [`embedded_can::Frame`] if it carries `ids.host_to_device`; other
     /// identifiers and remote frames are ignored. Returns whether the frame was for this link.
-    pub fn receive_can_frame<F: embedded_can::Frame>(
+    pub fn receive_can_frame<Fr: embedded_can::Frame>(
         &mut self,
         ids: &crate::CanLinkIds,
-        frame: &F,
+        frame: &Fr,
     ) -> bool {
         if frame.is_remote_frame() || !ids.is_host_to_device(frame.id()) {
             return false;
@@ -578,7 +652,10 @@ impl<const RX: usize, const TX: usize, N: AsRef<str>, const ST: usize>
     /// The next segment as an [`embedded_can::Frame`] with `ids.device_to_host`, without consuming
     /// it (see [`DeviceSession::peek_segment`]). `None` when idle, if the identifier is out of
     /// range, or if `F` cannot carry the segment length (a classic frame type with a CAN FD MTU).
-    pub fn peek_can_frame<F: embedded_can::Frame>(&mut self, ids: &crate::CanLinkIds) -> Option<F> {
+    pub fn peek_can_frame<Fr: embedded_can::Frame>(
+        &mut self,
+        ids: &crate::CanLinkIds,
+    ) -> Option<Fr> {
         let id = ids.device_to_host_id()?;
         self.peek_segment()?.to_can_frame(id)
     }

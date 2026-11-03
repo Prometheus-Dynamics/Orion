@@ -29,6 +29,10 @@ device = []
 # `ActionRequested` event. Adds one receive-sized buffer and a few bytes of state to the device
 # session; off, the minimal device build is unchanged.
 actions = ["device"]
+# Firmware transfer over the link (kinds 0x20-0x28): the device session's transfer state,
+# `DeviceInfo`, and the host driver. Needs `device`; the sink trait and the wire types are always
+# compiled, and dead-stripped where unused.
+xfer = ["device"]
 # Device session counters (`device::DeviceStats`, `DeviceSession::stats`). Off, the counters cost
 # no RAM (about 56 bytes on 32-bit targets) and no flash (about 100 bytes).
 stats = []

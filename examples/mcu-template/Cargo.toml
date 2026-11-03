@@ -41,6 +41,9 @@ stats = ["orion-link/stats"]
 # Device-side actions (`orion-link/actions`): one request at a time, results reported by the
 # application. Off in the minimal builds.
 actions = ["orion-link/actions"]
+# Firmware transfer over the link (`orion-link` feature `xfer`): the C entry points run a session
+# with a `PlaceholderFirmware` sink. A port replaces that sink with its flash driver.
+xfer = ["orion-link/xfer"]
 
 [dependencies]
 embedded-can = "0.4"

@@ -11,6 +11,8 @@ mod actions;
 #[cfg(feature = "std")]
 mod can_e2e;
 mod device_scripted;
+#[cfg(all(feature = "std", feature = "xfer"))]
+mod firmware;
 #[cfg(feature = "std")]
 mod sim;
 #[cfg(feature = "std")]

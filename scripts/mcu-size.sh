@@ -15,6 +15,8 @@
 #   uart-actions the minimal UART device with the `actions` feature (protocol 1 requests and
 #               results; the template exposes no C entry point for reporting, so only the receive
 #               path and the busy refusal are linked)
+#   uart-xfer   the UART variant with firmware transfer (feature `xfer`) and the placeholder sink:
+#               what the transfer logic adds on top of `uart`
 # Override with MCU_SIZE_VARIANTS="uart can".
 #
 # Columns: flash = .text + .rodata + .data, static RAM = .data + .bss (of which heap), and the
@@ -29,7 +31,7 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 template="$root_dir/examples/mcu-template"
 read -r -a targets <<<"${MCU_SIZE_TARGETS:-thumbv6m-none-eabi thumbv7em-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf}"
-read -r -a variants <<<"${MCU_SIZE_VARIANTS:-uart can uart-alloc uart-actions}"
+read -r -a variants <<<"${MCU_SIZE_VARIANTS:-uart can uart-alloc uart-actions uart-xfer}"
 
 # Budgets for the minimal UART device (RX = TX = 128), about 15-20% above what it needs today.
 # Raise them only together with an explanation of what the extra bytes buy.
@@ -84,12 +86,14 @@ declare -A variant_features=(
     [can]="standalone,ffi-can"
     [uart-alloc]="standalone,ffi-uart,global-heap"
     [uart-actions]="standalone,ffi-uart,actions"
+    [uart-xfer]="standalone,ffi-uart,xfer"
 )
 declare -A variant_roots=(
     [uart]="orion_rx orion_tx"
     [can]="orion_can_rx orion_can_tx"
     [uart-alloc]="orion_rx orion_tx"
     [uart-actions]="orion_rx orion_tx"
+    [uart-xfer]="orion_rx orion_tx"
 )
 
 # Prints "component bytes" lines for the code and read-only data of an ELF whose flash total is

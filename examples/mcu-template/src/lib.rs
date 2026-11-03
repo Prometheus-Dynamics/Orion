@@ -25,6 +25,8 @@ extern crate alloc;
 pub mod can;
 #[cfg(any(feature = "ffi-uart", feature = "ffi-can"))]
 pub mod ffi;
+#[cfg(feature = "xfer")]
+pub mod firmware;
 #[cfg(feature = "heap")]
 pub mod heap;
 pub mod uart;

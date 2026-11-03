@@ -1,0 +1,13 @@
+# Canonical firmware transfer frames checked by crates/link/tests/firmware_encoding.rs.
+# Format: <name> <frame length> <lowercase hex of the complete frame>.
+device_info 28 0120010003312e3200020067010a73696d2d626f6f742031c4b925f3
+xfer_begin 33 0121020007096d6f746f722d61707003312e33b8178001effdb6f50d0166d78581
+xfer_chunk 20 01220300078001b7ffacb20303616263776180cc
+xfer_ack.ok 12 0123040007830100b2991499
+xfer_ack.bad_crc 12 0123050007800101dbb1616e
+xfer_end 9 01240600071dae1fd4
+xfer_result.ok 10 01250700070057028b18
+xfer_result.bad_digest 10 0125080007038f2a9fe4
+xfer_abort 10 012609000706df241844
+activate 10 01270a000700a2258a38
+confirm 9 01280b00014113167c

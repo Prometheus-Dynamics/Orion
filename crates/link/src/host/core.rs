@@ -16,6 +16,8 @@ use crate::message::{
 use super::ActionSendError;
 use crate::transport::seq_newer;
 
+#[cfg(feature = "xfer")]
+use super::xfer::{DeviceInfo, XferReply, XferRequest};
 use super::{HOST_MAX_FRAME, HostConfig, HostEvent, HostStats};
 
 /// Frames queued for transmission per link; the oldest is dropped beyond this.
@@ -44,6 +46,9 @@ pub(crate) struct HostCore {
     events: VecDeque<HostEvent>,
     leases: Vec<LeaseRecord>,
     last_state: Option<ProviderState>,
+    /// The device's last reported firmware state in this session (feature `xfer`).
+    #[cfg(feature = "xfer")]
+    last_info: Option<DeviceInfo>,
     heard: bool,
     last_heard: u64,
     no_session_sent: bool,
@@ -62,6 +67,8 @@ impl HostCore {
             events: VecDeque::new(),
             leases: Vec::new(),
             last_state: None,
+            #[cfg(feature = "xfer")]
+            last_info: None,
             heard: false,
             last_heard: 0,
             no_session_sent: false,
@@ -139,6 +146,10 @@ impl HostCore {
         if let Some(conn) = self.conn.take() {
             self.out.clear();
             self.last_state = None;
+            #[cfg(feature = "xfer")]
+            {
+                self.last_info = None;
+            }
             self.emit(HostEvent::DeviceLost {
                 device_name: conn.device_name,
             });
@@ -238,6 +249,12 @@ impl HostCore {
                 }
                 _ => self.decode_error(),
             },
+            #[cfg(feature = "xfer")]
+            kind::DEVICE_INFO => self.on_device_info(frame.seq(), frame.payload(), limit),
+            #[cfg(feature = "xfer")]
+            kind::XFER_ACK | kind::XFER_RESULT | kind::XFER_ABORT => {
+                self.on_xfer_reply(frame.kind(), frame.payload());
+            }
             kind::STATUS => match message::decode_status(frame.payload()) {
                 Ok(entries) => {
                     self.stats.status_received = self.stats.status_received.wrapping_add(1);
@@ -351,6 +368,10 @@ impl HostCore {
         self.next_session_id = self.next_session_id.wrapping_add(1).max(1);
         self.out.clear();
         self.last_state = None;
+        #[cfg(feature = "xfer")]
+        {
+            self.last_info = None;
+        }
         self.conn = Some(Conn {
             device_name: hello.device_name.clone(),
             session_id,
@@ -377,6 +398,142 @@ impl HostCore {
         };
         let _ = self.queue(kind::WELCOME, &welcome, max_frame);
         self.queue_leases();
+    }
+
+    /// Queues a frame whose body `encode` writes (the device codec of `crate::wire`).
+    #[cfg(feature = "xfer")]
+    fn queue_wire(
+        &mut self,
+        limit: usize,
+        encode: impl FnOnce(u16, &mut [u8]) -> Result<usize, crate::wire::WireError>,
+    ) -> bool {
+        let seq = self.seq.wrapping_add(1);
+        let mut buf = vec![0u8; limit.clamp(FRAME_OVERHEAD, HOST_MAX_FRAME)];
+        match encode(seq, &mut buf) {
+            Ok(len) => {
+                self.seq = seq;
+                buf.truncate(len);
+                if self.out.len() >= OUT_CAPACITY {
+                    self.out.pop_front();
+                    self.stats.frames_dropped = self.stats.frames_dropped.wrapping_add(1);
+                }
+                self.out.push_back(buf);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Sends a firmware transfer message to the connected device. False if there is no session,
+    /// or the message does not fit the negotiated frame size.
+    #[cfg(feature = "xfer")]
+    pub(crate) fn send_xfer(&mut self, request: &XferRequest) -> bool {
+        let Some(limit) = self.conn.as_ref().map(|conn| conn.max_frame) else {
+            return false;
+        };
+        use crate::wire::{
+            ActivateView, ConfirmView, XferBeginView, XferChunkView, XferEndView, kind,
+        };
+        match request {
+            XferRequest::Begin {
+                xfer_id,
+                component,
+                version,
+                total_len,
+                chunk_len,
+                image_crc32c,
+                target_slot,
+            } => {
+                let body = XferBeginView {
+                    xfer_id: *xfer_id,
+                    component,
+                    version,
+                    total_len: *total_len,
+                    chunk_len: *chunk_len,
+                    image_crc32c: *image_crc32c,
+                    target_slot: *target_slot,
+                };
+                self.queue_wire(limit, |seq, buf| {
+                    crate::wire::encode_frame(kind::XFER_BEGIN, seq, &body, buf)
+                })
+            }
+            XferRequest::Chunk {
+                xfer_id,
+                offset,
+                crc32c,
+                data,
+            } => {
+                let body = XferChunkView {
+                    xfer_id: *xfer_id,
+                    offset: *offset,
+                    crc32c: *crc32c,
+                    data,
+                };
+                self.queue_wire(limit, |seq, buf| {
+                    crate::wire::encode_frame(kind::XFER_CHUNK, seq, &body, buf)
+                })
+            }
+            XferRequest::End { xfer_id } => {
+                let body = XferEndView { xfer_id: *xfer_id };
+                self.queue_wire(limit, |seq, buf| {
+                    crate::wire::encode_frame(kind::XFER_END, seq, &body, buf)
+                })
+            }
+            XferRequest::Activate { xfer_id, mode } => {
+                let body = ActivateView {
+                    xfer_id: *xfer_id,
+                    mode: *mode,
+                };
+                self.queue_wire(limit, |seq, buf| {
+                    crate::wire::encode_frame(kind::ACTIVATE, seq, &body, buf)
+                })
+            }
+            XferRequest::Confirm { slot } => {
+                let body = ConfirmView { slot: *slot };
+                self.queue_wire(limit, |seq, buf| {
+                    crate::wire::encode_frame(kind::CONFIRM, seq, &body, buf)
+                })
+            }
+        }
+    }
+
+    /// `DeviceInfo`: acknowledged every time (the device resends until it sees the ack), reported
+    /// when it differs from the last one in this session.
+    #[cfg(feature = "xfer")]
+    fn on_device_info(&mut self, seq: u16, payload: &[u8], limit: usize) {
+        let _ = self.queue_wire(limit, |ack_seq, buf| {
+            crate::wire::encode_frame(kind::ACK, ack_seq, &seq, buf)
+        });
+        let Ok(view) = crate::wire::DeviceInfoView::decode(payload) else {
+            self.decode_error();
+            return;
+        };
+        let info = DeviceInfo::from_view(&view);
+        if self.last_info.as_ref() == Some(&info) {
+            return;
+        }
+        self.last_info = Some(info.clone());
+        if let Some(device_name) = self.device_name().map(String::from) {
+            self.emit(HostEvent::DeviceInfo { device_name, info });
+        }
+    }
+
+    /// A device's reply to a transfer request.
+    #[cfg(feature = "xfer")]
+    fn on_xfer_reply(&mut self, kind_: u8, payload: &[u8]) {
+        let reply = match kind_ {
+            kind::XFER_ACK => XferReply::ack(payload),
+            kind::XFER_RESULT => XferReply::result(payload),
+            _ => XferReply::abort(payload),
+        };
+        match reply {
+            Some(reply) => {
+                if let Some(device_name) = self.device_name().map(String::from) {
+                    self.emit(HostEvent::Xfer { device_name, reply });
+                }
+            }
+            None => self.decode_error(),
+        }
     }
 
     fn on_state(&mut self, seq: u16, state: ProviderState, limit: usize) {

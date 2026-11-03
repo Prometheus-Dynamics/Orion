@@ -140,7 +140,9 @@ postcard encodings of the listed fields, in order.
 | `0x12` | `ExecutorState` | device → host | | Reserved for the executor role. |
 | `0x13` | `Workloads` | host → device | | Reserved for the executor role. |
 | `0x14` | `Status` | device → host | `Vec<StatusEntry>`; each `key: String`, `value: TypedConfigValue`, `ttl_ms: u32` | Volatile status values (see "Status" below). Fire-and-forget: never acknowledged or retransmitted. Added in version 1 as an additive kind. |
-| `0x20`-`0x2F` | reserved | | | Reserved for firmware transfer (`orion_link::wire::kind::FIRMWARE_FIRST`..`FIRMWARE_LAST`). Not implemented: these kinds are ignored like unknown kinds, and no version bump is needed to add them later. |
+| `0x20` | `DeviceInfo` | device → host | firmware state; see "Firmware transfer" (feature `xfer`) |
+| `0x21`-`0x28` | firmware transfer | both | `XferBegin`, `XferChunk`, `XferAck`, `XferEnd`, `XferResult`, `XferAbort`, `Activate`, `Confirm` (feature `xfer`) |
+| `0x29`-`0x2F` | reserved | | | Reserved for firmware transfer; ignored like unknown kinds. |
 | `0x30` | `ActionRequest` | host → device | `id: u32`, `name: String`, `payload: Vec<u8>` | Asks the device to run a named action (see "Actions" below). Added in version 1 as an additive kind. |
 | `0x31` | `ActionResult` | device → host | `id: u32`, `state` (postcard enum: `0` Running, `1` Succeeded, `2` Failed, `3` Rejected), `payload: Vec<u8>` | The device's report on the request with the same `id`; the payload depends on the state (see "Actions"). Added in version 1 as an additive kind. |
 
@@ -491,6 +493,46 @@ Stop the simulator and the resource turns `health=unknown availability=unavailab
 `missed_heartbeats` heartbeats. `link_device_sim --port <path>` drives an existing serial port
 (115200 8N1) instead of a new pty, for example a USB-serial adapter cabled to the gateway's port,
 so the device can be stopped and restarted on a fixed path to see its resources restored.
+
+## Firmware transfer
+
+Feature `xfer` of `orion-link` (kinds `0x20`-`0x28`, additive: `LINK_PROTOCOL_VERSION` stays 1).
+The bodies are postcard, in the order below; `u8` and `bool` are one byte, `u16` and `u32` are
+varints, strings and byte strings are length-prefixed. The wire fixture is
+`crates/link/tests/fixtures/firmware_encodings.txt`, checked by `tests/firmware_encoding.rs`
+against the codec and against postcard through serde.
+
+| Kind | Name | Body |
+| --- | --- | --- |
+| `0x20` | `DeviceInfo` | `fw_version: str`, `active_slot: u8`, `slots: u8`, `trial: bool`, `xfer_max_chunk: u16`, `xfer_window: u8`, `bootloader: str` |
+| `0x21` | `XferBegin` | `xfer_id: u32`, `component: str`, `version: str`, `total_len: u32`, `chunk_len: u16`, `image_crc32c: u32`, `target_slot: u8` |
+| `0x22` | `XferChunk` | `xfer_id: u32`, `offset: u32`, `crc32c: u32` (of `data`), `data: bytes` |
+| `0x23` | `XferAck` | `xfer_id: u32`, `next_offset: u32`, `status: u8` |
+| `0x24` | `XferEnd` | `xfer_id: u32` |
+| `0x25` | `XferResult` | `xfer_id: u32`, `status: u8` |
+| `0x26` | `XferAbort` | `xfer_id: u32` (0 if not about a transfer), `reason: u8` |
+| `0x27` | `Activate` | `xfer_id: u32`, `mode: u8` (0 trial, 1 handoff) |
+| `0x28` | `Confirm` | `slot: u8` |
+
+Status codes (`u8`): 0 ok, 1 bad chunk CRC, 2 bad offset, 3 bad digest, 4 flash, 5 no space,
+6 busy, 7 unsupported, 8 unknown transfer, 9 bad slot. Unknown codes decode as `Other`.
+
+- **Device.** `DeviceInfo` is sent after every `Welcome` and after every firmware change, and is
+  resent until the host's `Ack` for one of its transmissions. A device whose firmware sink reports
+  zero slots never sends it. `XferBegin` is answered with an `XferAck` whose `next_offset` is what
+  the sink already holds, which is the resume point. A chunk is accepted only at the next offset
+  (a chunk that repeats stored bytes is acknowledged without a write, one that overlaps writes only
+  its new tail, one past the next offset is `BadOffset`). Its CRC-32C is checked before it is
+  written, so a corrupted chunk is refused with `BadChunkCrc` and the host resends from
+  `next_offset`. `XferEnd` verifies the whole image once; a repeated `End` gets the same verdict.
+  `Activate` needs a verified image (otherwise `XferAbort` with `BadDigest`).
+- **Host.** `HostSession::send_xfer` queues a request; `HostEvent::DeviceInfo` and
+  `HostEvent::Xfer` carry the replies. `host::xfer::FirmwareTransfer` is the sans-IO driver (see
+  `docs/update-recovery.md`, "MCU firmware over the link").
+- **Digest.** Length and CRC-32C of the whole image, not SHA-256 (see `docs/update-recovery.md`).
+- **Chunk size.** The host's chunk is at most the device's `xfer_max_chunk` (the receive buffer
+  minus `max_chunk_for_frame`, and the sink's own limit) and the negotiated frame size, so a chunk
+  always fits one frame and one CAN FD message.
 
 ## Versioning
 

@@ -36,6 +36,8 @@
 
 mod bus;
 mod core;
+#[cfg(feature = "xfer")]
+pub mod xfer;
 
 use std::boxed::Box;
 use std::collections::BTreeSet;
@@ -153,6 +155,23 @@ pub enum HostEvent {
         device_name: Option<String>,
         /// Reason sent to the device.
         reason: RejectReason,
+    },
+    /// The device's firmware state changed (feature `xfer`). Sent once per distinct report; the
+    /// device resends it until acknowledged, and the host acknowledges every copy.
+    #[cfg(feature = "xfer")]
+    DeviceInfo {
+        /// The device that sent it.
+        device_name: String,
+        /// The report.
+        info: xfer::DeviceInfo,
+    },
+    /// A reply to a firmware transfer request (feature `xfer`).
+    #[cfg(feature = "xfer")]
+    Xfer {
+        /// The device that replied.
+        device_name: String,
+        /// The reply.
+        reply: xfer::XferReply,
     },
     /// The lease set does not fit the negotiated frame size and was not sent.
     LeasesTooLarge {
@@ -318,6 +337,13 @@ impl<T: Transport> HostSession<T> {
     /// Whether a session is up.
     pub fn is_connected(&self) -> bool {
         self.core.device_name().is_some()
+    }
+
+    /// Sends a firmware transfer message (feature `xfer`) to the connected device. Returns false
+    /// without a session or if the message does not fit the negotiated frame size.
+    #[cfg(feature = "xfer")]
+    pub fn send_xfer(&mut self, request: &xfer::XferRequest) -> bool {
+        self.core.send_xfer(request)
     }
 
     /// The current session id.

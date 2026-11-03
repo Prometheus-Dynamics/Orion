@@ -25,6 +25,7 @@
 mod action;
 mod codec;
 mod decode;
+pub mod firmware;
 mod views;
 
 #[cfg(feature = "alloc")]
@@ -35,6 +36,11 @@ pub(crate) use action::ActionResultBody;
 pub use action::{ActionRequestView, ActionState, decode_progress};
 pub use codec::{Encode, RawVarint, Reader, Writer, encoded_len, str_from_utf8};
 pub use decode::{LeaseView, Leases, WelcomeView, decode_ack, decode_reject, decode_u64};
+pub use firmware::{
+    ActivateMode, ActivateView, ConfirmView, DeviceInfoView, FirmwareInfo, FirmwareSink,
+    NoFirmware, XferAbortView, XferAckView, XferBeginView, XferChunkView, XferEndView,
+    XferResultView, XferStatus, max_chunk_for_frame,
+};
 pub use views::{
     ActionResultView, ActionStatus, Availability, CapabilityView, ConfigField, Health, HelloView,
     LeaseState, Ownership, ProviderBody, ProviderStateView, ProviderView, ResourceBody,
@@ -75,9 +81,26 @@ pub mod kind {
     pub const WORKLOADS: u8 = 0x13;
     /// `Status(Vec<StatusEntry>)`, device → host: volatile status values, fire-and-forget.
     pub const STATUS: u8 = 0x14;
+    /// `DeviceInfo`, device → host: firmware state, sent until acknowledged. Additive, `xfer`.
+    pub const DEVICE_INFO: u8 = 0x20;
+    /// `XferBegin`, host → device: start or resume a transfer. Additive, `xfer`.
+    pub const XFER_BEGIN: u8 = 0x21;
+    /// `XferChunk`, host → device: one chunk of the image at an offset. Additive, `xfer`.
+    pub const XFER_CHUNK: u8 = 0x22;
+    /// `XferAck`, device → host: cumulative acknowledgement (the resume point). Additive, `xfer`.
+    pub const XFER_ACK: u8 = 0x23;
+    /// `XferEnd`, host → device: verify the whole image. Additive, `xfer`.
+    pub const XFER_END: u8 = 0x24;
+    /// `XferResult`, device → host: verdict on the whole image. Additive, `xfer`.
+    pub const XFER_RESULT: u8 = 0x25;
+    /// `XferAbort`, either direction: stop a transfer or report an error. Additive, `xfer`.
+    pub const XFER_ABORT: u8 = 0x26;
+    /// `Activate`, host → device: run a verified image on trial or hand over to the bootloader.
+    pub const ACTIVATE: u8 = 0x27;
+    /// `Confirm`, host → device: keep the trial slot. Additive, `xfer`.
+    pub const CONFIRM: u8 = 0x28;
     /// First kind of the range reserved for firmware transfer (`0x20..=0x2F`, see
-    /// [`is_firmware`]). Reserved, not implemented: a build without firmware transfer decodes
-    /// these kinds as unknown and sessions ignore them.
+    /// [`is_firmware`]). `0x29..=0x2F` are reserved; a session ignores them as unknown kinds.
     pub const FIRMWARE_FIRST: u8 = 0x20;
     /// Last kind of the range reserved for firmware transfer.
     pub const FIRMWARE_LAST: u8 = 0x2F;

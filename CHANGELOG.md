@@ -6,6 +6,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- Firmware transfer over the link (U8, feature `xfer` of `orion-link`; `LINK_PROTOCOL_VERSION`
+  stays 1). Kinds `0x20`-`0x28`: `DeviceInfo`, `XferBegin`, `XferChunk` (offset, CRC-32C per chunk),
+  `XferAck` (cumulative next offset, the resume point), `XferEnd`, `XferResult` (whole-image
+  CRC-32C and length), `XferAbort`, `Activate` (trial or handoff), `Confirm`. Device side:
+  `device::FirmwareSink` (the firmware's flash and boot hooks) on `DeviceSession`, with
+  `NoFirmware` for devices without it. Host side: `host::xfer::FirmwareTransfer`, a sans-IO driver
+  that resumes from the device's reported offset and follows trial boot to confirmation or
+  failure, and `HostSession::send_xfer`. The mcu-template gains an `xfer` feature and a
+  `uart-xfer` size variant (`scripts/mcu-size.sh`). Docs: `docs/link-protocol.md`,
+  `docs/update-recovery.md`.
+
 ### Changed (protocol 1 reset, breaking)
 
 Nothing has been released, so every Orion protocol and on-disk format is now version 1, and the

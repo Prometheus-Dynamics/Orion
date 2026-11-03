@@ -591,30 +591,39 @@ switch.
 
 ### Reserved kinds
 
-Reserve `0x20`–`0x2F` for device information and chunked transfer. Unknown kinds are ignored by
-existing sessions, so this is additive (no `LINK_PROTOCOL_VERSION` bump), and devices that do not
-implement it never see it unless the host knows they advertised support.
+Kinds `0x20`-`0x28` carry device information and chunked transfer (feature `xfer` of `orion-link`;
+the wire types are always compiled, the session logic is behind the feature). Unknown kinds are
+ignored by existing sessions, so this is additive: `LINK_PROTOCOL_VERSION` stays 1, and a device
+without firmware slots never sends `DeviceInfo`. The bodies are in `docs/link-protocol.md`,
+"Firmware transfer".
 
-| Kind | Name | Direction | Body (postcard) |
-| --- | --- | --- | --- |
-| `0x20` | `DeviceInfo` | device → host | `fw_version: String`, `active_slot: u8`, `slots: u8`, `trial: bool`, `xfer_max_chunk: u16`, `xfer_window: u8`, `bootloader: String` (sent after `Welcome`, retransmitted until acked like `ProviderState`) |
-| `0x21` | `XferBegin` | host → device | `xfer_id: u32`, `component: String`, `version: String`, `total_len: u32`, `chunk_len: u16`, `image_crc32c: u32`, `target_slot: u8` |
-| `0x22` | `XferChunk` | host → device | `xfer_id: u32`, `offset: u32`, `data: [u8]` |
-| `0x23` | `XferAck` | device → host | `xfer_id: u32`, `next_offset: u32` (cumulative), `status: u8` |
-| `0x24` | `XferEnd` | host → device | `xfer_id: u32` (device verifies whole-image CRC and its signature) |
-| `0x25` | `XferResult` | device → host | `xfer_id: u32`, `status: u8` (ok, crc, signature, flash, no_space, busy, unsupported) |
-| `0x26` | `XferAbort` | either | `xfer_id: u32`, `reason: u8` |
-| `0x27` | `Activate` | host → device | `xfer_id: u32`, `mode: u8` (trial-boot slot, or bootloader handoff) |
-| `0x28` | `Confirm` | host → device | `slot: u8` (mark good after the host-side health gate; devices may self-confirm) |
-| `0x29`–`0x2F` | reserved | | |
+| Kind | Name | Direction |
+| --- | --- | --- |
+| `0x20` | `DeviceInfo` (fw version, active slot, slots, trial, max chunk, window, bootloader) | device → host, resent until acked |
+| `0x21` | `XferBegin` (id, component, version, total length, chunk length, CRC-32C, target slot) | host → device |
+| `0x22` | `XferChunk` (id, offset, CRC-32C of the chunk, data) | host → device |
+| `0x23` | `XferAck` (id, next offset, status) | device → host |
+| `0x24` | `XferEnd` (id) | host → device |
+| `0x25` | `XferResult` (id, status) | device → host |
+| `0x26` | `XferAbort` (id, reason) | either |
+| `0x27` | `Activate` (id, mode: trial or handoff) | host → device |
+| `0x28` | `Confirm` (slot) | host → device |
+| `0x29`-`0x2F` | reserved | |
 
 `Hello` is frozen, so support is advertised by sending `DeviceInfo`, never by a `Hello` field.
 
+**Image digest.** The device checks the whole image against its length and CRC-32C, not SHA-256.
+A CRC-32C plus length is what fits the smallest devices with no hashing code. It guards against
+transfer and storage corruption, not against a forged image: the image signature check stays with
+the device's bootloader, which verifies it again before it runs (the bootloader owns the trust
+decision, as the principles above require).
+
 ### Transfer rules
 
-- Every frame is already CRC-32C checked; the whole image additionally carries `image_crc32c` and
-  the device bootloader checks the image signature. Chunks are **offset-addressed**, so duplicates
-  and retransmissions are idempotent.
+- Every frame is already CRC-32C checked. Each chunk also carries its own CRC-32C, so a chunk that
+  was changed between the host's buffer and the device's receive buffer is refused with
+  `BadChunkCrc` and resent. The whole image carries its CRC-32C and length (see the digest note
+  above). Chunks are **offset-addressed**, so duplicates and retransmissions are idempotent.
 - Flow control is a cumulative ack with a small window (`xfer_window`, 1 for the smallest devices:
   stop-and-wait). Chunk size is at most the negotiated `max_frame` minus headers, so the device can
   write each chunk straight to flash through a page buffer it already has; no full-image RAM
@@ -667,6 +676,38 @@ sequenceDiagram
     G-->>DM: Succeeded {installed 1.3}
 ```
 
+### What landed in U8
+
+- `orion-link` feature `xfer`: the device session runs the transfer (`device::FirmwareSink`, which
+  the firmware implements with its flash and boot hooks; `NoFirmware` otherwise). It answers
+  `XferBegin` with the sink's stored offset, accepts chunks only at the next offset after their CRC
+  check, verifies the image once at `XferEnd` (the verdict is kept for repeats), and forwards
+  `Activate` and `Confirm` to the sink. `DeviceInfo` is resent until acknowledged and again after
+  every change of the firmware state.
+- The host driver `host::xfer::FirmwareTransfer` is sans-IO: it streams from any `Read + Seek`
+  image, resends a chunk after `ack_timeout_ms` or on a refused chunk (up to `max_retries`), resumes
+  from the device's offset after a reconnect, and then follows the trial: `Activate` (trial or
+  handoff), wait for the device to report the new version, `Confirm` when the health gate passes,
+  and `Succeeded`, `Failed(RolledBack)` (the bootloader reverted), `Failed(NotActivated)` or
+  `Failed(Timeout)` otherwise. A handoff finishes when the link goes quiet.
+- Simulator tests (`crates/link/tests/session/firmware.rs`) run a two-slot device with a bootloader
+  model against the driver over a link that can drop frames, corrupt a chunk with a valid frame CRC,
+  or go dead for longer than the heartbeat timeout: full transfer with trial and confirm, resume
+  after link loss, refused and resent chunk, lost frames, bad digest, refused active slot, and trial
+  without confirmation rolling back on the next power cycle.
+- Size (`scripts/mcu-size.sh`, RX = TX = 128): the minimal `uart` build grows by 12 bytes on
+  Cortex-M0+ (7814 to 7826 B), 8 on Cortex-M4F, 22 on RV32IMC, with no RAM change: the generic
+  sink parameter and one codec body the linker keeps. The `uart-xfer` variant (the placeholder
+  sink, so the session's transfer logic is linked) costs about 2.4 KB flash and 160 bytes RAM on
+  Cortex-M0+ (10202 B and 884 B against 7826 B and 724 B for `uart`; the RAM is the 96-byte
+  `DeviceInfo` buffer, the reply and transfer state, and a 6-byte larger control buffer). A port's
+  flash driver adds its own code and buffers on top.
+
+**Not landed (the gateway part of U8):** `link.release` and `link.attach` actions, and the node
+action that pulls an image from a blob (`docs/blobs.md`), streams it through the driver over the
+gateway's session, reports `Running { progress }`, and confirms when the device reports the new
+version. These stay in `crates/node` (`link_gateway/firmware.rs`) and are the remaining U8 work.
+
 ## Recovery when Orion is unavailable
 
 ```mermaid
@@ -706,7 +747,7 @@ critical path at all. Each milestone is independently useful and testable.
 | U5 | External rollout controller | `RolloutRecord`, waves, `max_unavailable`, health gate, monotonic halt; `orionctl rollout` as the first controller. | U4 |
 | U6 | Cross-version rollouts | Frozen rollout beacon; state-dir snapshot before a slot switch; documented "sync-compatible" flag per release; a test that runs N and N+1 nodes through a rollout. | U5 |
 | U7 | Leaderless rollouts | Wave assignment and gate evaluation in `orion-cluster` (rendezvous order, own-intent writes, convergent halt); property tests like placement's. | U5 |
-| U8 | MCU firmware over the link | Reserve kinds `0x20`–`0x2F` now (doc + constants); later `DeviceInfo`, `xfer` feature in device and host sessions, gateway tunnelling and `link.release` / `link.attach` actions, simulator test with link loss and resume, size budget for the `xfer` feature. | U4 |
+| U8 | MCU firmware over the link | Kinds `0x20`–`0x28` and the `xfer` feature in device and host sessions (landed); still open: gateway `link.release` / `link.attach` and the node firmware action with confirm and rollback. Simulator test with link loss and resume and the size budget (landed). | U4 |
 | U9 | Hardware validation | Real A/B writer on a Linux board, power-cut and watchdog fault injection at every phase, an MCU with an A/B bootloader over UART and CAN. | U4, U8 |
 
 U1 and U2 have no dependencies and can start immediately. U3 was batched with other pending

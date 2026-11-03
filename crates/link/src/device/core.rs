@@ -3,7 +3,8 @@
 use crate::frame::{self, FRAME_OVERHEAD, FrameHeader, FrameView, copy_prefix};
 use crate::transport::seq_newer;
 use crate::wire::{
-    self, Encode, HelloView, Leases, RawVarint, Reader, RejectReason, WelcomeView, kind,
+    self, Encode, FirmwareSink, HelloView, Leases, RawVarint, Reader, RejectReason, WelcomeView,
+    kind,
 };
 #[cfg(feature = "actions")]
 use crate::wire::{ActionRequestView, ActionResultBody, ActionState};
@@ -11,6 +12,8 @@ use crate::wire::{ActionRequestView, ActionResultBody, ActionState};
 #[cfg(feature = "stats")]
 use super::DeviceStats;
 use super::events::{DeviceEvent, EventQueue};
+#[cfg(feature = "xfer")]
+use super::xfer::{REPLY_FRAME_MAX, XferState};
 use super::{DeviceConfig, LinkState, NODE_ID_CAPACITY, PublishError};
 
 /// Counts one event in [`DeviceStats`]. Compiles to nothing without the `stats` feature.
@@ -29,12 +32,23 @@ const MIN_HEARTBEAT_MS: u32 = 10;
 /// Longest `Ping` / `Pong` frame: header, a `u64` varint, CRC.
 const PING_FRAME_MAX: usize = FRAME_OVERHEAD + 10;
 
-/// Size of the control buffer. With `actions` it also holds the refusal of a request that arrives
-/// while the device is busy: an `ActionResult` with a 4-byte reason and a `u32` id.
+/// Reply length the transfer code may need in the control buffer (feature `xfer`).
+#[cfg(feature = "xfer")]
+const XFER_REPLY_MAX: usize = REPLY_FRAME_MAX;
+#[cfg(not(feature = "xfer"))]
+const XFER_REPLY_MAX: usize = 0;
+
+/// Size of the control buffer: pings, pongs, a busy refusal with `actions` (an `ActionResult` with
+/// a 4-byte reason and a `u32` id), and transfer replies with `xfer`.
 #[cfg(feature = "actions")]
-const CONTROL_MAX: usize = PING_FRAME_MAX + 1;
+const ACTION_CONTROL_MAX: usize = PING_FRAME_MAX + 1;
 #[cfg(not(feature = "actions"))]
-const CONTROL_MAX: usize = PING_FRAME_MAX;
+const ACTION_CONTROL_MAX: usize = PING_FRAME_MAX;
+const CONTROL_MAX: usize = if ACTION_CONTROL_MAX > XFER_REPLY_MAX {
+    ACTION_CONTROL_MAX
+} else {
+    XFER_REPLY_MAX
+};
 
 /// Reason sent with the refusal of a request that arrives while another one is running.
 #[cfg(feature = "actions")]
@@ -80,6 +94,9 @@ pub(crate) enum Source {
     /// An `ActionResult` for the device's action (encoded in the action buffer).
     #[cfg(feature = "actions")]
     Action,
+    /// The `DeviceInfo` report (its payload kept for retransmission).
+    #[cfg(feature = "xfer")]
+    Info,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,6 +200,8 @@ pub(crate) struct DeviceCore<N, const RX: usize, const TX: usize, const ST: usiz
     /// A request id to refuse (the device was busy).
     #[cfg(feature = "actions")]
     refusal: Option<u32>,
+    #[cfg(feature = "xfer")]
+    xfer: XferState,
     #[cfg(feature = "stats")]
     stats: DeviceStats,
 }
@@ -231,6 +250,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             out_final: false,
             #[cfg(feature = "actions")]
             refusal: None,
+            #[cfg(feature = "xfer")]
+            xfer: XferState::new(),
             #[cfg(feature = "stats")]
             stats: DeviceStats::default(),
         }
@@ -355,6 +376,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         self.leases_len = None;
         self.ping_due = false;
         self.pong.clear();
+        #[cfg(feature = "xfer")]
+        self.xfer.on_connected();
     }
 
     /// Leaves the session and sends `Hello` at once.
@@ -367,7 +390,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
 
     // ---- receive ---------------------------------------------------------------------------
 
-    pub(crate) fn handle_frame(&mut self, frame: &FrameView<'_>) {
+    pub(crate) fn handle_frame<F: FirmwareSink>(&mut self, frame: &FrameView<'_>, fw: &mut F) {
         bump!(self, frames_received);
         if !frame.header().is_current_version() {
             // REJECT is frozen across versions, so a host speaking another version can still
@@ -388,7 +411,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
                 Ok(reason) => self.on_reject(reason),
                 Err(_) => self.decode_error(),
             },
-            _ => self.on_session_frame(frame),
+            _ => self.on_session_frame(frame, fw),
         }
     }
 
@@ -426,6 +449,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             node_id_len,
         });
         bump!(self, connects);
+        #[cfg(feature = "xfer")]
+        self.xfer.request_info();
         self.hello_due = false;
         self.hello_backoff_ms = self.config.hello_retry_min_ms.max(1);
         self.reject_backoff_ms = self.config.reject_retry_min_ms.max(1);
@@ -477,7 +502,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         self.hello_backoff_ms = self.config.hello_retry_min_ms.max(1);
     }
 
-    fn on_session_frame(&mut self, frame: &FrameView<'_>) {
+    #[cfg_attr(not(feature = "xfer"), allow(unused_variables))]
+    fn on_session_frame<F: FirmwareSink>(&mut self, frame: &FrameView<'_>, fw: &mut F) {
         let Link::Connected(session) = &mut self.link else {
             return;
         };
@@ -500,12 +526,29 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
                 Ok(()) => {}
                 Err(_) => self.decode_error(),
             },
+            #[cfg(feature = "xfer")]
+            kind::XFER_BEGIN
+            | kind::XFER_CHUNK
+            | kind::XFER_END
+            | kind::ACTIVATE
+            | kind::CONFIRM
+            | kind::XFER_ABORT => self.on_xfer(frame, fw),
             // Pong only proves liveness; unknown and reserved kinds are ignored.
             _ => {}
         }
     }
 
+    /// Host → device firmware transfer frames (feature `xfer`; otherwise they are unknown kinds).
+    #[cfg(feature = "xfer")]
+    fn on_xfer<F: FirmwareSink>(&mut self, frame: &FrameView<'_>, fw: &mut F) {
+        if !self.xfer.on_frame(frame.kind(), frame.payload(), fw) {
+            self.decode_error();
+        }
+    }
+
     fn on_ack(&mut self, acked: u16) {
+        #[cfg(feature = "xfer")]
+        self.xfer.on_ack(acked);
         let Some(snapshot) = &mut self.snapshot else {
             return;
         };
@@ -730,6 +773,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             Source::Status => &self.status_buf,
             #[cfg(feature = "actions")]
             Source::Action => &self.action_buf,
+            #[cfg(feature = "xfer")]
+            Source::Info => self.xfer.info_buf(),
         };
         buf.get(..out.len)
     }
@@ -804,9 +849,59 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         #[cfg(feature = "actions")]
         if let Some(outgoing) = self.select_action(max_frame) {
             return Some(outgoing);
+        #[cfg(feature = "xfer")]
+        if let Some(reply) = self.xfer.take_reply() {
+            let result = reply.encode(seq, control);
+            return self.control_frame(Source::Control, result);
+        }
+        #[cfg(feature = "xfer")]
+        if let Some(info) = self.select_info() {
+            return Some(info);
         }
         self.select_snapshot()
             .or_else(|| self.select_status(max_frame))
+    }
+
+    /// The `DeviceInfo` report, when one is due (feature `xfer`).
+    #[cfg(feature = "xfer")]
+    fn select_info(&mut self) -> Option<Outgoing> {
+        let next_at = self.xfer.info_next_at()?;
+        if next_at.is_some_and(|at| !reached(self.now, at)) {
+            return None;
+        }
+        let cap = self
+            .session()
+            .map_or(u32::MAX, |session| session.heartbeat_ms);
+        let seq = self.next_seq();
+        let len = self.xfer.info_frame(seq, self.now, cap)?;
+        Some(Outgoing {
+            source: Source::Info,
+            len,
+        })
+    }
+
+    /// Whether the firmware state must be encoded again before the next transmission.
+    #[cfg(feature = "xfer")]
+    pub(crate) fn info_due(&self) -> bool {
+        self.xfer.info_due() && self.session().is_some()
+    }
+
+    /// Encodes the firmware state as the pending `DeviceInfo` (see [`Self::info_due`]).
+    #[cfg(feature = "xfer")]
+    pub(crate) fn encode_info(&mut self, info: &crate::wire::FirmwareInfo<'_>) {
+        let max_frame = self.max_frame();
+        if !self
+            .xfer
+            .encode_info(info, RX, max_frame, self.config.state_retry_min_ms)
+        {
+            bump!(self, encode_errors);
+        }
+    }
+
+    /// Requests a fresh `DeviceInfo` (the firmware state changed).
+    #[cfg(feature = "xfer")]
+    pub(crate) fn firmware_changed(&mut self) {
+        self.xfer.request_info();
     }
 
     fn control_frame(

@@ -48,10 +48,16 @@ pub const ORION_EVENT_REJECTED: u32 = 1 << 3;
 pub const ORION_EVENT_STATE_ACKED: u32 = 1 << 4;
 
 // The C API never publishes status, so the session has no status buffer (`0`).
-#[cfg(feature = "ffi-can")]
+#[cfg(all(feature = "ffi-can", not(feature = "xfer")))]
 type Session = orion_link::device::CanDevice<RX, TX, StoredName, 0>;
-#[cfg(all(feature = "ffi-uart", not(feature = "ffi-can")))]
+#[cfg(all(feature = "ffi-can", feature = "xfer"))]
+type Session =
+    orion_link::device::CanDevice<RX, TX, StoredName, 0, crate::firmware::PlaceholderFirmware>;
+#[cfg(all(feature = "ffi-uart", not(feature = "ffi-can"), not(feature = "xfer")))]
 type Session = orion_link::device::StreamDevice<RX, TX, StoredName, 0>;
+#[cfg(all(feature = "ffi-uart", not(feature = "ffi-can"), feature = "xfer"))]
+type Session =
+    orion_link::device::StreamDevice<RX, TX, StoredName, 0, crate::firmware::PlaceholderFirmware>;
 
 /// The session's device name: a view of the name stored in [`PORT`], so the session holds no
 /// copy of it.
@@ -175,7 +181,14 @@ pub unsafe extern "C" fn orion_init(device_name: *const u8, len: usize) -> bool 
         PORT.set_name(name);
         // The session owns nothing that needs dropping, so a previous one is simply overwritten.
         // `new` is inlined, so the session is built in place rather than on the stack.
+        #[cfg(not(feature = "xfer"))]
         slot.write(Session::new(DeviceConfig::provider(StoredName), transport));
+        #[cfg(feature = "xfer")]
+        slot.write(Session::with_firmware(
+            DeviceConfig::provider(StoredName),
+            transport,
+            crate::firmware::PlaceholderFirmware,
+        ));
         PORT.ready.store(true, Ordering::Relaxed);
     })
     .is_some()
