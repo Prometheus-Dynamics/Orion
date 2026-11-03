@@ -5,10 +5,11 @@
 //! integrations) call [`NodeApp::request_reconcile`]. The loop sleeps until such a request, or
 //! until the periodic backstop elapses, instead of polling on every reconcile interval.
 
+use super::unsupported_runtime::UnsupportedWarnings;
 use super::{NodeApp, NodeError, ReconcileLoopHandle};
 use crate::config::normalize_runtime_tuning_duration;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::Duration;
@@ -34,6 +35,8 @@ pub(super) struct ReconcileTrigger {
     /// only stops advancing when the loop is wedged or gone.
     completed_passes: AtomicU64,
     notify: Notify,
+    /// Workloads no local executor can run, for the warn-once log (see `unsupported_runtime`).
+    pub(super) unsupported: Mutex<UnsupportedWarnings>,
 }
 
 impl ReconcileTrigger {

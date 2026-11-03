@@ -719,6 +719,14 @@ impl NodeApp {
         &self,
         snapshot: ProviderSnapshot,
     ) -> Result<(), NodeError> {
+        // Same ordering concern as executors: reject a foreign node before writing its record.
+        if snapshot.provider.node_id != self.config.node_id {
+            return Err(NodeError::ProviderNodeMismatch {
+                provider_id: snapshot.provider.provider_id.clone(),
+                expected: self.config.node_id.clone(),
+                found: snapshot.provider.node_id.clone(),
+            });
+        }
         let created = self.ensure_provider_record(snapshot.provider.clone())?;
         let changed = self.with_store_mut(|store| store.apply_provider_snapshot(snapshot))?;
         if changed {
@@ -737,6 +745,16 @@ impl NodeApp {
         source: &LocalAddress,
         update: ExecutorStateUpdate,
     ) -> Result<(), NodeError> {
+        // Checked before the record is written: a foreign record persisted here would be
+        // rejected by the snapshot apply below and yet stay in desired state, where it is
+        // never local, so every reconcile pass would find no executor for its runtime type.
+        if update.executor.node_id != self.config.node_id {
+            return Err(NodeError::ExecutorNodeMismatch {
+                executor_id: update.executor.executor_id.clone(),
+                expected: self.config.node_id.clone(),
+                found: update.executor.node_id.clone(),
+            });
+        }
         let created = self.ensure_executor_record(update.executor.clone())?;
         self.record_status_owner(source, OwnedSubject::Executor(&update.executor.executor_id));
         let changed = self.with_store_mut(|store| {

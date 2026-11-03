@@ -39,6 +39,7 @@ mod reconcile_tick;
 mod reconcile_trigger;
 mod remote_sessions;
 mod safe_mode;
+mod unsupported_runtime;
 pub use safe_mode::SafeModeCause;
 mod blob_store;
 mod local_blobs;

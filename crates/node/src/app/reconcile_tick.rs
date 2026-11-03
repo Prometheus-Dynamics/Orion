@@ -49,7 +49,9 @@ impl NodeApp {
         let runtime_changed = self.apply_runtime_snapshots(&collected)? || cluster_changed;
         let reconcile = {
             let store = self.store_read();
-            self.runtime.reconcile(&store)?
+            let report = self.runtime.reconcile(&store)?;
+            self.note_unsupported_workloads(&store, &report);
+            report
         };
         self.run_lease_pass(&reconcile.unsatisfied);
 
@@ -70,7 +72,9 @@ impl NodeApp {
 
         let reconcile = {
             let store = self.store_read();
-            self.runtime.reconcile(&store)?
+            let report = self.runtime.reconcile(&store)?;
+            self.note_unsupported_workloads(&store, &report);
+            report
         };
         self.run_lease_pass(&reconcile.unsatisfied);
 
