@@ -44,7 +44,8 @@ async fn camera_cluster(
 
 #[tokio::test]
 async fn workload_binds_a_remote_resource_and_both_sides_see_the_lease() {
-    let (a, b, c, _provider) = camera_cluster(FAST, Duration::from_secs(5)).await;
+    // Not about liveness: the availability asserts below must not race a lapsing liveness window.
+    let (a, b, c, _provider) = camera_cluster(NEVER, Duration::from_secs(5)).await;
     let all = [&a, &b, &c];
     write_local(
         &a.app,
