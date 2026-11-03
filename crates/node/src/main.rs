@@ -214,6 +214,10 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     let dynamic_peers = app.restore_discovered_enrollments()? > 0 || process.discovery.is_some();
     #[cfg(not(feature = "discovery-mdns"))]
     let dynamic_peers = false;
+    // Link-owned providers of the previous run are reserved before any IPC client can publish
+    // (`docs/link-protocol.md`, "Restart"); the link tasks start later, with the gateway.
+    #[cfg(feature = "link-gateway")]
+    app.restore_link_devices(&process.links)?;
     let reconcile_loop = app.spawn_reconcile_loop(config.reconcile_interval);
     let clock_facts_loop = app.spawn_clock_facts_loop();
     let host_facts_loop = app.spawn_host_facts_loop();

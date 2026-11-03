@@ -13,16 +13,23 @@ use tracing::{info, warn};
 
 impl NodeApp {
     /// Restores the providers link devices owned before the last shutdown or crash, and marks
-    /// their resources unavailable. Called by `start_link_gateway` before any link task runs.
+    /// their resources unavailable.
+    ///
+    /// `orion-node` calls this at startup, before it starts the IPC servers, so that no local
+    /// client can publish a persisted provider id first. [`Self::start_link_gateway`] calls it too
+    /// (before any link task runs); a call after the first one does nothing.
     ///
     /// A persisted provider whose link is still configured stays reserved for its device (the
     /// device reconnects and its snapshots are accepted again). One whose link is no longer
     /// configured is forgotten: its resources stay unavailable, and the provider id is free again.
     /// A provider that is no longer local in desired state is forgotten without being recreated.
-    pub(crate) fn restore_link_devices(&self, links: &[LinkConfig]) -> Result<(), NodeError> {
+    pub fn restore_link_devices(&self, links: &[LinkConfig]) -> Result<(), NodeError> {
         let Some(storage) = self.storage.as_ref() else {
             return Ok(());
         };
+        if lock(&self.state.links.persisted).is_some() {
+            return Ok(());
+        }
         let stored = storage.load_link_devices()?;
         let configured: BTreeSet<&str> = links.iter().map(|link| link.name.as_str()).collect();
         for record in &stored {
@@ -46,7 +53,8 @@ impl NodeApp {
             {
                 let mut owners = lock(&self.state.links.owners);
                 if owners.contains_key(&provider_id) {
-                    // A local IPC client published this id before the gateway started.
+                    // Only a client that published this id before the restore could own it:
+                    // `orion-node` restores before it accepts any IPC client.
                     warn!(link = %record.link, device = %record.device, provider = %provider_id, "not restoring a link device provider: the id is already published");
                     continue;
                 }

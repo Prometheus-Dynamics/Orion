@@ -33,6 +33,10 @@ compatibility paths for older versions are gone.
 - Tests of the forwarder's push client (`tests/cluster/peer_watch.rs`): a refused session, and forged pushes from a fake owner on a real `orion+tcp` socket (bad signature, another `OpenSession`'s binding, replayed or out-of-order sequence, unwatched action). Each is refused, and the action completes by resend.
 - `orion_auth::peer_tcp`: `encode_push_body`, `split_push_body` and `check_push_sequence`, shared by the node push client, the remote operator client and the owner. The wire is unchanged.
 
+### Fixed (link device ids at startup)
+
+- `orion-node` restores the link-owned providers before it starts its IPC servers, so a local IPC provider can no longer claim a persisted link device's provider id in the window before the gateway started (docs/link-protocol.md, "Restart"). The link tasks still start with the gateway; `start_link_gateway` restores too when the binary has not, and a second restore is a no-op.
+
 ### Added (update intents, U3)
 
 - Desired state gains an `update_intents` section: `UpdateIntentRecord` (target node, component, opaque target version, artifact, digest hint, handler action, arguments, generation, drain policy, paused flag), with HLC stamps and tombstones, merged over peer sync like the other sections. Writes are `DesiredStateMutation::PutUpdateIntent` / `RemoveUpdateIntent`. See [docs/update-recovery.md](docs/update-recovery.md#what-landed-in-u3).

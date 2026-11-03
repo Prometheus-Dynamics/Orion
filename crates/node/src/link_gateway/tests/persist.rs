@@ -148,3 +148,74 @@ async fn link_removed_from_config_is_forgotten() {
     handle.shutdown().await;
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// `orion-node`'s startup order: the restore runs before the IPC servers accept clients. A local
+/// provider that publishes the persisted id right at startup is refused, and the device keeps it.
+#[tokio::test]
+async fn an_ipc_provider_cannot_claim_a_persisted_id_at_startup() {
+    use orion::control_plane::{ClientHello, ClientRole, ControlMessage, ProviderStateUpdate};
+    use orion::transport::ipc::{ControlEnvelope, LocalAddress, UnixControlClient};
+
+    let dir = state_dir("ipc-startup");
+    crash_after_publish(&dir);
+
+    let app = persisted_app(&dir);
+    app.restore_link_devices(&[link(LINK)])
+        .expect("the restore should succeed before the IPC servers start");
+    let socket = std::env::temp_dir().join(format!("orion-lg-startup-{}.sock", std::process::id()));
+    let (_path, server) = app
+        .start_ipc_server_graceful(&socket)
+        .await
+        .expect("the IPC server should start");
+
+    let client = UnixControlClient::new(&socket);
+    let send = |message: ControlMessage| {
+        let envelope = ControlEnvelope {
+            source: LocalAddress::new("local-provider"),
+            destination: LocalAddress::new("orion"),
+            message,
+        };
+        let client = client.clone();
+        async move {
+            client
+                .send(envelope)
+                .await
+                .expect("the IPC exchange should complete")
+        }
+    };
+    send(ControlMessage::ClientHello(ClientHello {
+        client_name: "local-provider".into(),
+        role: ClientRole::Provider,
+    }))
+    .await;
+    let provider = ProviderRecord::builder(orion::ProviderId::new(PROVIDER), NODE)
+        .resource_type("imu.sample_source")
+        .build();
+    let response = send(ControlMessage::ProviderState(ProviderStateUpdate {
+        provider,
+        resources: vec![device_resource(RESOURCE, PROVIDER, "imu")],
+    }))
+    .await;
+    assert!(
+        matches!(response.message, ControlMessage::Rejected(_)),
+        "a local provider may not publish a link device's persisted id, got {:?}",
+        response.message
+    );
+    assert_eq!(
+        resource_availability(&app),
+        Some(AvailabilityState::Unavailable),
+        "the refused publish leaves the restored resource unavailable"
+    );
+
+    // The device still reconnects to its id.
+    assert!(
+        publish_as(&app, LINK, "imu-board"),
+        "the device should reconnect"
+    );
+    assert_eq!(
+        resource_availability(&app),
+        Some(AvailabilityState::Available)
+    );
+    server.shutdown().await.expect("the IPC server should stop");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -388,17 +388,18 @@ Bridging, kept generic (nothing about the device's resource types is assumed):
 - **Restart.** The providers link devices own, with their last accepted provider and resource
   records and the link and device names, are persisted in `<state dir>/link-devices.rkyv` whenever
   that set changes (a new provider, a provider switch, a removed device; not connects or losses). A
-  crash (no shutdown) therefore leaves them recorded. When the gateway starts, before any link task
-  runs, each persisted provider whose link is still configured is seeded as owned by its device,
+  crash (no shutdown) therefore leaves them recorded. When the node starts, before its IPC servers accept
+  clients and before any link task runs, each persisted provider whose link is still configured is seeded as owned by its device,
   disconnected, and its resources are marked unavailable (`Unavailable`, `Unknown`). Until the device
   reconnects, another device or a local IPC client cannot publish that provider id. The reconnecting
   device's snapshot makes the resources available again. A persisted provider whose link is no longer
   in `ORION_NODE_LINKS` is forgotten: its resources stay unavailable and the id is free again. A
   persisted provider that is no longer a local provider in desired state is dropped without being
   recreated. Without a state directory nothing is persisted. The file is written atomically and has
-  its own format version, so the snapshot format is unchanged. The IPC servers start before the
-  gateway in `orion-node`'s main, so an IPC client that publishes a persisted provider id in that
-  short window keeps it; the restore skips it (logged).
+  its own format version, so the snapshot format is unchanged. `orion-node` restores before it starts
+  the IPC servers (the link tasks still start with the gateway), so no local client can publish a
+  persisted id before the restore. A restore that finds an id already published (only possible when a
+  library caller starts IPC first) skips that provider and logs it.
 - **Shutdown.** On node shutdown every link task stops, marks its connected devices lost, and closes
   its port or socket before the reconcile loop and IPC servers stop.
 - **Status.** Device `Status` batches go to the node's volatile status lane under the device's

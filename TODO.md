@@ -239,6 +239,8 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
       run the `vcan0` test in CI. Done: `<state dir>/link-devices.rkyv` (own format version, written
       on change, restored by `start_link_gateway` as unavailable and reserved for the device until it
       reconnects; links no longer configured are forgotten), tests in `link_gateway/tests/persist.rs`.
+      Startup window closed: `orion-node` restores before its IPC servers accept clients, so an IPC
+      provider cannot claim a persisted id first (test `an_ipc_provider_cannot_claim_a_persisted_id_at_startup`).
       vcan0 decision: the `lints` job runs `vcan0_up` (`scripts/ci-jobs.sh`: `sudo -n modprobe vcan`,
       `ip link add dev vcan0 type vcan`, `ip link set up`), best effort, never failing the job, then
       `can_gateway_on_vcan0 -- --ignored`, which skips itself when `vcan0` is missing. GitHub's
