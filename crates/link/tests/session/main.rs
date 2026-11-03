@@ -6,6 +6,8 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+#[cfg(all(feature = "std", feature = "actions", feature = "xfer"))]
+mod ack_rule;
 #[cfg(all(feature = "std", feature = "actions"))]
 mod actions;
 #[cfg(feature = "std")]

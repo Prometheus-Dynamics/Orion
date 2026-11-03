@@ -139,8 +139,11 @@ struct Snapshot {
     payload_len: usize,
     /// Not yet acknowledged in the current session.
     pending: bool,
-    /// Sequence numbers of the first and latest transmission of this snapshot in this session.
-    seqs: Option<(u16, u16)>,
+    /// Sequence number of the latest transmission in this session (`None` before the first). Only an
+    /// `Ack` for exactly this number acknowledges the slot: sequence numbers are unique per frame,
+    /// so an ack for an earlier transmission, or for another stream, never matches (docs/link-protocol.md,
+    /// "Reliability").
+    latest: Option<u16>,
     backoff_ms: u32,
     /// Retransmission deadline; `None` sends at once.
     next_at: Option<u32>,
@@ -485,7 +488,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             } else {
                 self.snapshot = Some(Snapshot {
                     pending: true,
-                    seqs: None,
+                    latest: None,
                     backoff_ms: self.config.state_retry_min_ms.max(1),
                     next_at: None,
                     ..snapshot
@@ -497,7 +500,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         if let Some(catalog) = self.catalog {
             self.catalog = Some(Snapshot {
                 pending: true,
-                seqs: None,
+                latest: None,
                 backoff_ms: self.config.state_retry_min_ms.max(1),
                 next_at: None,
                 ..catalog
@@ -578,23 +581,18 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
     fn on_ack(&mut self, acked: u16) {
         #[cfg(feature = "xfer")]
         self.xfer.on_ack(acked);
-        // The catalog's acknowledgement is matched exactly against its latest transmission, and
-        // such a sequence number never belongs to the snapshot, so the snapshot is left alone.
+        // Every reliable stream (catalog, snapshot) acknowledges only its latest transmission.
         #[cfg(feature = "actions")]
         if let Some(catalog) = &mut self.catalog
-            && catalog.seqs.is_some_and(|(_, latest)| latest == acked)
+            && catalog.pending
+            && catalog.latest == Some(acked)
         {
             catalog.pending = false;
-            return;
         }
-        let Some(snapshot) = &mut self.snapshot else {
-            return;
-        };
-        let Some((first, latest)) = snapshot.seqs else {
-            return;
-        };
-        let in_range = acked.wrapping_sub(first) <= latest.wrapping_sub(first);
-        if snapshot.pending && in_range {
+        if let Some(snapshot) = &mut self.snapshot
+            && snapshot.pending
+            && snapshot.latest == Some(acked)
+        {
             snapshot.pending = false;
             self.emit(DeviceEvent::StateAcked);
         }
@@ -699,7 +697,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         self.catalog = Some(Snapshot {
             payload_len,
             pending: true,
-            seqs: None,
+            latest: None,
             backoff_ms: self.config.state_retry_min_ms.max(1),
             next_at: None,
         });
@@ -827,7 +825,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         self.snapshot = Some(Snapshot {
             payload_len,
             pending: true,
-            seqs: None,
+            latest: None,
             backoff_ms: self.config.state_retry_min_ms.max(1),
             next_at: None,
         });
@@ -978,12 +976,11 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             &mut self.catalog_buf,
         )
         .ok()?;
-        let first = catalog.seqs.map_or(seq, |(first, _)| first);
         let cap = self
             .session()
             .map_or(u32::MAX, |session| session.heartbeat_ms);
         self.catalog = Some(Snapshot {
-            seqs: Some((first, seq)),
+            latest: Some(seq),
             next_at: Some(self.now.wrapping_add(catalog.backoff_ms)),
             backoff_ms: catalog.backoff_ms.saturating_mul(2).min(cap.max(1)),
             ..catalog
@@ -1086,12 +1083,11 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             &mut self.snapshot_buf,
         )
         .ok()?;
-        if snapshot.seqs.is_some() {
+        if snapshot.latest.is_some() {
             bump!(self, state_retransmits);
         }
-        let first = snapshot.seqs.map_or(seq, |(first, _)| first);
         self.snapshot = Some(Snapshot {
-            seqs: Some((first, seq)),
+            latest: Some(seq),
             ..snapshot
         });
         Some(Outgoing {

@@ -65,7 +65,8 @@ struct Transfer {
 struct InfoSlot {
     payload_len: usize,
     pending: bool,
-    seqs: Option<(u16, u16)>,
+    /// Sequence number of the latest transmission (see `Snapshot::latest` in `core.rs`).
+    latest: Option<u16>,
     backoff_ms: u32,
     next_at: Option<u32>,
 }
@@ -121,10 +122,7 @@ impl XferState {
         let Some(info) = &mut self.info else {
             return;
         };
-        let Some((first, latest)) = info.seqs else {
-            return;
-        };
-        if info.pending && acked.wrapping_sub(first) <= latest.wrapping_sub(first) {
+        if info.pending && info.latest == Some(acked) {
             info.pending = false;
         }
     }
@@ -166,7 +164,7 @@ impl XferState {
         self.info = Some(InfoSlot {
             payload_len,
             pending: true,
-            seqs: None,
+            latest: None,
             backoff_ms: state_retry_ms.max(1),
             next_at: None,
         });
@@ -190,8 +188,7 @@ impl XferState {
             &mut self.info_buf,
         )
         .ok()?;
-        let first = info.seqs.map_or(seq, |(first, _)| first);
-        info.seqs = Some((first, seq));
+        info.latest = Some(seq);
         info.next_at = Some(now.wrapping_add(info.backoff_ms));
         info.backoff_ms = info.backoff_ms.saturating_mul(2).min(cap_ms.max(1));
         self.info = Some(info);

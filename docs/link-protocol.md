@@ -308,8 +308,12 @@ that does not fit is not sent and is reported to the gateway (`LeasesTooLarge`).
   because they open or close sessions. A new session resets the window.
 - `ProviderState` is retransmitted by the device until acknowledged, with exponential backoff
   (default 200 ms, measured from the end of each transmission) capped at the heartbeat interval.
-  Each retransmission uses a new `seq`; an `Ack` for any transmission of the current snapshot
-  counts, an `Ack` for an older snapshot does not. Because snapshots are full state, only the
+  Each retransmission uses a new `seq`. The ack rule is the same for every reliable stream (the
+  snapshot, the action catalog `0x33`, and `DeviceInfo` `0x20`): an `Ack { seq }` acknowledges the
+  stream only when `seq` is the sequence number of that stream's latest transmission. Sequence
+  numbers are unique per frame, so an ack for an earlier transmission of the same stream, or for
+  another stream's frame, never matches; the next retransmission is acknowledged in turn, since
+  the host acknowledges every new frame it accepts. Because snapshots are full state, only the
   newest pending one is kept; publishing a new snapshot while the previous one is still being
   sent aborts that transmission (the receiver drops the partial frame).
 - The host acknowledges every `ProviderState` it receives but reports a snapshot to the gateway
