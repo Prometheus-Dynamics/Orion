@@ -19,6 +19,7 @@ struct DeleteDryRunReport {
 
 pub(super) async fn run(command: DeleteCommand) -> Result<(), String> {
     match command {
+        DeleteCommand::Update(args) => super::update::delete_update(args).await,
         DeleteCommand::Artifact(args) => {
             let client = args.local.client()?;
             let snapshot = client

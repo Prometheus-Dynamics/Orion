@@ -32,6 +32,10 @@ pub(crate) enum AuditEventKind {
     HttpTlsRotated,
     OperatorEnrolled,
     OperatorRemoved,
+    /// An update intent was written (by a local client or a remote operator, `docs/update-recovery.md`).
+    UpdateIntentWritten,
+    /// An update intent was removed.
+    UpdateIntentRemoved,
 }
 
 #[derive(Debug, Serialize)]

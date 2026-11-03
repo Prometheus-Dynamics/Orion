@@ -70,6 +70,7 @@ fn hello_message() -> ControlMessage {
             providers: 5,
             executors: 6,
             leases: 7,
+            update_intents: 0,
         },
         observed_revision: Revision::new(1),
         applied_revision: Revision::new(1),

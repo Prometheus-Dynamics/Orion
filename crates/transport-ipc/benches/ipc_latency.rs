@@ -48,6 +48,7 @@ fn payload_with_node_id_len(len: usize) -> ControlEnvelope {
                 providers: 0,
                 executors: 0,
                 leases: 0,
+                update_intents: 0,
             },
             observed_revision: Revision::new(7),
             applied_revision: Revision::new(7),

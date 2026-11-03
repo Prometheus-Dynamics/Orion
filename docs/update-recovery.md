@@ -1,8 +1,9 @@
 # Software Update and Recovery
 
-Status: **design only**. Nothing in this document is implemented yet. It describes how device
+Status: **U0 to U3 are implemented; U4 onwards is design.** This document describes how device
 software updates and recovery flow through Orion, which pieces Orion owns, which pieces it
-deliberately does not own, and the order in which to build them. Open items are tracked in
+deliberately does not own, and the order in which to build them. The implementation status of
+each milestone is in the table under "Implementation plan"; open items are tracked in
 [TODO.md](../TODO.md) under "Update / recovery".
 
 What works today, without the records below, is the action-only path (option B): a device agent
@@ -129,10 +130,48 @@ Use **A for the source of truth and B for delivery and imperative operations**:
 This keeps the property that makes the rest of Orion robust: *desired versus observed*, compared
 locally and repeatedly, with no coordinator.
 
-### Records (sketch)
+### Records
 
 All fields are generic. Orion only compares version strings for **equality**; it never orders
 them. Ordering, downgrade protection and compatibility belong to the writer.
+
+The sketch below is what U3 implements, with these differences: `acting_on` is a named struct
+(`UpdateActing { target_version, generation }`), the intent id is checked to be
+`<node>/<component>` (`update_intent_id`), and `rollout_id` is left out until `RolloutRecord`
+exists (U5). Strings and lists are bounded (`MAX_UPDATE_*` constants in
+`orion_control_plane`; `UpdateIntentRecord::validate` runs before a write is committed).
+
+### What landed in U3
+
+- **Desired state**: `UpdateIntentRecord` in the `update_intents` section of
+  `DesiredClusterState`, with HLC stamps and tombstones like every other section. Mutations
+  `PutUpdateIntent` and `RemoveUpdateIntent`. The section is in peer sync
+  (`DesiredStateSection::UpdateIntents`, `DesiredStateObjectSelector::UpdateIntents`, summaries and
+  fingerprints) and in persisted state (the snapshot's desired state, counted in the manifest).
+- **Observed state**: `UpdateStatusRecord` in `ObservedClusterState::update_statuses`. A node
+  publishes only the statuses of its own intents (`node_id` must be the node; peers are refused
+  otherwise). The node computes them in its reconcile pass (`publish_local_update_statuses`): an
+  `os` intent is `Idle` when the booted image (host facts `image_version`, else `os_version`) has
+  the target version and `Pending` otherwise; other components have no installed-version source
+  yet and stay `Pending`. Phases past `Pending` are written by the delivery loop (U4).
+- **Control surface**: no new IPC messages were needed. `orionctl get updates [--node <id>]` reads
+  the state snapshot, which carries both sections, so it works over the local socket and through
+  any client that can read the snapshot. `orionctl apply update` and `orionctl delete update` write
+  `PutUpdateIntent` / `RemoveUpdateIntent` batches over the local socket.
+  `orion_client::LocalControlPlaneClient` has `update_intents`, `apply_update_intent` and
+  `remove_update_intent`; `orion_client::remote::RemoteOperator` has `update_intents` and
+  `apply_update_intents` (the batch, with its base revision).
+- **Requester authorization**: local control-plane clients may always write intents, as they may
+  write any desired state. Remote operators may write intents only when listed in
+  `ORION_NODE_UPDATE_REQUESTERS` (operator ids, default none). A listed operator's batch is accepted
+  only if every mutation is an intent write or removal, and each intent is validated. Operators are
+  refused everything else, as before. Peers relay intents through sync like any desired state, under
+  the peer-sync rules. The rule that every node also checks the writer of an intent it is about to
+  act on is U4's, because nothing acts on an intent yet.
+- **Audit**: `update_intent_written` and `update_intent_removed` records (subject
+  `<node>/<component>`, the actor: `local client` or `operator`), see
+  [audit-logging.md](audit-logging.md). Peer-sync merges are not audited, as they are not writes
+  by a requester.
 
 ```rust
 /// Desired state, new section `update_intents`. Key: `UpdateIntentId`, conventionally
@@ -449,13 +488,14 @@ sequenceDiagram
 ## Security
 
 - **Who may request.** Writing `update_intents` and `rollouts`, and sending update actions, needs
-  an explicit permission, separate from ordinary desired-state writes: local IPC clients by role
-  (`ControlPlane`) plus a UID allowlist (`SO_PEERCRED`), remote writes only from enrolled peers
-  (ed25519, [peer-sync.md](peer-sync.md#threat-model-and-why-oriontcp-has-no-tls)). Proposed knob:
-  `ORION_NODE_UPDATE_REQUESTERS` (UIDs and/or peer node ids), default local root only. Because
-  desired state replicates, every node checks the writer of an intent it is about to *act on*
-  (the stamp's node tag maps to an enrolled peer that is allowed to request updates), not only the
-  node that accepted the write.
+  an explicit permission, separate from ordinary desired-state writes. U3 has the first half:
+  local control-plane clients (role `ControlPlane`) write intents, and remote operators write them
+  only when listed in `ORION_NODE_UPDATE_REQUESTERS` (operator ids, default none; see
+  [node-env.md](node-env.md#update-intents)). Still open, for U4 and U5: a UID allowlist for local
+  IPC (`SO_PEERCRED`), the peer-side check, and the rollout permission. Because desired state
+  replicates, every node should check the writer of an intent it is about to *act on* (the stamp's
+  node tag maps to an enrolled peer that is allowed to request updates), not only the node that
+  accepted the write.
 - **Artifact authenticity is not Orion's job.** The writer verifies signatures and digests against
   keys in the image (or a TPM / secure element), and enforces anti-rollback (monotonic security
   version). `expected_digest` in an intent is a hint for early failure, never a trust anchor.
@@ -466,7 +506,8 @@ sequenceDiagram
   non-rolled-back version, pause or halt rollouts, and lie about progress. It cannot install
   unsigned code or prevent out-of-band recovery.
 - **Audit**: every accepted intent and rollout write, every update action and every outcome is an
-  audit record (requester identity, node, component, versions, generation).
+  audit record (requester identity, node, component, versions, generation). Intent writes and
+  removals are audited since U3; update actions, outcomes and rollouts come with U4 and U5.
 
 ## Failure modes and recovery
 
@@ -663,7 +704,7 @@ critical path at all. Each milestone is independently useful and testable.
 | U0 | Prerequisites (parallel work) | Generic action mechanism; host facts with OS / image version on the observed `NodeRecord`. | — |
 | U1 | Supervision | Feature `systemd`: `READY=1`, `WATCHDOG=1` from the reconcile loop, `STATUS=`; example unit with watchdog, restart limits and `OnFailure`; test that a wedged loop stops the heartbeat. | — |
 | U2 | Safe mode | `ORION_NODE_SAFE_MODE`; quarantine instead of failing on undecodable state; no workloads, receive-only sync, health reason; `orion_safe_mode` metric; tests for corrupted and newer-format state dirs. | — |
-| U3 | Data model | `UpdateIntentRecord` desired section, `UpdateStatusRecord` in the observed slice, protocol bump, layout fingerprint, `orionctl apply` / `get updates`, requester authorization (`ORION_NODE_UPDATE_REQUESTERS`), audit records. | U0 |
+| U3 | **Done.** Data model | `UpdateIntentRecord` desired section, `UpdateStatusRecord` in the observed slice, protocol bump, layout fingerprint, `orionctl apply` / `get updates`, requester authorization (`ORION_NODE_UPDATE_REQUESTERS`), audit records. | U0 |
 | U4 | Delivery and resume | Reconciler that delivers intents as actions with the idempotency key, re-delivery and backoff, phase persistence, status-lane progress keys, drain integration; a fake device manager in `examples/` and tests that kill the node or the handler at every phase. | U3 |
 | U5 | External rollout controller | `RolloutRecord`, waves, `max_unavailable`, health gate, monotonic halt; `orionctl rollout` as the first controller. | U4 |
 | U6 | Cross-version rollouts | Frozen rollout beacon; legacy state-dir copy kept until commit and used on downgrade; documented "sync-compatible" flag per release; a test that runs N and N+1 nodes through a rollout. | U5 |
@@ -671,8 +712,9 @@ critical path at all. Each milestone is independently useful and testable.
 | U8 | MCU firmware over the link | Reserve kinds `0x20`–`0x2F` now (doc + constants); later `DeviceInfo`, `xfer` feature in device and host sessions, gateway tunnelling and `link.release` / `link.attach` actions, simulator test with link loss and resume, size budget for the `xfer` feature. | U4 |
 | U9 | Hardware validation | Real A/B writer on a Linux board, power-cut and watchdog fault injection at every phase, an MCU with an A/B bootloader over UART and CAN. | U4, U8 |
 
-U1 and U2 have no dependencies and can start immediately. U3 should be batched with other
-pending layout changes into one `CONTROL_PROTOCOL_VERSION` bump.
+U1 and U2 have no dependencies and can start immediately. U3 was batched with other pending
+layout changes into one `CONTROL_PROTOCOL_VERSION` bump (U3 itself changed the layout; the version
+number is set when the batch is integrated).
 
 ## Non-goals
 

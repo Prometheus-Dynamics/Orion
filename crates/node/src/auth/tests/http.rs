@@ -242,6 +242,7 @@ fn peer_http_rejects_mismatched_embedded_peer_identity() {
                             providers: 0,
                             executors: 0,
                             leases: 0,
+                            update_intents: 0,
                         },
                     observed_revision: Revision::ZERO,
                     applied_revision: Revision::ZERO,
@@ -319,6 +320,68 @@ fn configured_peer_cannot_publish_foreign_observed_state() {
     assert!(
         err.to_string()
             .contains("peer node-peer cannot publish observed node record for node-other")
+    );
+}
+
+#[test]
+fn configured_peer_cannot_publish_another_nodes_update_status() {
+    let main = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node-main"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-main-status"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: None,
+            peers: vec![PeerConfig::new("node-peer", "http://127.0.0.1:9002")],
+            peer_authentication: PeerAuthenticationMode::Optional,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .try_build()
+        .expect("node app should build");
+    let peer = NodeApp::builder()
+        .config(NodeConfig {
+            node_id: NodeId::new("node-peer"),
+            http_bind_addr: "127.0.0.1:0".parse().expect("socket address should parse"),
+            ipc_socket_path: NodeConfig::default_ipc_socket_path_for("node-peer-status"),
+            reconcile_interval: Duration::from_millis(10),
+            state_dir: None,
+            peers: Vec::new(),
+            peer_authentication: PeerAuthenticationMode::Optional,
+            peer_sync_execution: NodeConfig::try_peer_sync_execution_from_env()
+                .expect("peer sync execution defaults should parse"),
+            ipc_stream_heartbeat_interval: NodeConfig::default_ipc_stream_heartbeat_interval(),
+            ipc_stream_heartbeat_timeout: NodeConfig::default_ipc_stream_heartbeat_timeout(),
+            runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
+                .expect("runtime tuning defaults should parse"),
+        })
+        .try_build()
+        .expect("node app should build");
+    // The peer may report on its own intents only.
+    let mut observed = orion::control_plane::ObservedClusterState::default();
+    observed.put_update_status(orion::control_plane::UpdateStatusRecord::new(
+        &orion::control_plane::UpdateIntentRecord::new("node-other", "os", "2.0"),
+        orion::control_plane::UpdatePhase::Applying,
+        1,
+    ));
+
+    let err = main
+        .http_control_handler()
+        .handle_payload(signed_peer_payload(
+            &peer,
+            orion::transport::http::HttpRequestPayload::ObservedUpdate(ObservedStateUpdate {
+                observed,
+                applied: orion::control_plane::AppliedClusterState::default(),
+            }),
+        ))
+        .expect_err("peer should not be allowed to report another node's update status");
+    assert!(
+        err.to_string()
+            .contains("peer node-peer cannot publish update status of node-other")
     );
 }
 

@@ -426,6 +426,7 @@ impl NodeAppBuilder {
         security.set_operator_open_read(config.runtime_tuning.actions.operator_open_read);
         security
             .set_operator_auto_enroll(config.runtime_tuning.actions.operator_auto_enroll.clone());
+        security.set_update_requesters(config.runtime_tuning.actions.update_requesters.clone());
         security
             .set_private_link_trust(PrivateLinkTrust::try_from_env(config.peer_authentication)?);
         let transport_security = Arc::new(NodeTransportSecurityManager::new(

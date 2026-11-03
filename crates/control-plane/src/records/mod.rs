@@ -6,6 +6,7 @@ mod inventory;
 mod placement;
 mod resource_endpoints;
 mod resources;
+mod updates;
 mod versions;
 mod workloads;
 
@@ -32,6 +33,13 @@ pub use resources::{
     LeaseRecord, LeaseRecordBuilder, ResourceActionResult, ResourceActionStatus,
     ResourceCapability, ResourceConfigState, ResourceOwnershipMode, ResourceRecord,
     ResourceRecordBuilder, ResourceState,
+};
+pub use updates::{
+    DrainPolicy, MAX_UPDATE_ARG_NAME_LEN, MAX_UPDATE_ARGS, MAX_UPDATE_COMPONENT_LEN,
+    MAX_UPDATE_DIGEST_LEN, MAX_UPDATE_DRAIN_TIMEOUT_MS, MAX_UPDATE_ERROR_LEN,
+    MAX_UPDATE_HANDLER_NAME_LEN, MAX_UPDATE_VERSION_LEN, UpdateActing, UpdateHandler,
+    UpdateIntentRecord, UpdateIntentView, UpdatePhase, UpdateStatusRecord, update_intent_id,
+    update_intent_views,
 };
 pub use versions::{DesiredObjectKey, DesiredObjectStamps, DesiredObjectVersion};
 pub use workloads::{

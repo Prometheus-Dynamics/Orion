@@ -52,6 +52,7 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
         ResourceType,
         ConfigSchemaId,
         CapabilityId,
+        UpdateIntentId,
         // envelopes
         ControlEnvelope,
         LocalAddress,

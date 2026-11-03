@@ -9,9 +9,10 @@ mod get_memory;
 mod get_status;
 mod operators;
 mod peers;
+mod update;
 mod watch;
 
-pub(crate) use action::{ActionCommand, ActionListArgs};
+pub(crate) use action::{ActionCommand, ActionListArgs, parse_action_arg};
 pub(crate) use discovered::PeerRemoveArgs;
 pub(crate) use operators::OperatorCommand;
 

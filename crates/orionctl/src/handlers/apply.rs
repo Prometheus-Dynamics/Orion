@@ -84,6 +84,7 @@ pub(super) async fn run(command: ApplyCommand) -> Result<(), String> {
                 | OutputFormat::Metrics => print_structured(&artifact, args.local.output),
             }
         }
+        ApplyCommand::Update(args) => super::update::apply_update(*args).await,
         ApplyCommand::Workload(args) => {
             let client = args.local.client()?;
             let dry_run = args.dry_run;

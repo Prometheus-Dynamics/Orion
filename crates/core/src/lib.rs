@@ -27,7 +27,7 @@ pub use error::OrionError;
 pub use hlc::{HlcClockSkew, HlcTimestamp, HybridLogicalClock, hlc_node_tag};
 pub use ids::{
     ArtifactId, ClientName, ExecutorId, NodeId, PeerBaseUrl, ProviderId, PublicKeyHex, ResourceId,
-    SessionId, WorkloadId,
+    SessionId, UpdateIntentId, WorkloadId,
 };
 pub use protocol::{
     CONTROL_PROTOCOL_HTTP_HEADER, CONTROL_PROTOCOL_LAYOUT_FINGERPRINT, CONTROL_PROTOCOL_VERSION,

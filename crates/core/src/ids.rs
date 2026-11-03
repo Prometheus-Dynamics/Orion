@@ -127,3 +127,4 @@ string_newtype!(ClientName);
 string_newtype!(SessionId);
 string_newtype!(PeerBaseUrl);
 string_newtype!(PublicKeyHex);
+string_newtype!(UpdateIntentId);

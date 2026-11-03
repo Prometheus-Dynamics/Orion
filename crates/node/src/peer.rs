@@ -139,6 +139,7 @@ impl PeerState {
                 providers: 0,
                 executors: 0,
                 leases: 0,
+                update_intents: 0,
             },
             observed_revision: Revision::ZERO,
             applied_revision: Revision::ZERO,

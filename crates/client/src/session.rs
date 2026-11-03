@@ -195,6 +195,7 @@ where
                 providers: 0,
                 executors: 0,
                 leases: 0,
+                update_intents: 0,
             },
             observed_revision,
             applied_revision,

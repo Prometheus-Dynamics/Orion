@@ -41,6 +41,7 @@ mod reconcile_trigger;
 mod remote_sessions;
 mod safe_mode;
 mod unsupported_runtime;
+mod update_intents;
 pub use safe_mode::SafeModeCause;
 mod blob_store;
 mod local_blobs;

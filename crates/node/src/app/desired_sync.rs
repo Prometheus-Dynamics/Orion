@@ -35,6 +35,10 @@ pub(super) fn summarize_desired_state_for_sections(
         providers: summarize_if(include(DesiredStateSection::Providers), &desired.providers)?,
         executors: summarize_if(include(DesiredStateSection::Executors), &desired.executors)?,
         leases: summarize_if(include(DesiredStateSection::Leases), &desired.leases)?,
+        update_intents: summarize_if(
+            include(DesiredStateSection::UpdateIntents),
+            &desired.update_intents,
+        )?,
         stamps: desired.stamps.for_sections(sections),
         tombstones: desired.tombstones.for_sections(sections),
     })
@@ -69,6 +73,11 @@ pub(crate) fn section_fingerprints(
         providers: section(&desired.providers, &stamps.providers, &tombstones.providers)?,
         executors: section(&desired.executors, &stamps.executors, &tombstones.executors)?,
         leases: section(&desired.leases, &stamps.leases, &tombstones.leases)?,
+        update_intents: section(
+            &desired.update_intents,
+            &stamps.update_intents,
+            &tombstones.update_intents,
+        )?,
     })
 }
 
@@ -105,6 +114,11 @@ pub(super) fn changed_sections(
             remote.executors,
         ),
         (DesiredStateSection::Leases, local.leases, remote.leases),
+        (
+            DesiredStateSection::UpdateIntents,
+            local.update_intents,
+            remote.update_intents,
+        ),
     ];
     pairs
         .into_iter()
@@ -123,6 +137,7 @@ pub(super) fn all_desired_sections() -> Vec<DesiredStateSection> {
         DesiredStateSection::Providers,
         DesiredStateSection::Executors,
         DesiredStateSection::Leases,
+        DesiredStateSection::UpdateIntents,
     ]
 }
 
@@ -140,6 +155,7 @@ pub(super) fn section_mask(sections: &[DesiredStateSection]) -> u8 {
             DesiredStateSection::Providers => 1 << 4,
             DesiredStateSection::Executors => 1 << 5,
             DesiredStateSection::Leases => 1 << 6,
+            DesiredStateSection::UpdateIntents => 1 << 7,
         };
     }
     mask
@@ -162,6 +178,7 @@ fn summary_content(summary: &DesiredStateSummary, key: &DesiredObjectKey) -> Opt
         DesiredObjectKey::Provider(id) => summary.providers.get(id),
         DesiredObjectKey::Executor(id) => summary.executors.get(id),
         DesiredObjectKey::Lease(id) => summary.leases.get(id),
+        DesiredObjectKey::UpdateIntent(id) => summary.update_intents.get(id),
     }
     .copied()
 }
@@ -241,6 +258,13 @@ fn summary_keys(summary: &DesiredStateSummary) -> Vec<DesiredObjectKey> {
             .map(DesiredObjectKey::Executor),
     );
     keys.extend(summary.leases.keys().cloned().map(DesiredObjectKey::Lease));
+    keys.extend(
+        summary
+            .update_intents
+            .keys()
+            .cloned()
+            .map(DesiredObjectKey::UpdateIntent),
+    );
     keys.extend(summary.tombstones.entries().into_iter().map(|(key, _)| key));
     keys
 }
@@ -336,6 +360,7 @@ pub(super) fn versions_newer_than_summary(
                 DesiredStateMutation::PutProvider(record) => entry_fingerprint(record),
                 DesiredStateMutation::PutExecutor(record) => entry_fingerprint(record),
                 DesiredStateMutation::PutLease(record) => entry_fingerprint(record),
+                DesiredStateMutation::PutUpdateIntent(record) => entry_fingerprint(record),
                 _ => Ok(0),
             };
             Some(local_summary_hash.unwrap_or(0))
@@ -376,6 +401,9 @@ fn selected_keys(selectors: &[DesiredStateObjectSelector]) -> Vec<DesiredObjectK
             DesiredStateObjectSelector::Leases(ids) => {
                 keys.extend(ids.iter().cloned().map(DesiredObjectKey::Lease))
             }
+            DesiredStateObjectSelector::UpdateIntents(ids) => {
+                keys.extend(ids.iter().cloned().map(DesiredObjectKey::UpdateIntent))
+            }
         }
     }
     keys
@@ -391,6 +419,7 @@ pub(super) fn selectors_for_keys(keys: &[DesiredObjectKey]) -> Vec<DesiredStateO
     let mut providers = Vec::new();
     let mut executors = Vec::new();
     let mut leases = Vec::new();
+    let mut update_intents = Vec::new();
     for key in keys {
         match key.clone() {
             DesiredObjectKey::Node(id) => nodes.push(id),
@@ -400,6 +429,7 @@ pub(super) fn selectors_for_keys(keys: &[DesiredObjectKey]) -> Vec<DesiredStateO
             DesiredObjectKey::Provider(id) => providers.push(id),
             DesiredObjectKey::Executor(id) => executors.push(id),
             DesiredObjectKey::Lease(id) => leases.push(id),
+            DesiredObjectKey::UpdateIntent(id) => update_intents.push(id),
         }
     }
     let mut selectors = Vec::new();
@@ -423,6 +453,9 @@ pub(super) fn selectors_for_keys(keys: &[DesiredObjectKey]) -> Vec<DesiredStateO
     }
     if !leases.is_empty() {
         selectors.push(DesiredStateObjectSelector::Leases(leases));
+    }
+    if !update_intents.is_empty() {
+        selectors.push(DesiredStateObjectSelector::UpdateIntents(update_intents));
     }
     selectors
 }

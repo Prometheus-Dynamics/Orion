@@ -11,8 +11,9 @@ use orion_auth::enrollment::{
 };
 use orion_control_plane::{
     ActionQuery, ActionRequest, ActionResult, ControlMessage, ENROLLMENT_PROTOCOL_VERSION,
-    EnrollmentConfirm, EnrollmentHello, EnrollmentRole, NodeObservabilitySnapshot, NodeRecord,
-    OperatorTrustState, OperatorWelcome, StateSnapshot, StatusEntry, StatusQuery,
+    EnrollmentConfirm, EnrollmentHello, EnrollmentRole, MutationBatch, NodeObservabilitySnapshot,
+    NodeRecord, OperatorTrustState, OperatorWelcome, StateSnapshot, StatusEntry, StatusQuery,
+    UpdateIntentView, update_intent_views,
 };
 use orion_core::NodeId;
 use orion_transport_http::HttpResponsePayload;
@@ -123,6 +124,25 @@ impl RemoteOperator {
         match self.request(ControlMessage::QueryStateSnapshot).await? {
             HttpResponsePayload::Snapshot(snapshot) => Ok(snapshot),
             other => Err(unexpected("QueryStateSnapshot", &other)),
+        }
+    }
+
+    /// Every update intent with the status its node reported (needs read access).
+    pub async fn update_intents(&self) -> Result<Vec<UpdateIntentView>, RemoteError> {
+        let snapshot = self.state_snapshot().await?;
+        Ok(update_intent_views(
+            &snapshot.state.desired,
+            &snapshot.state.observed,
+        ))
+    }
+
+    /// Writes update intents. Only the intents of a requester listed in
+    /// `ORION_NODE_UPDATE_REQUESTERS` are accepted; the batch is refused otherwise (see
+    /// `docs/update-recovery.md`). The batch's `base_revision` must be the node's desired revision.
+    pub async fn apply_update_intents(&self, batch: MutationBatch) -> Result<(), RemoteError> {
+        match self.request(ControlMessage::Mutations(batch)).await? {
+            HttpResponsePayload::Accepted => Ok(()),
+            other => Err(unexpected("Mutations", &other)),
         }
     }
 

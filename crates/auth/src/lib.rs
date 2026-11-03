@@ -245,6 +245,7 @@ mod tests {
                 providers: 5,
                 executors: 6,
                 leases: 7,
+                update_intents: 0,
             },
             observed_revision: Revision::ZERO,
             applied_revision: Revision::ZERO,

@@ -1,11 +1,12 @@
 use orion_control_plane::{
     ClientEvent, ClientEventPoll, ClientHello, ClientRole, CommunicationEndpointScope,
     CommunicationEndpointSnapshot, CommunicationFailureKind, CommunicationTransportKind,
-    ControlMessage, HostMetricsSnapshot, MaintenanceCommand, MaintenanceStatus, MutationBatch,
-    NodeObservabilitySnapshot, PeerEnrollment, PeerIdentityUpdate, PeerTrustSnapshot,
-    StateSnapshot, StateWatch, StatusQuery, duration_ms_u64,
+    ControlMessage, DesiredStateMutation, HostMetricsSnapshot, MaintenanceCommand,
+    MaintenanceStatus, MutationBatch, NodeObservabilitySnapshot, PeerEnrollment,
+    PeerIdentityUpdate, PeerTrustSnapshot, StateSnapshot, StateWatch, StatusQuery,
+    UpdateIntentRecord, UpdateIntentView, duration_ms_u64, update_intent_views,
 };
-use orion_core::{ClientName, NodeId, Revision};
+use orion_core::{ClientName, NodeId, Revision, UpdateIntentId};
 use orion_transport_ipc::LocalControlTransport;
 use std::{
     collections::BTreeMap,
@@ -462,6 +463,36 @@ impl LocalControlPlaneClient {
     pub async fn fetch_state_snapshot(&self) -> Result<StateSnapshot, ClientError> {
         self.send_request_with(ControlMessage::QueryStateSnapshot, expect_state_snapshot)
             .await
+    }
+
+    /// Every update intent with the status its node reported (`docs/update-recovery.md`).
+    pub async fn update_intents(&self) -> Result<Vec<UpdateIntentView>, ClientError> {
+        let snapshot = self.fetch_state_snapshot().await?;
+        Ok(update_intent_views(
+            &snapshot.state.desired,
+            &snapshot.state.observed,
+        ))
+    }
+
+    /// Writes an update intent (its id is `<node>/<component>`). The batch is based on the
+    /// current desired revision, read just before it is sent.
+    pub async fn apply_update_intent(&self, intent: UpdateIntentRecord) -> Result<(), ClientError> {
+        let snapshot = self.fetch_state_snapshot().await?;
+        self.apply_mutations(MutationBatch::new(
+            snapshot.state.desired.revision,
+            vec![DesiredStateMutation::PutUpdateIntent(intent)],
+        ))
+        .await
+    }
+
+    /// Removes an update intent: the node keeps what it runs.
+    pub async fn remove_update_intent(&self, intent_id: UpdateIntentId) -> Result<(), ClientError> {
+        let snapshot = self.fetch_state_snapshot().await?;
+        self.apply_mutations(MutationBatch::new(
+            snapshot.state.desired.revision,
+            vec![DesiredStateMutation::RemoveUpdateIntent(intent_id)],
+        ))
+        .await
     }
 
     pub async fn publish_snapshot(&self, snapshot: StateSnapshot) -> Result<(), ClientError> {

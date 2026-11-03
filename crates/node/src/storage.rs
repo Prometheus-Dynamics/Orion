@@ -66,6 +66,7 @@ pub struct DesiredStateSectionCounts {
     pub providers: u64,
     pub executors: u64,
     pub leases: u64,
+    pub update_intents: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
@@ -649,6 +650,7 @@ impl DesiredStateSectionCounts {
             providers: desired.providers.len() as u64,
             executors: desired.executors.len() as u64,
             leases: desired.leases.len() as u64,
+            update_intents: desired.update_intents.len() as u64,
         }
     }
 }

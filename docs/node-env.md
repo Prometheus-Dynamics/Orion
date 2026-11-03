@@ -383,6 +383,21 @@ Programmatic callers use `NodeRuntimeTuning::host_facts` (`HostFactsTuning::with
 `with_image_files`) and replace or extend the source with `NodeAppBuilder::with_host_facts_source`
 and `with_host_facts_overlay`.
 
+## Update intents
+
+Update intents (`docs/update-recovery.md`, "Data model") say which version of a component a node
+should install. They are desired state: any local control-plane client (`orionctl apply update`)
+may write them, as it may write any desired state. Remote operators may write them only when they
+are listed here:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ORION_NODE_UPDATE_REQUESTERS` | unset (none) | Comma-separated operator ids (`operator:<name>`, or `<name>`) that may write update intents over the signed peer transport (`RemoteOperator::apply_update_intents`). A listed operator's batch is accepted only when every mutation is an update-intent write or removal; anything else is refused as a whole. Operators not listed are refused. Every accepted write and removal is audited (`update_intent_written`, `update_intent_removed`, see `docs/audit-logging.md`). |
+
+Intents are validated before they are committed: the id must be `<node>/<component>`, strings are
+bounded (component and versions 128 bytes, error text 512, argument names 64) and at most 32
+arguments, a drain timeout is 1 ms to 24 h.
+
 ## Actions
 
 Generic actions (see [actions.md](actions.md)) are tracked in memory only, bounded by

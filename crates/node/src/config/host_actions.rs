@@ -98,6 +98,9 @@ pub struct ActionTuning {
     /// Networks whose operators are enrolled on their first hello
     /// (`ORION_NODE_OPERATOR_AUTO_ENROLL`).
     pub operator_auto_enroll: Vec<OperatorAutoEnroll>,
+    /// Operators allowed to write update intents (`ORION_NODE_UPDATE_REQUESTERS`, see
+    /// `docs/update-recovery.md`). Empty by default: no remote operator may request an update.
+    pub update_requesters: Vec<orion::control_plane::OperatorId>,
 }
 
 /// What operators the node has not enrolled may read, without actions
@@ -237,6 +240,7 @@ impl Default for ActionTuning {
             operator_actions: Vec::new(),
             operator_open_read: OperatorOpenRead::default(),
             operator_auto_enroll: Vec::new(),
+            update_requesters: Vec::new(),
         }
     }
 }
@@ -262,6 +266,7 @@ impl ActionTuning {
                 DEFAULT_ACTION_MAX_WAIT_MS,
             )?,
             operator_actions: operator_actions_from_env()?,
+            update_requesters: update_requesters_from_env()?,
             operator_open_read: match env::var("ORION_NODE_OPERATOR_OPEN_READ") {
                 Ok(raw) => OperatorOpenRead::parse(&raw)?,
                 Err(env::VarError::NotPresent) => OperatorOpenRead::default(),
@@ -336,6 +341,15 @@ impl ActionTuning {
         self
     }
 
+    /// See [`Self::update_requesters`].
+    pub fn with_update_requesters(
+        mut self,
+        requesters: Vec<orion::control_plane::OperatorId>,
+    ) -> Self {
+        self.update_requesters = requesters;
+        self
+    }
+
     /// See [`Self::operator_auto_enroll`].
     pub fn with_operator_auto_enroll(mut self, rules: Vec<OperatorAutoEnroll>) -> Self {
         self.operator_auto_enroll = rules;
@@ -362,6 +376,34 @@ fn operator_actions_from_env() -> Result<Vec<String>, NodeError> {
     orion::control_plane::validate_action_patterns(&patterns)
         .map_err(|err| NodeError::Config(format!("ORION_NODE_OPERATOR_ACTIONS: {err}")))?;
     Ok(patterns)
+}
+
+/// `ORION_NODE_UPDATE_REQUESTERS`: comma-separated operator ids (`operator:<name>` or `<name>`)
+/// that may write update intents. Local control-plane clients are not listed here: they may
+/// always write desired state.
+fn update_requesters_from_env() -> Result<Vec<orion::control_plane::OperatorId>, NodeError> {
+    let raw = match env::var("ORION_NODE_UPDATE_REQUESTERS") {
+        Ok(raw) => raw,
+        Err(env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(env::VarError::NotUnicode(_)) => {
+            return Err(NodeError::Config(
+                "ORION_NODE_UPDATE_REQUESTERS must be valid unicode".into(),
+            ));
+        }
+    };
+    let mut requesters = Vec::new();
+    for item in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
+        let operator = orion::control_plane::OperatorId::try_new(item)
+            .map_err(|err| NodeError::Config(format!("ORION_NODE_UPDATE_REQUESTERS: {err}")))?;
+        if !requesters.contains(&operator) {
+            requesters.push(operator);
+        }
+    }
+    Ok(requesters)
 }
 
 #[cfg(test)]

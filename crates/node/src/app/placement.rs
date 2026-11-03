@@ -56,6 +56,7 @@ impl NodeApp {
     /// state or binding availability changed.
     pub(super) fn run_placement_pass(&self) -> bool {
         let facts_changed = self.publish_local_node_facts();
+        let statuses_changed = self.publish_local_update_statuses();
         let liveness_changed = self.refresh_unreachable_nodes();
         // Most clusters use no placement: check that before cloning desired and observed state.
         let placement_used = self
@@ -100,7 +101,7 @@ impl NodeApp {
                 debug!(node = %self.config.node_id, error = %err, "placement write rejected; retrying next pass");
             }
         }
-        facts_changed || liveness_changed
+        facts_changed || statuses_changed || liveness_changed
     }
 
     /// Runs after the runtime planned: releases, acquires and arbitrates cross-node leases.

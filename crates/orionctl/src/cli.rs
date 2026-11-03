@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use orion_client::{default_ipc_socket_path, default_ipc_stream_socket_path};
-use orion_control_plane::{DesiredState, RestartPolicy, TypedConfigValue};
+use orion_control_plane::{DesiredState, DrainPolicy, RestartPolicy, TypedConfigValue};
 use orion_core::{NodeId, ResourceId, ResourceType, RuntimeType, WorkloadId};
 
 use crate::build_info;
@@ -92,6 +92,8 @@ pub(crate) enum GetCommand {
     Providers(ListArgs),
     Executors(ListArgs),
     Leases(ListArgs),
+    /// Update intents (desired) with the status their nodes report (`--node` filters by target).
+    Updates(ListArgs),
     Events(ListArgs),
     /// Volatile status lane entries (local socket only; never persisted or replicated).
     Status(StatusArgs),
@@ -123,12 +125,16 @@ pub(crate) enum WatchCommand {
 pub(crate) enum ApplyCommand {
     Artifact(ApplyArtifactArgs),
     Workload(Box<ApplyWorkloadArgs>),
+    /// Writes an update intent: the version a node should install (`docs/update-recovery.md`).
+    Update(Box<ApplyUpdateArgs>),
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum DeleteCommand {
     Artifact(DeleteArtifactArgs),
     Workload(DeleteWorkloadArgs),
+    /// Removes an update intent (the node keeps what it runs).
+    Update(DeleteUpdateArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -395,6 +401,69 @@ pub(crate) struct ApplyArtifactArgs {
     pub(crate) size_bytes: Option<u64>,
     #[arg(long)]
     pub(crate) dry_run: bool,
+}
+
+#[derive(Args, Clone, Debug)]
+pub(crate) struct ApplyUpdateArgs {
+    #[command(flatten)]
+    pub(crate) local: LocalControlArgs,
+    /// The node that should install the update (the intent's id is `<node>/<component>`).
+    #[arg(long)]
+    pub(crate) node: String,
+    #[arg(long)]
+    pub(crate) component: String,
+    /// The version to install, an opaque string (compared for equality only).
+    #[arg(long)]
+    pub(crate) version: String,
+    #[arg(long)]
+    pub(crate) artifact: Option<String>,
+    /// Optional digest hint for the device manager (`sha256` hex).
+    #[arg(long)]
+    pub(crate) digest: Option<String>,
+    /// The node action that performs the update.
+    #[arg(long, default_value = "update")]
+    pub(crate) action: String,
+    /// A handler argument, `KEY=VALUE` or `KEY=TYPE:VALUE` (types as for `action run`).
+    #[arg(long = "arg", value_parser = crate::handlers::parse_action_arg)]
+    pub(crate) args: Vec<(String, TypedConfigValue)>,
+    /// `none`, `cordon`, or `drain:<timeout_ms>`.
+    #[arg(long, value_parser = parse_drain_policy, default_value = "none")]
+    pub(crate) drain: DrainPolicy,
+    /// Keep the intent but do not deliver it.
+    #[arg(long)]
+    pub(crate) paused: bool,
+    /// Ask for another attempt at the same version (bumps the generation).
+    #[arg(long)]
+    pub(crate) retry: bool,
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+#[derive(Args, Clone, Debug)]
+pub(crate) struct DeleteUpdateArgs {
+    #[command(flatten)]
+    pub(crate) local: LocalControlArgs,
+    #[arg(long)]
+    pub(crate) node: String,
+    #[arg(long)]
+    pub(crate) component: String,
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+pub(crate) fn parse_drain_policy(input: &str) -> Result<DrainPolicy, String> {
+    match input {
+        "none" => Ok(DrainPolicy::None),
+        "cordon" => Ok(DrainPolicy::Cordon),
+        other => match other.strip_prefix("drain:") {
+            Some(ms) => Ok(DrainPolicy::Drain {
+                timeout_ms: ms
+                    .parse()
+                    .map_err(|error| format!("invalid drain timeout `{ms}`: {error}"))?,
+            }),
+            None => Err("expected none, cordon, or drain:<timeout_ms>".to_owned()),
+        },
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -25,6 +25,9 @@ Current audit event kinds include:
 - peer identity replacement
 - peer TLS pretrust
 - local auto-HTTP-TLS rotation
+- update intent written (`update_intent_written`, subject `<node>/<component>`): by a local
+  control-plane client or a remote operator listed in `ORION_NODE_UPDATE_REQUESTERS`
+- update intent removed (`update_intent_removed`)
 
 Records are written as one JSON object per line and include:
 

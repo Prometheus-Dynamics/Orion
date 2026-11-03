@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added (update intents, U3)
+
+- Desired state gains an `update_intents` section: `UpdateIntentRecord` (target node, component, opaque target version, artifact, digest hint, handler action, arguments, generation, drain policy, paused flag), with HLC stamps and tombstones, merged over peer sync like the other sections. Writes are `DesiredStateMutation::PutUpdateIntent` / `RemoveUpdateIntent`. See [docs/update-recovery.md](docs/update-recovery.md#what-landed-in-u3).
+- Observed state gains `UpdateStatusRecord` (phase, acting version and generation, installed and previous version, last error, timestamp), keyed by intent. A node reports only its own intents; `Idle` for an `os` intent when the booted image has the target, `Pending` otherwise.
+- `orionctl get updates [--node <id>]`, `orionctl apply update` (generation rules, `--retry`, `--dry-run`) and `orionctl delete update`; `orion-client` has `update_intents`, `apply_update_intent` and `remove_update_intent` (local) and `RemoteOperator::update_intents` and `apply_update_intents` (remote).
+- `ORION_NODE_UPDATE_REQUESTERS` lists the remote operators that may write update intents (default none). Their batches are accepted only when they contain intent writes and removals. Every intent write and removal is audited (`update_intent_written`, `update_intent_removed`). See [docs/node-env.md](docs/node-env.md#update-intents).
+- Control protocol: the wire layout changed (new desired section and mutations, observed field, `UpdateIntentId`), so the layout fingerprint and the canonical encoding fixture are updated. The `CONTROL_PROTOCOL_VERSION` bump is applied when the batch is integrated. Persisted state gains the `update_intents` section; state directories written by earlier builds are not migrated by this change.
+
 ### Added (link device providers persist across restarts)
 
 - The gateway persists which providers link devices own (`<state dir>/link-devices.rkyv`, a separate atomically written file with its own format version; the snapshot format is unchanged). A node that crashed without a shutdown marks those providers and their resources unavailable when the gateway starts, and keeps the ids reserved for their device until it reconnects. A link removed from `ORION_NODE_LINKS` is forgotten at the next start. See [docs/link-protocol.md](docs/link-protocol.md#gateway).

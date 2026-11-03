@@ -94,6 +94,7 @@ pub(super) async fn run(command: GetCommand) -> Result<(), String> {
         GetCommand::DiscoveredPeers(args) => super::discovered::get_discovered_peers(args).await,
         GetCommand::Operators(args) => super::operators::get_operators(args).await,
         GetCommand::Actions(args) => super::action::get_actions(args).await,
+        GetCommand::Updates(args) => super::update::get_updates(args).await,
         GetCommand::Links(args) => {
             let snapshot = fetch_observability_snapshot(&args).await?;
             match args.output {

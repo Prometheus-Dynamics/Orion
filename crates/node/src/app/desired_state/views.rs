@@ -229,6 +229,13 @@ pub(crate) fn diff_desired_cluster_state(
         |resource_id| DesiredStateMutation::RemoveLease(resource_id.clone()),
         &mut mutations,
     );
+    diff_section(
+        &current.update_intents,
+        &desired.update_intents,
+        |record| DesiredStateMutation::PutUpdateIntent(record.clone()),
+        |intent_id| DesiredStateMutation::RemoveUpdateIntent(intent_id.clone()),
+        &mut mutations,
+    );
 
     orion::control_plane::MutationBatch::new(base_revision, mutations)
 }
@@ -293,6 +300,12 @@ pub(crate) fn merge_observed_state(
             changed = true;
         }
     }
+    for (key, value) in source.update_statuses {
+        if target.update_statuses.get(&key) != Some(&value) {
+            target.update_statuses.insert(key, value);
+            changed = true;
+        }
+    }
     changed
 }
 
@@ -312,6 +325,7 @@ pub(crate) fn merge_peer_observed_state(
     let source_workload_ids: BTreeSet<_> = source.workloads.keys().cloned().collect();
     let source_resource_ids: BTreeSet<_> = source.resources.keys().cloned().collect();
     let source_lease_ids: BTreeSet<_> = source.leases.keys().cloned().collect();
+    let source_update_status_ids: BTreeSet<_> = source.update_statuses.keys().cloned().collect();
     let peer_provider_ids: BTreeSet<_> = desired
         .providers
         .values()
@@ -358,6 +372,9 @@ pub(crate) fn merge_peer_observed_state(
             || source_resource_ids.contains(resource_id)
             || lease.holder_node_id.as_ref() == Some(peer_node_id);
         !peer_owned || source_lease_ids.contains(resource_id)
+    });
+    changed |= retain_with_change(&mut target.update_statuses, |intent_id, status| {
+        status.node_id != *peer_node_id || source_update_status_ids.contains(intent_id)
     });
 
     changed |= merge_observed_state(target, source);

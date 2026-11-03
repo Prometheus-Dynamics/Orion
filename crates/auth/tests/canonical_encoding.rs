@@ -183,6 +183,7 @@ fn hello() -> ControlMessage {
             providers: 5,
             executors: 6,
             leases: 7,
+            update_intents: 0,
         },
         observed_revision: Revision::new(7),
         applied_revision: Revision::new(7),

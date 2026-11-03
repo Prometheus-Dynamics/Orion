@@ -131,6 +131,13 @@ pub mod control_plane {
         OperatorPolicy, OperatorRecord, OperatorTrustState, OperatorWelcome, OperatorsSnapshot,
         action_pattern_matches, validate_action_patterns,
     };
+    pub use orion_control_plane::{
+        DrainPolicy, MAX_UPDATE_ARG_NAME_LEN, MAX_UPDATE_ARGS, MAX_UPDATE_COMPONENT_LEN,
+        MAX_UPDATE_DIGEST_LEN, MAX_UPDATE_DRAIN_TIMEOUT_MS, MAX_UPDATE_ERROR_LEN,
+        MAX_UPDATE_HANDLER_NAME_LEN, MAX_UPDATE_VERSION_LEN, UpdateActing, UpdateHandler,
+        UpdateIntentRecord, UpdateIntentView, UpdatePhase, UpdateStatusRecord, update_intent_id,
+        update_intent_views,
+    };
 
     /// Prometheus text rendering is host-only and requires the `std` feature.
     #[cfg(feature = "std")]
@@ -150,8 +157,8 @@ pub mod core {
         ConfigSchemaDef, ConfigSchemaId, ExecutorId, FeatureFlag, HlcClockSkew, HlcTimestamp,
         HybridLogicalClock, NodeId, OrionError, PeerBaseUrl, ProtocolVersion, ProviderId,
         PublicKeyHex, ResourceId, ResourceType, ResourceTypeDef, Revision, RuntimeType,
-        RuntimeTypeDef, SessionId, WorkloadId, decode_from_slice, encode_to_aligned, encode_to_vec,
-        hlc_node_tag,
+        RuntimeTypeDef, SessionId, UpdateIntentId, WorkloadId, decode_from_slice,
+        encode_to_aligned, encode_to_vec, hlc_node_tag,
     };
 }
 

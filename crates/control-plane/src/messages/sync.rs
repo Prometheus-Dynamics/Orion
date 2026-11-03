@@ -1,7 +1,9 @@
 use crate::{ClusterStateEnvelope, DesiredObjectStamps};
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use orion_core::{ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId};
+use orion_core::{
+    ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, Revision, UpdateIntentId, WorkloadId,
+};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +74,7 @@ pub enum DesiredStateSection {
     Providers,
     Executors,
     Leases,
+    UpdateIntents,
 }
 
 #[derive(
@@ -85,6 +88,7 @@ pub enum DesiredStateObjectSelector {
     Providers(Vec<ProviderId>),
     Executors(Vec<ExecutorId>),
     Leases(Vec<ResourceId>),
+    UpdateIntents(Vec<UpdateIntentId>),
 }
 
 #[derive(
@@ -107,6 +111,7 @@ pub struct DesiredStateSectionFingerprints {
     pub providers: u64,
     pub executors: u64,
     pub leases: u64,
+    pub update_intents: u64,
 }
 
 #[derive(
@@ -131,6 +136,7 @@ pub struct DesiredStateSummary {
     pub providers: BTreeMap<ProviderId, u64>,
     pub executors: BTreeMap<ExecutorId, u64>,
     pub leases: BTreeMap<ResourceId, u64>,
+    pub update_intents: BTreeMap<UpdateIntentId, u64>,
     /// HLC stamps of the summarized live objects.
     pub stamps: DesiredObjectStamps,
     /// HLC stamps of the summarized sections' tombstones.

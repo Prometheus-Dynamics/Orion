@@ -21,8 +21,8 @@ use tracing::debug;
 pub(crate) const OBSERVED_REFRESH_INTERVAL_MS: u64 = 30_000;
 
 impl NodeApp {
-    /// This node's observed slice: its node record, its assigned workloads, and the resources
-    /// (and their leases) of its providers and executors.
+    /// This node's observed slice: its node record, its assigned workloads, the resources (and
+    /// their leases) of its providers and executors, and the update statuses of its own intents.
     pub(crate) fn local_observed_slice(&self) -> ObservedClusterState {
         let store = self.store_read();
         let local = &self.config.node_id;
@@ -79,6 +79,12 @@ impl NodeApp {
                 .leases
                 .iter()
                 .filter(|(id, _)| local_resources.contains(*id))
+                .map(|(id, record)| (id.clone(), record.clone()))
+                .collect(),
+            update_statuses: observed
+                .update_statuses
+                .iter()
+                .filter(|(_, status)| &status.node_id == local)
                 .map(|(id, record)| (id.clone(), record.clone()))
                 .collect(),
         }

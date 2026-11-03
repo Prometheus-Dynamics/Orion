@@ -323,6 +323,29 @@ impl NodeSecurityAuthorizer {
                     refuse("its policy grants neither read access nor actions")
                 }
             }
+            // Update intents only, from requesters listed in `ORION_NODE_UPDATE_REQUESTERS`.
+            ControlOperation::Mutations => {
+                let crate::service::ControlRequestBody::Control(message) = &request.body else {
+                    return refuse("malformed request");
+                };
+                let ControlMessage::Mutations(batch) = message.as_ref() else {
+                    return refuse("malformed request");
+                };
+                if !self.security.is_update_requester(&operator.operator_id) {
+                    return refuse(
+                        "it is not in ORION_NODE_UPDATE_REQUESTERS, so it may not write update intents",
+                    );
+                }
+                if batch.mutations.is_empty()
+                    || !batch
+                        .mutations
+                        .iter()
+                        .all(orion::control_plane::DesiredStateMutation::is_update_intent)
+                {
+                    return refuse("operators may only write update intents");
+                }
+                Ok(())
+            }
             ControlOperation::RunAction => {
                 let crate::service::ControlRequestBody::Control(message) = &request.body else {
                     return refuse("malformed request");
@@ -393,6 +416,14 @@ impl NodeSecurityAuthorizer {
                 return Err(NodeError::Authorization(format!(
                     "peer {} cannot publish observed lease for resource {}",
                     peer.node_id, lease.resource_id
+                )));
+            }
+        }
+        for status in update.observed.update_statuses.values() {
+            if status.node_id != peer.node_id {
+                return Err(NodeError::Authorization(format!(
+                    "peer {} cannot publish update status of {}",
+                    peer.node_id, status.node_id
                 )));
             }
         }

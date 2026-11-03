@@ -87,6 +87,7 @@ pub(super) struct OperatorTrust {
     default_actions: Vec<String>,
     open_read: crate::OperatorOpenRead,
     auto_enroll: Vec<crate::OperatorAutoEnroll>,
+    update_requesters: BTreeSet<OperatorId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -244,6 +245,19 @@ impl NodeSecurity {
 
     pub fn operator_open_read(&self) -> crate::OperatorOpenRead {
         read_rwlock(self.operators.read(), "operators").open_read
+    }
+
+    /// Operators allowed to write update intents (`ORION_NODE_UPDATE_REQUESTERS`).
+    pub fn set_update_requesters(&self, requesters: impl IntoIterator<Item = OperatorId>) {
+        write_rwlock(self.operators.write(), "operators").update_requesters =
+            requesters.into_iter().collect();
+    }
+
+    /// Whether `operator_id` may write update intents.
+    pub fn is_update_requester(&self, operator_id: &OperatorId) -> bool {
+        read_rwlock(self.operators.read(), "operators")
+            .update_requesters
+            .contains(operator_id)
     }
 
     /// Networks whose operators are enrolled on their hello (`ORION_NODE_OPERATOR_AUTO_ENROLL`).

@@ -12,7 +12,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::cmp::Ordering;
 use orion_core::{
     ArchiveEncode, ArtifactId, ExecutorId, HlcTimestamp, NodeId, ProviderId, ResourceId,
-    WorkloadId, encode_to_vec,
+    UpdateIntentId, WorkloadId, encode_to_vec,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,7 @@ pub struct DesiredObjectStamps {
     pub providers: BTreeMap<ProviderId, HlcTimestamp>,
     pub executors: BTreeMap<ExecutorId, HlcTimestamp>,
     pub leases: BTreeMap<ResourceId, HlcTimestamp>,
+    pub update_intents: BTreeMap<UpdateIntentId, HlcTimestamp>,
 }
 
 /// Identity of one desired-state object.
@@ -50,6 +51,7 @@ pub enum DesiredObjectKey {
     Provider(ProviderId),
     Executor(ExecutorId),
     Lease(ResourceId),
+    UpdateIntent(UpdateIntentId),
 }
 
 /// Current version of one object: the stamp of its last write and whether that write deleted it.
@@ -69,6 +71,7 @@ impl DesiredObjectKey {
             Self::Provider(_) => DesiredStateSection::Providers,
             Self::Executor(_) => DesiredStateSection::Executors,
             Self::Lease(_) => DesiredStateSection::Leases,
+            Self::UpdateIntent(_) => DesiredStateSection::UpdateIntents,
         }
     }
 
@@ -82,6 +85,7 @@ impl DesiredObjectKey {
             Self::Provider(id) => DesiredStateMutation::RemoveProvider(id),
             Self::Executor(id) => DesiredStateMutation::RemoveExecutor(id),
             Self::Lease(id) => DesiredStateMutation::RemoveLease(id),
+            Self::UpdateIntent(id) => DesiredStateMutation::RemoveUpdateIntent(id),
         }
     }
 }
@@ -97,6 +101,9 @@ impl DesiredStateMutation {
             Self::PutProvider(record) => DesiredObjectKey::Provider(record.provider_id.clone()),
             Self::PutExecutor(record) => DesiredObjectKey::Executor(record.executor_id.clone()),
             Self::PutLease(record) => DesiredObjectKey::Lease(record.resource_id.clone()),
+            Self::PutUpdateIntent(record) => {
+                DesiredObjectKey::UpdateIntent(record.intent_id.clone())
+            }
             Self::RemoveNode(id) => DesiredObjectKey::Node(id.clone()),
             Self::RemoveArtifact(id) => DesiredObjectKey::Artifact(id.clone()),
             Self::RemoveWorkload(id) => DesiredObjectKey::Workload(id.clone()),
@@ -104,6 +111,7 @@ impl DesiredStateMutation {
             Self::RemoveProvider(id) => DesiredObjectKey::Provider(id.clone()),
             Self::RemoveExecutor(id) => DesiredObjectKey::Executor(id.clone()),
             Self::RemoveLease(id) => DesiredObjectKey::Lease(id.clone()),
+            Self::RemoveUpdateIntent(id) => DesiredObjectKey::UpdateIntent(id.clone()),
         }
     }
 
@@ -117,7 +125,13 @@ impl DesiredStateMutation {
                 | Self::RemoveProvider(_)
                 | Self::RemoveExecutor(_)
                 | Self::RemoveLease(_)
+                | Self::RemoveUpdateIntent(_)
         )
+    }
+
+    /// `true` for the mutations of update intents (`PutUpdateIntent` / `RemoveUpdateIntent`).
+    pub fn is_update_intent(&self) -> bool {
+        matches!(self, Self::PutUpdateIntent(_) | Self::RemoveUpdateIntent(_))
     }
 }
 
@@ -149,6 +163,10 @@ macro_rules! for_each_section {
         }
         {
             let $map = &$stamps.leases;
+            $body;
+        }
+        {
+            let $map = &$stamps.update_intents;
             $body;
         }
     }};
@@ -185,6 +203,7 @@ impl DesiredObjectStamps {
             DesiredObjectKey::Provider(id) => self.providers.get(id),
             DesiredObjectKey::Executor(id) => self.executors.get(id),
             DesiredObjectKey::Lease(id) => self.leases.get(id),
+            DesiredObjectKey::UpdateIntent(id) => self.update_intents.get(id),
         }
         .copied()
     }
@@ -198,6 +217,7 @@ impl DesiredObjectStamps {
             DesiredObjectKey::Provider(id) => self.providers.insert(id, stamp),
             DesiredObjectKey::Executor(id) => self.executors.insert(id, stamp),
             DesiredObjectKey::Lease(id) => self.leases.insert(id, stamp),
+            DesiredObjectKey::UpdateIntent(id) => self.update_intents.insert(id, stamp),
         }
     }
 
@@ -210,6 +230,7 @@ impl DesiredObjectStamps {
             DesiredObjectKey::Provider(id) => self.providers.remove(id),
             DesiredObjectKey::Executor(id) => self.executors.remove(id),
             DesiredObjectKey::Lease(id) => self.leases.remove(id),
+            DesiredObjectKey::UpdateIntent(id) => self.update_intents.remove(id),
         }
     }
 
@@ -252,6 +273,11 @@ impl DesiredObjectStamps {
                 .iter()
                 .map(|(id, stamp)| (DesiredObjectKey::Lease(id.clone()), *stamp)),
         );
+        entries.extend(
+            self.update_intents
+                .iter()
+                .map(|(id, stamp)| (DesiredObjectKey::UpdateIntent(id.clone()), *stamp)),
+        );
         entries
     }
 
@@ -276,6 +302,11 @@ impl DesiredObjectStamps {
             providers: pick(sections, DesiredStateSection::Providers, &self.providers),
             executors: pick(sections, DesiredStateSection::Executors, &self.executors),
             leases: pick(sections, DesiredStateSection::Leases, &self.leases),
+            update_intents: pick(
+                sections,
+                DesiredStateSection::UpdateIntents,
+                &self.update_intents,
+            ),
         }
     }
 
@@ -289,6 +320,7 @@ impl DesiredObjectStamps {
         self.providers.retain(|_, stamp| keep(*stamp));
         self.executors.retain(|_, stamp| keep(*stamp));
         self.leases.retain(|_, stamp| keep(*stamp));
+        self.update_intents.retain(|_, stamp| keep(*stamp));
         before - self.len()
     }
 }
@@ -438,6 +470,12 @@ impl DesiredClusterState {
                 &self.tombstones.leases,
                 id,
             ),
+            DesiredObjectKey::UpdateIntent(id) => version_in(
+                &self.update_intents,
+                &self.stamps.update_intents,
+                &self.tombstones.update_intents,
+                id,
+            ),
         }
     }
 
@@ -484,6 +522,12 @@ impl DesiredClusterState {
             }
             DesiredStateMutation::PutLease(record) => {
                 check!(leases, Some(record), &record.resource_id)
+            }
+            DesiredStateMutation::PutUpdateIntent(record) => {
+                check!(update_intents, Some(record), &record.intent_id)
+            }
+            DesiredStateMutation::RemoveUpdateIntent(id) => {
+                check!(update_intents, None, id)
             }
             DesiredStateMutation::RemoveNode(id) => check!(nodes, None, id),
             DesiredStateMutation::RemoveArtifact(id) => check!(artifacts, None, id),
@@ -562,6 +606,11 @@ impl DesiredClusterState {
             DesiredStateMutation::RemoveLease(id) => {
                 section_mut!(self, leases).write(id, None, stamp, force)
             }
+            DesiredStateMutation::PutUpdateIntent(record) => section_mut!(self, update_intents)
+                .write(record.intent_id.clone(), Some(record), stamp, force),
+            DesiredStateMutation::RemoveUpdateIntent(id) => {
+                section_mut!(self, update_intents).write(id, None, stamp, force)
+            }
         };
         if changed {
             self.bump_revision();
@@ -600,6 +649,9 @@ impl DesiredClusterState {
             }
             DesiredObjectKey::Lease(id) => {
                 DesiredStateMutation::PutLease(self.leases.get(id)?.clone())
+            }
+            DesiredObjectKey::UpdateIntent(id) => {
+                DesiredStateMutation::PutUpdateIntent(self.update_intents.get(id)?.clone())
             }
         };
         Some((mutation, version.stamp))
@@ -640,6 +692,12 @@ impl DesiredClusterState {
                 .map(DesiredObjectKey::Executor),
         );
         keys.extend(self.leases.keys().cloned().map(DesiredObjectKey::Lease));
+        keys.extend(
+            self.update_intents
+                .keys()
+                .cloned()
+                .map(DesiredObjectKey::UpdateIntent),
+        );
         keys.extend(self.tombstones.entries().into_iter().map(|(key, _)| key));
         keys
     }
@@ -748,6 +806,60 @@ mod tests {
         two.apply_stamped(right, tie);
         two.apply_stamped(left, tie);
         assert_eq!(one.artifacts, two.artifacts);
+    }
+
+    #[test]
+    fn update_intents_converge_and_deletes_are_tombstones() {
+        use crate::UpdateIntentRecord;
+
+        let intent = UpdateIntentRecord::new("node-a", "os", "2.0");
+        let key = DesiredObjectKey::UpdateIntent(intent.intent_id.clone());
+        let written = (
+            DesiredStateMutation::PutUpdateIntent(intent.clone()),
+            stamp(10, 1),
+        );
+        let deleted = (key.remove_mutation(), stamp(20, 2));
+
+        // The requester's node: write, then delete.
+        let mut requester = DesiredClusterState::default();
+        assert!(requester.apply_stamped(written.0.clone(), written.1));
+        assert!(requester.apply_stamped(deleted.0.clone(), deleted.1));
+
+        // A peer that saw the write, then the delete.
+        let mut peer = DesiredClusterState::default();
+        assert!(peer.apply_stamped(written.0.clone(), written.1));
+        assert!(peer.update_intents.contains_key(&intent.intent_id));
+        assert!(peer.apply_stamped(deleted.0.clone(), deleted.1));
+        assert!(peer.update_intents.is_empty());
+        assert_eq!(
+            peer.tombstones.update_intents.get(&intent.intent_id),
+            Some(&stamp(20, 2))
+        );
+
+        // A peer that only learns the delete, and a late copy of the old write: no resurrection.
+        let mut late = DesiredClusterState::default();
+        assert!(late.apply_stamped(deleted.0.clone(), deleted.1));
+        assert!(!late.apply_stamped(written.0.clone(), written.1));
+        assert!(late.update_intents.is_empty());
+
+        // Whole-state replay converges to the same records, stamps and tombstones.
+        let mut merged = DesiredClusterState::default();
+        peer.stamped_batch().apply_to(&mut merged);
+        assert_eq!(merged.update_intents, requester.update_intents);
+        assert_eq!(merged.tombstones, requester.tombstones);
+        assert_eq!(merged.stamps, requester.stamps);
+
+        // A newer write brings the intent back and clears the tombstone.
+        let retry = UpdateIntentRecord {
+            generation: 2,
+            ..intent.clone()
+        };
+        assert!(merged.apply_stamped(
+            DesiredStateMutation::PutUpdateIntent(retry.clone()),
+            stamp(30, 1)
+        ));
+        assert_eq!(merged.update_intents.get(&intent.intent_id), Some(&retry));
+        assert!(merged.tombstones.update_intents.is_empty());
     }
 
     #[test]

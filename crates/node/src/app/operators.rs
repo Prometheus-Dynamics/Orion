@@ -80,6 +80,14 @@ impl NodeApp {
             ControlMessage::QueryStateSnapshot => {
                 Ok(HttpResponsePayload::Snapshot(self.state_snapshot()))
             }
+            // Update intents only; the policy already checked the requester and the batch.
+            ControlMessage::Mutations(batch) => {
+                self.apply_client_mutation_batch(
+                    &batch,
+                    &format!("operator `{}`", operator.operator_id),
+                )?;
+                Ok(HttpResponsePayload::Accepted)
+            }
             ControlMessage::QueryObservability => Ok(HttpResponsePayload::Observability(Box::new(
                 self.observability_snapshot(),
             ))),

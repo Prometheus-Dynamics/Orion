@@ -90,10 +90,10 @@ Control protocol:
       and the byte limit next to the event counts (737579d added the cap); `orionctl get memory`
       shows them. The Prometheus gauge `orion_local_client_event_queue_bytes` is text, not wire, but
       ships with it. Docs: node-env.md (`ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES`).
-- [ ] **U3 update records.** `UpdateIntentRecord` as a new desired section with HLC stamps (peer
-      sync and persisted-state migration with it), `UpdateStatusRecord` in the observed slice,
-      their mutations, and the query / response payloads behind `orionctl get updates`. Docs:
-      update-recovery.md (U3), device-agent.md.
+- [x] **U3 update records.** Done: `UpdateIntentRecord` desired section with HLC stamps and
+      tombstones, `UpdateStatusRecord` in the observed slice, `orionctl get updates` / `apply update`
+      / `delete update`, `ORION_NODE_UPDATE_REQUESTERS`, audit records. Docs: update-recovery.md
+      (U3), device-agent.md, node-env.md, audit-logging.md.
 - [ ] **Action counters in `resource_usage`.** Pending / running / finished counts and the
       result-history bytes in `NodeResourceUsageSnapshot`. Docs: actions.md.
 - [ ] **Peer `ActionWatch`.** A forwarding node subscribes to the owner's action results over
@@ -423,10 +423,11 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
 - [x] **U0 Prerequisites**: the generic action mechanism is in (`ActionRequest`, `ActionCaller`, `wait_ms`, 4fadba9).
 - [x] **U1 Supervision**: done (`READY=1`, `WATCHDOG=1`, see the release section: 2ec9f08, a380034).
 - [x] **U2 Safe mode**: done (a380034, 9ad7991; the safe-mode unit is never enabled by default).
-- [ ] **U3 Data model** (scoped against the device-agent contract in
-      [docs/device-agent.md](docs/device-agent.md), "From here to durable update records"): `UpdateIntentRecord` desired section and `UpdateStatusRecord` in the
-      observed slice (protocol bump, batched with other layout changes); `orionctl get updates`;
-      requester authorization (`ORION_NODE_UPDATE_REQUESTERS`); audit records.
+- [x] **U3 Data model**: done (scoped against the device-agent contract in
+      [docs/device-agent.md](docs/device-agent.md), "Durable update records"). `UpdateIntentRecord`
+      desired section and `UpdateStatusRecord` in the observed slice (protocol layout changed,
+      version bump batched at integration); `orionctl get updates`; requester authorization
+      (`ORION_NODE_UPDATE_REQUESTERS`); audit records.
 - [ ] **U4 Delivery and resume**: deliver intents as actions keyed by
       `(intent, version, generation)`, re-delivery with backoff, immediate persistence of phase
       transitions, status-lane progress keys, drain integration, fake device manager example and

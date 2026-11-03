@@ -1,10 +1,11 @@
 use crate::{
     ArtifactRecord, DesiredClusterState, ExecutorRecord, LeaseRecord, NodeRecord, ProviderRecord,
-    ResourceRecord, WorkloadRecord,
+    ResourceRecord, UpdateIntentRecord, WorkloadRecord,
 };
 use alloc::vec::Vec;
 use orion_core::{
-    ArtifactId, ExecutorId, HlcTimestamp, NodeId, ProviderId, ResourceId, Revision, WorkloadId,
+    ArtifactId, ExecutorId, HlcTimestamp, NodeId, ProviderId, ResourceId, Revision, UpdateIntentId,
+    WorkloadId,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,7 @@ pub enum DesiredStateMutation {
     PutProvider(ProviderRecord),
     PutExecutor(ExecutorRecord),
     PutLease(LeaseRecord),
+    PutUpdateIntent(UpdateIntentRecord),
     RemoveNode(NodeId),
     RemoveArtifact(ArtifactId),
     RemoveWorkload(WorkloadId),
@@ -28,6 +30,7 @@ pub enum DesiredStateMutation {
     RemoveProvider(ProviderId),
     RemoveExecutor(ExecutorId),
     RemoveLease(ResourceId),
+    RemoveUpdateIntent(UpdateIntentId),
 }
 
 /// An ordered list of desired-state writes.
@@ -150,6 +153,7 @@ fn apply_unstamped(desired: &mut DesiredClusterState, mutation: DesiredStateMuta
         DesiredStateMutation::PutProvider(record) => desired.put_provider(record),
         DesiredStateMutation::PutExecutor(record) => desired.put_executor(record),
         DesiredStateMutation::PutLease(record) => desired.put_lease(record),
+        DesiredStateMutation::PutUpdateIntent(record) => desired.put_update_intent(record),
         DesiredStateMutation::RemoveNode(node_id) => {
             desired.remove_node(&node_id);
         }
@@ -170,6 +174,9 @@ fn apply_unstamped(desired: &mut DesiredClusterState, mutation: DesiredStateMuta
         }
         DesiredStateMutation::RemoveLease(resource_id) => {
             desired.remove_lease(&resource_id);
+        }
+        DesiredStateMutation::RemoveUpdateIntent(intent_id) => {
+            desired.remove_update_intent(&intent_id);
         }
     }
 }

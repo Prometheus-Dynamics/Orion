@@ -1,13 +1,18 @@
 # Peer Sync
 
 Every `orion-node` keeps a full copy of the cluster's **desired state** (nodes, artifacts,
-workloads, resources, providers, executors, leases). Peer sync is the leaderless anti-entropy
+workloads, resources, providers, executors, leases, update intents). Peer sync is the leaderless anti-entropy
 protocol that makes those copies converge. This document describes the transports it runs over,
 how concurrent writes are merged, how deletes are tracked, and what changed in control protocol
 v3.
 
 Observed state (what is actually running) is not merged like desired state: every node owns its
 own observed slice and pushes it to its peers (see "Observed state" below).
+
+Update intents (`UpdateIntentRecord`, the `update_intents` section) are desired state: one writer
+per intent (its requester), merged per object like the other sections. The target node's progress
+on an intent is an `UpdateStatusRecord` in its own observed slice. See
+[update-recovery.md](update-recovery.md#data-model).
 
 ## Behaviour before control protocol v3
 
@@ -256,6 +261,10 @@ node's observed facts only from that node.
 A removed provider's observed records are retracted when the removal is applied, locally or from
 a peer. Every node that applies a `RemoveProvider` tombstone drops the resources and leases that
 provider last reported; the owner's next observed slice then carries the retraction to its peers.
+
+The update statuses in a node's slice are the ones it reports for its own intents (`node_id` is
+the node itself). A peer that pushes a status for another node is refused, like a foreign node
+record.
 Removal is the only way to retract them: a provider that is still in the desired state keeps its
 last report until it publishes a new one.
 

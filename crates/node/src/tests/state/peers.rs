@@ -99,6 +99,7 @@ fn node_app_records_peer_hello_and_sync_status() {
                 providers: 0,
                 executors: 0,
                 leases: 0,
+                update_intents: 0,
             },
             observed_revision: orion::Revision::new(4),
             applied_revision: orion::Revision::new(4),

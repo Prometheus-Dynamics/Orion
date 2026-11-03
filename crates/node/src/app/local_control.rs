@@ -245,7 +245,7 @@ impl NodeApp {
                 Ok(ControlMessage::Accepted)
             }
             ControlMessage::Mutations(batch) => {
-                self.apply_mutation_batch(&batch, super::desired_writes::WriteOrigin::Local)?;
+                self.apply_client_mutation_batch(&batch, &format!("local client `{source}`"))?;
                 Ok(ControlMessage::Accepted)
             }
             ControlMessage::ClientWelcome(_)

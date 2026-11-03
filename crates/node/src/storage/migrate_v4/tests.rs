@@ -70,6 +70,7 @@ fn write_format_4_state(storage: &NodeStorage) -> HlcTimestamp {
             providers: 0,
             executors: 0,
             leases: 0,
+            update_intents: 0,
         },
     };
     let write = |path: PathBuf, bytes: Vec<u8>| std::fs::write(path, bytes).expect("written");

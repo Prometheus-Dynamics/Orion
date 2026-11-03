@@ -1,9 +1,11 @@
 use super::{
     ArtifactRecord, DesiredObjectStamps, ExecutorRecord, LeaseRecord, NodeRecord, ProviderRecord,
-    ResourceRecord, WorkloadRecord,
+    ResourceRecord, UpdateIntentRecord, UpdateStatusRecord, WorkloadRecord,
 };
 use alloc::collections::BTreeMap;
-use orion_core::{ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, Revision, WorkloadId};
+use orion_core::{
+    ArtifactId, ExecutorId, NodeId, ProviderId, ResourceId, Revision, UpdateIntentId, WorkloadId,
+};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +37,8 @@ pub struct DesiredClusterState {
     pub providers: BTreeMap<ProviderId, ProviderRecord>,
     pub executors: BTreeMap<ExecutorId, ExecutorRecord>,
     pub leases: BTreeMap<ResourceId, LeaseRecord>,
+    /// Update intents: what each node should install (`docs/update-recovery.md`).
+    pub update_intents: BTreeMap<UpdateIntentId, UpdateIntentRecord>,
     /// HLC stamp of the last write of every live object.
     pub stamps: DesiredObjectStamps,
     /// HLC stamp of the delete of every deleted object (until collected).
@@ -85,6 +89,12 @@ impl DesiredClusterState {
     pub fn put_lease(&mut self, record: LeaseRecord) {
         self.tombstones.leases.remove(&record.resource_id);
         self.leases.insert(record.resource_id.clone(), record);
+        self.bump_revision();
+    }
+
+    pub fn put_update_intent(&mut self, record: UpdateIntentRecord) {
+        self.tombstones.update_intents.remove(&record.intent_id);
+        self.update_intents.insert(record.intent_id.clone(), record);
         self.bump_revision();
     }
 
@@ -150,6 +160,18 @@ impl DesiredClusterState {
         }
         removed
     }
+
+    pub fn remove_update_intent(
+        &mut self,
+        intent_id: &UpdateIntentId,
+    ) -> Option<UpdateIntentRecord> {
+        let removed = self.update_intents.remove(intent_id);
+        if removed.is_some() {
+            self.stamps.update_intents.remove(intent_id);
+            self.bump_revision();
+        }
+        removed
+    }
 }
 
 #[derive(
@@ -170,6 +192,8 @@ pub struct ObservedClusterState {
     pub workloads: BTreeMap<WorkloadId, WorkloadRecord>,
     pub resources: BTreeMap<ResourceId, ResourceRecord>,
     pub leases: BTreeMap<ResourceId, LeaseRecord>,
+    /// Update status of the intents this slice's origin node acts on (`docs/update-recovery.md`).
+    pub update_statuses: BTreeMap<UpdateIntentId, UpdateStatusRecord>,
 }
 
 impl ObservedClusterState {
@@ -191,6 +215,11 @@ impl ObservedClusterState {
 
     pub fn put_lease(&mut self, record: LeaseRecord) {
         self.leases.insert(record.resource_id.clone(), record);
+    }
+
+    pub fn put_update_status(&mut self, record: UpdateStatusRecord) {
+        self.update_statuses
+            .insert(record.intent_id.clone(), record);
     }
 }
 

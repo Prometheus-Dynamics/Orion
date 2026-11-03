@@ -211,19 +211,25 @@ restart):
   from the new boot's;
 - `orion-node` itself keeps running; nothing else on the device is affected.
 
-## From here to durable update records (milestone U3)
+## Durable update records (milestone U3, landed)
 
-This contract needs no protocol change. Milestone U3 of [update-recovery.md](update-recovery.md)
-adds durable, replicated records: an `UpdateIntentRecord` desired-state section (what a node should
-run, written by the requester) and an `UpdateStatusRecord` in each node's observed slice (phase,
-installed and previous version, last error), plus `orionctl get updates`, requester authorization
-(`ORION_NODE_UPDATE_REQUESTERS`) and audit records. It is not a small step: it needs a
-control-protocol bump (batched with other layout changes), a new desired section with HLC stamps
-and tombstones, the observed-slice fold, and U4's delivery loop to be useful. When it lands:
+This contract needs no change for the agent. Milestone U3 of [update-recovery.md](update-recovery.md)
+added durable, replicated records: an `UpdateIntentRecord` desired-state section (what a node
+should run, written by the requester) and an `UpdateStatusRecord` in each node's observed slice
+(phase, installed and previous version, last error), plus `orionctl get updates`, `apply update`
+and `delete update`, requester authorization (`ORION_NODE_UPDATE_REQUESTERS`, see
+[node-env.md](node-env.md#update-intents)) and audit records. What the agent sees is unchanged: no
+action is delivered from an intent until U4. A node reports:
+
+- `Idle` for an `os` intent when its booted image already has the target version, and `Pending`
+  otherwise. Other components stay `Pending` until U4's delivery loop reports the phases below.
+  Nothing else is folded from the `update.*` keys yet.
+
+When U4 lands it does the rest:
 
 - the node folds the agent's `update.*` keys into its `UpdateStatusRecord` (or the agent reports
   the phase directly), so the outcome replicates to peers and survives the status-lane TTL;
-- U4 delivers intents as `update` actions keyed by `(intent, version, generation)` with
+- it delivers intents as `update` actions keyed by `(intent, version, generation)` with
   re-delivery after reboots, so requesters stop sending actions themselves;
 - the action names, arguments, result semantics and `update.*` keys above stay valid, so an agent
   written against this page keeps working, and a requester's Orion integration changes only where it reads

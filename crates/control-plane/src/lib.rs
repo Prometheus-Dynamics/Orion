@@ -80,6 +80,13 @@ pub use records::{
     WorkloadRequirement, config_json_value, deserialize_config, is_valid_endpoint_scheme,
     parse_node_labels, split_label,
 };
+pub use records::{
+    DrainPolicy, MAX_UPDATE_ARG_NAME_LEN, MAX_UPDATE_ARGS, MAX_UPDATE_COMPONENT_LEN,
+    MAX_UPDATE_DIGEST_LEN, MAX_UPDATE_DRAIN_TIMEOUT_MS, MAX_UPDATE_ERROR_LEN,
+    MAX_UPDATE_HANDLER_NAME_LEN, MAX_UPDATE_VERSION_LEN, UpdateActing, UpdateHandler,
+    UpdateIntentRecord, UpdateIntentView, UpdatePhase, UpdateStatusRecord, update_intent_id,
+    update_intent_views,
+};
 pub use state::{
     AvailabilityState, DesiredState, HealthState, LeaseState, RestartPolicy, WorkloadObservedState,
 };
@@ -239,6 +246,7 @@ mod tests {
                 providers: 5,
                 executors: 6,
                 leases: 7,
+                update_intents: 8,
             },
             observed_revision: Revision::new(3),
             applied_revision: Revision::new(3),

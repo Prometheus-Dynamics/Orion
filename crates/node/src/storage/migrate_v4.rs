@@ -83,6 +83,8 @@ impl V4DesiredClusterState {
             providers: self.providers,
             executors: self.executors,
             leases: self.leases,
+            // Format 4 predates update intents.
+            update_intents: Default::default(),
             stamps: self.stamps,
             tombstones: self.tombstones,
         }
@@ -275,6 +277,7 @@ impl NodeStorage {
                 workloads: observed.workloads,
                 resources: observed.resources,
                 leases: observed.leases,
+                update_statuses: Default::default(),
             });
         let history = read_optional(source_dir, &file_name(self.mutation_history_path()))?
             .map(|bytes| {
