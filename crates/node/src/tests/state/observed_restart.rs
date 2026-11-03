@@ -6,7 +6,7 @@ use orion::control_plane::{ExecutorRecord, ProviderRecord, WorkloadObservedState
 use orion::runtime::ExecutorCommand;
 use orion_client::{LocalNodeRuntime, LocalRuntimePublisher};
 
-const RUNTIME: &str = "helios.engine.execution.v1";
+const RUNTIME: &str = "example.engine.execution.v1";
 const WORKLOAD: &str = "workload.restart";
 const EXECUTOR: &str = "executor.restart";
 
@@ -40,7 +40,7 @@ fn publisher(socket: &std::path::Path, stream: &std::path::Path) -> LocalRuntime
     let node = NodeId::new("node-a");
     LocalRuntimePublisher::builder(
         LocalNodeRuntime::new(socket.to_path_buf(), stream.to_path_buf()),
-        "helios-engine",
+        "example-engine",
     )
     .provider(
         ProviderRecord::builder(ProviderId::new("provider.restart"), node.clone())

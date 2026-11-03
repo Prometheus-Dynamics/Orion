@@ -6,7 +6,7 @@ use orion::control_plane::{ExecutorRecord, ProviderRecord, WorkloadRecord};
 use orion_client::{LocalNodeRuntime, LocalRuntimePublisher};
 use std::sync::{Arc, Mutex};
 
-const EXTERNAL_TYPE: &str = "helios.engine.execution.v1";
+const EXTERNAL_TYPE: &str = "example.engine.execution.v1";
 const NO_EXECUTOR: &str = "no local executor realizes this workload";
 
 #[derive(Clone, Default)]
@@ -94,7 +94,7 @@ fn engine_publisher(
     )
     .runtime_type(RuntimeType::new(EXTERNAL_TYPE))
     .build();
-    LocalRuntimePublisher::builder(runtime, "helios-engine")
+    LocalRuntimePublisher::builder(runtime, "example-engine")
         .provider(provider)
         .executor(executor)
         .build()
