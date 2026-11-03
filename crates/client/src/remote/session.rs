@@ -45,6 +45,30 @@ struct Shared {
     node_id: NodeId,
     node_key: [u8; 32],
     pending: Mutex<Pending>,
+    /// Set once the session can no longer pair the node's answers with the requests queued in
+    /// `pending` (a write failed after part of a frame may have gone out, or an answer did not
+    /// verify). Nothing more is sent on a broken session.
+    broken: std::sync::atomic::AtomicBool,
+}
+
+impl Shared {
+    fn is_broken(&self) -> bool {
+        self.broken.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Marks the session broken and fails every waiting request.
+    fn break_session(&self) {
+        self.broken.store(true, std::sync::atomic::Ordering::SeqCst);
+        let waiting: Vec<_> = self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .drain(..)
+            .collect();
+        for (_, reply) in waiting {
+            let _ = reply.send(Err(RemoteError::Transport("the session closed".into())));
+        }
+    }
 }
 
 /// A push session with one node. Dropping it closes the connection; the node forgets the
@@ -95,6 +119,7 @@ impl RemoteOperator {
             node_id: self.node_id().clone(),
             node_key: self.node_public_key(),
             pending: Mutex::new(VecDeque::new()),
+            broken: std::sync::atomic::AtomicBool::new(false),
         });
 
         let open = encode_signed(
@@ -154,21 +179,30 @@ impl RemoteOperator {
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .pop_front();
                     let Some((request, reply)) = next else {
+                        // An answer nobody asked for: the session is out of step.
                         break;
                     };
-                    let _ = reply.send(verified_frame(&reader_shared, &request, &frame));
+                    let verified = verified_frame(&reader_shared, &request, &frame);
+                    let failed = verified.as_ref().err().map(ToString::to_string);
+                    let _ = reply.send(verified);
+                    if let Some(error) = failed {
+                        // Logged once: the session ends here, so there is nothing to repeat.
+                        tracing::warn!(
+                            node = %reader_shared.node_id,
+                            peer_key = %orion_auth::crypto::key_fingerprint(&reader_shared.node_key),
+                            check = "response signature",
+                            transcript_len = request.len(),
+                            nonce_len = 0usize,
+                            error = %error,
+                            "authentication failed: node response did not verify; closing the session"
+                        );
+                        // Later answers would be paired with the wrong requests: stop here.
+                        break;
+                    }
                 }
             }
-            // Fail what is still waiting.
-            let waiting: Vec<_> = reader_shared
-                .pending
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .drain(..)
-                .collect();
-            for (_, reply) in waiting {
-                let _ = reply.send(Err(RemoteError::Transport("the session closed".into())));
-            }
+            // Fail what is still waiting, and refuse anything queued later.
+            reader_shared.break_session();
         });
 
         let mut session = RemoteSession {
@@ -299,12 +333,20 @@ async fn request_on(
     {
         // Queued and written under the writer lock: the node answers in the order it reads.
         let mut writer = writer.lock().await;
+        if shared.is_broken() {
+            return Err(RemoteError::Transport("the session closed".into()));
+        }
         shared
             .pending
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push_back((request.clone(), reply));
-        write_frame(&mut writer, &request, max_payload_bytes, io_timeout).await?;
+        if let Err(err) = write_frame(&mut writer, &request, max_payload_bytes, io_timeout).await {
+            // A write that failed or timed out may have sent part of the frame, so the node's
+            // answers can no longer be matched with the queue. Nothing else may go out either.
+            shared.break_session();
+            return Err(err);
+        }
     }
     tokio::time::timeout(io_timeout, answer)
         .await

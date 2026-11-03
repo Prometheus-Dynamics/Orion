@@ -48,6 +48,7 @@ getrandom = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "fs", "sync", "time"] }
+tracing = { workspace = true }
 
 # Only the local IPC examples (unix, feature `ipc`) use the HTTP transport. Keeping it off other
 # targets lets the `remote` example build on Windows without a C toolchain for ring.

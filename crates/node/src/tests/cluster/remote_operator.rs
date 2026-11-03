@@ -539,3 +539,36 @@ async fn operators_enroll_with_the_shared_enrollment_key() {
     discovery.shutdown().await;
     node.server.shutdown().await.expect("listener stops");
 }
+
+/// Many requests in flight on one enrolled session: every answer must pair with its own request
+/// and verify. A mispaired answer (a wrong request bound into the signature check) ends the session
+/// instead of returning someone else's result.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_requests_on_one_operator_session_all_verify() {
+    let state_dir = temp_state_dir("operator-concurrent");
+    let node = operator_node("node-a", Some(state_dir.clone())).await;
+    publish_facts(&node.app);
+    let identity = OperatorIdentity::generate("carol").expect("identity");
+    let operator =
+        std::sync::Arc::new(enrolled_operator(&node, identity, OperatorPolicy::default()).await);
+
+    let mut requests = tokio::task::JoinSet::new();
+    for _ in 0..64 {
+        let operator = operator.clone();
+        requests.spawn(async move { operator.nodes().await.map(|nodes| nodes.len()) });
+    }
+    let mut answered = 0;
+    while let Some(result) = requests.join_next().await {
+        let nodes = result
+            .expect("request task should not panic")
+            .expect("every concurrent request should verify and answer");
+        assert!(nodes >= 1, "each answer carries the node list");
+        answered += 1;
+    }
+    assert_eq!(answered, 64);
+    // The session still works after the burst.
+    assert!(operator.nodes().await.is_ok());
+
+    let _ = node.server.shutdown().await;
+    let _ = std::fs::remove_dir_all(state_dir);
+}
