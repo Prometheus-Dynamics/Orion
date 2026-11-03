@@ -5,6 +5,8 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::vec::Vec;
 
+#[cfg(feature = "xfer")]
+use super::xfer::XferRequest;
 use super::{ActionSendError, HostConfig, HostEvent, HostSession};
 use crate::message::LeaseRecord;
 use crate::packet::{CanLinkIds, Segment};
@@ -231,6 +233,23 @@ impl HostBus {
             Some(device) => device.session.send_action(id, name, payload),
             None => Err(ActionSendError::NotConnected),
         }
+    }
+
+    /// Drops the session at `address`: its frames are no longer routed to it, and anything it had
+    /// queued is discarded. A later frame from that address starts a new session. Returns whether
+    /// there was one.
+    pub fn forget(&mut self, address: u32) -> bool {
+        self.devices.remove(&address).is_some()
+    }
+
+    /// Sends a firmware transfer message to the device at `address`; see
+    /// [`HostSession::send_xfer`]. Returns false if there is no such session or the message does
+    /// not fit its frame size.
+    #[cfg(feature = "xfer")]
+    pub fn send_xfer(&mut self, address: u32, request: &XferRequest) -> bool {
+        self.devices
+            .get_mut(&address)
+            .is_some_and(|device| device.session.send_xfer(request))
     }
 
     /// Addresses that have a session (connected or not).

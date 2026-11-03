@@ -1,12 +1,14 @@
 //! Per-link control slots (`docs/update-recovery.md`, "MCU firmware over the link protocol").
 //!
-//! Each link task registers a slot when it starts: a serial link gets a firmware job channel and a
-//! release flag (`link.release` / `link.attach`); a CAN link registers an empty slot, so the
-//! actions can say why they do not apply. A slot is removed when its task closes.
+//! Each link task registers a slot when it starts. A serial link's slot has a firmware job channel
+//! and a release flag for its port (`link.release` / `link.attach` release the link). A CAN link's
+//! slot has a firmware job channel and the set of its released devices: a released device is not
+//! routed to, and the rest of the bus keeps working. A slot is removed when its task closes.
 
 use super::{NodeApp, ProviderOwner, lock};
 use crate::actions::ActionOutcome;
 use orion_link::host::xfer::FirmwareTransfer;
+use std::collections::BTreeSet;
 use std::fs::File;
 use tokio::sync::{mpsc, watch};
 
@@ -19,8 +21,8 @@ pub(crate) enum JobReport {
     Done(ActionOutcome),
 }
 
-/// A firmware transfer for a serial link's task: the driver, the committed image it reads, and
-/// the channel the handler waits on.
+/// A firmware transfer for a link task: the driver, the committed image it reads, and the channel
+/// the handler waits on.
 pub(crate) struct FirmwareCommand {
     /// The device the image goes to (must be connected on the link when the job starts).
     pub(crate) device: String,
@@ -44,12 +46,23 @@ pub(crate) struct SerialSlot {
     pub(crate) released: watch::Receiver<bool>,
 }
 
-#[derive(Default)]
+/// What a CAN link task listens on.
+pub(crate) struct CanSlot {
+    pub(crate) jobs: mpsc::UnboundedReceiver<FirmwareCommand>,
+    /// The released devices, by name (a device is released until it is attached again).
+    pub(crate) released: watch::Receiver<BTreeSet<String>>,
+}
+
 pub(crate) struct LinkSlot {
-    /// Firmware jobs (serial links only).
-    jobs: Option<mpsc::UnboundedSender<FirmwareCommand>>,
-    /// Release flag (serial links only).
-    release: Option<watch::Sender<bool>>,
+    jobs: mpsc::UnboundedSender<FirmwareCommand>,
+    release: Release,
+}
+
+enum Release {
+    /// A serial link: its port.
+    Port(watch::Sender<bool>),
+    /// A CAN link: its released devices.
+    Devices(watch::Sender<BTreeSet<String>>),
 }
 
 impl NodeApp {
@@ -61,16 +74,26 @@ impl NodeApp {
         lock(&self.state.links.slots).insert(
             link.to_owned(),
             LinkSlot {
-                jobs: Some(jobs_tx),
-                release: Some(release_tx),
+                jobs: jobs_tx,
+                release: Release::Port(release_tx),
             },
         );
         SerialSlot { jobs, released }
     }
 
-    /// Registers the slot of CAN link `link`: present, but without firmware or release.
-    pub(crate) fn link_can_slot_open(&self, link: &str) {
-        lock(&self.state.links.slots).insert(link.to_owned(), LinkSlot::default());
+    /// Registers the slot of CAN link `link` (replacing an older one) and returns the ends the task
+    /// listens on.
+    pub(crate) fn link_can_slot_open(&self, link: &str) -> CanSlot {
+        let (jobs_tx, jobs) = mpsc::unbounded_channel();
+        let (released_tx, released) = watch::channel(BTreeSet::new());
+        lock(&self.state.links.slots).insert(
+            link.to_owned(),
+            LinkSlot {
+                jobs: jobs_tx,
+                release: Release::Devices(released_tx),
+            },
+        );
+        CanSlot { jobs, released }
     }
 
     /// Removes the slot of `link` (its task has stopped).
@@ -78,36 +101,48 @@ impl NodeApp {
         lock(&self.state.links.slots).remove(link);
     }
 
-    /// Sets the release flag of serial link `link`; returns the previous value.
-    pub(crate) fn link_set_released(&self, link: &str, released: bool) -> Result<bool, String> {
+    /// Releases (`true`) or attaches (`false`) `device` on `link`. On a serial link the port is
+    /// released, and the link has one device; on a CAN link only `device` is.
+    pub(crate) fn link_set_device_released(
+        &self,
+        link: &str,
+        device: &str,
+        released: bool,
+    ) -> Result<(), String> {
         let slots = lock(&self.state.links.slots);
         let slot = slots
             .get(link)
             .ok_or_else(|| format!("link {link} is not running"))?;
-        let sender = slot.release.as_ref().ok_or_else(|| {
-            format!(
-                "link {link} is a CAN link; link.release and link.attach support serial links only"
-            )
-        })?;
-        Ok(sender.send_replace(released))
+        match &slot.release {
+            Release::Port(sender) => {
+                sender.send_replace(released);
+            }
+            Release::Devices(sender) => {
+                sender.send_if_modified(|set| {
+                    if released {
+                        set.insert(device.to_owned())
+                    } else {
+                        set.remove(device)
+                    }
+                });
+            }
+        }
+        Ok(())
     }
 
-    /// Whether serial link `link` is released.
-    pub(crate) fn link_is_released(&self, link: &str) -> Result<bool, String> {
+    /// Whether `device` on `link` is released.
+    pub(crate) fn link_device_released(&self, link: &str, device: &str) -> Result<bool, String> {
         let slots = lock(&self.state.links.slots);
         let slot = slots
             .get(link)
             .ok_or_else(|| format!("link {link} is not running"))?;
-        let sender = slot.release.as_ref().ok_or_else(|| {
-            format!(
-                "link {link} is a CAN link; link.release and link.attach support serial links only"
-            )
-        })?;
-        Ok(*sender.borrow())
+        Ok(match &slot.release {
+            Release::Port(sender) => *sender.borrow(),
+            Release::Devices(sender) => sender.borrow().contains(device),
+        })
     }
 
-    /// Hands a firmware job to the task of serial link `link`. Refused on CAN links and on links
-    /// that are not running.
+    /// Hands a firmware job to the task of `link`. Refused on links that are not running.
     pub(crate) fn link_submit_firmware(
         &self,
         link: &str,
@@ -117,11 +152,8 @@ impl NodeApp {
         let slot = slots
             .get(link)
             .ok_or_else(|| format!("link {link} is not running"))?;
-        let jobs = slot
-            .jobs
-            .as_ref()
-            .ok_or_else(|| "firmware transfer is not supported on CAN links yet".to_owned())?;
-        jobs.send(command)
+        slot.jobs
+            .send(command)
             .map_err(|_| format!("link {link} stopped before the transfer was started"))
     }
 

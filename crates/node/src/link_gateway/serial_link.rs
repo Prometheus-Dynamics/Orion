@@ -154,7 +154,9 @@ pub(super) async fn run(
                     if end.handoff {
                         // The device's bootloader owns the port now; it is not reopened until the
                         // link is attached again.
-                        let _ = ctx.app.link_set_released(&ctx.name, true);
+                        let _ = ctx
+                            .app
+                            .link_set_device_released(&ctx.name, running.device(), true);
                     }
                     running.finish(end.outcome);
                 }
@@ -222,7 +224,10 @@ fn start_job(
     seen: &DeviceSeen,
 ) {
     let reason = if released {
-        format!("link {link} is released; run link.attach first")
+        format!(
+            "device `{}` on link {link} is released; run link.attach first",
+            command.device
+        )
     } else if job.is_some() {
         format!("a firmware transfer is already running on link {link}")
     } else if !seen.is_connected(&command.device) {

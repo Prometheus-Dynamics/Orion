@@ -20,9 +20,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   `docs/update-recovery.md`.
 - Node actions for MCU firmware over serial links (U8): `link.firmware.update` streams a committed
   blob through the firmware transfer with progress, trial confirmation and rollback reporting;
-  `link.release` and `link.attach` stop and restore a serial link's port. CAN firmware is not yet
-  supported. Docs: `docs/actions.md` ("Link firmware"), `docs/link-protocol.md`,
-  `docs/update-recovery.md`.
+  `link.release` and `link.attach` stop and restore a serial link's port. Docs:
+  `docs/actions.md` ("Link firmware"), `docs/link-protocol.md`, `docs/update-recovery.md`.
+- Firmware over CAN links (U8): `link.firmware.update` on a SocketCAN link runs the transfer on the
+  addressed device's session, one job per device, with chunks of at most 32 CAN frames (199 bytes
+  on classic CAN, 256 on CAN FD). `link.release` and `link.attach` on a CAN bus release one device
+  and leave the bus open for the others. `orion-link`: `HostBus::forget` and `HostBus::send_xfer`,
+  `FirmwareTransfer::set_chunk_len`. Docs: `docs/update-recovery.md` ("CAN links"),
+  `docs/actions.md`.
 
 ### Changed (protocol 1 reset, breaking)
 

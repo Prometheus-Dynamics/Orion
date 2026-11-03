@@ -4,6 +4,7 @@
 
 mod actions;
 mod can;
+mod can_firmware;
 mod config;
 mod firmware;
 mod persist;

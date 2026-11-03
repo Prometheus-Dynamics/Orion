@@ -534,11 +534,12 @@ Status codes (`u8`): 0 ok, 1 bad chunk CRC, 2 bad offset, 3 bad digest, 4 flash,
   minus `max_chunk_for_frame`, and the sink's own limit) and the negotiated frame size, so a chunk
   always fits one frame and one CAN FD message.
 
-The node's gateway drives this transfer for a serial link: the `link.firmware.update` action
-(`docs/actions.md`, "Link firmware") runs one committed blob on the link's session, resumes from the
-device's `next_offset` after a reconnect, and sends `Confirm` once the device reports the target
-version. Serial links only: a CAN link refuses the job, because the CAN transfer is still open
-(`docs/update-recovery.md`, "What landed in U8").
+The node's gateway drives this transfer on a serial link and on a CAN bus: the `link.firmware.update`
+action (`docs/actions.md`, "Link firmware") runs one committed blob on the device's session, resumes
+from the device's `next_offset` after a reconnect, and sends `Confirm` once the device reports the
+target version. On a CAN bus the chunk is also bounded by the segment budget (32 frames, so 199 bytes
+on classic CAN and at most 256 on CAN FD), and the other devices on the bus are not addressed
+(`docs/update-recovery.md`, "CAN links").
 
 ## Versioning
 

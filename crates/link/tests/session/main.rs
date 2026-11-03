@@ -13,6 +13,10 @@ mod can_e2e;
 mod device_scripted;
 #[cfg(all(feature = "std", feature = "xfer"))]
 mod firmware;
+#[cfg(all(feature = "std", feature = "xfer"))]
+mod firmware_can;
+#[cfg(all(feature = "std", feature = "xfer"))]
+mod flash;
 #[cfg(feature = "std")]
 mod sim;
 #[cfg(feature = "std")]

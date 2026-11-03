@@ -703,25 +703,50 @@ sequenceDiagram
   `DeviceInfo` buffer, the reply and transfer state, and a 6-byte larger control buffer). A port's
   flash driver adds its own code and buffers on top.
 
-**Gateway (landed, serial links only).** In `crates/node` (`link_gateway/firmware.rs`, with the
-serial link task in `link_gateway/serial_link.rs`) three node actions are registered when the
-`link-gateway` feature is built in (`docs/actions.md`, "Link firmware"):
+**Gateway (landed, serial and CAN links).** In `crates/node` (`link_gateway/firmware.rs`, with the
+serial link task in `link_gateway/serial_link.rs` and the CAN bus task in `link_gateway/can_link.rs`)
+three node actions are registered when the `link-gateway` feature is built in (`docs/actions.md`,
+"Link firmware"):
 
-- `link.release` and `link.attach` (`link` and `device` arguments): a released link closes its port,
-  marks its device lost (the device's providers become unavailable) and does not reopen until it is
-  attached again. A link released after a handoff stays released in the same way.
+- `link.release` and `link.attach` (`link` and `device` arguments). On a serial link a released link
+  closes its port, marks its device lost (the device's providers become unavailable) and does not
+  reopen until it is attached again; a link released after a handoff stays released the same way. On
+  a CAN bus the release is per device (below).
 - `link.firmware.update`: streams a committed blob (`docs/blobs.md`) through the host driver on the
-  link's session, one job per link. It reports `Running { progress }` from the bytes the device
-  acknowledged, confirms the trial once the device reports the target version, and ends `Succeeded`
-  (`phase = "installed"`, or `"handoff"` followed by a release), or `Failed` with a reason. A
-  rollback is reported as `rolled back`: the device's bootloader reverted the image.
+  device's session, one job per device (per link on serial). It reports `Running { progress }` from
+  the bytes the device acknowledged, confirms the trial once the device reports the target version,
+  and ends `Succeeded` (`phase = "installed"`, or `"handoff"` followed by a release), or `Failed` with
+  a reason. A rollback is reported as `rolled back`: the device's bootloader reverted the image.
 
 The health gate before `Confirm` is the device reporting the target version. The provider's own
-health (the gate of the design above) is not checked yet. **CAN firmware is still open:** a CAN link
-refuses the job with `firmware transfer is not supported on CAN links yet`, and release and attach
-are serial-only too. Tests: `crates/node/src/link_gateway/tests/firmware.rs`, a simulated two-slot
-device on a pseudo-terminal (a trial update with progress, a refused confirmation, a handoff,
-release and attach, and the refused requests).
+health (the gate of the design above) is not checked yet.
+
+**CAN links (landed).** The CAN task drives the same driver on the `HostBus` session of the addressed
+device; the other devices on the bus are not addressed and keep working.
+
+- *Chunk budget.* A lost segment costs a resend of its whole chunk, and a long chunk holds the bus
+  against the devices that share it. So a chunk spans at most 32 CAN frames: 199 bytes of data on
+  classic CAN (32 segments of 7 bytes, less the chunk frame's 25 bytes of overhead), and at most 256
+  bytes on CAN FD. The device's `xfer_max_chunk` and the frame limit still apply below that
+  (`can_link::firmware_chunk_len`, `FirmwareTransfer::set_chunk_len`).
+- *Release is per device.* `link.release` on a CAN bus releases the one device and the bus stays
+  open. The task forgets the device's session, so nothing is routed to it and its frames are dropped;
+  its providers become unavailable and its actions in flight fail. Its hello gets no `Welcome` until
+  `link.attach`. Closing the whole bus would take every device on it down for one device's update,
+  so this was chosen. A handoff releases the device whose bootloader took the bus, and a released
+  device refuses firmware with `device ... is released`.
+- *Jobs.* One job per device, so transfers to different devices on one bus can run at once. A job
+  for a device that is not connected is rejected at once, as on serial links.
+
+Tests: `crates/link/tests/session/firmware_can.rs` (the driver over segmented frames on a simulated
+CAN bus: lossy segments on the addressed device, a neighbour that keeps its session, a bus cut
+longer than the heartbeat that resumes on the next session, and a device that advertises larger
+chunks than the budget); `crates/node/src/link_gateway/tests/can_firmware.rs` (a firmware device and
+a neighbour on an in-memory bus: a transfer that reaches only the addressed device, release and
+attach, a refused update to a released device, and a handoff; plus `can_firmware_on_vcan0`, which
+needs `vcan0`). Serial tests: `crates/node/src/link_gateway/tests/firmware.rs`, a simulated two-slot
+device on a pseudo-terminal (a trial update with progress, a refused confirmation, a handoff, release
+and attach, and the refused requests).
 
 ## Recovery when Orion is unavailable
 
@@ -762,7 +787,7 @@ critical path at all. Each milestone is independently useful and testable.
 | U5 | External rollout controller | `RolloutRecord`, waves, `max_unavailable`, health gate, monotonic halt; `orionctl rollout` as the first controller. | U4 |
 | U6 | Cross-version rollouts | Frozen rollout beacon; state-dir snapshot before a slot switch; documented "sync-compatible" flag per release; a test that runs N and N+1 nodes through a rollout. | U5 |
 | U7 | Leaderless rollouts | Wave assignment and gate evaluation in `orion-cluster` (rendezvous order, own-intent writes, convergent halt); property tests like placement's. | U5 |
-| U8 | MCU firmware over the link | Kinds `0x20`–`0x28` and the `xfer` feature in device and host sessions, the simulator tests and the size budget (landed); gateway `link.release` / `link.attach` and `link.firmware.update` with confirm and rollback on serial links (landed). Still open: firmware over CAN. | U4 |
+| U8 | MCU firmware over the link | Kinds `0x20`–`0x28` and the `xfer` feature in device and host sessions, the simulator tests and the size budget (landed); gateway `link.release` / `link.attach` and `link.firmware.update` with confirm and rollback on serial and CAN links (landed; a CAN release takes one device off the bus). | U4 |
 | U9 | Hardware validation | Real A/B writer on a Linux board, power-cut and watchdog fault injection at every phase, an MCU with an A/B bootloader over UART and CAN. | U4, U8 |
 
 U1 and U2 have no dependencies and can start immediately. U3 was batched with other pending

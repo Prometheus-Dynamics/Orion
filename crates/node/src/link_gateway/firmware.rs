@@ -1,15 +1,16 @@
 //! Firmware over a serial link, and the link's release, as node actions (`docs/actions.md`,
 //! "Link firmware"; `docs/update-recovery.md`, "MCU firmware over the link protocol").
 //!
-//! - `link.release { link, device }` stops the link task serving its port: the port is closed, the
-//!   device is marked lost (its providers become unavailable) and the link does not reopen until
-//!   `link.attach { link, device }`.
+//! - `link.release { link, device }` stops routing to the device: it is marked lost (its providers
+//!   become unavailable) and its traffic is dropped until `link.attach { link, device }`. On a
+//!   serial link this closes the port and the link does not reopen until it is attached again. On
+//!   a CAN link only that device is released; the rest of the bus keeps working (see
+//!   `docs/update-recovery.md`, "MCU firmware over the link protocol").
 //! - `link.firmware.update { link, device, blob, component, version, target_slot, activate }` runs a
 //!   committed blob through `orion_link::host::xfer::FirmwareTransfer` on the link's session. The
-//!   link task owns the transfer (it owns the session); this handler submits the job, forwards its
-//!   progress as the action's `Running` state, and returns its outcome.
-//!
-//! Firmware is accepted only on serial links. A CAN link answers the job with a refusal.
+//!   link task owns the transfer (it owns the session, or on a CAN bus the device's session); this
+//!   handler submits the job, forwards its progress as the action's `Running` state, and returns its
+//!   outcome. Serial and CAN links both take firmware.
 
 use crate::NodeApp;
 use crate::actions::{ActionContext, ActionHandler, ActionOutcome};
@@ -64,7 +65,7 @@ fn set_released(app: &NodeApp, request: &ActionRequest, released: bool) -> Actio
             "no device `{device}` has published on link {link}"
         ));
     }
-    match app.link_set_released(&link, released) {
+    match app.link_set_device_released(&link, &device, released) {
         Ok(_) => ActionOutcome::Succeeded(BTreeMap::from([
             (
                 "state".to_owned(),
@@ -87,12 +88,11 @@ async fn firmware_update(request: ActionRequest, context: ActionContext) -> Acti
         Ok(path) => path,
         Err(reason) => return ActionOutcome::rejected(reason),
     };
-    // A link that is not running, or a CAN link, is refused by the submission below, with the
-    // reason that applies to it.
-    if app.link_is_released(&args.link) == Ok(true) {
+    // A link that is not running is refused by the submission below, with the reason that applies.
+    if app.link_device_released(&args.link, &args.device) == Ok(true) {
         return ActionOutcome::rejected(format!(
-            "link {} is released; run link.attach first",
-            args.link
+            "device `{}` on link {} is released; run link.attach first",
+            args.device, args.link
         ));
     }
 
@@ -310,6 +310,11 @@ impl FirmwareJob {
             job.apply_info(info);
         }
         job
+    }
+
+    /// The device this job transfers to.
+    pub(super) fn device(&self) -> &str {
+        &self.device
     }
 
     /// Feeds one host event (only the events of this job's device matter).

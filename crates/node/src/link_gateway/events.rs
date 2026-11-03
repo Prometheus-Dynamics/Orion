@@ -1,7 +1,7 @@
 //! Host-session events → node provider path, shared by serial and CAN links.
 
 use crate::NodeApp;
-use crate::app::{LinkActionCommand, SerialSlot};
+use crate::app::{CanSlot, LinkActionCommand, SerialSlot};
 use crate::control_plane::LinkStatusSnapshot;
 use orion::control_plane::ActionState;
 use orion::control_plane::TypedConfigValue;
@@ -71,9 +71,9 @@ impl LinkContext {
         self.app.link_serial_slot_open(&self.name)
     }
 
-    /// Registers this CAN link's slot, which refuses firmware jobs and release requests.
-    pub(super) fn open_can_slot(&self) {
-        self.app.link_can_slot_open(&self.name);
+    /// Registers this CAN link's slot: firmware jobs, and the devices released by `link.release`.
+    pub(super) fn open_can_slot(&self) -> CanSlot {
+        self.app.link_can_slot_open(&self.name)
     }
 
     /// Registers this link for action requests; the receiver yields what the node routes here.

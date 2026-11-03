@@ -115,6 +115,9 @@ job_lints() {
     step lints "test orion-node [link-gateway] can_gateway_on_vcan0" \
         cargo test --locked -p orion-node --no-default-features --features link-gateway \
         --lib can_gateway_on_vcan0 -- --ignored
+    step lints "test orion-node [link-gateway] can_firmware_on_vcan0" \
+        cargo test --locked -p orion-node --no-default-features --features link-gateway \
+        --lib can_firmware_on_vcan0 -- --ignored
 
     # The remote operator client alone (no IPC client, no HTTP stack), with mDNS browsing, through
     # the facade, and orion-auth's shared signing / enrollment code.

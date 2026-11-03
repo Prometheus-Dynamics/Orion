@@ -129,7 +129,7 @@ Follow-ups that do not change the wire:
       per device (`busy` refusal), progress and output, disconnect fails in-flight actions; no
       cancel companion (the device is busy) and no name declarations (docs/actions.md, "Link devices").
 - [x] **U8 firmware transfer** in the reserved kinds (`DeviceInfo`, chunked transfer): landed in
-      `orion-link` (feature `xfer`) and in the node gateway for serial links; CAN firmware is open.
+      `orion-link` (feature `xfer`) and in the node gateway for serial and CAN links.
 
 Not protocol changes: Prometheus metric names, env knobs, and persisted side files with their own
 format versions (`link-devices.rkyv`, `peer-sync-times.json`).
@@ -468,11 +468,14 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       convergent halt, property tests.
 - [x] **U8 MCU firmware over the link**: link kinds, `xfer` device and host sessions, simulator
       test and size budget, and the node actions `link.release`, `link.attach` and
-      `link.firmware.update` on serial links landed; firmware over CAN is open (see
-      docs/update-recovery.md, U8).
-- [ ] **U8 firmware over CAN links**: `link.firmware.update` on a SocketCAN link refuses the job
-      today. Drive `FirmwareTransfer` from the CAN link task as the serial task does (chunks sized
-      to the CAN/FD segment budget), plus an end-to-end `RolledBack` test over a pty.
+      `link.firmware.update` on serial links landed (see docs/update-recovery.md, U8).
+- [x] **U8 firmware over CAN links**: `link.firmware.update` on a SocketCAN link drives
+      `FirmwareTransfer` from the CAN link task (chunks of at most 32 CAN frames, device and frame
+      limits applied), one job per device; `link.release` and `link.attach` release one device and
+      keep the bus open. Simulated-bus tests, and `can_firmware_on_vcan0` in the `lints` job.
+- [ ] **U8 end-to-end `RolledBack` test over a pty**: a trial whose health check fails rolls back
+      through the node's serial gateway to `Failed` with the rolled-back reason; the device's explicit
+      rollback status, if the protocol gets one.
 - [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
       MCU with an A/B bootloader over UART and CAN.
 

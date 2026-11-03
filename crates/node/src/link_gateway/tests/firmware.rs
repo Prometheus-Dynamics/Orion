@@ -23,21 +23,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::task::JoinHandle;
 
-const LINK_DEVICE: &str = "motor-a";
-const PROVIDER: &str = "provider.motor-a";
-const RESOURCE: &str = "motor-a.speed";
-const CHUNK_MAX: usize = 96;
+pub(super) const LINK_DEVICE: &str = "motor-a";
+pub(super) const PROVIDER: &str = "provider.motor-a";
+pub(super) const RESOURCE: &str = "motor-a.speed";
+pub(super) const CHUNK_MAX: usize = 96;
 
 /// One slot of the simulated flash.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Slot {
-    version: String,
-    image: Vec<u8>,
+pub(super) struct Slot {
+    pub(super) version: String,
+    pub(super) image: Vec<u8>,
 }
 
 /// The image being written into the inactive slot.
 #[derive(Debug, Clone)]
-struct Staging {
+pub(super) struct Staging {
     xfer_id: u32,
     total: u32,
     crc32c: u32,
@@ -50,20 +50,29 @@ struct Staging {
 /// A two-slot A/B device: flash, a bootloader that reverts an unconfirmed trial on its second
 /// boot, and the switches the tests use (a refused confirmation, a handoff to the bootloader).
 #[derive(Debug, Clone)]
-struct Flash {
-    slots: [Slot; 2],
-    active: u8,
+pub(super) struct Flash {
+    pub(super) slots: [Slot; 2],
+    pub(super) active: u8,
     previous: u8,
-    trial: bool,
+    pub(super) trial: bool,
     trial_boots: u8,
-    staging: Option<Staging>,
-    reboot_pending: bool,
-    handoff: bool,
+    pub(super) staging: Option<Staging>,
+    pub(super) reboot_pending: bool,
+    pub(super) handoff: bool,
     refuse_confirm: bool,
+    /// The trial's health check fails: the device resets instead of confirming, and the bootloader
+    /// reverts the trial on that second boot.
+    pub(super) unhealthy_trial: bool,
+    /// The bootloader reverts a trial on its first boot, before the host can see the new version.
+    pub(super) revert_on_first_boot: bool,
+    /// Largest chunk the device advertises.
+    pub(super) max_chunk: u16,
+    /// Largest chunk written so far (the chunk budget check).
+    pub(super) largest_write: usize,
 }
 
 impl Flash {
-    fn factory(version: &str) -> Self {
+    pub(super) fn factory(version: &str) -> Self {
         Self {
             slots: [
                 Slot {
@@ -83,6 +92,10 @@ impl Flash {
             reboot_pending: false,
             handoff: false,
             refuse_confirm: false,
+            unhealthy_trial: false,
+            revert_on_first_boot: false,
+            max_chunk: CHUNK_MAX as u16,
+            largest_write: 0,
         }
     }
 
@@ -92,10 +105,10 @@ impl Flash {
     }
 
     /// The bootloader's part of a power cycle.
-    fn power_cycle(&mut self) {
+    pub(super) fn power_cycle(&mut self) {
         self.reboot_pending = false;
         if self.trial {
-            if self.trial_boots >= 1 {
+            if self.trial_boots >= 1 || self.revert_on_first_boot {
                 self.active = self.previous;
                 self.trial = false;
                 self.trial_boots = 0;
@@ -113,7 +126,7 @@ impl FirmwareSink for Flash {
             active_slot: self.active,
             slots: 2,
             trial: self.trial,
-            max_chunk: CHUNK_MAX as u16,
+            max_chunk: self.max_chunk,
             window: 1,
             bootloader: "node-test-boot 1",
         }
@@ -152,6 +165,7 @@ impl FirmwareSink for Flash {
             return Err(XferStatus::NoSpace);
         }
         staging.data.extend_from_slice(data);
+        self.largest_write = self.largest_write.max(data.len());
         Ok(())
     }
 
@@ -201,6 +215,12 @@ impl FirmwareSink for Flash {
     fn confirm(&mut self, slot: u8) -> Result<(), XferStatus> {
         if self.refuse_confirm || slot != self.active || !self.trial {
             return Err(XferStatus::BadSlot);
+        }
+        if self.unhealthy_trial {
+            // The health check fails: the device resets before it confirms, so the bootloader
+            // sees an unconfirmed trial on its next boot.
+            self.reboot_pending = true;
+            return Ok(());
         }
         self.trial = false;
         Ok(())
@@ -321,7 +341,7 @@ fn write_master(fd: &OwnedFd, mut bytes: &[u8]) {
 }
 
 /// A node with a blob directory of its own, so blob push works in the test.
-fn firmware_app(name: &str) -> (NodeApp, PathBuf) {
+pub(super) fn firmware_app(name: &str) -> (NodeApp, PathBuf) {
     let dir = std::env::temp_dir().join(format!("orion-lg-fw-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let socket =
@@ -333,14 +353,14 @@ fn firmware_app(name: &str) -> (NodeApp, PathBuf) {
 }
 
 /// Deterministic image bytes.
-fn image(len: usize) -> Vec<u8> {
+pub(super) fn image(len: usize) -> Vec<u8> {
     (0..len)
         .map(|index| (index.wrapping_mul(2_654_435_761) >> 11) as u8)
         .collect()
 }
 
 /// Commits `data` as blob `id` through the local blob messages (`docs/blobs.md`).
-fn commit_blob(app: &NodeApp, id: &str, data: &[u8]) {
+pub(super) fn commit_blob(app: &NodeApp, id: &str, data: &[u8]) {
     let sha256 = Sha256::digest(data)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -363,7 +383,7 @@ fn commit_blob(app: &NodeApp, id: &str, data: &[u8]) {
         .expect("commit");
 }
 
-fn blob_committed(app: &NodeApp, id: &str) -> bool {
+pub(super) fn blob_committed(app: &NodeApp, id: &str) -> bool {
     matches!(
         app.apply_local_blob_message(ControlMessage::QueryBlobs(Some(id.to_owned()))),
         Ok(ControlMessage::Blobs(blobs))
@@ -371,7 +391,7 @@ fn blob_committed(app: &NodeApp, id: &str) -> bool {
     )
 }
 
-async fn committed(app: &NodeApp, id: &str, data: &[u8]) {
+pub(super) async fn committed(app: &NodeApp, id: &str, data: &[u8]) {
     commit_blob(app, id, data);
     assert!(
         wait_until(WAIT, || blob_committed(app, id)).await,
@@ -379,7 +399,7 @@ async fn committed(app: &NodeApp, id: &str, data: &[u8]) {
     );
 }
 
-fn result(app: &NodeApp, action_id: &str) -> Option<ActionResult> {
+pub(super) fn result(app: &NodeApp, action_id: &str) -> Option<ActionResult> {
     app.query_actions(&ActionQuery {
         action_id: Some(action_id.to_owned()),
         ..ActionQuery::default()
@@ -389,7 +409,7 @@ fn result(app: &NodeApp, action_id: &str) -> Option<ActionResult> {
 }
 
 /// Waits for `action_id` to finish. Returns the final result and the progress values seen.
-async fn settle(app: &NodeApp, action_id: &str) -> (ActionResult, Vec<u16>) {
+pub(super) async fn settle(app: &NodeApp, action_id: &str) -> (ActionResult, Vec<u16>) {
     let deadline = Instant::now() + std::time::Duration::from_secs(20);
     let mut progress = Vec::new();
     loop {
@@ -412,7 +432,7 @@ async fn settle(app: &NodeApp, action_id: &str) -> (ActionResult, Vec<u16>) {
     }
 }
 
-fn update_request(
+pub(super) fn update_request(
     action_id: &str,
     link: &str,
     blob: &str,
@@ -439,7 +459,7 @@ fn update_request(
     request
 }
 
-fn link_request(action_id: &str, name: &str, link: &str) -> ActionRequest {
+pub(super) fn link_request(action_id: &str, name: &str, link: &str) -> ActionRequest {
     ActionRequest::new(
         action_id,
         ActionTarget::Node(NodeId::new(NODE)),
@@ -469,7 +489,7 @@ async fn setup(
     (app, device, gateway, link_name, dir)
 }
 
-fn output_text(result: &ActionResult, key: &str) -> Option<String> {
+pub(super) fn output_text(result: &ActionResult, key: &str) -> Option<String> {
     match result.output.get(key) {
         Some(TypedConfigValue::String(value)) => Some(value.clone()),
         _ => None,
@@ -650,19 +670,6 @@ async fn firmware_requests_are_refused_before_a_transfer_starts() {
     assert!(matches!(
         settle(&app, "not-running").await.0.state,
         ActionState::Rejected { reason } if reason.contains("not running")
-    ));
-
-    // A CAN link registers a slot without firmware: the job is refused as such.
-    app.link_can_slot_open("can:vcan0");
-    app.run_action(
-        update_request("on-can", "can:vcan0", "app-1-3", "1.3", None),
-        "test",
-    )
-    .expect("accepted");
-    assert!(matches!(
-        settle(&app, "on-can").await.0.state,
-        ActionState::Rejected { reason }
-            if reason == "firmware transfer is not supported on CAN links yet"
     ));
 
     // Release is refused for a device the node has never seen on the link.

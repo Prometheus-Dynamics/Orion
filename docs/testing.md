@@ -89,6 +89,7 @@ cannot be loaded, the step says so and the test skips. Locally, the same command
 sudo modprobe vcan
 sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
 cargo test -p orion-node --features link-gateway --lib can_gateway_on_vcan0 -- --ignored
+cargo test -p orion-node --features link-gateway --lib can_firmware_on_vcan0 -- --ignored
 ```
 
 ## Peer Discovery

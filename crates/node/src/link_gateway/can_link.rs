@@ -1,9 +1,20 @@
 //! The task serving one CAN bus (many devices, `HostBus`), over any [`CanIo`] socket.
+//!
+//! Besides the bus's traffic, the task takes device actions, firmware jobs and the released
+//! devices from the node (`link.release` / `link.attach`). Release is per device: a released device
+//! loses its session (nothing is routed to it, and what it sends is dropped) and its providers
+//! become unavailable; the other devices on the bus are not affected. A firmware job runs per
+//! device, so transfers to different devices can run at once.
 
 use super::CanLinkConfig;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, REOPEN_DELAY};
-use orion_link::host::{ActionSendError, BusFrame, HostBus, HostConfig};
+use super::firmware::{DeviceSeen, FirmwareJob};
+use crate::actions::ActionOutcome;
+use crate::app::{CanSlot, FirmwareCommand};
+use orion_link::host::{ActionSendError, BusFrame, HostBus, HostConfig, HostEvent};
+use orion_link::wire::max_chunk_for_frame;
 use orion_link::{Packet, PacketStats};
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::io;
 use std::time::{Duration, Instant};
@@ -11,6 +22,20 @@ use tokio::sync::watch;
 
 /// Retry delay while the socket's transmit queue is full.
 const TX_RETRY: Duration = Duration::from_millis(2);
+
+/// Segments one firmware chunk may take on the bus. A chunk is resent whole when a segment is lost,
+/// and a long one holds the bus from the other devices sharing it.
+const CHUNK_SEGMENTS: usize = 32;
+/// Largest firmware chunk, whatever the segment budget allows (CAN FD).
+const CHUNK_MAX: usize = 256;
+
+/// The firmware chunk length on a bus with `transport`: the most payload that fits
+/// [`CHUNK_SEGMENTS`] segments, less the chunk frame's own overhead, and at most [`CHUNK_MAX`]. The
+/// device's and the frame's limits apply on top, in the driver.
+fn firmware_chunk_len(transport: Packet) -> u16 {
+    let budget = max_chunk_for_frame(CHUNK_SEGMENTS * transport.mtu.payload_len());
+    u16::try_from(budget.min(CHUNK_MAX)).unwrap_or(u16::MAX)
+}
 
 /// One CAN or CAN FD data frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,6 +69,7 @@ pub(super) async fn run<P: CanIo>(
     } else {
         Packet::CLASSIC
     };
+    let chunk_len = firmware_chunk_len(transport);
     let mut bus = HostBus::new(host, config.base_ids(), transport, config.addresses.clone());
     let mut desired = ctx.app.link_desired_changes();
     let mut socket: Option<P> = None;
@@ -52,7 +78,17 @@ pub(super) async fn run<P: CanIo>(
     let mut pending: Option<BusFrame> = None;
     let mut commands = ctx.open_actions();
     let mut commands_open = true;
-    ctx.open_can_slot();
+    let CanSlot {
+        jobs: mut job_commands,
+        released: mut released_set,
+    } = ctx.open_can_slot();
+    let mut jobs_open = true;
+    let mut release_open = true;
+    // The devices this task has applied as released.
+    let mut held: BTreeSet<String> = BTreeSet::new();
+    // What the task knows of each device it has seen (its firmware job replays it on start).
+    let mut seen: BTreeMap<String, DeviceSeen> = BTreeMap::new();
+    let mut running: BTreeMap<String, FirmwareJob> = BTreeMap::new();
 
     loop {
         if socket.is_none() && Instant::now() >= reopen_at {
@@ -92,14 +128,95 @@ pub(super) async fn run<P: CanIo>(
                 }),
                 None => commands_open = false,
             },
+            command = job_commands.recv(), if jobs_open => match command {
+                Some(command) => start_job(
+                    &mut running,
+                    command,
+                    &ctx.name,
+                    &held,
+                    &seen,
+                    chunk_len,
+                ),
+                None => jobs_open = false,
+            },
+            changed = released_set.changed(), if release_open => {
+                if changed.is_err() {
+                    release_open = false;
+                }
+            }
             _ = tick.tick() => {}
+        }
+
+        // Release and attach, as the node's set now says.
+        let wanted: BTreeSet<String> = released_set.borrow().clone();
+        if wanted != held {
+            let newly: Vec<String> = wanted.difference(&held).cloned().collect();
+            held = wanted;
+            for device in newly {
+                if let Some(address) = bus.address_of(&device) {
+                    // The session goes: nothing is routed to the device until it is attached.
+                    bus.forget(address);
+                    let _ = ctx.handle(HostEvent::DeviceLost {
+                        device_name: device.clone(),
+                    });
+                    if pending
+                        .as_ref()
+                        .is_some_and(|frame| frame.address == address)
+                    {
+                        pending = None;
+                    }
+                }
+                seen.remove(&device);
+                if let Some(job) = running.remove(&device) {
+                    job.finish(ActionOutcome::failed(
+                        "device released during the firmware transfer",
+                    ));
+                }
+            }
         }
 
         bus.poll(ctx.now_ms());
         while let Some(event) = bus.next_event() {
             let address = event.address;
+            if let Some(device) = event_device(&event.event)
+                && held.contains(device)
+            {
+                // A released device gets no session: its traffic is dropped, and a new session it
+                // opens (its hello) is dropped the same way until it is attached.
+                bus.forget(address);
+                continue;
+            }
+            if let Some(device) = event_device(&event.event) {
+                seen.entry(device.to_owned())
+                    .or_default()
+                    .on_event(&event.event);
+            }
+            for job in running.values_mut() {
+                job.on_event(&event.event);
+            }
             if let LeaseAction::Set(leases) = ctx.handle(event.event) {
                 bus.set_leases(address, leases);
+            }
+        }
+
+        // Firmware jobs: one step each; a finished job ends its action, and a handoff releases its
+        // device (its bootloader owns the bus now).
+        let now = ctx.now_ms();
+        let mut ended = Vec::new();
+        for (device, job) in &mut running {
+            let address = bus.address_of(device);
+            if let Some(end) = job.drive(now, |request| {
+                address.is_some_and(|address| bus.send_xfer(address, request))
+            }) {
+                ended.push((device.clone(), end));
+            }
+        }
+        for (device, end) in ended {
+            if let Some(job) = running.remove(&device) {
+                if end.handoff {
+                    let _ = ctx.app.link_set_device_released(&ctx.name, &device, true);
+                }
+                job.finish(end.outcome);
             }
         }
         if refresh || Instant::now() >= lease_refresh_at {
@@ -154,8 +271,55 @@ pub(super) async fn run<P: CanIo>(
         ctx.publish_status();
     }
     drop(socket);
+    for job in std::mem::take(&mut running).into_values() {
+        job.finish(ActionOutcome::failed(
+            "link closed before the firmware transfer finished",
+        ));
+    }
     update_stats(&mut ctx, &bus);
     ctx.close();
+}
+
+/// Accepts a firmware job for its device, or refuses it: a released device, a transfer to the
+/// device already running, or a device that is not connected now (the job does not wait for one).
+fn start_job(
+    running: &mut BTreeMap<String, FirmwareJob>,
+    mut command: FirmwareCommand,
+    link: &str,
+    held: &BTreeSet<String>,
+    seen: &BTreeMap<String, DeviceSeen>,
+    chunk_len: u16,
+) {
+    let device = command.device.clone();
+    let busy = running.contains_key(&device);
+    let reason = if held.contains(&device) {
+        format!("device `{device}` on link {link} is released; run link.attach first")
+    } else if busy {
+        format!("a firmware transfer to `{device}` is already running on link {link}")
+    } else if let Some(device_seen) = seen.get(&device).filter(|seen| seen.is_connected(&device)) {
+        command.driver.set_chunk_len(chunk_len);
+        running.insert(device, FirmwareJob::start(command, device_seen));
+        return;
+    } else {
+        format!("device `{device}` is not connected on link {link}")
+    };
+    command.reject(reason);
+}
+
+/// The device an event is about, if any.
+fn event_device(event: &HostEvent) -> Option<&str> {
+    match event {
+        HostEvent::DeviceConnected { device_name, .. }
+        | HostEvent::ProviderState { device_name, .. }
+        | HostEvent::Status { device_name, .. }
+        | HostEvent::DeviceLost { device_name }
+        | HostEvent::DeviceInfo { device_name, .. }
+        | HostEvent::Xfer { device_name, .. }
+        | HostEvent::ActionResult { device_name, .. }
+        | HostEvent::LeasesTooLarge { device_name, .. } => Some(device_name.as_str()),
+        HostEvent::DeviceRejected { device_name, .. } => device_name.as_deref(),
+        _ => None,
+    }
 }
 
 fn update_stats(ctx: &mut LinkContext, bus: &HostBus) {

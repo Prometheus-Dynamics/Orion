@@ -16,18 +16,18 @@ use tokio::task::JoinHandle;
 
 /// A broadcast bus: every frame sent on one port is received by all other ports.
 #[derive(Default)]
-struct MemoryBus {
+pub(super) struct MemoryBus {
     ports: Mutex<Vec<mpsc::UnboundedSender<CanFrame>>>,
 }
 
-struct MemoryPort {
+pub(super) struct MemoryPort {
     index: usize,
     bus: Arc<MemoryBus>,
     rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<CanFrame>>,
 }
 
 impl MemoryBus {
-    fn port(self: &Arc<Self>) -> MemoryPort {
+    pub(super) fn port(self: &Arc<Self>) -> MemoryPort {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut ports = self.ports.lock().expect("bus lock");
         ports.push(tx);

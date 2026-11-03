@@ -341,6 +341,14 @@ impl FirmwareTransfer {
         }))
     }
 
+    /// Sets the largest chunk the host asks for. The device's limit and the frame's limit still
+    /// apply on top (see [`FirmwareTransfer::poll`]); a transport with a segment budget sets this
+    /// so a chunk never spans more CAN frames than the budget allows. Call it before the transfer
+    /// starts.
+    pub fn set_chunk_len(&mut self, chunk_len: u16) {
+        self.plan.chunk_len = chunk_len.max(1);
+    }
+
     /// Replaces the timing and retry limits.
     #[must_use]
     pub fn with_config(mut self, config: DriverConfig) -> Self {
