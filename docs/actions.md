@@ -8,7 +8,7 @@ local provider and executor clients (out of process).
 
 ## Wire shapes
 
-`orion-control-plane` (`no_std` + `alloc`), control protocol v4:
+`orion-control-plane` (`no_std` + `alloc`), control protocol 1:
 
 ```rust
 pub enum ActionTarget {

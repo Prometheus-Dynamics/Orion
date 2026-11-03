@@ -117,7 +117,7 @@ fn desired_state() -> DesiredClusterState {
             .holder_workload(WorkloadId::new("workload.pose"))
             .build(),
     );
-    // Per-object versions: a stamped node record and a tombstone (control protocol v3).
+    // Per-object versions: a stamped node record and a tombstone (control protocol 1).
     let node = desired.nodes[&NodeId::new("node-a")].clone();
     desired.apply_stamped(
         DesiredStateMutation::PutNode(node),

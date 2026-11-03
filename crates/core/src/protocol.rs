@@ -17,40 +17,15 @@ use core::fmt;
 /// the same change. Peers with different values refuse to talk to each other with a
 /// [`ControlProtocolMismatch`] error instead of failing on undecodable archives.
 ///
-/// History:
-/// - `1`: implicit, unversioned layout before the preamble existed.
-/// - `2`: `NodeObservabilitySnapshot::resource_usage` section; version preamble/header added.
-/// - `3`: `NodeRecord::clock` and `NodeObservabilitySnapshot::clock` (`NodeClockFacts`);
-///   `ResourceOwnershipMode::ExclusiveOwnerPublishesDerived` removed; volatile status lane messages (`PublishStatus`, `QueryStatus`, `WatchStatus`, `Status`,
-///   `ClientEventKind::Status`) and the `observed_persistence` / `status_lane` resource-usage
-///   sections.
-///   Per-object HLC versions (`DesiredClusterState::stamps`/`tombstones`,
-///   `DesiredStateSummary::stamps`/`tombstones`, `MutationBatch::stamps`, `HlcTimestamp`,
-///   `DesiredObjectStamps`), `NodeObservabilitySnapshot::desired_merge`; `orion+tcp` peer frames.
-///   Peer discovery and enrollment messages (`QueryDiscovery`, `Discovery`,
-///   `EnrollDiscoveredPeer`, `RemovePeer`, `EnrollmentHello`/`Challenge`/`Confirm`) and
-///   `NodeObservabilitySnapshot::discovery`.
-/// - `4`: host facts (`NodeRecord::host`, `NodeHostFacts`, `NodeObservabilitySnapshot::host_facts`,
-///   `HostFacts`, `HostMetricsSample`, `HostTemperature`, `StatusSubject::Node`); generic actions
-///   (`RunAction`, `QueryActions`, `WatchActions`, `WatchActionRequests`, `ReportActionResult`,
-///   `ActionResults`, `ClientEventKind::ActionRequest`/`ActionResults`, `ActionRequest`,
-///   `ActionResult`, `ActionState`, `ActionTarget`, `ActionQuery`,
-///   `HttpResponsePayload::Actions`); link gateway counters in
-///   `NodeObservabilitySnapshot::links` (`LinkStatusSnapshot`). Still unreleased, so it also
-///   carries CPU utilisation and temperatures in `HostMetricsSnapshot` / `HostMetricsSample` and
-///   supplementary groups in `UnixPeerIdentity`, `StateWatch::include_observed`, and
-///   `TypedConfigValue::F64` (same archived size, so the fingerprint did not move; the canonical
-///   encoding fixture pins it).
-/// - `5`: remote push sessions (`ControlMessage::OpenSession`, `SessionOpen`, `SessionWelcome`,
-///   `HttpResponsePayload::Session`); live streams (`DeclareStream`, `PublishSamples`,
-///   `SubscribeStream`, `UnsubscribeStream`, `ClientEventKind::StreamCatalog` / `StreamData` /
-///   `StreamReset` / `StreamDemand` and their types, `NodeResourceUsageSnapshot::streams`).
-/// - `6`: `ActionState::Cancelled`, the terminal state of a long-running job stopped by its
-///   `<name>.cancel` companion action (`docs/actions.md`, "Long-running jobs").
-/// - `7`: blob push (`docs/blobs.md`): `ControlMessage::BeginBlob`, `WriteBlobChunk`, `CommitBlob`,
-///   `QueryBlobs`, `DeleteBlob`, `Blob`, `Blobs`; `BlobBegin`, `BlobChunk`, `BlobState`,
-///   `BlobStatus`.
-pub const CONTROL_PROTOCOL_VERSION: u16 = 7;
+/// Protocol 1, the first released control-protocol version. It covers: the cluster state envelope
+/// (desired, observed, and applied sections with per-object HLC stamps and tombstones); the local
+/// IPC and HTTP control surface (client sessions, state watches, status lanes, generic actions and
+/// their results, remote push sessions, live streams, and blob push); peer sync and the `orion+tcp`
+/// frames; peer discovery and enrollment (`QueryDiscovery`, `EnrollmentHello`/`Challenge`/`Confirm`);
+/// host facts and node observability (resource usage, link gateway counters, host metrics).
+///
+/// Every change to a protocol type after a release bumps this number and the layout fingerprint.
+pub const CONTROL_PROTOCOL_VERSION: u16 = 1;
 
 /// Fingerprint of the archived layout of the control-protocol types at
 /// [`CONTROL_PROTOCOL_VERSION`].
@@ -91,7 +66,7 @@ impl fmt::Display for ControlProtocolMismatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Orion control protocol mismatch: this side speaks v{}, the remote side speaks v{}; \
+            "Orion control protocol mismatch: this side speaks protocol {}, the remote side speaks protocol {}; \
              upgrade orionctl, client libraries, and orion-node together so they share the same \
              protocol version",
             self.local, self.remote

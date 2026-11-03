@@ -23,8 +23,8 @@ pub enum ClientError {
     },
     /// orion-node speaks a different control-protocol wire version than this client build.
     #[error(
-        "incompatible Orion control protocol: this client speaks v{local} but orion-node speaks \
-         v{remote}; upgrade orionctl/client libraries and orion-node together (they must come \
+        "incompatible Orion control protocol: this client speaks protocol {local} but orion-node speaks \
+         protocol {remote}; upgrade orionctl/client libraries and orion-node together (they must come \
          from the same Orion release)"
     )]
     ProtocolMismatch { local: u16, remote: u16 },
@@ -63,7 +63,7 @@ mod tests {
             }
         );
         let message = error.to_string();
-        assert!(message.contains("this client speaks v2 but orion-node speaks v3"));
+        assert!(message.contains("this client speaks protocol 2 but orion-node speaks protocol 3"));
         assert!(message.contains("upgrade orionctl"));
     }
 }

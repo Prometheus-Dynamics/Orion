@@ -12,7 +12,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
 /// Version of the shared-key enrollment handshake.
-pub const ENROLLMENT_PROTOCOL_VERSION: u16 = 2;
+pub const ENROLLMENT_PROTOCOL_VERSION: u16 = 1;
 
 /// Trust state of a discovered peer, as seen by the local node.
 #[derive(

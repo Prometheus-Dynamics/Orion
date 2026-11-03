@@ -193,8 +193,7 @@ This adds control messages and archived types, so `CONTROL_PROTOCOL_VERSION` goe
   `StreamBatch`, `StreamReset`, `StreamGap`.
 - **Observability:** a `streams` section, plus the session counters.
 
-Mixed versions aren't supported, as today. A v5 client talking to a v4 node keeps the polling
-watches, because `OperatorWelcome` carries the version. Downstreams (each product's orion-node
+Mixed versions aren't supported: a peer that announces another control protocol version is refused. Downstreams (each product's orion-node
 artifact and operator console) move to the same rev together.
 
 ## 5. Tests and measurement

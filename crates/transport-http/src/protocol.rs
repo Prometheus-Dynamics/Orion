@@ -63,7 +63,7 @@ pub(crate) fn check_response_protocol(
         ))),
         None if status == 200 => Err(HttpTransportError::DecodeResponse(format!(
             "response is missing the {CONTROL_PROTOCOL_HTTP_HEADER} header; the server is not an \
-             orion-node speaking control protocol v{CONTROL_PROTOCOL_VERSION}"
+             orion-node speaking control protocol {CONTROL_PROTOCOL_VERSION}"
         ))),
         None => Ok(()),
     }

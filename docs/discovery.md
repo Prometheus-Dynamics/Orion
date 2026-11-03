@@ -100,7 +100,7 @@ the trust store:
 ```sh
 $ orionctl get discovered-peers --socket /run/orion/control.sock
 discovery backend=mdns cluster=lab local_fingerprint=sha256:3f9a... enrollment_key=false discovered=1 enrolled=0 ...
-peer node=node-b state=discovered fingerprint=sha256:91c2... protocol=v3 urls=orion+tcp://192.0.2.2:9200 last_seen_ms_ago=812 expires_in_ms=119188 last_enrollment_error=-
+peer node=node-b state=discovered fingerprint=sha256:91c2... protocol=1 urls=orion+tcp://192.0.2.2:9200 last_seen_ms_ago=812 expires_in_ms=119188 last_enrollment_error=-
 ```
 
 `-o json|yaml|toml` prints the full `DiscoverySnapshot` including the public keys.
@@ -369,7 +369,7 @@ the audit log (`peer_enrolled`, `peer_removed`).
   (`orion_auth::enrollment`) and the fingerprint (`orion_auth::crypto::key_fingerprint`) live in
   `orion-auth`, shared with the remote operator client, which can browse `_orion._tcp` with its
   `discovery` feature.
-- Control messages (control protocol v3): `QueryDiscovery` / `Discovery`, `EnrollDiscoveredPeer`,
+- Control messages (control protocol 1): `QueryDiscovery` / `Discovery`, `EnrollDiscoveredPeer`,
   `RemovePeer` on the local socket, and `EnrollmentHello` / `EnrollmentChallenge` /
   `EnrollmentConfirm` between peers (`HttpResponsePayload::EnrollmentChallenge`). `orion-client`
   has `LocalControlPlaneClient::{query_discovery, enroll_discovered_peer, remove_peer}`.

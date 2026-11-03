@@ -18,7 +18,7 @@ node/<id>`, `orionctl describe node`, Prometheus) without churning records or th
 
 ## Wire shapes
 
-`orion-control-plane` (`no_std` + `alloc`), control protocol v4:
+`orion-control-plane` (`no_std` + `alloc`), control protocol 1:
 
 ```rust
 pub struct NodeHostFacts {
@@ -256,13 +256,3 @@ only the model crate; `orion_node::HostFactsSource` re-exports it.
 | `orion_node_host_temperature_celsius` | `node_id`, `sensor` | One sample per sensor. |
 | `orion_node_host_metric` | `node_id`, `key` | Numeric extra metrics (`Int`, `UInt`, `Bool`). |
 | `orion_host_uptime_seconds`, `orion_host_load1/5/15`, `orion_host_memory_total_bytes`, `orion_host_memory_available_bytes` | `node_id` | The existing host section; read from `/proc` at scrape time, filled from the latest host-facts sample when `/proc` does not report them. |
-
-## Upgrading from protocol v3
-
-`NodeRecord::host` changes the archived layout of node records, so control protocol v4 refuses v3
-peers, `orionctl` builds and client libraries with a `ProtocolMismatch` error; upgrade them
-together. Persisted state directories are migrated on the first start: snapshot format 4 is
-rewritten as format 5 with every desired and observed record, stamp, tombstone, mutation-history
-batch and revision kept (node records get `host: None` until the node samples again). The old
-files are kept in `<state dir>/legacy-format-4/`, an interrupted migration restarts from there, and
-a directory that cannot be decoded fails startup without overwriting anything.

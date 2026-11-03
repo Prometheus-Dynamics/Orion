@@ -138,7 +138,7 @@ impl NodeApp {
                 })?;
             if self.classify_discovered_peer(&peer) == DiscoveredPeerState::Incompatible {
                 return Err(NodeError::Config(format!(
-                    "peer {} speaks control protocol v{}; upgrade it before enrolling",
+                    "peer {} speaks control protocol {}; upgrade it before enrolling",
                     request.node_id, peer.advertisement.control_protocol_version
                 )));
             }

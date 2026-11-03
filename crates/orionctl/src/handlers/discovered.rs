@@ -172,7 +172,7 @@ fn render_discovery_summary(snapshot: &DiscoverySnapshot, now_ms: u64) -> String
 
 fn render_peer(peer: &DiscoveredPeerRecord, now_ms: u64) -> String {
     format!(
-        "peer node={} state={} fingerprint={} protocol=v{} urls={} last_seen_ms_ago={} \
+        "peer node={} state={} fingerprint={} protocol={} urls={} last_seen_ms_ago={} \
          expires_in_ms={} last_enrollment_error={}\n",
         peer.node_id,
         peer.state,
@@ -212,7 +212,7 @@ mod tests {
                 public_key_hex: PublicKeyHex::new("00".repeat(32)),
                 key_fingerprint: "sha256:bb".into(),
                 peer_urls: vec![PeerBaseUrl::new("orion+tcp://192.0.2.2:9200")],
-                control_protocol_version: 3,
+                control_protocol_version: 1,
                 state: DiscoveredPeerState::Discovered,
                 first_seen_at_ms: 1_000,
                 last_seen_at_ms: 1_500,
@@ -224,7 +224,7 @@ mod tests {
         assert!(text.starts_with("discovery backend=mdns cluster=lab local_fingerprint=sha256:aa"));
         assert!(text.contains("enrollment_attempts=2"));
         assert!(text.contains(
-            "peer node=node-b state=discovered fingerprint=sha256:bb protocol=v3 \
+            "peer node=node-b state=discovered fingerprint=sha256:bb protocol=1 \
              urls=orion+tcp://192.0.2.2:9200 last_seen_ms_ago=500 expires_in_ms=1000"
         ));
         let disabled = render_discovery_summary(&DiscoverySnapshot::default(), 0);

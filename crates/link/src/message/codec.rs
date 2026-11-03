@@ -8,8 +8,8 @@ use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{
-    Hello, LeaseRecord, Message, MessageError, ProviderRecord, ProviderState, RejectReason,
-    ResourceRecord, StatusEntry, Welcome, kind,
+    ActionRequest, ActionResult, Hello, LeaseRecord, Message, MessageError, ProviderRecord,
+    ProviderState, RejectReason, ResourceRecord, StatusEntry, Welcome, kind,
 };
 use crate::frame::{self, FrameHeader, FrameView};
 
@@ -56,6 +56,14 @@ struct LeasesBody {
 struct StatusBody {
     #[serde(deserialize_with = "bounded_vec")]
     entries: Vec<StatusEntry>,
+}
+
+/// Borrowed [`ActionRequest`] (same wire format).
+#[derive(Serialize)]
+struct ActionRequestRef<'a> {
+    id: u32,
+    name: &'a str,
+    payload: &'a [u8],
 }
 
 /// Borrowed [`ProviderState`] (same wire format).
@@ -135,6 +143,26 @@ pub fn encode_leases(
     encode_with(kind::LEASES, seq, leases, buf)
 }
 
+/// Encodes a [`kind::ACTION_REQUEST`] frame from borrowed fields, returning the frame length.
+///
+/// # Errors
+///
+/// [`MessageError::BufferTooSmall`] if the frame does not fit in `buf`.
+pub fn encode_action_request(
+    id: u32,
+    name: &str,
+    payload: &[u8],
+    seq: u16,
+    buf: &mut [u8],
+) -> Result<usize, MessageError> {
+    encode_with(
+        kind::ACTION_REQUEST,
+        seq,
+        &ActionRequestRef { id, name, payload },
+        buf,
+    )
+}
+
 /// Encodes a [`kind::STATUS`] frame from borrowed entries, returning the frame length.
 ///
 /// # Errors
@@ -181,6 +209,8 @@ impl Message {
             Self::Ping { .. } => kind::PING,
             Self::Pong { .. } => kind::PONG,
             Self::Status(_) => kind::STATUS,
+            Self::ActionRequest(_) => kind::ACTION_REQUEST,
+            Self::ActionResult(_) => kind::ACTION_RESULT,
             Self::Unknown(kind) => *kind,
         }
     }
@@ -205,6 +235,10 @@ impl Message {
             Self::Leases(leases) => encode_leases(leases, seq, buf),
             Self::Ping { now_ms } | Self::Pong { now_ms } => encode_with(kind, seq, now_ms, buf),
             Self::Status(entries) => encode_status(entries, seq, buf),
+            Self::ActionRequest(body) => {
+                encode_action_request(body.id, &body.name, &body.payload, seq, buf)
+            }
+            Self::ActionResult(body) => encode_with(kind, seq, body, buf),
             Self::Unknown(_) => Err(MessageError::Encode),
         }
     }
@@ -244,6 +278,11 @@ impl Message {
                 now_ms: decode_body(kind, payload)?,
             },
             kind::STATUS => Self::Status(decode_status(payload)?),
+            kind::ACTION_REQUEST => {
+                Self::ActionRequest(decode_body::<ActionRequest>(kind, payload)?)
+            }
+            kind::ACTION_RESULT => Self::ActionResult(decode_body::<ActionResult>(kind, payload)?),
+            // Firmware-transfer kinds are reserved; they decode as unknown like any other kind.
             other => Self::Unknown(other),
         })
     }

@@ -144,7 +144,7 @@ pub use service::{
     ControlPrincipal, ControlRequest, ControlRequestBody, ControlRequestContext, ControlResponse,
     ControlSource, ControlSurface,
 };
-pub use storage::{NodeStorage, StateMigrationReport};
+pub use storage::{NodeStorage, UnsupportedSnapshotFormat};
 pub use transport_security::{
     ManagedClientTransportSecurity, ManagedNodeTransportSurface, ManagedServerTransportSecurity,
     ManagedTransportProtocol, NodeTransportSecurityManager,

@@ -20,9 +20,9 @@ use orion_control_plane::{
 use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, WorkloadId};
 use orion_link::LINK_PROTOCOL_VERSION;
 use orion_link::message::{
-    Hello, LeaseRecord, Message, MessageError, ProviderRecord, ProviderState, RejectReason,
-    ResourceRecord, Roles, StatusEntry, Welcome, encode_leases, encode_provider_state,
-    encode_status, kind,
+    ActionRequest, ActionResult, Hello, LeaseRecord, LinkActionState, Message, MessageError,
+    ProviderRecord, ProviderState, RejectReason, ResourceRecord, Roles, StatusEntry, Welcome,
+    encode_action_request, encode_leases, encode_provider_state, encode_status, kind,
 };
 
 const FIXTURE: &str = "tests/fixtures/link_encodings.txt";
@@ -130,6 +130,46 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
         ("pong", Message::Pong { now_ms: 1_700_000 }),
         // Additive in version 1: appended so the earlier entries keep their sequence numbers.
         ("status", Message::Status(status_entries())),
+        (
+            "action_request",
+            Message::ActionRequest(ActionRequest {
+                id: 0x0000_002A,
+                name: "locate".into(),
+                payload: vec![0x01, 0x80, 0x04],
+            }),
+        ),
+        (
+            "action_result.running",
+            Message::ActionResult(ActionResult {
+                id: 0x0000_002A,
+                state: LinkActionState::Running,
+                payload: Vec::new(),
+            }),
+        ),
+        (
+            "action_result.succeeded",
+            Message::ActionResult(ActionResult {
+                id: 0x0000_002A,
+                state: LinkActionState::Succeeded,
+                payload: b"ok".to_vec(),
+            }),
+        ),
+        (
+            "action_result.failed",
+            Message::ActionResult(ActionResult {
+                id: 0x0000_002B,
+                state: LinkActionState::Failed,
+                payload: b"sensor timeout".to_vec(),
+            }),
+        ),
+        (
+            "action_result.rejected",
+            Message::ActionResult(ActionResult {
+                id: 0x0000_002C,
+                state: LinkActionState::Rejected,
+                payload: b"busy".to_vec(),
+            }),
+        ),
     ]
 }
 
@@ -203,11 +243,54 @@ fn kind_numbers_are_stable() {
             kind::EXECUTOR_STATE,
             kind::WORKLOADS,
             kind::STATUS,
+            kind::ACTION_REQUEST,
+            kind::ACTION_RESULT,
         ],
         [
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x13, 0x14
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x13, 0x14, 0x30, 0x31
         ]
     );
+    assert_eq!((kind::FIRMWARE_FIRST, kind::FIRMWARE_LAST), (0x20, 0x2F));
+    assert!(kind::is_firmware(0x20) && kind::is_firmware(0x2F));
+    assert!(!kind::is_firmware(0x1F) && !kind::is_firmware(0x30));
+}
+
+#[test]
+fn action_messages_round_trip_and_borrowed_encoder_matches_owned() {
+    let request = ActionRequest {
+        id: 7,
+        name: "restart-unit".into(),
+        payload: vec![1, 2, 3],
+    };
+    let mut buf = vec![0u8; 2048];
+    let len = encode_action_request(7, "restart-unit", &[1, 2, 3], 9, &mut buf).unwrap();
+    assert_eq!(
+        &buf[..len],
+        encode(&Message::ActionRequest(request.clone()), 9).as_slice()
+    );
+    let (header, decoded) = Message::decode_frame(&buf[..len]).unwrap();
+    assert_eq!(header.kind, kind::ACTION_REQUEST);
+    assert_eq!(decoded, Message::ActionRequest(request));
+
+    let result = ActionResult {
+        id: 7,
+        state: LinkActionState::Failed,
+        payload: b"no".to_vec(),
+    };
+    let frame = encode(&Message::ActionResult(result.clone()), 3);
+    let (header, decoded) = Message::decode_frame(&frame).unwrap();
+    assert_eq!(header.kind, kind::ACTION_RESULT);
+    assert_eq!(decoded, Message::ActionResult(result));
+}
+
+#[test]
+fn firmware_range_decodes_as_unknown_until_implemented() {
+    for kind in [kind::FIRMWARE_FIRST, 0x25, kind::FIRMWARE_LAST] {
+        assert_eq!(
+            Message::decode_payload(kind, b"chunk").unwrap(),
+            Message::Unknown(kind)
+        );
+    }
 }
 
 #[test]

@@ -31,10 +31,9 @@ const MUTATION_HISTORY_BASELINE_FILE: &str = "mutation-history-baseline.rkyv";
 pub(crate) const MAINTENANCE_STATE_FILE: &str = "maintenance-state.rkyv";
 const ARTIFACT_METADATA_FILE: &str = "metadata.rkyv";
 const ARTIFACT_PAYLOAD_FILE: &str = "payload.bin";
-/// Snapshot format. `4`: per-object HLC stamps and tombstones in the desired state, stamped
-/// mutation history. `5`: `NodeRecord::host` (control protocol v4). Format `3` and `4` directories
-/// are migrated by [`NodeStorage::migrate_legacy_state`].
-pub(crate) const SNAPSHOT_FORMAT_VERSION: u32 = 5;
+/// Snapshot format of the released layout. A state directory holding any other format is not read:
+/// its files are moved aside (see [`NodeStorage::move_unsupported_format_aside`]).
+pub(crate) const SNAPSHOT_FORMAT_VERSION: u32 = 1;
 /// Written while the node runs in safe mode (`docs/update-recovery.md`); holds the cause.
 const SAFE_MODE_MARKER_FILE: &str = "safe-mode.txt";
 /// Files that make up the persisted cluster state. Quarantine moves all of them aside together.
@@ -49,11 +48,8 @@ pub(crate) const CLUSTER_STATE_FILES: [&str; 6] = [
 
 #[cfg(feature = "link-gateway")]
 mod link_devices;
-mod migrate_v3;
-mod migrate_v4;
 #[cfg(feature = "link-gateway")]
 pub(crate) use link_devices::LinkDeviceRecord;
-pub use migrate_v3::StateMigrationReport;
 
 #[derive(Clone, Debug, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct DesiredStateSectionCounts {
@@ -98,6 +94,15 @@ pub struct PersistedSnapshotSections {
     pub manifest: SnapshotManifest,
     pub observed: ObservedClusterState,
     pub applied: AppliedClusterState,
+}
+
+/// A snapshot manifest this build does not read, see [`NodeStorage::unsupported_snapshot_format`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnsupportedSnapshotFormat {
+    /// The manifest decodes and names this format.
+    Found(u32),
+    /// The manifest does not decode with the current layout.
+    Undecodable,
 }
 
 #[derive(Clone, Debug)]
@@ -165,7 +170,7 @@ impl NodeStorage {
         })?;
         if manifest.format_version != SNAPSHOT_FORMAT_VERSION {
             return Err(NodeError::Storage(format!(
-                "unsupported snapshot format version {}",
+                "snapshot format {} is not the format this orion-node reads ({SNAPSHOT_FORMAT_VERSION})",
                 manifest.format_version
             )));
         }
@@ -366,24 +371,42 @@ impl NodeStorage {
         self.atomic_write(&self.maintenance_state_path(), &bytes)
     }
 
-    /// The snapshot format of a manifest this build cannot read because it is newer. `None` when
-    /// there is no manifest, it does not decode, or its format is one this build reads.
-    pub fn newer_snapshot_format(&self) -> Result<Option<u32>, NodeError> {
+    /// The snapshot manifest of a state directory this build does not read: one whose format is
+    /// not the current format (`SNAPSHOT_FORMAT_VERSION`), or one that does not decode at all (an older layout or a
+    /// damaged file). `None` when there is no manifest or its format is the current one.
+    pub fn unsupported_snapshot_format(
+        &self,
+    ) -> Result<Option<UnsupportedSnapshotFormat>, NodeError> {
         let path = self.snapshot_manifest_path();
         if !path.exists() {
             return Ok(None);
         }
         let bytes = std::fs::read(&path).map_err(|err| NodeError::Storage(err.to_string()))?;
-        Ok(decode_from_slice::<SnapshotManifest>(&bytes)
-            .ok()
-            .map(|manifest| manifest.format_version)
-            .filter(|version| *version > SNAPSHOT_FORMAT_VERSION))
+        Ok(match decode_from_slice::<SnapshotManifest>(&bytes) {
+            Ok(manifest) if manifest.format_version == SNAPSHOT_FORMAT_VERSION => None,
+            Ok(manifest) => Some(UnsupportedSnapshotFormat::Found(manifest.format_version)),
+            Err(_) => Some(UnsupportedSnapshotFormat::Undecodable),
+        })
     }
 
     /// Moves the named state files into a fresh `quarantine-<unix ms>/` directory under the state
     /// root. Files are renamed, never deleted, and absent names are skipped. Returns the directory
     /// when at least one file moved.
     pub fn quarantine_files(&self, names: &[&str]) -> Result<Option<PathBuf>, NodeError> {
+        self.move_files_aside("quarantine", names)
+    }
+
+    /// Moves the cluster state files of a state directory in an unsupported snapshot format into a
+    /// fresh `unsupported-format-<unix ms>/` directory. Nothing is deleted; the node then starts
+    /// with an empty desired state.
+    pub fn move_unsupported_format_aside(
+        &self,
+        names: &[&str],
+    ) -> Result<Option<PathBuf>, NodeError> {
+        self.move_files_aside("unsupported-format", names)
+    }
+
+    fn move_files_aside(&self, prefix: &str, names: &[&str]) -> Result<Option<PathBuf>, NodeError> {
         let present: Vec<&str> = names
             .iter()
             .copied()
@@ -397,7 +420,7 @@ impl NodeStorage {
             .map(|elapsed| elapsed.as_millis() as u64)
             .unwrap_or(0);
         let dir = loop {
-            let candidate = self.root.join(format!("quarantine-{stamp}"));
+            let candidate = self.root.join(format!("{prefix}-{stamp}"));
             if !candidate.exists() {
                 break candidate;
             }
