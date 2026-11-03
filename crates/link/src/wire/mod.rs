@@ -32,8 +32,10 @@ mod views;
 mod records;
 
 #[cfg(feature = "actions")]
+pub(crate) use action::ActionCatalogBody;
+#[cfg(feature = "actions")]
 pub(crate) use action::ActionResultBody;
-pub use action::{ActionRequestView, ActionState, decode_progress};
+pub use action::{ActionRequestView, ActionState, decode_action_cancel, decode_progress};
 pub use codec::{Encode, RawVarint, Reader, Writer, encoded_len, str_from_utf8};
 pub use decode::{LeaseView, Leases, WelcomeView, decode_ack, decode_reject, decode_u64};
 pub use firmware::{
@@ -110,6 +112,14 @@ pub mod kind {
     /// `ActionResult { id, state, payload }`, device → host: the state of the action with that
     /// `id`. Additive in protocol 1.
     pub const ACTION_RESULT: u8 = 0x31;
+    /// `ActionCancel { id }`, host → device: asks the device to stop the action with that `id`. It
+    /// is accepted while the device is busy with that action (the device answers with a final
+    /// `ActionResult`, normally `Cancelled`). Additive in protocol 1.
+    pub const ACTION_CANCEL: u8 = 0x32;
+    /// `ActionCatalog { names }`, device → host: the action names the device handles, declared with
+    /// `DeviceSession::declare_actions` (feature `actions`). Sent after every `Welcome` until the
+    /// host acknowledges it. Additive in protocol 1.
+    pub const ACTION_CATALOG: u8 = 0x33;
 
     /// Whether `kind` lies in the firmware-transfer range reserved by [`FIRMWARE_FIRST`] and
     /// [`FIRMWARE_LAST`].

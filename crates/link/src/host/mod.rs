@@ -182,6 +182,14 @@ pub enum HostEvent {
         /// Negotiated frame limit.
         max_frame: usize,
     },
+    /// The action names the device declared (`DeviceSession::declare_actions`), in this session.
+    /// A device that declares nothing sends no event.
+    ActionCatalog {
+        /// The device that declared them.
+        device_name: String,
+        /// The names, as the device declared them.
+        names: Vec<String>,
+    },
     /// The device reported on an action the host sent it (`HostSession::send_action`). The
     /// gateway matches `id` to its own record of the request.
     ActionResult {
@@ -322,6 +330,17 @@ impl<T: Transport> HostSession<T> {
         payload: &[u8],
     ) -> Result<(), ActionSendError> {
         self.core.send_action(id, name, payload)
+    }
+
+    /// Queues an `ActionCancel` for the request `id` on the connected device. The device accepts
+    /// it while it runs that action and reports the action's final state (normally `Cancelled`).
+    /// A cancel for another id is ignored by the device.
+    ///
+    /// # Errors
+    ///
+    /// As [`HostSession::send_action`].
+    pub fn send_action_cancel(&mut self, id: u32) -> Result<(), ActionSendError> {
+        self.core.send_action_cancel(id)
     }
 
     /// The current lease set.

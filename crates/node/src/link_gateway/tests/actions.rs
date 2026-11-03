@@ -6,9 +6,11 @@ use super::serial::{SimDevice, WAIT, open_pty, serial_link, start};
 use super::*;
 use crate::link_gateway::LinkGatewayHandle;
 use orion::ProviderId;
+use orion::control_plane::LinkDeviceActions;
 use orion::control_plane::{
     ActionQuery, ActionRequest, ActionResult, ActionState, ActionTarget, TypedConfigValue,
 };
+use orion_link::device::DeviceEvent;
 use orion_link::message::{decode_action_map, encode_action_map};
 use orion_link::wire::ActionState as DeviceState;
 use std::collections::BTreeMap;
@@ -209,4 +211,179 @@ async fn action_for_an_unknown_provider_is_refused_at_once() {
         .run_action(provider_request("nope-1", "locate"), "test")
         .expect("accepted");
     assert!(matches!(accepted.state, ActionState::Rejected { .. }));
+}
+
+/// A job named `flash` that runs until the host cancels it: the device reports `Cancelled` once it
+/// has received the cancel (the device session queues it while the job runs).
+fn spawn_cancellable_job(device: &SimDevice) -> tokio::task::JoinHandle<()> {
+    let shared = device.device.clone();
+    let events = device.events.clone();
+    tokio::spawn(async move {
+        loop {
+            let id = shared
+                .lock()
+                .expect("device lock")
+                .action()
+                .map(|request| request.id);
+            let Some(id) = id else {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                continue;
+            };
+            loop {
+                let cancelled = events
+                    .lock()
+                    .expect("events lock")
+                    .contains(&DeviceEvent::ActionCancelRequested { id });
+                if cancelled {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            shared
+                .lock()
+                .expect("device lock")
+                .report_action(DeviceState::Cancelled, &[])
+                .expect("cancel report accepted");
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_companion_reaches_the_busy_device_and_the_job_ends_cancelled() {
+    let (app, device, gateway) = setup("link-action-cancel").await;
+    let _job = spawn_cancellable_job(&device);
+
+    app.run_action(provider_request("job-1", "flash"), "test")
+        .expect("accepted");
+    assert!(
+        wait_until(WAIT, || device
+            .device
+            .lock()
+            .expect("device lock")
+            .action()
+            .is_some())
+        .await,
+        "the device has the job"
+    );
+    // The companion is an ordinary action on the same target; the node sends it as an
+    // `ActionCancel` for the running job, which the busy device accepts.
+    app.run_action(provider_request("job-1.cancel", "flash.cancel"), "test")
+        .expect("accepted");
+
+    let job = settled(&app, "job-1").await;
+    assert_eq!(job.state, ActionState::Cancelled);
+    let companion = settled(&app, "job-1.cancel").await;
+    assert_eq!(companion.state, ActionState::Succeeded);
+    assert!(device.saw(|e| matches!(e, DeviceEvent::ActionCancelRequested { .. })));
+    gateway.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_without_a_running_job_is_an_ordinary_request_to_the_device() {
+    let (app, device, gateway) = setup("link-action-cancel-idle").await;
+    let _handler = spawn_handler(&device, script);
+
+    app.run_action(
+        provider_request("flash-idle.cancel", "flash.cancel"),
+        "test",
+    )
+    .expect("accepted");
+    let done = settled(&app, "flash-idle.cancel").await;
+    assert_eq!(
+        done.state,
+        ActionState::Rejected {
+            reason: "unknown action".into()
+        },
+        "nothing runs, so the name goes to the device as it is"
+    );
+    assert!(!device.saw(|e| matches!(e, DeviceEvent::ActionCancelRequested { .. })));
+    gateway.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_is_rejected_when_the_job_finishes_first() {
+    let (app, device, gateway) = setup("link-action-cancel-late").await;
+    let _handler = spawn_handler(&device, script);
+
+    // `locate` reports Running, then Succeeded 80 ms later; the cancel arrives in between, and the
+    // handler does not stop for it.
+    app.run_action(
+        provider_request("locate-late", "locate").with_arg("enabled", TypedConfigValue::Bool(true)),
+        "test",
+    )
+    .expect("accepted");
+    // The device has reported `Running` (its request is no longer readable): the job is in flight.
+    assert!(
+        wait_until(WAIT, || result(&app, "locate-late")
+            .is_some_and(|r| matches!(r.state, ActionState::Running { .. })))
+        .await
+    );
+    app.run_action(
+        provider_request("locate-late.cancel", "locate.cancel"),
+        "test",
+    )
+    .expect("accepted");
+
+    let job = settled(&app, "locate-late").await;
+    assert_eq!(job.state, ActionState::Succeeded);
+    let companion = settled(&app, "locate-late.cancel").await;
+    assert_eq!(
+        companion.state,
+        ActionState::Rejected {
+            reason: "the action finished as succeeded before the cancel took effect".into()
+        }
+    );
+    gateway.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_name_the_device_did_not_declare_is_refused_before_it_is_sent() {
+    let (app, device, gateway) = setup("link-action-declared").await;
+    let _handler = spawn_handler(&device, script);
+    device
+        .device
+        .lock()
+        .expect("device lock")
+        .declare_actions(&["locate", "hang"])
+        .expect("names fit");
+    assert!(
+        wait_until(WAIT, || app.link_status().iter().any(|link| link.actions
+            == vec![LinkDeviceActions {
+                device: "imu-board".into(),
+                names: vec!["locate".into(), "hang".into()],
+            }]))
+        .await,
+        "the declared names show in the link status: {:?}",
+        app.link_status()
+    );
+
+    app.run_action(provider_request("frob-2", "frobnicate"), "test")
+        .expect("accepted");
+    let done = settled(&app, "frob-2").await;
+    match done.state {
+        ActionState::Rejected { reason } => {
+            assert!(
+                reason.contains("imu-board")
+                    && reason.ends_with("does not declare action `frobnicate`"),
+                "reason: {reason}"
+            );
+        }
+        other => panic!("expected Rejected, got {other:?}"),
+    }
+    assert!(
+        !device.saw(|e| matches!(e, DeviceEvent::ActionRequested)),
+        "the device never had the request"
+    );
+
+    // A declared name still runs.
+    app.run_action(
+        provider_request("locate-2", "locate").with_arg("enabled", TypedConfigValue::Bool(true)),
+        "test",
+    )
+    .expect("accepted");
+    assert_eq!(
+        settled(&app, "locate-2").await.state,
+        ActionState::Succeeded
+    );
+    gateway.shutdown().await;
 }

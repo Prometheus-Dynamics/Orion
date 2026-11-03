@@ -193,6 +193,7 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
         ReplicatedHostMetrics,
         HostTemperature,
         LinkStatusSnapshot,
+        LinkDeviceActions,
         // records and state
         AppliedClusterState,
         ClusterStateEnvelope,

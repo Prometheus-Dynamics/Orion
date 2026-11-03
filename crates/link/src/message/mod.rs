@@ -32,7 +32,10 @@ use serde::{Deserialize, Serialize};
 pub(crate) use codec::decode_leases;
 #[cfg(feature = "std")]
 pub(crate) use codec::{decode_status, encode_with};
-pub use codec::{encode_action_request, encode_leases, encode_provider_state, encode_status};
+pub use codec::{
+    encode_action_cancel, encode_action_request, encode_leases, encode_provider_state,
+    encode_status,
+};
 
 /// Encodes action arguments or an action's output: the postcard encoding of the map (a count, then
 /// `(key, value)` pairs in key order). See `docs/link-protocol.md`, "Action payloads".
@@ -162,6 +165,17 @@ pub enum LinkActionState {
     Failed,
     /// Refused by the device without running; the payload is the reason.
     Rejected,
+    /// Stopped at the host's [`ActionCancel`]; the payload is empty. Final.
+    Cancelled,
+}
+
+/// The names of the actions a device handles, declared with `DeviceSession::declare_actions`.
+/// Device → host, kind [`kind::ACTION_CATALOG`]. The body is a postcard sequence of strings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionCatalog {
+    /// Action names, in the order the device declared them.
+    #[serde(deserialize_with = "codec::bounded_vec")]
+    pub names: Vec<String>,
 }
 
 /// The device's report on an [`ActionRequest`]. Device → host, kind [`kind::ACTION_RESULT`].
@@ -212,6 +226,13 @@ pub enum Message {
     ActionRequest(ActionRequest),
     /// [`kind::ACTION_RESULT`]: the state of an action the device runs.
     ActionResult(ActionResult),
+    /// [`kind::ACTION_CANCEL`]: stop the action with this `id` (accepted while the device is busy).
+    ActionCancel {
+        /// The `id` of the request to stop.
+        id: u32,
+    },
+    /// [`kind::ACTION_CATALOG`]: the action names the device handles.
+    ActionCatalog(ActionCatalog),
     /// A kind this build does not handle (including the reserved kinds). Ignored by sessions.
     Unknown(u8),
 }

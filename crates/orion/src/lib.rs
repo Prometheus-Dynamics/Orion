@@ -79,8 +79,8 @@ pub mod control_plane {
     pub use orion_control_plane::{
         ActionQuery, ActionReport, ActionRequest, ActionResult, ActionState, ActionTarget,
         ActionTargetParseError, BlobBegin, BlobChunk, BlobState, BlobStatus, HostFacts,
-        HostMetricsSample, HostTemperature, LinkStatusSnapshot, NodeHostFacts, action_names,
-        action_status_keys, update_action,
+        HostMetricsSample, HostTemperature, LinkDeviceActions, LinkStatusSnapshot, NodeHostFacts,
+        action_names, action_status_keys, update_action,
     };
     pub use orion_control_plane::{
         ActionUsageSnapshot, AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder,

@@ -199,8 +199,12 @@ registry, and watches work as for any action.
   ("no action handler is registered ..."), as with any provider without a handler.
 - **Arguments and output.** `args` are sent as a postcard map of `TypedConfigValue`s, and the
   output comes back the same way (`docs/link-protocol.md`, "Action map").
-- **Names.** A device does not declare its action names. The node forwards every name, and the device
-  refuses the ones it does not handle with `Rejected`.
+- **Names.** A device may declare the names it handles (`DeviceSession::declare_actions`, feature
+  `actions`; `docs/link-protocol.md`, "Action catalog"). For a device that declared a list, the node
+  refuses any other name with `Rejected` (reason ``link device `<device>` on <link> does not declare
+  action `<name>` ``) before it is sent. A device that declared nothing gets every name, and the
+  device refuses the ones it does not handle with `Rejected`. The declared names are listed in the
+  link status (`orionctl get links`, `link_actions` lines).
 - **One at a time.** A device runs one action at a time. A second request while one runs is
   `Rejected` (`busy`) by the device; it is not queued on the node.
 - **Disconnect.** A device that disconnects, restarts, or is replaced fails the actions in flight on
@@ -208,15 +212,20 @@ registry, and watches work as for any action.
   fails its actions the same way.
 - **Deadlines.** The deadline is the node's, as for every action. A device that never reports is
   `TimedOut` at it, and its requests stay busy on the device until it reports.
-- **Cancel.** No cancel reaches the device: the device is busy with the action, so a companion
-  `<name>.cancel` request would be refused. A handler that needs cancellation should watch for it
-  some other way (for example a status key) or use a deadline.
+- **Cancel.** The companion `<name>.cancel` reaches a busy device as `ActionCancel` for the running
+  `<name>` request, which the device accepts while it runs (`docs/link-protocol.md`, "Cancel"). The
+  device stops the work and reports `Cancelled`; the job ends `Cancelled`, and the companion
+  `Succeeded`. If the job finishes first, or the device cannot cancel it, the companion is
+  `Rejected` with the job's final state as its reason. With no running request of that name, the
+  companion goes to the device as an ordinary request.
 - **Node-level names.** A link device does not claim node action names (`ClaimNodeActions` is for
   local clients). Only provider and resource targets reach a device.
 
 Tests: `crates/node/src/link_gateway/tests/actions.rs` (routed action with its output, unknown name
-refused by the device, disconnect mid-action, deadline) and `crates/link/tests/session/actions.rs`
-(device and host session round trip, busy refusal, slot reuse after the final result).
+refused by the device, disconnect mid-action, deadline, cancel companion on a busy device, a cancel
+that loses the race, undeclared names refused before sending) and `crates/link/tests/session/actions.rs`
+(device and host session round trip, busy refusal, slot reuse after the final result, cancel
+accepted while busy, the catalog's retransmission until acknowledged).
 
 ### Across nodes
 
@@ -348,7 +357,7 @@ same lane as every action, so there is no job-specific message:
 | Start | `RunAction` with a client-chosen `action_id`, a generous `deadline_ms` (up to `ORION_NODE_ACTION_MAX_DEADLINE_MS`, one hour by default), and `wait_ms` if the caller wants to wait a little. |
 | Progress | The handler reports `ActionState::Running { progress }` (per-mille) through `ActionReporter::progress`, and publishes `action.<id>.progress` status keys. `QueryActions`, `WatchActions` and `orionctl get actions` show it. |
 | Re-attach after a disconnect | Send the same request again (same id, target, name and arguments): the node answers with the job's current state and does **not** deliver it to the handler twice. `QueryActions` by `action_id` does the same without resending. Records live in node memory until `ORION_NODE_ACTION_RESULT_TTL_MS` after they finish, so a job that finished longer ago is gone; keep the durable outcome in the device's own state (the `update.*` pattern in [device-agent.md](device-agent.md)). |
-| Cancel | Send the companion action `<name>.cancel` to the same target (for `flash` it is `flash.cancel`). Its handler is the job's handler, so it claims both names. The handler stops the work, reports the companion `Succeeded` (or `Rejected` with a reason), and reports the job itself `Cancelled`. |
+| Cancel | Send the companion action `<name>.cancel` to the same target (for `flash` it is `flash.cancel`). Its handler is the job's handler, so it claims both names. The handler stops the work, reports the companion `Succeeded` (or `Rejected` with a reason), and reports the job itself `Cancelled`. On a link device the node sends the cancel to the device itself (see [Link devices](#link-devices)). |
 | Outcome | `Succeeded`, `Failed { reason }`, `Cancelled`, or `TimedOut` at the deadline. A cancel that the handler cannot honour is `Failed` or ignored; the job keeps its last state until it reports final. |
 
 `Cancelled` is a final state. A handler that reports it must have stopped the work. A job whose

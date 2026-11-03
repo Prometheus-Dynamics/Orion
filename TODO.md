@@ -126,8 +126,11 @@ Follow-ups that do not change the wire:
 - [x] **Link gateway actions:** route an action for a link-owned provider to its device as
       `ActionRequest` and report the device's `ActionResult`; the device session queues and answers
       requests (docs/link-protocol.md, docs/actions.md). Done on link-actions: one request in flight
-      per device (`busy` refusal), progress and output, disconnect fails in-flight actions; no
-      cancel companion (the device is busy) and no name declarations (docs/actions.md, "Link devices").
+      per device (`busy` refusal), progress and output, disconnect fails in-flight actions. Cancel
+      companion and name declarations landed on link-cancel: `ActionCancel` (kind `0x32`) reaches a
+      busy device, `ActionCatalog` (kind `0x33`) declares names that the node checks before sending,
+      and both are listed in the link status (docs/actions.md, "Link devices";
+      docs/link-protocol.md, "Cancel" and "Action catalog").
 - [x] **U8 firmware transfer** in the reserved kinds (`DeviceInfo`, chunked transfer): landed in
       `orion-link` (feature `xfer`) and in the node gateway for serial and CAN links.
 

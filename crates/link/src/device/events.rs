@@ -39,6 +39,14 @@ pub enum DeviceEvent {
     /// [`super::DeviceSession::action`] and answer with `report_action` / `report_progress`.
     #[cfg(feature = "actions")]
     ActionRequested,
+    /// The host asked to cancel the running action `id` (feature `actions`). The device answers
+    /// with `report_action(ActionState::Cancelled, ..)` once the work has stopped. Delivered even
+    /// while the action runs; a cancel for another id is ignored.
+    #[cfg(feature = "actions")]
+    ActionCancelRequested {
+        /// The `id` of the request to stop.
+        id: u32,
+    },
 }
 
 // Queued events are stored as plain integers (a tag and two words each). Integer arrays let a
@@ -52,6 +60,8 @@ const REJECTED: u8 = 5;
 const STATE_TOO_LARGE: u8 = 6;
 #[cfg(feature = "actions")]
 const ACTION_REQUESTED: u8 = 7;
+#[cfg(feature = "actions")]
+const ACTION_CANCEL_REQUESTED: u8 = 8;
 
 fn pack(event: DeviceEvent) -> (u8, usize, usize) {
     match event {
@@ -66,6 +76,8 @@ fn pack(event: DeviceEvent) -> (u8, usize, usize) {
         } => (STATE_TOO_LARGE, frame_len, max_frame),
         #[cfg(feature = "actions")]
         DeviceEvent::ActionRequested => (ACTION_REQUESTED, 0, 0),
+        #[cfg(feature = "actions")]
+        DeviceEvent::ActionCancelRequested { id } => (ACTION_CANCEL_REQUESTED, id as usize, 0),
     }
 }
 
@@ -84,6 +96,8 @@ fn unpack(tag: u8, a: usize, b: usize) -> Option<DeviceEvent> {
         },
         #[cfg(feature = "actions")]
         ACTION_REQUESTED => DeviceEvent::ActionRequested,
+        #[cfg(feature = "actions")]
+        ACTION_CANCEL_REQUESTED => DeviceEvent::ActionCancelRequested { id: a as u32 },
         _ => return None,
     })
 }

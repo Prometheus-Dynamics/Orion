@@ -49,6 +49,8 @@ pub(crate) struct HostCore {
     /// The device's last reported firmware state in this session (feature `xfer`).
     #[cfg(feature = "xfer")]
     last_info: Option<DeviceInfo>,
+    /// The action names the device declared in this session, if it declared any.
+    last_catalog: Option<Vec<String>>,
     heard: bool,
     last_heard: u64,
     no_session_sent: bool,
@@ -69,6 +71,7 @@ impl HostCore {
             last_state: None,
             #[cfg(feature = "xfer")]
             last_info: None,
+            last_catalog: None,
             heard: false,
             last_heard: 0,
             no_session_sent: false,
@@ -146,6 +149,7 @@ impl HostCore {
         if let Some(conn) = self.conn.take() {
             self.out.clear();
             self.last_state = None;
+            self.last_catalog = None;
             #[cfg(feature = "xfer")]
             {
                 self.last_info = None;
@@ -236,6 +240,12 @@ impl HostCore {
                 Ok(Message::ProviderState(state)) => self.on_state(frame.seq(), state, limit),
                 _ => self.decode_error(),
             },
+            kind::ACTION_CATALOG => match Message::decode(frame) {
+                Ok(Message::ActionCatalog(catalog)) => {
+                    self.on_action_catalog(frame.seq(), catalog.names, limit);
+                }
+                _ => self.decode_error(),
+            },
             kind::ACTION_RESULT => match Message::decode(frame) {
                 Ok(Message::ActionResult(result)) => {
                     if let Some(device_name) = self.device_name().map(String::from) {
@@ -291,6 +301,19 @@ impl HostCore {
         name: &str,
         payload: &[u8],
     ) -> Result<(), ActionSendError> {
+        self.queue_action(|seq, buf| message::encode_action_request(id, name, payload, seq, buf))
+    }
+
+    /// Queues an `ActionCancel` for the request `id` on the connected device.
+    pub(crate) fn send_action_cancel(&mut self, id: u32) -> Result<(), ActionSendError> {
+        self.queue_action(|seq, buf| message::encode_action_cancel(id, seq, buf))
+    }
+
+    /// Encodes an action frame for the connected device and queues it.
+    fn queue_action(
+        &mut self,
+        encode: impl FnOnce(u16, &mut [u8]) -> Result<usize, message::MessageError>,
+    ) -> Result<(), ActionSendError> {
         let Some(conn) = &self.conn else {
             return Err(ActionSendError::NotConnected);
         };
@@ -300,13 +323,10 @@ impl HostCore {
         }
         let seq = self.seq.wrapping_add(1);
         let mut buf = vec![0u8; HOST_MAX_FRAME];
-        let frame_len =
-            message::encode_action_request(id, name, payload, seq, &mut buf).map_err(|_| {
-                ActionSendError::TooLarge {
-                    frame_len: HOST_MAX_FRAME,
-                    max_frame,
-                }
-            })?;
+        let frame_len = encode(seq, &mut buf).map_err(|_| ActionSendError::TooLarge {
+            frame_len: HOST_MAX_FRAME,
+            max_frame,
+        })?;
         if frame_len > max_frame {
             return Err(ActionSendError::TooLarge {
                 frame_len,
@@ -317,6 +337,20 @@ impl HostCore {
         self.seq = seq;
         self.out.push_back(buf);
         Ok(())
+    }
+
+    /// The device declared its action names. Acknowledged like every state report; a repeat of
+    /// the same list is not reported again.
+    fn on_action_catalog(&mut self, seq: u16, names: Vec<String>, limit: usize) {
+        let _ = self.queue(kind::ACK, &seq, limit);
+        if self.last_catalog.as_ref() == Some(&names) {
+            return;
+        }
+        let Some(device_name) = self.device_name().map(String::from) else {
+            return;
+        };
+        self.last_catalog = Some(names.clone());
+        self.emit(HostEvent::ActionCatalog { device_name, names });
     }
 
     fn on_hello(&mut self, seq: u16, hello: Hello) {
@@ -368,6 +402,7 @@ impl HostCore {
         self.next_session_id = self.next_session_id.wrapping_add(1).max(1);
         self.out.clear();
         self.last_state = None;
+        self.last_catalog = None;
         #[cfg(feature = "xfer")]
         {
             self.last_info = None;

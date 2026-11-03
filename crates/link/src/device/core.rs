@@ -7,7 +7,9 @@ use crate::wire::{
     kind,
 };
 #[cfg(feature = "actions")]
-use crate::wire::{ActionRequestView, ActionResultBody, ActionState};
+use crate::wire::{
+    ActionCatalogBody, ActionRequestView, ActionResultBody, ActionState, decode_action_cancel,
+};
 
 #[cfg(feature = "stats")]
 use super::DeviceStats;
@@ -97,6 +99,9 @@ pub(crate) enum Source {
     /// The `DeviceInfo` report (its payload kept for retransmission).
     #[cfg(feature = "xfer")]
     Info,
+    /// The action catalog (its payload kept for retransmission).
+    #[cfg(feature = "actions")]
+    Catalog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +205,13 @@ pub(crate) struct DeviceCore<N, const RX: usize, const TX: usize, const ST: usiz
     /// A request id to refuse (the device was busy).
     #[cfg(feature = "actions")]
     refusal: Option<u32>,
+    /// The declared action names, encoded (payload only) in `catalog_buf`, and their reliable
+    /// transmission state. `None` for a device that declares nothing.
+    #[cfg(feature = "actions")]
+    catalog: Option<Snapshot>,
+    /// Holds the encoded `ActionCatalog` payload, and then its frame while it is sent.
+    #[cfg(feature = "actions")]
+    catalog_buf: [u8; RX],
     #[cfg(feature = "xfer")]
     xfer: XferState,
     #[cfg(feature = "stats")]
@@ -250,6 +262,10 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             out_final: false,
             #[cfg(feature = "actions")]
             refusal: None,
+            #[cfg(feature = "actions")]
+            catalog: None,
+            #[cfg(feature = "actions")]
+            catalog_buf: [0; RX],
             #[cfg(feature = "xfer")]
             xfer: XferState::new(),
             #[cfg(feature = "stats")]
@@ -476,6 +492,17 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
                 });
             }
         }
+        // The host has not seen the declared names in this session either.
+        #[cfg(feature = "actions")]
+        if let Some(catalog) = self.catalog {
+            self.catalog = Some(Snapshot {
+                pending: true,
+                seqs: None,
+                backoff_ms: self.config.state_retry_min_ms.max(1),
+                next_at: None,
+                ..catalog
+            });
+        }
     }
 
     fn on_reject(&mut self, reason: RejectReason) {
@@ -522,6 +549,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             kind::LEASES => self.on_leases(payload),
             #[cfg(feature = "actions")]
             kind::ACTION_REQUEST => self.on_action_request(payload),
+            #[cfg(feature = "actions")]
+            kind::ACTION_CANCEL => self.on_action_cancel(payload),
             kind::PING => match self.pong.read(&mut Reader::new(payload)) {
                 Ok(()) => {}
                 Err(_) => self.decode_error(),
@@ -549,6 +578,15 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
     fn on_ack(&mut self, acked: u16) {
         #[cfg(feature = "xfer")]
         self.xfer.on_ack(acked);
+        // The catalog's acknowledgement is matched exactly against its latest transmission, and
+        // such a sequence number never belongs to the snapshot, so the snapshot is left alone.
+        #[cfg(feature = "actions")]
+        if let Some(catalog) = &mut self.catalog
+            && catalog.seqs.is_some_and(|(_, latest)| latest == acked)
+        {
+            catalog.pending = false;
+            return;
+        }
         let Some(snapshot) = &mut self.snapshot else {
             return;
         };
@@ -618,6 +656,54 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             finished: false,
         });
         self.emit(DeviceEvent::ActionRequested);
+    }
+
+    /// Host's `ActionCancel`. Accepted while the device is busy: a cancel for the running action
+    /// (not yet final) queues `ActionCancelRequested` for the application; any other id is ignored.
+    #[cfg(feature = "actions")]
+    fn on_action_cancel(&mut self, payload: &[u8]) {
+        let Ok(id) = decode_action_cancel(payload) else {
+            self.decode_error();
+            return;
+        };
+        if self
+            .action_slot
+            .is_some_and(|slot| slot.id == id && !slot.finished)
+        {
+            self.emit(DeviceEvent::ActionCancelRequested { id });
+        }
+    }
+
+    /// Replaces the declared action names (see `DeviceSession::declare_actions`). Returns whether a
+    /// transmission of the previous catalog was aborted.
+    #[cfg(feature = "actions")]
+    pub(crate) fn declare_actions(&mut self, names: &[&str]) -> Result<bool, PublishError> {
+        let body = ActionCatalogBody { names };
+        let frame_len = frame::frame_len(wire::encoded_len(&body));
+        if !names.is_empty() && frame_len > Self::LOCAL_MAX {
+            return Err(PublishError::TooLarge {
+                frame_len,
+                max_frame: Self::LOCAL_MAX,
+            });
+        }
+        let aborted = self.out.is_some_and(|out| out.source == Source::Catalog);
+        if aborted {
+            self.out = None;
+            bump!(self, aborted_frames);
+        }
+        if names.is_empty() {
+            self.catalog = None;
+            return Ok(aborted);
+        }
+        let payload_len = wire::write_payload(&body, &mut self.catalog_buf);
+        self.catalog = Some(Snapshot {
+            payload_len,
+            pending: true,
+            seqs: None,
+            backoff_ms: self.config.state_retry_min_ms.max(1),
+            next_at: None,
+        });
+        Ok(aborted)
     }
 
     /// The request the device should run. Available until the first report: a report overwrites
@@ -773,6 +859,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             Source::Status => &self.status_buf,
             #[cfg(feature = "actions")]
             Source::Action => &self.action_buf,
+            #[cfg(feature = "actions")]
+            Source::Catalog => &self.catalog_buf,
             #[cfg(feature = "xfer")]
             Source::Info => self.xfer.info_buf(),
         };
@@ -850,6 +938,10 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         if let Some(outgoing) = self.select_action(max_frame) {
             return Some(outgoing);
         }
+        #[cfg(feature = "actions")]
+        if let Some(outgoing) = self.select_catalog(max_frame) {
+            return Some(outgoing);
+        }
         #[cfg(feature = "xfer")]
         if let Some(reply) = self.xfer.take_reply() {
             let buf = self
@@ -865,6 +957,41 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         }
         self.select_snapshot()
             .or_else(|| self.select_status(max_frame))
+    }
+
+    /// The `ActionCatalog` frame, while the host has not acknowledged its latest transmission.
+    /// Retransmitted with doubling intervals up to the heartbeat, like the snapshot.
+    #[cfg(feature = "actions")]
+    fn select_catalog(&mut self, max_frame: usize) -> Option<Outgoing> {
+        let catalog = self.catalog?;
+        if !catalog.pending || catalog.next_at.is_some_and(|at| !reached(self.now, at)) {
+            return None;
+        }
+        if frame::frame_len(catalog.payload_len) > max_frame {
+            // Declared before a smaller frame size was negotiated: it waits for a session that fits.
+            return None;
+        }
+        let seq = self.next_seq();
+        let len = frame::encode_in_place(
+            FrameHeader::new(kind::ACTION_CATALOG, seq),
+            catalog.payload_len,
+            &mut self.catalog_buf,
+        )
+        .ok()?;
+        let first = catalog.seqs.map_or(seq, |(first, _)| first);
+        let cap = self
+            .session()
+            .map_or(u32::MAX, |session| session.heartbeat_ms);
+        self.catalog = Some(Snapshot {
+            seqs: Some((first, seq)),
+            next_at: Some(self.now.wrapping_add(catalog.backoff_ms)),
+            backoff_ms: catalog.backoff_ms.saturating_mul(2).min(cap.max(1)),
+            ..catalog
+        });
+        Some(Outgoing {
+            source: Source::Catalog,
+            len,
+        })
     }
 
     /// The `DeviceInfo` report, when one is due (feature `xfer`).

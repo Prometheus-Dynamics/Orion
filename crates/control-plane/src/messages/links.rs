@@ -5,6 +5,27 @@ use alloc::{string::String, vec::Vec};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
+/// The action names one device declared on its link (`docs/link-protocol.md`, "Action catalog").
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+pub struct LinkDeviceActions {
+    /// The device's announced name.
+    pub device: String,
+    /// The names it handles, as it declared them. The node refuses other names for this device
+    /// before they are sent.
+    pub names: Vec<String>,
+}
+
 /// Counters and connected devices of one microcontroller link. Counters are cumulative since the
 /// gateway started.
 #[derive(
@@ -26,6 +47,9 @@ pub struct LinkStatusSnapshot {
     pub open: bool,
     /// Devices with an accepted provider snapshot in the current session.
     pub devices: Vec<String>,
+    /// Action names declared by the connected devices that declared some (a device that declares
+    /// none is absent, and its actions are forwarded without a check).
+    pub actions: Vec<LinkDeviceActions>,
     /// Valid link frames received.
     pub frames_rx: u64,
     /// Link frames sent (for CAN: CAN frames).

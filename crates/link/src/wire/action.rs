@@ -22,6 +22,9 @@ pub enum ActionState {
     Failed,
     /// Refused without running; the payload is the reason (UTF-8).
     Rejected,
+    /// Stopped at the host's `ActionCancel`: the handler has stopped the work. The payload is
+    /// empty.
+    Cancelled,
 }
 
 impl ActionState {
@@ -33,6 +36,7 @@ impl ActionState {
             Self::Succeeded => 1,
             Self::Failed => 2,
             Self::Rejected => 3,
+            Self::Cancelled => 4,
         }
     }
 
@@ -44,6 +48,7 @@ impl ActionState {
             1 => Self::Succeeded,
             2 => Self::Failed,
             3 => Self::Rejected,
+            4 => Self::Cancelled,
             _ => return None,
         })
     }
@@ -96,6 +101,28 @@ impl Encode for ActionResultBody<'_> {
         self.id.encode(w);
         w.varint(u64::from(self.state.index()));
         w.bytes(self.payload);
+    }
+}
+
+/// Decodes an `ActionCancel` body: the `id` of the action to stop.
+///
+/// # Errors
+///
+/// [`WireError::Decode`] if the payload is not a valid `u32` varint.
+pub fn decode_action_cancel(payload: &[u8]) -> Result<u32, WireError> {
+    Reader::new(payload).varint_u32()
+}
+
+/// An `ActionCatalog` body: the names a device handles, a postcard sequence of strings.
+#[cfg(feature = "actions")]
+pub(crate) struct ActionCatalogBody<'a> {
+    pub(crate) names: &'a [&'a str],
+}
+
+#[cfg(feature = "actions")]
+impl Encode for ActionCatalogBody<'_> {
+    fn encode(&self, w: &mut Writer<'_>) {
+        self.names.encode(w);
     }
 }
 

@@ -168,6 +168,19 @@ pub(crate) fn render_links_summary(links: &[LinkStatusSnapshot]) -> String {
                 .map(|error| format!("{error:?}"))
                 .unwrap_or_else(|| "-".to_owned()),
         ));
+        // One line per device that declared its action names (`docs/actions.md`, "Link devices").
+        for device in &link.actions {
+            out.push_str(&format!(
+                "link_actions link={} device={} names={}\n",
+                link.name,
+                device.device,
+                if device.names.is_empty() {
+                    "-".to_owned()
+                } else {
+                    device.names.join(",")
+                },
+            ));
+        }
     }
     out
 }
@@ -194,6 +207,7 @@ pub(crate) fn print_replicated_host_metrics(peer: Option<&PeerHostMetricsSnapsho
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_control_plane::LinkDeviceActions;
 
     #[test]
     fn host_fields_quote_spaces_and_dash_missing_values() {
@@ -227,5 +241,22 @@ mod tests {
         ));
         assert!(text.ends_with("last_error=\"read failed\"\n"));
         assert_eq!(render_links_summary(&[]), "links count=0\n");
+    }
+
+    #[test]
+    fn links_summary_lists_declared_action_names_per_device() {
+        let link = LinkStatusSnapshot {
+            name: "serial:/dev/ttyUSB0".into(),
+            devices: vec!["imu-board".into()],
+            actions: vec![LinkDeviceActions {
+                device: "imu-board".into(),
+                names: vec!["locate".into(), "flash".into()],
+            }],
+            ..LinkStatusSnapshot::default()
+        };
+        let text = render_links_summary(&[link]);
+        assert!(text.ends_with(
+            "link_actions link=serial:/dev/ttyUSB0 device=imu-board names=locate,flash\n"
+        ));
     }
 }

@@ -8,8 +8,8 @@ use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{
-    ActionRequest, ActionResult, Hello, LeaseRecord, Message, MessageError, ProviderRecord,
-    ProviderState, RejectReason, ResourceRecord, StatusEntry, Welcome, kind,
+    ActionCatalog, ActionRequest, ActionResult, Hello, LeaseRecord, Message, MessageError,
+    ProviderRecord, ProviderState, RejectReason, ResourceRecord, StatusEntry, Welcome, kind,
 };
 use crate::frame::{self, FrameHeader, FrameView};
 
@@ -163,6 +163,15 @@ pub fn encode_action_request(
     )
 }
 
+/// Encodes a [`kind::ACTION_CANCEL`] frame for the request `id`, returning the frame length.
+///
+/// # Errors
+///
+/// [`MessageError::BufferTooSmall`] if the frame does not fit in `buf`.
+pub fn encode_action_cancel(id: u32, seq: u16, buf: &mut [u8]) -> Result<usize, MessageError> {
+    encode_with(kind::ACTION_CANCEL, seq, &id, buf)
+}
+
 /// Encodes a [`kind::STATUS`] frame from borrowed entries, returning the frame length.
 ///
 /// # Errors
@@ -211,6 +220,8 @@ impl Message {
             Self::Status(_) => kind::STATUS,
             Self::ActionRequest(_) => kind::ACTION_REQUEST,
             Self::ActionResult(_) => kind::ACTION_RESULT,
+            Self::ActionCancel { .. } => kind::ACTION_CANCEL,
+            Self::ActionCatalog(_) => kind::ACTION_CATALOG,
             Self::Unknown(kind) => *kind,
         }
     }
@@ -239,6 +250,8 @@ impl Message {
                 encode_action_request(body.id, &body.name, &body.payload, seq, buf)
             }
             Self::ActionResult(body) => encode_with(kind, seq, body, buf),
+            Self::ActionCancel { id } => encode_with(kind, seq, id, buf),
+            Self::ActionCatalog(body) => encode_with(kind, seq, body, buf),
             Self::Unknown(_) => Err(MessageError::Encode),
         }
     }
@@ -282,6 +295,12 @@ impl Message {
                 Self::ActionRequest(decode_body::<ActionRequest>(kind, payload)?)
             }
             kind::ACTION_RESULT => Self::ActionResult(decode_body::<ActionResult>(kind, payload)?),
+            kind::ACTION_CANCEL => Self::ActionCancel {
+                id: decode_body(kind, payload)?,
+            },
+            kind::ACTION_CATALOG => {
+                Self::ActionCatalog(decode_body::<ActionCatalog>(kind, payload)?)
+            }
             // Firmware-transfer kinds are reserved; they decode as unknown like any other kind.
             other => Self::Unknown(other),
         })

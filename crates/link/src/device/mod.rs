@@ -47,7 +47,8 @@
 //! `Hello` outside a session), a `TX`-byte buffer for the encoded latest snapshot, an `ST`-byte
 //! buffer for the newest status batch (`ST` is 0 for a device that never publishes status, see
 //! [`DeviceSession`]), an 18-byte ping/pong buffer, the node id ([`NODE_ID_CAPACITY`] bytes), a
-//! 4-slot event queue, and timers. Counters ([`DeviceStats`]) are compiled in with feature
+//! 4-slot event queue, and timers. With feature `actions` add one more `RX`-byte buffer for the
+//! declared action names (see [`DeviceSession::declare_actions`]). Counters ([`DeviceStats`]) are compiled in with feature
 //! `stats`. Nothing allocates, panics, or formats. With feature `alloc`, the same session also
 //! accepts the full Orion records (`ProviderRecord`, `ResourceRecord`, `StatusEntry`) and decodes
 //! the lease set into `LeaseRecord`s (`DeviceSession::lease_records`).
@@ -402,7 +403,7 @@ impl<
     }
 
     /// Reports a final or running state for the action (see `docs/link-protocol.md`, "Actions").
-    /// A final state (`Succeeded`, `Failed`, `Rejected`) frees the device for its next request
+    /// A final state (`Succeeded`, `Failed`, `Rejected`, `Cancelled`) frees the device for its next request
     /// once it is sent. Newer reports replace unsent ones.
     ///
     /// # Errors
@@ -416,6 +417,23 @@ impl<
         payload: &[u8],
     ) -> Result<(), ActionReportError> {
         if self.core.report_action(state, payload)? {
+            self.cursor = T::Cursor::default();
+        }
+        Ok(())
+    }
+
+    /// Declares the action names this device handles (feature `actions`), so the host can list
+    /// them and refuse the others before sending. The names are encoded at once and sent after
+    /// every `Welcome` until the host acknowledges them. An empty list withdraws the declaration
+    /// (the host then forwards every name, as for a device that declares nothing).
+    ///
+    /// # Errors
+    ///
+    /// [`PublishError::TooLarge`] if the list does not fit the largest frame (`min(RX, TX)`). The
+    /// previous declaration stays.
+    #[cfg(feature = "actions")]
+    pub fn declare_actions(&mut self, names: &[&str]) -> Result<(), PublishError> {
+        if self.core.declare_actions(names)? {
             self.cursor = T::Cursor::default();
         }
         Ok(())

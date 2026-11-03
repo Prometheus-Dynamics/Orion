@@ -20,9 +20,9 @@ use orion_control_plane::{
 use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, WorkloadId};
 use orion_link::LINK_PROTOCOL_VERSION;
 use orion_link::message::{
-    ActionRequest, ActionResult, Hello, LeaseRecord, LinkActionState, Message, MessageError,
-    ProviderRecord, ProviderState, RejectReason, ResourceRecord, Roles, StatusEntry, Welcome,
-    encode_action_request, encode_leases, encode_provider_state, encode_status, kind,
+    ActionCatalog, ActionRequest, ActionResult, Hello, LeaseRecord, LinkActionState, Message,
+    MessageError, ProviderRecord, ProviderState, RejectReason, ResourceRecord, Roles, StatusEntry,
+    Welcome, encode_action_request, encode_leases, encode_provider_state, encode_status, kind,
 };
 
 const FIXTURE: &str = "tests/fixtures/link_encodings.txt";
@@ -170,6 +170,22 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
                 payload: b"busy".to_vec(),
             }),
         ),
+        // Protocol 1, additive: cancel and catalog, and the `Cancelled` state.
+        ("action_cancel", Message::ActionCancel { id: 0x0000_002C }),
+        (
+            "action_result.cancelled",
+            Message::ActionResult(ActionResult {
+                id: 0x0000_002C,
+                state: LinkActionState::Cancelled,
+                payload: Vec::new(),
+            }),
+        ),
+        (
+            "action_catalog",
+            Message::ActionCatalog(ActionCatalog {
+                names: vec!["locate".into(), "flash".into()],
+            }),
+        ),
     ]
 }
 
@@ -245,9 +261,12 @@ fn kind_numbers_are_stable() {
             kind::STATUS,
             kind::ACTION_REQUEST,
             kind::ACTION_RESULT,
+            kind::ACTION_CANCEL,
+            kind::ACTION_CATALOG,
         ],
         [
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x13, 0x14, 0x30, 0x31
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x13, 0x14, 0x30, 0x31, 0x32,
+            0x33
         ]
     );
     assert_eq!((kind::FIRMWARE_FIRST, kind::FIRMWARE_LAST), (0x20, 0x2F));

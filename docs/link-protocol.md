@@ -144,7 +144,9 @@ postcard encodings of the listed fields, in order.
 | `0x21`-`0x28` | firmware transfer | both | `XferBegin`, `XferChunk`, `XferAck`, `XferEnd`, `XferResult`, `XferAbort`, `Activate`, `Confirm` (feature `xfer`) |
 | `0x29`-`0x2F` | reserved | | | Reserved for firmware transfer; ignored like unknown kinds. |
 | `0x30` | `ActionRequest` | host → device | `id: u32`, `name: String`, `payload: Vec<u8>` | Asks the device to run a named action (see "Actions" below). Added in version 1 as an additive kind. |
-| `0x31` | `ActionResult` | device → host | `id: u32`, `state` (postcard enum: `0` Running, `1` Succeeded, `2` Failed, `3` Rejected), `payload: Vec<u8>` | The device's report on the request with the same `id`; the payload depends on the state (see "Actions"). Added in version 1 as an additive kind. |
+| `0x31` | `ActionResult` | device → host | `id: u32`, `state` (postcard enum: `0` Running, `1` Succeeded, `2` Failed, `3` Rejected, `4` Cancelled), `payload: Vec<u8>` | The device's report on the request with the same `id`; the payload depends on the state (see "Actions"). Added in version 1 as an additive kind. |
+| `0x32` | `ActionCancel` | host → device | `id: u32` | Asks the device to stop the running action with that `id`. Accepted while the device is busy with it (see "Actions"). Added in version 1 as an additive kind. |
+| `0x33` | `ActionCatalog` | device → host | `names: Vec<String>` (a postcard sequence of strings) | The action names the device handles, declared with `DeviceSession::declare_actions` (see "Action catalog"). Added in version 1 as an additive kind. |
 
 Reject reasons (one byte; unknown codes are reported as `Other(code)`):
 
@@ -210,6 +212,7 @@ sends it as `ActionRequest { id, name, payload }` (kind `0x30`), and the device 
 | `1` `Succeeded` | Finished. | The output: an action map (below), empty for no output. |
 | `2` `Failed` | Finished unsuccessfully. | The reason, UTF-8. |
 | `3` `Rejected` | Refused without running (unknown name, bad arguments, busy). | The reason, UTF-8. |
+| `4` `Cancelled` | Stopped at the host's `ActionCancel`; final. | Empty. |
 
 `id` is chosen by the host and is unique among the requests it has outstanding to that device. The
 name and the meaning of `payload` belong to the handler, as with node actions: the link layer only
@@ -226,7 +229,15 @@ map. `orion_link::message::{encode_action_map, decode_action_map}` implement it.
 `actions` of `orion-link`) returns the request until the first report on it;
 `report_progress` / `report_action` queue `Running` and final results, and `DeviceEvent::
 ActionRequested` announces a request. A request for another id while one runs is answered at once
-with `Rejected` and the reason `busy`. A request for the running id is a repeat and is ignored. The
+with `Rejected` and the reason `busy`.
+
+**Cancel.** `ActionCancel { id }` (kind `0x32`) is the one message a busy device accepts besides
+the action's own traffic: the device session takes it while the action runs, and when `id` is the
+running action that has not reported a final state, it queues `DeviceEvent::ActionCancelRequested
+{ id }`. The application stops the work and reports `Cancelled` (or another final state, if it
+cannot stop); a cancel for another id, or after the final report, is ignored. The device sends no
+separate answer to the cancel, so the host learns the outcome from the action's final result. The
+node maps the companion action `<name>.cancel` to this message (`docs/actions.md`, "Link devices"). A request for the running id is a repeat and is ignored. The
 device frees itself once it has sent a final result, and only then accepts the next request. The
 request's name and payload are copied into the session's buffer, which the first report overwrites
 (so read them before reporting). Newer reports replace unsent ones, and a final result is never
@@ -237,7 +248,7 @@ Action results, like `Status`, are not acknowledged or retransmitted. A final re
 link is reported by the node as `TimedOut` when the deadline passes, so give actions a deadline.
 The device buffers one request: the buffer and the busy refusal cost one receive-sized buffer and
 eight bytes of control buffer, only with the `actions` feature (`scripts/mcu-size.sh`,
-`uart-actions`).
+`uart-actions`). The action catalog adds a second receive-sized buffer (see "Action catalog").
 
 **Host side.** `HostSession::send_action(id, name, payload)` (and `HostBus::send_action`) queues a
 request for a connected device and fails with `NotConnected`, `TooLarge` (the negotiated frame
@@ -246,10 +257,26 @@ size) or `Congested` rather than queueing unbounded work. Results arrive as
 went to and only within its session. A device lost or replaced mid-action is reported by
 `DeviceLost` or `DeviceConnected`; the node fails the actions in flight on it.
 
-**No declaration.** A device does not declare the action names it handles: no provider record
-carries them, and a declaration would add reliable state to the minimal device. The node sends any
-name to the device that publishes the target provider, and the device refuses the names it does not
-handle (`Rejected`, reason `unknown action` in the reference simulator).
+**Action catalog.** Feature `actions` only (so the minimal device build does not carry it).
+`DeviceSession::declare_actions(&[&str])` encodes the names the device handles into one receive-sized
+buffer. From the session's `Welcome` on, the device sends them as `ActionCatalog` (kind `0x33`) and
+retransmits until the host acknowledges that transmission, with the snapshot's backoff. The
+acknowledgement must match the catalog's latest transmission exactly, so it cannot clear the
+provider snapshot's acknowledgement. The host reports the list once per session as
+`HostEvent::ActionCatalog { device_name, names }` and acknowledges every transmission. An empty list
+withdraws the declaration, and a list too large for the largest frame is refused
+(`PublishError::TooLarge`). A list that does not fit the negotiated frame size of a session is not
+sent in that session.
+
+The node then checks names on its side. For a device that declared a list, an action whose name is
+not in it is `Rejected` before anything is sent (``link device `<device>` on <link> does not declare
+action `<name>` ``). A device that declared nothing gets every name, as before, and the device still
+refuses the names it does not handle (`Rejected`, reason `unknown action` in the reference
+simulator). `orion-node` lists the declared names per device in the link status
+(`LinkStatusSnapshot::actions`, `orionctl get links` prints one `link_actions` line per device).
+
+Cost: the `actions` feature adds one receive-sized buffer for the catalog (`RX` bytes) and about 24
+bytes of state; the minimal `uart` and `can` builds are unchanged (`scripts/mcu-size.sh`).
 
 ### Session lifecycle
 
@@ -550,8 +577,9 @@ numbers, body fields, or the postcard encoding of the shared records) fails unti
 `LINK_PROTOCOL_VERSION` is bumped and the fixture is regenerated with
 `ORION_UPDATE_LINK_ENCODINGS=1`. Additive changes (new kinds, appended body fields) need no bump:
 the `Status` body was added this way (the `status` fixture entry is appended, earlier entries are
-unchanged, and `LINK_PROTOCOL_VERSION` stays 1). The action kinds (`0x30`, `0x31`) and the
-`alloc`-only bodies were added the same way. Hosts and devices that predate a kind ignore it.
+unchanged, and `LINK_PROTOCOL_VERSION` stays 1). The action kinds (`0x30`-`0x33`) and the
+`alloc`-only bodies were added the same way; the fixture entries `action_cancel`,
+`action_result.cancelled` and `action_catalog` are appended. Hosts and devices that predate a kind ignore it.
 
 The device's hand-written codec (`orion_link::wire`) is held to the same fixture:
 `crates/link/tests/wire.rs` encodes every device → host message from views and compares the frames

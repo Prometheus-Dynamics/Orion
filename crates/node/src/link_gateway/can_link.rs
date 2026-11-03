@@ -7,7 +7,7 @@
 //! device, so transfers to different devices can run at once.
 
 use super::CanLinkConfig;
-use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, REOPEN_DELAY};
+use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, LinkSend, REOPEN_DELAY};
 use super::firmware::{DeviceSeen, FirmwareJob};
 use crate::actions::ActionOutcome;
 use crate::app::{CanSlot, FirmwareCommand};
@@ -120,9 +120,14 @@ pub(super) async fn run<P: CanIo>(
             _ = retry(pending.is_some() && socket.is_some()) => {}
             changed = desired.changed() => refresh = changed.is_ok(),
             command = commands.recv(), if commands_open => match command {
-                Some(command) => ctx.accept_action(command, |device, id, name, payload| {
+                Some(command) => ctx.accept_action(command, |device, send| {
                     match bus.address_of(device) {
-                        Some(address) => bus.send_action(address, id, name, payload),
+                        Some(address) => match send {
+                            LinkSend::Request { id, name, payload } => {
+                                bus.send_action(address, id, name, payload)
+                            }
+                            LinkSend::Cancel { id } => bus.send_action_cancel(address, id),
+                        },
                         None => Err(ActionSendError::NotConnected),
                     }
                 }),

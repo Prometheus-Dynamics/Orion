@@ -252,6 +252,14 @@ impl HostBus {
             .is_some_and(|device| device.session.send_xfer(request))
     }
 
+    /// Queues an `ActionCancel` for request `id` on the device at `address`.
+    pub fn send_action_cancel(&mut self, address: u32, id: u32) -> Result<(), ActionSendError> {
+        match self.devices.get_mut(&address) {
+            Some(device) => device.session.send_action_cancel(id),
+            None => Err(ActionSendError::NotConnected),
+        }
+    }
+
     /// Addresses that have a session (connected or not).
     pub fn addresses(&self) -> impl Iterator<Item = u32> + '_ {
         self.devices.keys().copied()

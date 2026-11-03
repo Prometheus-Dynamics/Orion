@@ -29,6 +29,24 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   `FirmwareTransfer::set_chunk_len`. Docs: `docs/update-recovery.md` ("CAN links"),
   `docs/actions.md`.
 
+### Added (link cancel and action names)
+
+- Link devices take the `<name>.cancel` companion. The node sends `ActionCancel` (kind `0x32`, body
+  `id: u32`) for the running request of the same name, and the device session accepts it while the
+  device is busy: the application gets `DeviceEvent::ActionCancelRequested { id }` and reports
+  `ActionState::Cancelled`. `LinkActionState` and the device's `ActionState` gain `Cancelled` (index
+  4). The job ends `Cancelled` and the companion `Succeeded`; a cancel that loses the race is
+  `Rejected` with the job's final state. Tests: `crates/link/tests/session/actions.rs` and
+  `crates/node/src/link_gateway/tests/actions.rs`.
+- Link devices declare their action names (`DeviceSession::declare_actions`, feature `actions` of
+  `orion-link`). The device sends them as `ActionCatalog` (kind `0x33`, a postcard sequence of
+  strings), retransmitted until acknowledged; the host reports `HostEvent::ActionCatalog`. For a
+  device that declared a list, the node rejects any other action name before sending it. The names
+  appear in the link status (`LinkStatusSnapshot::actions`, a new control-protocol field:
+  `CONTROL_PROTOCOL_LAYOUT_FINGERPRINT` is updated and the version stays 1, as protocol 1 is not
+  released) and in `orionctl get links` (`link_actions` lines). Docs: `docs/link-protocol.md`
+  ("Cancel", "Action catalog"), `docs/actions.md` ("Link devices").
+
 ### Changed (protocol 1 reset, breaking)
 
 Nothing has been released, so every Orion protocol and on-disk format is now version 1, and the

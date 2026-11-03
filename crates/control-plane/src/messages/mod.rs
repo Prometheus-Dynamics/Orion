@@ -30,7 +30,7 @@ pub use discovery::{
     DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,
     EnrollmentHello, EnrollmentRole,
 };
-pub use links::LinkStatusSnapshot;
+pub use links::{LinkDeviceActions, LinkStatusSnapshot};
 pub use maintenance::{
     MaintenanceAction, MaintenanceCommand, MaintenanceMode, MaintenanceState, MaintenanceStatus,
 };

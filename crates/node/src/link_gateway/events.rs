@@ -2,7 +2,7 @@
 
 use crate::NodeApp;
 use crate::app::{CanSlot, LinkActionCommand, SerialSlot};
-use crate::control_plane::LinkStatusSnapshot;
+use crate::control_plane::{LinkDeviceActions, LinkStatusSnapshot};
 use orion::control_plane::ActionState;
 use orion::control_plane::TypedConfigValue;
 use orion_link::host::{ActionSendError, HostEvent};
@@ -29,6 +29,9 @@ pub(super) struct LinkContext {
     last_logged_error: Option<String>,
     /// Actions sent to this link's devices, by the id the device sees.
     actions: SentActions,
+    /// The action names each connected device declared in its session (devices that declared
+    /// none are absent: their names are not checked).
+    declared: BTreeMap<String, Vec<String>>,
 }
 
 /// Requests sent to devices of one link and not yet final. Ids are per link and wrap.
@@ -41,6 +44,25 @@ struct SentActions {
 struct SentAction {
     device: String,
     action_id: String,
+    /// The request's name, to match `<name>.cancel` companions against it.
+    name: String,
+    /// Companion cancel requests waiting for this action's final result.
+    cancels: Vec<String>,
+}
+
+/// The companion-action suffix: `<name>.cancel` cancels the running `<name>` (`docs/actions.md`).
+const CANCEL_SUFFIX: &str = ".cancel";
+
+/// What the link task sends a device for an action.
+pub(super) enum LinkSend<'a> {
+    /// An `ActionRequest`.
+    Request {
+        id: u32,
+        name: &'a str,
+        payload: &'a [u8],
+    },
+    /// An `ActionCancel` for the request `id` the device is running.
+    Cancel { id: u32 },
 }
 
 /// What to do with a device's lease set after an event.
@@ -63,6 +85,7 @@ impl LinkContext {
             status,
             last_logged_error: None,
             actions: SentActions::default(),
+            declared: BTreeMap::new(),
         }
     }
 
@@ -83,16 +106,44 @@ impl LinkContext {
 
     /// Sends a routed action to its device through `send` (the link's session). A request that
     /// cannot be sent fails the action at once.
+    ///
+    /// - `<name>.cancel` while a request named `<name>` runs on the device is sent as an
+    ///   `ActionCancel` for that request, which the device accepts while it is busy. The companion
+    ///   is `Succeeded` when the device finishes that request `Cancelled`, else `Rejected`.
+    /// - A name the device declared no longer than its session is refused before it is sent, when
+    ///   the device declared a list.
     pub(super) fn accept_action(
         &mut self,
         command: LinkActionCommand,
-        send: impl FnOnce(&str, u32, &str, &[u8]) -> Result<(), ActionSendError>,
+        send: impl FnOnce(&str, LinkSend<'_>) -> Result<(), ActionSendError>,
     ) {
         let LinkActionCommand {
             device,
             action_id,
             request,
         } = command;
+        if let Some(base) = request.name.strip_suffix(CANCEL_SUFFIX)
+            && let Some(id) = self.running_request(&device, base)
+        {
+            self.accept_cancel(&device, &action_id, id, send);
+            return;
+        }
+        if let Some(names) = self.declared.get(&device)
+            && !names.contains(&request.name)
+        {
+            let reason = format!(
+                "link device `{device}` on {} does not declare action `{}`",
+                self.name, request.name
+            );
+            self.app.report_link_action(
+                &action_id,
+                &self.name,
+                &device,
+                ActionState::Rejected { reason },
+                BTreeMap::new(),
+            );
+            return;
+        }
         let payload = match encode_action_map(&request.args) {
             Ok(payload) => payload,
             Err(_) => {
@@ -110,12 +161,26 @@ impl LinkContext {
         };
         let id = self.actions.next_id;
         self.actions.next_id = self.actions.next_id.wrapping_add(1);
-        match send(&device, id, &request.name, &payload) {
+        let sent = send(
+            &device,
+            LinkSend::Request {
+                id,
+                name: &request.name,
+                payload: &payload,
+            },
+        );
+        match sent {
             Ok(()) => {
                 debug!(link = %self.name, device = %device, action_id = %action_id, id, name = %request.name, "action sent to link device");
-                self.actions
-                    .pending
-                    .insert(id, SentAction { device, action_id });
+                self.actions.pending.insert(
+                    id,
+                    SentAction {
+                        device,
+                        action_id,
+                        name: request.name,
+                        cancels: Vec::new(),
+                    },
+                );
             }
             Err(error) => {
                 let state = send_failure(&device, &self.name, error);
@@ -130,7 +195,41 @@ impl LinkContext {
         }
     }
 
-    /// Reports a device's `ActionResult` for an action this link sent it.
+    /// The id of the request named `name` that runs on `device`, if one does.
+    fn running_request(&self, device: &str, name: &str) -> Option<u32> {
+        self.actions
+            .pending
+            .iter()
+            .find(|(_, sent)| sent.device == device && sent.name == name)
+            .map(|(id, _)| *id)
+    }
+
+    /// Sends `ActionCancel` for the request `id` and remembers the companion `action_id`, which
+    /// is reported when that request reaches its final state.
+    fn accept_cancel(
+        &mut self,
+        device: &str,
+        action_id: &str,
+        id: u32,
+        send: impl FnOnce(&str, LinkSend<'_>) -> Result<(), ActionSendError>,
+    ) {
+        match send(device, LinkSend::Cancel { id }) {
+            Ok(()) => {
+                debug!(link = %self.name, device = %device, action_id, id, "cancel sent to link device");
+                if let Some(sent) = self.actions.pending.get_mut(&id) {
+                    sent.cancels.push(action_id.to_owned());
+                }
+            }
+            Err(error) => {
+                let state = send_failure(device, &self.name, error);
+                self.app
+                    .report_link_action(action_id, &self.name, device, state, BTreeMap::new());
+            }
+        }
+    }
+
+    /// Reports a device's `ActionResult` for an action this link sent it. A final result also
+    /// settles the cancel companions waiting for it.
     fn on_action_result(&mut self, device: &str, id: u32, state: LinkActionState, payload: &[u8]) {
         let Some(sent) = self.actions.pending.get(&id) else {
             debug!(link = %self.name, device = %device, id, "action result for an unknown request");
@@ -141,8 +240,28 @@ impl LinkContext {
             return;
         }
         let action_id = sent.action_id.clone();
-        if state != LinkActionState::Running {
-            self.actions.pending.remove(&id);
+        if state != LinkActionState::Running
+            && let Some(finished) = self.actions.pending.remove(&id)
+        {
+            for companion in &finished.cancels {
+                let companion_state = if state == LinkActionState::Cancelled {
+                    ActionState::Succeeded
+                } else {
+                    ActionState::Rejected {
+                        reason: format!(
+                            "the action finished as {} before the cancel took effect",
+                            final_state_name(state)
+                        ),
+                    }
+                };
+                self.app.report_link_action(
+                    companion,
+                    &self.name,
+                    device,
+                    companion_state,
+                    BTreeMap::new(),
+                );
+            }
         }
         let (state, output) = report_state(state, payload);
         self.app
@@ -176,6 +295,7 @@ impl LinkContext {
             } => {
                 info!(link = %self.name, device = %device_name, session_id, max_frame, "link device connected");
                 self.accepted.remove(&device_name);
+                self.declared.remove(&device_name);
                 // Seed the lease set of a device the node already knows, so it has its leases
                 // before its first snapshot arrives.
                 LeaseAction::Set(
@@ -237,6 +357,7 @@ impl LinkContext {
             HostEvent::DeviceLost { device_name } => {
                 info!(link = %self.name, device = %device_name, "link device lost; marking its resources unavailable");
                 self.accepted.remove(&device_name);
+                self.declared.remove(&device_name);
                 self.fail_device_actions(
                     &device_name,
                     "link device disconnected before the action finished",
@@ -251,6 +372,11 @@ impl LinkContext {
                 payload,
             } => {
                 self.on_action_result(&device_name, id, state, &payload);
+                LeaseAction::Keep
+            }
+            HostEvent::ActionCatalog { device_name, names } => {
+                debug!(link = %self.name, device = %device_name, names = names.len(), "link device declared its actions");
+                self.declared.insert(device_name, names);
                 LeaseAction::Keep
             }
             HostEvent::DeviceRejected {
@@ -311,6 +437,14 @@ impl LinkContext {
     /// Publishes the status (`NodeApp::link_status`).
     pub(super) fn publish_status(&mut self) {
         self.status.devices = self.accepted.iter().cloned().collect();
+        self.status.actions = self
+            .declared
+            .iter()
+            .map(|(device, names)| LinkDeviceActions {
+                device: device.clone(),
+                names: names.clone(),
+            })
+            .collect();
         self.app.record_link_status(self.status.clone());
     }
 
@@ -371,6 +505,18 @@ fn report_state(
             },
             BTreeMap::new(),
         ),
+        LinkActionState::Cancelled => (ActionState::Cancelled, BTreeMap::new()),
+    }
+}
+
+/// The name of a final state, for a companion's reason.
+fn final_state_name(state: LinkActionState) -> &'static str {
+    match state {
+        LinkActionState::Succeeded => "succeeded",
+        LinkActionState::Failed => "failed",
+        LinkActionState::Rejected => "rejected",
+        LinkActionState::Cancelled => "cancelled",
+        LinkActionState::Running => "running",
     }
 }
 

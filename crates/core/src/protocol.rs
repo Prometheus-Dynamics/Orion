@@ -27,7 +27,8 @@ use core::fmt;
 /// Protocol 1 also carries update intents and statuses (`UpdateIntentRecord`, `UpdateStatusRecord`),
 /// replicated host metrics on observed pushes, the peer sync clock in the peer status, action and
 /// client-queue byte counters in resource usage, and peer push sessions for forwarded actions
-/// (`ActionQuery::forwarded_by`).
+/// (`ActionQuery::forwarded_by`), and the action names each link device declared
+/// (`LinkStatusSnapshot::actions`).
 ///
 /// Every change to a protocol type after a release bumps this number and the layout fingerprint.
 pub const CONTROL_PROTOCOL_VERSION: u16 = 1;
@@ -38,7 +39,7 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 1;
 /// Guarded by `crates/orion/tests/control_protocol_layout.rs`, which recomputes it from the
 /// archived type sizes/alignments and fails when the layout changes without this constant (and
 /// the version) being updated.
-pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x46e2_4e5d_08c6_9f4e;
+pub const CONTROL_PROTOCOL_LAYOUT_FINGERPRINT: u64 = 0x199d_e929_1758_0e5b;
 
 /// HTTP header carrying [`CONTROL_PROTOCOL_VERSION`] on every control request and response.
 pub const CONTROL_PROTOCOL_HTTP_HEADER: &str = "x-orion-control-protocol";

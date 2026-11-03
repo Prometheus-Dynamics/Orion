@@ -6,7 +6,7 @@
 //! it owns the session (`firmware.rs`).
 
 use super::SerialLinkConfig;
-use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, REOPEN_DELAY};
+use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, LinkSend, REOPEN_DELAY};
 use super::firmware::{DeviceSeen, FirmwareJob};
 use super::serial::SerialPort;
 use crate::actions::ActionOutcome;
@@ -84,9 +84,14 @@ pub(super) async fn run(
             },
             changed = desired.changed() => refresh = changed.is_ok(),
             command = commands.recv(), if commands_open => match command {
-                Some(command) => ctx.accept_action(command, |device, id, name, payload| {
+                Some(command) => ctx.accept_action(command, |device, send| {
                     match session.device_name() {
-                        Some(current) if current == device => session.send_action(id, name, payload),
+                        Some(current) if current == device => match send {
+                            LinkSend::Request { id, name, payload } => {
+                                session.send_action(id, name, payload)
+                            }
+                            LinkSend::Cancel { id } => session.send_action_cancel(id),
+                        },
                         _ => Err(ActionSendError::NotConnected),
                     }
                 }),
