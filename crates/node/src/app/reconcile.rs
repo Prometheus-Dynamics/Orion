@@ -34,6 +34,14 @@ impl NodeApp {
             ControlMessage::Hello(_) => Ok(HttpResponsePayload::Hello(self.peer_hello()?)),
             // Acted on by `note_private_link_message` before dispatch; only the acknowledgement is left.
             ControlMessage::RobotLinkListener(_) => Ok(HttpResponsePayload::Accepted),
+            // A configured peer's push session for the actions it forwarded (`docs/actions.md`,
+            // "Peer watches").
+            ControlMessage::OpenSession(open) => match peer.as_ref() {
+                Some(peer) => self.open_peer_session(peer, open),
+                None => Err(NodeError::Authorization(
+                    "push sessions need an authenticated peer".into(),
+                )),
+            },
             ControlMessage::SyncRequest(request) => self.build_sync_response(request),
             ControlMessage::SyncSummaryRequest(request) => Ok(HttpResponsePayload::Summary(
                 self.desired_state_summary_for_sections(&request.sections)?,
@@ -133,7 +141,6 @@ impl NodeApp {
             | ControlMessage::Blob(_)
             | ControlMessage::Blobs(_)
             | ControlMessage::OperatorHello
-            | ControlMessage::OpenSession(_)
             | ControlMessage::DeclareStream(_)
             | ControlMessage::PublishSamples(_)
             | ControlMessage::SubscribeStream(_)
@@ -422,6 +429,11 @@ impl NodeApp {
     ) -> Result<HttpResponsePayload, NodeError> {
         if let Some(peer) = peer_node_id {
             self.note_peer_heard(peer);
+            // Replicated load is kept beside the state, never merged into it. Only an
+            // authenticated peer's metrics count (open mode has no peer id here).
+            if let Some(metrics) = update.host {
+                self.record_peer_host_metrics(peer, metrics);
+            }
         }
         let mut state_changed = self.with_store_mut(|store| match peer_node_id {
             Some(peer_node_id) => merge_peer_observed_state(

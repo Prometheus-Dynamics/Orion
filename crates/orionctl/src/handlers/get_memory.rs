@@ -86,7 +86,7 @@ fn render_memory_summary(snapshot: &NodeObservabilitySnapshot) -> String {
         history.max_bytes,
     ));
     out.push_str(&format!(
-        "local_streams clients={} attached_streams={} state_watchers={} executor_watchers={} provider_watchers={} send_queue_depth_total={} send_queue_depth_max={}/{} queued_events_total={} queued_events_max={}/{} dropped_events={}\n",
+        "local_streams clients={} attached_streams={} state_watchers={} executor_watchers={} provider_watchers={} send_queue_depth_total={} send_queue_depth_max={}/{} queued_events_total={} queued_events_max={}/{} queued_event_bytes_total={} queued_event_bytes_max={}/{} dropped_events={}\n",
         streams.registered_clients,
         streams.attached_streams,
         streams.state_watchers,
@@ -98,7 +98,15 @@ fn render_memory_summary(snapshot: &NodeObservabilitySnapshot) -> String {
         streams.queued_client_events_total,
         streams.queued_client_events_max,
         streams.client_event_queue_limit,
+        streams.queued_client_event_bytes_total,
+        streams.queued_client_event_bytes_max,
+        streams.client_event_queue_byte_limit,
         streams.dropped_client_events_total,
+    ));
+    let actions = &usage.actions;
+    out.push_str(&format!(
+        "actions pending={} running={} finished={} result_history_bytes={}\n",
+        actions.pending, actions.running, actions.finished, actions.result_history_bytes,
     ));
     for queue in &usage.worker_queues {
         out.push_str(&format!(

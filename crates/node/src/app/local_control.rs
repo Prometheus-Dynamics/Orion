@@ -93,6 +93,8 @@ impl NodeApp {
                         learned_tls_root_cert_fingerprint: status.learned_tls_root_cert_fingerprint,
                         revoked: status.revoked,
                         sync_status: status.sync_status,
+                        last_successful_sync_ms: status.last_successful_sync_ms,
+                        stale: status.stale,
                         last_error: status.last_error,
                         last_error_kind: status.last_error_kind,
                         troubleshooting_hint: status.troubleshooting_hint,

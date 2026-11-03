@@ -291,6 +291,38 @@ same lane as every action, so there is no job-specific message:
 handler disconnects before a final report becomes `Failed` (see "Disconnects" in
 [device-agent.md](device-agent.md)).
 
+## Counters
+
+The resource-usage snapshot (`NodeResourceUsageSnapshot::actions`, `orionctl get memory`) counts
+the tracked actions by stage: `pending` (accepted, not yet started by its handler), `running`
+(reported as running), and `finished` (any final state). `result_history_bytes` is the approximate
+size of the retained final results (their ids, names, requesters, reasons, and output keys and
+values), so an operator can see what the result TTL and `ORION_NODE_ACTION_MAX_TRACKED` hold. It is
+computed on demand from the registry and is not persisted. Prometheus:
+`orion_action_entries{stage="pending"|"running"|"finished"}` and
+`orion_action_result_history_bytes`.
+
+## Peer watches
+
+A node that forwards an action to its owner does not have to poll for the result. A configured
+peer may open a push session on its own `orion+tcp` connection (`OpenSession`, the same mechanism
+as remote operator sessions, see [remote-operator.md](remote-operator.md#push-sessions)) and watch
+the results of the actions it forwarded (`WatchActions` with `ActionQuery::forwarded_by`). The
+owner's results are pushed on that connection as they change.
+
+- **Scope.** A peer's session is narrowed to its own forwarded actions: the owner sets
+  `forwarded_by` to the authenticated peer whatever query the peer sends, and refuses a query that
+  names another peer. A forwarded result carries `requested_by = peer:<node>/<original>`, which the
+  owner stamps itself, so a local client cannot claim to be a forwarder.
+- **Session.** Only `WatchActions` and `Ping` are accepted on a peer session. Its client is
+  registered under `peer:<node>/...` and is closed with the connection or when it goes idle, as
+  for operator sessions.
+- **Authorization.** `OpenSession`, `WatchActions` and `Ping` from a peer are allowed only for a
+  configured peer, under the same peer authentication as `RunAction` (signed `orion+tcp`).
+
+The forwarding side that opens these sessions is described in the forwarding section above; until
+it lands, forwarding keeps resending `RunAction` with `wait_ms`.
+
 ## Limits
 
 Action ids, names, argument and output keys are at most 128 bytes; at most 32 arguments and 32

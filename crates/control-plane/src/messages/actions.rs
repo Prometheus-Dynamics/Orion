@@ -510,6 +510,11 @@ impl ActionReport {
 pub struct ActionQuery {
     pub action_id: Option<String>,
     pub target: Option<ActionTarget>,
+    /// Only actions forwarded by this peer (`requested_by` = `peer:<node>/...`). A peer's push
+    /// session is always narrowed to its own forwarded actions (`docs/actions.md`, "Peer
+    /// watches").
+    #[serde(default)]
+    pub forwarded_by: Option<NodeId>,
 }
 
 impl ActionQuery {
@@ -520,15 +525,21 @@ impl ActionQuery {
     pub fn action(action_id: impl Into<String>) -> Self {
         Self {
             action_id: Some(action_id.into()),
-            target: None,
+            ..Self::default()
         }
     }
 
     pub fn target(target: ActionTarget) -> Self {
         Self {
-            action_id: None,
             target: Some(target),
+            ..Self::default()
         }
+    }
+
+    /// The same query, narrowed to the actions `peer` forwarded.
+    pub fn forwarded_by(mut self, peer: NodeId) -> Self {
+        self.forwarded_by = Some(peer);
+        self
     }
 
     pub fn matches(&self, result: &ActionResult) -> bool {
@@ -539,6 +550,13 @@ impl ActionQuery {
                 .target
                 .as_ref()
                 .is_none_or(|target| target == &result.target)
+            && self.forwarded_by.as_ref().is_none_or(|peer| {
+                result
+                    .requested_by
+                    .strip_prefix("peer:")
+                    .and_then(|rest| rest.strip_prefix(peer.as_str()))
+                    .is_some_and(|rest| rest.starts_with('/'))
+            })
     }
 }
 
@@ -609,5 +627,28 @@ mod tests {
         };
         let entries = result.status_entries();
         assert_eq!(entries[1].key, "action.u1.error");
+    }
+
+    #[test]
+    fn forwarded_by_matches_only_the_results_that_peer_forwarded() {
+        let target = ActionTarget::Node(NodeId::new("node-b"));
+        let result = |requested_by: &str| {
+            let mut result = ActionResult::new(
+                "a",
+                target.clone(),
+                "locate",
+                NodeId::new("node-b"),
+                ActionState::Accepted,
+            );
+            result.requested_by = requested_by.into();
+            result
+        };
+        let query = ActionQuery::all().forwarded_by(NodeId::new("node-a"));
+        assert!(query.matches(&result("peer:node-a/cli")));
+        // Another peer, a prefix of another node id, and a local requester do not match.
+        assert!(!query.matches(&result("peer:node-ab/cli")));
+        assert!(!query.matches(&result("peer:node-c/cli")));
+        assert!(!query.matches(&result("local:cli")));
+        assert!(ActionQuery::all().matches(&result("local:cli")));
     }
 }

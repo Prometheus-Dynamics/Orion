@@ -198,3 +198,74 @@ fn builder_sources_and_overlays_are_merged() {
         Some("edge-1")
     );
 }
+
+#[test]
+fn replicated_load_reaches_peers_and_stays_out_of_their_state() {
+    use orion::control_plane::{ObservedClusterState, ObservedStateUpdate};
+
+    let sender = host_app("node-sender");
+    let host = FakeHost::new();
+    host.update(|facts| {
+        facts
+            .metrics
+            .temperatures
+            .push(HostTemperature::new("gpu", 61_000));
+    });
+    sender.refresh_host_facts_from(&host);
+    let metrics = sender
+        .replicated_host_metrics()
+        .expect("a sampled host replicates its load");
+    assert_eq!(metrics.memory_available_bytes, Some(6 << 30));
+    assert_eq!(metrics.load_1_milli, Some(250));
+    // The hottest of the sensors, not the first one.
+    assert_eq!(metrics.max_temperature_millidegrees_c, Some(61_000));
+
+    let receiver = host_app("node-receiver");
+    let push = |host: Option<orion::control_plane::ReplicatedHostMetrics>| ObservedStateUpdate {
+        observed: ObservedClusterState::default(),
+        applied: Default::default(),
+        host,
+    };
+    receiver
+        .apply_observed_update_from_peer(Some(&NodeId::new("node-sender")), push(Some(metrics)))
+        .expect("peer observed update should apply");
+    let snapshot = receiver.observability_snapshot();
+    assert_eq!(snapshot.peer_host_metrics.len(), 1);
+    assert_eq!(
+        snapshot.peer_host_metrics[0].node_id,
+        NodeId::new("node-sender")
+    );
+    assert_eq!(snapshot.peer_host_metrics[0].metrics, metrics);
+    assert!(snapshot.peer_host_metrics[0].received_at_ms > 0);
+    // Load is kept beside the state: the peer gets no node record from it.
+    assert!(
+        !receiver
+            .state_snapshot()
+            .state
+            .observed
+            .nodes
+            .contains_key(&NodeId::new("node-sender"))
+    );
+
+    // Without an authenticated peer (open mode, local calls) nothing is recorded.
+    receiver
+        .apply_observed_update_from_peer(None, push(Some(metrics)))
+        .expect("local update should apply");
+    assert_eq!(receiver.observability_snapshot().peer_host_metrics.len(), 1);
+
+    // A newer push replaces the peer's entry; a push without metrics keeps the last one.
+    let newer = orion::control_plane::ReplicatedHostMetrics {
+        sampled_at_ms: metrics.sampled_at_ms + 1_000,
+        load_1_milli: Some(900),
+        ..metrics
+    };
+    receiver
+        .apply_observed_update_from_peer(Some(&NodeId::new("node-sender")), push(Some(newer)))
+        .expect("peer observed update should apply");
+    receiver
+        .apply_observed_update_from_peer(Some(&NodeId::new("node-sender")), push(None))
+        .expect("peer observed update should apply");
+    let peers = receiver.observability_snapshot().peer_host_metrics;
+    assert_eq!(peers.len(), 1);
+    assert_eq!(peers[0].metrics, newer);
+}

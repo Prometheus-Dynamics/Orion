@@ -1,6 +1,8 @@
 //! Rendering host facts (`docs/host-facts.md`) and link status (`docs/link-protocol.md`).
 
-use orion_control_plane::{HostMetricsSample, LinkStatusSnapshot, NodeHostFacts};
+use orion_control_plane::{
+    HostMetricsSample, LinkStatusSnapshot, NodeHostFacts, PeerHostMetricsSnapshot,
+};
 
 fn text_or_dash(value: Option<&String>) -> &str {
     value.map_or("-", String::as_str)
@@ -168,6 +170,25 @@ pub(crate) fn render_links_summary(links: &[LinkStatusSnapshot]) -> String {
         ));
     }
     out
+}
+
+/// The load a peer replicated to this node (`docs/host-facts.md`, "Replicated load"); `-` when the
+/// peer has not pushed any yet.
+pub(crate) fn print_replicated_host_metrics(peer: Option<&PeerHostMetricsSnapshot>) {
+    let Some(peer) = peer else {
+        println!("replicated_host_metrics: -");
+        return;
+    };
+    let metrics = &peer.metrics;
+    println!(
+        "replicated_host_metrics: sampled_at_ms={} received_at_ms={} cpu_busy_milli={} memory_available_bytes={} load_1_milli={} max_temperature_millidegrees_c={}",
+        metrics.sampled_at_ms,
+        peer.received_at_ms,
+        display_or_dash(metrics.cpu_busy_milli),
+        display_or_dash(metrics.memory_available_bytes),
+        display_or_dash(metrics.load_1_milli),
+        display_or_dash(metrics.max_temperature_millidegrees_c),
+    );
 }
 
 #[cfg(test)]

@@ -83,9 +83,9 @@ pub mod control_plane {
         action_status_keys, update_action,
     };
     pub use orion_control_plane::{
-        AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder, AvailabilityState, ClientEvent,
-        ClientEventKind, ClientEventPoll, ClientHello, ClientRole, ClientSession,
-        ClientSessionMetricsSnapshot, ClockSourceKind, ClusterStateEnvelope,
+        ActionUsageSnapshot, AppliedClusterState, ArtifactRecord, ArtifactRecordBuilder,
+        AvailabilityState, ClientEvent, ClientEventKind, ClientEventPoll, ClientHello, ClientRole,
+        ClientSession, ClientSessionMetricsSnapshot, ClockSourceKind, ClusterStateEnvelope,
         CommunicationEndpointSnapshot, CommunicationFailureCountSnapshot, CommunicationFailureKind,
         CommunicationMetricsSnapshot, CommunicationRecentMetricsSnapshot,
         CommunicationStageMetricsSnapshot, ConfigDecodeError, ConfigMapRef, ControlMessage,

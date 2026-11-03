@@ -66,9 +66,24 @@ orion_local_client_event_queue_depth{node_id="node-a",stat="max"} 6
 # HELP orion_local_client_event_queue_limit Configured per-client pending event limit.
 # TYPE orion_local_client_event_queue_limit gauge
 orion_local_client_event_queue_limit{node_id="node-a"} 256
+# HELP orion_local_client_event_queue_bytes Bytes charged to pending local client events, summed or per-client maximum.
+# TYPE orion_local_client_event_queue_bytes gauge
+orion_local_client_event_queue_bytes{node_id="node-a",stat="total"} 4096
+orion_local_client_event_queue_bytes{node_id="node-a",stat="max"} 2048
+# HELP orion_local_client_event_queue_byte_limit Configured per-client pending byte limit.
+# TYPE orion_local_client_event_queue_byte_limit gauge
+orion_local_client_event_queue_byte_limit{node_id="node-a"} 65536
 # HELP orion_local_client_dropped_events Events dropped from full client queues, summed over currently registered clients.
 # TYPE orion_local_client_dropped_events gauge
 orion_local_client_dropped_events{node_id="node-a"} 2
+# HELP orion_action_entries Tracked generic actions by stage: pending (accepted), running, or finished.
+# TYPE orion_action_entries gauge
+orion_action_entries{node_id="node-a",stage="pending"} 1
+orion_action_entries{node_id="node-a",stage="running"} 2
+orion_action_entries{node_id="node-a",stage="finished"} 5
+# HELP orion_action_result_history_bytes Approximate bytes of the retained final action results.
+# TYPE orion_action_result_history_bytes gauge
+orion_action_result_history_bytes{node_id="node-a"} 900
 # HELP orion_worker_queue_depth Commands waiting in a bounded background worker queue.
 # TYPE orion_worker_queue_depth gauge
 orion_worker_queue_depth{node_id="node-a",queue="persistence"} 1

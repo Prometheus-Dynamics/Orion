@@ -29,6 +29,7 @@ pub(super) fn append_resource_usage_metrics(
     append_state_metrics(out, node, usage);
     append_mutation_history_metrics(out, node, usage);
     append_local_stream_metrics(out, node, usage);
+    append_action_metrics(out, node, usage);
     append_worker_queue_metrics(out, node, usage);
     append_registry_metrics(out, node, usage);
     append_status_and_persistence_metrics(out, node, usage);
@@ -233,12 +234,56 @@ fn append_local_stream_metrics(out: &mut String, node: &str, usage: &NodeResourc
         &[("node_id", node)],
         streams.client_event_queue_limit,
     );
+    append_total_max(
+        out,
+        node,
+        "orion_local_client_event_queue_bytes",
+        "Bytes charged to pending local client events, summed or per-client maximum.",
+        streams.queued_client_event_bytes_total,
+        streams.queued_client_event_bytes_max,
+    );
+    gauge(
+        out,
+        "orion_local_client_event_queue_byte_limit",
+        "Configured per-client pending byte limit.",
+        &[("node_id", node)],
+        streams.client_event_queue_byte_limit,
+    );
     gauge(
         out,
         "orion_local_client_dropped_events",
         "Events dropped from full client queues, summed over currently registered clients.",
         &[("node_id", node)],
         streams.dropped_client_events_total,
+    );
+}
+
+fn append_action_metrics(out: &mut String, node: &str, usage: &NodeResourceUsageSnapshot) {
+    let actions = &usage.actions;
+    metric_help(
+        out,
+        "orion_action_entries",
+        "Tracked generic actions by stage: pending (accepted), running, or finished.",
+    );
+    metric_type(out, "orion_action_entries", "gauge");
+    for (stage, value) in [
+        ("pending", actions.pending),
+        ("running", actions.running),
+        ("finished", actions.finished),
+    ] {
+        sample(
+            out,
+            "orion_action_entries",
+            &[("node_id", node), ("stage", stage)],
+            value,
+        );
+    }
+    gauge(
+        out,
+        "orion_action_result_history_bytes",
+        "Approximate bytes of the retained final action results.",
+        &[("node_id", node)],
+        actions.result_history_bytes,
     );
 }
 

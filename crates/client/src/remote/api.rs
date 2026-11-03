@@ -237,12 +237,7 @@ impl RemoteOperator {
 
     /// The current result of one action, if the node still tracks it.
     pub async fn query_action(&self, action_id: &str) -> Result<Option<ActionResult>, RemoteError> {
-        let results = self
-            .query_actions(ActionQuery {
-                action_id: Some(action_id.to_owned()),
-                target: None,
-            })
-            .await?;
+        let results = self.query_actions(ActionQuery::action(action_id)).await?;
         Ok(results
             .into_iter()
             .find(|result| result.action_id == action_id))

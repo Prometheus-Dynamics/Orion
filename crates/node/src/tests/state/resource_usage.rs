@@ -80,6 +80,14 @@ fn observability_reports_state_history_and_queue_usage() {
     assert_eq!(usage.local_streams.attached_streams, 0);
     assert_eq!(usage.local_streams.send_queue_capacity, 16);
     assert_eq!(usage.local_streams.client_event_queue_limit, 8);
+    assert_eq!(
+        usage.local_streams.client_event_queue_byte_limit,
+        app.config.runtime_tuning.local_client_event_queue_bytes as u64
+    );
+    // The usage snapshot reports bytes next to counts: with no queued events, no bytes either.
+    assert_eq!(usage.local_streams.queued_client_events_total, 0);
+    assert_eq!(usage.local_streams.queued_client_event_bytes_total, 0);
+    assert_eq!(usage.local_streams.queued_client_event_bytes_max, 0);
     assert_eq!(usage.local_streams.dropped_client_events_total, 0);
     assert_eq!(usage.registries.local_clients, 1);
     assert_eq!(usage.registries.peers, 0);

@@ -119,6 +119,7 @@ fn codec_maps_observed_updates_to_observed_route() {
     let update = ObservedStateUpdate {
         observed: ObservedClusterState::default(),
         applied: AppliedClusterState::default(),
+        host: None,
     };
     let request = codec
         .encode_request(&HttpRequestPayload::ObservedUpdate(update.clone()))

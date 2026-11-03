@@ -80,6 +80,10 @@ pub struct PeerTrustStatus {
     pub learned_tls_root_cert_fingerprint: Option<String>,
     pub revoked: bool,
     pub sync_status: Option<PeerSyncStatus>,
+    /// Last completed sync round with this node, in milliseconds since the Unix epoch.
+    pub last_successful_sync_ms: Option<u64>,
+    /// The last successful sync is older than the tombstone retention (the peer is refused).
+    pub stale: bool,
     pub last_error: Option<String>,
     pub last_error_kind: Option<PeerSyncErrorKind>,
     pub troubleshooting_hint: Option<String>,

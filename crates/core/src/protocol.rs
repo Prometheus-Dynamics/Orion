@@ -49,7 +49,14 @@ use core::fmt;
 ///   `<name>.cancel` companion action (`docs/actions.md`, "Long-running jobs").
 /// - `7`: blob push (`docs/blobs.md`): `ControlMessage::BeginBlob`, `WriteBlobChunk`, `CommitBlob`,
 ///   `QueryBlobs`, `DeleteBlob`, `Blob`, `Blobs`; `BlobBegin`, `BlobChunk`, `BlobState`,
-///   `BlobStatus`.
+///   `BlobStatus`. Queued client event bytes next to the counts in
+///   `NodeResourceUsageSnapshot::local_streams` (`client_event_queue_byte_limit`,
+///   `queued_client_event_bytes_total` / `_max`), and the action counters
+///   `NodeResourceUsageSnapshot::actions` (`ActionUsageSnapshot`), and the peer sync clock in the
+///   peer status: `PeerTrustRecord::last_successful_sync_ms` and `stale`; replicated host metrics
+///   (`ObservedStateUpdate::host`, `ReplicatedHostMetrics`, `NodeObservabilitySnapshot::peer_host_metrics`,
+///   `PeerHostMetricsSnapshot`; `docs/host-facts.md`, "Replicated load"), and `ActionQuery::forwarded_by`
+///   (a configured peer's push session for the actions it forwarded; `docs/actions.md`, "Peer watches").
 pub const CONTROL_PROTOCOL_VERSION: u16 = 7;
 
 /// Fingerprint of the archived layout of the control-protocol types at

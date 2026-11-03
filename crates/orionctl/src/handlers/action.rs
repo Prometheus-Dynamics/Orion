@@ -182,6 +182,7 @@ pub(crate) async fn get_actions(args: ActionListArgs) -> Result<(), String> {
         .query_actions(ActionQuery {
             action_id: args.id.clone(),
             target,
+            forwarded_by: None,
         })
         .await
         .map_err(|error| error.to_string())?;

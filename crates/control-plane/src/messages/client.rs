@@ -3,7 +3,7 @@ use super::status::StatusChange;
 use super::sync::StateSnapshot;
 use crate::{
     AppliedClusterState, ExecutorRecord, LeaseRecord, ObservedClusterState, ProviderRecord,
-    ResourceRecord, WorkloadRecord,
+    ReplicatedHostMetrics, ResourceRecord, WorkloadRecord,
 };
 use alloc::{boxed::Box, string::String, vec::Vec};
 use orion_core::{
@@ -172,4 +172,8 @@ pub struct ClientEvent {
 pub struct ObservedStateUpdate {
     pub observed: ObservedClusterState,
     pub applied: AppliedClusterState,
+    /// The sender's replicated host metrics (`docs/host-facts.md`, "Replicated load"). Not state:
+    /// a receiver keeps them for its observability snapshot and never stores them in records.
+    #[serde(default)]
+    pub host: Option<ReplicatedHostMetrics>,
 }

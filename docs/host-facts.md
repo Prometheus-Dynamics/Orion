@@ -10,7 +10,7 @@ The two halves have different lifetimes and travel differently:
 | Half | Type | Where it goes | Replicated to peers |
 | --- | --- | --- | --- |
 | Identity (slow-changing) | `NodeHostFacts` | The node's own observed `NodeRecord::host`, replaced only when a value changes | Yes, with the observed slice (like clock facts, see [peer-sync.md](peer-sync.md)) |
-| Metrics (volatile) | `HostMetricsSample` | The volatile status lane under the subject `node/<id>`, and the observability snapshot | No (the status lane is node-local) |
+| Metrics (volatile) | `HostMetricsSample` | The volatile status lane under the subject `node/<id>`, and the observability snapshot | Four of them, in each observed push ([Replicated load](#replicated-load)); the status lane stays node-local |
 
 So peers and `orionctl get nodes` see every node's hostname, image version and boot id, while
 uptime, load and temperatures are read from the node itself (`orionctl get status --subject
@@ -174,6 +174,33 @@ subscription and starts it with a new bootstrap.
 `subscribe_state_and_observed` (`StateWatch::include_observed`) also sends a snapshot whenever the
 observed state changes (workload phases, resource health and availability, leases, node records),
 starting with a bootstrap snapshot, so a client never needs to poll `fetch_state_snapshot`.
+
+## Replicated load
+
+Peers see each other's load without polling the status lane. Each observed push to a peer
+([peer-sync.md](peer-sync.md), "Observed state") carries `ObservedStateUpdate::host`: a
+`ReplicatedHostMetrics` built from the sender's latest sample. It is a fixed-size value (no strings
+and no lists), so building and receiving one allocates nothing.
+
+| Field | From the sample | Note |
+| --- | --- | --- |
+| `sampled_at_ms` | `HostFacts::sampled_at_ms` | The sender's clock. |
+| `cpu_busy_milli` | `cpu_busy_milli` | All CPUs, per mille. Unset until the sender has a CPU window. |
+| `memory_available_bytes` | `memory_available_bytes` | |
+| `load_1_milli` | `load_1_milli` | One-minute load average times 1000. |
+| `max_temperature_millidegrees_c` | the hottest `temperatures` reading | Per-sensor readings stay local. |
+
+**Rate.** The value rides the observed push, so it is sent when the sender's observed slice
+changes and at least every 30 seconds (`OBSERVED_REFRESH_INTERVAL_MS`). A peer's view of a node's
+load is therefore at most about 30 seconds old, and the cost is one small field per push. Nothing
+is sent per sample.
+
+**Receiving.** The receiver keeps the latest value per authenticated peer, with `received_at_ms`
+on its own clock, in memory only (not persisted, not relayed, not part of the desired or observed
+state). It holds at most 256 peers. A push without an authenticated peer (open mode, local calls)
+records nothing. The values appear in `NodeObservabilitySnapshot::peer_host_metrics` (wire field
+`PeerHostMetricsSnapshot`) and in `orionctl describe node <id>` as a `replicated_host_metrics:`
+line. The local node's own full sample stays in its host section.
 
 ## Custom sources
 

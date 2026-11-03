@@ -10,7 +10,7 @@ first; the other items below are still needed, after it.
 
 - [ ] **aarch64 appliance soak** on the reference board (below, under freeze items).
 - [x] **Unknown arguments start a node** (below): `orion-node --version` on the reference board. Done in 6bf46ce; on dev.
-- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total not yet in the usage snapshot or metrics (queued in "4. Protocol v7 window").
+- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total now in the usage snapshot and metrics (protocol v7 window, usage-peer-wire).
 - [ ] **Protocol v7 on the reference board:** once the current pin is proven on the board, the v7 window
       (the device library's orion-v7 merge, the consuming products together, the images' orion-node).
 
@@ -86,7 +86,7 @@ signed types, the version history in `crates/core/src/protocol.rs`, and the docs
 
 Control protocol:
 
-- [ ] **Client event queue bytes.** `NodeResourceUsageSnapshot` gains the per-client queued bytes
+- [x] **Client event queue bytes** (done on `usage-peer-wire`, CHANGELOG [Unreleased]). `NodeResourceUsageSnapshot` gains the per-client queued bytes
       and the byte limit next to the event counts (737579d added the cap); `orionctl get memory`
       shows them. The Prometheus gauge `orion_local_client_event_queue_bytes` is text, not wire, but
       ships with it. Docs: node-env.md (`ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES`).
@@ -94,14 +94,17 @@ Control protocol:
       tombstones, `UpdateStatusRecord` in the observed slice, `orionctl get updates` / `apply update`
       / `delete update`, `ORION_NODE_UPDATE_REQUESTERS`, audit records. Docs: update-recovery.md
       (U3), device-agent.md, node-env.md, audit-logging.md.
-- [ ] **Action counters in `resource_usage`.** Pending / running / finished counts and the
+- [x] **Action counters in `resource_usage`** (done on `usage-peer-wire`; `NodeResourceUsageSnapshot::actions`). Pending / running / finished counts and the
       result-history bytes in `NodeResourceUsageSnapshot`. Docs: actions.md.
 - [ ] **Peer `ActionWatch`.** A forwarding node subscribes to the owner's action results over
       `orion+tcp` instead of polling it (additive messages). Docs: actions.md, peer-sync.md.
-- [ ] **Replicated host metrics.** A small, selected set of volatile host metrics carried in peer
+      Owner side done on `usage-peer-wire` (commit A): a configured peer's push session, narrowed
+      to its forwarded actions (`ActionQuery::forwarded_by`). Forwarder push client and fallback
+      (commit B) still to do; until then the forwarder resends `RunAction` with `wait_ms`.
+- [x] **Replicated host metrics** (done on `usage-peer-wire`: `ObservedStateUpdate::host`, see docs/host-facts.md "Replicated load"). A small, selected set of volatile host metrics carried in peer
       sync (or a peer push) so peers see each other's load without the node-local status lane.
       Docs: host-facts.md, peer-sync.md.
-- [ ] **Stale peer state.** The last successful sync time and a stale flag in the peer status
+- [x] **Stale peer state** (done on `usage-peer-wire`: `PeerTrustRecord::last_successful_sync_ms` and `stale`). The last successful sync time and a stale flag in the peer status
       messages (`orionctl get peers`). Since 54abc8c a stale peer is refused and its status is an
       error naming the reset commands; the clock itself is node-side only (`peer-sync-times.json`).
 

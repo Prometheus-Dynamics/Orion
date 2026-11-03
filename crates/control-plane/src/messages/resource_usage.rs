@@ -33,6 +33,7 @@ pub struct NodeResourceUsageSnapshot {
     pub observed_persistence: ObservedPersistenceUsageSnapshot,
     pub status_lane: StatusLaneUsageSnapshot,
     pub streams: StreamsUsageSnapshot,
+    pub actions: ActionUsageSnapshot,
 }
 
 /// Process memory counters read from `/proc/self/status` and `/proc/self/smaps_rollup`.
@@ -180,6 +181,12 @@ pub struct LocalStreamUsageSnapshot {
     pub queued_client_events_max: u64,
     /// Events discarded because a registered client's pending queue was full.
     pub dropped_client_events_total: u64,
+    /// Configured per-client pending byte limit (`ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_BYTES`).
+    pub client_event_queue_byte_limit: u64,
+    /// Bytes charged to the pending events of all registered clients, summed.
+    pub queued_client_event_bytes_total: u64,
+    /// Bytes charged to the pending events of the most loaded registered client.
+    pub queued_client_event_bytes_max: u64,
 }
 
 /// Queue depth for a bounded background worker.
@@ -312,4 +319,31 @@ pub struct StreamsUsageSnapshot {
     pub samples_total: u64,
     /// Declarations and batches refused (not the owner, not the publisher).
     pub refused_total: u64,
+}
+
+/// Tracked generic actions by stage (`docs/actions.md`, "Action counters"). The registry holds
+/// accepted, running and final results until their TTL passes.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+#[serde(default)]
+pub struct ActionUsageSnapshot {
+    /// Accepted actions not yet started by their handler.
+    pub pending: u64,
+    /// Actions a handler reported as running.
+    pub running: u64,
+    /// Actions in a final state (succeeded, failed, rejected, timed out, cancelled).
+    pub finished: u64,
+    /// Approximate bytes of the retained final results: their ids, names, requesters, reasons,
+    /// and output keys and values.
+    pub result_history_bytes: u64,
 }

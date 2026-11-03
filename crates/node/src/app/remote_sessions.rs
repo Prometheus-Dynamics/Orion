@@ -14,7 +14,7 @@ use orion::{
     },
     transport::{http::HttpResponsePayload, ipc::LocalAddress},
 };
-use orion_core::ClientName;
+use orion_core::{ClientName, NodeId};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A session that sends nothing (not even a ping) for this long is closed.
@@ -28,6 +28,11 @@ fn session_prefix(operator: &OperatorId) -> String {
     format!("{REMOTE_SESSION_PREFIX}{operator}/")
 }
 
+/// The address prefix of a peer's sessions (`peer:<node>/`, never an operator id).
+fn peer_session_prefix(peer: &NodeId) -> String {
+    format!("{REMOTE_SESSION_PREFIX}peer:{peer}/")
+}
+
 impl NodeApp {
     /// `OpenSession` from an enrolled operator: registers the session's client.
     pub(super) fn open_remote_session(
@@ -35,10 +40,28 @@ impl NodeApp {
         operator: &OperatorId,
         open: SessionOpen,
     ) -> Result<HttpResponsePayload, NodeError> {
+        self.open_session_at(&session_prefix(operator), operator.to_string(), open)
+    }
+
+    /// `OpenSession` from a configured peer: its push session for the actions it forwarded.
+    pub(crate) fn open_peer_session(
+        &self,
+        peer: &NodeId,
+        open: SessionOpen,
+    ) -> Result<HttpResponsePayload, NodeError> {
+        self.open_session_at(&peer_session_prefix(peer), format!("peer:{peer}"), open)
+    }
+
+    fn open_session_at(
+        &self,
+        prefix: &str,
+        default_name: String,
+        open: SessionOpen,
+    ) -> Result<HttpResponsePayload, NodeError> {
         let n = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-        let source = LocalAddress::new(format!("{}{n}", session_prefix(operator)));
+        let source = LocalAddress::new(format!("{prefix}{n}"));
         let client_name = if open.client_name.trim().is_empty() {
-            operator.to_string()
+            default_name
         } else {
             open.client_name
         };
@@ -80,6 +103,54 @@ impl NodeApp {
                  orion+tcp connection)"
             )));
         };
+        self.serve_session_message(session, message)
+    }
+
+    /// A peer's watch or ping on its own session. The only watch a peer may hold is over the
+    /// actions it forwarded: its `forwarded_by` is forced to `peer`, and a query naming another
+    /// peer is refused (`docs/actions.md`, "Peer watches").
+    pub(crate) fn apply_peer_session_message(
+        &self,
+        peer: &NodeId,
+        session: Option<&LocalAddress>,
+        message: ControlMessage,
+    ) -> Result<HttpResponsePayload, NodeError> {
+        let Some(session) = session.filter(|s| s.as_str().starts_with(&peer_session_prefix(peer)))
+        else {
+            return Err(NodeError::Authorization(format!(
+                "peer {peer}: watches need its push session (OpenSession on its own orion+tcp \
+                 connection)"
+            )));
+        };
+        let message = match message {
+            ControlMessage::WatchActions(query) => {
+                if query
+                    .forwarded_by
+                    .as_ref()
+                    .is_some_and(|other| other != peer)
+                {
+                    return Err(NodeError::Authorization(format!(
+                        "peer {peer} may watch only the actions it forwarded"
+                    )));
+                }
+                ControlMessage::WatchActions(query.forwarded_by(peer.clone()))
+            }
+            ControlMessage::Ping => ControlMessage::Ping,
+            _ => {
+                return Err(NodeError::Authorization(format!(
+                    "peer {peer}: a push session takes only WatchActions and Ping"
+                )));
+            }
+        };
+        self.serve_session_message(session, message)
+    }
+
+    /// Applies one message on a session's client and flushes what it queued.
+    fn serve_session_message(
+        &self,
+        session: &LocalAddress,
+        message: ControlMessage,
+    ) -> Result<HttpResponsePayload, NodeError> {
         let answer = self.apply_local_control_message(session, message)?;
         // A new watch queues its bootstrap: send it now, as the local stream server does after
         // every message.

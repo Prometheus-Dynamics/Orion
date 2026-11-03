@@ -82,6 +82,7 @@ fn optional_peer_auth_still_rejects_unsigned_peer_write_operations() {
             ObservedStateUpdate {
                 observed: orion::control_plane::ObservedClusterState::default(),
                 applied: orion::control_plane::AppliedClusterState::default(),
+                host: None,
             },
         ))
         .expect_err("unsigned observed updates should be rejected");
@@ -313,6 +314,7 @@ fn configured_peer_cannot_publish_foreign_observed_state() {
             orion::transport::http::HttpRequestPayload::ObservedUpdate(ObservedStateUpdate {
                 observed,
                 applied: orion::control_plane::AppliedClusterState::default(),
+                host: None,
             }),
         ))
         .expect_err("peer should not be allowed to publish foreign observed node records");

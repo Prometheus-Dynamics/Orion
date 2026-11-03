@@ -15,7 +15,10 @@ pub use cluster::{
     AppliedClusterState, ClusterStateEnvelope, DesiredClusterState, ObservedClusterState,
 };
 pub use config_decode::{ConfigDecodeError, ConfigMapRef, config_json_value, deserialize_config};
-pub use host::{HostFacts, HostFactsSource, HostMetricsSample, HostTemperature, NodeHostFacts};
+pub use host::{
+    HostFacts, HostFactsSource, HostMetricsSample, HostTemperature, NodeHostFacts,
+    PeerHostMetricsSnapshot, ReplicatedHostMetrics,
+};
 pub use inventory::{
     ArtifactRecord, ArtifactRecordBuilder, ExecutorRecord, ExecutorRecordBuilder, NodeRecord,
     NodeRecordBuilder, ProviderRecord, ProviderRecordBuilder,

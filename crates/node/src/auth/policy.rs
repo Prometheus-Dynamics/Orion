@@ -523,6 +523,14 @@ impl Authorizer for NodeSecurityAuthorizer {
                 | ControlOperation::QueryActions
                 | ControlOperation::QueryStatus,
             ) if self.lookup.is_configured_peer(&peer.node_id) => Ok(()),
+            // A configured peer's push session: its own forwarded actions only (the watch is
+            // narrowed in `apply_peer_session_message`).
+            (
+                ControlPrincipal::Peer(peer),
+                ControlOperation::OpenSession
+                | ControlOperation::WatchActions
+                | ControlOperation::Ping,
+            ) if self.lookup.is_configured_peer(&peer.node_id) => Ok(()),
             (
                 ControlPrincipal::Anonymous | ControlPrincipal::Peer(_),
                 ControlOperation::RunAction

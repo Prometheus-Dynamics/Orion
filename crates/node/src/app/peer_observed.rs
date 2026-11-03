@@ -116,6 +116,7 @@ impl NodeApp {
         let update = HttpRequestPayload::ObservedUpdate(ObservedStateUpdate {
             observed: slice,
             applied: AppliedClusterState::default(),
+            host: self.replicated_host_metrics(),
         });
         match transport.exchange(self, node_id, update).await {
             Ok(HttpResponsePayload::Accepted) => {

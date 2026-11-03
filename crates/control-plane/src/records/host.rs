@@ -13,6 +13,7 @@
 //! Every field is optional: a source fills in what its platform reports.
 
 use crate::TypedConfigValue;
+use orion_core::NodeId;
 // `Arc` needs pointer-width atomics (absent on thumbv6m and riscv32imc).
 #[cfg(target_has_atomic = "ptr")]
 use alloc::sync::Arc;
@@ -287,4 +288,60 @@ mod tests {
         );
         assert_eq!(base.sampled_at_ms, 7);
     }
+}
+
+/// The few volatile metrics a node replicates to its peers with its observed state
+/// (`docs/host-facts.md`, "Replicated load"). Fixed size: no strings and no lists, so a sample is
+/// copied, not allocated, on either side.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+pub struct ReplicatedHostMetrics {
+    /// When the sender sampled the host, in Unix milliseconds on the sender's clock.
+    pub sampled_at_ms: u64,
+    /// Busy share of all CPUs, per mille (0 to 1000), since the sender's previous sample.
+    pub cpu_busy_milli: Option<u32>,
+    pub memory_available_bytes: Option<u64>,
+    /// One-minute load average times 1000.
+    pub load_1_milli: Option<u64>,
+    /// The hottest thermal reading of the sender, in millidegrees Celsius.
+    pub max_temperature_millidegrees_c: Option<i32>,
+}
+
+impl ReplicatedHostMetrics {
+    /// The replicated subset of one sample.
+    pub fn from_sample(sampled_at_ms: u64, metrics: &HostMetricsSample) -> Self {
+        Self {
+            sampled_at_ms,
+            cpu_busy_milli: metrics.cpu_busy_milli,
+            memory_available_bytes: metrics.memory_available_bytes,
+            load_1_milli: metrics.load_1_milli,
+            max_temperature_millidegrees_c: metrics
+                .temperatures
+                .iter()
+                .map(|reading| reading.millidegrees_c)
+                .max(),
+        }
+    }
+}
+
+/// A peer's [`ReplicatedHostMetrics`] as this node received them (`NodeObservabilitySnapshot`).
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+pub struct PeerHostMetricsSnapshot {
+    pub node_id: NodeId,
+    /// When this node received the metrics, in Unix milliseconds on this node's clock.
+    pub received_at_ms: u64,
+    pub metrics: ReplicatedHostMetrics,
 }

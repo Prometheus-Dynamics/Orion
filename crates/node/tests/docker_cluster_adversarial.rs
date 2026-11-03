@@ -112,6 +112,7 @@ async fn docker_cluster_returns_bad_request_for_valid_json_with_wrong_control_sh
     let wrong_shape = encode_to_vec(&orion::control_plane::ObservedStateUpdate {
         observed: orion::control_plane::ObservedClusterState::default(),
         applied: orion::control_plane::AppliedClusterState::default(),
+        host: None,
     })
     .expect("observed update should encode");
 

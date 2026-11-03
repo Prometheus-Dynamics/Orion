@@ -53,10 +53,10 @@ pub use operators::{
     validate_action_patterns,
 };
 pub use resource_usage::{
-    LocalStreamUsageSnapshot, MutationHistoryUsageSnapshot, NodeResourceUsageSnapshot,
-    ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot, RegistryUsageSnapshot,
-    StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot, StreamsUsageSnapshot,
-    WorkerQueueUsageSnapshot,
+    ActionUsageSnapshot, LocalStreamUsageSnapshot, MutationHistoryUsageSnapshot,
+    NodeResourceUsageSnapshot, ObservedPersistenceUsageSnapshot, ProcessMemorySnapshot,
+    RegistryUsageSnapshot, StateSectionCounts, StateSizeSnapshot, StatusLaneUsageSnapshot,
+    StreamsUsageSnapshot, WorkerQueueUsageSnapshot,
 };
 pub use session::{REMOTE_SESSION_PREFIX, SessionOpen, SessionWelcome};
 pub use status::{

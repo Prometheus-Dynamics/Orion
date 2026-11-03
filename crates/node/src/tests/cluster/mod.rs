@@ -25,6 +25,8 @@ mod open_read;
 #[cfg(feature = "peer-tcp")]
 mod peer_tcp;
 #[cfg(feature = "peer-tcp")]
+mod peer_watch;
+#[cfg(feature = "peer-tcp")]
 mod placement;
 #[cfg(feature = "peer-tcp")]
 mod remote_operator;
