@@ -378,6 +378,7 @@ fn configured_peer_cannot_publish_another_nodes_update_status() {
             orion::transport::http::HttpRequestPayload::ObservedUpdate(ObservedStateUpdate {
                 observed,
                 applied: orion::control_plane::AppliedClusterState::default(),
+                host: None,
             }),
         ))
         .expect_err("peer should not be allowed to report another node's update status");
