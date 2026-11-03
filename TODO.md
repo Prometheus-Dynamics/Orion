@@ -318,13 +318,29 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       Status: the test now polls `get events` for up to 5 s (`poll_until_event`). Not reproduced: 200
       runs under load on the old code, 0 failures, so the fix is not proven under load yet.
 - [x] **Replayed nonce after restart.** Failed once in a full `ci-jobs.sh workspace` run on 2026-11-03
-      (`crates/node/src/auth/tests/persistence.rs`, `replayed_nonce_is_rejected_after_restart`); passed
-      alone, 30 runs alone pass, and the failure text was not kept. Fixed the one ordering hole found:
-      `persist_security_state` captured the trust store, released its locks, then wrote, so an older
-      capture (without a just-recorded nonce) could reach the disk after a newer one. Captures now
-      take a generation under both read guards and writes go through `PersistOrder`, which skips a
-      capture older than the last one written (tests in `auth/store.rs`). If it recurs, keep the
-      failure text.
+      (`crates/node/src/auth/tests/persistence.rs`, `replayed_nonce_is_rejected_after_restart`). First
+      candidate: the trust-store persist-order hole (an older capture could reach the disk after a newer
+      one); fixed with `PersistOrder` (tests in `auth/store.rs`), but it was not the cause. Reproduced
+      under load: whole node lib binary looped beside looping workspace test runs, 2 of 151 runs failed
+      on the code before that fix with `node app should build: Config("ORION_NODE_SAFE_MODE has invalid
+      boolean value `maybe`; ...")`. Cause: config tests set `ORION_NODE_*` variables in the process
+      environment (behind a lock only they take), and any node built at that moment in the same test
+      binary read them; `ORION_NODE_SAFE_MODE=1` from the same test silently starts a node in safe mode.
+      Fix: every config test that sets the environment moved to its own binary
+      (`crates/node/tests/config_env.rs`). Runs: 400 isolated + 150 whole-binary on the persist-order
+      code, 0 failures (the window is narrow). Beside it, 8 of 57 looping `cargo test --workspace`
+      runs on that code failed some node build with the same `maybe` error. With the move: 150
+      whole-binary + 300 isolated runs under the same load, 0 environment failures.
+      Left: `crates/client/src/tests/local_defaults.rs` and `crates/client/src/graph.rs` still set
+      variables in the client's lib test binary (valid values, own lock); move them if one ever fails.
+- [ ] **Unsupported-runtime warning missing under load.** Still fails after the all-thread capture:
+      `truly_unsupported_type_is_reported_once_and_does_not_block_others`
+      (`crates/node/src/tests/runtime/unsupported_runtime.rs:269`, `wait_for` WARN left 0 right 1)
+      in 6 of 150 whole node lib binary runs beside looping workspace tests (2026-11-03), never alone.
+      Not the environment (same rate before and after the config-test move). Suspect the callsite
+      interest cache: another test thread re-registering the callsite between `rebuild_interest_cache`
+      and the pass. Also seen once each under that load: `discovery::tests::sync::removed_peers_are_not_re_enrolled_by_the_shared_key`,
+      `tests::runtime::reconcile_loop::idle_reconcile_loop_only_runs_backstop_passes` ("observed 5").
 - [x] **Unsupported-runtime log count.** Failure: `crates/node/src/tests/runtime/unsupported_runtime.rs:230`,
       "left: 0, right: 1" for `logs.count("nobody.exec.v1", "WARN")`. Cause: the IPC server reconciles on a
       runtime worker thread after a publish; the test's subscriber was thread-local (`set_default` on the
