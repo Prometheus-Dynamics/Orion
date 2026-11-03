@@ -253,8 +253,10 @@ slice changed since the last successful push to that peer, and at least every 30
 peer that restarted catches up). The receiver replaces exactly that origin's slice: records the
 origin owns but no longer reports are pruned, records of other nodes are never touched, and the
 receiver keeps its own observed revision (it advances by one when the slice changed) and ignores
-the sender's applied revision. Pushes are best effort; a failed push does not fail the desired-state
-round and is retried on the next one. Observed slices are not relayed: a node learns another
+the sender's applied revision. The same push carries the sender's replicated host metrics (`host`,
+four volatile values; [host-facts.md](host-facts.md#replicated-load)), which the receiver keeps in
+memory for its observability snapshot and never stores in state. Pushes are best effort; a failed
+push does not fail the desired-state round and is retried on the next one. Observed slices are not relayed: a node learns another
 node's observed facts only from that node.
 
 A removed provider's observed records are retracted when the removal is applied, locally or from
@@ -407,6 +409,7 @@ Persisted state directories are migrated on first start:
   so an mDNS announcement alone can never inject state, and discovery requires
   `ORION_NODE_PEER_AUTH=required` so unenrolled peers are never pinned on first contact.
 - **Observed facts and the status lane**: each node's observed slice already travels to its peers
-  at the end of every round (`push_observed_slice` in `crates/node/src/app/peer_observed.rs`).
+  at the end of every round (`push_observed_slice` in `crates/node/src/app/peer_observed.rs`), and
+  so do its replicated host metrics (`ObservedStateUpdate::host`, see host-facts.md).
   The volatile status lane is local-only; replicating it would follow the same per-origin pattern
   (origin pushes its own entries, receivers replace that origin's set) on the same transport.

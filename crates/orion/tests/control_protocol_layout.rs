@@ -188,6 +188,8 @@ fn protocol_layouts() -> Vec<(&'static str, usize, usize)> {
         StreamsUsageSnapshot,
         HostFacts,
         HostMetricsSample,
+        PeerHostMetricsSnapshot,
+        ReplicatedHostMetrics,
         HostTemperature,
         LinkStatusSnapshot,
         // records and state

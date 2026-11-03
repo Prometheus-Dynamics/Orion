@@ -155,6 +155,7 @@ fn observed_only_persist_reuses_unchanged_applied_and_history_files() {
     app.apply_observed_update(orion::control_plane::ObservedStateUpdate {
         observed,
         applied: Default::default(),
+        host: None,
     })
     .expect("observed update should persist");
 

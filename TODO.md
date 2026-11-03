@@ -98,7 +98,7 @@ Control protocol:
       result-history bytes in `NodeResourceUsageSnapshot`. Docs: actions.md.
 - [ ] **Peer `ActionWatch`.** A forwarding node subscribes to the owner's action results over
       `orion+tcp` instead of polling it (additive messages). Docs: actions.md, peer-sync.md.
-- [ ] **Replicated host metrics.** A small, selected set of volatile host metrics carried in peer
+- [x] **Replicated host metrics** (done on `usage-peer-wire`: `ObservedStateUpdate::host`, see docs/host-facts.md "Replicated load"). A small, selected set of volatile host metrics carried in peer
       sync (or a peer push) so peers see each other's load without the node-local status lane.
       Docs: host-facts.md, peer-sync.md.
 - [x] **Stale peer state** (done on `usage-peer-wire`: `PeerTrustRecord::last_successful_sync_ms` and `stale`). The last successful sync time and a stale flag in the peer status

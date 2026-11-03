@@ -3,10 +3,12 @@
 
 use super::{NodeApp, ReconcileLoopHandle};
 use crate::host_facts::{CpuUsageTracker, HostFactsSource, thermal_zone_temperatures};
+use orion::NodeId;
 use orion::control_plane::{
-    HostFacts, HostMetricsSnapshot, NodeHostFacts, NodeRecord, StatusEntry, StatusSubject,
-    TypedConfigValue,
+    HostFacts, HostMetricsSnapshot, NodeHostFacts, NodeRecord, PeerHostMetricsSnapshot,
+    ReplicatedHostMetrics, StatusEntry, StatusSubject, TypedConfigValue,
 };
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -20,6 +22,9 @@ const HOST_STATUS_TTL_INTERVALS: u32 = 3;
 pub(crate) const MAX_CPU_STATUS_ENTRIES: usize = 64;
 /// Most extra metrics published to the status lane per sample.
 const MAX_EXTRA_STATUS_METRICS: usize = 64;
+/// Most peers whose replicated metrics a node keeps (one entry per peer; see
+/// `docs/host-facts.md`, "Replicated load").
+const MAX_PEER_HOST_METRICS: usize = 256;
 
 /// Shortest CPU window reported in observability snapshots: readers polling faster share the
 /// previous window's figures instead of shrinking it.
@@ -30,6 +35,8 @@ const SNAPSHOT_CPU_MIN_WINDOW: Duration = Duration::from_millis(250);
 pub(super) struct HostFactsState {
     pub(super) source: Arc<dyn HostFactsSource>,
     snapshot_cpu: Mutex<CpuUsageTracker>,
+    /// Replicated metrics pushed by authenticated peers, by node id. Volatile: not persisted.
+    peer_metrics: Mutex<BTreeMap<NodeId, PeerHostMetricsSnapshot>>,
 }
 
 impl HostFactsState {
@@ -42,6 +49,7 @@ impl HostFactsState {
         Self {
             source,
             snapshot_cpu: Mutex::new(tracker),
+            peer_metrics: Mutex::new(BTreeMap::new()),
         }
     }
 }
@@ -51,6 +59,50 @@ fn read_proc_stat() -> Option<crate::host_facts::ProcStat> {
 }
 
 impl NodeApp {
+    /// The replicated subset of the latest host sample, carried by the next observed-state push
+    /// to peers (`peer_observed.rs`). `None` before the first sample.
+    pub(crate) fn replicated_host_metrics(&self) -> Option<ReplicatedHostMetrics> {
+        self.observability_read()
+            .host_facts
+            .as_ref()
+            .map(|facts| ReplicatedHostMetrics::from_sample(facts.sampled_at_ms, &facts.metrics))
+    }
+
+    /// Keeps the metrics `peer` pushed, replacing its previous entry. A new peer is refused once
+    /// [`MAX_PEER_HOST_METRICS`] are kept.
+    pub(super) fn record_peer_host_metrics(&self, peer: &NodeId, metrics: ReplicatedHostMetrics) {
+        let received_at_ms = Self::current_time_ms();
+        let mut peers = self
+            .state
+            .host_facts
+            .peer_metrics
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !peers.contains_key(peer) && peers.len() >= MAX_PEER_HOST_METRICS {
+            return;
+        }
+        peers.insert(
+            peer.clone(),
+            PeerHostMetricsSnapshot {
+                node_id: peer.clone(),
+                received_at_ms,
+                metrics,
+            },
+        );
+    }
+
+    /// The replicated metrics of every peer that pushed them, in node-id order.
+    pub(super) fn peer_host_metrics_snapshot(&self) -> Vec<PeerHostMetricsSnapshot> {
+        self.state
+            .host_facts
+            .peer_metrics
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect()
+    }
+
     /// Samples `source` once: records the sample for observability, publishes the volatile
     /// metrics to the status lane under `node/<id>`, and replaces the identity facts in this
     /// node's observed record when they changed. Returns whether the observed record changed.

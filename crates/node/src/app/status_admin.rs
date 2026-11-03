@@ -191,6 +191,7 @@ impl NodeApp {
             maintenance: self.maintenance_state_read().clone(),
             peer_sync_paused: self.peer_sync_paused(),
             remote_desired_state_blocked: self.remote_desired_state_blocked(),
+            peer_host_metrics: self.peer_host_metrics_snapshot(),
             configured_peer_count,
             ready_peer_count,
             pending_peer_count,

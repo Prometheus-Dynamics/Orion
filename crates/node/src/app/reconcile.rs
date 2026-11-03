@@ -422,6 +422,11 @@ impl NodeApp {
     ) -> Result<HttpResponsePayload, NodeError> {
         if let Some(peer) = peer_node_id {
             self.note_peer_heard(peer);
+            // Replicated load is kept beside the state, never merged into it. Only an
+            // authenticated peer's metrics count (open mode has no peer id here).
+            if let Some(metrics) = update.host {
+                self.record_peer_host_metrics(peer, metrics);
+            }
         }
         let mut state_changed = self.with_store_mut(|store| match peer_node_id {
             Some(peer_node_id) => merge_peer_observed_state(

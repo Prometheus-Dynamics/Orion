@@ -86,6 +86,7 @@ async fn observed_update_wakes_reconcile_loop() {
     app.apply_observed_update(orion::control_plane::ObservedStateUpdate {
         observed,
         applied: Default::default(),
+        host: None,
     })
     .expect("observed update should apply");
     let elapsed = wait_for_reconciles(&app, 2, Duration::from_secs(2)).await;

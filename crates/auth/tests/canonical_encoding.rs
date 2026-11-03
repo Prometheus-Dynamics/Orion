@@ -167,7 +167,11 @@ fn observed_update() -> ObservedStateUpdate {
     );
     let mut applied = AppliedClusterState::default();
     applied.mark_applied(Revision::new(7));
-    ObservedStateUpdate { observed, applied }
+    ObservedStateUpdate {
+        observed,
+        applied,
+        host: None,
+    }
 }
 
 fn hello() -> ControlMessage {

@@ -27,6 +27,8 @@ struct NodeDescribeReport {
     observed: Option<NodeRecord>,
     /// Volatile host metrics, when the queried node is the described one.
     host_metrics: Option<orion_control_plane::HostMetricsSample>,
+    /// The replicated load this node received from a peer (`docs/host-facts.md`).
+    peer_host_metrics: Option<orion_control_plane::PeerHostMetricsSnapshot>,
     maintenance_mode: MaintenanceMode,
     peer_sync_paused: bool,
     remote_desired_state_blocked: bool,
@@ -189,10 +191,16 @@ pub(super) async fn run(command: DescribeCommand) -> Result<(), String> {
                         .map(|facts| facts.metrics.clone())
                 })
                 .flatten();
+            let peer_host_metrics = observability
+                .peer_host_metrics
+                .iter()
+                .find(|peer| peer.node_id == node_id)
+                .cloned();
             let report = NodeDescribeReport {
                 node,
                 observed,
                 host_metrics,
+                peer_host_metrics,
                 maintenance_mode: if observability.node_id == node_id {
                     observability.maintenance.mode
                 } else {
@@ -533,6 +541,7 @@ fn print_node_describe_summary(report: &NodeDescribeReport) {
             .and_then(|observed| observed.host.as_ref()),
         report.host_metrics.as_ref(),
     );
+    crate::render_host::print_replicated_host_metrics(report.peer_host_metrics.as_ref());
     println!("maintenance_mode: {}", report.maintenance_mode);
     println!("peer_sync_paused: {}", report.peer_sync_paused);
     println!(

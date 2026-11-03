@@ -1,6 +1,6 @@
 use super::maintenance::MaintenanceState;
 use super::resource_usage::NodeResourceUsageSnapshot;
-use crate::{HostFacts, HostTemperature, NodeClockFacts};
+use crate::{HostFacts, HostTemperature, NodeClockFacts, PeerHostMetricsSnapshot};
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
 use alloc::{string::String, vec::Vec};
@@ -718,6 +718,9 @@ pub struct NodeObservabilitySnapshot {
     pub peer_sync_paused: bool,
     pub remote_desired_state_blocked: bool,
     pub host: HostMetricsSnapshot,
+    /// Replicated host metrics of the peers that pushed them, in node-id order.
+    #[serde(default)]
+    pub peer_host_metrics: Vec<PeerHostMetricsSnapshot>,
     pub configured_peer_count: u64,
     pub ready_peer_count: u64,
     pub pending_peer_count: u64,

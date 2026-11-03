@@ -125,6 +125,7 @@ fn peer_clock_facts_merge_through_observed_updates() {
         orion::control_plane::ObservedStateUpdate {
             observed,
             applied: Default::default(),
+            host: None,
         },
     )
     .expect("peer observed update should apply");
