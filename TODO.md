@@ -3,16 +3,16 @@
 Tracks Orion's integration with its first consumers and appliance hardening work. See
 [CHANGELOG.md](CHANGELOG.md) for the user-facing summary of what landed.
 
-## Alpha (Raze)
+## Alpha (reference board)
 
-The user, 2026-11-03: the next release is an alpha for the Raze (CM5) hardware only. These come
+The user, 2026-11-03: the next release is an alpha for the reference board hardware only. These come
 first; the other items below are still needed, after it.
 
-- [ ] **aarch64 appliance soak** on the Raze (below, under freeze items).
-- [x] **Unknown arguments start a node** (below): `orion-node --version` on the Raze. Done in 6bf46ce on `alpha-fixes`; not yet on dev.
-- [x] **Byte-bounded watch queues** (below): the Raze runs HeliOS's watchers. Done in 737579d on `alpha-fixes`; not yet on dev. Byte total not yet in the usage snapshot or metrics (wire change, for v7).
-- [ ] **Protocol v7 on the Raze:** once the current pin is proven on the board, the v7 window
-      (Lemnos orion-v7 merge, HeliOS and Atlas together, the PV images' orion-node).
+- [ ] **aarch64 appliance soak** on the reference board (below, under freeze items).
+- [x] **Unknown arguments start a node** (below): `orion-node --version` on the reference board. Done in 6bf46ce on `alpha-fixes`; not yet on dev.
+- [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d on `alpha-fixes`; not yet on dev. Byte total not yet in the usage snapshot or metrics (wire change, for v7).
+- [ ] **Protocol v7 on the reference board:** once the current pin is proven on the board, the v7 window
+      (the device library's orion-v7 merge, the consuming products together, the images' orion-node).
 
 ## Next release (1.0.0)
 
@@ -222,6 +222,19 @@ its dev version.
       200 green under load; the coalescing test 120 of 120 green.
 
 ## Open
+
+### Test robustness (flaky under the full parallel suite)
+
+Each failed once in a full `cargo test --workspace --all-features` run on 2026-11-02 and passed when rerun
+alone. Fix the test so it does not depend on timing or on other tests' logs.
+
+- [ ] **orionctl `get events` test.** Failure: `crates/orionctl/tests/cli_get.rs:421`, "assertion failed:
+      events_stdout.contains("kind=mutation_apply")" in `orionctl_get_reports_health_readiness_observability_and_snapshot`.
+      Suspected race: the test reads the events before the node has recorded this one. Poll until it appears.
+- [ ] **Unsupported-runtime log count.** Failure: `crates/node/src/tests/runtime/unsupported_runtime.rs:230`,
+      "assertion `left == right` failed, left: 0, right: 1" for `logs.count("nobody.exec.v1", "WARN")` in
+      `truly_unsupported_type_is_reported_once_and_does_not_block_others`. Suspected cause: the captured log is shared
+      with parallel tests, or the warning arrives after the 20 ticks. Capture logs per test and wait for the warning.
 
 ### Needs the device (arm64 board)
 
