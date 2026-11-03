@@ -9,8 +9,8 @@ The user, 2026-11-03: the next release is an alpha for the Raze (CM5) hardware o
 first; the other items below are still needed, after it.
 
 - [ ] **aarch64 appliance soak** on the Raze (below, under freeze items).
-- [ ] **Unknown arguments start a node** (below): `orion-node --version` on the Raze.
-- [ ] **Byte-bounded watch queues** (below): the Raze runs HeliOS's watchers.
+- [x] **Unknown arguments start a node** (below): `orion-node --version` on the Raze. Done in 6bf46ce on `alpha-fixes`; not yet on dev.
+- [x] **Byte-bounded watch queues** (below): the Raze runs HeliOS's watchers. Done in 737579d on `alpha-fixes`; not yet on dev. Byte total not yet in the usage snapshot or metrics (wire change, for v7).
 - [ ] **Protocol v7 on the Raze:** once the current pin is proven on the board, the v7 window
       (Lemnos orion-v7 merge, HeliOS and Atlas together, the PV images' orion-node).
 
