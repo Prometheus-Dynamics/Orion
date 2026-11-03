@@ -61,6 +61,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed (protocol 1 reset, breaking)
 
+- A client pointed at a port where something other than Orion listens now reports
+  "`<addr>` is not an Orion endpoint (no control protocol preamble)" (`ControlTcpError` and
+  `PeerTcpError::NotOrionEndpoint`) instead of "failed to decode unix socket message". The
+  transport-neutral `IpcTransportError::MissingPreamble` replaces that `DecodeFailed` text.
 Nothing has been released, so every Orion protocol and on-disk format is now version 1, and the
 compatibility paths for older versions are gone.
 

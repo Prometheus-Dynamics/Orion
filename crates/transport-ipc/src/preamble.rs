@@ -41,11 +41,7 @@ pub const fn control_preamble() -> [u8; CONTROL_PREAMBLE_BYTES] {
 /// Validates a received preamble: magic first, then the protocol version.
 pub fn check_control_preamble(preamble: &[u8]) -> Result<(), IpcTransportError> {
     if preamble.len() < CONTROL_PREAMBLE_BYTES || preamble[..2] != CONTROL_PREAMBLE_MAGIC {
-        return Err(IpcTransportError::DecodeFailed(
-            "missing Orion control protocol preamble; the peer is not an Orion control client \
-             or was built from an incompatible Orion release"
-                .into(),
-        ));
+        return Err(IpcTransportError::MissingPreamble);
     }
     ControlProtocolMismatch::check(u16::from_le_bytes([preamble[2], preamble[3]]))
         .map_err(IpcTransportError::from)
@@ -227,14 +223,20 @@ mod tests {
     }
 
     #[test]
-    fn garbage_is_a_decode_failure() {
-        assert!(matches!(
+    fn garbage_is_a_missing_preamble() {
+        assert_eq!(
             check_control_preamble(b"{ no"),
-            Err(IpcTransportError::DecodeFailed(_))
-        ));
-        assert!(matches!(
+            Err(IpcTransportError::MissingPreamble)
+        );
+        assert_eq!(
             check_control_preamble(b"OC"),
-            Err(IpcTransportError::DecodeFailed(_))
-        ));
+            Err(IpcTransportError::MissingPreamble)
+        );
+        // Names no transport: the same check runs on unix sockets and on orion+tcp.
+        let message = IpcTransportError::MissingPreamble.to_string();
+        assert!(
+            !message.contains("unix") && !message.contains("tcp"),
+            "{message}"
+        );
     }
 }

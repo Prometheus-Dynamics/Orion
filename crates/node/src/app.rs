@@ -701,7 +701,9 @@ impl NodeApp {
         observability.ipc_frame_failures = observability.ipc_frame_failures.saturating_add(1);
         if matches!(
             error,
-            IpcTransportError::DecodeFailed(_) | IpcTransportError::ProtocolMismatch { .. }
+            IpcTransportError::DecodeFailed(_)
+                | IpcTransportError::MissingPreamble
+                | IpcTransportError::ProtocolMismatch { .. }
         ) {
             observability.ipc_malformed_input_count =
                 observability.ipc_malformed_input_count.saturating_add(1);

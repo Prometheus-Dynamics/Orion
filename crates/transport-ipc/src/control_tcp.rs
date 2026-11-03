@@ -28,6 +28,10 @@ pub enum ControlTcpError {
     Connection { addr: String, message: String },
     #[error("orion+tcp connection to {addr} was closed before a response arrived")]
     Closed { addr: String },
+    /// The remote answered without the control-protocol preamble: something other than Orion
+    /// listens there.
+    #[error("{addr} is not an Orion endpoint (no control protocol preamble)")]
+    NotOrionEndpoint { addr: String },
     #[error(transparent)]
     Frame(#[from] IpcTransportError),
 }
@@ -143,7 +147,13 @@ impl ControlTcpClient {
                     .read_state
                     .read_payload(&mut connection.stream, self.max_payload_bytes),
             )
-            .await??
+            .await?
+            .map_err(|err| match err {
+                IpcTransportError::MissingPreamble => ControlTcpError::NotOrionEndpoint {
+                    addr: self.authority.clone(),
+                },
+                other => other.into(),
+            })?
             .ok_or_else(|| ControlTcpError::Closed {
                 addr: self.authority.clone(),
             })?;
@@ -218,6 +228,34 @@ mod tests {
             }
         });
         (addr, task)
+    }
+
+    #[tokio::test]
+    async fn a_port_that_is_not_orion_is_named_in_the_error() {
+        // Something else listens there: it answers with its own bytes, not a control frame.
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("listener addr").to_string();
+        let server = tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+        });
+        let client = ControlTcpClient::new(&addr, Duration::from_secs(5), 1024);
+        let err = client
+            .exchange(b"request")
+            .await
+            .expect_err("a non-Orion server must be refused");
+        assert_eq!(
+            err,
+            ControlTcpError::NotOrionEndpoint { addr: addr.clone() }
+        );
+        assert_eq!(
+            err.to_string(),
+            format!("{addr} is not an Orion endpoint (no control protocol preamble)")
+        );
+        server.await.expect("server");
     }
 
     #[tokio::test]

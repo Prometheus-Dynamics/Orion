@@ -47,6 +47,8 @@ pub enum PeerTcpError {
     Connection { addr: String, message: String },
     #[error("peer TCP connection to {addr} was closed before a response arrived")]
     Closed { addr: String },
+    #[error("{addr} is not an Orion endpoint (no control protocol preamble)")]
+    NotOrionEndpoint { addr: String },
     #[error(transparent)]
     Frame(#[from] IpcTransportError),
     #[error("malformed peer TCP frame: {0}")]
@@ -70,6 +72,7 @@ impl From<ControlTcpError> for PeerTcpError {
             },
             ControlTcpError::Connection { addr, message } => Self::Connection { addr, message },
             ControlTcpError::Closed { addr } => Self::Closed { addr },
+            ControlTcpError::NotOrionEndpoint { addr } => Self::NotOrionEndpoint { addr },
             ControlTcpError::Frame(frame) => Self::Frame(frame),
         }
     }
@@ -89,7 +92,8 @@ impl PeerTcpError {
             Self::Connection { .. } | Self::Closed { .. } | Self::Bind { .. } => {
                 CommunicationFailureKind::Transport
             }
-            Self::Frame(IpcTransportError::ProtocolMismatch { .. }) => {
+            Self::NotOrionEndpoint { .. }
+            | Self::Frame(IpcTransportError::ProtocolMismatch { .. }) => {
                 CommunicationFailureKind::Protocol
             }
             Self::Frame(_) | Self::Decode(_) => CommunicationFailureKind::Decode,

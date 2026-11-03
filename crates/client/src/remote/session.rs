@@ -137,7 +137,12 @@ impl RemoteOperator {
         )
         .await
         .map_err(|_| RemoteError::Transport("the node did not answer OpenSession".into()))?
-        .map_err(frame_error)?
+        .map_err(|err| match err {
+            IpcTransportError::MissingPreamble => RemoteError::Transport(format!(
+                "{authority} is not an Orion endpoint (no control protocol preamble)"
+            )),
+            other => frame_error(other),
+        })?
         .ok_or_else(|| RemoteError::Transport("the node closed the session".into()))?;
         let welcome = match verified_response(&shared, &open, &first)? {
             HttpResponsePayload::Session(welcome) => welcome,

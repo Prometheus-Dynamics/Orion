@@ -19,6 +19,14 @@ pub enum IpcTransportError {
     EncodeFailed(String),
     #[error("failed to decode unix socket message: {0}")]
     DecodeFailed(String),
+    /// The bytes did not start with the Orion control-protocol preamble: the peer is another
+    /// service, or an Orion build from an incompatible release. Transport-neutral; clients that
+    /// know the address name it (for example `ControlTcpError::NotOrionEndpoint`).
+    #[error(
+        "no Orion control protocol preamble: the peer is another service or an Orion build from an \
+         incompatible release"
+    )]
+    MissingPreamble,
     /// The peer speaks a different control-protocol wire version (see
     /// [`orion_core::CONTROL_PROTOCOL_VERSION`]). Detected from the fixed preamble before any
     /// archived payload is decoded.

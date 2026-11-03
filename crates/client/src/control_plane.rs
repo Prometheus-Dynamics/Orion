@@ -844,6 +844,7 @@ fn classify_ipc_failure(
             CommunicationFailureKind::Transport
         }
         orion_transport_ipc::IpcTransportError::EncodeFailed(_)
+        | orion_transport_ipc::IpcTransportError::MissingPreamble
         | orion_transport_ipc::IpcTransportError::ProtocolMismatch { .. } => {
             CommunicationFailureKind::Protocol
         }
