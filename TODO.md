@@ -317,14 +317,14 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       Suspected race: the test reads the events before the node has recorded this one. Poll until it appears.
       Status: the test now polls `get events` for up to 5 s (`poll_until_event`). Not reproduced: 200
       runs under load on the old code, 0 failures, so the fix is not proven under load yet.
-- [ ] **Replayed nonce after restart.** Failed once in a full `ci-jobs.sh workspace` run on 2026-11-03
+- [x] **Replayed nonce after restart.** Failed once in a full `ci-jobs.sh workspace` run on 2026-11-03
       (`crates/node/src/auth/tests/persistence.rs`, `replayed_nonce_is_rejected_after_restart`); passed
-      alone, and 30 runs alone pass. The failure text was not kept. Not explained: the nonce is
-      persisted synchronously before `handle_payload` returns, and the state dirs are unique.
-      Candidate: `persist_security_state` captures the store, releases the locks, then writes, so two
-      concurrent persists can land in the reverse order and an older capture (without the nonce) can
-      overwrite a newer one. Hold one persist-order lock across capture and write, as the snapshot
-      path does (`persist_order_guard`), and keep the failure text if it recurs.
+      alone, 30 runs alone pass, and the failure text was not kept. Fixed the one ordering hole found:
+      `persist_security_state` captured the trust store, released its locks, then wrote, so an older
+      capture (without a just-recorded nonce) could reach the disk after a newer one. Captures now
+      take a generation under both read guards and writes go through `PersistOrder`, which skips a
+      capture older than the last one written (tests in `auth/store.rs`). If it recurs, keep the
+      failure text.
 - [x] **Unsupported-runtime log count.** Failure: `crates/node/src/tests/runtime/unsupported_runtime.rs:230`,
       "left: 0, right: 1" for `logs.count("nobody.exec.v1", "WARN")`. Cause: the IPC server reconciles on a
       runtime worker thread after a publish; the test's subscriber was thread-local (`set_default` on the

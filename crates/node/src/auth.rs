@@ -46,8 +46,8 @@ pub use policy::PeerSecurityMiddleware;
 pub(crate) use private_link::PrivateLinkProof;
 pub(crate) use private_link::PrivateLinkTrust;
 use store::{
-    AuthStateWorker, load_next_outbound_nonce, load_or_create_identity, load_seen_nonces,
-    load_trusted_peer_state,
+    AuthStateWorker, PersistOrder, load_next_outbound_nonce, load_or_create_identity,
+    load_seen_nonces, load_trusted_peer_state,
 };
 
 const IDENTITY_FILE: &str = "node-identity.ed25519";
@@ -102,6 +102,8 @@ pub struct NodeSecurity {
     identity_error: Option<String>,
     storage: Option<NodeStorage>,
     auth_state_worker: Option<Arc<AuthStateWorker>>,
+    /// Orders trust-store writes by capture, so an older capture never overwrites a newer one.
+    persist_order: Arc<PersistOrder>,
     configured_peer_keys: Arc<RwLock<BTreeMap<NodeId, Option<[u8; 32]>>>>,
     trusted_peer_state: Arc<RwLock<TrustedPeerState>>,
     seen_nonces: Arc<RwLock<BTreeMap<NodeId, VecDeque<u64>>>>,
@@ -117,6 +119,9 @@ pub struct NodeSecurity {
 //   sections only.
 // - Any persistence happens after the relevant guard is dropped so auth flows never await or block
 //   durable I/O while holding an RwLock guard.
+// - A trust-store capture holds the trusted_peer_state then the seen_nonces read guard while it
+//   takes its write generation (nothing else nests these two), and writes go through
+//   `PersistOrder`, so an older capture never overwrites a newer one.
 
 #[derive(Clone, Debug, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 struct TrustedPeerStore {
@@ -183,6 +188,7 @@ impl NodeSecurity {
             identity_error,
             storage,
             auth_state_worker,
+            persist_order: Arc::new(PersistOrder::default()),
             configured_peer_keys: Arc::new(RwLock::new(configured_peer_keys)),
             trusted_peer_state,
             seen_nonces,

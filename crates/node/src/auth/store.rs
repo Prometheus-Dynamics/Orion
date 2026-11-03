@@ -15,7 +15,10 @@ use orion::{NodeId, encode_to_vec};
 use std::{
     collections::{BTreeMap, VecDeque},
     path::PathBuf,
-    sync::atomic::Ordering,
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -24,42 +27,42 @@ fn decode_store_error(context: &str, err: impl std::fmt::Display) -> NodeError {
 }
 
 impl NodeSecurity {
-    fn capture_persisted_security_state(&self) -> Result<TrustedPeerStore, NodeError> {
+    /// Captures the store and its generation. Both read guards are held while the generation is
+    /// taken: writers hold a write guard, so generation order is the order of the captured state.
+    fn capture_persisted_security_state(&self) -> Result<(TrustedPeerStore, u64), NodeError> {
         let trusted = self.trusted_peer_state.read();
         let trusted = read_rwlock(trusted, "trusted_peer_state");
-        let peers = trusted
-            .peers
-            .iter()
-            .map(|(node_id, key)| (node_id.clone(), key.to_vec()))
-            .collect();
-        let tls_root_certs = trusted.tls_root_certs.clone();
-        let revoked = trusted.revoked.clone();
-        drop(trusted);
-
         let seen_nonces = self.seen_nonces.read();
         let seen_nonces = read_rwlock(seen_nonces, "seen_nonces");
+        let generation = self.persist_order.next.fetch_add(1, Ordering::SeqCst) + 1;
 
-        Ok(TrustedPeerStore {
-            peers,
-            tls_root_certs,
-            revoked,
+        let store = TrustedPeerStore {
+            peers: trusted
+                .peers
+                .iter()
+                .map(|(node_id, key)| (node_id.clone(), key.to_vec()))
+                .collect(),
+            tls_root_certs: trusted.tls_root_certs.clone(),
+            revoked: trusted.revoked.clone(),
             seen_nonces: seen_nonces
                 .iter()
                 .map(|(node_id, nonces)| (node_id.clone(), nonces.iter().copied().collect()))
                 .collect(),
             next_outbound_nonce: self.next_nonce.load(Ordering::SeqCst),
-        })
+        };
+        Ok((store, generation))
     }
 
     pub(super) async fn persist_security_state_async(&self) -> Result<(), NodeError> {
         let Some(storage) = self.storage.as_ref() else {
             return Ok(());
         };
-        let store = self.capture_persisted_security_state()?;
+        let (store, generation) = self.capture_persisted_security_state()?;
+        let order = self.persist_order.clone();
         if let Some(worker) = &self.auth_state_worker {
-            return worker.persist_state_async(store).await;
+            return worker.persist_state_async(store, generation, order).await;
         }
-        persist_trusted_peer_store_async(storage.clone(), store).await
+        persist_trusted_peer_store_async(storage.clone(), store, generation, order).await
     }
 
     pub(super) fn persist_security_state(&self) -> Result<(), NodeError> {
@@ -68,17 +71,45 @@ impl NodeSecurity {
         let Some(storage) = self.storage.as_ref() else {
             return Ok(());
         };
-        let store = self.capture_persisted_security_state()?;
+        let (store, generation) = self.capture_persisted_security_state()?;
+        let order = self.persist_order.clone();
         if let Some(worker) = &self.auth_state_worker {
-            return worker.persist_state_blocking(store);
+            return worker.persist_state_blocking(store, generation, order);
         }
-        persist_trusted_peer_store(storage, &store)
+        order.write_if_newer(generation, || persist_trusted_peer_store(storage, &store))
+    }
+}
+
+/// Trust-store write order. Captures race to the writer (worker queue, blocking pool or the
+/// caller), so a capture taken earlier can arrive later; it is skipped once a newer one is on disk,
+/// since every capture is a full copy of the state.
+#[derive(Debug, Default)]
+pub(super) struct PersistOrder {
+    pub(super) next: AtomicU64,
+    written: Mutex<u64>,
+}
+
+impl PersistOrder {
+    fn write_if_newer(
+        &self,
+        generation: u64,
+        write: impl FnOnce() -> Result<(), NodeError>,
+    ) -> Result<(), NodeError> {
+        let mut written = self.written.lock().unwrap_or_else(PoisonError::into_inner);
+        if generation <= *written {
+            return Ok(());
+        }
+        write()?;
+        *written = generation;
+        Ok(())
     }
 }
 
 enum AuthStateCommand {
     Persist {
         store: Box<TrustedPeerStore>,
+        generation: u64,
+        order: Arc<PersistOrder>,
         reply: oneshot::Sender<Result<(), NodeError>>,
     },
 }
@@ -103,11 +134,18 @@ impl AuthStateWorker {
         self.thread.queue_depth()
     }
 
-    async fn persist_state_async(&self, store: TrustedPeerStore) -> Result<(), NodeError> {
+    async fn persist_state_async(
+        &self,
+        store: TrustedPeerStore,
+        generation: u64,
+        order: Arc<PersistOrder>,
+    ) -> Result<(), NodeError> {
         request_worker_operation_async(
             self.thread.sender(),
             |reply| AuthStateCommand::Persist {
                 store: Box::new(store),
+                generation,
+                order,
                 reply,
             },
             NodeError::AuthStateWorkerUnavailable,
@@ -116,11 +154,18 @@ impl AuthStateWorker {
         .await
     }
 
-    fn persist_state_blocking(&self, store: TrustedPeerStore) -> Result<(), NodeError> {
+    fn persist_state_blocking(
+        &self,
+        store: TrustedPeerStore,
+        generation: u64,
+        order: Arc<PersistOrder>,
+    ) -> Result<(), NodeError> {
         request_worker_operation_blocking(
             self.thread.sender(),
             |reply| AuthStateCommand::Persist {
                 store: Box::new(store),
+                generation,
+                order,
                 reply,
             },
             NodeError::AuthStateWorkerUnavailable,
@@ -132,8 +177,15 @@ impl AuthStateWorker {
 fn run_auth_state_worker(storage: NodeStorage, mut receiver: mpsc::Receiver<AuthStateCommand>) {
     while let Some(command) = receiver.blocking_recv() {
         match command {
-            AuthStateCommand::Persist { store, reply } => {
-                let _ = reply.send(persist_trusted_peer_store(&storage, &store));
+            AuthStateCommand::Persist {
+                store,
+                generation,
+                order,
+                reply,
+            } => {
+                let result = order
+                    .write_if_newer(generation, || persist_trusted_peer_store(&storage, &store));
+                let _ = reply.send(result);
             }
         }
     }
@@ -142,10 +194,14 @@ fn run_auth_state_worker(storage: NodeStorage, mut receiver: mpsc::Receiver<Auth
 async fn persist_trusted_peer_store_async(
     storage: NodeStorage,
     store: TrustedPeerStore,
+    generation: u64,
+    order: Arc<PersistOrder>,
 ) -> Result<(), NodeError> {
-    tokio::task::spawn_blocking(move || persist_trusted_peer_store(&storage, &store))
-        .await
-        .map_err(|err| NodeError::Storage(format!("auth state task join failed: {err}")))?
+    tokio::task::spawn_blocking(move || {
+        order.write_if_newer(generation, || persist_trusted_peer_store(&storage, &store))
+    })
+    .await
+    .map_err(|err| NodeError::Storage(format!("auth state task join failed: {err}")))?
 }
 
 fn persist_trusted_peer_store(
@@ -278,5 +334,49 @@ impl NodeStorage {
 
     pub fn trust_store_path(&self) -> PathBuf {
         self.root().join(TRUST_STORE_FILE)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PersistOrder;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn an_older_capture_arriving_late_is_not_written() {
+        let order = PersistOrder::default();
+        let older = order.next.fetch_add(1, Ordering::SeqCst) + 1;
+        let newer = order.next.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut writes = Vec::new();
+        order
+            .write_if_newer(newer, || {
+                writes.push(newer);
+                Ok(())
+            })
+            .expect("newer capture should be written");
+        order
+            .write_if_newer(older, || {
+                writes.push(older);
+                Ok(())
+            })
+            .expect("a skipped capture is not an error");
+        assert_eq!(writes, vec![newer]);
+    }
+
+    #[test]
+    fn a_failed_write_does_not_advance_the_order() {
+        let order = PersistOrder::default();
+        let first = order.next.fetch_add(1, Ordering::SeqCst) + 1;
+        let failed =
+            order.write_if_newer(first, || Err(crate::NodeError::Storage("disk full".into())));
+        assert!(failed.is_err());
+        let mut written = false;
+        order
+            .write_if_newer(first, || {
+                written = true;
+                Ok(())
+            })
+            .expect("the same capture can be retried");
+        assert!(written);
     }
 }
