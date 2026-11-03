@@ -153,10 +153,13 @@ its dev version.
       borrowed views (byte-identical to the records, checked against the fixture and by property
       tests), no allocator, no `core::fmt`, no atomics; the template's UART device is about 8 KB
       flash and 0.9 KB RAM on Cortex-M0+, with a CI size budget.
-- [ ] Go smaller: drop the `memcpy` the CAN reassembler pulls in (1 KB of compiler-builtins on
-      Cortex-M0+), make the status buffer optional for devices that never publish status (`TX`
-      bytes of RAM), and put `DeviceStats` behind a feature (56 bytes of RAM, about 100 bytes of
-      flash).
+- [x] Go smaller (`209c58e`): the CAN reassembler no longer calls `memcpy` (the 7-byte `Result`
+      move in `Reassembler::push`, about 0.55 KB of compiler-builtins on Cortex-M0+ and RV32); the
+      status buffer is sized by `ST` (0 in the C template); `DeviceStats` is behind feature `stats`
+      (off in the template minimal builds). mcu-size, uart flash / RAM bytes, before -> after:
+      thumbv6m 8022 -> 7814 / 908 -> 724; thumbv6m CAN 8838 -> 8066 / 932 -> 748; thumbv7em
+      7870 -> 7690 / 908 -> 724; thumbv7em CAN 8114 -> 7934 / 932 -> 748; riscv32imc 9818 -> 9652 /
+      908 -> 724; riscv32imc CAN 10380 -> 9792 / 932 -> 748. Budgets lowered to measured + 18%.
 - [x] Node gateway (`orion-node` `link-gateway` feature): `ORION_NODE_LINKS` serial and SocketCAN
       links (termios / `PF_CAN` over `libc` + `AsyncFd`), `HostSession` / `HostBus` driven per link,
       `ProviderState` applied through the IPC provider path (gateway-owned `node_id`, provider and
