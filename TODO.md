@@ -470,6 +470,9 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       test and size budget, and the node actions `link.release`, `link.attach` and
       `link.firmware.update` on serial links landed; firmware over CAN is open (see
       docs/update-recovery.md, U8).
+- [ ] **U8 firmware over CAN links**: `link.firmware.update` on a SocketCAN link refuses the job
+      today. Drive `FirmwareTransfer` from the CAN link task as the serial task does (chunks sized
+      to the CAN/FD segment budget), plus an end-to-end `RolledBack` test over a pty.
 - [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
       MCU with an A/B bootloader over UART and CAN.
 
