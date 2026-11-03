@@ -398,7 +398,7 @@ Observed and applied state change far more often (every provider or executor sna
 observed updates, reconcile results) and are only a cache of what providers and executors report.
 While the reconcile loop runs (`NodeApp::spawn_reconcile_loop`, which `orion-node` always starts),
 those changes only mark the state dirty, and a background coalescer writes it at most once per
-`ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` (default `2000`):
+`ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` (default `30000`):
 
 - the first change after an idle interval is written at once; changes within the interval after a
   write are collected into one write at the end of the interval;
@@ -497,7 +497,7 @@ apply it with `NodeConfig::with_runtime_tuning(...)` or `NodeConfig::with_runtim
 | `ORION_NODE_OPERATOR_OPEN_READ` | unset (none) | Comma-separated `status`, `streams`, `state`: what operators the node has not enrolled may read (signed requests still; no actions), including push sessions for it. For appliances that are open on their own networks by design. See "Open read and auto-enrollment" in `docs/remote-operator.md`. |
 | `ORION_NODE_OPERATOR_AUTO_ENROLL` | unset (none) | `<network>/<prefix>=<pattern>,...` rules separated by `;` (`172.31.0.0/16=reboot,usb-boot`): an operator whose hello comes from the network is enrolled with read access and those action patterns, without an administrator (never one an administrator removed, or one enrolled with another key). Persisted and audited as `network` enrollments. |
 | `ORION_NODE_CLOCK_REFRESH_MS` | `10000` | How often the node re-reads its clock state. The observed node record is only republished on meaningful change (see `docs/observability.md`, Clock Facts). |
-| `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` | `2000` | Shortest spacing between coalesced observed/applied state writes while the reconcile loop runs. `0` writes every change immediately (not normalized to `1`). Desired-state commits are never delayed. See "Observed-state write coalescing". |
+| `ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS` | `30000` | Shortest spacing between coalesced observed/applied state writes while the reconcile loop runs. `0` writes every change immediately (not normalized to `1`). Desired-state commits are never delayed. See "Observed-state write coalescing". |
 | `ORION_NODE_STATUS_MAX_ENTRIES` | `4096` | Node-wide cap on volatile status lane entries. |
 | `ORION_NODE_STATUS_MAX_ENTRIES_PER_PUBLISHER` | `256` | Status lane entries one local client or link device may hold (clamped to the node-wide cap). |
 | `ORION_NODE_STATUS_MAX_TTL_MS` | `300000` | Longest status entry TTL, also used for entries published with `ttl_ms = 0`. |

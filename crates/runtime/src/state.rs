@@ -185,7 +185,9 @@ impl LocalRuntimeStore {
             self.observed.resources.retain(|resource_id, resource| {
                 let retain = resource.provider_id != provider_id
                     || incoming_by_id.get(resource_id).is_some_and(|candidates| {
-                        candidates.iter().any(|incoming| **incoming == *resource)
+                        candidates.iter().any(|incoming| {
+                            **incoming == *resource || differs_only_in_timestamp(resource, incoming)
+                        })
                     });
                 if !retain {
                     changed = true;
@@ -195,10 +197,16 @@ impl LocalRuntimeStore {
         }
 
         for resource in snapshot.resources {
-            if self.observed.resources.get(&resource.resource_id) != Some(&resource) {
+            let timestamp_only = match self.observed.resources.get(&resource.resource_id) {
+                Some(stored) if *stored == resource => continue,
+                Some(stored) => differs_only_in_timestamp(stored, &resource),
+                None => false,
+            };
+            // A fresh observation time is stored, but it is not a change of runtime state.
+            if !timestamp_only {
                 changed = true;
-                self.observed.put_resource(resource);
             }
+            self.observed.put_resource(resource);
         }
 
         self.provider_sync_revisions
@@ -279,11 +287,12 @@ impl LocalRuntimeStore {
             retain
         });
         self.observed.resources.retain(|resource_id, resource| {
-            let retain =
-                resource.realized_by_executor_id.as_ref() != Some(&snapshot.executor.executor_id)
-                    || snapshot.resources.iter().any(|incoming| {
-                        incoming.resource_id == *resource_id && incoming == resource
-                    });
+            let retain = resource.realized_by_executor_id.as_ref()
+                != Some(&snapshot.executor.executor_id)
+                || snapshot.resources.iter().any(|incoming| {
+                    incoming.resource_id == *resource_id
+                        && (incoming == resource || differs_only_in_timestamp(resource, incoming))
+                });
             if !retain {
                 changed = true;
             }
@@ -297,10 +306,16 @@ impl LocalRuntimeStore {
             }
         }
         for resource in snapshot.resources {
-            if self.observed.resources.get(&resource.resource_id) != Some(&resource) {
+            let timestamp_only = match self.observed.resources.get(&resource.resource_id) {
+                Some(stored) if *stored == resource => continue,
+                Some(stored) => differs_only_in_timestamp(stored, &resource),
+                None => false,
+            };
+            // A fresh observation time is stored, but it is not a change of runtime state.
+            if !timestamp_only {
                 changed = true;
-                self.observed.put_resource(resource);
             }
+            self.observed.put_resource(resource);
         }
 
         self.executor_sync_revisions
@@ -565,4 +580,20 @@ pub(crate) fn remote_lease_matches(
                     .iter()
                     .any(|capability| &capability.capability_id == capability_id)
             })
+}
+
+/// Whether `incoming` equals `stored` apart from its observation time. Publishers stamp every
+/// snapshot, so such a record is refreshed in place but is not a change of runtime state.
+fn differs_only_in_timestamp(stored: &ResourceRecord, incoming: &ResourceRecord) -> bool {
+    let (Some(stored_state), Some(incoming_state)) = (&stored.state, &incoming.state) else {
+        return false;
+    };
+    if stored_state.observed_at_ms == incoming_state.observed_at_ms {
+        return false;
+    }
+    let mut stamped = incoming.clone();
+    if let Some(state) = stamped.state.as_mut() {
+        state.observed_at_ms = stored_state.observed_at_ms;
+    }
+    stamped == *stored
 }

@@ -19,4 +19,5 @@ mod replay_fallback;
 mod resource_usage;
 mod restarts;
 mod safe_mode;
+mod steady_persistence;
 mod transport;
