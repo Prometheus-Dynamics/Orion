@@ -66,13 +66,12 @@ pub(crate) use remote_sessions::REMOTE_SESSION_IDLE_TIMEOUT;
 pub(crate) use remote_sessions::is_remote_session_address;
 #[cfg(any(feature = "transport-http", feature = "peer-tcp"))]
 pub(crate) use task_handle::GracefulTaskHandle;
-pub use types::{
-    HttpMutualTlsMode, NodeError, NodeSnapshot, NodeTickReport, PeerSyncExecution,
-    ReconcileLoopHandle,
-};
+pub(crate) use types::http_mutual_tls_mode_from_env;
+pub use types::{NodeError, NodeSnapshot, NodeTickReport, PeerSyncExecution, ReconcileLoopHandle};
 
 use crate::auth::{LocalAuthenticationMode, NodeSecurity};
 use crate::config::NodeConfig;
+use crate::control_plane::HttpMutualTlsMode;
 use crate::peer::{PeerConfig, PeerState};
 use crate::service::ControlMiddlewareHandle;
 use crate::storage::NodeStorage;

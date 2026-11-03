@@ -188,8 +188,8 @@ and `ActionRequestWatch` (`next`, `report`, `progress`, `succeed`, `fail`, `reje
 
 `NodeObservabilitySnapshot::links: Vec<LinkStatusSnapshot>` carries `NodeApp::link_status()` over
 the control protocol (empty without the `link-gateway` feature);
-`orion_node::link_gateway::LinkStatus` is an alias of `LinkStatusSnapshot`, and
-`render_link_metrics` renders the per-link Prometheus families.
+there is no separate `orion_node::link_gateway::LinkStatus` type (the alias was removed; use
+`LinkStatusSnapshot`). `render_link_metrics` renders the per-link Prometheus families.
 
 ## Peer Sync and Per-Object Versions
 

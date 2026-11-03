@@ -56,7 +56,10 @@ async fn node_sync_peer_noops_when_revisions_already_match() {
         .into_iter()
         .find(|peer| peer.node_id == NodeId::new("node-a"))
         .expect("peer state should exist");
-    assert_eq!(peer.sync_status, PeerSyncStatus::Synced);
+    assert_eq!(
+        peer.sync_status,
+        orion::control_plane::PeerSyncStatus::Synced
+    );
 
     server_a.abort();
 }

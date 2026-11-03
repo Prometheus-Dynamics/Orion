@@ -64,7 +64,7 @@ pub(crate) enum ManagedSurfaceLaunchRequest {
 }
 
 impl ManagedSurfaceLaunchRequest {
-    pub fn surface(&self) -> ManagedNodeTransportSurface {
+    pub(crate) fn surface(&self) -> ManagedNodeTransportSurface {
         match self {
             #[cfg(feature = "transport-http")]
             Self::PeerHttpControl { .. } => ManagedNodeTransportSurface::PeerHttpControl,
@@ -82,7 +82,7 @@ impl ManagedSurfaceLaunchRequest {
         feature = "transport-tcp",
         feature = "transport-quic"
     ))]
-    pub async fn start(
+    pub(crate) async fn start(
         self,
         app: NodeApp,
     ) -> Result<
@@ -117,7 +117,7 @@ impl ManagedSurfaceLaunchRequest {
     }
 
     #[cfg(feature = "transport-http")]
-    pub async fn start_with_shutdown(
+    pub(crate) async fn start_with_shutdown(
         self,
         app: NodeApp,
     ) -> Result<(ManagedTransportBinding, GracefulTaskHandle<NodeError>), NodeError> {

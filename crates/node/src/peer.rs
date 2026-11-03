@@ -1,8 +1,6 @@
 use orion::{
     CompatibilityState, NodeId, OrionError, Revision,
-    control_plane::{
-        DesiredStateSectionFingerprints, PeerSyncErrorKind, PeerSyncStatus as PublicPeerSyncStatus,
-    },
+    control_plane::{DesiredStateSectionFingerprints, PeerSyncErrorKind, PeerSyncStatus},
 };
 use orion_core::{PeerBaseUrl, PublicKeyHex};
 use std::{fmt, path::PathBuf, time::Duration};
@@ -81,7 +79,7 @@ pub struct PeerTrustStatus {
     pub configured_tls_root_cert_path: Option<String>,
     pub learned_tls_root_cert_fingerprint: Option<String>,
     pub revoked: bool,
-    pub sync_status: Option<PublicPeerSyncStatus>,
+    pub sync_status: Option<PeerSyncStatus>,
     pub last_error: Option<String>,
     pub last_error_kind: Option<PeerSyncErrorKind>,
     pub troubleshooting_hint: Option<String>,
@@ -93,31 +91,6 @@ pub struct PeerSyncBackoff<'a> {
     pub max: Duration,
     pub max_jitter_ms: u64,
     pub retry_scope: &'a str,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PeerSyncStatus {
-    Configured,
-    Negotiating,
-    Ready,
-    BackingOff,
-    Syncing,
-    Synced,
-    Error,
-}
-
-impl From<PeerSyncStatus> for PublicPeerSyncStatus {
-    fn from(value: PeerSyncStatus) -> Self {
-        match value {
-            PeerSyncStatus::Configured => Self::Configured,
-            PeerSyncStatus::Negotiating => Self::Negotiating,
-            PeerSyncStatus::Ready => Self::Ready,
-            PeerSyncStatus::BackingOff => Self::BackingOff,
-            PeerSyncStatus::Syncing => Self::Syncing,
-            PeerSyncStatus::Synced => Self::Synced,
-            PeerSyncStatus::Error => Self::Error,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

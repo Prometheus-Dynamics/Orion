@@ -64,7 +64,7 @@ let done = operator.wait_for_action("reboot-42", std::time::Duration::from_secs(
 | `enroll_with_key(&[u8])` | Shared-key enrollment (below). |
 | `state_snapshot`, `nodes`, `node(id)` | Converged cluster state of the connected node; node records merged like `orionctl get nodes`. |
 | `status(StatusQuery)`, `watch_status(StatusQuery)` | Status-lane entries; queries for a subject another node owns are forwarded to it (below). |
-| `run_action`, `call_action(request, timeout)`, `action(id)` / `query_action(id)`, `query_actions`, `wait_for_action(id, timeout)`, `watch_actions(query)` | Actions ([actions.md](actions.md)); `call_action` waits for the result without polling. |
+| `run_action`, `call_action(request, timeout)`, `query_action(id)`, `query_actions`, `wait_for_action(id, timeout)`, `watch_actions(query)` | Actions ([actions.md](actions.md)); `call_action` waits for the result without polling. |
 | `observability()` | `NodeObservabilitySnapshot` of the connected node. |
 | `discovery::browse_nodes(duration, cluster)` (feature `discovery`) | mDNS browse of `_orion._tcp`; returns `DiscoveredNode { advertisement, key_fingerprint, urls, compatible }`. |
 | `RemoteError` | `Transport`, `ProtocolMismatch`, `NodeAuthentication`, `Rejected` (signed refusal; `is_not_enrolled()`), `Enrollment`, `ActionTimeout`, ... |

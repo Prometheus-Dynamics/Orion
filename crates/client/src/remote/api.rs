@@ -216,7 +216,7 @@ impl RemoteOperator {
     }
 
     /// The current result of one action, if the node still tracks it.
-    pub async fn action(&self, action_id: &str) -> Result<Option<ActionResult>, RemoteError> {
+    pub async fn query_action(&self, action_id: &str) -> Result<Option<ActionResult>, RemoteError> {
         let results = self
             .query_actions(ActionQuery {
                 action_id: Some(action_id.to_owned()),
@@ -226,11 +226,6 @@ impl RemoteOperator {
         Ok(results
             .into_iter()
             .find(|result| result.action_id == action_id))
-    }
-
-    /// The current result of one action (the same as [`Self::action`]).
-    pub async fn query_action(&self, action_id: &str) -> Result<Option<ActionResult>, RemoteError> {
-        self.action(action_id).await
     }
 
     /// Polls an action every [`super::RemoteOperatorConfig::poll_interval`] until it is final
@@ -243,7 +238,7 @@ impl RemoteOperator {
         let deadline = Instant::now() + timeout;
         loop {
             let result = self
-                .action(action_id)
+                .query_action(action_id)
                 .await?
                 .ok_or_else(|| RemoteError::UnknownAction(action_id.to_owned()))?;
             if result.state.is_terminal() {

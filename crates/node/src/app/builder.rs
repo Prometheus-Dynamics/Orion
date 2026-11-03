@@ -1,5 +1,6 @@
 use super::{
     HttpMutualTlsMode, LifecycleState, NodeApp, NodeAppBuilder, ObservabilityState,
+    http_mutual_tls_mode_from_env,
     persistence::PersistenceWorker,
     state_access::{
         AppLocalSessionLookup, ClientRegistryState, NodeState, PeerRegistryState, PersistedState,
@@ -17,7 +18,7 @@ use crate::service::{ControlMiddleware, ControlMiddlewareHandle};
 use crate::storage::{
     CLUSTER_STATE_FILES, MAINTENANCE_STATE_FILE, NodeStorage, SNAPSHOT_FORMAT_VERSION,
 };
-use crate::transport_security::{NodeTransportSecurityManager, PeerTransportSecurityMode};
+use crate::transport_security::NodeTransportSecurityManager;
 #[cfg(feature = "transport-quic")]
 use orion::transport::quic::QuicTransport;
 #[cfg(feature = "transport-tcp")]
@@ -407,7 +408,7 @@ impl NodeAppBuilder {
         let http_mutual_tls_mode = self
             .http_mutual_tls_mode
             .map(Ok)
-            .unwrap_or_else(HttpMutualTlsMode::try_from_env)?;
+            .unwrap_or_else(http_mutual_tls_mode_from_env)?;
         let security = Arc::new(
             NodeSecurity::load_or_create(
                 config.node_id.clone(),
@@ -431,7 +432,7 @@ impl NodeAppBuilder {
             security.clone(),
             http_tls_cert_path.clone(),
             http_tls_key_path.clone(),
-            PeerTransportSecurityMode::from(http_mutual_tls_mode),
+            http_mutual_tls_mode,
         ));
         // Each configured peer starts its sync clock from `peer-sync-times.json` (see
         // `docs/peer-sync.md`, "Stale peers"); a peer without a record starts it now.

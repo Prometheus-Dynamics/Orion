@@ -5,7 +5,8 @@ use super::{
 };
 use crate::PeerSyncExecution;
 use crate::config::AuditLogOverloadPolicy;
-use crate::peer::{PeerConfig, PeerState, PeerSyncStatus, PeerTrustStatus};
+use crate::control_plane::PeerSyncStatus;
+use crate::peer::{PeerConfig, PeerState, PeerTrustStatus};
 use orion::{
     NodeId,
     control_plane::{
@@ -469,9 +470,7 @@ impl NodeApp {
                     }),
                     learned_tls_root_cert_fingerprint,
                     revoked: self.security.is_peer_revoked(&node_id)?,
-                    sync_status: peers
-                        .get(&node_id)
-                        .map(|peer| peer.sync_status.clone().into()),
+                    sync_status: peers.get(&node_id).map(|peer| peer.sync_status.clone()),
                     last_error: peers.get(&node_id).and_then(|peer| peer.last_error.clone()),
                     node_id,
                 })

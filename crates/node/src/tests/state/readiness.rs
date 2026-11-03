@@ -36,8 +36,11 @@ async fn readiness_stays_ready_after_startup_when_a_peer_is_degraded() {
         .await
         .expect("ipc stream server should start");
     app.replay_state().expect("startup replay should complete");
-    app.set_peer_sync_status(&NodeId::new("node-b"), PeerSyncStatus::BackingOff)
-        .expect("peer sync status should update");
+    app.set_peer_sync_status(
+        &NodeId::new("node-b"),
+        orion::control_plane::PeerSyncStatus::BackingOff,
+    )
+    .expect("peer sync status should update");
 
     let readiness = app.readiness_snapshot();
     let health = app.health_snapshot();

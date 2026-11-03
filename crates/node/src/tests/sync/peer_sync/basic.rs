@@ -64,7 +64,10 @@ async fn node_sync_peer_pulls_remote_snapshot_when_peer_is_ahead() {
         .into_iter()
         .find(|peer| peer.node_id == NodeId::new("node-a"))
         .expect("peer state should exist");
-    assert_eq!(peer.sync_status, PeerSyncStatus::Synced);
+    assert_eq!(
+        peer.sync_status,
+        orion::control_plane::PeerSyncStatus::Synced
+    );
     assert_eq!(
         peer.desired_revision,
         node_a.state_snapshot().state.desired.revision

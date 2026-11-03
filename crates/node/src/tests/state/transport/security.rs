@@ -20,7 +20,7 @@ fn transport_security_manager_centralizes_http_tcp_and_quic_trust_material() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Optional)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Optional)
         .try_build()
         .expect("node app should build");
 
@@ -175,7 +175,7 @@ fn managed_http_server_surface_uses_generic_transport_security_api() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 
@@ -217,7 +217,7 @@ fn managed_probe_surface_explicitly_skips_transport_security() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 

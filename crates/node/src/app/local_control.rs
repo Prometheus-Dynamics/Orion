@@ -5,7 +5,6 @@ use super::{
         enqueue_executor_workloads_event, enqueue_provider_leases_event,
         enqueue_state_snapshot_event, insert_state_snapshot_event, reserve_state_snapshot_event,
     },
-    observability::public_http_mutual_tls_mode,
     status_lane::OwnedSubject,
 };
 use crate::peer::PeerConfig;
@@ -81,7 +80,7 @@ impl NodeApp {
                 Ok(ControlMessage::Accepted)
             }
             ControlMessage::QueryPeerTrust => Ok(ControlMessage::PeerTrust(PeerTrustSnapshot {
-                http_mutual_tls_mode: public_http_mutual_tls_mode(self.http_mutual_tls_mode),
+                http_mutual_tls_mode: self.http_mutual_tls_mode,
                 peers: self
                     .peer_trust_statuses()?
                     .into_iter()

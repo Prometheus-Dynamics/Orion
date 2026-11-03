@@ -11,7 +11,7 @@ use orion::{
     NodeId,
     control_plane::{
         CommunicationEndpointScope, CommunicationEndpointSnapshot, CommunicationTransportKind,
-        HttpMutualTlsMode as PublicHttpMutualTlsMode, ObservabilityEvent, ObservabilityEventKind,
+        ObservabilityEvent, ObservabilityEventKind,
     },
 };
 use std::{
@@ -244,16 +244,6 @@ fn prune_communication_endpoints_for_insert(observability: &mut ObservabilitySta
             break;
         };
         observability.communication_endpoints.remove(&oldest_key);
-    }
-}
-
-pub(super) fn public_http_mutual_tls_mode(
-    mode: crate::app::HttpMutualTlsMode,
-) -> PublicHttpMutualTlsMode {
-    match mode {
-        crate::app::HttpMutualTlsMode::Disabled => PublicHttpMutualTlsMode::Disabled,
-        crate::app::HttpMutualTlsMode::Optional => PublicHttpMutualTlsMode::Optional,
-        crate::app::HttpMutualTlsMode::Required => PublicHttpMutualTlsMode::Required,
     }
 }
 

@@ -89,7 +89,10 @@ async fn node_sync_peer_phase_equal_state_stops_after_hello() {
     let peer = local
         .peer_state_for_test(&NodeId::new("node-a"))
         .expect("peer state should exist");
-    assert_eq!(peer.sync_status, PeerSyncStatus::Synced);
+    assert_eq!(
+        peer.sync_status,
+        orion::control_plane::PeerSyncStatus::Synced
+    );
 }
 
 #[tokio::test]

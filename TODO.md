@@ -26,9 +26,16 @@ when, blocked by.
       far (2026-10-31, reference board #1, the packaged node under the device runtime's real load): 7 days up, 0 restarts,
       PSS 9.8 MiB / RSS 11.3 MiB. Left: a release aarch64 build's 24 h PSS curve after warm-up,
       recorded in docs/node-env.md. Blocked by: nothing (the coordinator lends reference board #1 on request).
-- [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate public types,
+- [x] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate public types,
       aliases or client methods remain across orion-client/control-plane/node, and docs match.
-      Blocked by: nothing.
+      Blocked by: nothing. Done: removed `RemoteOperator::action` (kept `query_action`), the
+      `link_gateway::LinkStatus` alias, node's mirror `PeerSyncStatus` and `PeerTransportSecurityMode`
+      and node's private `HttpMutualTlsMode` (all now the control-plane types); exported
+      `NodeRuntimeTuning`/`AuditLogOverloadPolicy`; narrowed unreachable items to `pub(crate)`. Rules:
+      one name per concept (the wire type in orion-control-plane wins over a mirror); same-name
+      types with different meaning stay (`ClientSession`, `TcpEndpoint`, `ClientRole` re-exports);
+      wire types are not renamed or changed; `pub` items that docs or the facade name stay public.
+      Changes listed in CHANGELOG [Unreleased].
 - [x] **Unknown arguments start a node.** Why: `orion-node --version` on a reference board (2026-10-31)
       started a second node (`node.local`, sockets in /tmp) instead of printing a version or
       refusing. Done when: `--version` and `--help` work, and an unknown argument exits non-zero
@@ -218,7 +225,7 @@ names, env knobs, and the per-client byte cap itself.
       `ip link add dev vcan0 type vcan`, `ip link set up`), best effort, never failing the job, then
       `can_gateway_on_vcan0 -- --ignored`, which skips itself when `vcan0` is missing. GitHub's
       ubuntu-latest runners have passwordless sudo and the vcan module in linux-modules-extra, so the
-      test is expected to run there; this was not verified on a runner (no sudo locally).
+      test runs there: verified in CI run 41585251104 (`vcan0 is up`, `can_gateway_on_vcan0 ... ok`).
 - [ ] Executor role on the link (`ExecutorState` / `Workloads`, kinds reserved) and the volatile
       `Status` lane.
 - [ ] Real hardware bring-up: run the template and the gateway on real hardware (one Cortex-M and

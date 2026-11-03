@@ -14,7 +14,10 @@ fn node_sync_status_and_error_updates_reject_unknown_peers() {
         .expect("node app should build");
 
     let err = app
-        .set_peer_sync_status(&NodeId::new("node-missing"), PeerSyncStatus::Syncing)
+        .set_peer_sync_status(
+            &NodeId::new("node-missing"),
+            orion::control_plane::PeerSyncStatus::Syncing,
+        )
         .expect_err("unknown peer status update should fail");
     assert!(matches!(err, NodeError::UnknownPeer(_)));
 
@@ -77,8 +80,11 @@ fn node_app_records_peer_hello_and_sync_status() {
         .try_build()
         .expect("node app should build");
 
-    app.set_peer_sync_status(&NodeId::new("node-b"), PeerSyncStatus::Negotiating)
-        .expect("peer sync status should update");
+    app.set_peer_sync_status(
+        &NodeId::new("node-b"),
+        orion::control_plane::PeerSyncStatus::Negotiating,
+    )
+    .expect("peer sync status should update");
     app.record_peer_hello(
         &NodeId::new("node-b"),
         &orion::control_plane::PeerHello {
@@ -112,7 +118,10 @@ fn node_app_records_peer_hello_and_sync_status() {
         .expect("peer state should exist");
     assert_eq!(peer.compatibility, Some(CompatibilityState::Downgraded));
     assert_eq!(peer.desired_revision, orion::Revision::new(5));
-    assert_eq!(peer.sync_status, PeerSyncStatus::Ready);
+    assert_eq!(
+        peer.sync_status,
+        orion::control_plane::PeerSyncStatus::Ready
+    );
 }
 
 #[test]
@@ -203,7 +212,7 @@ fn peer_trust_query_exposes_mtls_mode_and_learned_tls_binding() {
             crate::PeerAuthenticationMode::Optional,
         ))
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Optional)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Optional)
         .try_build()
         .expect("node app should build");
     let node_b = NodeApp::builder()
@@ -214,7 +223,7 @@ fn peer_trust_query_exposes_mtls_mode_and_learned_tls_binding() {
             crate::PeerAuthenticationMode::Optional,
         ))
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Optional)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Optional)
         .try_build()
         .expect("node app should build");
 
@@ -297,7 +306,7 @@ fn local_enroll_peer_can_pretrust_tls_root_cert() {
             "node-enroll-tls",
             crate::PeerAuthenticationMode::Optional,
         ))
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 
@@ -366,7 +375,7 @@ fn peer_trust_status_classifies_sync_errors_for_troubleshooting() {
             runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
                 .expect("runtime tuning defaults should parse"),
         })
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 

@@ -32,7 +32,7 @@ async fn managed_surface_launcher_starts_named_http_control_surface() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 
@@ -144,7 +144,7 @@ async fn managed_surface_launcher_starts_named_http_probe_surface() {
             runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
                 .expect("runtime tuning defaults should parse"),
         })
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 
@@ -203,7 +203,7 @@ async fn managed_http_probe_surface_exposes_metrics_without_control_routes() {
             runtime_tuning: NodeConfig::try_runtime_tuning_from_env()
                 .expect("runtime tuning defaults should parse"),
         })
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 
@@ -298,7 +298,7 @@ async fn managed_surface_launcher_starts_named_tcp_surface() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 
@@ -387,7 +387,7 @@ async fn managed_surface_launcher_starts_named_quic_surface() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 
@@ -475,7 +475,7 @@ async fn managed_tcp_transport_adapter_starts_secure_data_surface() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 
@@ -578,7 +578,7 @@ async fn managed_quic_transport_adapter_starts_secure_data_surface() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 

@@ -74,7 +74,10 @@ async fn two_nodes_converge_over_orion_tcp_with_required_peer_auth() {
         .app
         .peer_state_for_test(&NodeId::new("node-b"))
         .expect("peer state should exist");
-    assert_eq!(peer.sync_status, PeerSyncStatus::Synced);
+    assert_eq!(
+        peer.sync_status,
+        orion::control_plane::PeerSyncStatus::Synced
+    );
     let snapshot = a.app.observability_snapshot();
     let endpoint = snapshot
         .communication
@@ -295,7 +298,10 @@ async fn unreachable_tcp_peer_backs_off_with_a_connectivity_error() {
         .app
         .peer_state_for_test(&NodeId::new("node-gone"))
         .expect("peer state should exist");
-    assert_eq!(peer.sync_status, PeerSyncStatus::BackingOff);
+    assert_eq!(
+        peer.sync_status,
+        orion::control_plane::PeerSyncStatus::BackingOff
+    );
     assert_eq!(
         peer.last_error_kind,
         Some(orion::control_plane::PeerSyncErrorKind::TransportConnectivity)

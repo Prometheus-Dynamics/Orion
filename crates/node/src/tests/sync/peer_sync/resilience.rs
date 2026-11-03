@@ -149,7 +149,10 @@ async fn node_sync_peer_backs_off_after_unreachable_peer_error() {
         .into_iter()
         .find(|peer| peer.node_id == NodeId::new("node-b"))
         .expect("peer state should exist");
-    assert_eq!(peer.sync_status, PeerSyncStatus::BackingOff);
+    assert_eq!(
+        peer.sync_status,
+        orion::control_plane::PeerSyncStatus::BackingOff
+    );
     assert!(peer.last_error.is_some());
     assert_eq!(peer.consecutive_failures, 1);
     assert!(peer.next_sync_allowed_at_ms.is_some());
@@ -163,7 +166,10 @@ async fn node_sync_peer_backs_off_after_unreachable_peer_error() {
         .into_iter()
         .find(|peer| peer.node_id == NodeId::new("node-b"))
         .expect("peer state should exist");
-    assert_eq!(peer.sync_status, PeerSyncStatus::BackingOff);
+    assert_eq!(
+        peer.sync_status,
+        orion::control_plane::PeerSyncStatus::BackingOff
+    );
     assert_eq!(peer.consecutive_failures, 1);
 }
 

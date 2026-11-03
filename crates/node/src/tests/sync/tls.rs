@@ -97,7 +97,7 @@ async fn two_nodes_can_exchange_snapshots_over_https_with_identity_bootstrap() {
             crate::PeerAuthenticationMode::Optional,
         ))
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Optional)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Optional)
         .try_build()
         .expect("node app should build");
     node_a
@@ -149,7 +149,7 @@ async fn two_nodes_can_exchange_snapshots_over_https_with_identity_bootstrap() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Optional)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Optional)
         .try_build()
         .expect("node app should build");
 
@@ -201,7 +201,7 @@ async fn optional_mtls_peer_rebinds_after_remote_http_tls_rotation() {
             crate::PeerAuthenticationMode::Optional,
         ))
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Optional)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Optional)
         .try_build()
         .expect("node app should build");
     node_a
@@ -241,7 +241,7 @@ async fn optional_mtls_peer_rebinds_after_remote_http_tls_rotation() {
                 .expect("runtime tuning defaults should parse"),
         })
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Optional)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Optional)
         .try_build()
         .expect("node app should build");
 
@@ -290,7 +290,7 @@ async fn two_nodes_can_exchange_snapshots_over_https_with_required_mtls() {
             crate::PeerAuthenticationMode::Required,
         ))
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
     let node_b = NodeApp::builder()
@@ -301,7 +301,7 @@ async fn two_nodes_can_exchange_snapshots_over_https_with_required_mtls() {
             crate::PeerAuthenticationMode::Required,
         ))
         .with_auto_http_tls(true)
-        .with_http_mutual_tls_mode(crate::app::HttpMutualTlsMode::Required)
+        .with_http_mutual_tls_mode(orion::control_plane::HttpMutualTlsMode::Required)
         .try_build()
         .expect("node app should build");
 

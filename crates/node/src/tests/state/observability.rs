@@ -730,16 +730,31 @@ fn observability_reports_peer_sync_counts_and_effective_parallel_cap() {
         .try_build()
         .expect("node app should build");
 
-    app.set_peer_sync_status(&NodeId::new("node-a"), PeerSyncStatus::Synced)
-        .expect("peer A sync status should update");
-    app.set_peer_sync_status(&NodeId::new("node-b"), PeerSyncStatus::Ready)
-        .expect("peer B sync status should update");
-    app.set_peer_sync_status(&NodeId::new("node-c"), PeerSyncStatus::BackingOff)
-        .expect("peer C sync status should update");
-    app.set_peer_sync_status(&NodeId::new("node-d"), PeerSyncStatus::Error)
-        .expect("peer D sync status should update");
-    app.set_peer_sync_status(&NodeId::new("node-e"), PeerSyncStatus::Syncing)
-        .expect("peer E sync status should update");
+    app.set_peer_sync_status(
+        &NodeId::new("node-a"),
+        orion::control_plane::PeerSyncStatus::Synced,
+    )
+    .expect("peer A sync status should update");
+    app.set_peer_sync_status(
+        &NodeId::new("node-b"),
+        orion::control_plane::PeerSyncStatus::Ready,
+    )
+    .expect("peer B sync status should update");
+    app.set_peer_sync_status(
+        &NodeId::new("node-c"),
+        orion::control_plane::PeerSyncStatus::BackingOff,
+    )
+    .expect("peer C sync status should update");
+    app.set_peer_sync_status(
+        &NodeId::new("node-d"),
+        orion::control_plane::PeerSyncStatus::Error,
+    )
+    .expect("peer D sync status should update");
+    app.set_peer_sync_status(
+        &NodeId::new("node-e"),
+        orion::control_plane::PeerSyncStatus::Syncing,
+    )
+    .expect("peer E sync status should update");
 
     let snapshot = app.observability_snapshot();
     assert_eq!(snapshot.configured_peer_count, 6);

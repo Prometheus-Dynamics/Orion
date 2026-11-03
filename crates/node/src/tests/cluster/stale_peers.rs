@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::peer::PeerState;
-use orion::control_plane::{ControlMessage, MutationBatch};
+use orion::control_plane::{ControlMessage, MutationBatch, PeerSyncStatus};
 use std::path::Path;
 
 /// Base URL of the test peers. Their requests go through the in-memory transport, so only a

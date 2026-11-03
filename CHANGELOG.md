@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - The robot-link trust path is named "private link" in the code and docs. `ORION_NODE_PEER_AUTO_TRUST` takes `private-link` (was `robot-link`); any other value still fails startup. `ORION_NODE_ROBOT_LINKS` and the `RobotLinkListener` control message keep their names: the variable is configuration and the message is on the wire.
 
+### Removed and renamed (breaking, API dedup)
+
+- `orion-client`: `RemoteOperator::action(id)` is removed; `RemoteOperator::query_action(id)` is the one name for the same call (same behavior).
+- `orion-node`: the `link_gateway::LinkStatus` alias is removed; use `LinkStatusSnapshot` (`orion::control_plane::LinkStatusSnapshot`). Same type, no wire change.
+- `orion-node`: the node-side `PeerSyncStatus` (root export) is removed; the type is `orion::control_plane::PeerSyncStatus`. It was a mirror enum with the same variants.
+- `orion-node`: `PeerTransportSecurityMode` is removed; `NodeTransportSecurityManager::peer_mode()` returns `orion::control_plane::HttpMutualTlsMode`, the same policy under one name. `NodeAppBuilder::with_http_mutual_tls_mode` takes that type too (the node-private enum it used to take could not be named outside the crate).
+- `orion-node`: `NodeRuntimeTuning` and `AuditLogOverloadPolicy` are exported from the crate root (documented in `docs/node-env.md` and `docs/public-api.md`, but previously not nameable).
+- Narrowed to crate-private (not reachable from outside before, so no caller changes): `orion-node` clock kernel constants and `clock_facts_*` helpers, the `orion_auth` re-exports and `PrivateLinkTrust` in `auth`, `BlobTuning`, `DEFAULT_RUNTIME_WORKER_THREADS`, the managed-transport `surface`/`start`/`start_with_shutdown` methods; `orion-client` default node id and env-name constants.
+
 ### Removed (breaking, dev tooling and examples only)
 
 - `orion-nt4` example `nt4-latency` (a PhotonVision camera latency tool with an AprilTag page) is removed from this repository and moves to the PhotonVision tooling. The `[[example]]` entry, its tests and its README section are gone with it. Public `orion-nt4` API is unchanged.

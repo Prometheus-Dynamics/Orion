@@ -31,10 +31,6 @@ use crate::{NodeApp, NodeError};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-/// Counters and connected devices of one link, from [`NodeApp::link_status`] and the
-/// observability snapshot's `links` section. Counters are cumulative since the gateway started.
-pub type LinkStatus = orion::control_plane::LinkStatusSnapshot;
-
 /// Running link tasks, from [`NodeApp::start_link_gateway`].
 pub struct LinkGatewayHandle {
     shutdown_tx: watch::Sender<bool>,
@@ -60,7 +56,8 @@ impl LinkGatewayHandle {
 
 impl NodeApp {
     /// Starts one task per link. Must be called inside a Tokio runtime. Ports and sockets that
-    /// cannot be opened yet are retried in the background (and reported in [`LinkStatus`]).
+    /// cannot be opened yet are retried in the background (and reported in
+    /// [`crate::control_plane::LinkStatusSnapshot`]).
     pub fn start_link_gateway(
         &self,
         links: Vec<LinkConfig>,

@@ -1,7 +1,7 @@
 //! Host-session events → node provider path, shared by serial and CAN links.
 
-use super::LinkStatus;
 use crate::NodeApp;
+use crate::control_plane::LinkStatusSnapshot;
 use orion_link::host::HostEvent;
 use orion_link::message::LeaseRecord;
 use std::collections::BTreeSet;
@@ -20,7 +20,7 @@ pub(super) struct LinkContext {
     started: Instant,
     /// Devices whose current-session snapshot was accepted.
     accepted: BTreeSet<String>,
-    pub(super) status: LinkStatus,
+    pub(super) status: LinkStatusSnapshot,
     last_logged_error: Option<String>,
 }
 
@@ -32,9 +32,9 @@ pub(super) enum LeaseAction {
 
 impl LinkContext {
     pub(super) fn new(app: NodeApp, name: String) -> Self {
-        let status = LinkStatus {
+        let status = LinkStatusSnapshot {
             name: name.clone(),
-            ..LinkStatus::default()
+            ..LinkStatusSnapshot::default()
         };
         Self {
             app,

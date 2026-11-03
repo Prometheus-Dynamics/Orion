@@ -10,13 +10,13 @@
 use orion::control_plane::{ClockSourceKind, NodeClockFacts};
 
 /// `STA_UNSYNC`: the kernel clock is not synchronized.
-pub const STA_UNSYNC: i32 = 0x0040;
+pub(crate) const STA_UNSYNC: i32 = 0x0040;
 /// `STA_CLOCKERR`: clock hardware fault.
-pub const STA_CLOCKERR: i32 = 0x1000;
+pub(crate) const STA_CLOCKERR: i32 = 0x1000;
 /// `STA_NANO`: `offset` is in nanoseconds instead of microseconds.
-pub const STA_NANO: i32 = 0x2000;
+pub(crate) const STA_NANO: i32 = 0x2000;
 /// `TIME_ERROR`: `adjtimex` return state for an unsynchronized clock.
-pub const TIME_ERROR: i32 = 5;
+pub(crate) const TIME_ERROR: i32 = 5;
 
 /// Offsets that move by less than this are not republished.
 const OFFSET_CHANGE_FLOOR_NS: u64 = 1_000_000;
@@ -86,7 +86,7 @@ fn micros_to_nanos(value: i64) -> u64 {
 /// The clock counts as synchronized unless `STA_UNSYNC` or `STA_CLOCKERR` is set or the state is
 /// `TIME_ERROR`. The maximum error is always reported; the offset and estimated error only while
 /// synchronized, because the kernel leaves stale values behind otherwise.
-pub fn clock_facts_from_reading(
+pub(crate) fn clock_facts_from_reading(
     reading: Option<KernelClockReading>,
     source_override: Option<&ClockSourceKind>,
     timebase: Option<&str>,
@@ -138,7 +138,7 @@ fn error_bound_changed(previous: Option<u64>, next: Option<u64>) -> bool {
 /// the offset moves by more than 1 ms; when an error bound halves or doubles by at least 10 ms; and
 /// when the published facts are `max_age_ms` old. Small jitter is left out of the observed record
 /// (the Prometheus export always has the latest sample).
-pub fn clock_facts_need_publish(
+pub(crate) fn clock_facts_need_publish(
     previous: Option<&NodeClockFacts>,
     next: &NodeClockFacts,
     max_age_ms: u64,

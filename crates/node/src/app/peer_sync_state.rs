@@ -1,5 +1,6 @@
 use super::{NodeApp, NodeError, classify_peer_sync_error_kind};
-use crate::peer::{PeerSyncBackoff, PeerSyncStatus};
+use crate::control_plane::PeerSyncStatus;
+use crate::peer::PeerSyncBackoff;
 use crate::storage_io::blocking_read_file;
 use orion::{
     CompatibilityState, NodeId, Revision,

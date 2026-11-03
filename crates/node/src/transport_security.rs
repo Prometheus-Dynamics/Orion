@@ -1,6 +1,7 @@
+use crate::NodeError;
 use crate::auth::NodeSecurity;
 use crate::blocking::run_possibly_blocking;
-use crate::{NodeError, app::HttpMutualTlsMode};
+use crate::control_plane::HttpMutualTlsMode;
 use orion::NodeId;
 #[cfg(feature = "transport-http")]
 use orion::transport::http::{
@@ -67,29 +68,12 @@ impl ManagedNodeTransportSurface {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PeerTransportSecurityMode {
-    Disabled,
-    Optional,
-    Required,
-}
-
-impl From<HttpMutualTlsMode> for PeerTransportSecurityMode {
-    fn from(value: HttpMutualTlsMode) -> Self {
-        match value {
-            HttpMutualTlsMode::Disabled => Self::Disabled,
-            HttpMutualTlsMode::Optional => Self::Optional,
-            HttpMutualTlsMode::Required => Self::Required,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct NodeTransportSecurityManager {
     security: Arc<NodeSecurity>,
     cert_path: Option<PathBuf>,
     key_path: Option<PathBuf>,
-    peer_mode: PeerTransportSecurityMode,
+    peer_mode: HttpMutualTlsMode,
 }
 
 impl NodeTransportSecurityManager {
@@ -97,7 +81,7 @@ impl NodeTransportSecurityManager {
         security: Arc<NodeSecurity>,
         cert_path: Option<PathBuf>,
         key_path: Option<PathBuf>,
-        peer_mode: PeerTransportSecurityMode,
+        peer_mode: HttpMutualTlsMode,
     ) -> Self {
         Self {
             security,
@@ -107,7 +91,7 @@ impl NodeTransportSecurityManager {
         }
     }
 
-    pub fn peer_mode(&self) -> PeerTransportSecurityMode {
+    pub fn peer_mode(&self) -> HttpMutualTlsMode {
         self.peer_mode
     }
 
@@ -233,7 +217,7 @@ impl NodeTransportSecurityManager {
     }
 
     pub fn local_client_identity_pem(&self) -> Result<Option<IdentityPemPair>, NodeError> {
-        if self.peer_mode == PeerTransportSecurityMode::Disabled {
+        if self.peer_mode == HttpMutualTlsMode::Disabled {
             return Ok(None);
         }
         self.load_local_identity_pem()
@@ -261,13 +245,13 @@ impl NodeTransportSecurityManager {
             cert_path: self.cert_path.clone(),
             key_path: self.key_path.clone(),
             client_auth: match self.peer_mode {
-                PeerTransportSecurityMode::Disabled => HttpServerClientAuth::Disabled,
-                PeerTransportSecurityMode::Optional => HttpServerClientAuth::OptionalDynamic {
+                HttpMutualTlsMode::Disabled => HttpServerClientAuth::Disabled,
+                HttpMutualTlsMode::Optional => HttpServerClientAuth::OptionalDynamic {
                     trust_provider: Arc::new(SecurityTrustProvider {
                         security: self.security.clone(),
                     }),
                 },
-                PeerTransportSecurityMode::Required => HttpServerClientAuth::RequiredDynamic {
+                HttpMutualTlsMode::Required => HttpServerClientAuth::RequiredDynamic {
                     trust_provider: Arc::new(SecurityTrustProvider {
                         security: self.security.clone(),
                     }),
@@ -308,15 +292,15 @@ impl NodeTransportSecurityManager {
         };
         Ok(Some(
             TcpServerTlsConfig::new(cert_pem, key_pem).with_client_auth(match self.peer_mode {
-                PeerTransportSecurityMode::Disabled => TcpServerClientAuth::Disabled,
-                PeerTransportSecurityMode::Optional => TcpServerClientAuth::Optional {
+                HttpMutualTlsMode::Disabled => TcpServerClientAuth::Disabled,
+                HttpMutualTlsMode::Optional => TcpServerClientAuth::Optional {
                     trusted_client_roots_pem: self
                         .security
                         .trusted_peer_tls_root_certs()?
                         .into_values()
                         .collect(),
                 },
-                PeerTransportSecurityMode::Required => TcpServerClientAuth::Required {
+                HttpMutualTlsMode::Required => TcpServerClientAuth::Required {
                     trusted_client_roots_pem: self
                         .security
                         .trusted_peer_tls_root_certs()?
@@ -352,15 +336,15 @@ impl NodeTransportSecurityManager {
         };
         Ok(Some(
             QuicServerTlsConfig::new(cert_pem, key_pem).with_client_auth(match self.peer_mode {
-                PeerTransportSecurityMode::Disabled => QuicServerClientAuth::Disabled,
-                PeerTransportSecurityMode::Optional => QuicServerClientAuth::Optional {
+                HttpMutualTlsMode::Disabled => QuicServerClientAuth::Disabled,
+                HttpMutualTlsMode::Optional => QuicServerClientAuth::Optional {
                     trusted_client_roots_pem: self
                         .security
                         .trusted_peer_tls_root_certs()?
                         .into_values()
                         .collect(),
                 },
-                PeerTransportSecurityMode::Required => QuicServerClientAuth::Required {
+                HttpMutualTlsMode::Required => QuicServerClientAuth::Required {
                     trusted_client_roots_pem: self
                         .security
                         .trusted_peer_tls_root_certs()?

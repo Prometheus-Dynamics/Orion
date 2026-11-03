@@ -132,13 +132,11 @@ pub use auth::{
 };
 pub use clock::{ClockStatusSource, KernelClockReading, KernelClockStatusSource};
 pub use config::{
-    ActionTuning, HostFactsTuning, NodeConfig, NodeProcessConfig, NodeRuntimeThreads,
-    OperatorAutoEnroll, OperatorOpenRead, PlacementTuning,
+    ActionTuning, AuditLogOverloadPolicy, HostFactsTuning, NodeConfig, NodeProcessConfig,
+    NodeRuntimeThreads, NodeRuntimeTuning, OperatorAutoEnroll, OperatorOpenRead, PlacementTuning,
 };
 pub use host_facts::{HostFactsSource, LayeredHostFactsSource, LinuxHostFactsSource};
-pub use peer::{
-    PEER_TCP_SCHEME, PeerConfig, PeerState, PeerSyncStatus, PeerTransportKind, PeerTrustStatus,
-};
+pub use peer::{PEER_TCP_SCHEME, PeerConfig, PeerState, PeerTransportKind, PeerTrustStatus};
 #[cfg(feature = "peer-tcp")]
 pub use peer_tcp::PeerTcpError;
 pub use service::{
@@ -149,7 +147,7 @@ pub use service::{
 pub use storage::{NodeStorage, StateMigrationReport};
 pub use transport_security::{
     ManagedClientTransportSecurity, ManagedNodeTransportSurface, ManagedServerTransportSecurity,
-    ManagedTransportProtocol, NodeTransportSecurityManager, PeerTransportSecurityMode,
+    ManagedTransportProtocol, NodeTransportSecurityManager,
 };
 
 #[cfg(test)]

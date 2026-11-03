@@ -13,7 +13,8 @@ use super::desired_sync::{
 use super::desired_writes::WriteOrigin;
 use super::peer_transport::{PeerSyncTransport, unexpected_response};
 use super::{NodeApp, NodeError, classify_peer_sync_error};
-use crate::peer::{PeerState, PeerSyncStatus};
+use crate::control_plane::PeerSyncStatus;
+use crate::peer::PeerState;
 use orion::{
     CompatibilityState, NodeId,
     control_plane::{ControlMessage, SyncDiffRequest, SyncSummaryRequest},

@@ -15,7 +15,7 @@
 mod persist;
 
 use super::{NodeApp, NodeError};
-use crate::link_gateway::LinkStatus;
+use crate::control_plane::LinkStatusSnapshot;
 use crate::storage::LinkDeviceRecord;
 use orion::{
     ProviderId, ResourceId,
@@ -33,7 +33,7 @@ use tracing::warn;
 /// Shared bridge state, one per node.
 pub(super) struct LinkBridgeState {
     owners: Mutex<BTreeMap<ProviderId, ProviderOwner>>,
-    status: Mutex<BTreeMap<String, LinkStatus>>,
+    status: Mutex<BTreeMap<String, LinkStatusSnapshot>>,
     desired_changed: tokio::sync::watch::Sender<u64>,
     /// Last content of `link-devices.rkyv`. `None` until the gateway restored it, so nothing is
     /// written over a file that has not been read.
@@ -388,12 +388,12 @@ impl NodeApp {
         self.state.links.desired_changed.subscribe()
     }
 
-    pub(crate) fn record_link_status(&self, status: LinkStatus) {
+    pub(crate) fn record_link_status(&self, status: LinkStatusSnapshot) {
         lock(&self.state.links.status).insert(status.name.clone(), status);
     }
 
     /// Counters and connected devices of every configured link (feature `link-gateway`).
-    pub fn link_status(&self) -> Vec<LinkStatus> {
+    pub fn link_status(&self) -> Vec<LinkStatusSnapshot> {
         lock(&self.state.links.status).values().cloned().collect()
     }
 }

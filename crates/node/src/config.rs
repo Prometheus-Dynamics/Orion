@@ -3,7 +3,7 @@ mod host_actions;
 mod placement;
 mod runtime_tuning;
 
-pub use blob_tuning::BlobTuning;
+pub(crate) use blob_tuning::BlobTuning;
 pub use host_actions::{ActionTuning, HostFactsTuning, OperatorAutoEnroll, OperatorOpenRead};
 pub use placement::PlacementTuning;
 pub(crate) use runtime_tuning::normalize_runtime_tuning_duration;
@@ -120,7 +120,7 @@ pub struct NodeProcessConfig {
 /// Worker threads when `ORION_NODE_RUNTIME_WORKER_THREADS` is unset. The node's work is mostly
 /// async I/O and lock-held state updates; blocking persistence runs on its own pool, so two workers
 /// keep the per-thread stacks and malloc arenas of a per-core pool off small boards.
-pub const DEFAULT_RUNTIME_WORKER_THREADS: usize = 2;
+pub(crate) const DEFAULT_RUNTIME_WORKER_THREADS: usize = 2;
 
 /// Tokio runtime sizing for the node binary.
 ///

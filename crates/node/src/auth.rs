@@ -38,13 +38,13 @@ use std::{
 
 pub use operators::AuthenticatedOperator;
 pub(crate) use operators::OperatorAuthentication;
-pub use orion_auth::{
+pub(crate) use orion_auth::{
     AuthenticatedPeerRequest, NodeTransportBinding, PEER_REQUEST_AUTH_VERSION, PeerRequestAuth,
     PeerRequestPayload, TRANSPORT_BINDING_VERSION,
 };
 pub use policy::PeerSecurityMiddleware;
 pub(crate) use private_link::PrivateLinkProof;
-pub use private_link::PrivateLinkTrust;
+pub(crate) use private_link::PrivateLinkTrust;
 use store::{
     AuthStateWorker, load_next_outbound_nonce, load_or_create_identity, load_seen_nonces,
     load_trusted_peer_state,

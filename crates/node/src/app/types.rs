@@ -5,7 +5,7 @@ use orion::transport::quic::QuicTransportError;
 use orion::transport::tcp::TcpTransportError;
 use orion::{
     ExecutorId, NodeId, ProviderId, Revision,
-    control_plane::{ClientRole, MutationApplyError},
+    control_plane::{ClientRole, HttpMutualTlsMode, MutationApplyError},
     runtime::{ExecutorCommand, RuntimeError},
     transport::{
         http::HttpTransportError,
@@ -16,26 +16,17 @@ use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::sync::watch;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HttpMutualTlsMode {
-    Disabled,
-    Optional,
-    Required,
-}
-
-impl HttpMutualTlsMode {
-    /// Parses `ORION_NODE_HTTP_MTLS` without panicking on invalid values.
-    pub fn try_from_env() -> Result<Self, NodeError> {
-        crate::config::parse_env_choice(
-            "ORION_NODE_HTTP_MTLS",
-            "disabled",
-            &[
-                ("disabled", Self::Disabled),
-                ("optional", Self::Optional),
-                ("required", Self::Required),
-            ],
-        )
-    }
+/// Parses `ORION_NODE_HTTP_MTLS` without panicking on invalid values.
+pub(crate) fn http_mutual_tls_mode_from_env() -> Result<HttpMutualTlsMode, NodeError> {
+    crate::config::parse_env_choice(
+        "ORION_NODE_HTTP_MTLS",
+        "disabled",
+        &[
+            ("disabled", HttpMutualTlsMode::Disabled),
+            ("optional", HttpMutualTlsMode::Optional),
+            ("required", HttpMutualTlsMode::Required),
+        ],
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

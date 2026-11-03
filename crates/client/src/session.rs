@@ -9,10 +9,10 @@ use std::{env, path::PathBuf};
 use crate::error::ClientError;
 
 pub const DEFAULT_DAEMON_ADDRESS: &str = "orion";
-pub const DEFAULT_NODE_ID: &str = "node.local";
-pub const ORION_NODE_ID_ENV: &str = "ORION_NODE_ID";
-pub const ORION_NODE_IPC_SOCKET_ENV: &str = "ORION_NODE_IPC_SOCKET";
-pub const ORION_NODE_IPC_STREAM_SOCKET_ENV: &str = "ORION_NODE_IPC_STREAM_SOCKET";
+pub(crate) const DEFAULT_NODE_ID: &str = "node.local";
+pub(crate) const ORION_NODE_ID_ENV: &str = "ORION_NODE_ID";
+pub(crate) const ORION_NODE_IPC_SOCKET_ENV: &str = "ORION_NODE_IPC_SOCKET";
+pub(crate) const ORION_NODE_IPC_STREAM_SOCKET_ENV: &str = "ORION_NODE_IPC_STREAM_SOCKET";
 const CONTROL_SOCKET_SUFFIX: &str = "control.sock";
 const CONTROL_STREAM_SOCKET_SUFFIX: &str = "control-stream.sock";
 
