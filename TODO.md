@@ -614,6 +614,21 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
 - [ ] Remote operator follow-ups: push-based watches over `orion+tcp` instead of polling; action
       policies scoped to targets; optional cluster-wide operator trust (today per node).
 
+### Stable message interface (waiting on the user's go; do not start)
+
+Decided 2026-11-03 after the C-boundary audit: extend the link format instead of a second rkyv rule.
+Nothing gets frozen. The rkyv control protocol stays internal to same-build software, and mixed
+versions on it stay refused. Software built outside the image uses this interface instead.
+
+- [ ] **One stable, versioned message interface with versioned clients.** Extend the link format
+      (stable kinds, version byte, recorded fixtures). Missing today: streams, status query and watch,
+      client actions, workloads, and a local Unix listener with peer identity, auth and rate limits.
+      Its message types stay separate from the internal records, so a record change does not change
+      the wire. Measure the packaged node's footprint when the listener lands: `link-gateway` is not a
+      default feature. Rough size: 6 to 8 engineer-weeks with `liborion`.
+- [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
+- [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.
+
 ### Nice to have
 
 - [ ] Optional blocking client for the fd latest-value channel.
