@@ -8,7 +8,7 @@ Tracks Orion's integration with its first consumers and appliance hardening work
 The user, 2026-11-03: the next release is an alpha for the reference board hardware only. These come
 first; the other items below are still needed, after it.
 
-- [ ] **aarch64 appliance soak** on the reference board (below, under freeze items).
+- [x] **aarch64 appliance soak** on the reference board (below, under freeze items). Curve in docs/node-env.md; 20 h, not 24.
 - [x] **Unknown arguments start a node** (below): `orion-node --version` on the reference board. Done in 6bf46ce; on dev.
 - [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total now in the usage snapshot and metrics (protocol 1).
 - [ ] **Protocol 1 on the reference board:** once the current pin is proven on the board, the protocol 1
@@ -22,18 +22,13 @@ when, blocked by.
 
 ### 1. Freeze items still open
 
-- [ ] **aarch64 appliance soak.** Why: the frozen soak item; orion-node runs on every board. Data so
-      far (2026-10-31, reference board #1, the packaged node under the device runtime's real load): 7 days up, 0 restarts,
-      PSS 9.8 MiB / RSS 11.3 MiB. Left: a release aarch64 build's 24 h PSS curve after warm-up,
-      recorded in docs/node-env.md. Running since 2026-11-02 11:55 UTC (board clock) on reference
-      board #1: the installed packaged release node under the device runtime's load, sampled every
-      10 min into `/var/lib/orion-soak/pss.csv` (epoch, pid, NRestarts, PSS/RSS/private dirty/anon
-      kB, threads) by `/var/lib/orion-soak/sample.sh` from the transient `orion-pss-soak.timer`,
-      which `orion-pss-soak-stop.timer` stops after 24 h. Transient timers do not survive a reboot:
-      a gap in the epochs means the board rebooted. First sample: PSS 5.4 MiB, RSS 8.2 MiB, private
-      dirty 4.1 MiB, 9 threads (just after a restart, so warm-up starts there). It measures the
-      board's current pin, not protocol 1, whose node the board's consumers cannot talk to yet.
-      Then: read the CSV, record the curve in docs/node-env.md.
+- [x] **aarch64 appliance soak.** Why: the frozen soak item; orion-node runs on every board. Earlier
+      data (2026-10-31, reference board #1, the packaged node under the device runtime's real load):
+      7 days up, 0 restarts, PSS 9.8 MiB / RSS 11.3 MiB. Done: the release node's curve on the same
+      board and load from 2026-11-02 11:55 UTC (board clock), every 10 min, in docs/node-env.md. 122
+      samples over 20.0 h, stopped early by decision: 0 restarts, one process, 9 threads, resting PSS
+      8.4 MiB from hour 4, one 0.15 MiB step at hour 17. It measures the board's pin, not protocol 1,
+      whose node the board's consumers cannot talk to yet. Board files and timers removed.
 - [x] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate public types,
       aliases or client methods remain across orion-client/control-plane/node, and docs match.
       Blocked by: nothing. Done: removed `RemoteOperator::action` (kept `query_action`), the

@@ -57,6 +57,16 @@ systemd" below covers the service side:
   - Embedders that pass peers or HTTP TLS files to `NodeApp::builder()` get the same error from `try_build()`.
 - set `ORION_NODE_RUNTIME_WORKER_THREADS=1` or `2` and lower `ORION_NODE_MAX_MUTATION_HISTORY*` and worker queue capacities to fit the device memory budget
 - on glibc targets, keep the packaged unit's malloc settings: `MALLOC_ARENA_MAX=1` with 64 KiB `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TOP_PAD_` and `MALLOC_TRIM_THRESHOLD_`. On a reference board with one pipeline, after three workload rewrites, they held 8.4 MiB PSS against 13.6 MiB with `MALLOC_ARENA_MAX=2` alone. On a reference board (reference board) under the device runtime's load, the packaged node after 7 days (2026-10-31): 9.8 MiB PSS, 11.3 MiB RSS, 6.9 MiB private dirty, 0 restarts
+- on the same board and load, the packaged release node sampled every 10 min for 20.0 h (2026-11-02, stopped early, not a full 24 h; the board's pinned release, before protocol 1). One process throughout, 0 restarts, 9 threads:
+
+  | Hours since first sample | PSS low to high (MiB) | RSS low to high (MiB) |
+  |---|---|---|
+  | 0 (restart) | 5.4 | 8.2 |
+  | 0 to 2 | 8.1 to 9.3 | 9.6 to 10.0 |
+  | 2 to 17 | 8.3 to 9.2 | 9.9 to 10.7 |
+  | 17 to 20 | 8.5 to 8.8 | 10.1 to 10.2 |
+
+  The resting PSS held at 8.4 MiB from hour 4, then stepped up 0.15 MiB at hour 17 and stayed there, with short peaks above it. That step is most of the fitted slope after hour 6, 9 KiB/h. A run this short cannot separate rare steps like it from the 9.8 MiB seen after 7 days.
 - keep the default allocator (glibc malloc). In every appliance soak run, the opt-in `alloc-jemalloc` and `alloc-mimalloc` features below used more memory than glibc
 - check transparent huge pages (THP) on the device: `cat /sys/kernel/mm/transparent_hugepage/enabled` and `grep AnonHugePages /proc/$(pidof orion-node)/smaps_rollup`. With THP set to `always`, the kernel can back sparsely used heap regions with whole huge pages. On a kernel with 16 KiB pages (common on small arm64 boards), a PMD huge page is 32 MiB instead of 2 MiB, so check `getconf PAGESIZE` too. If `AnonHugePages` is a large share of `Anonymous`, boot with `transparent_hugepage=madvise` (or write `madvise` to that sysfs file)
 
