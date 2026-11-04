@@ -193,8 +193,10 @@ job_link() {
         cargo fmt --check &&
         cargo clippy --locked --all-targets -- -D warnings &&
         cargo clippy --locked --all-targets --features alloc -- -D warnings &&
+        cargo clippy --locked --all-targets --features xfer -- -D warnings &&
         cargo test --locked &&
-        cargo test --locked --features alloc'
+        cargo test --locked --features alloc &&
+        cargo test --locked --features xfer'
     for target in thumbv6m-none-eabi thumbv7em-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf; do
         step link "mcu-template clippy ${target}" bash -c "
             cd examples/mcu-template &&

@@ -29,6 +29,8 @@ pub mod ffi;
 pub mod firmware;
 #[cfg(feature = "heap")]
 pub mod heap;
+#[cfg(feature = "xfer")]
+pub mod slots;
 pub mod uart;
 
 pub use can::CanPort;

@@ -51,13 +51,11 @@ pub const ORION_EVENT_STATE_ACKED: u32 = 1 << 4;
 #[cfg(all(feature = "ffi-can", not(feature = "xfer")))]
 type Session = orion_link::device::CanDevice<RX, TX, StoredName, 0>;
 #[cfg(all(feature = "ffi-can", feature = "xfer"))]
-type Session =
-    orion_link::device::CanDevice<RX, TX, StoredName, 0, crate::firmware::PlaceholderFirmware>;
+type Session = orion_link::device::CanDevice<RX, TX, StoredName, 0, crate::firmware::Firmware>;
 #[cfg(all(feature = "ffi-uart", not(feature = "ffi-can"), not(feature = "xfer")))]
 type Session = orion_link::device::StreamDevice<RX, TX, StoredName, 0>;
 #[cfg(all(feature = "ffi-uart", not(feature = "ffi-can"), feature = "xfer"))]
-type Session =
-    orion_link::device::StreamDevice<RX, TX, StoredName, 0, crate::firmware::PlaceholderFirmware>;
+type Session = orion_link::device::StreamDevice<RX, TX, StoredName, 0, crate::firmware::Firmware>;
 
 /// The session's device name: a view of the name stored in [`PORT`], so the session holds no
 /// copy of it.
@@ -187,7 +185,7 @@ pub unsafe extern "C" fn orion_init(device_name: *const u8, len: usize) -> bool 
         slot.write(Session::with_firmware(
             DeviceConfig::provider(StoredName),
             transport,
-            crate::firmware::PlaceholderFirmware,
+            crate::firmware::Firmware::default(),
         ));
         PORT.ready.store(true, Ordering::Relaxed);
     })

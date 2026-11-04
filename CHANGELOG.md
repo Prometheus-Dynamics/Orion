@@ -11,6 +11,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `HttpClient::try_new_with_connect_timeout` and `HttpClient::with_tls_and_connect_timeout` set the
   connect timeout of the HTTP control client. The timeout covers DNS, the TCP connect and the TLS
   handshake. The default is unchanged (500 ms, `DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT`).
+- Two-slot (A/B) firmware for the MCU template (U8, feature `xfer` of `examples/mcu-template`):
+  `slots::SlotFirmware<F: SlotFlash>`, a generic `no_std`, allocation-free `FirmwareSink` over a
+  board's flash, with a persistent boot record (two CRC-32C copies, sequence-numbered, so a torn
+  write leaves the older copy), the trial state, the slot digests, and the last rollback report.
+  `slots::boot` is the bootloader's decision on reset (`boot_select` is the pure part): an armed
+  trial boots once, an unconfirmed trial reverts with `NotConfirmed` (or `BootFailure` after a
+  fault reset), an image that fails its check reverts with `VerifyFailed`. `last_trial()` reports
+  the revert; the next `XferBegin` clears it. The C API keeps the placeholder sink (`firmware::Firmware`)
+  until a port supplies flash. **Host-tested only** (`tests/slots`, 21 tests, including a device
+  session driven by the host's `FirmwareTransfer` that ends `RolledBack { NotConfirmed }`); no board
+  has run it. `scripts/ci-jobs.sh link` runs the template's `xfer` clippy and tests.
+  Docs: `docs/update-recovery.md`, `examples/mcu-template/README.md`.
 - Explicit rollback status for firmware trials (U8). After its bootloader reverts a trial, the device
   reports it in `DeviceInfo` (an optional `rollback` field: the version, a `RollbackReason` of not
   confirmed, boot failure, verify failed, requested or other, and a short note). The sink reports it

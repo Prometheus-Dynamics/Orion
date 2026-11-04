@@ -21,7 +21,9 @@ repository and edit it.
 | `src/ffi.rs` | C entry points (`orion_init`, `orion_rx`/`orion_tx` or `orion_can_rx`/`orion_can_tx`, `orion_poll`, `orion_publish`, `orion_lease_count`) for C firmware, over one zero-initialized static. |
 | `src/lib.rs` | Buffer sizes, `provider_view` / `resource_view` helpers (and `provider_record` / `resource_record` with `alloc`), and the `#[panic_handler]` / `#[global_allocator]` used only by the standalone staticlib. |
 | `src/heap.rs` | `FreeListHeap<N>` (feature `heap`): a tiny first-fit `GlobalAlloc` for the `alloc` variant. Replaceable. |
-| `tests/` | Host tests: both ports and the C API against the real `orion-link` host session and CAN bus. |
+| `src/firmware.rs` | The firmware sink of the C entry points (feature `xfer`): `PlaceholderFirmware` (no flash) and the `Firmware` alias a port changes. |
+| `src/slots/` | Feature `xfer`: two-slot (A/B) firmware, `SlotFirmware<F: SlotFlash>`, the persistent boot record, and the bootloader's decision (`boot`, `boot_select`). **Host-tested only; no board has run it.** |
+| `tests/` | Host tests: both ports and the C API against the real `orion-link` host session and CAN bus (`tests/ports.rs`, `tests/ffi.rs`), and the A/B slots (`tests/slots/`, feature `xfer`). |
 
 ## Features
 
@@ -31,6 +33,7 @@ repository and edit it.
 | `ffi-uart` *(default)* / `ffi-can` | C entry points over a byte stream / over CAN. |
 | `alloc` | The full-record variant: the ports also accept `ProviderRecord` / `ResourceRecord` / `StatusEntry`, the C API publishes records, `provider_record` / `resource_record` exist. Needs a global allocator. |
 | `heap` / `global-heap` | The example heap / install an 8 KiB one (implies `alloc`). Uses compare-and-swap, so not for Cortex-M0/M0+ or RV32 without `A`. |
+| `xfer` | Firmware transfer over the link (`orion-link` feature `xfer`), with the placeholder sink and the A/B slot logic in `src/slots/` for a port to use. Run its tests with `cargo test --features xfer`. |
 
 ## Port Orion to a new MCU in 6 steps
 
@@ -125,6 +128,34 @@ staticlib is a final artifact and needs one).
 `../../scripts/mcu-size.sh` links the staticlib with `--gc-sections` and reports flash/RAM per
 target and transport (CI fails if the minimal UART build outgrows its budget); see
 `crates/link/README.md` for current numbers.
+
+## Firmware transfer and A/B slots (feature `xfer`)
+
+The `xfer` feature runs firmware transfer on the device session (`docs/update-recovery.md`, U8).
+The C entry points run it with the placeholder sink (`firmware::Firmware`), which has no flash:
+it accepts a transfer and refuses every write, so the C API behaves as it did before.
+
+`src/slots/` is the sink a port uses instead. It is generic over the board's flash:
+
+- `SlotFlash` is the port's flash: erase, write, and read an image slot; read and write one of the
+  two boot record copies; `reset()` to start the bootloader.
+- `SlotFirmware<F>` is the `FirmwareSink` over it. `XferBegin` erases the inactive slot and clears
+  the last rollback report; `Activate` (trial) records the trial and resets; `Confirm` keeps it; and
+  `last_trial()` reports a revert.
+- `boot(&mut flash, reason)` is the bootloader's decision. The board calls it on every reset, before
+  it starts the application, with `ResetReason::Fault` for a watchdog or fault reset and `Normal`
+  otherwise. It returns the slot to start, or `None` when no slot may start.
+
+To use it, implement `SlotFlash` for the board, change the alias in `src/firmware.rs` to
+`SlotFirmware<ItsFlash>`, and build the session with `SlotFirmware::new(flash)` in `src/ffi.rs` (or
+pass it to `UartPort` / `CanPort` in Rust firmware). Use the boot stage in the bootloader image.
+
+**Status: host-tested only.** `tests/slots/` covers the transfer rules, the trial, the revert on
+reset, verification and fault failures, torn record writes, the rollback report, and a device
+session driven by the host's `FirmwareTransfer`. No board or MCU bootloader has run this code. A
+port must check what the host cannot: the erase and program semantics of its flash, the record
+regions' placement, that `reset()` really starts the bootloader, and that its watchdog and fault
+handlers report `ResetReason::Fault`.
 
 ## Notes
 

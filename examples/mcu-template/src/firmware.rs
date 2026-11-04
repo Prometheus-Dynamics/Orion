@@ -1,16 +1,22 @@
 //! Firmware sink of the template's C entry points (feature `xfer`).
 //!
 //! The placeholder answers every query like a two-slot device that has no flash driver yet: it
-//! accepts a `Begin`, refuses every write with `Flash`, and refuses activation. A port replaces it
-//! with a sink that writes its image slots and runs the bootloader's handoff or trial boot (see
-//! `docs/update-recovery.md`, "MCU firmware over the link"). Its code size is what the session's
-//! transfer logic costs, which is what `scripts/mcu-size.sh` reports for the `uart-xfer` variant.
+//! accepts a `Begin`, refuses every write with `Flash`, and refuses activation. The C entry points
+//! run it through the [`Firmware`] alias. A port with flash replaces the alias with
+//! `slots::SlotFirmware<ItsFlash>`, the A/B sink in [`crate::slots`] (host-tested only; see that
+//! module for what a port must check). Its code size is what the session's transfer logic costs,
+//! which is what `scripts/mcu-size.sh` reports for the `uart-xfer` variant.
 
 use orion_link::wire::{FirmwareInfo, FirmwareSink, XferBeginView, XferStatus};
 
 /// The placeholder sink (no flash). See the [module docs](self).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PlaceholderFirmware;
+
+/// The sink the C entry points run with. A port that has flash replaces this alias with
+/// `SlotFirmware<ItsFlash>` (see [`crate::slots`]): the same session, with real slots and a
+/// rollback report. Until then the placeholder keeps the C API's transfer behavior unchanged.
+pub type Firmware = PlaceholderFirmware;
 
 impl FirmwareSink for PlaceholderFirmware {
     fn info(&self) -> FirmwareInfo<'_> {

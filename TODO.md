@@ -585,6 +585,14 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       with `rollback_reason` in its result. A bootloader that reports nothing keeps the `NotActivated`
       fallback. Tested in the link simulator (both reason paths, the fallback), the pty gateway and the
       in-memory CAN bus. Hardware bootloaders must implement `FirmwareSink::last_trial`.
+- [x] **U8 two-slot firmware for the MCU template** (host-tested only): `slots::SlotFirmware<F>`
+      with a persistent CRC-protected boot record (two copies), `slots::boot` (trial boots once;
+      revert with `NotConfirmed`, `BootFailure` or `VerifyFailed`), the rollback report cleared by the
+      next transfer. Tests in `examples/mcu-template/tests/slots`, including the host driver's
+      `RolledBack { NotConfirmed }`. The C API keeps the placeholder until a port supplies flash.
+- [ ] **U8 board port for the template slots**: implement `SlotFlash` and the reset reason for one
+      real MCU, run the bootloader stage from its reset path, and check the flash semantics and the
+      watchdog classification the host cannot. Not started; the slot logic has never run on hardware.
 - [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
       MCU with an A/B bootloader over UART and CAN.
 

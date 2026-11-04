@@ -676,6 +676,64 @@ sequenceDiagram
     G-->>DM: Succeeded {installed 1.3}
 ```
 
+### Two-slot firmware in the template (host-tested only)
+
+`examples/mcu-template/src/slots/` implements the device side for a board with two image slots, so
+the rollback report is produced by a real bootloader model and not only by the simulator. Nothing in
+it names a chip. The board port supplies a `SlotFlash` (erase, write and read a slot; read and write
+one of two boot record copies; reset) and a reset reason for the boot stage. **No board has run
+this code.** Its tests are host tests against an in-memory flash.
+
+- *Transfer.* `XferBegin` erases the inactive slot and clears the last rollback report; it is refused
+  with `Busy` while a trial is unconfirmed (the fallback slot must stay intact until the verdict).
+  Chunks are written in order, and `XferEnd` reads the stored image back and checks its CRC-32C.
+  `Activate` (trial) records the target as the pending trial, with the previous slot as its
+  fallback, and resets the device. Handoff is not supported.
+- *Boot record.* Two copies of one `ORB1` record, each with a sequence number and a CRC-32C. A write
+  goes to the copy that does not hold the newest valid record, so a write torn by a power cut only
+  damages the older copy, and the reader takes the newest copy whose CRC checks out. The record holds
+  the active and previous slots, the trial slot and its boot count, the version, length and CRC-32C
+  of each slot, and the last rollback (its version, a `RollbackReason`, and a note). 166 bytes per
+  copy.
+- *Boot decision* (`slots::boot_select`, called by `slots::boot` on each reset):
+  1. An armed trial (booted zero times) that verifies boots once. If it does not verify, it reverts
+     with `VerifyFailed`.
+  2. A trial that booted before and is still unconfirmed reverts with `BootFailure` if this reset is
+     a fault (a watchdog, hard fault, or any reset the port classifies as one), and with
+     `NotConfirmed` otherwise. A revert runs the previous slot, which must verify too.
+  3. Without a trial, the active slot runs if it verifies. If it does not, the other slot runs when
+     it verifies, recorded as `VerifyFailed`.
+  4. `None` means no slot may run (or the decision could not be stored, because a trial whose boot
+     count is not recorded would never be reverted). The board then halts or recovers.
+- *Confirm and report.* `Confirm` clears the trial, and the bootloader does not revert it afterwards.
+  `last_trial()` reports the rollback, so `DeviceInfo` carries `RolledBack { reason }` to the host.
+  The next `XferBegin` clears it.
+
+Tests (`examples/mcu-template/tests/slots`, `cargo test --features xfer`, 21 tests): a full transfer,
+an activation, one trial boot, and a confirm that persists; an unconfirmed trial reverted on reset
+and reported `NotConfirmed`; a fault during the trial reported `BootFailure`; an image that fails
+its check at boot reverted before it runs; both images failing (nothing starts); a torn activation
+record leaving the old record (a power cut after it runs the old slot, and a retry writes over the
+torn copy); a corrupted newest copy falling back to the older one; the next transfer clearing the
+report; the record's encoding round trip; refused transfers (active slot, size, version, order,
+digests, activation before verification); the `boot_select` decision table; and an end-to-end
+device session (`orion-link` `DeviceSession` with the sink, driven by the host's `FirmwareTransfer`
+over an in-memory link) that succeeds on a confirmed trial and ends `RolledBack { NotConfirmed }`
+when the trial is reset before it confirms.
+
+What a port must still check: the flash's erase and program semantics and alignment (the sink
+assumes programming needs erased cells, as NOR flash does), that a record write is atomic per copy
+or torn in a way its CRC catches, that `reset()` starts the bootloader and does not return, that its
+watchdog and fault handlers report `ResetReason::Fault`, and the time a verification (a full CRC of
+each slot on every boot) takes.
+
+Size (`scripts/mcu-size.sh`): no build links the slot code (the placeholder is still the C API's
+sink), so the numbers are unchanged. The `uart` and `uart-xfer` builds are the same on Cortex-M0+
+(7794 B and 11014 B flash) and Cortex-M4F; RV32IMC `uart-xfer` moves by +6 B. The Cortex-M4F
+`uart-alloc` build is 20 B smaller in this change, though it contains no slot or transfer code
+(codegen layout). Linking the sink into a board image costs what its code costs there, which the
+size script does not measure.
+
 ### What landed in U8
 
 - `orion-link` feature `xfer`: the device session runs the transfer (`device::FirmwareSink`, which
