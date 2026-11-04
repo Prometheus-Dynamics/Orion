@@ -281,6 +281,10 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
 
 ### Bugs fixed (each with a regression test)
 
+- [x] NT4 client clock offset: the smallest RTT ever seen won and never expired, so a slow start
+      stayed in the offset and drift was never followed. The smallest RTT of the last 30 s wins now,
+      with 1 s pings until settled. A lost connection drops the estimate. Bench check on the real
+      server is the reporter's.
 - [x] `send_unix_fd_frame_async` / `recv_unix_fd_frame_async` busy-spun on idle connections.
 - [x] Background loops busy-spun when their `ReconcileLoopHandle` was dropped.
 - [x] Executor/provider subscriptions dropped all but the first event of a batched frame.
@@ -564,8 +568,10 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       kill-at-every-phase tests.
 - [ ] **U5 External rollout controller**: `RolloutRecord` with waves, `max_unavailable`, health
       gates and monotonic halt; `orionctl rollout`.
-- [ ] **U6 Cross-version rollouts**: frozen rollout beacon readable across one protocol bump; keep
-      a snapshot of the state directory until commit and restore it on downgrade; N / N+1 rollout test.
+- [ ] **U6 Cross-version rollouts**: a rollout beacon on the stable message interface (under "Decided,
+      starts when the user says"), readable across versions, instead of a separate frozen layout; keep a
+      snapshot of the state directory until commit and restore it on downgrade; N / N+1 rollout test.
+      docs/update-recovery.md still describes the frozen beacon.
 - [ ] **U7 Leaderless rollouts** in `orion-cluster`: rendezvous wave order, own-intent writes,
       convergent halt, property tests.
 - [x] **U8 MCU firmware over the link**: link kinds, `xfer` device and host sessions, simulator
@@ -596,6 +602,7 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
 - [ ] **U8 board port for the template slots**: implement the hooks and the reset reason for one
       real MCU, run the bootloader stage from its reset path, and check the flash semantics and the
       watchdog classification the host cannot. Not started; the slot logic has never run on hardware.
+      Blocked: no target MCU is chosen, and none with a debug probe is attached to the build host.
 - [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an
       MCU with an A/B bootloader over UART and CAN.
 
@@ -611,32 +618,49 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
 - [x] The remote operator client builds on Windows and macOS (`orion-transport-ipc`'s frame code
       and `ControlTcpClient` are cross-platform, the Unix socket parts `#[cfg(unix)]`; CI checks
       the Windows and macOS targets and runs the client unit tests on `windows-latest`).
-- [ ] Remote operator follow-ups: push-based watches over `orion+tcp` instead of polling; action
-      policies scoped to targets; optional cluster-wide operator trust (today per node).
+- [ ] Remote operator follow-ups: push-based watches instead of polling; action policies scoped to
+      targets; optional cluster-wide operator trust (today per node). `orion+tcp` carries rkyv, so
+      the client works only when built with the node. Tools built outside the image move to the
+      stable message interface, and the watches belong there.
 
-### Stable message interface (waiting on the user's go; do not start)
+### Decided, starts when the user says
 
-Decided 2026-11-03 after the C-boundary audit: extend the link format instead of a second rkyv rule.
-Nothing gets frozen. The rkyv control protocol stays internal to same-build software, and mixed
-versions on it stay refused. Software built outside the image uses this interface instead.
+Decided by the user on 2026-11-03; none of it has started. New work stays paused until the user
+starts it.
+
+- The link format is extended, rather than adding a second rkyv rule. Nothing gets frozen.
+- The rkyv control protocol stays internal to same-build software, and mixed versions on it stay
+  refused. Software built outside the image uses the stable interface instead.
+- Static and shared build modes both happen, with a core, surface and wrapper for each dependency.
+  The image build's LTO test informs how shared gets built, not whether.
+- Hardware access is a kernel module in the hardware repository, with drivers in Rust in userspace.
+  No Orion item follows from that yet.
+
+Items:
 
 - [ ] **One stable, versioned message interface with versioned clients.** Extend the link format
       (stable kinds, version byte, recorded fixtures). Missing today: streams, status query and watch,
-      client actions, workloads, and a local Unix listener with peer identity, auth and rate limits.
+      client actions, workloads, a local Unix listener with peer identity, auth and rate limits, and
+      a remote transport for tools built outside the image.
       Its message types stay separate from the internal records, so a record change does not change
       the wire. Measure the packaged node's footprint when the listener lands: `link-gateway` is not a
       default feature. Rough size: 6 to 8 engineer-weeks with `liborion`.
 - [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
+      It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.
+- [ ] **Shared ABI primitives.** Use the hardware repository's ABI primitives crate where they fit.
+- [ ] **Static and shared build modes.** Split each dependency into core, surface and wrapper, and
+      build Orion both ways.
 
 ### Nice to have
 
-- [ ] Optional blocking client for the fd latest-value channel.
 - [ ] Single multiplexed local IPC socket instead of separate unary and stream sockets.
 - [ ] Default `orionctl` is still 4.38 MiB, almost all reqwest + rustls + hyper client for `--http`.
       A smaller HTTP/1.1 client (hyper-util client or a hand-rolled one over tokio-rustls) could
       replace reqwest if the CLI size matters; trimming clap's `color` / `suggestions` would also
-      save a little but changes help/error output.
-- [ ] Field-reorder/same-size type changes are not caught by the protocol layout fingerprint; consider
-      hashing archived fixture bytes as well. (Partly covered: `crates/auth/tests/canonical_encoding.rs`
-      pins the bytes of representative control/auth messages; extend it to the remaining types.)
+      save a little but changes help/error output. Measure again after the shared build mode, which
+      changes what this size costs.
+- [ ] Field-reorder/same-size type changes are not caught by the protocol layout fingerprint. On the
+      wire this matters less now that rkyv is same-build only; what remains is the state directory
+      across an upgrade. Consider hashing archived fixture bytes of the on-disk types. (Partly covered:
+      `crates/auth/tests/canonical_encoding.rs` pins the bytes of representative control/auth messages.)
