@@ -120,7 +120,8 @@ pub(crate) enum Command {
     },
     Set {
         pubuid: u32,
-        timestamp_us: i64,
+        /// On the server's clock; `None` before the first RTT sample.
+        timestamp_us: Option<i64>,
         value: Value,
     },
     SetProperties {
@@ -306,7 +307,10 @@ impl Publisher {
                 got: value.default_type_name(),
             });
         }
-        let timestamp_us = self.handle.server_time_us();
+        let timestamp_us = self
+            .handle
+            .time_offset_us()
+            .map(|offset| now_micros() + offset);
         self.handle.send(Command::Set {
             pubuid: self.pubuid,
             timestamp_us,

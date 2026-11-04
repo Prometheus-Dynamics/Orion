@@ -32,12 +32,13 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Offered in this order; the server picks one and the client accepts either.
 const OFFERED_SUBPROTOCOLS: &str = "v4.1.networktables.first.wpi.edu, networktables.first.wpi.edu";
-/// Pings sent back to back after connecting, then one every `SETTLING_PING_INTERVAL` until the
-/// estimate settles, then one every `PING_INTERVAL`.
+/// Pings sent back to back after connecting, then one every `PING_INTERVAL`.
 const BURST_PINGS: u32 = 5;
 const BURST_INTERVAL: Duration = Duration::from_millis(200);
-const SETTLING_PING_INTERVAL: Duration = Duration::from_secs(1);
-const PING_INTERVAL: Duration = Duration::from_secs(5);
+/// A server may answer only on its loop tick, which adds up to a whole period to the RTT. This
+/// interval is not a multiple of a 20 ms loop: each ping lands 7.6 ms (0.382 of the loop) further
+/// on, so pings cover the loop evenly and soon land just before a tick, where the RTT is lowest.
+const PING_INTERVAL: Duration = Duration::from_micros(1_007_639);
 /// Smallest offset change `ClientEvent::TimeSync` reports. Smaller ones are RTT noise; the
 /// estimate still takes them.
 const TIME_SYNC_EVENT_MIN_US: i64 = 250;
@@ -74,6 +75,8 @@ struct Link {
     /// Offset last reported in `ClientEvent::TimeSync`.
     reported_offset_us: Option<i64>,
     pings_sent: u32,
+    /// The publications' last values went out, which waits for the first RTT sample.
+    values_sent: bool,
 }
 
 /// What a connection attempt ended with.
@@ -122,7 +125,7 @@ pub(crate) async fn run(
                 command = commands.recv() => match command {
                     Some(command) => {
                         // Offline: only the state changes; nothing goes on the wire.
-                        let _ = apply(&mut state, command);
+                        let _ = apply(&mut state, command, None);
                     }
                     None => return,
                 },
@@ -177,22 +180,8 @@ async fn serve(
             options: sub.options.clone(),
         })));
     }
-    // Every publication's last value goes out in one batched binary message.
-    let now = now_micros();
-    let mut values: Vec<(i32, i64, &Value)> = Vec::new();
     for (&pubuid, publication) in &state.pubs {
         replay.push(Outbound::Text(publish_message(pubuid, publication)));
-        if let Some(value) = &publication.last {
-            values.push((pubuid as i32, now, value));
-        }
-    }
-    if !values.is_empty() {
-        match encode_frames(values) {
-            Ok(bytes) => replay.push(Outbound::Binary(bytes)),
-            Err(e) => {
-                let _ = events.send(ClientEvent::ProtocolWarning(e.to_string()));
-            }
-        }
     }
     for message in replay {
         if let Err(e) = send(&mut socket, message).await {
@@ -210,6 +199,20 @@ async fn serve(
                     }
                     Some(Ok(Message::Binary(bytes))) => {
                         on_binary(&bytes, state, &mut link, events, shared);
+                        if !link.values_sent && let Some(offset) = link.clock.offset_us() {
+                            link.values_sent = true;
+                            match last_values(state, now_micros() + offset) {
+                                Ok(Some(message)) => {
+                                    if let Err(e) = send(&mut socket, message).await {
+                                        return Outcome::Lost(e.to_string());
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    let _ = events.send(ClientEvent::ProtocolWarning(e.to_string()));
+                                }
+                            }
+                        }
                     }
                     Some(Ok(Message::Close(_))) | None => {
                         return Outcome::Lost("closed by server".into());
@@ -220,7 +223,7 @@ async fn serve(
             }
             command = commands.recv() => {
                 let Some(command) = command else { return Outcome::Shutdown };
-                match apply(state, command) {
+                match apply(state, command, link.clock.offset_us()) {
                     Ok(Some(message)) => {
                         if let Err(e) = send(&mut socket, message).await {
                             return Outcome::Lost(e.to_string());
@@ -246,24 +249,33 @@ async fn serve(
                     }
                 }
                 link.pings_sent += 1;
-                next_ping = Instant::now() + ping_interval(&link);
+                next_ping = Instant::now()
+                    + if link.pings_sent < BURST_PINGS { BURST_INTERVAL } else { PING_INTERVAL };
             }
         }
     }
 }
 
-fn ping_interval(link: &Link) -> Duration {
-    if link.pings_sent < BURST_PINGS {
-        BURST_INTERVAL
-    } else if link.clock.settled() {
-        PING_INTERVAL
-    } else {
-        SETTLING_PING_INTERVAL
+/// Every publication's last value in one batched binary message, stamped `timestamp_us`.
+fn last_values(state: &State, timestamp_us: i64) -> Result<Option<Outbound>> {
+    let values: Vec<(i32, i64, &Value)> = state
+        .pubs
+        .iter()
+        .filter_map(|(&pubuid, publication)| {
+            let value = publication.last.as_ref()?;
+            Some((pubuid as i32, timestamp_us, value))
+        })
+        .collect();
+    if values.is_empty() {
+        return Ok(None);
     }
+    encode_frames(values).map(|bytes| Some(Outbound::Binary(bytes)))
 }
 
-/// Updates the state for a command and returns the message to send now, if connected.
-fn apply(state: &mut State, command: Command) -> Result<Option<Outbound>> {
+/// Updates the state for a command and returns the message to send now, if connected. `offset_us`
+/// is this connection's clock offset: without one a value is only kept, and goes out with the
+/// last values after the first RTT sample, since no timestamp on the server's clock exists yet.
+fn apply(state: &mut State, command: Command, offset_us: Option<i64>) -> Result<Option<Outbound>> {
     Ok(match command {
         Command::Subscribe {
             subuid,
@@ -318,9 +330,10 @@ fn apply(state: &mut State, command: Command) -> Result<Option<Outbound>> {
             value,
         } => match state.pubs.get_mut(&pubuid) {
             Some(publication) => {
-                let bytes = encode_frame(pubuid as i32, timestamp_us, &value)?;
+                let stamp = offset_us.map(|offset| timestamp_us.unwrap_or(now_micros() + offset));
+                let bytes = encode_frame(pubuid as i32, stamp.unwrap_or(0), &value)?;
                 publication.last = Some(value);
-                Some(Outbound::Binary(bytes))
+                stamp.map(|_| Outbound::Binary(bytes))
             }
             None => None,
         },
@@ -552,5 +565,73 @@ fn route(
     }
     for subuid in dead {
         state.subs.remove(&subuid);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OFFSET_US: i64 = 5_000_000;
+
+    fn state_with_publication() -> State {
+        let mut state = State::default();
+        let publish = Command::Publish {
+            pubuid: 1,
+            name: "/a".into(),
+            type_name: "int".into(),
+        };
+        apply(&mut state, publish, None).unwrap();
+        state
+    }
+
+    fn set(timestamp_us: Option<i64>) -> Command {
+        Command::Set {
+            pubuid: 1,
+            timestamp_us,
+            value: Value::Int(7),
+        }
+    }
+
+    fn timestamp(message: Option<Outbound>) -> i64 {
+        let Some(Outbound::Binary(bytes)) = message else {
+            panic!("expected a binary message");
+        };
+        decode_frames(&bytes).0[0].timestamp_us
+    }
+
+    #[test]
+    fn a_value_set_before_the_first_sample_is_kept_and_goes_out_on_the_server_clock() {
+        let mut state = state_with_publication();
+        assert!(apply(&mut state, set(None), None).unwrap().is_none());
+        let stamp = OFFSET_US + 123;
+        assert_eq!(timestamp(last_values(&state, stamp).unwrap()), stamp);
+    }
+
+    #[test]
+    fn an_unstamped_value_gets_the_connections_offset() {
+        let mut state = state_with_publication();
+        let before = now_micros() + OFFSET_US;
+        let message = apply(&mut state, set(None), Some(OFFSET_US)).unwrap();
+        assert!(timestamp(message) >= before);
+    }
+
+    #[test]
+    fn a_value_stamped_on_the_old_connection_waits_for_the_new_ones_clock() {
+        let mut state = state_with_publication();
+        assert!(apply(&mut state, set(Some(99)), None).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_stamped_value_keeps_its_timestamp() {
+        let mut state = state_with_publication();
+        let message = apply(&mut state, set(Some(99)), Some(OFFSET_US)).unwrap();
+        assert_eq!(timestamp(message), 99);
+    }
+
+    #[test]
+    fn nothing_is_sent_when_no_publication_has_a_value() {
+        let state = state_with_publication();
+        assert!(last_values(&state, 1).unwrap().is_none());
     }
 }

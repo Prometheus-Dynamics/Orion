@@ -77,10 +77,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed (protocol 1 reset, breaking)
 
-- `orion-nt4` client: the clock offset follows the smallest RTT of the last 30 s instead of the
-  smallest ever, so a slow start and drift no longer stay in the offset. Pings run every second
-  until the estimate settles. `time_offset_us()` is `None` while disconnected and until the first
-  sample of a connection, and `TimeSync` now reports moves of at least 250 us.
+- `orion-nt4` client: the clock offset takes the sample with the lowest error bound, half its RTT
+  plus 20 ppm of age, instead of the smallest RTT ever, so a slow start and drift no longer stay in
+  the offset. Pings run about once a second, spread over a server's loop. `time_offset_us()` is
+  `None` while disconnected and until the first sample of a connection, and `TimeSync` now reports
+  moves of at least 250 us.
+- `orion-nt4` client: after a connect, values wait for the first RTT sample and go out on the
+  server's clock. They used to carry the local clock.
 - The local rate limit no longer refuses the final report of an open action from its handler,
   which left the action `Accepted` until its deadline. Progress reports stay limited.
 - A client pointed at a port where something other than Orion listens now reports

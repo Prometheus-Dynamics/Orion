@@ -282,9 +282,10 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
 ### Bugs fixed (each with a regression test)
 
 - [x] NT4 client clock offset: the smallest RTT ever seen won and never expired, so a slow start
-      stayed in the offset and drift was never followed. The smallest RTT of the last 30 s wins now,
-      with 1 s pings until settled. A lost connection drops the estimate. Bench check on the real
-      server is the reporter's.
+      stayed in the offset and drift was never followed. A 30 s window (521aa14) regressed steady
+      state on a real server, whose RTT cycles over 60 s. Now the lowest of half the RTT plus 20 ppm
+      of age wins, with pings every 1.0076 s to cover a 20 ms loop. A lost connection drops the
+      estimate, and values wait for the first sample. Bench check on the real server is the reporter's.
 - [x] `send_unix_fd_frame_async` / `recv_unix_fd_frame_async` busy-spun on idle connections.
 - [x] Background loops busy-spun when their `ReconcileLoopHandle` was dropped.
 - [x] Executor/provider subscriptions dropped all but the first event of a batched frame.

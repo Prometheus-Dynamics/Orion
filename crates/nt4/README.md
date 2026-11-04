@@ -62,9 +62,10 @@ The client reconnects on its own with backoff (`ClientConfig::reconnect_min` and
 `reconnect_max`). Subscriptions and publications are sent again after each connect, and the last
 value of each publication is re-sent. Values set while disconnected are kept (the last one per
 publication). `ClientHandle::server_time_us()` gives the server clock estimate, which RTT pings
-(`[-1, ...]` binary frames) keep following: the smallest RTT of the last 30 s wins, with a ping
-every second until the estimate settles and every 5 s after. `time_offset_us()` is `None` until the
-first sample of a connection, and while disconnected. `ClientEvent::TimeSync` reports the first
+(`[-1, ...]` binary frames, about one a second) keep following: a sample's RTT counts for less as
+it ages, at 20 ppm, and the best wins. `time_offset_us()` is `None` until the first sample of a
+connection, and while disconnected. Values wait for that sample too: only the last one per
+publication goes out, stamped on the server's clock. `ClientEvent::TimeSync` reports the first
 estimate of a connection and each move of at least 250 us.
 
 Server, with a host-owned topic that clients can subscribe to and edit:
