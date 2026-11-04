@@ -25,6 +25,7 @@
 //! # let _ = client.next_event().await; Ok(()) }
 //! ```
 
+mod clock;
 mod session;
 mod subscription;
 
@@ -85,7 +86,7 @@ pub enum ClientEvent {
         /// Why the connection ended.
         reason: String,
     },
-    /// The clock estimate improved from a better RTT sample.
+    /// The first clock estimate of a connection, or a later one that moved by at least 250 us.
     TimeSync {
         /// `server_time = local_time + offset_us`.
         offset_us: i64,
@@ -141,6 +142,10 @@ impl Shared {
     pub(crate) fn set_offset(&self, offset_us: i64) {
         self.offset_us.store(offset_us, Ordering::Release);
         self.synced.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn clear_offset(&self) {
+        self.synced.store(false, Ordering::Release);
     }
 }
 
@@ -232,8 +237,8 @@ impl ClientHandle {
         })
     }
 
-    /// The server's clock estimate in microseconds. Before the first RTT sample this is the local
-    /// monotonic clock; see [`ClientHandle::time_offset_us`].
+    /// The server's clock estimate in microseconds. Without an RTT sample on the current
+    /// connection this is the local monotonic clock; see [`ClientHandle::time_offset_us`].
     pub fn server_time_us(&self) -> i64 {
         let local = now_micros();
         match self.time_offset_us() {
@@ -242,7 +247,8 @@ impl ClientHandle {
         }
     }
 
-    /// `server_time - local_time` from the best RTT sample so far, or `None` before the first.
+    /// `server_time - local_time` from the best recent RTT sample, or `None` before the first
+    /// sample of a connection and while disconnected.
     pub fn time_offset_us(&self) -> Option<i64> {
         self.shared
             .synced

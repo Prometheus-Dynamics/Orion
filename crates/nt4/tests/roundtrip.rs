@@ -307,6 +307,34 @@ async fn rtt_sync_estimates_the_server_clock() {
 }
 
 #[tokio::test]
+async fn a_lost_connection_drops_the_clock_estimate() {
+    let server = start_server().await;
+    let mut client = connect(&server, "rtt-lost").await;
+    let handle = client.handle();
+    timeout(WAIT, async {
+        while !matches!(
+            client.next_event().await,
+            Some(ClientEvent::TimeSync { .. })
+        ) {}
+    })
+    .await
+    .unwrap();
+    assert!(handle.time_offset_us().is_some());
+
+    drop(server);
+    timeout(WAIT, async {
+        while !matches!(
+            client.next_event().await,
+            Some(ClientEvent::Disconnected { .. })
+        ) {}
+    })
+    .await
+    .unwrap();
+    // A restarted server has another clock: nothing may be stamped with this one's offset.
+    assert_eq!(handle.time_offset_us(), None);
+}
+
+#[tokio::test]
 async fn persistent_topics_survive_a_server_restart() {
     let path = std::env::temp_dir().join(format!("orion-nt4-test-{}.json", std::process::id()));
     let _ = std::fs::remove_file(&path);

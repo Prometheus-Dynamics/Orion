@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
+use super::clock::{ClockFilter, Sample};
 use super::subscription::{TopicEvent, TopicInfo};
 use super::{ClientConfig, ClientEvent, Command, Shared};
 use crate::codec::{Frame, decode_frames, encode_frame, encode_frames};
@@ -31,10 +32,15 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Offered in this order; the server picks one and the client accepts either.
 const OFFERED_SUBPROTOCOLS: &str = "v4.1.networktables.first.wpi.edu, networktables.first.wpi.edu";
-/// Pings sent back to back after connecting, then one every `PING_INTERVAL`.
+/// Pings sent back to back after connecting, then one every `SETTLING_PING_INTERVAL` until the
+/// estimate settles, then one every `PING_INTERVAL`.
 const BURST_PINGS: u32 = 5;
 const BURST_INTERVAL: Duration = Duration::from_millis(200);
+const SETTLING_PING_INTERVAL: Duration = Duration::from_secs(1);
 const PING_INTERVAL: Duration = Duration::from_secs(5);
+/// Smallest offset change `ClientEvent::TimeSync` reports. Smaller ones are RTT noise; the
+/// estimate still takes them.
+const TIME_SYNC_EVENT_MIN_US: i64 = 250;
 
 /// Per-client state that survives reconnects.
 #[derive(Default)]
@@ -64,8 +70,9 @@ struct Link {
     /// Topics this client publishes (announced with its `pubuid`). Their values are the client's
     /// own echo, delivered only to subscriptions with `all`.
     own: HashSet<i32>,
-    /// Smallest RTT seen on this connection.
-    best_rtt_us: Option<i64>,
+    clock: ClockFilter,
+    /// Offset last reported in `ClientEvent::TimeSync`.
+    reported_offset_us: Option<i64>,
     pings_sent: u32,
 }
 
@@ -101,6 +108,8 @@ pub(crate) async fn run(
         match outcome {
             Outcome::Shutdown => return,
             Outcome::Lost(reason) => {
+                // The next connection may reach a restarted server with another clock.
+                shared.clear_offset();
                 let _ = events.send(ClientEvent::Disconnected { reason });
             }
         }
@@ -237,10 +246,19 @@ async fn serve(
                     }
                 }
                 link.pings_sent += 1;
-                next_ping = Instant::now()
-                    + if link.pings_sent < BURST_PINGS { BURST_INTERVAL } else { PING_INTERVAL };
+                next_ping = Instant::now() + ping_interval(&link);
             }
         }
+    }
+}
+
+fn ping_interval(link: &Link) -> Duration {
+    if link.pings_sent < BURST_PINGS {
+        BURST_INTERVAL
+    } else if link.clock.settled() {
+        PING_INTERVAL
+    } else {
+        SETTLING_PING_INTERVAL
     }
 }
 
@@ -455,7 +473,7 @@ fn on_frame(
 
 /// RTT sample: the server echoes our send time in `value` and stamps its own clock in `timestamp`.
 /// The server clock at the midpoint of the round trip is `timestamp`, so
-/// `offset = timestamp - (sent + rtt / 2)`. The sample with the smallest RTT wins.
+/// `offset = timestamp - (sent + rtt / 2)`. [`ClockFilter`] picks the sample to use.
 fn on_pong(
     frame: &crate::codec::Frame,
     link: &mut Link,
@@ -468,17 +486,29 @@ fn on_pong(
         ));
         return;
     };
-    let rtt = now_micros() - sent;
-    if rtt < 0 || link.best_rtt_us.is_some_and(|best| rtt >= best) {
+    let now = now_micros();
+    let rtt = now - sent;
+    if rtt < 0 {
         return;
     }
-    link.best_rtt_us = Some(rtt);
-    let offset = frame.timestamp_us - (sent + rtt / 2);
-    shared.set_offset(offset);
-    let _ = events.send(ClientEvent::TimeSync {
-        offset_us: offset,
+    let Some(best) = link.clock.add(Sample {
+        at_us: now,
         rtt_us: rtt,
-    });
+        offset_us: frame.timestamp_us - (sent + rtt / 2),
+    }) else {
+        return;
+    };
+    shared.set_offset(best.offset_us);
+    if link
+        .reported_offset_us
+        .is_none_or(|reported| (best.offset_us - reported).abs() >= TIME_SYNC_EVENT_MIN_US)
+    {
+        link.reported_offset_us = Some(best.offset_us);
+        let _ = events.send(ClientEvent::TimeSync {
+            offset_us: best.offset_us,
+            rtt_us: best.rtt_us,
+        });
+    }
 }
 
 /// Delivers a topic event to every subscription whose names or prefixes match `name`. `own` marks
