@@ -57,6 +57,21 @@ async fn async_snapshot_adoption_does_not_block_the_runtime_thread() {
     let _ = fs::remove_dir_all(state_dir);
 }
 
+/// How long these tests wait for a read to finish beside a blocked snapshot. The gate stays shut
+/// until the read returns, so the read finishing at all is the proof; this is only reached on
+/// failure and says nothing about how fast a loaded machine runs it.
+const SNAPSHOT_WAIT: Duration = Duration::from_secs(30);
+
+/// Opens a blocking integration's gate when the test ends, also on a panic: a snapshot left blocked
+/// keeps the runtime's blocking pool from shutting down, which hangs the test instead of failing it.
+struct ReleaseOnDrop<F: Fn()>(F);
+
+impl<F: Fn()> Drop for ReleaseOnDrop<F> {
+    fn drop(&mut self) {
+        (self.0)();
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tick_async_keeps_state_reads_available_while_provider_snapshot_blocks() {
     let app = Arc::new(
@@ -77,8 +92,12 @@ async fn tick_async_keeps_state_reads_available_while_provider_snapshot_blocks()
     let tick_app = Arc::clone(&app);
     let tick = tokio::spawn(async move { tick_app.tick_async().await });
 
+    let _release = ReleaseOnDrop({
+        let provider = provider.clone();
+        move || provider.release()
+    });
     started_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(SNAPSHOT_WAIT)
         .expect("provider snapshot should start");
 
     let snapshot_app = Arc::clone(&app);
@@ -89,7 +108,7 @@ async fn tick_async_keeps_state_reads_available_while_provider_snapshot_blocks()
     });
 
     let revision = snapshot_rx
-        .recv_timeout(Duration::from_millis(100))
+        .recv_timeout(SNAPSHOT_WAIT)
         .expect("state snapshot should not block while provider snapshot is running");
     assert!(revision > Revision::ZERO);
 
@@ -118,8 +137,12 @@ async fn tick_async_keeps_state_reads_available_while_executor_snapshot_blocks()
     let tick_app = Arc::clone(&app);
     let tick = tokio::spawn(async move { tick_app.tick_async().await });
 
+    let _release = ReleaseOnDrop({
+        let executor = executor.clone();
+        move || executor.release()
+    });
     started_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(SNAPSHOT_WAIT)
         .expect("executor snapshot should start");
 
     let snapshot_app = Arc::clone(&app);
@@ -130,7 +153,7 @@ async fn tick_async_keeps_state_reads_available_while_executor_snapshot_blocks()
     });
 
     let revision = snapshot_rx
-        .recv_timeout(Duration::from_millis(100))
+        .recv_timeout(SNAPSHOT_WAIT)
         .expect("state snapshot should not block while executor snapshot is running");
     assert!(revision > Revision::ZERO);
 

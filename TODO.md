@@ -340,6 +340,11 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       another test's thread without a subscriber reaching the warning first caches "never" for the
       process. Shown with a standalone program (captured 0 without, 1 with a second dispatcher). Fix:
       `with_logs` keeps a second, process-lived dispatcher registered. After: 0 of 210 runs.
+- [x] **Blocked snapshot hangs the test binary.** `tick_async_keeps_state_reads_available_while_{provider,executor}_snapshot_blocks`
+      hung one whole workspace run for 14 h under load: a 100 ms / 250 ms `recv_timeout` expired, the
+      panic unwound, and dropping the runtime waited for a snapshot whose gate was never opened. Fix:
+      `ReleaseOnDrop` opens the gate on every exit, and the read waits 30 s, since it finishing with the
+      gate shut is the proof. An injected panic now fails the test instead of hanging it.
 - [x] **Link sim device deadlock.** One whole-binary run hung (24 min) in
       `serial_device_becomes_provider_gets_leases_and_survives_reconnect`: `SimDevice::last_leases`
       held the events lock (a temporary living to the end of the statement) while taking the device
