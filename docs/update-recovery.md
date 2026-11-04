@@ -727,12 +727,19 @@ or torn in a way its CRC catches, that `reset()` starts the bootloader and does 
 watchdog and fault handlers report `ResetReason::Fault`, and the time a verification (a full CRC of
 each slot on every boot) takes.
 
-Size (`scripts/mcu-size.sh`): no build links the slot code (the placeholder is still the C API's
-sink), so the numbers are unchanged. The `uart` and `uart-xfer` builds are the same on Cortex-M0+
-(7794 B and 11014 B flash) and Cortex-M4F; RV32IMC `uart-xfer` moves by +6 B. The Cortex-M4F
-`uart-alloc` build is 20 B smaller in this change, though it contains no slot or transfer code
-(codegen layout). Linking the sink into a board image costs what its code costs there, which the
-size script does not measure.
+Size (`scripts/mcu-size.sh`, variant `uart-slots`): the real sink, boot record, and `orion_boot`, on
+top of `uart-xfer`, with the port's flash hooks stubbed.
+
+| Target | `uart-xfer` flash | `uart-slots` flash | Added flash | Added static RAM |
+|---|---|---|---|---|
+| Cortex-M0+ | 11014 B | 19090 B | +8076 B | +216 B |
+| Cortex-M4F | 10144 B | 18710 B | +8566 B | +216 B |
+| RV32IMC / RV32IMAC | 13210 B | 21690 B | +8480 B | +216 B |
+
+Both halves are in one image here. A separate bootloader splits them, repeating the record code in
+each. The board's flash driver is extra, and so is stack: the record is 166 B, held in locals while
+it is read and written. A C port enables feature `ffi-slots`, defines the `orion_port_*` hooks, and
+calls `orion_boot` from its boot stage (`tests/port_hooks.rs` runs that route on the host).
 
 ### What landed in U8
 

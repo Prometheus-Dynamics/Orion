@@ -44,6 +44,9 @@ actions = ["orion-link/actions"]
 # Firmware transfer over the link (`orion-link` feature `xfer`): the C entry points run a session
 # with a `PlaceholderFirmware` sink. A port replaces that sink with its flash driver.
 xfer = ["orion-link/xfer"]
+# The C entry points run `slots::SlotFirmware` over the `orion_port_*` flash hooks a C port defines
+# (see `firmware.rs`), and add `orion_boot` for its boot stage. Host-tested only.
+ffi-slots = ["xfer"]
 
 [dependencies]
 embedded-can = "0.4"

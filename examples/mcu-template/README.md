@@ -33,6 +33,7 @@ repository and edit it.
 | `ffi-uart` *(default)* / `ffi-can` | C entry points over a byte stream / over CAN. |
 | `alloc` | The full-record variant: the ports also accept `ProviderRecord` / `ResourceRecord` / `StatusEntry`, the C API publishes records, `provider_record` / `resource_record` exist. Needs a global allocator. |
 | `heap` / `global-heap` | The example heap / install an 8 KiB one (implies `alloc`). Uses compare-and-swap, so not for Cortex-M0/M0+ or RV32 without `A`. |
+| `ffi-slots` | The C entry points run `SlotFirmware` over the `orion_port_*` flash hooks the port defines, and add `orion_boot` for its boot stage. Host-tested only. Run its test with `cargo test --features ffi-slots --test port_hooks`. |
 | `xfer` | Firmware transfer over the link (`orion-link` feature `xfer`), with the placeholder sink and the A/B slot logic in `src/slots/` for a port to use. Run its tests with `cargo test --features xfer`. |
 
 ## Port Orion to a new MCU in 6 steps

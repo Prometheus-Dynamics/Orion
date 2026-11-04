@@ -17,6 +17,9 @@
 #               path and the busy refusal are linked)
 #   uart-xfer   the UART variant with firmware transfer (feature `xfer`) and the placeholder sink:
 #               what the transfer logic adds on top of `uart`
+#   uart-slots  the UART variant with the real A/B sink and boot stage (feature `ffi-slots`): what
+#               `slots::SlotFirmware`, the boot record, and `orion_boot` add on top of `uart-xfer`.
+#               The port's flash hooks are stubbed at link time, so the board's driver is extra.
 # Override with MCU_SIZE_VARIANTS="uart can".
 #
 # Columns: flash = .text + .rodata + .data, static RAM = .data + .bss (of which heap), and the
@@ -31,7 +34,7 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 template="$root_dir/examples/mcu-template"
 read -r -a targets <<<"${MCU_SIZE_TARGETS:-thumbv6m-none-eabi thumbv7em-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf}"
-read -r -a variants <<<"${MCU_SIZE_VARIANTS:-uart can uart-alloc uart-actions uart-xfer}"
+read -r -a variants <<<"${MCU_SIZE_VARIANTS:-uart can uart-alloc uart-actions uart-xfer uart-slots}"
 
 # Budgets for the minimal UART device (RX = TX = 128), about 15-20% above what it needs today.
 # Raise them only together with an explanation of what the extra bytes buy.
@@ -78,6 +81,14 @@ SECTIONS
   .bss (NOLOAD) : { *(.bss .bss.* .sbss .sbss.* COMMON) } > RAM
   /DISCARD/ : { *(.ARM.exidx .ARM.exidx.* .ARM.extab.* .eh_frame .comment) }
 }
+/* The flash driver is the port's (`uart-slots`); it is not part of what this measures. */
+orion_port_slot_capacity = 0;
+orion_port_erase_slot = 0;
+orion_port_write_slot = 0;
+orion_port_read_slot = 0;
+orion_port_read_record = 0;
+orion_port_write_record = 0;
+orion_port_reset = 0;
 EOF
 
 common_roots=(orion_init orion_publish orion_poll orion_lease_count)
@@ -87,6 +98,7 @@ declare -A variant_features=(
     [uart-alloc]="standalone,ffi-uart,global-heap"
     [uart-actions]="standalone,ffi-uart,actions"
     [uart-xfer]="standalone,ffi-uart,xfer"
+    [uart-slots]="standalone,ffi-uart,ffi-slots"
 )
 declare -A variant_roots=(
     [uart]="orion_rx orion_tx"
@@ -94,6 +106,7 @@ declare -A variant_roots=(
     [uart-alloc]="orion_rx orion_tx"
     [uart-actions]="orion_rx orion_tx"
     [uart-xfer]="orion_rx orion_tx"
+    [uart-slots]="orion_rx orion_tx orion_boot"
 )
 
 # Prints "component bytes" lines for the code and read-only data of an ELF whose flash total is
@@ -139,8 +152,11 @@ for target in "${targets[@]}"; do
             undefined+=("--undefined=$symbol")
         done
         elf="$work/$target-$variant.elf"
+        # The stubbed flash hooks are absolute symbols, which lld warns about on Thumb calls.
+        quiet=()
+        [[ "$variant" == "uart-slots" ]] && quiet=(--no-warnings)
         "$lld" -flavor gnu -T "$work/link.x" --gc-sections -e orion_poll "${undefined[@]}" \
-            -o "$elf" "$archive"
+            "${quiet[@]}" -o "$elf" "$archive"
         if [[ -n "${MCU_SIZE_ELF_DIR:-}" ]]; then
             mkdir -p "$MCU_SIZE_ELF_DIR"
             cp "$elf" "$MCU_SIZE_ELF_DIR/"

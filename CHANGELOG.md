@@ -8,6 +8,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- MCU template feature `ffi-slots`: the C entry points run `SlotFirmware` over `orion_port_*` flash
+  hooks, with `orion_boot` for the boot stage. `scripts/mcu-size.sh` reports it as `uart-slots`
+  (+8.1 to 8.6 KB flash and +216 B static RAM over `uart-xfer`, without the board's flash driver).
+  Host-tested only.
 - `HttpClient::try_new_with_connect_timeout` and `HttpClient::with_tls_and_connect_timeout` set the
   connect timeout of the HTTP control client. The timeout covers DNS, the TCP connect and the TLS
   handshake. The default is unchanged (500 ms, `DEFAULT_HTTP_CLIENT_CONNECT_TIMEOUT`).
@@ -73,6 +77,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed (protocol 1 reset, breaking)
 
+- The local rate limit no longer refuses the final report of an open action from its handler,
+  which left the action `Accepted` until its deadline. Progress reports stay limited.
 - A client pointed at a port where something other than Orion listens now reports
   "`<addr>` is not an Orion endpoint (no control protocol preamble)" (`ControlTcpError` and
   `PeerTcpError::NotOrionEndpoint`) instead of "failed to decode unix socket message". The

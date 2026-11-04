@@ -142,6 +142,9 @@ Accepted ──> Running { progress } ──> Succeeded | Failed { reason }
 - Routing failures are recorded as `Rejected` results (queryable like any other); malformed
   requests and a full registry are errors.
 - A final state never changes: late reports (after a timeout, say) are ignored.
+- The local rate limit never refuses the final report of an open action, from the client it was
+  delivered to: it would leave the action `Accepted` until its deadline. Each admitted action owes
+  one, so these stay bounded. Progress reports, and reports nothing owes, count as usual.
 - Results are held in memory, bounded by `ORION_NODE_ACTION_MAX_TRACKED`, and dropped
   `ORION_NODE_ACTION_RESULT_TTL_MS` after they finish. Nothing is persisted.
 

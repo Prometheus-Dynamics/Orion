@@ -261,6 +261,29 @@ impl NodeApp {
         Ok(())
     }
 
+    /// Whether `message` is the final report of an open action that was delivered to `source`.
+    /// The local rate limit lets these through: refusing one would leave the action `Accepted`
+    /// until its deadline, and each admitted action can owe only one, so they stay bounded.
+    /// Progress and reports for anything else count as usual.
+    pub(crate) fn is_owed_action_result(
+        &self,
+        source: &LocalAddress,
+        message: &ControlMessage,
+    ) -> bool {
+        let ControlMessage::ReportActionResult(report) = message else {
+            return false;
+        };
+        if !report.state.is_terminal() || matches!(report.state, ActionState::TimedOut) {
+            return false;
+        }
+        self.action_registry()
+            .get(&report.action_id)
+            .is_some_and(|entry| {
+                !entry.result.state.is_terminal()
+                    && matches!(&entry.route, ActionRoute::Client(handler) if handler == source)
+            })
+    }
+
     /// `ReportActionResult` from the handler client an action was delivered to.
     pub(crate) fn report_action_result(
         &self,

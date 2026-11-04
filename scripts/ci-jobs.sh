@@ -196,7 +196,9 @@ job_link() {
         cargo clippy --locked --all-targets --features xfer -- -D warnings &&
         cargo test --locked &&
         cargo test --locked --features alloc &&
-        cargo test --locked --features xfer'
+        cargo test --locked --features xfer &&
+        cargo clippy --locked --test port_hooks --features ffi-slots -- -D warnings &&
+        cargo test --locked --features ffi-slots --test port_hooks'
     for target in thumbv6m-none-eabi thumbv7em-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf; do
         step link "mcu-template clippy ${target}" bash -c "
             cd examples/mcu-template &&
@@ -206,6 +208,9 @@ job_link() {
     step link "mcu-template clippy [xfer] thumbv6m-none-eabi" bash -c "
         cd examples/mcu-template &&
         cargo clippy --locked --release --target thumbv6m-none-eabi --no-default-features --features standalone,ffi-uart,xfer -- -D warnings"
+    step link "mcu-template clippy [ffi-slots] thumbv6m-none-eabi" bash -c "
+        cd examples/mcu-template &&
+        cargo clippy --locked --release --target thumbv6m-none-eabi --no-default-features --features standalone,ffi-uart,ffi-slots -- -D warnings"
     for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
         step link "mcu-template clippy [global-heap] ${target}" bash -c "
             cd examples/mcu-template &&

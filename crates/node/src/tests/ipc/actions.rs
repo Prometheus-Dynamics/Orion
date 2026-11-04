@@ -268,6 +268,65 @@ fn provider_handles_resource_actions_and_reports_progress_and_output() {
 }
 
 #[test]
+fn a_rate_limited_handler_still_delivers_each_final_result_once() {
+    let app = NodeApp::builder()
+        .config(test_node_config(NodeId::new("node-actions-limit"), "limit"))
+        .with_local_rate_limit_window(Duration::from_secs(3600))
+        .with_local_rate_limit_max_messages(3)
+        .try_build()
+        .expect("node app should build");
+    let handler = hello(&app, "limited-provider", ClientRole::Provider);
+    publish_provider(&app, &handler, PROVIDER);
+    watch_requests(&app, &handler, PROVIDER);
+    let operator = hello(&app, "operator", ClientRole::ControlPlane);
+    let target = || ActionTarget::Resource(orion::ResourceId::new(RESOURCE));
+    run(
+        &app,
+        &operator,
+        ActionRequest::new("final-1", target(), "locate"),
+    );
+    assert_eq!(polled_requests(&app, &handler).len(), 1);
+
+    // The handler spent its budget on the three messages above.
+    let limited = |result: Result<ControlMessage, NodeError>| {
+        matches!(result, Err(NodeError::RateLimitedClient { .. }))
+    };
+    let progress = ActionState::Running { progress: Some(1) };
+    assert!(
+        limited(report(
+            &app,
+            &handler,
+            ActionReport::new("final-1", progress)
+        )),
+        "progress can be dropped, so it stays limited"
+    );
+    assert!(
+        limited(report(
+            &app,
+            &handler,
+            ActionReport::new("no-such-action", ActionState::Succeeded)
+        )),
+        "a report no action owes stays limited"
+    );
+
+    report(
+        &app,
+        &handler,
+        ActionReport::new("final-1", ActionState::Succeeded),
+    )
+    .expect("the final report of an open action must get through");
+    assert_eq!(current(&app, "final-1").state, ActionState::Succeeded);
+    assert!(
+        limited(report(
+            &app,
+            &handler,
+            ActionReport::new("final-1", ActionState::Succeeded)
+        )),
+        "the exemption is good once per action"
+    );
+}
+
+#[test]
 fn actions_without_a_handler_are_rejected_and_recorded() {
     let app = actions_app("node-actions-none");
     let operator = hello(&app, "operator", ClientRole::ControlPlane);

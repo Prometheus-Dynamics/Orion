@@ -384,6 +384,10 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       `fwd-long` report. Fix: poll every 5 ms (at most 200 messages per window, within the limit by construction),
       and count refused messages, which must be zero. Runs: 10 of 400 failed before; 0 of 400 after, under the
       same load.
+- [x] **A refused final report left the action Accepted until its deadline.** The test fix above left the
+      product gap: a handler over the rate limit lost its result. The final report of an open action, from the
+      client it was delivered to, now passes the limit. Each admitted action owes one, so these stay bounded.
+      Progress, repeats and reports nothing owes still count (`a_rate_limited_handler_still_delivers_each_final_result_once`).
 - [x] **orionctl tests share control sockets.** Failures: `cli_get::orionctl_get_reports_health_readiness_observability_and_snapshot`
       ("failed to connect to unix socket: Connection refused") and `cli_describe::orionctl_describe_reports_full_object_state_and_blockers`
       ("resource `resource.describe` not found"), about 1 in 40 full workspace runs under load. Cause: the harness
@@ -589,8 +593,12 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       with a persistent CRC-protected boot record (two copies), `slots::boot` (trial boots once;
       revert with `NotConfirmed`, `BootFailure` or `VerifyFailed`), the rollback report cleared by the
       next transfer. Tests in `examples/mcu-template/tests/slots`, including the host driver's
-      `RolledBack { NotConfirmed }`. The C API keeps the placeholder until a port supplies flash.
-- [ ] **U8 board port for the template slots**: implement `SlotFlash` and the reset reason for one
+      `RolledBack { NotConfirmed }`. The C API keeps the placeholder unless a port enables `ffi-slots`.
+- [x] **U8 C route and real size for the slots** (host-tested only): feature `ffi-slots` runs
+      `SlotFirmware` over `orion_port_*` flash hooks and adds `orion_boot`. `mcu-size` variant
+      `uart-slots` links it: +8076 to +8566 B flash and +216 B static RAM over `uart-xfer`, without the
+      board's flash driver. `tests/port_hooks.rs` reverts an unconfirmed trial through the hooks.
+- [ ] **U8 board port for the template slots**: implement the hooks and the reset reason for one
       real MCU, run the bootloader stage from its reset path, and check the flash semantics and the
       watchdog classification the host cannot. Not started; the slot logic has never run on hardware.
 - [ ] **U9 Hardware validation**: real A/B writer with power-cut and watchdog fault injection; an

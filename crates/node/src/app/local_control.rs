@@ -32,7 +32,8 @@ impl NodeApp {
         if !matches!(
             message,
             ControlMessage::ClientHello(_) | ControlMessage::Ping | ControlMessage::Pong
-        ) {
+        ) && !self.is_owed_action_result(source, &message)
+        {
             self.enforce_local_rate_limit(source)?;
         }
 
