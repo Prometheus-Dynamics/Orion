@@ -238,9 +238,12 @@ mod tests {
             .expect("listener should bind");
         let addr = listener.local_addr().expect("listener addr").to_string();
         let server = tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
             let (mut stream, _) = listener.accept().await.expect("accept");
             let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+            // Read until the client hangs up: closing with its request unread resets the
+            // connection on Windows, and the client would see that instead of the answer.
+            let _ = stream.read_to_end(&mut Vec::new()).await;
         });
         let client = ControlTcpClient::new(&addr, Duration::from_secs(5), 1024);
         let err = client
