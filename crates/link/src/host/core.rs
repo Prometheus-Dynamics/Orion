@@ -64,6 +64,19 @@ pub(crate) struct HostCore {
     stats: HostStats,
 }
 
+/// Encodes a frame of at most `limit` bytes on the stack and returns it in a buffer of its exact
+/// length, so a queued frame holds only its own bytes (not a `limit`-sized buffer).
+pub(super) fn exact_frame<E>(
+    limit: usize,
+    encode: impl FnOnce(&mut [u8]) -> Result<usize, E>,
+) -> Result<Vec<u8>, E> {
+    let mut scratch = [0u8; HOST_MAX_FRAME];
+    let limit = limit.clamp(FRAME_OVERHEAD, HOST_MAX_FRAME);
+    let buf = scratch.get_mut(..limit).unwrap_or_default();
+    let len = encode(buf)?;
+    Ok(buf.get(..len).unwrap_or_default().to_vec())
+}
+
 impl HostCore {
     pub(crate) fn new(config: Arc<HostConfig>) -> Self {
         let next_session_id = config.session_seed.max(1);
@@ -140,11 +153,9 @@ impl HostCore {
 
     fn queue<T: Serialize + ?Sized>(&mut self, kind: u8, body: &T, limit: usize) -> bool {
         let seq = self.seq.wrapping_add(1);
-        let mut buf = vec![0u8; limit.clamp(FRAME_OVERHEAD, HOST_MAX_FRAME)];
-        match message::encode_with(kind, seq, body, &mut buf) {
-            Ok(len) => {
+        match exact_frame(limit, |buf| message::encode_with(kind, seq, body, buf)) {
+            Ok(buf) => {
                 self.seq = seq;
-                buf.truncate(len);
                 if self.out.len() >= OUT_CAPACITY {
                     self.out.pop_front();
                     self.stats.frames_dropped = self.stats.frames_dropped.wrapping_add(1);
@@ -373,18 +384,18 @@ impl HostCore {
             return Err(ActionSendError::Congested);
         }
         let seq = self.seq.wrapping_add(1);
-        let mut buf = vec![0u8; HOST_MAX_FRAME];
-        let frame_len = encode(seq, &mut buf).map_err(|_| ActionSendError::TooLarge {
-            frame_len: HOST_MAX_FRAME,
-            max_frame,
+        let buf = exact_frame(HOST_MAX_FRAME, |buf| encode(seq, buf)).map_err(|_| {
+            ActionSendError::TooLarge {
+                frame_len: HOST_MAX_FRAME,
+                max_frame,
+            }
         })?;
-        if frame_len > max_frame {
+        if buf.len() > max_frame {
             return Err(ActionSendError::TooLarge {
-                frame_len,
+                frame_len: buf.len(),
                 max_frame,
             });
         }
-        buf.truncate(frame_len);
         self.seq = seq;
         self.out.push_back(buf);
         Ok(())
@@ -504,11 +515,9 @@ impl HostCore {
         encode: impl FnOnce(u16, &mut [u8]) -> Result<usize, crate::wire::WireError>,
     ) -> bool {
         let seq = self.seq.wrapping_add(1);
-        let mut buf = vec![0u8; limit.clamp(FRAME_OVERHEAD, HOST_MAX_FRAME)];
-        match encode(seq, &mut buf) {
-            Ok(len) => {
+        match exact_frame(limit, |buf| encode(seq, buf)) {
+            Ok(buf) => {
                 self.seq = seq;
-                buf.truncate(len);
                 if self.out.len() >= OUT_CAPACITY {
                     self.out.pop_front();
                     self.stats.frames_dropped = self.stats.frames_dropped.wrapping_add(1);
@@ -646,5 +655,19 @@ impl HostCore {
             provider: state.provider,
             resources: state.resources,
         });
+    }
+}
+
+#[cfg(test)]
+mod exact_frame_tests {
+    use super::*;
+
+    #[test]
+    fn a_queued_frame_holds_only_its_own_bytes() {
+        let mut core = HostCore::new(Arc::new(HostConfig::new(orion_core::NodeId::new("node-a"))));
+        assert!(core.queue(kind::PING, &7u64, HOST_MAX_FRAME));
+        let frame = core.pop_frame().expect("queued");
+        assert!(frame.len() < 32);
+        assert_eq!(frame.capacity(), frame.len());
     }
 }

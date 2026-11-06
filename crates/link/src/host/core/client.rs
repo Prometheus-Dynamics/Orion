@@ -2,7 +2,6 @@
 //! and answers queued as parts that fit the session's frame size.
 
 use std::string::String;
-use std::vec;
 use std::vec::Vec;
 
 use super::{HostCore, OUT_CAPACITY};
@@ -129,12 +128,13 @@ impl HostCore {
         let mut seq = self.seq;
         for part in 0..parts {
             seq = seq.wrapping_add(1);
-            let mut buf = vec![0u8; max_frame];
-            let len = encode(part, seq, &mut buf).map_err(|_| ActionSendError::TooLarge {
-                frame_len: max_frame.saturating_add(1),
-                max_frame,
-            })?;
-            buf.truncate(len);
+            let buf =
+                super::exact_frame(max_frame, |buf| encode(part, seq, buf)).map_err(|_| {
+                    ActionSendError::TooLarge {
+                        frame_len: max_frame.saturating_add(1),
+                        max_frame,
+                    }
+                })?;
             frames.push(buf);
         }
         self.seq = seq;

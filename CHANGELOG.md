@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed (memory)
+
+- Link host: a queued frame holds only its own bytes. Frames were encoded into a buffer of the
+  session's frame size (4096 B on most links) and kept it, so a full output queue (32 frames)
+  held 128 KiB per session; they are now encoded on the stack and copied out at their length.
+
 ### Added
 
 - `orion::client::ActionCaller`: the facade re-exports `orion-client`'s action caller, so users
