@@ -11,6 +11,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Link host: a queued frame holds only its own bytes. Frames were encoded into a buffer of the
   session's frame size (4096 B on most links) and kept it, so a full output queue (32 frames)
   held 128 KiB per session; they are now encoded on the stack and copied out at their length.
+- Link host: the output queue is one byte ring, and `HostSession::transmit_into` sends into a
+  reused buffer; heartbeats and stream data that fits a frame now allocate nothing in steady
+  state (they cost 1 and 4 allocations per round). Stream chunks encode and decode straight from
+  `SampleChunk` (no wire-type vectors); the serial gateway reuses its frame buffer.
+  `crates/link/tests/alloc_count.rs` counts them.
+- `orion-nt4`: a relayed value (client set, server fan-out, subscriber event) costs 4.7
+  allocations instead of 18. Scalar frames decode without allocating (`for_each_frame`, no
+  `rmpv` tree), `encode_frame` returns an exact-size buffer, the server keeps its recipient list
+  and shares topic names, and a subscriber's pending values coalesce by topic id; the last
+  matching subscription takes the event instead of a clone. `crates/nt4/tests/alloc_count.rs`
+  counts them.
 
 ### Added
 

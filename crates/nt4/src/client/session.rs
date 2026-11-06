@@ -18,7 +18,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use super::clock::{ClockFilter, Sample};
 use super::subscription::{TopicEvent, TopicInfo};
 use super::{ClientConfig, ClientEvent, Command, Shared};
-use crate::codec::{Frame, decode_frames, encode_frame, encode_frames};
+use crate::codec::{Frame, encode_frame, encode_frames, for_each_frame};
 use crate::error::{Error, Result};
 use crate::message::{
     AnnounceParams, Control, PublishParams, SetPropertiesParams, SubscribeOptions, SubscribeParams,
@@ -53,7 +53,7 @@ struct State {
 struct SubState {
     topics: Vec<String>,
     options: SubscribeOptions,
-    events: mailbox::Sender<String, TopicEvent>,
+    events: mailbox::Sender<i32, TopicEvent>,
 }
 
 struct Publication {
@@ -443,10 +443,7 @@ fn on_binary(
     shared: &Shared,
 ) {
     // One WebSocket message may batch several values; a malformed one drops the rest of it.
-    let (frames, error) = decode_frames(bytes);
-    for frame in frames {
-        on_frame(frame, state, link, events, shared);
-    }
+    let error = for_each_frame(bytes, |frame| on_frame(frame, state, link, events, shared));
     if let Some(e) = error {
         let _ = events.send(ClientEvent::ProtocolWarning(e.to_string()));
     }
@@ -465,7 +462,6 @@ fn on_frame(
     }
     match link.ids.get(&frame.id) {
         Some(name) => {
-            let name = name.clone();
             let own = link.own.contains(&frame.id);
             let event = TopicEvent::Value {
                 id: frame.id,
@@ -473,7 +469,7 @@ fn on_frame(
                 timestamp_us: frame.timestamp_us,
                 value: frame.value,
             };
-            route(state, events, &name, event, own);
+            route(state, events, name, event, own);
         }
         None => {
             let _ = events.send(ClientEvent::ProtocolWarning(format!(
@@ -535,11 +531,28 @@ fn route(
     own: bool,
 ) {
     let mut dead = Vec::new();
-    let key = match &event {
-        TopicEvent::Value { name, .. } => Some(name.clone()),
-        _ => None,
+    // Values coalesce per topic id while queued.
+    let (key, unannounced) = match &event {
+        TopicEvent::Value { id, .. } => (Some(*id), None),
+        TopicEvent::Unannounced { id, .. } => (None, Some(*id)),
+        _ => (None, None),
     };
-    let unannounced = matches!(event, TopicEvent::Unannounced { .. });
+    let deliver = |subuid: u32, sub: &SubState, event: TopicEvent, dead: &mut Vec<u32>| match sub
+        .events
+        .push(event, key)
+    {
+        Ok(()) => {}
+        Err(PushError::Closed(_)) => dead.push(subuid),
+        Err(PushError::Full(_)) => {
+            sub.events.abort();
+            let _ = events.send(ClientEvent::ProtocolWarning(format!(
+                "subscription {subuid} fell more than {CONTROL_CAPACITY} events behind; closed"
+            )));
+            dead.push(subuid);
+        }
+    };
+    // Every matching subscription but the last gets a clone; the last takes the event.
+    let mut previous: Option<(u32, &SubState)> = None;
     for (&subuid, sub) in &state.subs {
         if own && !sub.options.all {
             continue;
@@ -547,21 +560,16 @@ fn route(
         if !name_matches(&sub.topics, sub.options.prefix, name) {
             continue;
         }
-        if unannounced {
+        if let Some(id) = unannounced {
             // A value still queued for a topic that went away must not be delivered after it.
-            sub.events.purge(&name.to_owned());
+            sub.events.purge(&id);
         }
-        match sub.events.push(event.clone(), key.clone()) {
-            Ok(()) => {}
-            Err(PushError::Closed(_)) => dead.push(subuid),
-            Err(PushError::Full(_)) => {
-                sub.events.abort();
-                let _ = events.send(ClientEvent::ProtocolWarning(format!(
-                    "subscription {subuid} fell more than {CONTROL_CAPACITY} events behind; closed"
-                )));
-                dead.push(subuid);
-            }
+        if let Some((prev_uid, prev)) = previous.replace((subuid, sub)) {
+            deliver(prev_uid, prev, event.clone(), &mut dead);
         }
+    }
+    if let Some((subuid, sub)) = previous {
+        deliver(subuid, sub, event, &mut dead);
     }
     for subuid in dead {
         state.subs.remove(&subuid);
@@ -597,7 +605,7 @@ mod tests {
         let Some(Outbound::Binary(bytes)) = message else {
             panic!("expected a binary message");
         };
-        decode_frames(&bytes).0[0].timestamp_us
+        crate::codec::decode_frames(&bytes).0[0].timestamp_us
     }
 
     #[test]

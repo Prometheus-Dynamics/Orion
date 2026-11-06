@@ -34,6 +34,8 @@ pub(super) async fn run(
     let mut reopen_at = Instant::now();
     let mut lease_refresh_at = Instant::now() + LEASE_REFRESH;
     let mut tx: Vec<u8> = Vec::new();
+    // The frame being copied into `tx`; its buffer is reused.
+    let mut frame = Vec::new();
     let mut buf = vec![0u8; 4096];
     let mut commands = ctx.open_actions();
     let mut commands_open = true;
@@ -178,13 +180,13 @@ pub(super) async fn run(
         }
 
         while tx.len() < TX_HIGH_WATER {
-            let Some(bytes) = session.transmit() else {
+            if !session.transmit_into(&mut frame) {
                 break;
-            };
+            }
             ctx.status.frames_tx += 1;
             // Without an open port the frame is dropped, as on a disconnected cable.
             if port.is_some() {
-                tx.extend_from_slice(&bytes);
+                tx.extend_from_slice(&frame);
             }
         }
         if failure.is_none()

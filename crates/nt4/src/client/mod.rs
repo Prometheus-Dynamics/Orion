@@ -105,7 +105,7 @@ pub(crate) enum Command {
         subuid: u32,
         topics: Vec<String>,
         options: SubscribeOptions,
-        events: mailbox::Sender<String, TopicEvent>,
+        events: mailbox::Sender<i32, TopicEvent>,
     },
     Unsubscribe {
         subuid: u32,

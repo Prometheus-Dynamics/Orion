@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::{Bytes, Utf8Bytes};
@@ -67,7 +68,7 @@ pub(super) struct ClientEntry {
     pub tx: Outbox,
     pub subs: BTreeMap<u32, Sub>,
     /// Publisher uid -> topic name.
-    pub pubs: HashMap<u32, String>,
+    pub pubs: HashMap<u32, Arc<str>>,
     /// Topic ids this client has been sent an announce for and not an unannounce.
     pub announced: HashSet<i32>,
 }
@@ -82,6 +83,8 @@ pub(super) struct State {
     /// A persistent topic changed since the last write. Cleared when the writer takes the job.
     persist_dirty: bool,
     events: broadcast::Sender<ServerEvent>,
+    /// The recipients of the value being fanned out, kept between values.
+    fanout: Vec<u64>,
 }
 
 /// Whether `name` is selected by a subscription's topic list.
@@ -111,6 +114,7 @@ impl State {
             persist_path,
             persist_dirty: false,
             events,
+            fanout: Vec::new(),
         }
     }
 
@@ -257,7 +261,7 @@ impl State {
         if let Owner::Client { id, pubuid } = owner
             && let Some(client) = self.clients.get_mut(&id)
         {
-            client.pubs.insert(pubuid, name.to_owned());
+            client.pubs.insert(pubuid, Arc::from(name));
         }
         self.announce_all(name);
         self.emit(|| ServerEvent::TopicPublished {
@@ -323,7 +327,7 @@ impl State {
             return;
         };
         let owned = matches!(
-            self.topics.get(&name).map(|t| t.owner),
+            self.topics.get(&*name).map(|t| t.owner),
             Some(Owner::Client { id, pubuid: p }) if id == client && p == pubuid
         );
         if owned {
@@ -342,8 +346,8 @@ impl State {
             .ok_or_else(|| Error::Decode(format!("unknown publisher uid {pubuid}")))?;
         let topic = self
             .topics
-            .get(&name)
-            .ok_or_else(|| Error::UnknownTopic(name.clone()))?;
+            .get(&*name)
+            .ok_or_else(|| Error::UnknownTopic(name.to_string()))?;
         if topic.owner != (Owner::Client { id: client, pubuid }) {
             return Err(Error::Decode(format!(
                 "publisher uid {pubuid} no longer owns {name}"
@@ -351,7 +355,7 @@ impl State {
         }
         if topic.type_id != value.type_id() {
             return Err(Error::TypeMismatch {
-                topic: name,
+                topic: name.to_string(),
                 expected: topic.type_name.clone(),
                 got: value.default_type_name(),
             });
@@ -375,18 +379,22 @@ impl State {
             (topic.id, topic.owner, flag(&topic.properties, "persistent"))
         };
         let frame = Bytes::from(encode_frame(id, timestamp_us, &value)?);
-        let targets: Vec<u64> = self
-            .clients
-            .iter()
-            .filter(|(cid, client)| {
-                let is_owner = matches!(owner, Owner::Client { id: o, .. } if o == **cid);
-                client.announced.contains(&id) && wants_values(client, name, is_owner)
-            })
-            .map(|(cid, _)| *cid)
-            .collect();
-        for cid in targets {
+        // The recipients, in a buffer kept between values.
+        let mut targets = std::mem::take(&mut self.fanout);
+        targets.clear();
+        targets.extend(
+            self.clients
+                .iter()
+                .filter(|(cid, client)| {
+                    let is_owner = matches!(owner, Owner::Client { id: o, .. } if o == **cid);
+                    client.announced.contains(&id) && wants_values(client, name, is_owner)
+                })
+                .map(|(cid, _)| *cid),
+        );
+        for &cid in &targets {
             self.queue(cid, Outgoing::Binary(frame.clone()), Some(id));
         }
+        self.fanout = targets;
         self.emit(|| ServerEvent::ValueChanged {
             name: name.to_owned(),
             value: value.clone(),

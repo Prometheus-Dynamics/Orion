@@ -87,6 +87,18 @@ impl HostCore {
         data: &message::StreamData,
     ) -> Result<(), ActionSendError> {
         let max_frame = self.frame_for(Roles::CLIENT, 2)?;
+        // Most batches fit one frame: encoded straight into the queue, nothing allocated.
+        if self.output_room() == 0 {
+            return Err(ActionSendError::Congested);
+        }
+        if self
+            .queue_parts(1, max_frame, |_, seq, buf| {
+                message::encode_data(data, false, seq, buf)
+            })
+            .is_ok()
+        {
+            return Ok(());
+        }
         let parts = message::DataParts::new(data, max_frame).map_err(|too_large| {
             ActionSendError::TooLarge {
                 frame_len: too_large.record_len.saturating_add(FRAME_OVERHEAD),

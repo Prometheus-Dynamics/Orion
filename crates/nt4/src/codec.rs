@@ -18,10 +18,24 @@ pub struct Frame {
 }
 
 /// Encodes one binary frame (one message).
+///
+/// The buffer has exactly the frame's length (encoded in a reused per-thread scratch, then copied
+/// once), so turning it into `Bytes` for a WebSocket message allocates nothing more.
 pub fn encode_frame(id: i32, timestamp_us: i64, value: &Value) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(16);
-    encode_frame_into(&mut buf, id, timestamp_us, value)?;
-    Ok(buf)
+    thread_local! {
+        static SCRATCH: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    SCRATCH.with(|scratch| {
+        let mut buf = scratch.borrow_mut();
+        buf.clear();
+        encode_frame_into(&mut buf, id, timestamp_us, value)?;
+        let frame = buf.as_slice().to_vec();
+        // A large value's scratch is not kept around.
+        if buf.capacity() > 4096 {
+            *buf = Vec::new();
+        }
+        Ok(frame)
+    })
 }
 
 /// Appends one encoded message to `buf`. Several messages in one buffer make a batched binary
@@ -54,46 +68,95 @@ pub fn encode_frames<'a>(
 /// arrays: ntcore batches several values into one WebSocket message. Returns the messages decoded
 /// before any malformed one, plus the error that stopped decoding; the rest of the frame is
 /// dropped, and the connection stays up.
-pub fn decode_frames(mut bytes: &[u8]) -> (Vec<Frame>, Option<Error>) {
+pub fn decode_frames(bytes: &[u8]) -> (Vec<Frame>, Option<Error>) {
     let mut frames = Vec::new();
+    let error = for_each_frame(bytes, |frame| frames.push(frame));
+    (frames, error)
+}
+
+/// Decodes every message in a binary frame and hands each to `f`, as [`decode_frames`] does but
+/// without collecting them. Header and scalar values (boolean, double, int, float) decode without
+/// allocating. Returns the error that stopped decoding, if any.
+pub fn for_each_frame(mut bytes: &[u8], mut f: impl FnMut(Frame)) -> Option<Error> {
     while !bytes.is_empty() {
-        let message = match rmpv::decode::read_value(&mut bytes) {
-            Ok(message) => message,
-            Err(e) => return (frames, Some(dec(e.to_string()))),
-        };
-        match frame_from_value(message) {
-            Ok(frame) => frames.push(frame),
-            Err(e) => return (frames, Some(e)),
+        match decode_one(&mut bytes) {
+            Ok(frame) => f(frame),
+            Err(e) => return Some(e),
         }
     }
-    (frames, None)
+    None
 }
 
-/// Decodes a buffer that must hold exactly one message.
-pub fn decode_frame(bytes: &[u8]) -> Result<Frame> {
-    match decode_frames(bytes) {
-        (mut frames, None) if frames.len() == 1 => Ok(frames.remove(0)),
-        (_, Some(e)) => Err(e),
-        _ => Err(dec("expected exactly one frame".into())),
+fn rd<E: std::fmt::Display>(e: E) -> Error {
+    dec(e.to_string())
+}
+
+/// One message from the front of `bytes`, which advances past it.
+fn decode_one(bytes: &mut &[u8]) -> Result<Frame> {
+    let len = rmp::decode::read_array_len(bytes).map_err(rd)?;
+    if len != 4 {
+        // Not a frame: skip it whole for the error, as the tree decoder would have.
+        return Err(dec("frame must have 4 elements".into()));
     }
-}
-
-fn frame_from_value(top: rmpv::Value) -> Result<Frame> {
-    let rmpv::Value::Array(items) = top else {
-        return Err(dec("frame is not an array".into()));
+    let id: i64 = rmp::decode::read_int(bytes).map_err(|_| dec("expected an integer".into()))?;
+    let id = i32::try_from(id).map_err(|_| dec("topic id out of range".into()))?;
+    let timestamp_us: i64 =
+        rmp::decode::read_int(bytes).map_err(|_| dec("expected an integer".into()))?;
+    let type_id: i64 =
+        rmp::decode::read_int(bytes).map_err(|_| dec("expected an integer".into()))?;
+    let type_id = u8::try_from(type_id).map_err(|_| dec("type id out of range".into()))?;
+    let marker = bytes
+        .first()
+        .map(|&b| rmp::Marker::from_u8(b))
+        .ok_or_else(|| dec("frame ends before its value".into()))?;
+    use rmp::Marker;
+    let value = match (type_id, marker) {
+        (value::BOOLEAN, Marker::True | Marker::False) => {
+            Value::Boolean(rmp::decode::read_bool(bytes).map_err(rd)?)
+        }
+        (value::DOUBLE, Marker::F64) => Value::Double(rmp::decode::read_f64(bytes).map_err(rd)?),
+        (value::DOUBLE, Marker::F32) => {
+            Value::Double(f64::from(rmp::decode::read_f32(bytes).map_err(rd)?))
+        }
+        (value::FLOAT, Marker::F32) => Value::Float(rmp::decode::read_f32(bytes).map_err(rd)?),
+        (value::FLOAT, Marker::F64) => {
+            Value::Float(rmp::decode::read_f64(bytes).map_err(rd)? as f32)
+        }
+        (
+            value::INT,
+            Marker::FixPos(_)
+            | Marker::FixNeg(_)
+            | Marker::U8
+            | Marker::U16
+            | Marker::U32
+            | Marker::U64
+            | Marker::I8
+            | Marker::I16
+            | Marker::I32
+            | Marker::I64,
+        ) => Value::Int(
+            rmp::decode::read_int(bytes).map_err(|_| dec("int value out of i64 range".into()))?,
+        ),
+        _ => {
+            let v = rmpv::decode::read_value(bytes).map_err(rd)?;
+            value_from_msgpack(type_id, v)?
+        }
     };
-    let [id, timestamp, type_id, value] = <[rmpv::Value; 4]>::try_from(items)
-        .map_err(|_| dec("frame must have 4 elements".into()))?;
-    let id = i32::try_from(int_of(&id)?).map_err(|_| dec("topic id out of range".into()))?;
-    let timestamp_us = int_of(&timestamp)?;
-    let type_id =
-        u8::try_from(int_of(&type_id)?).map_err(|_| dec("type id out of range".into()))?;
-    let value = value_from_msgpack(type_id, value)?;
     Ok(Frame {
         id,
         timestamp_us,
         value,
     })
+}
+
+/// Decodes a buffer that must hold exactly one message.
+pub fn decode_frame(mut bytes: &[u8]) -> Result<Frame> {
+    let frame = decode_one(&mut bytes)?;
+    if bytes.is_empty() {
+        Ok(frame)
+    } else {
+        Err(dec("expected exactly one frame".into()))
+    }
 }
 
 fn dec(msg: String) -> Error {

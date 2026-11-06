@@ -238,6 +238,45 @@ impl From<ChunkWire<'_>> for cp::SampleChunk {
     }
 }
 
+/// Chunks serialized straight from the node's type, without a wire-type vector.
+pub(super) struct ChunksRef<'a>(pub(super) &'a [cp::SampleChunk]);
+
+impl Serialize for ChunksRef<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.iter().map(ChunkWire::from))
+    }
+}
+
+/// Decodes chunks straight into the node's type: one vector, and one copy of each chunk's data.
+fn owned_chunks<'de, D>(deserializer: D) -> Result<Vec<cp::SampleChunk>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct Chunks;
+
+    impl<'de> serde::de::Visitor<'de> for Chunks {
+        type Value = Vec<cp::SampleChunk>;
+
+        fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("a sequence of sample chunks")
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            // The encoded count is not trusted for preallocation beyond a few chunks.
+            let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(8));
+            while let Some(chunk) = seq.next_element::<ChunkWire<'de>>()? {
+                out.push(chunk.into());
+            }
+            Ok(out)
+        }
+    }
+
+    deserializer.deserialize_seq(Chunks)
+}
+
 #[derive(Serialize, Deserialize)]
 enum BackfillWire {
     None,
@@ -293,16 +332,16 @@ struct DeclareBody {
 }
 
 #[derive(Serialize)]
-pub(super) struct PublishRef<'a> {
-    pub(super) id: &'a str,
-    pub(super) chunks: &'a [ChunkWire<'a>],
+struct PublishRef<'a> {
+    id: &'a str,
+    chunks: ChunksRef<'a>,
 }
 
 #[derive(Deserialize)]
-struct PublishBody<'a> {
+struct PublishBody {
     id: String,
-    #[serde(borrow, deserialize_with = "bounded_vec")]
-    chunks: Vec<ChunkWire<'a>>,
+    #[serde(deserialize_with = "owned_chunks")]
+    chunks: Vec<cp::SampleChunk>,
 }
 
 #[derive(Serialize)]
@@ -356,19 +395,19 @@ pub(super) struct DataRef<'a> {
     pub(super) prev_seq: u64,
     pub(super) backfill: bool,
     pub(super) more: bool,
-    pub(super) chunks: &'a [ChunkWire<'a>],
+    pub(super) chunks: ChunksRef<'a>,
 }
 
 #[derive(Deserialize)]
-struct DataBody<'a> {
+struct DataBody {
     req: u32,
     epoch: u64,
     seq: u64,
     prev_seq: u64,
     backfill: bool,
     more: bool,
-    #[serde(borrow, deserialize_with = "bounded_vec")]
-    chunks: Vec<ChunkWire<'a>>,
+    #[serde(deserialize_with = "owned_chunks")]
+    chunks: Vec<cp::SampleChunk>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -395,10 +434,10 @@ pub(super) fn decode_stream(
                 series: body.series.into_iter().map(Into::into).collect(),
             })
         }),
-        kind::STREAM_PUBLISH => decode::<PublishBody<'_>>(kind, payload).map(|body| {
+        kind::STREAM_PUBLISH => decode::<PublishBody>(kind, payload).map(|body| {
             Message::StreamPublish(StreamPublish {
                 id: body.id,
-                chunks: body.chunks.into_iter().map(Into::into).collect(),
+                chunks: body.chunks,
             })
         }),
         kind::STREAM_DEMAND => decode::<DemandBody>(kind, payload).map(|body| {
@@ -436,7 +475,7 @@ pub(super) fn decode_stream(
                 live: body.live,
             })
         }),
-        kind::STREAM_DATA => decode::<DataBody<'_>>(kind, payload).map(|body| {
+        kind::STREAM_DATA => decode::<DataBody>(kind, payload).map(|body| {
             Message::StreamData(StreamData {
                 req: body.req,
                 cursor: cp::StreamCursor {
@@ -446,7 +485,7 @@ pub(super) fn decode_stream(
                 prev_seq: body.prev_seq,
                 backfill: body.backfill,
                 more: body.more,
-                chunks: body.chunks.into_iter().map(Into::into).collect(),
+                chunks: body.chunks,
             })
         }),
         kind::STREAM_RESET => decode::<ResetBody>(kind, payload).map(|body| {
@@ -530,23 +569,7 @@ pub(super) fn encode_stream(
             seq,
             buf,
         ),
-        Message::StreamData(data) => {
-            let chunks: Vec<ChunkWire<'_>> = data.chunks.iter().map(Into::into).collect();
-            encode_with(
-                kind,
-                seq,
-                &DataRef {
-                    req: data.req,
-                    epoch: data.cursor.epoch,
-                    seq: data.cursor.seq,
-                    prev_seq: data.prev_seq,
-                    backfill: data.backfill,
-                    more: data.more,
-                    chunks: &chunks,
-                },
-                buf,
-            )
-        }
+        Message::StreamData(data) => encode_data(data, data.more, seq, buf),
         Message::StreamReset(reset) => encode_with(
             kind,
             seq,
@@ -571,13 +594,39 @@ pub fn encode_publish(
     seq: u16,
     buf: &mut [u8],
 ) -> Result<usize, MessageError> {
-    let chunks: Vec<ChunkWire<'_>> = chunks.iter().map(Into::into).collect();
     super::codec::encode_with(
         kind::STREAM_PUBLISH,
         seq,
         &PublishRef {
             id,
-            chunks: &chunks,
+            chunks: ChunksRef(chunks),
+        },
+        buf,
+    )
+}
+
+/// Encodes `data` as one [`kind::STREAM_DATA`] frame with `more` (whatever `data.more` says).
+///
+/// # Errors
+///
+/// [`MessageError::BufferTooSmall`] if the frame does not fit in `buf`.
+pub(crate) fn encode_data(
+    data: &StreamData,
+    more: bool,
+    seq: u16,
+    buf: &mut [u8],
+) -> Result<usize, MessageError> {
+    super::codec::encode_with(
+        kind::STREAM_DATA,
+        seq,
+        &DataRef {
+            req: data.req,
+            epoch: data.cursor.epoch,
+            seq: data.cursor.seq,
+            prev_seq: data.prev_seq,
+            backfill: data.backfill,
+            more,
+            chunks: ChunksRef(&data.chunks),
         },
         buf,
     )
@@ -683,7 +732,7 @@ pub(crate) mod parts {
         cursor: cp::StreamCursor,
         prev_seq: u64,
         backfill: bool,
-        chunks: Vec<ChunkWire<'a>>,
+        chunks: &'a [cp::SampleChunk],
         parts: Vec<Range<usize>>,
     }
 
@@ -694,12 +743,13 @@ pub(crate) mod parts {
             data: &'a crate::message::StreamData,
             max_frame: usize,
         ) -> Result<Self, crate::message::RecordTooLarge> {
-            let chunks: Vec<ChunkWire<'a>> = data.chunks.iter().map(Into::into).collect();
+            let chunks = data.chunks.as_slice();
             let mut scratch = alloc::vec![0u8; max_frame.max(FRAME_OVERHEAD)];
             let lens: Vec<usize> = chunks
                 .iter()
                 .map(|chunk| {
-                    postcard::to_slice(chunk, &mut scratch).map_or(usize::MAX, |used| used.len())
+                    postcard::to_slice(&ChunkWire::from(chunk), &mut scratch)
+                        .map_or(usize::MAX, |used| used.len())
                 })
                 .collect();
             let budget = max_frame.saturating_sub(FRAME_OVERHEAD + DATA_HEADER);
@@ -735,7 +785,7 @@ pub(crate) mod parts {
                     prev_seq: self.prev_seq,
                     backfill: self.backfill,
                     more: part + 1 < self.parts.len(),
-                    chunks: self.chunks.get(range).unwrap_or_default(),
+                    chunks: ChunksRef(self.chunks.get(range).unwrap_or_default()),
                 },
                 buf,
             )

@@ -58,14 +58,14 @@ pub enum TopicEvent {
 pub struct Subscription {
     handle: ClientHandle,
     subuid: u32,
-    events: mailbox::Receiver<String, TopicEvent>,
+    events: mailbox::Receiver<i32, TopicEvent>,
 }
 
 impl Subscription {
     pub(crate) fn new(
         handle: ClientHandle,
         subuid: u32,
-        events: mailbox::Receiver<String, TopicEvent>,
+        events: mailbox::Receiver<i32, TopicEvent>,
     ) -> Self {
         Self {
             handle,

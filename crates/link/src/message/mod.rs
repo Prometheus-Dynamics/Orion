@@ -46,6 +46,8 @@ pub use codec::{
     encode_status,
 };
 #[cfg(feature = "std")]
+pub(crate) use streams::encode_data;
+#[cfg(feature = "std")]
 pub(crate) use streams::parts::DataParts;
 pub use streams::{
     StreamCatalog, StreamData, StreamDeclare, StreamDemand, StreamPublish, StreamReset,

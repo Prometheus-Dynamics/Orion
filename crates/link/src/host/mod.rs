@@ -36,6 +36,7 @@
 
 mod bus;
 mod core;
+mod out;
 #[cfg(feature = "xfer")]
 pub mod xfer;
 
@@ -363,7 +364,9 @@ pub struct HostSession<T: Transport> {
     transport: T,
     rx: Box<T::Decoder<HOST_MAX_FRAME>>,
     cursor: T::Cursor,
-    current: Option<Vec<u8>>,
+    /// The frame being sent, taken from the output queue; its buffer is reused.
+    current: Vec<u8>,
+    has_current: bool,
     core: HostCore,
 }
 
@@ -389,7 +392,8 @@ impl<T: Transport> HostSession<T> {
             transport,
             rx: Box::default(),
             cursor: T::Cursor::default(),
-            current: None,
+            current: Vec::new(),
+            has_current: false,
             core: HostCore::new(config),
         }
     }
@@ -609,10 +613,10 @@ impl<T: Transport> HostSession<T> {
     }
 
     fn current_frame(&mut self) -> Option<&[u8]> {
-        if self.current.is_none() {
-            self.current = self.core.pop_frame();
+        if !self.has_current {
+            self.has_current = self.core.pop_frame_into(&mut self.current);
         }
-        self.current.as_deref()
+        self.has_current.then_some(self.current.as_slice())
     }
 }
 
@@ -635,13 +639,23 @@ impl HostSession<Stream> {
     /// The stream bytes of the next frame (with a leading `0x00`), or `None` when idle. Write
     /// them completely; partial writes are the gateway's to finish.
     pub fn transmit(&mut self) -> Option<Vec<u8>> {
-        let frame = self.current_frame()?;
-        let mut out = std::vec![0u8; max_encoded_len(frame.len()).saturating_add(1)];
+        let mut out = Vec::new();
+        self.transmit_into(&mut out).then_some(out)
+    }
+
+    /// As [`HostSession::transmit`], into `out` (its contents replaced, its buffer reused): no
+    /// allocation once `out` has held a frame of this size. `false` when idle.
+    pub fn transmit_into(&mut self, out: &mut Vec<u8>) -> bool {
+        let Some(frame) = self.current_frame() else {
+            return false;
+        };
+        out.clear();
+        out.resize(max_encoded_len(frame.len()).saturating_add(1), 0);
         let mut cursor = None;
-        let (written, _) = transport::stream_fill(frame, &mut cursor, &mut out);
+        let (written, _) = transport::stream_fill(frame, &mut cursor, out);
         out.truncate(written);
-        self.current = None;
-        Some(out)
+        self.has_current = false;
+        true
     }
 }
 
@@ -664,12 +678,12 @@ impl HostSession<Packet> {
         match step {
             Some((segment, done)) => {
                 if done {
-                    self.current = None;
+                    self.has_current = false;
                 }
                 Some(segment)
             }
             None => {
-                self.current = None;
+                self.has_current = false;
                 self.cursor = Default::default();
                 None
             }

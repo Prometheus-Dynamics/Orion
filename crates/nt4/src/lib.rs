@@ -30,6 +30,7 @@ pub use client::{
 };
 pub use codec::{
     Frame, decode_frame, decode_frames, encode_frame, encode_frame_into, encode_frames,
+    for_each_frame,
 };
 pub use error::{Error, Result};
 pub use message::{Control, Properties, SubscribeOptions};

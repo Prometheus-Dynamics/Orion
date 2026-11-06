@@ -2,7 +2,6 @@
 //! and answers queued as parts that fit the session's frame size.
 
 use std::string::String;
-use std::vec::Vec;
 
 use super::{HostCore, OUT_CAPACITY};
 use crate::frame::{FRAME_OVERHEAD, FrameView};
@@ -124,21 +123,25 @@ impl HostCore {
         if self.out.len() + parts > OUT_CAPACITY {
             return Err(ActionSendError::Congested);
         }
-        let mut frames = Vec::with_capacity(parts);
+        let mark = self.out.mark();
         let mut seq = self.seq;
         for part in 0..parts {
             seq = seq.wrapping_add(1);
-            let buf =
-                super::exact_frame(max_frame, |buf| encode(part, seq, buf)).map_err(|_| {
-                    ActionSendError::TooLarge {
-                        frame_len: max_frame.saturating_add(1),
-                        max_frame,
-                    }
-                })?;
-            frames.push(buf);
+            let out = &mut self.out;
+            let encoded = super::with_frame(
+                max_frame,
+                |buf| encode(part, seq, buf),
+                |frame| out.push_back(frame),
+            );
+            if encoded.is_err() {
+                self.out.rollback(mark);
+                return Err(ActionSendError::TooLarge {
+                    frame_len: max_frame.saturating_add(1),
+                    max_frame,
+                });
+            }
         }
         self.seq = seq;
-        self.out.extend(frames);
         Ok(())
     }
 

@@ -49,7 +49,7 @@ pub(crate) struct HostCore {
     conn: Option<Conn>,
     seq: u16,
     next_session_id: u32,
-    out: VecDeque<Vec<u8>>,
+    out: super::out::OutQueue,
     events: VecDeque<HostEvent>,
     leases: Vec<LeaseRecord>,
     last_state: Option<ProviderState>,
@@ -64,17 +64,18 @@ pub(crate) struct HostCore {
     stats: HostStats,
 }
 
-/// Encodes a frame of at most `limit` bytes on the stack and returns it in a buffer of its exact
-/// length, so a queued frame holds only its own bytes (not a `limit`-sized buffer).
-pub(super) fn exact_frame<E>(
+/// Encodes a frame of at most `limit` bytes on the stack and hands it to `then`, so a queued
+/// frame is copied once into the output ring at its own length.
+pub(super) fn with_frame<E, R>(
     limit: usize,
     encode: impl FnOnce(&mut [u8]) -> Result<usize, E>,
-) -> Result<Vec<u8>, E> {
+    then: impl FnOnce(&[u8]) -> R,
+) -> Result<R, E> {
     let mut scratch = [0u8; HOST_MAX_FRAME];
     let limit = limit.clamp(FRAME_OVERHEAD, HOST_MAX_FRAME);
     let buf = scratch.get_mut(..limit).unwrap_or_default();
     let len = encode(buf)?;
-    Ok(buf.get(..len).unwrap_or_default().to_vec())
+    Ok(then(buf.get(..len).unwrap_or_default()))
 }
 
 impl HostCore {
@@ -85,7 +86,7 @@ impl HostCore {
             conn: None,
             seq: 0,
             next_session_id,
-            out: VecDeque::new(),
+            out: super::out::OutQueue::default(),
             events: VecDeque::new(),
             leases: Vec::new(),
             last_state: None,
@@ -139,8 +140,9 @@ impl HostCore {
         self.events.pop_front()
     }
 
-    pub(crate) fn pop_frame(&mut self) -> Option<Vec<u8>> {
-        self.out.pop_front()
+    /// Moves the next frame into `out`; `false` when none is queued.
+    pub(crate) fn pop_frame_into(&mut self, out: &mut Vec<u8>) -> bool {
+        self.out.pop_into(out)
     }
 
     fn emit(&mut self, event: HostEvent) {
@@ -153,18 +155,24 @@ impl HostCore {
 
     fn queue<T: Serialize + ?Sized>(&mut self, kind: u8, body: &T, limit: usize) -> bool {
         let seq = self.seq.wrapping_add(1);
-        match exact_frame(limit, |buf| message::encode_with(kind, seq, body, buf)) {
-            Ok(buf) => {
-                self.seq = seq;
-                if self.out.len() >= OUT_CAPACITY {
-                    self.out.pop_front();
-                    self.stats.frames_dropped = self.stats.frames_dropped.wrapping_add(1);
-                }
-                self.out.push_back(buf);
-                true
-            }
-            Err(_) => false,
+        let queued = with_frame(
+            limit,
+            |buf| message::encode_with(kind, seq, body, buf),
+            |frame| self.push_dropping_oldest(frame),
+        );
+        if queued.is_ok() {
+            self.seq = seq;
         }
+        queued.is_ok()
+    }
+
+    /// Queues `frame`, dropping the oldest frame when the queue is full.
+    fn push_dropping_oldest(&mut self, frame: &[u8]) {
+        if self.out.len() >= OUT_CAPACITY {
+            self.out.pop_front();
+            self.stats.frames_dropped = self.stats.frames_dropped.wrapping_add(1);
+        }
+        self.out.push_back(frame);
     }
 
     fn reject(&mut self, device_name: Option<String>, reason: RejectReason) {
@@ -202,9 +210,10 @@ impl HostCore {
         if !conn.roles.contains(Roles::PROVIDER) {
             return;
         }
-        let (limit, device_name) = (conn.max_frame, conn.device_name.clone());
+        let limit = conn.max_frame;
         let leases = core::mem::take(&mut self.leases);
         if !self.queue(kind::LEASES, leases.as_slice(), limit) {
+            let device_name = self.device_name().map(String::from).unwrap_or_default();
             let mut probe = vec![0u8; HOST_MAX_FRAME];
             let frame_len = message::encode_leases(&leases, 0, &mut probe).unwrap_or(usize::MAX);
             self.emit(HostEvent::LeasesTooLarge {
@@ -384,20 +393,26 @@ impl HostCore {
             return Err(ActionSendError::Congested);
         }
         let seq = self.seq.wrapping_add(1);
-        let buf = exact_frame(HOST_MAX_FRAME, |buf| encode(seq, buf)).map_err(|_| {
-            ActionSendError::TooLarge {
-                frame_len: HOST_MAX_FRAME,
-                max_frame,
-            }
-        })?;
-        if buf.len() > max_frame {
-            return Err(ActionSendError::TooLarge {
-                frame_len: buf.len(),
-                max_frame,
-            });
-        }
+        let out = &mut self.out;
+        with_frame(
+            HOST_MAX_FRAME,
+            |buf| encode(seq, buf),
+            |frame| {
+                if frame.len() > max_frame {
+                    return Err(ActionSendError::TooLarge {
+                        frame_len: frame.len(),
+                        max_frame,
+                    });
+                }
+                out.push_back(frame);
+                Ok(())
+            },
+        )
+        .map_err(|_| ActionSendError::TooLarge {
+            frame_len: HOST_MAX_FRAME,
+            max_frame,
+        })??;
         self.seq = seq;
-        self.out.push_back(buf);
         Ok(())
     }
 
@@ -515,18 +530,15 @@ impl HostCore {
         encode: impl FnOnce(u16, &mut [u8]) -> Result<usize, crate::wire::WireError>,
     ) -> bool {
         let seq = self.seq.wrapping_add(1);
-        match exact_frame(limit, |buf| encode(seq, buf)) {
-            Ok(buf) => {
-                self.seq = seq;
-                if self.out.len() >= OUT_CAPACITY {
-                    self.out.pop_front();
-                    self.stats.frames_dropped = self.stats.frames_dropped.wrapping_add(1);
-                }
-                self.out.push_back(buf);
-                true
-            }
-            Err(_) => false,
+        let queued = with_frame(
+            limit,
+            |buf| encode(seq, buf),
+            |frame| self.push_dropping_oldest(frame),
+        );
+        if queued.is_ok() {
+            self.seq = seq;
         }
+        queued.is_ok()
     }
 
     /// Sends a firmware transfer message to the connected device. False if there is no session,
@@ -659,15 +671,17 @@ impl HostCore {
 }
 
 #[cfg(test)]
-mod exact_frame_tests {
+mod out_queue_tests {
     use super::*;
 
     #[test]
     fn a_queued_frame_holds_only_its_own_bytes() {
         let mut core = HostCore::new(Arc::new(HostConfig::new(orion_core::NodeId::new("node-a"))));
         assert!(core.queue(kind::PING, &7u64, HOST_MAX_FRAME));
-        let frame = core.pop_frame().expect("queued");
-        assert!(frame.len() < 32);
-        assert_eq!(frame.capacity(), frame.len());
+        assert!(core.queue(kind::PING, &8u64, HOST_MAX_FRAME));
+        assert!(core.out.len() == 2 && core.out.mark_bytes() < 64);
+        let mut frame = Vec::new();
+        assert!(core.pop_frame_into(&mut frame) && frame.len() < 32);
+        assert!(core.pop_frame_into(&mut frame) && !core.pop_frame_into(&mut frame));
     }
 }
