@@ -34,6 +34,8 @@ struct Conn {
     last_seq: u16,
     /// The device has sent session traffic, so it has seen our `Welcome`.
     confirmed: bool,
+    /// The session's interface revision: the lower of the device's and the host's.
+    revision: u16,
 }
 
 #[derive(Debug)]
@@ -89,6 +91,10 @@ impl HostCore {
 
     pub(crate) fn session_id(&self) -> Option<u32> {
         self.conn.as_ref().map(|conn| conn.session_id)
+    }
+
+    pub(crate) fn revision(&self) -> Option<u16> {
+        self.conn.as_ref().map(|conn| conn.revision)
     }
 
     pub(crate) fn leases(&self) -> &[LeaseRecord] {
@@ -379,6 +385,9 @@ impl HostCore {
             .unwrap_or(usize::MAX)
             .min(config.max_frame())
             .max(FRAME_OVERHEAD);
+        // While `LINK_INTERFACE_REVISION` is 0 the lower revision is always 0.
+        #[allow(clippy::unnecessary_min_or_max)]
+        let revision = hello.revision.min(crate::LINK_INTERFACE_REVISION);
         self.heard = true;
         if let Some(conn) = &mut self.conn
             && conn.device_name == hello.device_name
@@ -387,6 +396,7 @@ impl HostCore {
             // The device did not get our Welcome yet: repeat it within the same session.
             conn.last_seq = seq;
             conn.max_frame = max_frame;
+            conn.revision = revision;
             let session_id = conn.session_id;
             self.send_welcome(session_id, max_frame);
             return;
@@ -413,6 +423,7 @@ impl HostCore {
             max_frame,
             last_seq: seq,
             confirmed: false,
+            revision,
         });
         self.stats.sessions = self.stats.sessions.wrapping_add(1);
         self.emit(HostEvent::DeviceConnected {
@@ -430,6 +441,7 @@ impl HostCore {
             session_id,
             heartbeat_ms: self.config.heartbeat_ms,
             max_frame: u32::try_from(max_frame).unwrap_or(u32::MAX),
+            revision: crate::LINK_INTERFACE_REVISION,
         };
         let _ = self.queue(kind::WELCOME, &welcome, max_frame);
         self.queue_leases();

@@ -15,6 +15,7 @@
 //! assert_eq!(Message::decode(&frame).unwrap(), Message::Ping { now_ms: 1234 });
 //! ```
 
+pub(crate) mod body;
 mod codec;
 
 use alloc::string::String;
@@ -46,7 +47,9 @@ pub use codec::{
 pub fn encode_action_map(
     map: &alloc::collections::BTreeMap<String, TypedConfigValue>,
 ) -> Result<Vec<u8>, MessageError> {
-    postcard::to_allocvec(map).map_err(|_| MessageError::Encode)
+    let wire: alloc::collections::BTreeMap<&String, body::ValueWire> =
+        map.iter().map(|(key, value)| (key, value.into())).collect();
+    postcard::to_allocvec(&wire).map_err(|_| MessageError::Encode)
 }
 
 /// Decodes the map [`encode_action_map`] writes. An empty payload is an empty map.
@@ -60,7 +63,12 @@ pub fn decode_action_map(
     if payload.is_empty() {
         return Ok(alloc::collections::BTreeMap::new());
     }
-    postcard::from_bytes(payload).map_err(|_| MessageError::Decode { kind: 0 })
+    let wire: alloc::collections::BTreeMap<String, body::ValueWire> =
+        postcard::from_bytes(payload).map_err(|_| MessageError::Decode { kind: 0 })?;
+    Ok(wire
+        .into_iter()
+        .map(|(key, value)| (key, value.into()))
+        .collect())
 }
 
 // Kind numbers, roles, and reject reasons are shared with the minimal device path.
@@ -70,8 +78,10 @@ use crate::frame::FrameError;
 
 /// Opens (or reopens) a session. Device → host, kind [`kind::HELLO`].
 ///
-/// The protocol version travels in the frame header, not in the body.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The protocol version travels in the frame header, not in the body. The body's first three
+/// fields are frozen; `revision` is appended, and left off the wire when it is 0, so a revision-0
+/// `Hello` is byte for byte what devices sent before revisions existed.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hello {
     /// Stable device name; the host may restrict accepted names.
     pub device_name: String,
@@ -79,10 +89,13 @@ pub struct Hello {
     pub roles: Roles,
     /// Largest frame (header + payload + CRC) the device can receive and send.
     pub max_frame: u32,
+    /// The highest interface revision the device speaks (`docs/design/stable-interface.md`).
+    /// 0, and absent on the wire, for devices that predate revisions.
+    pub revision: u16,
 }
 
 /// Accepts a session. Host → device, kind [`kind::WELCOME`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Welcome {
     /// The node the device is attached to.
     pub node_id: NodeId,
@@ -92,15 +105,20 @@ pub struct Welcome {
     pub heartbeat_ms: u32,
     /// Negotiated maximum frame length: the minimum of both sides. Neither side sends larger frames.
     pub max_frame: u32,
+    /// The highest interface revision the host speaks; the session uses the lower of both sides'.
+    /// Appended, and absent on the wire when it is 0.
+    pub revision: u16,
 }
 
 /// Full provider snapshot. Device → host, kind [`kind::PROVIDER_STATE`]. Idempotent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The records are encoded through the link's own body types (`body.rs`), so their wire does not
+/// follow changes to the `orion-control-plane` records.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderState {
     /// The provider record. The gateway owns `node_id` and overwrites it.
     pub provider: ProviderRecord,
     /// Every resource the provider currently offers.
-    #[serde(deserialize_with = "codec::bounded_vec")]
     pub resources: Vec<ResourceRecord>,
 }
 
@@ -115,6 +133,7 @@ pub struct StatusEntry {
     /// Key, unique per device (at most 128 bytes on the node).
     pub key: String,
     /// The value (strings and bytes at most 1024 bytes on the node).
+    #[serde(with = "body::value")]
     pub value: TypedConfigValue,
     /// Requested time-to-live in milliseconds.
     pub ttl_ms: u32,

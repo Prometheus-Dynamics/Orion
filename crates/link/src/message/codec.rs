@@ -7,11 +7,13 @@ use core::marker::PhantomData;
 use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::body::{LeaseWire, ProviderWire, ResourceWire};
 use super::{
     ActionCatalog, ActionRequest, ActionResult, Hello, LeaseRecord, Message, MessageError,
-    ProviderRecord, ProviderState, RejectReason, ResourceRecord, StatusEntry, Welcome, kind,
+    ProviderRecord, ProviderState, RejectReason, ResourceRecord, Roles, StatusEntry, Welcome, kind,
 };
 use crate::frame::{self, FrameHeader, FrameView};
+use orion_core::NodeId;
 
 /// Elements preallocated for a decoded sequence, whatever length the (untrusted) payload claims.
 /// Longer sequences grow as elements actually decode, so memory stays bounded by the frame size.
@@ -44,11 +46,11 @@ where
     deserializer.deserialize_seq(BoundedVisitor(PhantomData))
 }
 
-/// Same wire format as `Vec<LeaseRecord>`, decoded with [`bounded_vec`].
+/// A lease set: a sequence of [`LeaseWire`]s, decoded with [`bounded_vec`].
 #[derive(Deserialize)]
 struct LeasesBody {
     #[serde(deserialize_with = "bounded_vec")]
-    leases: Vec<LeaseRecord>,
+    leases: Vec<LeaseWire>,
 }
 
 /// Same wire format as `Vec<StatusEntry>`, decoded with [`bounded_vec`].
@@ -66,11 +68,110 @@ struct ActionRequestRef<'a> {
     payload: &'a [u8],
 }
 
-/// Borrowed [`ProviderState`] (same wire format).
-#[derive(Serialize)]
-struct ProviderStateRef<'a> {
-    provider: &'a ProviderRecord,
-    resources: &'a [ResourceRecord],
+/// A [`ProviderState`] body.
+#[derive(Serialize, Deserialize)]
+struct ProviderStateWire {
+    provider: ProviderWire,
+    #[serde(deserialize_with = "bounded_vec")]
+    resources: Vec<ResourceWire>,
+}
+
+impl From<ProviderStateWire> for ProviderState {
+    fn from(wire: ProviderStateWire) -> Self {
+        Self {
+            provider: wire.provider.into(),
+            resources: wire.resources.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// The frozen prefix of a [`Hello`] body; `revision` follows it when it is not 0.
+#[derive(Serialize, Deserialize)]
+struct HelloPrefix {
+    device_name: alloc::string::String,
+    roles: Roles,
+    max_frame: u32,
+}
+
+/// The [`Welcome`] fields before `revision`.
+#[derive(Serialize, Deserialize)]
+struct WelcomePrefix {
+    node_id: NodeId,
+    session_id: u32,
+    heartbeat_ms: u32,
+    max_frame: u32,
+}
+
+/// Serializes `prefix`, then `revision` unless it is 0, so a revision-0 body keeps the bytes it had
+/// before revisions were appended.
+fn serialize_with_revision<S: serde::Serializer, P: Serialize>(
+    prefix: &P,
+    revision: u16,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeTuple;
+    let mut tuple = serializer.serialize_tuple(if revision == 0 { 1 } else { 2 })?;
+    tuple.serialize_element(prefix)?;
+    if revision != 0 {
+        tuple.serialize_element(&revision)?;
+    }
+    tuple.end()
+}
+
+/// Decodes `P`, then the `revision` appended after it: 0 when absent (a sender that predates
+/// revisions) or unreadable. Bytes after the revision are ignored, as after any body.
+fn decode_with_revision<'a, P: Deserialize<'a>>(
+    kind: u8,
+    payload: &'a [u8],
+) -> Result<(P, u16), MessageError> {
+    let (prefix, rest) =
+        postcard::take_from_bytes::<P>(payload).map_err(|_| MessageError::Decode { kind })?;
+    let revision = postcard::take_from_bytes::<u16>(rest).map_or(0, |(revision, _)| revision);
+    Ok((prefix, revision))
+}
+
+impl Serialize for Hello {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let prefix = HelloPrefix {
+            device_name: self.device_name.clone(),
+            roles: self.roles,
+            max_frame: self.max_frame,
+        };
+        serialize_with_revision(&prefix, self.revision, serializer)
+    }
+}
+
+impl Serialize for Welcome {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let prefix = WelcomePrefix {
+            node_id: self.node_id.clone(),
+            session_id: self.session_id,
+            heartbeat_ms: self.heartbeat_ms,
+            max_frame: self.max_frame,
+        };
+        serialize_with_revision(&prefix, self.revision, serializer)
+    }
+}
+
+fn decode_hello(payload: &[u8]) -> Result<Hello, MessageError> {
+    let (prefix, revision) = decode_with_revision::<HelloPrefix>(kind::HELLO, payload)?;
+    Ok(Hello {
+        device_name: prefix.device_name,
+        roles: prefix.roles,
+        max_frame: prefix.max_frame,
+        revision,
+    })
+}
+
+fn decode_welcome(payload: &[u8]) -> Result<Welcome, MessageError> {
+    let (prefix, revision) = decode_with_revision::<WelcomePrefix>(kind::WELCOME, payload)?;
+    Ok(Welcome {
+        node_id: prefix.node_id,
+        session_id: prefix.session_id,
+        heartbeat_ms: prefix.heartbeat_ms,
+        max_frame: prefix.max_frame,
+        revision,
+    })
 }
 
 fn map_encode_error(err: postcard::Error, available: usize) -> MessageError {
@@ -107,8 +208,7 @@ pub(crate) fn encode_with<T: Serialize + ?Sized>(
     )?)
 }
 
-/// Encodes a [`kind::PROVIDER_STATE`] frame from borrowed records (no clone), returning the frame
-/// length.
+/// Encodes a [`kind::PROVIDER_STATE`] frame from borrowed records, returning the frame length.
 ///
 /// # Errors
 ///
@@ -122,9 +222,9 @@ pub fn encode_provider_state(
     encode_with(
         kind::PROVIDER_STATE,
         seq,
-        &ProviderStateRef {
-            provider,
-            resources,
+        &ProviderStateWire {
+            provider: provider.into(),
+            resources: resources.iter().map(ResourceWire::from).collect(),
         },
         buf,
     )
@@ -140,7 +240,8 @@ pub fn encode_leases(
     seq: u16,
     buf: &mut [u8],
 ) -> Result<usize, MessageError> {
-    encode_with(kind::LEASES, seq, leases, buf)
+    let leases: Vec<LeaseWire> = leases.iter().map(LeaseWire::from).collect();
+    encode_with(kind::LEASES, seq, &leases, buf)
 }
 
 /// Encodes a [`kind::ACTION_REQUEST`] frame from borrowed fields, returning the frame length.
@@ -201,7 +302,8 @@ pub(crate) fn decode_body<'a, T: Deserialize<'a>>(
 
 /// Decodes a [`kind::LEASES`] body.
 pub(crate) fn decode_leases(payload: &[u8]) -> Result<Vec<LeaseRecord>, MessageError> {
-    decode_body::<LeasesBody>(kind::LEASES, payload).map(|body| body.leases)
+    decode_body::<LeasesBody>(kind::LEASES, payload)
+        .map(|body| body.leases.into_iter().map(Into::into).collect())
 }
 
 impl Message {
@@ -274,11 +376,11 @@ impl Message {
     /// [`MessageError::Decode`] if the payload is not a valid body for `kind`.
     pub fn decode_payload(kind: u8, payload: &[u8]) -> Result<Self, MessageError> {
         Ok(match kind {
-            kind::HELLO => Self::Hello(decode_body::<Hello>(kind, payload)?),
-            kind::WELCOME => Self::Welcome(decode_body::<Welcome>(kind, payload)?),
+            kind::HELLO => Self::Hello(decode_hello(payload)?),
+            kind::WELCOME => Self::Welcome(decode_welcome(payload)?),
             kind::REJECT => Self::Reject(decode_body::<RejectReason>(kind, payload)?),
             kind::PROVIDER_STATE => {
-                Self::ProviderState(decode_body::<ProviderState>(kind, payload)?)
+                Self::ProviderState(decode_body::<ProviderStateWire>(kind, payload)?.into())
             }
             kind::ACK => Self::Ack {
                 seq: decode_body(kind, payload)?,

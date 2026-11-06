@@ -370,6 +370,12 @@ impl<T: Transport> HostSession<T> {
         self.core.session_id()
     }
 
+    /// The current session's interface revision: the lower of the device's and
+    /// [`crate::LINK_INTERFACE_REVISION`].
+    pub fn revision(&self) -> Option<u16> {
+        self.core.revision()
+    }
+
     /// The latest snapshot received in this session.
     pub fn provider_state(&self) -> Option<&ProviderState> {
         self.core.provider_state()

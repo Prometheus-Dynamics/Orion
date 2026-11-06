@@ -25,16 +25,16 @@ These hold for every kind, old and new. `crates/link/tests/link_encoding.rs` enf
 2. **No change in the middle of a body.** Postcard is not self-describing, so a field added
    inside a nested struct shifts every byte after it. Nested types stay as they are; a body that
    needs more grows at its end, or a new kind replaces it.
-3. **No new enum variants in existing fields.** A reader that predates the variant fails to
-   decode the whole body. A new variant goes in a new field or a new kind, with a default that
-   old writers produce by not sending it.
+3. **New enum variants only where the peer knows them.** A reader that predates a variant fails
+   to decode the whole body, so a variant is appended to the enum, belongs to a revision, and a
+   side sends it only when the session's revision includes it.
 4. **Appended fields have defaults.** A body shorter than the reader's type is valid: missing
    trailing fields take their defaults. Postcard does not do this by itself, so step 1 adds it to
    the decoder. Longer bodies keep working as today (trailing bytes ignored).
 5. **The wire types are the link's own.** Bodies are defined by types in `orion-link`, not by the
-   node's records. The gateway converts between them. A record change in `orion-control-plane`
-   does not change the wire; only a deliberate change to a wire type does, and the fixtures catch
-   it.
+   node's records; `orion-link` converts between them. A record change in `orion-control-plane`
+   does not change the wire: the conversions stop compiling until the change is decided for the
+   link, and the fixtures catch any change to a wire type.
 6. **`LINK_PROTOCOL_VERSION` stays 1.** A bump means every deployed device and client stops
    working with the new node, so it is reserved for a framing change. Additions use revisions
    (below).
@@ -55,8 +55,8 @@ host will answer a request at all. So both sides announce an interface revision:
   sees a lower session revision and reports the missing requests as unsupported, without sending
   them.
 
-Revision 0 is today's link protocol. Each step below that adds kinds raises the revision by one,
-recorded in a table in link-protocol.md.
+Revision 0 is the link protocol before revisions. Each step below that adds kinds raises the
+revision by one, recorded in the table in link-protocol.md ("Revisions").
 
 ## Roles
 
@@ -131,17 +131,17 @@ protocol, for same-build tools (`orionctl`). They can move later, one kind range
 Each step lands on `dev` with its fixtures, tests and docs, and raises the revision when it adds
 kinds.
 
-1. **Wire types and rules.** This document, then link-owned body types in `orion-link` with
-   conversions in the gateway; the fixtures stay byte for byte (proof the wire did not change).
-   `revision` appended to `Hello` and `Welcome`. Revision 1.
+1. **Wire types and rules.** This document, then link-owned body types in `orion-link`; the
+   fixtures stay byte for byte (proof the wire did not change). `revision` appended to `Hello` and
+   `Welcome`. Still revision 0: nothing new to announce yet. Done.
 2. **Unix listener.** `unix:` links with many sessions, peer identity, roles, rate limit and
    byte-bounded queues. The existing provider kinds work over it unchanged.
 3. **Client role, status and actions.** Request correlation, status query and watch, run, query
-   and watch actions. Revision 2.
+   and watch actions. Revision 1.
 4. **Streams.** Declare and publish for providers, subscribe for clients. Sample chunks keep
-   their current encoding. Revision 3.
+   their current encoding. Revision 2.
 5. **Records and the executor role.** Workloads and assignments (`0x12`, `0x13`), resource and
-   provider reads. Revision 4.
+   provider reads. Revision 3.
 6. **Remote transport.** Revision unchanged unless it needs kinds.
 7. **`liborion`.** A C library over the interface: opaque handles, byte buffers, a pollable fd,
    and a blocking client for the fd latest-value channel.

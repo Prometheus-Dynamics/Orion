@@ -263,6 +263,7 @@ fn host_rejects_another_protocol_version() {
         device_name: "future-board".into(),
         roles: orion_link::message::Roles::PROVIDER,
         max_frame: 512,
+        revision: 0,
     });
     let mut frame = vec![0u8; 128];
     let len = hello.encode(1, &mut frame).unwrap();
@@ -293,6 +294,34 @@ fn host_rejects_another_protocol_version() {
             ..
         })
     ));
+}
+
+#[test]
+fn the_session_uses_the_lower_revision_and_the_welcome_announces_the_hosts() {
+    for device_revision in [0, orion_link::LINK_INTERFACE_REVISION, u16::MAX] {
+        let mut host = HostSession::stream(host_config());
+        let hello = Message::Hello(orion_link::message::Hello {
+            device_name: "imu-board".into(),
+            roles: orion_link::message::Roles::PROVIDER,
+            max_frame: 512,
+            revision: device_revision,
+        });
+        let mut frame = vec![0u8; 128];
+        let len = hello.encode(1, &mut frame).unwrap();
+        let wire: Vec<u8> =
+            StreamEncoder::for_message(FrameHeader::new(kind::HELLO, 1), &frame[4..len - 4])
+                .collect();
+        host.receive(&wire);
+        let lower = std::cmp::min(device_revision, orion_link::LINK_INTERFACE_REVISION);
+        assert_eq!(host.revision(), Some(lower));
+        let reply = host.transmit().unwrap();
+        let mut decoder = orion_link::StreamDecoder::<128>::new();
+        let (_, result) = decoder.push_slice(&reply[1..]);
+        let Message::Welcome(welcome) = Message::decode(&result.unwrap().unwrap()).unwrap() else {
+            panic!("expected a welcome");
+        };
+        assert_eq!(welcome.revision, orion_link::LINK_INTERFACE_REVISION);
+    }
 }
 
 #[test]

@@ -69,6 +69,7 @@ fn welcome(session_id: u32) -> Message {
         session_id,
         heartbeat_ms: 1_000,
         max_frame: 4_096,
+        revision: 0,
     })
 }
 
@@ -126,6 +127,7 @@ fn hello_backs_off_exponentially_up_to_the_cap() {
             device_name: "dev".into(),
             roles: Roles::PROVIDER,
             max_frame: 256,
+            revision: 0,
         })
     );
 }

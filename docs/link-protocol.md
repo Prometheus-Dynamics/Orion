@@ -129,8 +129,8 @@ postcard encodings of the listed fields, in order.
 
 | Kind | Name | Direction | Body | Notes |
 | --- | --- | --- | --- | --- |
-| `0x01` | `Hello` | device → host | `device_name: String`, `roles: u8` (bit 0 provider, bit 1 executor), `max_frame: u32` | Opens or reopens a session. The protocol version is the frame header's `version`; the body carries no separate copy. |
-| `0x02` | `Welcome` | host → device | `node_id`, `session_id: u32`, `heartbeat_ms: u32`, `max_frame: u32` | `max_frame` is the negotiated minimum of both sides. |
+| `0x01` | `Hello` | device → host | `device_name: String`, `roles: u8` (bit 0 provider, bit 1 executor), `max_frame: u32`, then `revision: u16` when not 0 | Opens or reopens a session. The protocol version is the frame header's `version`; the body carries no separate copy. `revision` is the highest interface revision the device speaks (see "Revisions"). |
+| `0x02` | `Welcome` | host → device | `node_id`, `session_id: u32`, `heartbeat_ms: u32`, `max_frame: u32`, then `revision: u16` when not 0 | `max_frame` is the negotiated minimum of both sides. `revision` is the host's highest interface revision. |
 | `0x03` | `Reject` | host → device | `reason: u8` | See the reject reasons below. |
 | `0x04` | `Ping` | device → host (either direction is answered) | `now_ms: u64` | Sent by the device every heartbeat. |
 | `0x05` | `Pong` | answer to `Ping` | `now_ms: u64` | Echoes the ping's `now_ms`, so the pinging side can measure the round trip. |
@@ -163,7 +163,8 @@ Rules for decoders:
 - Unknown and reserved kinds are ignored by both sessions (after duplicate suppression they still
   count as liveness), so new kinds can be added without a version bump.
 - Trailing bytes after a body are ignored, so a later version can append fields compatibly.
-- `Hello` and `Reject` (kind numbers and bodies) are frozen across versions. A host answers a
+- `Hello` and `Reject` (kind numbers, and the fields they had in version 1) are frozen across
+  versions; `Hello` only grows at its end. A host answers a
   `Hello` of another version with `Reject { VersionMismatch }` in its own version; a device accepts
   a `Reject` of any version (decoding the reason if it can, otherwise assuming `VersionMismatch`)
   and ignores every other frame of another version.
@@ -604,3 +605,20 @@ the records, the views, and the fixture together.
 The link protocol is also Orion's stable message interface for software built outside the image.
 Its rules for extending the protocol, and the plan for the client role and the Unix listener, are in
 [design/stable-interface.md](design/stable-interface.md).
+
+The bodies that carry Orion records (`ProviderState`, `Leases`, `Status`, action payloads) are
+encoded through `orion-link`'s own body types, which mirror the records field by field in wire
+order. A record that changes does not change the wire: the conversion stops compiling until the
+change is decided for the link.
+
+### Revisions
+
+`Hello` and `Welcome` end with an optional `revision: u16`, the highest interface revision the
+sender speaks (`LINK_INTERFACE_REVISION`). It is left off when it is 0, so a revision-0 body is the
+body of version 1 before revisions existed, and a missing field reads as 0. A session uses the lower
+of both sides' revisions (`HostSession::revision`), and a side sends a kind only when that revision
+includes it. Revisions do not change `LINK_PROTOCOL_VERSION`.
+
+| Revision | Adds |
+|---|---|
+| 0 | The protocol as of version 1, before revisions. |

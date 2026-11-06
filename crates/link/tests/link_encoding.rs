@@ -85,6 +85,7 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
                 device_name: "imu-board".into(),
                 roles: Roles::PROVIDER,
                 max_frame: 512,
+                revision: 0,
             }),
         ),
         (
@@ -94,6 +95,7 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
                 session_id: 0x0102_0304,
                 heartbeat_ms: 1_000,
                 max_frame: 512,
+                revision: 0,
             }),
         ),
         (
@@ -184,6 +186,27 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
             "action_catalog",
             Message::ActionCatalog(ActionCatalog {
                 names: vec!["locate".into(), "flash".into()],
+            }),
+        ),
+        // Interface revisions, appended to `Hello` and `Welcome`. At revision 0 the field is left
+        // off, so the `hello` and `welcome` entries above did not change.
+        (
+            "hello.revision",
+            Message::Hello(Hello {
+                device_name: "imu-board".into(),
+                roles: Roles::PROVIDER,
+                max_frame: 512,
+                revision: 3,
+            }),
+        ),
+        (
+            "welcome.revision",
+            Message::Welcome(Welcome {
+                node_id: NodeId::new("node-a"),
+                session_id: 0x0102_0304,
+                heartbeat_ms: 1_000,
+                max_frame: 512,
+                revision: 3,
             }),
         ),
     ]
@@ -418,4 +441,63 @@ fn trailing_payload_bytes_are_ignored() {
         Message::decode_payload(kind::ACK, &payload).unwrap(),
         Message::Ack { seq: 7 }
     );
+}
+
+/// The payload of a frame (between the 4-byte header and the CRC).
+fn payload(frame: &[u8]) -> &[u8] {
+    &frame[4..frame.len() - 4]
+}
+
+#[test]
+fn a_revision_is_appended_after_the_frozen_hello_and_welcome_fields() {
+    let hello = |revision| {
+        Message::Hello(Hello {
+            device_name: "imu-board".into(),
+            roles: Roles::PROVIDER,
+            max_frame: 512,
+            revision,
+        })
+    };
+    let old = encode(&hello(0), 1);
+    let new = encode(&hello(3), 1);
+    assert!(payload(&new).starts_with(payload(&old)));
+    assert_eq!(&payload(&new)[payload(&old).len()..], &[3]);
+
+    // A host that reads only the frozen fields still gets them right.
+    let welcome = encode(
+        &Message::Welcome(Welcome {
+            node_id: NodeId::new("node-a"),
+            session_id: 7,
+            heartbeat_ms: 1_000,
+            max_frame: 512,
+            revision: 300,
+        }),
+        1,
+    );
+    let view = orion_link::wire::WelcomeView::decode(payload(&welcome)).expect("prefix decodes");
+    assert_eq!(
+        (view.node_id, view.session_id, view.max_frame),
+        ("node-a", 7, 512)
+    );
+}
+
+#[test]
+fn a_body_without_a_revision_decodes_as_revision_0_and_extra_bytes_are_ignored() {
+    let hello = Message::Hello(Hello {
+        device_name: "imu-board".into(),
+        roles: Roles::PROVIDER,
+        max_frame: 512,
+        revision: 0,
+    });
+    let frame = encode(&hello, 1);
+    let decoded = Message::decode_payload(kind::HELLO, payload(&frame)).unwrap();
+    assert_eq!(decoded, hello);
+
+    // A later field after the revision is ignored.
+    let mut longer = payload(&frame).to_vec();
+    longer.extend_from_slice(&[0x02, 0xAA, 0xBB]);
+    let Message::Hello(decoded) = Message::decode_payload(kind::HELLO, &longer).unwrap() else {
+        panic!("not a hello");
+    };
+    assert_eq!(decoded.revision, 2);
 }

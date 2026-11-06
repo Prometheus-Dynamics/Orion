@@ -84,7 +84,8 @@ mod read_error;
 
 pub use crc::{Crc32c, crc32c};
 pub use frame::{
-    CRC_LEN, FRAME_OVERHEAD, FrameError, FrameHeader, FrameView, HEADER_LEN, LINK_PROTOCOL_VERSION,
+    CRC_LEN, FRAME_OVERHEAD, FrameError, FrameHeader, FrameView, HEADER_LEN,
+    LINK_INTERFACE_REVISION, LINK_PROTOCOL_VERSION,
 };
 pub use packet::{
     CanLinkIds, PacketError, PacketStats, Reassembler, Segment, SegmentMtu, Segmenter,

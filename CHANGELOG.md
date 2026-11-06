@@ -8,6 +8,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- Link protocol: `Hello` and `Welcome` end with an optional interface `revision`
+  (`LINK_INTERFACE_REVISION`, `HostSession::revision`), left off at 0, so existing devices send and
+  receive the same bytes. The record bodies are encoded through `orion-link`'s own body types, so a
+  record change no longer changes the link wire (fixtures unchanged). `message::Hello` and
+  `message::Welcome` gain a `revision` field. Plan: `docs/design/stable-interface.md`.
 - MCU template feature `ffi-slots`: the C entry points run `SlotFirmware` over `orion_port_*` flash
   hooks, with `orion_boot` for the boot stage. `scripts/mcu-size.sh` reports it as `uart-slots`
   (+8.1 to 8.6 KB flash and +216 B static RAM over `uart-xfer`, without the board's flash driver).

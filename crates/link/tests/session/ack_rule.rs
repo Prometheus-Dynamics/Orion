@@ -122,6 +122,7 @@ fn stale_acks_never_clear_a_reliable_stream_and_a_dropped_snapshot_is_retransmit
             session_id: 1,
             heartbeat_ms: 10_000,
             max_frame: 4_096,
+            revision: 0,
         }),
         100,
     );

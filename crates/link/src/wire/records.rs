@@ -1,8 +1,11 @@
-//! The full Orion records as device bodies (feature `alloc`): they encode through postcard itself
-//! (into a [`Writer`]), so they are the reference the hand-written views are tested against.
+//! The full Orion records as device bodies (feature `alloc`): they encode through the link's body
+//! types and postcard (into a [`Writer`]), so they are the reference the hand-written views are
+//! tested against.
 
 use orion_control_plane::{ProviderRecord, ResourceRecord};
 use serde::Serialize;
+
+use crate::message::body::{ProviderWire, ResourceWire};
 
 use super::codec::{Encode, Writer};
 use super::views::{ProviderBody, ResourceBody, StatusBody};
@@ -37,10 +40,10 @@ fn encode_serde<T: Serialize + ?Sized>(value: &T, w: &mut Writer<'_>) {
 }
 
 macro_rules! serde_body {
-    ($($ty:ty => $marker:ident),+ $(,)?) => {$(
+    ($($ty:ty => $marker:ident via $wire:ty),+ $(,)?) => {$(
         impl Encode for $ty {
             fn encode(&self, w: &mut Writer<'_>) {
-                encode_serde(self, w);
+                encode_serde(&<$wire>::from(self), w);
             }
         }
         impl sealed::Sealed for $ty {}
@@ -49,10 +52,17 @@ macro_rules! serde_body {
 }
 
 serde_body!(
-    ProviderRecord => ProviderBody,
-    ResourceRecord => ResourceBody,
-    StatusEntry => StatusBody,
+    ProviderRecord => ProviderBody via ProviderWire,
+    ResourceRecord => ResourceBody via ResourceWire,
 );
+
+impl Encode for StatusEntry {
+    fn encode(&self, w: &mut Writer<'_>) {
+        encode_serde(self, w);
+    }
+}
+impl sealed::Sealed for StatusEntry {}
+impl StatusBody for StatusEntry {}
 
 impl Serialize for Roles {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

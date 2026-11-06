@@ -650,6 +650,8 @@ The shared ABI primitives wait until the hardware repository says they are ready
       Its message types stay separate from the internal records, so a record change does not change
       the wire. Measure the packaged node's footprint when the listener lands: `link-gateway` is not a
       default feature. Rough size: 6 to 8 engineer-weeks with `liborion`.
+      Progress (steps in the design): 1 done (link-owned body types, fixtures unchanged; `revision`
+      in `Hello` and `Welcome`).
 - [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
       It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.

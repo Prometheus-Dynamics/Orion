@@ -12,6 +12,11 @@ use crate::crc::{Crc32c, crc32c};
 /// Independent of the node's control-protocol version.
 pub const LINK_PROTOCOL_VERSION: u8 = 1;
 
+/// The interface revision this build speaks, announced in `Hello` and `Welcome`
+/// (`docs/design/stable-interface.md`). A session uses the lower of both sides' revisions, and
+/// sends a kind only when that revision includes it. Revision 0 is the protocol before revisions.
+pub const LINK_INTERFACE_REVISION: u16 = 0;
+
 /// Header length: version, kind, and the little-endian sequence number.
 pub const HEADER_LEN: usize = 4;
 
