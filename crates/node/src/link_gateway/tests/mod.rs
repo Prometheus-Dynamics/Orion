@@ -1,6 +1,6 @@
 //! Link gateway tests: config parsing, serial end-to-end over pseudo-terminals, and CAN bridging
 //! over an in-memory bus (plus an ignored test on a real `vcan0`), and link-owned providers across
-//! a restart.
+//! a restart, and Unix links over real sockets.
 
 mod actions;
 mod can;
@@ -10,6 +10,7 @@ mod firmware;
 mod persist;
 mod serial;
 mod status;
+mod unix;
 
 use crate::{NodeApp, NodeConfig};
 use orion::control_plane::{

@@ -1,9 +1,8 @@
 use super::{
     AuthenticatedOperator, AuthenticatedPeer, AuthorizationLookup, LOCAL_AUTH_ALLOW_ENV,
-    LOCAL_PROVIDER_ALLOW_ENV, LocalAccessAllowList, LocalAccessGrants, LocalAuthenticationMode,
-    NodeSecurity, OperatorAuthentication, PeerAuthenticationMode, PeerObservedScope,
-    crypto::{current_effective_gid, current_effective_uid},
-    transport_binding_from_hello,
+    LOCAL_PROVIDER_ALLOW_ENV, LocalAccessAllowList, LocalAccessGrants, LocalAdmission,
+    LocalAdmissionPolicy, LocalAuthenticationMode, NodeSecurity, OperatorAuthentication,
+    PeerAuthenticationMode, PeerObservedScope, transport_binding_from_hello,
 };
 use crate::NodeError;
 use crate::service::{
@@ -93,10 +92,7 @@ impl Authenticator for NodeSecurityAuthenticator {
 struct NodeSecurityAuthorizer {
     security: Arc<NodeSecurity>,
     peer_authentication: PeerAuthenticationMode,
-    local_authentication: LocalAuthenticationMode,
-    grants: LocalAccessGrants,
-    local_uid: u32,
-    local_gid: u32,
+    admission: LocalAdmissionPolicy,
     lookup: Arc<dyn AuthorizationLookup>,
 }
 
@@ -147,44 +143,29 @@ impl NodeSecurityAuthorizer {
     fn new(
         security: &Arc<NodeSecurity>,
         peer_authentication: PeerAuthenticationMode,
-        local_authentication: LocalAuthenticationMode,
-        grants: LocalAccessGrants,
-        local_uid: u32,
-        local_gid: u32,
+        admission: LocalAdmissionPolicy,
         lookup: Arc<dyn AuthorizationLookup>,
     ) -> Self {
         Self {
             security: security.clone(),
             peer_authentication,
-            local_authentication,
-            grants,
-            local_uid,
-            local_gid,
+            admission,
             lookup,
         }
     }
 
     fn authorize_local_identity(&self, request: &ControlRequest) -> Result<(), NodeError> {
-        if self.local_authentication == LocalAuthenticationMode::Disabled {
+        if self.admission.mode == LocalAuthenticationMode::Disabled {
             return Ok(());
         }
         let Some(identity) = request.context.local_identity.as_ref() else {
             return Ok(());
         };
-        let same_user = identity.uid == self.local_uid;
-        let same_group = identity.is_member_of(self.local_gid);
-        let allowed = match self.local_authentication {
-            LocalAuthenticationMode::Disabled => true,
-            LocalAuthenticationMode::SameUser => same_user,
-            LocalAuthenticationMode::SameUserOrGroup => same_user || same_group,
-            LocalAuthenticationMode::SameUserOrGroupOrRoot => {
-                same_user || same_group || identity.uid == 0
-            }
-        } || self.grants.admin.admits(identity);
-        if allowed {
+        let admission = self.admission.admit(identity);
+        if admission == LocalAdmission::Full {
             return Ok(());
         }
-        if self.grants.provider.admits(identity) {
+        if admission == LocalAdmission::ProviderLane {
             if provider_lane_request(request) {
                 return Ok(());
             }
@@ -205,9 +186,9 @@ impl NodeSecurityAuthorizer {
             identity.uid,
             identity.gid,
             identity.groups,
-            self.local_authentication,
-            self.local_uid,
-            self.local_gid
+            self.admission.mode,
+            self.admission.local_uid,
+            self.admission.local_gid
         )))
     }
 
@@ -671,18 +652,26 @@ impl PeerSecurityMiddleware {
         grants: LocalAccessGrants,
         lookup: Arc<dyn AuthorizationLookup>,
     ) -> Self {
-        let local_uid = current_effective_uid();
-        let local_gid = current_effective_gid();
+        Self::with_local_admission(
+            security,
+            LocalAdmissionPolicy::for_this_process(local_authentication, grants),
+            lookup,
+        )
+    }
+
+    /// Judges local callers by `admission` (shared with the `unix:` links).
+    pub(crate) fn with_local_admission(
+        security: &Arc<NodeSecurity>,
+        admission: LocalAdmissionPolicy,
+        lookup: Arc<dyn AuthorizationLookup>,
+    ) -> Self {
         Self {
             inner: AuthorizationMiddleware::new(
                 Arc::new(NodeSecurityAuthenticator::new(security.clone())),
                 Arc::new(NodeSecurityAuthorizer::new(
                     security,
                     security.mode(),
-                    local_authentication,
-                    grants,
-                    local_uid,
-                    local_gid,
+                    admission,
                     lookup,
                 )),
             ),

@@ -2,7 +2,8 @@
 //!
 //! Syntax: a `;`-separated list of `<kind>:<target>[?key=value&key=value...]` entries, for example
 //! `serial:/dev/ttyAMA0?baud=115200&allow=imu-board` or
-//! `can:can0?device_base=0x600&host_base=0x680&addresses=1-16&fd=false`. Every key is documented
+//! `can:can0?device_base=0x600&host_base=0x680&addresses=1-16&fd=false` or
+//! `unix:/run/orion/link.sock?max_connections=16`. Every key is documented
 //! in docs/node-env.md ("Link gateway").
 
 use crate::NodeError;
@@ -30,6 +31,12 @@ pub const DEFAULT_CAN_HOST_BASE: u32 = 0x680;
 pub const DEFAULT_CAN_ADDRESSES: RangeInclusive<u32> = 1..=16;
 /// Most device addresses one CAN link may serve (one kernel receive filter per address).
 pub const MAX_CAN_ADDRESSES: u32 = 512;
+/// Default number of connections a Unix link serves at once.
+pub const DEFAULT_UNIX_MAX_CONNECTIONS: u32 = 32;
+/// Most connections a Unix link may be configured to serve.
+pub const MAX_UNIX_CONNECTIONS: u32 = 1024;
+/// `sun_path` length on Linux: a socket path must be shorter, its terminating NUL included.
+const MAX_UNIX_PATH: usize = 108;
 
 const MIN_HEARTBEAT_MS: u32 = 10;
 const MAX_HEARTBEAT_MS: u32 = 600_000;
@@ -66,6 +73,19 @@ pub enum LinkTransport {
     Serial(SerialLinkConfig),
     /// A SocketCAN interface shared by several devices.
     Can(CanLinkConfig),
+    /// A Unix stream socket the node listens on: one session per connection, COBS framed as on a
+    /// serial port.
+    Unix(UnixLinkConfig),
+}
+
+/// `unix:<path>` settings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnixLinkConfig {
+    /// Socket path, e.g. `/run/orion/link.sock`. A stale socket at the path is replaced; any other
+    /// file there is left alone and the link does not open.
+    pub path: PathBuf,
+    /// Connections served at once (`max_connections=`); further connections are closed at once.
+    pub max_connections: u32,
 }
 
 /// `serial:<path>` settings.
@@ -137,9 +157,12 @@ impl LinkConfig {
 
     /// Parses one `<kind>:<target>[?query]` entry.
     pub fn parse(entry: &str) -> Result<Self, NodeError> {
-        let (kind, rest) = entry
-            .split_once(':')
-            .ok_or_else(|| link_error(entry, "expected `serial:<path>` or `can:<interface>`"))?;
+        let (kind, rest) = entry.split_once(':').ok_or_else(|| {
+            link_error(
+                entry,
+                "expected `serial:<path>`, `can:<interface>` or `unix:<path>`",
+            )
+        })?;
         let (target, query) = rest.split_once('?').unwrap_or((rest, ""));
         let target = target.trim();
         if target.is_empty() {
@@ -181,10 +204,33 @@ impl LinkConfig {
                 })
             }
             "can" => LinkTransport::Can(parse_can(entry, target, &mut params)?),
+            "unix" => {
+                let max_connections =
+                    params.number("max_connections", DEFAULT_UNIX_MAX_CONNECTIONS)?;
+                if !(1..=MAX_UNIX_CONNECTIONS).contains(&max_connections) {
+                    return Err(link_error(
+                        entry,
+                        format!("max_connections must be between 1 and {MAX_UNIX_CONNECTIONS}"),
+                    ));
+                }
+                if !target.starts_with('/') {
+                    return Err(link_error(entry, "the socket path must be absolute"));
+                }
+                if target.len() >= MAX_UNIX_PATH {
+                    return Err(link_error(
+                        entry,
+                        format!("the socket path must be shorter than {MAX_UNIX_PATH} bytes"),
+                    ));
+                }
+                LinkTransport::Unix(UnixLinkConfig {
+                    path: PathBuf::from(target),
+                    max_connections,
+                })
+            }
             other => {
                 return Err(link_error(
                     entry,
-                    format!("unknown link kind `{other}`; expected `serial` or `can`"),
+                    format!("unknown link kind `{other}`; expected `serial`, `can` or `unix`"),
                 ));
             }
         };

@@ -290,7 +290,7 @@ quarantined cluster state.
 
 | Variable | Default | Valid values | Failure behavior |
 | --- | --- | --- | --- |
-| `ORION_NODE_LINKS` | unset (no links) | `;`-separated `<kind>:<target>[?key=value&...]` entries, `kind` = `serial` or `can` | Any malformed entry, unknown or misplaced key, out-of-range value, duplicate key, or duplicate link fails startup with `NodeError::Config` naming the entry. A port or interface that cannot be opened does not fail startup; the link retries every second and logs the error. |
+| `ORION_NODE_LINKS` | unset (no links) | `;`-separated `<kind>:<target>[?key=value&...]` entries, `kind` = `serial`, `can` or `unix` | Any malformed entry, unknown or misplaced key, out-of-range value, duplicate key, or duplicate link fails startup with `NodeError::Config` naming the entry. A port, interface or socket that cannot be opened does not fail startup; the link retries every second and logs the error. |
 
 Keys for every link:
 
@@ -316,6 +316,24 @@ Keys for every link:
 | `addresses` | `1-16` | `N` or `A-B`, at most 512 addresses | Device addresses served. Every identifier must fit 11 bits (29 with `extended`), and the device and host identifier ranges must not overlap. |
 | `fd` | `false` | `true`/`false` (`1`/`0`, `yes`/`no`, `on`/`off`) | CAN FD (64-byte frames, `CAN_RAW_FD_FRAMES`). The interface must be configured for FD. |
 | `extended` | `false` | as `fd` | 29-bit identifiers. |
+
+`unix:<path>` keys (a Unix stream socket the node listens on; one session per connection, COBS
+framed as on a serial port; the path must be absolute and shorter than 108 bytes):
+
+| Key | Default | Valid values | Meaning |
+| --- | --- | --- | --- |
+| `max_connections` | `32` | `1`-`1024` | Connections served at once; a connection past it is closed at once. |
+
+A Unix link judges each caller at connect by its `SO_PEERCRED` identity, like the control sockets:
+`ORION_NODE_LOCAL_AUTH` and `ORION_NODE_LOCAL_AUTH_ALLOW` admit it, and so does
+`ORION_NODE_LOCAL_PROVIDER_ALLOW` (a provider session needs no more). A caller admitted by none is
+disconnected. Frames from one connection are read within the local control budget
+(`ORION_NODE_LOCAL_RATE_LIMIT_WINDOW_MS`, `ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES`): past it the
+connection is not read until the window ends, so nothing is dropped. Output waiting for a connection
+is bounded at 64 KiB; a connection that takes no output for 5 s is closed. A second connection
+whose `Hello` names a device already connected on the link is closed. A stale socket at the path is
+replaced at start and removed at shutdown; any other file there is left alone and the link reports
+the error. `link.release`, `link.attach` and firmware transfers do not apply to Unix links.
 
 Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:can0?device_base=0x600&host_base=0x680&addresses=1-16&allow=motor-a,motor-b'`.
 

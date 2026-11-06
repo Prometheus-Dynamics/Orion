@@ -194,6 +194,62 @@ fn lookup_group(name: &str) -> Option<u32> {
     (ok && !found.is_null()).then_some(entry.gr_gid)
 }
 
+/// What a local caller is admitted to, from its Unix socket credentials ([`LocalAdmissionPolicy`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LocalAdmission {
+    /// Every local operation: the authentication mode or `ORION_NODE_LOCAL_AUTH_ALLOW` admits it.
+    Full,
+    /// The provider and executor lane only (`ORION_NODE_LOCAL_PROVIDER_ALLOW`).
+    ProviderLane,
+    /// Nothing.
+    Refused,
+}
+
+/// The node's rule for local callers: `ORION_NODE_LOCAL_AUTH` against the node's own uid and gid,
+/// and the two allow-lists. The control sockets and the `unix:` links both judge callers by it.
+#[derive(Clone, Debug)]
+pub(crate) struct LocalAdmissionPolicy {
+    pub(crate) mode: super::LocalAuthenticationMode,
+    pub(crate) grants: LocalAccessGrants,
+    pub(crate) local_uid: u32,
+    pub(crate) local_gid: u32,
+}
+
+impl LocalAdmissionPolicy {
+    /// The policy judged against this process's effective uid and gid.
+    pub(crate) fn for_this_process(
+        mode: super::LocalAuthenticationMode,
+        grants: LocalAccessGrants,
+    ) -> Self {
+        Self {
+            mode,
+            grants,
+            local_uid: super::crypto::current_effective_uid(),
+            local_gid: super::crypto::current_effective_gid(),
+        }
+    }
+
+    /// What `identity` is admitted to.
+    pub(crate) fn admit(&self, identity: &UnixPeerIdentity) -> LocalAdmission {
+        use super::LocalAuthenticationMode as Mode;
+        let same_user = identity.uid == self.local_uid;
+        let same_group = identity.is_member_of(self.local_gid);
+        let full = match self.mode {
+            Mode::Disabled => true,
+            Mode::SameUser => same_user,
+            Mode::SameUserOrGroup => same_user || same_group,
+            Mode::SameUserOrGroupOrRoot => same_user || same_group || identity.uid == 0,
+        } || self.grants.admin.admits(identity);
+        if full {
+            LocalAdmission::Full
+        } else if self.grants.provider.admits(identity) {
+            LocalAdmission::ProviderLane
+        } else {
+            LocalAdmission::Refused
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,5 +310,52 @@ mod tests {
         assert!(list.admits(&identity(1000, 1000, &[4, 990])));
         assert!(!list.admits(&identity(1000, 1000, &[4, 27])));
         assert!(!LocalAccessAllowList::new().admits(&identity(0, 0, &[])));
+    }
+
+    #[test]
+    fn admission_is_full_by_mode_or_admin_list_and_provider_lane_by_the_provider_list() {
+        use super::super::LocalAuthenticationMode as Mode;
+        let policy = |mode| LocalAdmissionPolicy {
+            mode,
+            grants: LocalAccessGrants {
+                admin: LocalAccessAllowList::new().allow_uid(1001),
+                provider: LocalAccessAllowList::new().allow_gid(990),
+            },
+            local_uid: 1000,
+            local_gid: 1000,
+        };
+        let same_user = policy(Mode::SameUser);
+        assert_eq!(
+            same_user.admit(&identity(1000, 5, &[])),
+            LocalAdmission::Full
+        );
+        assert_eq!(
+            same_user.admit(&identity(1001, 5, &[])),
+            LocalAdmission::Full
+        );
+        assert_eq!(
+            same_user.admit(&identity(1002, 5, &[990])),
+            LocalAdmission::ProviderLane
+        );
+        assert_eq!(
+            same_user.admit(&identity(1002, 1000, &[])),
+            LocalAdmission::Refused
+        );
+        assert_eq!(
+            same_user.admit(&identity(0, 0, &[])),
+            LocalAdmission::Refused
+        );
+        assert_eq!(
+            policy(Mode::SameUserOrGroup).admit(&identity(1002, 1000, &[])),
+            LocalAdmission::Full
+        );
+        assert_eq!(
+            policy(Mode::SameUserOrGroupOrRoot).admit(&identity(0, 0, &[])),
+            LocalAdmission::Full
+        );
+        assert_eq!(
+            policy(Mode::Disabled).admit(&identity(7, 7, &[])),
+            LocalAdmission::Full
+        );
     }
 }

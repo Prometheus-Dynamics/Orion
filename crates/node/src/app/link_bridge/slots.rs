@@ -110,9 +110,7 @@ impl NodeApp {
         released: bool,
     ) -> Result<(), String> {
         let slots = lock(&self.state.links.slots);
-        let slot = slots
-            .get(link)
-            .ok_or_else(|| format!("link {link} is not running"))?;
+        let slot = slots.get(link).ok_or_else(|| no_slot(link))?;
         match &slot.release {
             Release::Port(sender) => {
                 sender.send_replace(released);
@@ -133,9 +131,7 @@ impl NodeApp {
     /// Whether `device` on `link` is released.
     pub(crate) fn link_device_released(&self, link: &str, device: &str) -> Result<bool, String> {
         let slots = lock(&self.state.links.slots);
-        let slot = slots
-            .get(link)
-            .ok_or_else(|| format!("link {link} is not running"))?;
+        let slot = slots.get(link).ok_or_else(|| no_slot(link))?;
         Ok(match &slot.release {
             Release::Port(sender) => *sender.borrow(),
             Release::Devices(sender) => sender.borrow().contains(device),
@@ -149,9 +145,7 @@ impl NodeApp {
         command: FirmwareCommand,
     ) -> Result<(), String> {
         let slots = lock(&self.state.links.slots);
-        let slot = slots
-            .get(link)
-            .ok_or_else(|| format!("link {link} is not running"))?;
+        let slot = slots.get(link).ok_or_else(|| no_slot(link))?;
         slot.jobs
             .send(command)
             .map_err(|_| format!("link {link} stopped before the transfer was started"))
@@ -166,5 +160,14 @@ impl NodeApp {
                 ProviderOwner::Device(claim) if claim.link == link && claim.device == device
             )
         })
+    }
+}
+
+/// Why `link` has no slot: Unix links never have one (no port to release, no firmware path).
+fn no_slot(link: &str) -> String {
+    if link.starts_with("unix:") {
+        format!("link {link} is a Unix link: release, attach and firmware transfers do not apply")
+    } else {
+        format!("link {link} is not running")
     }
 }

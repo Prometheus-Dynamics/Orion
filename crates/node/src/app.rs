@@ -210,6 +210,12 @@ pub struct NodeApp {
     /// Set when the node runs in safe mode (`docs/update-recovery.md`); fixed for this process.
     safe_mode: Option<safe_mode::SafeModeCause>,
     pub(crate) control_middlewares: Arc<[ControlMiddlewareHandle]>,
+    /// Which local callers are admitted: the control sockets and the `unix:` links judge by it.
+    #[cfg_attr(
+        not(all(feature = "link-gateway", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) local_admission: Arc<crate::auth::LocalAdmissionPolicy>,
     pub http: HttpTransport,
     pub ipc: IpcTransport,
     #[cfg(feature = "transport-tcp")]

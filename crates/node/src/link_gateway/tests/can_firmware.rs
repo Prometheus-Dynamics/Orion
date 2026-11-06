@@ -222,7 +222,7 @@ impl Bench {
 fn can_config(link: &LinkConfig) -> CanLinkConfig {
     match &link.transport {
         LinkTransport::Can(can) => can.clone(),
-        LinkTransport::Serial(_) => panic!("expected a CAN link"),
+        _ => panic!("expected a CAN link"),
     }
 }
 

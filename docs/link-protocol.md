@@ -25,7 +25,7 @@ Goals, in priority order:
 | Crate | `std`? | Role |
 | --- | --- | --- |
 | `orion-link` | `no_std` (framing and the device path with its hand-written codec, feature `device`: no `alloc`, no dependencies; serde messages over the records: `alloc`; host session: `std`) | Framing codecs, link messages, the sans-IO device session, and the sans-IO host session. |
-| `orion-node` (`link-gateway` feature) | std | Serves configured serial and SocketCAN links and bridges each device session into the node as a provider. |
+| `orion-node` (`link-gateway` feature) | std | Serves configured serial, SocketCAN and Unix socket links and bridges each device session into the node as a provider. |
 
 Optional `orion-link` features add adapters for common trait ecosystems without changing the core:
 `embedded-io` (blocking byte streams), `embedded-io-async`, and `embedded-can` (CAN frames). The core
@@ -444,6 +444,15 @@ Every key (`allow`, `heartbeat_ms`, `missed_heartbeats`, `max_frame`; serial `ba
 device address in its range on one interface (`HostBus`), with a kernel receive filter per
 device-to-host identifier. A port or interface that is missing or fails is reopened every second,
 so USB adapters can be unplugged and replugged.
+
+A Unix link (`unix:/run/orion/link.sock?max_connections=32`) is a socket the node listens on, for
+software on the same machine: each connection is one session (`HostSession<Stream>`, COBS framed as
+on a serial port), so the existing provider kinds work over it unchanged. The caller's `SO_PEERCRED`
+identity is judged at connect by the node's local policy, frames are read within the local control
+budget, and output is bounded per connection (`docs/node-env.md`, "Link Gateway"). A device name
+belongs to one connection at a time. Release, attach and firmware transfers do not apply to it.
+Frames are limited to `HOST_MAX_FRAME` (4096) like the other links: a larger limit for local
+sockets comes with the kinds that need it.
 
 Bridging, kept generic (nothing about the device's resource types is assumed):
 

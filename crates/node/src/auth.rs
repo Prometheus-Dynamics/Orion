@@ -22,6 +22,7 @@ use getrandom::{SysRng, rand_core::UnwrapErr};
 pub use local_access::{
     LOCAL_AUTH_ALLOW_ENV, LOCAL_PROVIDER_ALLOW_ENV, LocalAccessAllowList, LocalAccessGrants,
 };
+pub(crate) use local_access::{LocalAdmission, LocalAdmissionPolicy};
 pub use modes::{LocalAuthenticationMode, PeerAuthenticationMode};
 use orion::transport::http::HttpRequestPayload;
 use orion_control_plane::{ClientSession, ControlMessage, PeerHello};

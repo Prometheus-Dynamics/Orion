@@ -592,6 +592,13 @@ impl NodeAppBuilder {
             #[cfg(feature = "discovery-mdns")]
             discovery: Arc::default(),
             control_middlewares: Arc::from(Vec::<ControlMiddlewareHandle>::new()),
+            local_admission: Arc::new(crate::auth::LocalAdmissionPolicy::for_this_process(
+                local_authentication_mode,
+                LocalAccessGrants {
+                    admin: local_access_allow,
+                    provider: local_provider_allow,
+                },
+            )),
             http: self.http.unwrap_or_default(),
             ipc: self.ipc.unwrap_or_default(),
             #[cfg(feature = "transport-tcp")]
@@ -599,13 +606,9 @@ impl NodeAppBuilder {
             #[cfg(feature = "transport-quic")]
             quic: self.quic.unwrap_or_default(),
         };
-        let mut control_middlewares = vec![Arc::new(PeerSecurityMiddleware::with_local_grants(
+        let mut control_middlewares = vec![Arc::new(PeerSecurityMiddleware::with_local_admission(
             &app.security,
-            local_authentication_mode,
-            LocalAccessGrants {
-                admin: local_access_allow,
-                provider: local_provider_allow,
-            },
+            (*app.local_admission).clone(),
             local_sessions,
         )) as ControlMiddlewareHandle];
         control_middlewares.extend(self.control_middlewares);

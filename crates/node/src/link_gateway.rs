@@ -3,7 +3,7 @@
 //!
 //! Each link runs in its own task: a serial port drives one `orion_link::host::HostSession`
 //! (COBS byte stream), a SocketCAN interface drives one `orion_link::host::HostBus` (many devices,
-//! demultiplexed by identifier). Device events go through the node's local provider path (see
+//! demultiplexed by identifier), and a Unix socket drives one `HostSession` per connection. Device events go through the node's local provider path (see
 //! `app/link_bridge.rs`); lease sets are refreshed after every desired-state commit. Serial and
 //! SocketCAN I/O are Linux-only and implemented directly on `libc` with tokio's `AsyncFd`.
 
@@ -22,11 +22,14 @@ mod serial_link;
 mod socketcan;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
+#[cfg(target_os = "linux")]
+mod unix_link;
 
 pub use config::{
     CanLinkConfig, DEFAULT_BAUD, DEFAULT_CAN_ADDRESSES, DEFAULT_CAN_DEVICE_BASE,
-    DEFAULT_CAN_HOST_BASE, DEFAULT_HEARTBEAT_MS, DEFAULT_MISSED_HEARTBEATS, LINKS_ENV, LinkConfig,
-    LinkTransport, MAX_CAN_ADDRESSES, SUPPORTED_BAUD_RATES, SerialLinkConfig,
+    DEFAULT_CAN_HOST_BASE, DEFAULT_HEARTBEAT_MS, DEFAULT_MISSED_HEARTBEATS,
+    DEFAULT_UNIX_MAX_CONNECTIONS, LINKS_ENV, LinkConfig, LinkTransport, MAX_CAN_ADDRESSES,
+    MAX_UNIX_CONNECTIONS, SUPPORTED_BAUD_RATES, SerialLinkConfig, UnixLinkConfig,
 };
 
 use crate::{NodeApp, NodeError};
@@ -75,7 +78,7 @@ impl NodeApp {
             let _ = shutdown_rx;
             if !links.is_empty() {
                 return Err(NodeError::Config(format!(
-                    "{LINKS_ENV}: serial and SocketCAN links are only supported on Linux"
+                    "{LINKS_ENV}: serial, SocketCAN and Unix links are only supported on Linux"
                 )));
             }
             Ok(LinkGatewayHandle {
@@ -99,6 +102,10 @@ impl NodeApp {
                         LinkTransport::Can(can) => {
                             let opener = socketcan::opener(can.clone());
                             tokio::spawn(can_link::run(ctx, can, host, opener, shutdown))
+                        }
+                        LinkTransport::Unix(unix) => {
+                            let limits = unix_link::ConnLimits::from_app(self);
+                            tokio::spawn(unix_link::run(ctx, unix, host, limits, shutdown))
                         }
                     }
                 })

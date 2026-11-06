@@ -1,5 +1,8 @@
 use crate::NodeError;
-use crate::link_gateway::{CanLinkConfig, LinkConfig, LinkTransport, SerialLinkConfig};
+use crate::link_gateway::{
+    CanLinkConfig, DEFAULT_UNIX_MAX_CONNECTIONS, LinkConfig, LinkTransport, SerialLinkConfig,
+    UnixLinkConfig,
+};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -108,7 +111,29 @@ fn can_defaults_and_every_key() {
 }
 
 #[test]
+fn parses_unix_links() {
+    let links = parse("unix:/run/orion/link.sock; unix:/run/b.sock?max_connections=4&allow=imu");
+    assert_eq!(links[0].name, "unix:/run/orion/link.sock");
+    assert_eq!(
+        links[0].transport,
+        LinkTransport::Unix(UnixLinkConfig {
+            path: "/run/orion/link.sock".into(),
+            max_connections: DEFAULT_UNIX_MAX_CONNECTIONS,
+        })
+    );
+    let LinkTransport::Unix(unix) = &links[1].transport else {
+        panic!("expected a Unix link");
+    };
+    assert_eq!(unix.max_connections, 4);
+    assert_eq!(
+        links[1].allowed_devices,
+        Some(["imu".to_owned()].into_iter().collect())
+    );
+}
+
+#[test]
 fn rejects_malformed_entries() {
+    let long_unix_path = format!("unix:/{}", "s".repeat(107));
     let cases = [
         ("ttyAMA0", "expected `serial:<path>`"),
         ("serial:", "target is empty"),
@@ -125,6 +150,23 @@ fn rejects_malformed_entries() {
             "unknown or inapplicable key `device_base`",
         ),
         ("can:can0?baud=9600", "unknown or inapplicable key `baud`"),
+        ("unix:run/link.sock", "the socket path must be absolute"),
+        (
+            long_unix_path.as_str(),
+            "the socket path must be shorter than 108 bytes",
+        ),
+        (
+            "unix:/run/link.sock?max_connections=0",
+            "max_connections must be between",
+        ),
+        (
+            "unix:/run/link.sock?baud=9600",
+            "unknown or inapplicable key `baud`",
+        ),
+        (
+            "serial:/dev/x?max_connections=2",
+            "unknown or inapplicable key `max_connections`",
+        ),
         ("serial:/dev/x?baud=12345", "unsupported baud"),
         (
             "serial:/dev/x?baud=fast",

@@ -13,6 +13,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   receive the same bytes. The record bodies are encoded through `orion-link`'s own body types, so a
   record change no longer changes the link wire (fixtures unchanged). `message::Hello` and
   `message::Welcome` gain a `revision` field. Plan: `docs/design/stable-interface.md`.
+- Link gateway: `unix:<path>` links, a Unix socket the node listens on with one link session per
+  connection (`max_connections=`, default 32), so local software can be a provider over the link
+  protocol. Callers are judged at connect by the local policy (`ORION_NODE_LOCAL_AUTH`, the admin
+  and provider allow-lists), frames are read within the local control budget, output is bounded at
+  64 KiB per connection, and a device name belongs to one connection at a time. Release, attach and
+  firmware transfers do not apply to them. The gateway adds 431 KiB to the stripped release binary
+  and about 0.4 MiB PSS; an idle connection costs about 13 KiB.
 - MCU template feature `ffi-slots`: the C entry points run `SlotFirmware` over `orion_port_*` flash
   hooks, with `orion_boot` for the boot stage. `scripts/mcu-size.sh` reports it as `uart-slots`
   (+8.1 to 8.6 KB flash and +216 B static RAM over `uart-xfer`, without the board's flash driver).

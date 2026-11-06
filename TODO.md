@@ -651,7 +651,12 @@ The shared ABI primitives wait until the hardware repository says they are ready
       the wire. Measure the packaged node's footprint when the listener lands: `link-gateway` is not a
       default feature. Rough size: 6 to 8 engineer-weeks with `liborion`.
       Progress (steps in the design): 1 done (link-owned body types, fixtures unchanged; `revision`
-      in `Hello` and `Welcome`).
+      in `Hello` and `Welcome`). 2 done (`unix:` links: a session per connection, local policy at
+      connect, rate limit by backpressure, 64 KiB output per connection). Footprint, x86_64 release:
+      the gateway adds 431 KiB stripped (6.68 to 7.10 MiB) and about 0.4 MiB PSS idle (6.2 to
+      6.6 MiB); 32 idle connections add about 0.4 MiB. Decided: Unix frames stay at 4096 bytes
+      until the stream kinds need more, because the host's receive buffer is sized by one constant
+      for every session, serial and CAN included.
 - [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
       It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.

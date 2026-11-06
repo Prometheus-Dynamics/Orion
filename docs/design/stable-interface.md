@@ -101,8 +101,10 @@ requests can be pipelined and watches told apart. A request the host refuses is 
 | remote (TCP) | COBS inside TLS or the `orion+tcp` signing | one per connection | step 6 |
 
 A Unix link is configured like the others: `ORION_NODE_LINKS='unix:/run/orion/link.sock?...'`.
-Its frames may be large (the host's `max_frame` raised to 64 KiB for it), since a local socket has
-no reason for small frames.
+Its frames stay at `HOST_MAX_FRAME` (4096) for now. The host's receive buffer is sized by that
+constant for every session, serial and CAN included, so raising it for all would cost each session
+the larger buffer; a larger limit for Unix links comes with the step whose kinds need it (streams),
+with the buffer sized per transport.
 
 ## Authorization and limits
 
@@ -110,11 +112,13 @@ no reason for small frames.
   (`ORION_NODE_LOCAL_AUTH`, `ORION_NODE_LOCAL_AUTH_ALLOW`). The provider and executor roles also
   need the provider lane (`ORION_NODE_LOCAL_PROVIDER_ALLOW`). A session that asks for a role its
   caller may not have is refused with `Reject`. The link's `allow` list of device names still
-  applies.
+  applies. As of step 2 the only role is provider, which every admitted caller may take, so a caller
+  the policy admits to nothing is disconnected at connect.
 - **Ownership:** a session publishes only for its own provider or executor, as local clients do.
 - **Rate limit:** each session has the local control budget (`ORION_NODE_LOCAL_RATE_LIMIT_WINDOW_MS`
-  and `ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES`),
-  with the same exemption for the final result of an action the session was handed.
+  and `ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES`). Past it the connection is not read until the
+  window ends: frames wait instead of being refused, so the final result of an action the session
+  was handed is never lost, and no exemption is needed.
 - **Queues:** host to client traffic is bounded in bytes per session. Watches coalesce to the
   latest value per key when the queue is full; stream data reports the gap with its cursor, as
   today.
@@ -135,7 +139,7 @@ kinds.
    fixtures stay byte for byte (proof the wire did not change). `revision` appended to `Hello` and
    `Welcome`. Still revision 0: nothing new to announce yet. Done.
 2. **Unix listener.** `unix:` links with many sessions, peer identity, roles, rate limit and
-   byte-bounded queues. The existing provider kinds work over it unchanged.
+   byte-bounded queues. The existing provider kinds work over it unchanged. Done.
 3. **Client role, status and actions.** Request correlation, status query and watch, run, query
    and watch actions. Revision 1.
 4. **Streams.** Declare and publish for providers, subscribe for clients. Sample chunks keep
