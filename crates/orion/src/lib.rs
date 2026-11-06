@@ -46,7 +46,7 @@ pub mod cluster {
 #[cfg(feature = "client")]
 pub mod client {
     pub use orion_client::prelude;
-    pub use orion_client::{ActionReporter, ActionRequestWatch, ActionWatch};
+    pub use orion_client::{ActionCaller, ActionReporter, ActionRequestWatch, ActionWatch};
     pub use orion_client::{
         AssignedWorkload, AssignedWorkloadWatch, AssignedWorkloadsUpdate, BoundResource,
         assigned_workloads, assigned_workloads_for_executor, assigned_workloads_from_records,
@@ -370,6 +370,7 @@ mod tests {
         ) -> Vec<prelude::AssignedWorkload> = prelude::assigned_workloads;
         let _client_prelude_node = client::prelude::NodeId::new("node-a");
         let _client_prelude_revision = client::prelude::Revision::ZERO;
+        let _action_caller: Option<client::ActionCaller> = None;
     }
 
     #[test]

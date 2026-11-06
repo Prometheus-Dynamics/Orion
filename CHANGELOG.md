@@ -8,6 +8,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `orion::client::ActionCaller`: the facade re-exports `orion-client`'s action caller, so users
+  of `orion` need no direct `orion-client` dependency for it.
 - Link protocol: `Hello` and `Welcome` end with an optional interface `revision`
   (`LINK_INTERFACE_REVISION`, `HostSession::revision`), left off at 0, so existing devices send and
   receive the same bytes. The record bodies are encoded through `orion-link`'s own body types, so a
