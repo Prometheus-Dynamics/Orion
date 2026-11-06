@@ -600,3 +600,7 @@ The device's hand-written codec (`orion_link::wire`) is held to the same fixture
 byte for byte, and decodes every host → device message from it; `tests/wire_property.rs` compares
 the views with postcard for random records and lease sets. A wire change therefore has to update
 the records, the views, and the fixture together.
+
+The link protocol is also Orion's stable message interface for software built outside the image.
+Its rules for extending the protocol, and the plan for the client role and the Unix listener, are in
+[design/stable-interface.md](design/stable-interface.md).

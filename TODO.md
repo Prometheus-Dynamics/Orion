@@ -639,6 +639,10 @@ starts it.
 
 Items:
 
+Started 2026-11-05 at the user's word (relayed by the coordinator): the interface, `liborion` and
+the versioned template. The plan and its rules: [docs/design/stable-interface.md](docs/design/stable-interface.md).
+The shared ABI primitives wait until the hardware repository says they are ready.
+
 - [ ] **One stable, versioned message interface with versioned clients.** Extend the link format
       (stable kinds, version byte, recorded fixtures). Missing today: streams, status query and watch,
       client actions, workloads, a local Unix listener with peer identity, auth and rate limits, and
