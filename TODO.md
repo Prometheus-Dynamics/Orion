@@ -656,7 +656,11 @@ The shared ABI primitives wait until the hardware repository says they are ready
       the gateway adds 431 KiB stripped (6.68 to 7.10 MiB) and about 0.4 MiB PSS idle (6.2 to
       6.6 MiB); 32 idle connections add about 0.4 MiB. Decided: Unix frames stay at 4096 bytes
       until the stream kinds need more, because the host's receive buffer is sized by one constant
-      for every session, serial and CAN included.
+      for every session, serial and CAN included. 3 done (revision 1: the client role on Unix links,
+      status query and watch, action run, query and watch; each session is a local control-plane
+      client, so the control sockets' authorization and rate limit apply per request). Decided:
+      answers larger than a frame go in parts (`more`), all parts or none; a record larger than a
+      frame ends its request with `limit`; serial and CAN links do not serve the client role.
 - [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
       It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.

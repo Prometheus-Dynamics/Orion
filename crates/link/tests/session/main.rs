@@ -12,6 +12,8 @@ mod ack_rule;
 mod actions;
 #[cfg(feature = "std")]
 mod can_e2e;
+#[cfg(feature = "std")]
+mod client;
 mod device_scripted;
 #[cfg(all(feature = "std", feature = "xfer"))]
 mod firmware;

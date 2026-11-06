@@ -14,11 +14,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::task::JoinHandle;
 
-fn socket_path(name: &str) -> PathBuf {
+pub(super) fn socket_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("orion-ul-{name}-{}.sock", std::process::id()))
 }
 
-fn unix_link(path: &Path, query: &str) -> LinkConfig {
+pub(super) fn unix_link(path: &Path, query: &str) -> LinkConfig {
     let entry = format!(
         "unix:{}?heartbeat_ms={HEARTBEAT_MS}&missed_heartbeats=3{query}",
         path.display()
@@ -27,8 +27,8 @@ fn unix_link(path: &Path, query: &str) -> LinkConfig {
 }
 
 /// A simulated device on one connection to the link's socket.
-struct SocketDevice {
-    device: Arc<Mutex<StreamDevice<512, 512, String>>>,
+pub(super) struct SocketDevice {
+    pub(super) device: Arc<Mutex<StreamDevice<512, 512, String>>>,
     events: Arc<Mutex<Vec<DeviceEvent>>>,
     /// Set when the node closed the connection.
     hung_up: Arc<AtomicBool>,
@@ -36,7 +36,7 @@ struct SocketDevice {
 }
 
 impl SocketDevice {
-    async fn connect(name: &str, path: &Path) -> Self {
+    pub(super) async fn connect(name: &str, path: &Path) -> Self {
         let mut stream = None;
         for _ in 0..200 {
             if let Ok(connected) = UnixStream::connect(path).await {
@@ -100,7 +100,7 @@ impl SocketDevice {
         }
     }
 
-    fn publish(&self, provider: &str, resource: &str) {
+    pub(super) fn publish(&self, provider: &str, resource: &str) {
         self.device
             .lock()
             .expect("device lock")

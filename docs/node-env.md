@@ -335,6 +335,12 @@ whose `Hello` names a device already connected on the link is closed. A stale so
 replaced at start and removed at shutdown; any other file there is left alone and the link reports
 the error. `link.release`, `link.attach` and firmware transfers do not apply to Unix links.
 
+A Unix link session may take the client role (`docs/link-protocol.md`, "Revisions"). Its requests
+are those of a local control-plane client named `link:<link>/<device name>`, authorized with the
+caller's identity per request: a caller admitted only by `ORION_NODE_LOCAL_PROVIDER_ALLOW` is
+refused (`not authorized`). A session holds one status watch, one action watch, and at most 16
+unfinished actions it ran.
+
 Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:can0?device_base=0x600&host_base=0x680&addresses=1-16&allow=motor-a,motor-b'`.
 
 ## Safe mode

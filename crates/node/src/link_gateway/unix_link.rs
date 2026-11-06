@@ -22,10 +22,13 @@
 
 use super::UnixLinkConfig;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, LinkSend, REOPEN_DELAY};
+use super::unix_client::LinkClient;
 use crate::NodeApp;
 use crate::auth::{LocalAdmission, LocalAdmissionPolicy};
+use orion::transport::ipc::UnixPeerIdentity;
 use orion_link::Stream;
 use orion_link::host::{ActionSendError, HostConfig, HostEvent, HostSession};
+use orion_link::message::Roles;
 use std::collections::BTreeMap;
 use std::io;
 use std::os::unix::fs::FileTypeExt;
@@ -73,9 +76,10 @@ struct Conn {
     session: HostSession<Stream>,
     out: mpsc::UnboundedSender<Vec<u8>>,
     pending: Arc<AtomicUsize>,
-    /// What the caller was admitted to; step 3's client role checks it.
-    #[allow(dead_code)]
-    admission: LocalAdmission,
+    /// The caller's identity, for its session's client requests.
+    identity: UnixPeerIdentity,
+    /// The client of the current session, when it took the client role.
+    client: Option<LinkClient>,
 }
 
 /// Session counters of connections already closed, so the link's totals never go back.
@@ -109,6 +113,8 @@ pub(super) async fn run(
     let mut commands_open = true;
     let (inbound_tx, mut inbound) = mpsc::channel::<Inbound>(INBOUND_CHUNKS);
     let drained = Arc::new(Notify::new());
+    // Notified when the node queues an event for one of the link's clients.
+    let client_wake = Arc::new(Notify::new());
     let mut conns: BTreeMap<u64, Conn> = BTreeMap::new();
     let mut next_id: u64 = 0;
     let mut retired = Retired::default();
@@ -180,6 +186,7 @@ pub(super) async fn run(
                 }
             },
             () = drained.notified() => {}
+            () = client_wake.notified() => {}
             changed = desired.changed() => refresh = changed.is_ok(),
             command = commands.recv(), if commands_open => match command {
                 Some(command) => ctx.accept_action(command, |device, send| {
@@ -230,6 +237,42 @@ pub(super) async fn run(
                     duplicate = true;
                     break;
                 }
+                let Some(conn) = conns.get_mut(&id) else {
+                    break;
+                };
+                match &event {
+                    HostEvent::ClientRequest { .. } => {
+                        if let HostEvent::ClientRequest { request, .. } = event
+                            && let Some(client) = conn.client.as_mut()
+                        {
+                            client.request(&ctx.app, request);
+                        }
+                        continue;
+                    }
+                    HostEvent::DeviceConnected {
+                        device_name, roles, ..
+                    } => {
+                        // A new session: the client of the previous one (if any) ends.
+                        if let Some(client) = conn.client.take() {
+                            client.close(&ctx.app);
+                        }
+                        if roles.contains(Roles::CLIENT) {
+                            conn.client = Some(LinkClient::open(
+                                &ctx.app,
+                                &ctx.name,
+                                device_name,
+                                conn.identity.clone(),
+                                client_wake.clone(),
+                            ));
+                        }
+                    }
+                    HostEvent::DeviceLost { .. } => {
+                        if let Some(client) = conn.client.take() {
+                            client.close(&ctx.app);
+                        }
+                    }
+                    _ => {}
+                }
                 if let LeaseAction::Set(leases) = ctx.handle(event)
                     && let Some(conn) = conns.get_mut(&id)
                 {
@@ -247,15 +290,16 @@ pub(super) async fn run(
             let Some(conn) = conns.get_mut(&id) else {
                 continue;
             };
-            // Frames go to the connection while its queue has room; the rest wait in the session.
-            while conn.pending.load(Ordering::Acquire) < QUEUE_BYTES {
-                let Some(bytes) = conn.session.transmit() else {
-                    break;
-                };
-                ctx.status.frames_tx += 1;
-                ctx.status.bytes_tx += bytes.len() as u64;
-                conn.pending.fetch_add(bytes.len(), Ordering::AcqRel);
-                if conn.out.send(bytes).is_err() {
+            // Client answers are queued while the connection has room, and again each time frames
+            // move on, so a long answer does not wait for the next tick.
+            loop {
+                let more = conn.pending.load(Ordering::Acquire) < QUEUE_BYTES
+                    && conn
+                        .client
+                        .as_mut()
+                        .is_some_and(|client| client.pump(&ctx.app, &mut conn.session));
+                let moved = transmit(&mut ctx, conn);
+                if !more || moved == 0 {
                     break;
                 }
             }
@@ -284,6 +328,25 @@ pub(super) async fn run(
     }
     update_stats(&mut ctx, &retired, &conns);
     ctx.close();
+}
+
+/// Hands the session's frames to the connection while its queue has room; the rest wait in the
+/// session. Returns the frames handed over.
+fn transmit(ctx: &mut LinkContext, conn: &mut Conn) -> usize {
+    let mut moved = 0;
+    while conn.pending.load(Ordering::Acquire) < QUEUE_BYTES {
+        let Some(bytes) = conn.session.transmit() else {
+            break;
+        };
+        ctx.status.frames_tx += 1;
+        ctx.status.bytes_tx += bytes.len() as u64;
+        conn.pending.fetch_add(bytes.len(), Ordering::AcqRel);
+        moved += 1;
+        if conn.out.send(bytes).is_err() {
+            break;
+        }
+    }
+    moved
 }
 
 /// Whether a connection other than `id` has a session for `device`.
@@ -373,13 +436,17 @@ fn admit(
         session: HostSession::stream(host.clone()),
         out,
         pending,
-        admission,
+        identity,
+        client: None,
     })
 }
 
 /// A closed connection: its device is lost, its counters retired. Dropping `conn.out` ends its
 /// I/O task.
-fn drop_conn(ctx: &mut LinkContext, retired: &mut Retired, conn: Conn) {
+fn drop_conn(ctx: &mut LinkContext, retired: &mut Retired, mut conn: Conn) {
+    if let Some(client) = conn.client.take() {
+        client.close(&ctx.app);
+    }
     // As on a serial hang-up: the device is lost whether or not its snapshot was accepted yet, so
     // actions in flight on it fail at once.
     if let Some(device) = conn.session.device_name().map(str::to_owned) {

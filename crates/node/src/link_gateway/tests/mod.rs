@@ -11,6 +11,7 @@ mod persist;
 mod serial;
 mod status;
 mod unix;
+mod unix_client;
 
 use crate::{NodeApp, NodeConfig};
 use orion::control_plane::{

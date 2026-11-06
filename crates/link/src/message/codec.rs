@@ -324,6 +324,15 @@ impl Message {
             Self::ActionResult(_) => kind::ACTION_RESULT,
             Self::ActionCancel { .. } => kind::ACTION_CANCEL,
             Self::ActionCatalog(_) => kind::ACTION_CATALOG,
+            Self::RequestError(_) => kind::REQUEST_ERROR,
+            Self::RequestEnd { .. } => kind::REQUEST_END,
+            Self::StatusQuery(_) => kind::STATUS_QUERY,
+            Self::StatusWatch(_) => kind::STATUS_WATCH,
+            Self::StatusChanges(_) => kind::STATUS_CHANGES,
+            Self::ActionRun(_) => kind::ACTION_RUN,
+            Self::ActionQuery(_) => kind::ACTION_QUERY,
+            Self::ActionWatch(_) => kind::ACTION_WATCH,
+            Self::ActionResults(_) => kind::ACTION_RESULTS,
             Self::Unknown(kind) => *kind,
         }
     }
@@ -337,6 +346,9 @@ impl Message {
     /// [`Message::Unknown`], which has no body.
     pub fn encode(&self, seq: u16, buf: &mut [u8]) -> Result<usize, MessageError> {
         let kind = self.kind();
+        if let Some(encoded) = super::client::encode_client(self, seq, buf) {
+            return encoded;
+        }
         match self {
             Self::Hello(body) => encode_with(kind, seq, body, buf),
             Self::Welcome(body) => encode_with(kind, seq, body, buf),
@@ -355,6 +367,16 @@ impl Message {
             Self::ActionCancel { id } => encode_with(kind, seq, id, buf),
             Self::ActionCatalog(body) => encode_with(kind, seq, body, buf),
             Self::Unknown(_) => Err(MessageError::Encode),
+            // Encoded by `client::encode_client` above.
+            Self::RequestError(_)
+            | Self::RequestEnd { .. }
+            | Self::StatusQuery(_)
+            | Self::StatusWatch(_)
+            | Self::StatusChanges(_)
+            | Self::ActionRun(_)
+            | Self::ActionQuery(_)
+            | Self::ActionWatch(_)
+            | Self::ActionResults(_) => Err(MessageError::Encode),
         }
     }
 
@@ -375,6 +397,9 @@ impl Message {
     ///
     /// [`MessageError::Decode`] if the payload is not a valid body for `kind`.
     pub fn decode_payload(kind: u8, payload: &[u8]) -> Result<Self, MessageError> {
+        if let Some(decoded) = super::client::decode_client(kind, payload) {
+            return decoded;
+        }
         Ok(match kind {
             kind::HELLO => Self::Hello(decode_hello(payload)?),
             kind::WELCOME => Self::Welcome(decode_welcome(payload)?),

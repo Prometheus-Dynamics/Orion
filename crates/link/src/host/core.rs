@@ -14,6 +14,8 @@ use crate::message::{
 };
 
 use super::ActionSendError;
+
+mod client;
 use crate::transport::seq_newer;
 
 #[cfg(feature = "xfer")]
@@ -36,6 +38,8 @@ struct Conn {
     confirmed: bool,
     /// The session's interface revision: the lower of the device's and the host's.
     revision: u16,
+    /// The roles the session announced.
+    roles: Roles,
 }
 
 #[derive(Debug)]
@@ -95,6 +99,14 @@ impl HostCore {
 
     pub(crate) fn revision(&self) -> Option<u16> {
         self.conn.as_ref().map(|conn| conn.revision)
+    }
+
+    pub(crate) fn roles(&self) -> Option<Roles> {
+        self.conn.as_ref().map(|conn| conn.roles)
+    }
+
+    pub(crate) fn output_room(&self) -> usize {
+        OUT_CAPACITY.saturating_sub(self.out.len())
     }
 
     pub(crate) fn leases(&self) -> &[LeaseRecord] {
@@ -170,6 +182,10 @@ impl HostCore {
         let Some(conn) = &self.conn else {
             return;
         };
+        // A client-only session holds no resources.
+        if !conn.roles.contains(Roles::PROVIDER) {
+            return;
+        }
         let (limit, device_name) = (conn.max_frame, conn.device_name.clone());
         let leases = core::mem::take(&mut self.leases);
         if !self.queue(kind::LEASES, leases.as_slice(), limit) {
@@ -240,7 +256,25 @@ impl HostCore {
         conn.last_seq = frame.seq();
         conn.confirmed = true;
         let limit = conn.max_frame;
+        let (revision, roles) = (conn.revision, conn.roles);
         self.heard = true;
+        if kind::is_client_request(frame.kind()) {
+            // Before revision 1 these kinds did not exist: ignored as any unknown kind.
+            if revision >= 1 {
+                self.on_client_request(frame, roles);
+            }
+            return;
+        }
+        if !roles.contains(Roles::PROVIDER)
+            && matches!(
+                frame.kind(),
+                kind::PROVIDER_STATE | kind::STATUS | kind::ACTION_CATALOG | kind::ACTION_RESULT
+            )
+        {
+            // A client-only session publishes nothing.
+            self.decode_error();
+            return;
+        }
         match frame.kind() {
             kind::PROVIDER_STATE => match Message::decode(frame) {
                 Ok(Message::ProviderState(state)) => self.on_state(frame.seq(), state, limit),
@@ -373,10 +407,16 @@ impl HostCore {
             self.reject(Some(hello.device_name), RejectReason::UnknownDevice);
             return;
         }
-        if !hello.roles.contains(Roles::PROVIDER) {
+        // While `LINK_INTERFACE_REVISION` is 1 the lower revision is 0 or 1.
+        let revision = hello.revision.min(crate::LINK_INTERFACE_REVISION);
+        let client = config.serve_clients && revision >= 1 && hello.roles.contains(Roles::CLIENT);
+        if !hello.roles.contains(Roles::PROVIDER) && !client {
             self.reject(Some(hello.device_name), RejectReason::UnsupportedRoles);
             return;
         }
+        // Only the roles this host serves count for the session.
+        let roles =
+            Roles(hello.roles.0 & Roles::PROVIDER.0 | if client { Roles::CLIENT.0 } else { 0 });
         if hello.max_frame < config.min_device_frame {
             self.reject(Some(hello.device_name), RejectReason::FrameTooSmall);
             return;
@@ -385,9 +425,6 @@ impl HostCore {
             .unwrap_or(usize::MAX)
             .min(config.max_frame())
             .max(FRAME_OVERHEAD);
-        // While `LINK_INTERFACE_REVISION` is 0 the lower revision is always 0.
-        #[allow(clippy::unnecessary_min_or_max)]
-        let revision = hello.revision.min(crate::LINK_INTERFACE_REVISION);
         self.heard = true;
         if let Some(conn) = &mut self.conn
             && conn.device_name == hello.device_name
@@ -397,6 +434,7 @@ impl HostCore {
             conn.last_seq = seq;
             conn.max_frame = max_frame;
             conn.revision = revision;
+            conn.roles = roles;
             let session_id = conn.session_id;
             self.send_welcome(session_id, max_frame);
             return;
@@ -424,12 +462,13 @@ impl HostCore {
             last_seq: seq,
             confirmed: false,
             revision,
+            roles,
         });
         self.stats.sessions = self.stats.sessions.wrapping_add(1);
         self.emit(HostEvent::DeviceConnected {
             device_name: hello.device_name,
             session_id,
-            roles: hello.roles,
+            roles,
             max_frame,
         });
         self.send_welcome(session_id, max_frame);

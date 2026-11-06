@@ -254,7 +254,22 @@ impl LinkConfig {
         config.max_frame = self.max_frame;
         config.allowed_devices = self.allowed_devices.clone();
         config.session_seed = session_seed;
+        // Only a Unix link's callers have a peer identity to authorize client requests with.
+        config.serve_clients = self.serves_clients();
         config
+    }
+
+    /// Whether this link serves the client role (revision 1): Unix links only.
+    #[must_use]
+    pub fn serves_clients(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            matches!(self.transport, LinkTransport::Unix(_))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
     }
 }
 

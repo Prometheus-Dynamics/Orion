@@ -122,6 +122,35 @@ pub mod kind {
     /// host acknowledges it. Additive in protocol 1.
     pub const ACTION_CATALOG: u8 = 0x33;
 
+    /// `RequestError { req, code, reason }`, host → client: a client request was refused and
+    /// ends. Revision 1.
+    pub const REQUEST_ERROR: u8 = 0x40;
+    /// `RequestEnd { req }`, client → host: ends the watch `req`; nothing answers it. Revision 1.
+    pub const REQUEST_END: u8 = 0x41;
+    /// `StatusQuery { req, filter }`, client → host. Revision 1.
+    pub const STATUS_QUERY: u8 = 0x50;
+    /// `StatusWatch { req, filter }`, client → host. Revision 1.
+    pub const STATUS_WATCH: u8 = 0x51;
+    /// `StatusChanges { req, bootstrap, more, updated, expired }`, host → client. Revision 1.
+    pub const STATUS_CHANGES: u8 = 0x52;
+    /// `ActionRun { req, action_id, target, name, args, deadline_ms }`, client → host. Revision 1.
+    pub const ACTION_RUN: u8 = 0x60;
+    /// `ActionQuery { req, filter }`, client → host. Revision 1.
+    pub const ACTION_QUERY: u8 = 0x61;
+    /// `ActionWatch { req, filter }`, client → host. Revision 1.
+    pub const ACTION_WATCH: u8 = 0x62;
+    /// `ActionResults { req, more, results }`, host → client. Revision 1.
+    pub const ACTION_RESULTS: u8 = 0x63;
+
+    /// Whether `kind` is a request a client sends (revision 1).
+    #[must_use]
+    pub const fn is_client_request(kind: u8) -> bool {
+        matches!(
+            kind,
+            REQUEST_END | STATUS_QUERY | STATUS_WATCH | ACTION_RUN | ACTION_QUERY | ACTION_WATCH
+        )
+    }
+
     /// Whether `kind` lies in the firmware-transfer range reserved by [`FIRMWARE_FIRST`] and
     /// [`FIRMWARE_LAST`].
     #[must_use]
@@ -139,6 +168,8 @@ impl Roles {
     pub const PROVIDER: Self = Self(0x01);
     /// The device runs workloads (reserved; not served by v1 hosts).
     pub const EXECUTOR: Self = Self(0x02);
+    /// The session queries and watches status and runs, queries and watches actions (revision 1).
+    pub const CLIENT: Self = Self(0x04);
 
     /// Whether every role in `other` is set.
     #[must_use]

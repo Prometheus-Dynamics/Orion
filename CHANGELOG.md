@@ -20,6 +20,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   64 KiB per connection, and a device name belongs to one connection at a time. Release, attach and
   firmware transfers do not apply to them. The gateway adds 431 KiB to the stripped release binary
   and about 0.4 MiB PSS; an idle connection costs about 13 KiB.
+- Link interface revision 1 (`LINK_INTERFACE_REVISION = 1`): the client role (`Roles::CLIENT`,
+  bit 2) on Unix links, with kinds `0x40`-`0x41` (`RequestError`, `RequestEnd`), `0x50`-`0x52`
+  (status query, watch and changes) and `0x60`-`0x63` (action run, query, watch and results). Each
+  client session is a local control-plane client of the node, `link:<link>/<device name>`,
+  authorized with the caller's identity per request. Answers larger than a frame are split into
+  parts. `HostConfig::serve_clients`, `HostEvent::ClientRequest` and
+  `HostSession::send_status_changes` / `send_action_results` / `send_request_error` serve it.
+  Existing kinds and devices are unchanged; `Welcome` now carries revision 1.
 - MCU template feature `ffi-slots`: the C entry points run `SlotFirmware` over `orion_port_*` flash
   hooks, with `orion_boot` for the boot stage. `scripts/mcu-size.sh` reports it as `uart-slots`
   (+8.1 to 8.6 KB flash and +216 B static RAM over `uart-xfer`, without the board's flash driver).

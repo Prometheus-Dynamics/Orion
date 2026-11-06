@@ -465,7 +465,7 @@ impl ControlResponse {
         }
     }
 
-    fn into_local(self) -> Result<ControlMessage, IpcTransportError> {
+    pub(crate) fn into_local(self) -> Result<ControlMessage, IpcTransportError> {
         match self {
             Self::Local(message) => Ok(*message),
             Self::Http(_) => Err(IpcTransportError::WriteFailed(

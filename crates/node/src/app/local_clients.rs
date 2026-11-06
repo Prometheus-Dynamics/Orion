@@ -201,6 +201,9 @@ pub(super) struct LocalClientState {
     pub(super) rate_window_started_ms: u64,
     pub(super) rate_window_count: u32,
     pub(super) last_activity_ms: u64,
+    /// Set for the client of a link session (`link_gateway`, Unix links): woken when an event is
+    /// queued, as the link drains the queue itself. Such a client lives as long as its session.
+    pub(super) link_wake: Option<std::sync::Arc<tokio::sync::Notify>>,
 }
 
 impl LocalClientState {
@@ -241,6 +244,7 @@ impl LocalClientState {
             rate_window_started_ms: now_ms,
             rate_window_count: 0,
             last_activity_ms: now_ms,
+            link_wake: None,
         }
     }
 }
@@ -543,6 +547,9 @@ fn enqueue_client_event_charged(
     client
         .queued_events
         .push_back(ClientEvent { sequence, event }, bytes);
+    if let Some(wake) = &client.link_wake {
+        wake.notify_one();
+    }
 }
 
 pub(super) fn prepare_client_stream_flush(

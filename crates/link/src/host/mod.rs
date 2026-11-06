@@ -77,6 +77,10 @@ pub struct HostConfig {
     /// First session id handed out (use something that differs across gateway restarts, such as
     /// the start time). Default 1.
     pub session_seed: u32,
+    /// Whether this link serves the client role (revision 1): when false, a `Hello` that does
+    /// not include the provider role is rejected, and client requests are answered with
+    /// `RequestError { code: UNSUPPORTED }`. Default false.
+    pub serve_clients: bool,
 }
 
 impl HostConfig {
@@ -90,6 +94,7 @@ impl HostConfig {
             min_device_frame: 32,
             allowed_devices: None,
             session_seed: 1,
+            serve_clients: false,
         }
     }
 
@@ -201,6 +206,61 @@ pub enum HostEvent {
         state: LinkActionState,
         /// Progress (`Running`), output (`Succeeded`) or reason (`Failed`, `Rejected`), as sent.
         payload: Vec<u8>,
+    },
+    /// A client request (revision 1, links with [`HostConfig::serve_clients`]).
+    ClientRequest {
+        /// The session's device name.
+        device_name: String,
+        /// The request.
+        request: ClientRequest,
+    },
+}
+
+/// A request from a session with the client role, in [`HostEvent::ClientRequest`]. The gateway
+/// answers it with [`HostSession::send_status_changes`], [`HostSession::send_action_results`] or
+/// [`HostSession::send_request_error`], echoing `req`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ClientRequest {
+    /// Answer once with the matching status entries (`bootstrap`).
+    StatusQuery {
+        /// Request id.
+        req: u32,
+        /// Which entries.
+        filter: orion_control_plane::StatusQuery,
+    },
+    /// Answer with the matching entries, then with their changes until ended.
+    StatusWatch {
+        /// Request id.
+        req: u32,
+        /// Which entries.
+        filter: orion_control_plane::StatusQuery,
+    },
+    /// Run an action; answer with its result and each update until it is final.
+    ActionRun {
+        /// Request id.
+        req: u32,
+        /// The action (`requested_by` and `wait_ms` empty).
+        request: Box<orion_control_plane::ActionRequest>,
+    },
+    /// Answer once with the matching action results.
+    ActionQuery {
+        /// Request id.
+        req: u32,
+        /// Which actions.
+        filter: orion_control_plane::ActionQuery,
+    },
+    /// Answer with the matching results, then with their updates until ended.
+    ActionWatch {
+        /// Request id.
+        req: u32,
+        /// Which actions.
+        filter: orion_control_plane::ActionQuery,
+    },
+    /// End the watch `req`. Not answered.
+    End {
+        /// The watch's request id.
+        req: u32,
     },
 }
 
@@ -341,6 +401,66 @@ impl<T: Transport> HostSession<T> {
     /// As [`HostSession::send_action`].
     pub fn send_action_cancel(&mut self, id: u32) -> Result<(), ActionSendError> {
         self.core.send_action_cancel(id)
+    }
+
+    /// Queues one answer to a status request, split into as many [`kind::STATUS_CHANGES`]
+    /// frames as the negotiated frame size needs (all or none of them).
+    ///
+    /// [`kind::STATUS_CHANGES`]: crate::message::kind::STATUS_CHANGES
+    ///
+    /// # Errors
+    ///
+    /// [`ActionSendError::NotConnected`] without a client session, [`ActionSendError::TooLarge`]
+    /// if one entry alone does not fit a frame or the answer needs more frames than the output
+    /// queue holds, and [`ActionSendError::Congested`] if the queue has no room now (retry
+    /// after transmitting).
+    pub fn send_status_changes(
+        &mut self,
+        req: u32,
+        bootstrap: bool,
+        updated: &[orion_control_plane::StatusEntry],
+        expired: &[orion_control_plane::StatusKey],
+    ) -> Result<(), ActionSendError> {
+        self.core
+            .send_status_changes(req, bootstrap, updated, expired)
+    }
+
+    /// Queues one answer to an action request, split as [`HostSession::send_status_changes`].
+    ///
+    /// # Errors
+    ///
+    /// As [`HostSession::send_status_changes`].
+    pub fn send_action_results(
+        &mut self,
+        req: u32,
+        results: &[orion_control_plane::ActionResult],
+    ) -> Result<(), ActionSendError> {
+        self.core.send_action_results(req, results)
+    }
+
+    /// Refuses the client request `req`, which ends. The reason is cut to
+    /// [`crate::message::MAX_REASON_BYTES`].
+    ///
+    /// # Errors
+    ///
+    /// [`ActionSendError::NotConnected`] or [`ActionSendError::Congested`].
+    pub fn send_request_error(
+        &mut self,
+        req: u32,
+        code: crate::message::ErrorCode,
+        reason: &str,
+    ) -> Result<(), ActionSendError> {
+        self.core.send_request_error(req, code, reason)
+    }
+
+    /// The roles the connected session announced.
+    pub fn roles(&self) -> Option<Roles> {
+        self.core.roles()
+    }
+
+    /// Frames the output queue can take now.
+    pub fn output_room(&self) -> usize {
+        self.core.output_room()
     }
 
     /// The current lease set.

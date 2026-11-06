@@ -13,6 +13,10 @@ mod link_bridge;
 pub(crate) use link_bridge::actions::LinkActionCommand;
 #[cfg(feature = "link-gateway")]
 pub(crate) use link_bridge::slots::{CanSlot, FirmwareCommand, JobReport, SerialSlot};
+#[cfg(all(feature = "link-gateway", target_os = "linux"))]
+mod link_clients;
+#[cfg(all(feature = "link-gateway", target_os = "linux"))]
+pub(crate) use link_clients::LinkWatch;
 mod local_clients;
 mod local_control;
 mod maintenance_admin;

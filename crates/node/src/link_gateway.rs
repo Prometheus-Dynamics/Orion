@@ -23,6 +23,8 @@ mod socketcan;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 #[cfg(target_os = "linux")]
+mod unix_client;
+#[cfg(target_os = "linux")]
 mod unix_link;
 
 pub use config::{

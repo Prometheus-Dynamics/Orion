@@ -24,6 +24,10 @@ use orion_link::message::{
     MessageError, ProviderRecord, ProviderState, RejectReason, ResourceRecord, Roles, StatusEntry,
     Welcome, encode_action_request, encode_leases, encode_provider_state, encode_status, kind,
 };
+use orion_link::message::{
+    ActionFilterRequest, ActionResults, ActionRun, ErrorCode, RequestError, StatusChanges,
+    StatusRequest,
+};
 
 const FIXTURE: &str = "tests/fixtures/link_encodings.txt";
 
@@ -210,6 +214,113 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
             }),
         ),
     ]
+    .into_iter()
+    .chain(client_messages())
+    .collect()
+}
+
+/// The client role's messages (revision 1, `docs/design/stable-interface.md`, "Step 3 wire").
+fn client_messages() -> Vec<(&'static str, Message)> {
+    use orion_control_plane as cp;
+    let subject = cp::StatusSubject::Resource(ResourceId::new("imu-board.imu-0"));
+    let target = cp::ActionTarget::Provider(ProviderId::new("provider.imu-board"));
+    let result = cp::ActionResult {
+        action_id: "act-1".into(),
+        target: target.clone(),
+        name: "calibrate".into(),
+        state: cp::ActionState::Running {
+            progress: Some(500),
+        },
+        output: [("gain".to_owned(), TypedConfigValue::F64(1.5))].into(),
+        handled_by: NodeId::new("node-a"),
+        requested_by: "local:link:arm/console".into(),
+        created_at_ms: 1_000,
+        updated_at_ms: 1_250,
+    };
+    vec![
+        (
+            "hello.client",
+            Message::Hello(Hello {
+                device_name: "console".into(),
+                roles: Roles::CLIENT,
+                max_frame: 4096,
+                revision: 1,
+            }),
+        ),
+        (
+            "request_error",
+            Message::RequestError(RequestError {
+                req: 7,
+                code: ErrorCode::LIMIT,
+                reason: "one status watch per session".into(),
+            }),
+        ),
+        ("request_end", Message::RequestEnd { req: 7 }),
+        (
+            "status_query",
+            Message::StatusQuery(StatusRequest {
+                req: 1,
+                filter: cp::StatusQuery::subject(subject.clone()).with_key_prefix("temp"),
+            }),
+        ),
+        (
+            "status_watch.all",
+            Message::StatusWatch(StatusRequest {
+                req: 2,
+                filter: cp::StatusQuery::all(),
+            }),
+        ),
+        (
+            "status_changes",
+            Message::StatusChanges(StatusChanges {
+                req: 2,
+                bootstrap: true,
+                more: false,
+                updated: vec![cp::StatusEntry {
+                    subject: subject.clone(),
+                    key: "temperature_mc".into(),
+                    value: TypedConfigValue::Int(41_250),
+                    ttl_ms: 5_000,
+                    published_at_ms: 1_700_000_000_000,
+                }],
+                expired: vec![cp::StatusKey {
+                    subject,
+                    key: "mode".into(),
+                }],
+            }),
+        ),
+        (
+            "action_run",
+            Message::ActionRun(Box::new(ActionRun {
+                req: 3,
+                request: cp::ActionRequest::new("act-1", target.clone(), "calibrate")
+                    .with_arg("samples", TypedConfigValue::UInt(64))
+                    .with_deadline_ms(10_000),
+            })),
+        ),
+        (
+            "action_query",
+            Message::ActionQuery(ActionFilterRequest {
+                req: 4,
+                filter: cp::ActionQuery::action("act-1"),
+            }),
+        ),
+        (
+            "action_watch",
+            Message::ActionWatch(ActionFilterRequest {
+                req: 5,
+                filter: cp::ActionQuery::target(target),
+            }),
+        ),
+        (
+            "action_results",
+            Message::ActionResults(ActionResults {
+                req: 3,
+                more: true,
+                results: vec![result],
+            }),
+        ),
+    ]
 }
 
 fn status_entries() -> Vec<StatusEntry> {
@@ -291,6 +402,34 @@ fn kind_numbers_are_stable() {
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x13, 0x14, 0x30, 0x31, 0x32,
             0x33
         ]
+    );
+    assert_eq!(
+        [
+            kind::REQUEST_ERROR,
+            kind::REQUEST_END,
+            kind::STATUS_QUERY,
+            kind::STATUS_WATCH,
+            kind::STATUS_CHANGES,
+            kind::ACTION_RUN,
+            kind::ACTION_QUERY,
+            kind::ACTION_WATCH,
+            kind::ACTION_RESULTS,
+        ],
+        [0x40, 0x41, 0x50, 0x51, 0x52, 0x60, 0x61, 0x62, 0x63]
+    );
+    assert_eq!(
+        (Roles::PROVIDER.0, Roles::EXECUTOR.0, Roles::CLIENT.0),
+        (0x01, 0x02, 0x04)
+    );
+    assert_eq!(
+        [
+            ErrorCode::UNSUPPORTED.0,
+            ErrorCode::NOT_AUTHORIZED.0,
+            ErrorCode::INVALID.0,
+            ErrorCode::LIMIT.0,
+            ErrorCode::INTERNAL.0
+        ],
+        [1, 2, 3, 4, 5]
     );
     assert_eq!((kind::FIRMWARE_FIRST, kind::FIRMWARE_LAST), (0x20, 0x2F));
     assert!(kind::is_firmware(0x20) && kind::is_firmware(0x2F));

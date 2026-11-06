@@ -16,6 +16,7 @@
 //! ```
 
 pub(crate) mod body;
+mod client;
 mod codec;
 
 use alloc::string::String;
@@ -30,6 +31,12 @@ pub use orion_control_plane::{
 pub use orion_core::{CapabilityId, NodeId, ProviderId, ResourceId, ResourceType, WorkloadId};
 use serde::{Deserialize, Serialize};
 
+pub use client::{
+    ActionFilterRequest, ActionResults, ActionRun, ErrorCode, MAX_REASON_BYTES, RecordTooLarge,
+    RequestError, StatusChanges, StatusRequest, encode_request_error, request_id,
+};
+#[cfg(feature = "std")]
+pub(crate) use client::{ActionParts, StatusParts};
 pub(crate) use codec::decode_leases;
 #[cfg(feature = "std")]
 pub(crate) use codec::{decode_status, encode_with};
@@ -252,6 +259,27 @@ pub enum Message {
     },
     /// [`kind::ACTION_CATALOG`]: the action names the device handles.
     ActionCatalog(ActionCatalog),
+    /// [`kind::REQUEST_ERROR`]: the host refused a client request (revision 1).
+    RequestError(RequestError),
+    /// [`kind::REQUEST_END`]: the client ends its watch `req` (revision 1).
+    RequestEnd {
+        /// The watch's request id.
+        req: u32,
+    },
+    /// [`kind::STATUS_QUERY`] (revision 1).
+    StatusQuery(StatusRequest),
+    /// [`kind::STATUS_WATCH`] (revision 1).
+    StatusWatch(StatusRequest),
+    /// [`kind::STATUS_CHANGES`] (revision 1).
+    StatusChanges(StatusChanges),
+    /// [`kind::ACTION_RUN`] (revision 1).
+    ActionRun(alloc::boxed::Box<ActionRun>),
+    /// [`kind::ACTION_QUERY`] (revision 1).
+    ActionQuery(ActionFilterRequest),
+    /// [`kind::ACTION_WATCH`] (revision 1).
+    ActionWatch(ActionFilterRequest),
+    /// [`kind::ACTION_RESULTS`] (revision 1).
+    ActionResults(ActionResults),
     /// A kind this build does not handle (including the reserved kinds). Ignored by sessions.
     Unknown(u8),
 }

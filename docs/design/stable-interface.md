@@ -112,8 +112,8 @@ with the buffer sized per transport.
   (`ORION_NODE_LOCAL_AUTH`, `ORION_NODE_LOCAL_AUTH_ALLOW`). The provider and executor roles also
   need the provider lane (`ORION_NODE_LOCAL_PROVIDER_ALLOW`). A session that asks for a role its
   caller may not have is refused with `Reject`. The link's `allow` list of device names still
-  applies. As of step 2 the only role is provider, which every admitted caller may take, so a caller
-  the policy admits to nothing is disconnected at connect.
+  applies. A caller the policy admits to nothing is disconnected at connect; the client role's
+  requests are authorized per request (see "Step 3 wire").
 - **Ownership:** a session publishes only for its own provider or executor, as local clients do.
 - **Rate limit:** each session has the local control budget (`ORION_NODE_LOCAL_RATE_LIMIT_WINDOW_MS`
   and `ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES`). Past it the connection is not read until the
@@ -124,6 +124,87 @@ with the buffer sized per transport.
   today.
 - **Remote:** decided at step 6. The options are the operator identities of `orion+tcp` (ed25519,
   enrollment) or TLS client certificates.
+
+## Step 3 wire (revision 1)
+
+Decided 2026-11-06. Bodies are postcard, as every other kind; `String` is UTF-8 with a varint
+length, `Option` and `Vec` are postcard's. All of them are link-owned types (`orion-link`), and each
+enum below only grows at its end, inside a later revision (rule 3).
+
+A session takes the client role with `Hello { roles: 0x04, revision: 1, .. }`; it may also be a
+provider. A client-only session publishes nothing and gets no leases. Client kinds are sent only
+when the session's revision is at least 1; a host that receives one in a revision-0 session ignores
+it, as any unknown kind.
+
+| Kind | Name | Direction | Body |
+|---|---|---|---|
+| `0x40` | `RequestError` | host → client | `req: u32, code: ErrorCode, reason: String` |
+| `0x41` | `RequestEnd` | client → host | `req: u32`: ends the watch `req`; nothing answers it |
+| `0x50` | `StatusQuery` | client → host | `req: u32, filter: StatusFilter` |
+| `0x51` | `StatusWatch` | client → host | `req: u32, filter: StatusFilter` |
+| `0x52` | `StatusChanges` | host → client | `req: u32, bootstrap: bool, more: bool, updated: Vec<StatusRecord>, expired: Vec<StatusKey>` |
+| `0x60` | `ActionRun` | client → host | `req: u32, action_id: String, target: Target, name: String, args: Vec<(String, Value)>, deadline_ms: u64` |
+| `0x61` | `ActionQuery` | client → host | `req: u32, filter: ActionFilter` |
+| `0x62` | `ActionWatch` | client → host | `req: u32, filter: ActionFilter` |
+| `0x63` | `ActionResults` | host → client | `req: u32, more: bool, results: Vec<ActionRecord>` |
+
+Types:
+
+- `Subject` and `Target`: an enum of a kind and an id string. `Subject` is
+  `Provider, Executor, Resource, Workload, Node`; `Target` is `Node, Provider, Resource, Executor`,
+  in that order (the node's own order).
+- `Value`: the link's existing value encoding (`Bool, Int, UInt, String, Bytes, F64`).
+- `StatusFilter { subject: Option<Subject>, key_prefix: Option<String> }`.
+- `StatusRecord { subject: Subject, key: String, value: Value, ttl_ms: u64, published_at_ms: u64 }`;
+  `StatusKey { subject: Subject, key: String }`.
+- `ActionFilter { action_id: Option<String>, target: Option<Target> }`.
+- `ActionRecord { action_id, target, name, state: ActionStateWire, output: Vec<(String, Value)>,
+  handled_by: String, requested_by: String, created_at_ms: u64, updated_at_ms: u64 }`;
+  `ActionStateWire` is `Accepted, Running { progress: Option<u16> }, Succeeded, Failed { reason },
+  Rejected { reason }, TimedOut, Cancelled`.
+- `ErrorCode` (`u16`, the list only grows): `1` unsupported (a request the host does not serve),
+  `2` not authorized, `3` invalid (a malformed or refused request), `4` limit (too many open
+  watches, or the rate limit for the request), `5` internal.
+
+Answers:
+
+- An answer larger than the session's frame size is split into parts, each a frame of the same
+  kind and `req`; every part but the last has `more: true`. A client applies a `bootstrap` answer
+  (all its parts) as the whole current set for its filter. A single record larger than a frame
+  cannot be sent: the request gets `RequestError { code: limit }` and ends (a watch with it).
+- A query is answered by one `StatusChanges` (`bootstrap: true`) or one `ActionResults`.
+- A watch is answered by a first `bootstrap` change (status) or the matching results (actions,
+  possibly none), then by changes until the client ends it (`RequestEnd`) or the session ends. Status changes coalesce to
+  the newest value per key while the client's queue is full, as for local clients.
+- `ActionRun` is answered with the action's current result, then with each update until the result
+  is final; the request ends there. Resubmitting the same `action_id` and content returns the same
+  action, as the control protocol does.
+- A refused request gets one `RequestError` and ends.
+
+Limits: one status watch and one action watch per session (a second is refused with `limit`; open
+another connection for more), and at most 16 actions run by the session that are not yet final.
+
+Authorization: the node handles client requests as requests of a local control-plane client
+registered for the session (named `link:<link>/<device name>`), with the caller's peer identity,
+so the control sockets' authorization and rate limit apply as they are: a caller admitted only to
+the provider lane gets `not authorized` for every client request (its session is not refused, so
+it can still be a provider).
+
+Decided at implementation (2026-11-06):
+
+- Only Unix links serve the client role (`HostConfig::serve_clients`): their callers have a peer
+  identity to authorize. On serial and CAN links a client-only `Hello` is rejected with
+  `UnsupportedRoles`, and client requests in a provider session get `unsupported`.
+- The role needs revision 1 on both sides; a revision-0 `Hello` with the client bit is a provider
+  session (or `UnsupportedRoles` without the provider bit). `Welcome` and `DeviceConnected` report
+  only the roles the host serves for the session.
+- A client-only session gets no `Leases`, and its provider kinds are ignored (counted as decode
+  errors).
+- Answers wait in the gateway while the session's output is full; the node's events for the client
+  stay in its queue, where status coalesces to the newest value per key and action results to the
+  newest per action. An answer is queued as all of its parts or none, and needs at most the
+  session's output queue (32 frames).
+- `RequestError` reasons are cut to 256 bytes at a character boundary.
 
 ## Not covered
 
@@ -141,7 +222,7 @@ kinds.
 2. **Unix listener.** `unix:` links with many sessions, peer identity, roles, rate limit and
    byte-bounded queues. The existing provider kinds work over it unchanged. Done.
 3. **Client role, status and actions.** Request correlation, status query and watch, run, query
-   and watch actions. Revision 1.
+   and watch actions. Revision 1. Done.
 4. **Streams.** Declare and publish for providers, subscribe for clients. Sample chunks keep
    their current encoding. Revision 2.
 5. **Records and the executor role.** Workloads and assignments (`0x12`, `0x13`), resource and

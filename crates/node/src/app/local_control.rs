@@ -417,7 +417,7 @@ impl NodeApp {
                 if preserve_source == Some(source) {
                     continue;
                 }
-                if client.stream_sender.is_some() {
+                if client.stream_sender.is_some() || client.link_wake.is_some() {
                     continue;
                 }
                 if now_ms.saturating_sub(client.last_activity_ms) >= ttl_ms {
@@ -466,6 +466,7 @@ impl NodeApp {
             .get(source)
             .map(|client| {
                 client.stream_sender.is_none()
+                    && client.link_wake.is_none()
                     && now_ms.saturating_sub(client.last_activity_ms) >= ttl_ms
             })
             .unwrap_or(false)

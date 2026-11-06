@@ -129,7 +129,7 @@ postcard encodings of the listed fields, in order.
 
 | Kind | Name | Direction | Body | Notes |
 | --- | --- | --- | --- | --- |
-| `0x01` | `Hello` | device → host | `device_name: String`, `roles: u8` (bit 0 provider, bit 1 executor), `max_frame: u32`, then `revision: u16` when not 0 | Opens or reopens a session. The protocol version is the frame header's `version`; the body carries no separate copy. `revision` is the highest interface revision the device speaks (see "Revisions"). |
+| `0x01` | `Hello` | device → host | `device_name: String`, `roles: u8` (bit 0 provider, bit 1 executor, bit 2 client), `max_frame: u32`, then `revision: u16` when not 0 | Opens or reopens a session. The protocol version is the frame header's `version`; the body carries no separate copy. `revision` is the highest interface revision the device speaks (see "Revisions"). |
 | `0x02` | `Welcome` | host → device | `node_id`, `session_id: u32`, `heartbeat_ms: u32`, `max_frame: u32`, then `revision: u16` when not 0 | `max_frame` is the negotiated minimum of both sides. `revision` is the host's highest interface revision. |
 | `0x03` | `Reject` | host → device | `reason: u8` | See the reject reasons below. |
 | `0x04` | `Ping` | device → host (either direction is answered) | `now_ms: u64` | Sent by the device every heartbeat. |
@@ -147,6 +147,15 @@ postcard encodings of the listed fields, in order.
 | `0x31` | `ActionResult` | device → host | `id: u32`, `state` (postcard enum: `0` Running, `1` Succeeded, `2` Failed, `3` Rejected, `4` Cancelled), `payload: Vec<u8>` | The device's report on the request with the same `id`; the payload depends on the state (see "Actions"). Added in version 1 as an additive kind. |
 | `0x32` | `ActionCancel` | host → device | `id: u32` | Asks the device to stop the running action with that `id`. Accepted while the device is busy with it (see "Actions"). Added in version 1 as an additive kind. |
 | `0x33` | `ActionCatalog` | device → host | `names: Vec<String>` (a postcard sequence of strings) | The action names the device handles, declared with `DeviceSession::declare_actions` (see "Action catalog"). Added in version 1 as an additive kind. |
+| `0x40` | `RequestError` | host → client | `req: u32`, `code: u16`, `reason: String` | Refuses the client request `req`, which ends. Codes: 1 unsupported, 2 not authorized, 3 invalid, 4 limit, 5 internal. Revision 1. |
+| `0x41` | `RequestEnd` | client → host | `req: u32` | Ends the watch `req`; not answered. Revision 1. |
+| `0x50` | `StatusQuery` | client → host | `req: u32`, `filter: { subject: Option<Subject>, key_prefix: Option<String> }` | Answered by one `StatusChanges` with `bootstrap`. Revision 1. |
+| `0x51` | `StatusWatch` | client → host | as `StatusQuery` | Answered by a `bootstrap` change, then changes. One per session. Revision 1. |
+| `0x52` | `StatusChanges` | host → client | `req: u32`, `bootstrap: bool`, `more: bool`, `updated: Vec<StatusRecord>`, `expired: Vec<StatusKey>` | One part of an answer; `more` until the last part. Revision 1. |
+| `0x60` | `ActionRun` | client → host | `req: u32`, `action_id`, `target`, `name`, `args: Vec<(String, Value)>`, `deadline_ms: u64` | Answered by the action's result, then each update until it is final. At most 16 unfinished per session. Revision 1. |
+| `0x61` | `ActionQuery` | client → host | `req: u32`, `filter: { action_id: Option<String>, target: Option<Target> }` | Answered by one `ActionResults`. Revision 1. |
+| `0x62` | `ActionWatch` | client → host | as `ActionQuery` | Answered by the matching results, then updates. One per session. Revision 1. |
+| `0x63` | `ActionResults` | host → client | `req: u32`, `more: bool`, `results: Vec<ActionRecord>` | One part of an answer. Revision 1. |
 
 Reject reasons (one byte; unknown codes are reported as `Other(code)`):
 
@@ -154,7 +163,7 @@ Reject reasons (one byte; unknown codes are reported as `Other(code)`):
 | --- | --- | --- |
 | 1 | `VersionMismatch` | Back off and retry. |
 | 2 | `UnknownDevice` (empty name, or not on the link's allowlist) | Back off and retry. |
-| 3 | `UnsupportedRoles` (no role the host serves; v1 hosts serve `provider`) | Back off and retry. |
+| 3 | `UnsupportedRoles` (no role the host serves: `provider`, and `client` on Unix links at revision 1) | Back off and retry. |
 | 4 | `FrameTooSmall` (`max_frame` below the host minimum, default 32) | Back off and retry. |
 | 5 | `NoSession` (session traffic from a device the host has no session for, for example after a host restart) | Reconnect immediately, without backoff and without a `Rejected` event. |
 
@@ -454,6 +463,11 @@ belongs to one connection at a time. Release, attach and firmware transfers do n
 Frames are limited to `HOST_MAX_FRAME` (4096) like the other links: a larger limit for local
 sockets comes with the kinds that need it.
 
+A Unix link session may also take the client role (revision 1, see "Revisions"): it queries and
+watches the node's status and runs, queries and watches actions, as a local control-plane client
+named `link:<link>/<device name>` with the caller's identity, so the control sockets'
+authorization and rate limit apply to each request.
+
 Bridging, kept generic (nothing about the device's resource types is assumed):
 
 - **Provider path.** `ProviderState` goes through the same code path as a `ProviderState` from a
@@ -631,3 +645,4 @@ includes it. Revisions do not change `LINK_PROTOCOL_VERSION`.
 | Revision | Adds |
 |---|---|
 | 0 | The protocol as of version 1, before revisions. |
+| 1 | The client role (`roles` bit 2) and kinds `0x40`, `0x41`, `0x50`-`0x52`, `0x60`-`0x63`: status query and watch, and running, querying and watching actions. Served on Unix links. The record and filter bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 3 wire"). |
