@@ -16,6 +16,7 @@ use crate::message::{
 use super::ActionSendError;
 
 mod client;
+mod streams;
 use crate::transport::seq_newer;
 
 #[cfg(feature = "xfer")]
@@ -99,6 +100,10 @@ impl HostCore {
 
     pub(crate) fn revision(&self) -> Option<u16> {
         self.conn.as_ref().map(|conn| conn.revision)
+    }
+
+    pub(crate) fn max_frame(&self) -> Option<usize> {
+        self.conn.as_ref().map(|conn| conn.max_frame)
     }
 
     pub(crate) fn roles(&self) -> Option<Roles> {
@@ -258,11 +263,17 @@ impl HostCore {
         let limit = conn.max_frame;
         let (revision, roles) = (conn.revision, conn.roles);
         self.heard = true;
+        let introduced = kind::revision(frame.kind());
+        if introduced > revision {
+            // Kinds of a later revision than the session's: ignored as any unknown kind.
+            return;
+        }
         if kind::is_client_request(frame.kind()) {
-            // Before revision 1 these kinds did not exist: ignored as any unknown kind.
-            if revision >= 1 {
-                self.on_client_request(frame, roles);
-            }
+            self.on_client_request(frame, roles);
+            return;
+        }
+        if kind::is_provider_stream(frame.kind()) {
+            self.on_provider_stream(frame, roles);
             return;
         }
         if !roles.contains(Roles::PROVIDER)
@@ -407,7 +418,6 @@ impl HostCore {
             self.reject(Some(hello.device_name), RejectReason::UnknownDevice);
             return;
         }
-        // While `LINK_INTERFACE_REVISION` is 1 the lower revision is 0 or 1.
         let revision = hello.revision.min(crate::LINK_INTERFACE_REVISION);
         let client = config.serve_clients && revision >= 1 && hello.roles.contains(Roles::CLIENT);
         if !hello.roles.contains(Roles::PROVIDER) && !client {

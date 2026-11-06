@@ -506,6 +506,70 @@ impl SampleChunk {
     }
 }
 
+impl SampleChunk {
+    /// Splits the chunk at sample boundaries into chunks whose `data` is at most `max_data` bytes
+    /// (a sample larger than that gets a chunk of its own). The bytes of every sample are kept: a
+    /// piece starts at its first sample's time with a zero delta, the rest are copied as they are.
+    pub fn split(
+        &self,
+        kind: SeriesKind,
+        max_data: usize,
+    ) -> Result<Vec<SampleChunk>, SampleDecodeError> {
+        if self.data.len() <= max_data {
+            return Ok(alloc::vec![self.clone()]);
+        }
+        let mut pieces = Vec::new();
+        let mut piece = SampleChunk {
+            series: self.series,
+            ..SampleChunk::default()
+        };
+        let (mut at, mut t) = (0usize, self.t0_us);
+        for _ in 0..self.count {
+            let dt = read_varint(&self.data, &mut at)?;
+            t = t.checked_add(dt).ok_or(SampleDecodeError)?;
+            let value_start = at;
+            match kind {
+                SeriesKind::F32 | SeriesKind::U32 => {
+                    take::<4>(&self.data, &mut at)?;
+                }
+                SeriesKind::F64 => {
+                    take::<8>(&self.data, &mut at)?;
+                }
+                SeriesKind::I64 => {
+                    read_varint(&self.data, &mut at)?;
+                }
+            }
+            let value = &self.data[value_start..at];
+            let mut delta = Vec::with_capacity(10);
+            write_varint(&mut delta, if piece.count == 0 { 0 } else { dt });
+            if piece.count > 0 && piece.data.len() + delta.len() + value.len() > max_data {
+                pieces.push(core::mem::replace(
+                    &mut piece,
+                    SampleChunk {
+                        series: self.series,
+                        ..SampleChunk::default()
+                    },
+                ));
+                delta.clear();
+                write_varint(&mut delta, 0);
+            }
+            if piece.count == 0 {
+                piece.t0_us = t;
+            }
+            piece.data.extend_from_slice(&delta);
+            piece.data.extend_from_slice(value);
+            piece.count += 1;
+        }
+        if at != self.data.len() {
+            return Err(SampleDecodeError);
+        }
+        if piece.count > 0 {
+            pieces.push(piece);
+        }
+        Ok(pieces)
+    }
+}
+
 fn take<const N: usize>(data: &[u8], at: &mut usize) -> Result<[u8; N], SampleDecodeError> {
     let bytes = data
         .get(*at..at.checked_add(N).ok_or(SampleDecodeError)?)
@@ -602,6 +666,34 @@ mod tests {
         assert_eq!(chunk.samples(SeriesKind::F64), Err(SampleDecodeError));
         chunk.data.extend_from_slice(&[0, 0]);
         assert_eq!(chunk.samples(SeriesKind::F64), Err(SampleDecodeError));
+    }
+
+    #[test]
+    fn a_chunk_splits_at_sample_boundaries_and_keeps_every_sample() {
+        for kind in [
+            SeriesKind::F32,
+            SeriesKind::F64,
+            SeriesKind::I64,
+            SeriesKind::U32,
+        ] {
+            let mut builder = SampleChunkBuilder::new(7, kind);
+            for i in 0..500u64 {
+                builder.push(1_000_000 + i * 997, (i * 31 % 1000) as f64);
+            }
+            let chunk = builder.take();
+            let pieces = chunk.split(kind, 300).expect("splits");
+            assert!(pieces.len() > 1);
+            assert!(pieces.iter().all(|p| p.data.len() <= 300 && p.series == 7));
+            let joined: Vec<(u64, f64)> = pieces
+                .iter()
+                .flat_map(|p| p.samples(kind).expect("each piece decodes"))
+                .collect();
+            assert_eq!(joined, chunk.samples(kind).unwrap());
+            assert_eq!(
+                chunk.split(kind, chunk.data.len()).unwrap(),
+                vec![chunk.clone()]
+            );
+        }
     }
 
     #[test]

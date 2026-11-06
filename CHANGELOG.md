@@ -28,6 +28,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   parts. `HostConfig::serve_clients`, `HostEvent::ClientRequest` and
   `HostSession::send_status_changes` / `send_action_results` / `send_request_error` serve it.
   Existing kinds and devices are unchanged; `Welcome` now carries revision 1.
+- Link interface revision 2 (`LINK_INTERFACE_REVISION = 2`): streams on Unix links, kinds
+  `0x70`-`0x76`. A provider session declares streams of its own provider (`StreamDeclare`),
+  publishes sample chunks in the node's encoding (`StreamPublish`) and gets the demand
+  (`StreamDemand`); a client session subscribes (`StreamSubscribe`, ended by `RequestEnd`) and gets
+  the catalog, the backfill and every batch (`StreamCatalog`, `StreamData`, `StreamReset`). Stream
+  data larger than a frame is split into parts by chunk, and chunks larger than a part at sample
+  boundaries (`SampleChunk::split`), so frames stay at 4096 bytes. `HostConfig::serve_streams`,
+  `HostEvent::StreamDeclare` / `StreamPublish`, `ClientRequest::StreamSubscribe` and
+  `HostSession::send_stream_*` serve it.
 - MCU template feature `ffi-slots`: the C entry points run `SlotFirmware` over `orion_port_*` flash
   hooks, with `orion_boot` for the boot stage. `scripts/mcu-size.sh` reports it as `uart-slots`
   (+8.1 to 8.6 KB flash and +216 B static RAM over `uart-xfer`, without the board's flash driver).

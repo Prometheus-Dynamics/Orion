@@ -142,13 +142,52 @@ pub mod kind {
     /// `ActionResults { req, more, results }`, host → client. Revision 1.
     pub const ACTION_RESULTS: u8 = 0x63;
 
-    /// Whether `kind` is a request a client sends (revision 1).
+    /// `StreamDeclare { req, id, series }`, provider → host. Revision 2.
+    pub const STREAM_DECLARE: u8 = 0x70;
+    /// `StreamPublish { id, chunks }`, provider → host; not answered. Revision 2.
+    pub const STREAM_PUBLISH: u8 = 0x71;
+    /// `StreamDemand { id, subscribers, series }`, host → provider. Revision 2.
+    pub const STREAM_DEMAND: u8 = 0x72;
+    /// `StreamSubscribe { req, owner, id, series, min_interval_us, backfill }`, client → host.
+    /// Revision 2.
+    pub const STREAM_SUBSCRIBE: u8 = 0x73;
+    /// `StreamCatalog { req, epoch, series, live }`, host → client. Revision 2.
+    pub const STREAM_CATALOG: u8 = 0x74;
+    /// `StreamData { req, epoch, seq, prev_seq, backfill, more, chunks }`, host → client.
+    /// Revision 2.
+    pub const STREAM_DATA: u8 = 0x75;
+    /// `StreamReset { req, reason }`, host → client. Revision 2.
+    pub const STREAM_RESET: u8 = 0x76;
+
+    /// Whether `kind` is a request a client sends (revision 1 and later).
     #[must_use]
     pub const fn is_client_request(kind: u8) -> bool {
         matches!(
             kind,
-            REQUEST_END | STATUS_QUERY | STATUS_WATCH | ACTION_RUN | ACTION_QUERY | ACTION_WATCH
+            REQUEST_END
+                | STATUS_QUERY
+                | STATUS_WATCH
+                | ACTION_RUN
+                | ACTION_QUERY
+                | ACTION_WATCH
+                | STREAM_SUBSCRIBE
         )
+    }
+
+    /// Whether `kind` is a stream kind a provider sends (revision 2).
+    #[must_use]
+    pub const fn is_provider_stream(kind: u8) -> bool {
+        matches!(kind, STREAM_DECLARE | STREAM_PUBLISH)
+    }
+
+    /// The interface revision that introduced `kind` (0 for the kinds before revisions).
+    #[must_use]
+    pub const fn revision(kind: u8) -> u16 {
+        match kind {
+            0x40..=0x6F => 1,
+            0x70..=0x7F => 2,
+            _ => 0,
+        }
     }
 
     /// Whether `kind` lies in the firmware-transfer range reserved by [`FIRMWARE_FIRST`] and

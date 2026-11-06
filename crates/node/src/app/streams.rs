@@ -423,6 +423,17 @@ impl NodeApp {
                 decl.owner
             )));
         }
+        self.declare_owned_stream(source, decl)
+    }
+
+    /// A declaration whose owner was checked: by [`Self::declare_stream`], or by the link gateway
+    /// for a device's own provider.
+    pub(super) fn declare_owned_stream(
+        &self,
+        source: &LocalAddress,
+        decl: StreamDecl,
+    ) -> Result<(), NodeError> {
+        validate(&decl)?;
         let stream = StreamRef {
             owner: decl.owner.clone(),
             id: decl.id.clone(),

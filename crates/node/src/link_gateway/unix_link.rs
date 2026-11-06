@@ -78,7 +78,7 @@ struct Conn {
     pending: Arc<AtomicUsize>,
     /// The caller's identity, for its session's client requests.
     identity: UnixPeerIdentity,
-    /// The client of the current session, when it took the client role.
+    /// The current session's client and stream publisher.
     client: Option<LinkClient>,
 }
 
@@ -241,11 +241,22 @@ pub(super) async fn run(
                     break;
                 };
                 match &event {
-                    HostEvent::ClientRequest { .. } => {
-                        if let HostEvent::ClientRequest { request, .. } = event
-                            && let Some(client) = conn.client.as_mut()
-                        {
-                            client.request(&ctx.app, request);
+                    HostEvent::ClientRequest { .. }
+                    | HostEvent::StreamDeclare { .. }
+                    | HostEvent::StreamPublish { .. } => {
+                        if let Some(client) = conn.client.as_mut() {
+                            match event {
+                                HostEvent::ClientRequest { request, .. } => {
+                                    client.request(&ctx.app, request);
+                                }
+                                HostEvent::StreamDeclare {
+                                    req, id, series, ..
+                                } => client.declare(&ctx.app, req, id, series),
+                                HostEvent::StreamPublish { id, chunks, .. } => {
+                                    client.publish(&ctx.app, &id, chunks);
+                                }
+                                _ => {}
+                            }
                         }
                         continue;
                     }
@@ -256,15 +267,14 @@ pub(super) async fn run(
                         if let Some(client) = conn.client.take() {
                             client.close(&ctx.app);
                         }
-                        if roles.contains(Roles::CLIENT) {
-                            conn.client = Some(LinkClient::open(
-                                &ctx.app,
-                                &ctx.name,
-                                device_name,
-                                conn.identity.clone(),
-                                client_wake.clone(),
-                            ));
-                        }
+                        conn.client = Some(LinkClient::open(
+                            &ctx.app,
+                            &ctx.name,
+                            device_name,
+                            conn.identity.clone(),
+                            client_wake.clone(),
+                            roles.contains(Roles::CLIENT),
+                        ));
                     }
                     HostEvent::DeviceLost { .. } => {
                         if let Some(client) = conn.client.take() {

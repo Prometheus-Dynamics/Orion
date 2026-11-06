@@ -256,6 +256,7 @@ impl LinkConfig {
         config.session_seed = session_seed;
         // Only a Unix link's callers have a peer identity to authorize client requests with.
         config.serve_clients = self.serves_clients();
+        config.serve_streams = self.serves_clients();
         config
     }
 

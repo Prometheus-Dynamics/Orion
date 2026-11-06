@@ -333,6 +333,13 @@ impl Message {
             Self::ActionQuery(_) => kind::ACTION_QUERY,
             Self::ActionWatch(_) => kind::ACTION_WATCH,
             Self::ActionResults(_) => kind::ACTION_RESULTS,
+            Self::StreamDeclare(_) => kind::STREAM_DECLARE,
+            Self::StreamPublish(_) => kind::STREAM_PUBLISH,
+            Self::StreamDemand(_) => kind::STREAM_DEMAND,
+            Self::StreamSubscribe(_) => kind::STREAM_SUBSCRIBE,
+            Self::StreamCatalog(_) => kind::STREAM_CATALOG,
+            Self::StreamData(_) => kind::STREAM_DATA,
+            Self::StreamReset(_) => kind::STREAM_RESET,
             Self::Unknown(kind) => *kind,
         }
     }
@@ -347,6 +354,9 @@ impl Message {
     pub fn encode(&self, seq: u16, buf: &mut [u8]) -> Result<usize, MessageError> {
         let kind = self.kind();
         if let Some(encoded) = super::client::encode_client(self, seq, buf) {
+            return encoded;
+        }
+        if let Some(encoded) = super::streams::encode_stream(self, seq, buf) {
             return encoded;
         }
         match self {
@@ -376,7 +386,15 @@ impl Message {
             | Self::ActionRun(_)
             | Self::ActionQuery(_)
             | Self::ActionWatch(_)
-            | Self::ActionResults(_) => Err(MessageError::Encode),
+            | Self::ActionResults(_)
+            // Encoded by `streams::encode_stream` above.
+            | Self::StreamDeclare(_)
+            | Self::StreamPublish(_)
+            | Self::StreamDemand(_)
+            | Self::StreamSubscribe(_)
+            | Self::StreamCatalog(_)
+            | Self::StreamData(_)
+            | Self::StreamReset(_) => Err(MessageError::Encode),
         }
     }
 
@@ -398,6 +416,9 @@ impl Message {
     /// [`MessageError::Decode`] if the payload is not a valid body for `kind`.
     pub fn decode_payload(kind: u8, payload: &[u8]) -> Result<Self, MessageError> {
         if let Some(decoded) = super::client::decode_client(kind, payload) {
+            return decoded;
+        }
+        if let Some(decoded) = super::streams::decode_stream(kind, payload) {
             return decoded;
         }
         Ok(match kind {

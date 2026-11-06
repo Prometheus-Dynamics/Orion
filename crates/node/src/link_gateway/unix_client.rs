@@ -8,19 +8,26 @@
 //! (status coalesced to the newest value per key) until they have room, so a slow client costs
 //! one bounded queue, not unbounded memory.
 //!
-//! Limits per session: one status watch, one action watch, and [`MAX_OPEN_ACTIONS`] actions run by
-//! the session that are not yet final.
+//! Limits per session: one status watch, one action watch, [`MAX_OPEN_ACTIONS`] actions run by
+//! the session that are not yet final, and [`MAX_SUBSCRIPTIONS`] stream subscriptions.
+//!
+//! Streams (revision 2, "Step 4 wire"): a provider session's declarations and batches are its
+//! provider's streams, published under the same local address (registered on its first
+//! declaration when the session has no client); subscriptions go through the control pipeline as
+//! the other client requests. Chunks larger than a frame are split at sample boundaries here.
 
 use crate::NodeApp;
 use crate::NodeError;
 use crate::app::LinkWatch;
 use orion::control_plane::{
-    ActionQuery, ActionResult, ClientEvent, ClientEventKind, ControlMessage, StatusEntry, StatusKey,
+    ActionQuery, ActionResult, ClientEvent, ClientEventKind, ControlMessage, SampleChunk,
+    SeriesDecl, SeriesKind, StatusEntry, StatusKey, StreamRef, StreamResetReason,
+    StreamSubscription,
 };
 use orion::transport::ipc::{LocalAddress, UnixPeerIdentity};
 use orion_link::Stream;
 use orion_link::host::{ActionSendError, ClientRequest, HostSession};
-use orion_link::message::ErrorCode;
+use orion_link::message::{self as lm, ErrorCode};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -28,6 +35,8 @@ use tracing::debug;
 
 /// Actions a session may have run that are not yet final.
 pub(super) const MAX_OPEN_ACTIONS: usize = 16;
+/// Stream subscriptions per session.
+pub(super) const MAX_SUBSCRIPTIONS: usize = 8;
 /// Node events taken from the client's queue at a time.
 const EVENTS_PER_DRAIN: usize = 32;
 /// Drains per pump, so one busy client does not hold the link task.
@@ -51,20 +60,57 @@ enum Answer {
         code: ErrorCode,
         reason: String,
     },
+    Catalog {
+        req: u32,
+        epoch: u64,
+        series: Vec<SeriesDecl>,
+        live: bool,
+    },
+    Data(lm::StreamData),
+    Reset {
+        req: u32,
+        reason: StreamResetReason,
+    },
+    /// To the provider: the demand for one of its streams (no request).
+    Demand {
+        id: String,
+        subscribers: u32,
+        series: Vec<u16>,
+    },
 }
 
 impl Answer {
+    /// The request answered; 0 for a provider's demand.
     fn req(&self) -> u32 {
         match self {
-            Self::Status { req, .. } | Self::Actions { req, .. } | Self::Error { req, .. } => *req,
+            Self::Status { req, .. }
+            | Self::Actions { req, .. }
+            | Self::Error { req, .. }
+            | Self::Catalog { req, .. }
+            | Self::Reset { req, .. } => *req,
+            Self::Data(data) => data.req,
+            Self::Demand { .. } => 0,
         }
     }
+}
+
+/// A stream subscription of the session.
+struct Subscription {
+    req: u32,
+    /// The series' kinds, from the latest catalog, to split chunks larger than a frame.
+    kinds: Vec<SeriesKind>,
 }
 
 /// The client of one session.
 pub(super) struct LinkClient {
     source: LocalAddress,
+    link: String,
+    device: String,
     identity: UnixPeerIdentity,
+    wake: Arc<Notify>,
+    /// Whether a local client is registered at `source` (the session's client, or its streams'
+    /// publisher).
+    registered: bool,
     /// Why the client could not be registered; every request is refused with it.
     refused: Option<(ErrorCode, String)>,
     status_watch: Option<u32>,
@@ -73,6 +119,9 @@ pub(super) struct LinkClient {
     action_watch_first: bool,
     /// Actions run by the session that are not final yet, and the request each answers.
     runs: BTreeMap<String, u32>,
+    subscriptions: BTreeMap<StreamRef, Subscription>,
+    /// Streams the provider session declared, by id.
+    declared: BTreeMap<String, StreamRef>,
     answers: VecDeque<Answer>,
 }
 
@@ -90,39 +139,83 @@ fn code_for(error: &NodeError) -> ErrorCode {
 }
 
 impl LinkClient {
-    /// Registers the client of the session of `device` on `link`.
+    /// Opens the session of `device` on `link`, and registers its client when the session took
+    /// the client role.
     pub(super) fn open(
         app: &NodeApp,
         link: &str,
         device: &str,
         identity: UnixPeerIdentity,
         wake: Arc<Notify>,
+        client_role: bool,
     ) -> Self {
         let name = format!("link:{link}/{device}");
         let source = LocalAddress::new(name.clone());
-        let refused = app
-            .register_link_client(&source, &name, &identity, wake)
-            .err()
-            .map(|error| {
-                debug!(link, device, %error, "link client not registered; its requests are refused");
-                (code_for(&error), error.to_string())
-            });
+        let refused = if client_role {
+            app.register_link_client(&source, &name, &identity, wake.clone())
+                .err()
+                .map(|error| {
+                    debug!(link, device, %error, "link client not registered; its requests are refused");
+                    (code_for(&error), error.to_string())
+                })
+        } else {
+            None
+        };
         Self {
             source,
+            link: link.to_owned(),
+            device: device.to_owned(),
             identity,
+            wake,
+            registered: client_role && refused.is_none(),
             refused,
             status_watch: None,
             action_watch: None,
             action_watch_first: false,
             runs: BTreeMap::new(),
+            subscriptions: BTreeMap::new(),
+            declared: BTreeMap::new(),
             answers: VecDeque::new(),
         }
     }
 
     /// Removes the client from the node (its session ended).
     pub(super) fn close(self, app: &NodeApp) {
-        if self.refused.is_none() {
+        if self.registered {
             app.remove_link_client(&self.source);
+        }
+    }
+
+    /// A provider session's `StreamDeclare`.
+    pub(super) fn declare(&mut self, app: &NodeApp, req: u32, id: String, series: Vec<SeriesDecl>) {
+        if !self.registered {
+            let name = self.source.as_str().to_owned();
+            app.register_link_publisher(&self.source, &name, self.wake.clone());
+            self.registered = true;
+        }
+        match app.declare_link_stream(&self.source, &self.link, &self.device, id.clone(), series) {
+            // The first demand answers it.
+            Ok(stream) => {
+                self.declared.insert(id, stream);
+            }
+            Err(error) => {
+                let code = match &error {
+                    NodeError::Status(_) => ErrorCode::INVALID,
+                    other => code_for(other),
+                };
+                self.refuse(req, code, error.to_string());
+            }
+        }
+    }
+
+    /// A provider session's `StreamPublish`: dropped (and logged) when refused.
+    pub(super) fn publish(&mut self, app: &NodeApp, id: &str, chunks: Vec<SampleChunk>) {
+        let Some(stream) = self.declared.get(id) else {
+            debug!(link = %self.link, device = %self.device, id, "batch for a stream the session did not declare");
+            return;
+        };
+        if let Err(error) = app.publish_link_stream(&self.source, stream.clone(), chunks) {
+            debug!(link = %self.link, device = %self.device, id, %error, "stream batch dropped");
         }
     }
 
@@ -189,6 +282,9 @@ impl LinkClient {
                 }
             }
             ClientRequest::ActionRun { req, request } => self.run(app, req, *request),
+            ClientRequest::StreamSubscribe { req, subscription } => {
+                self.subscribe(app, req, *subscription);
+            }
             ClientRequest::ActionQuery { req, filter } => {
                 if let Some(ControlMessage::ActionResults(results)) =
                     self.serve(app, req, ControlMessage::QueryActions(filter))
@@ -216,6 +312,36 @@ impl LinkClient {
             ClientRequest::End { .. } | _ => {
                 self.refuse(req, ErrorCode::UNSUPPORTED, "request not served");
             }
+        }
+    }
+
+    fn subscribe(&mut self, app: &NodeApp, req: u32, subscription: StreamSubscription) {
+        if let Some(existing) = self.subscriptions.get(&subscription.stream) {
+            let reason = format!(
+                "already subscribed to this stream (request {}); end it first",
+                existing.req
+            );
+            self.refuse(req, ErrorCode::LIMIT, reason);
+            return;
+        }
+        if self.subscriptions.len() >= MAX_SUBSCRIPTIONS {
+            let reason = format!("at most {MAX_SUBSCRIPTIONS} stream subscriptions per session");
+            self.refuse(req, ErrorCode::LIMIT, reason);
+            return;
+        }
+        let stream = subscription.stream.clone();
+        if self
+            .serve(app, req, ControlMessage::SubscribeStream(subscription))
+            .is_some()
+        {
+            // The catalog and backfill arrive as the client's events.
+            self.subscriptions.insert(
+                stream,
+                Subscription {
+                    req,
+                    kinds: Vec::new(),
+                },
+            );
         }
     }
 
@@ -261,14 +387,66 @@ impl LinkClient {
         {
             self.action_watch = None;
             app.end_link_client_watch(&self.source, LinkWatch::Actions);
+        } else if let Some(stream) = self
+            .subscriptions
+            .iter()
+            .find_map(|(stream, sub)| (sub.req == req).then(|| stream.clone()))
+        {
+            self.subscriptions.remove(&stream);
+            let _ = app.serve_link_client_message(
+                &self.source,
+                &self.identity,
+                ControlMessage::UnsubscribeStream(stream),
+            );
         } else {
             return;
         }
         self.answers.retain(|answer| answer.req() != req);
     }
 
-    fn on_event(&mut self, event: ClientEvent) {
+    fn on_event(&mut self, event: ClientEvent, max_chunk: usize) {
         match event.event {
+            ClientEventKind::StreamCatalog(catalog) => {
+                if let Some(sub) = self.subscriptions.get_mut(&catalog.stream) {
+                    sub.kinds = catalog.series.iter().map(|series| series.kind).collect();
+                    self.answers.push_back(Answer::Catalog {
+                        req: sub.req,
+                        epoch: catalog.epoch,
+                        series: catalog.series,
+                        live: catalog.live,
+                    });
+                }
+            }
+            ClientEventKind::StreamData(data) => {
+                if let Some(sub) = self.subscriptions.get(&data.stream) {
+                    let chunks = split_chunks(data.chunks, &sub.kinds, max_chunk);
+                    self.answers.push_back(Answer::Data(lm::StreamData {
+                        req: sub.req,
+                        cursor: data.cursor,
+                        prev_seq: data.prev_seq,
+                        backfill: data.backfill,
+                        more: false,
+                        chunks,
+                    }));
+                }
+            }
+            ClientEventKind::StreamReset(reset) => {
+                if let Some(sub) = self.subscriptions.get(&reset.stream) {
+                    self.answers.push_back(Answer::Reset {
+                        req: sub.req,
+                        reason: reset.reason,
+                    });
+                }
+            }
+            ClientEventKind::StreamDemand(demand) => {
+                if self.declared.get(&demand.stream.id) == Some(&demand.stream) {
+                    self.answers.push_back(Answer::Demand {
+                        id: demand.stream.id,
+                        subscribers: demand.subscribers,
+                        series: demand.series,
+                    });
+                }
+            }
             ClientEventKind::Status(change) => {
                 if let Some(req) = self.status_watch {
                     self.answers.push_back(Answer::Status {
@@ -311,10 +489,11 @@ impl LinkClient {
     /// events for the client. Returns whether work is left (answers that did not fit, or events
     /// past this pump's share): the caller pumps again once frames have moved on.
     pub(super) fn pump(&mut self, app: &NodeApp, session: &mut HostSession<Stream>) -> bool {
-        if self.refused.is_some() {
+        if !self.registered {
             self.flush(app, session);
             return !self.answers.is_empty();
         }
+        let max_chunk = lm::max_chunk_data(session.max_frame().unwrap_or(0));
         for _ in 0..DRAINS_PER_PUMP {
             self.flush(app, session);
             if !self.answers.is_empty() {
@@ -325,7 +504,7 @@ impl LinkClient {
                 return false;
             }
             for event in events {
-                self.on_event(event);
+                self.on_event(event, max_chunk);
             }
         }
         self.flush(app, session);
@@ -345,12 +524,31 @@ impl LinkClient {
                 Answer::Error { req, code, reason } => {
                     session.send_request_error(*req, *code, reason)
                 }
+                Answer::Catalog {
+                    req,
+                    epoch,
+                    series,
+                    live,
+                } => session.send_stream_catalog(*req, *epoch, series, *live),
+                Answer::Data(data) => session.send_stream_data(data),
+                Answer::Reset { req, reason } => session.send_stream_reset(*req, *reason),
+                Answer::Demand {
+                    id,
+                    subscribers,
+                    series,
+                } => session.send_stream_demand(id, *subscribers, series),
             };
             match sent {
                 Ok(()) => {
                     self.answers.pop_front();
                 }
                 Err(ActionSendError::Congested) => return,
+                Err(ActionSendError::TooLarge { .. })
+                    if matches!(answer, Answer::Demand { .. }) =>
+                {
+                    // Too many series to list in one frame: the provider keeps sampling them all.
+                    self.answers.pop_front();
+                }
                 Err(ActionSendError::TooLarge { max_frame, .. }) => {
                     // The request cannot be served at this frame size: it ends.
                     let req = answer.req();
@@ -381,7 +579,33 @@ fn request_id(request: &ClientRequest) -> u32 {
         | ClientRequest::ActionRun { req, .. }
         | ClientRequest::ActionQuery { req, .. }
         | ClientRequest::ActionWatch { req, .. }
+        | ClientRequest::StreamSubscribe { req, .. }
         | ClientRequest::End { req } => *req,
         _ => 0,
     }
+}
+
+/// `chunks` with each one larger than `max_data` split at sample boundaries. A chunk of a series
+/// the catalog did not name, or that does not decode, is kept as it is (and refused for its size
+/// when sent).
+fn split_chunks(
+    chunks: Vec<SampleChunk>,
+    kinds: &[SeriesKind],
+    max_data: usize,
+) -> Vec<SampleChunk> {
+    if chunks.iter().all(|chunk| chunk.data.len() <= max_data) {
+        return chunks;
+    }
+    let mut out = Vec::with_capacity(chunks.len() + 1);
+    for chunk in chunks {
+        let kind = kinds.get(usize::from(chunk.series)).copied();
+        match kind.filter(|_| chunk.data.len() > max_data) {
+            Some(kind) => match chunk.split(kind, max_data) {
+                Ok(pieces) => out.extend(pieces),
+                Err(_) => out.push(chunk),
+            },
+            None => out.push(chunk),
+        }
+    }
+    out
 }

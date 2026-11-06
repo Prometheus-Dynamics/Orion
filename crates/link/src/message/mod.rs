@@ -18,6 +18,7 @@
 pub(crate) mod body;
 mod client;
 mod codec;
+mod streams;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -36,13 +37,19 @@ pub use client::{
     RequestError, StatusChanges, StatusRequest, encode_request_error, request_id,
 };
 #[cfg(feature = "std")]
-pub(crate) use client::{ActionParts, StatusParts};
+pub(crate) use client::{ActionParts, StatusParts, pack as client_pack};
 pub(crate) use codec::decode_leases;
 #[cfg(feature = "std")]
 pub(crate) use codec::{decode_status, encode_with};
 pub use codec::{
     encode_action_cancel, encode_action_request, encode_leases, encode_provider_state,
     encode_status,
+};
+#[cfg(feature = "std")]
+pub(crate) use streams::parts::DataParts;
+pub use streams::{
+    StreamCatalog, StreamData, StreamDeclare, StreamDemand, StreamPublish, StreamReset,
+    StreamSubscribe, encode_catalog, encode_demand, encode_publish, encode_reset, max_chunk_data,
 };
 
 /// Encodes action arguments or an action's output: the postcard encoding of the map (a count, then
@@ -280,6 +287,20 @@ pub enum Message {
     ActionWatch(ActionFilterRequest),
     /// [`kind::ACTION_RESULTS`] (revision 1).
     ActionResults(ActionResults),
+    /// [`kind::STREAM_DECLARE`] (revision 2).
+    StreamDeclare(StreamDeclare),
+    /// [`kind::STREAM_PUBLISH`] (revision 2).
+    StreamPublish(StreamPublish),
+    /// [`kind::STREAM_DEMAND`] (revision 2).
+    StreamDemand(StreamDemand),
+    /// [`kind::STREAM_SUBSCRIBE`] (revision 2).
+    StreamSubscribe(alloc::boxed::Box<StreamSubscribe>),
+    /// [`kind::STREAM_CATALOG`] (revision 2).
+    StreamCatalog(StreamCatalog),
+    /// [`kind::STREAM_DATA`] (revision 2).
+    StreamData(StreamData),
+    /// [`kind::STREAM_RESET`] (revision 2).
+    StreamReset(StreamReset),
     /// A kind this build does not handle (including the reserved kinds). Ignored by sessions.
     Unknown(u8),
 }

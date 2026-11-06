@@ -14,7 +14,7 @@ fn encoded_len<T: Serialize>(value: &T, scratch: &mut [u8]) -> usize {
 
 /// Packs records of the given lengths into consecutive ranges whose total fits `budget`. At least
 /// one (empty) range, so an empty answer is still sent.
-pub(super) fn pack(lens: &[usize], budget: usize) -> Result<Vec<Range<usize>>, RecordTooLarge> {
+pub(crate) fn pack(lens: &[usize], budget: usize) -> Result<Vec<Range<usize>>, RecordTooLarge> {
     let mut parts = Vec::new();
     let (mut start, mut used) = (0, 0usize);
     for (index, &len) in lens.iter().enumerate() {

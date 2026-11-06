@@ -64,6 +64,21 @@ impl HostCore {
                 req: body.req,
                 filter: body.filter,
             },
+            Ok(Message::StreamSubscribe(subscribe)) => {
+                if !self.config.serve_streams {
+                    refuse(
+                        self,
+                        ErrorCode::UNSUPPORTED,
+                        "this link does not serve streams",
+                    );
+                    return;
+                }
+                let message::StreamSubscribe { req, subscription } = *subscribe;
+                crate::host::ClientRequest::StreamSubscribe {
+                    req,
+                    subscription: std::boxed::Box::new(subscription),
+                }
+            }
             Ok(Message::RequestEnd { req }) => crate::host::ClientRequest::End { req },
             _ => {
                 self.decode_error();
@@ -80,9 +95,14 @@ impl HostCore {
     }
 
     /// The negotiated frame size of a session that serves clients.
-    fn client_frame(&self) -> Result<usize, ActionSendError> {
+    pub(super) fn client_frame(&self) -> Result<usize, ActionSendError> {
+        self.frame_for(Roles::CLIENT, 1)
+    }
+
+    /// The negotiated frame size of a session with `role` and at least `revision`.
+    pub(super) fn frame_for(&self, role: Roles, revision: u16) -> Result<usize, ActionSendError> {
         match &self.conn {
-            Some(conn) if conn.roles.contains(Roles::CLIENT) && conn.revision >= 1 => {
+            Some(conn) if conn.roles.contains(role) && conn.revision >= revision => {
                 Ok(conn.max_frame)
             }
             _ => Err(ActionSendError::NotConnected),
@@ -90,7 +110,7 @@ impl HostCore {
     }
 
     /// Queues `parts` frames that `encode(part, seq, buf)` writes: all of them, or none.
-    fn queue_parts(
+    pub(super) fn queue_parts(
         &mut self,
         parts: usize,
         max_frame: usize,

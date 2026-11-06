@@ -156,6 +156,13 @@ postcard encodings of the listed fields, in order.
 | `0x61` | `ActionQuery` | client → host | `req: u32`, `filter: { action_id: Option<String>, target: Option<Target> }` | Answered by one `ActionResults`. Revision 1. |
 | `0x62` | `ActionWatch` | client → host | as `ActionQuery` | Answered by the matching results, then updates. One per session. Revision 1. |
 | `0x63` | `ActionResults` | host → client | `req: u32`, `more: bool`, `results: Vec<ActionRecord>` | One part of an answer. Revision 1. |
+| `0x70` | `StreamDeclare` | provider → host | `req: u32`, `id: String`, `series: Vec<Series>` | Declares a stream of the session's provider. Answered by `StreamDemand`, or refused with `RequestError`. Revision 2. |
+| `0x71` | `StreamPublish` | provider → host | `id: String`, `chunks: Vec<Chunk>` | A batch of samples; not answered. Revision 2. |
+| `0x72` | `StreamDemand` | host → provider | `id: String`, `subscribers: u32`, `series: Vec<u16>` | Which series someone subscribes to; after a declaration and on every change. Revision 2. |
+| `0x73` | `StreamSubscribe` | client → host | `req: u32`, `owner: Subject`, `id: String`, `series: Vec<String>`, `min_interval_us: u32`, `backfill: Backfill` | Answered by a catalog, the backfill, then each batch, until `RequestEnd`. Revision 2. |
+| `0x74` | `StreamCatalog` | host → client | `req: u32`, `epoch: u64`, `series: Vec<Series>`, `live: bool` | First, and again after a reset. Revision 2. |
+| `0x75` | `StreamData` | host → client | `req: u32`, `epoch: u64`, `seq: u64`, `prev_seq: u64`, `backfill: bool`, `more: bool`, `chunks: Vec<Chunk>` | One part of the samples; `more` until the last part. Revision 2. |
+| `0x76` | `StreamReset` | host → client | `req: u32`, `reason: u8 enum` | The subscription's position no longer holds. Revision 2. |
 
 Reject reasons (one byte; unknown codes are reported as `Other(code)`):
 
@@ -466,7 +473,9 @@ sockets comes with the kinds that need it.
 A Unix link session may also take the client role (revision 1, see "Revisions"): it queries and
 watches the node's status and runs, queries and watches actions, as a local control-plane client
 named `link:<link>/<device name>` with the caller's identity, so the control sockets'
-authorization and rate limit apply to each request.
+authorization and rate limit apply to each request. From revision 2 a Unix link session also
+carries streams: a provider session publishes streams of its own provider, under the same local
+address, and a client session subscribes to any stream of the node.
 
 Bridging, kept generic (nothing about the device's resource types is assumed):
 
@@ -646,3 +655,4 @@ includes it. Revisions do not change `LINK_PROTOCOL_VERSION`.
 |---|---|
 | 0 | The protocol as of version 1, before revisions. |
 | 1 | The client role (`roles` bit 2) and kinds `0x40`, `0x41`, `0x50`-`0x52`, `0x60`-`0x63`: status query and watch, and running, querying and watching actions. Served on Unix links. The record and filter bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 3 wire"). |
+| 2 | Streams, kinds `0x70`-`0x76`: providers declare and publish, clients subscribe. Served on Unix links. The bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 4 wire"). |

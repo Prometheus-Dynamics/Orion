@@ -338,8 +338,9 @@ the error. `link.release`, `link.attach` and firmware transfers do not apply to 
 A Unix link session may take the client role (`docs/link-protocol.md`, "Revisions"). Its requests
 are those of a local control-plane client named `link:<link>/<device name>`, authorized with the
 caller's identity per request: a caller admitted only by `ORION_NODE_LOCAL_PROVIDER_ALLOW` is
-refused (`not authorized`). A session holds one status watch, one action watch, and at most 16
-unfinished actions it ran.
+refused (`not authorized`). A session holds one status watch, one action watch, at most 16
+unfinished actions it ran, and at most 8 stream subscriptions. A provider session also declares
+and publishes streams of its own provider (revision 2).
 
 Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:can0?device_base=0x600&host_base=0x680&addresses=1-16&allow=motor-a,motor-b'`.
 

@@ -661,6 +661,12 @@ The shared ABI primitives wait until the hardware repository says they are ready
       client, so the control sockets' authorization and rate limit apply per request). Decided:
       answers larger than a frame go in parts (`more`), all parts or none; a record larger than a
       frame ends its request with `limit`; serial and CAN links do not serve the client role.
+      4 done (revision 2: streams on Unix links; a provider session declares and publishes streams
+      of its own provider, a client session subscribes, at most 8 per session). Decided: frames
+      stay at 4096 bytes on every transport, stream data larger than a frame goes in parts by
+      chunk and chunks larger than a part are split at sample boundaries (byte-exact), so no
+      receive buffer grows; serial and CAN sessions' declarations are refused with `unsupported`
+      until their link tasks drain the publisher's demand (with the versioned template, step 8).
 - [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
       It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.

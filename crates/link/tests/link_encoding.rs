@@ -26,7 +26,8 @@ use orion_link::message::{
 };
 use orion_link::message::{
     ActionFilterRequest, ActionResults, ActionRun, ErrorCode, RequestError, StatusChanges,
-    StatusRequest,
+    StatusRequest, StreamCatalog, StreamData, StreamDeclare, StreamDemand, StreamPublish,
+    StreamReset, StreamSubscribe,
 };
 
 const FIXTURE: &str = "tests/fixtures/link_encodings.txt";
@@ -216,6 +217,7 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
     ]
     .into_iter()
     .chain(client_messages())
+    .chain(stream_messages())
     .collect()
 }
 
@@ -323,6 +325,102 @@ fn client_messages() -> Vec<(&'static str, Message)> {
     ]
 }
 
+/// The stream messages (revision 2, `docs/design/stable-interface.md`, "Step 4 wire").
+fn stream_messages() -> Vec<(&'static str, Message)> {
+    use orion_control_plane as cp;
+    let series = vec![
+        cp::SeriesDecl::new("imu.accel_x", cp::SeriesKind::F32, 10_000)
+            .with_unit("m/s2")
+            .with_history(cp::HistoryPolicy::full(60_000).with_reduced(600_000, 1_000)),
+        cp::SeriesDecl::new("led.0", cp::SeriesKind::U32, 0)
+            .with_sampling(cp::Sampling::WhileSubscribed),
+    ];
+    let mut builder = cp::SampleChunkBuilder::new(0, cp::SeriesKind::F32);
+    builder.push(1_700_000_000_000_000, 9.81);
+    builder.push(1_700_000_000_010_000, 9.79);
+    let chunk = builder.take();
+    let stream = cp::StreamRef {
+        owner: cp::StatusSubject::Provider(ProviderId::new("provider.imu-board")),
+        id: "imu".into(),
+    };
+    vec![
+        (
+            "stream_declare",
+            Message::StreamDeclare(StreamDeclare {
+                req: 8,
+                id: "imu".into(),
+                series: series.clone(),
+            }),
+        ),
+        (
+            "stream_publish",
+            Message::StreamPublish(StreamPublish {
+                id: "imu".into(),
+                chunks: vec![chunk.clone()],
+            }),
+        ),
+        (
+            "stream_demand",
+            Message::StreamDemand(StreamDemand {
+                id: "imu".into(),
+                subscribers: 2,
+                series: vec![0, 1],
+            }),
+        ),
+        (
+            "stream_subscribe",
+            Message::StreamSubscribe(Box::new(StreamSubscribe {
+                req: 9,
+                subscription: cp::StreamSubscription::all(stream.clone())
+                    .with_series(["imu.*"])
+                    .with_backfill(cp::Backfill::LastMs(5_000)),
+            })),
+        ),
+        (
+            "stream_subscribe.since",
+            Message::StreamSubscribe(Box::new(StreamSubscribe {
+                req: 10,
+                subscription: cp::StreamSubscription::all(stream).with_backfill(
+                    cp::Backfill::Since(cp::StreamCursor {
+                        epoch: 0x0001_0203,
+                        seq: 42,
+                    }),
+                ),
+            })),
+        ),
+        (
+            "stream_catalog",
+            Message::StreamCatalog(StreamCatalog {
+                req: 9,
+                epoch: 0x0001_0203,
+                series,
+                live: true,
+            }),
+        ),
+        (
+            "stream_data",
+            Message::StreamData(StreamData {
+                req: 9,
+                cursor: cp::StreamCursor {
+                    epoch: 0x0001_0203,
+                    seq: 43,
+                },
+                prev_seq: 42,
+                backfill: false,
+                more: false,
+                chunks: vec![chunk],
+            }),
+        ),
+        (
+            "stream_reset",
+            Message::StreamReset(StreamReset {
+                req: 9,
+                reason: cp::StreamResetReason::NewEpoch,
+            }),
+        ),
+    ]
+}
+
 fn status_entries() -> Vec<StatusEntry> {
     vec![
         StatusEntry::new("temperature_mc", TypedConfigValue::Int(41_250)).with_ttl_ms(5_000),
@@ -416,6 +514,26 @@ fn kind_numbers_are_stable() {
             kind::ACTION_RESULTS,
         ],
         [0x40, 0x41, 0x50, 0x51, 0x52, 0x60, 0x61, 0x62, 0x63]
+    );
+    assert_eq!(
+        [
+            kind::STREAM_DECLARE,
+            kind::STREAM_PUBLISH,
+            kind::STREAM_DEMAND,
+            kind::STREAM_SUBSCRIBE,
+            kind::STREAM_CATALOG,
+            kind::STREAM_DATA,
+            kind::STREAM_RESET,
+        ],
+        [0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76]
+    );
+    assert_eq!(
+        [
+            kind::revision(0x33),
+            kind::revision(0x63),
+            kind::revision(0x76)
+        ],
+        [0, 1, 2]
     );
     assert_eq!(
         (Roles::PROVIDER.0, Roles::EXECUTOR.0, Roles::CLIENT.0),

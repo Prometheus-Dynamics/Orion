@@ -178,5 +178,7 @@ For example, 40 gauges at 10 Hz for 5 minutes plus 6 IMU channels (30 s at 100 H
 | Local provider and executor clients | Declare and publish streams for subjects they own (`node/<this node>` for any of them). |
 | Any local client | Subscribe. |
 | Remote operators with read access | Subscribe, inside a push session. |
+| Provider sessions of a Unix link (revision 2) | Declare and publish streams of their own provider (`docs/design/stable-interface.md`, "Step 4 wire"). |
+| Client sessions of a Unix link (revision 2) | Subscribe, as local clients authorized with the caller's identity. |
 
 Nothing else may declare or publish.

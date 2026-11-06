@@ -250,13 +250,9 @@ impl NodeApp {
 
     /// Files a device's status batch in the status lane under the device's provider subject.
     /// The device must have an accepted provider snapshot on `link`.
-    pub(crate) fn link_publish_device_status(
-        &self,
-        link: &str,
-        device: &str,
-        entries: Vec<LinkStatusEntry>,
-    ) -> Result<(), LinkRejection> {
-        let provider_id = lock(&self.state.links.owners)
+    /// The provider of `device` on `link`, while it is connected with an accepted snapshot.
+    pub(crate) fn link_device_provider(&self, link: &str, device: &str) -> Option<ProviderId> {
+        lock(&self.state.links.owners)
             .iter()
             .find_map(|(id, owner)| match owner {
                 ProviderOwner::Device(claim)
@@ -266,11 +262,19 @@ impl NodeApp {
                 }
                 _ => None,
             })
-            .ok_or_else(|| {
-                LinkRejection(format!(
-                    "device `{device}` has no accepted provider snapshot on {link}"
-                ))
-            })?;
+    }
+
+    pub(crate) fn link_publish_device_status(
+        &self,
+        link: &str,
+        device: &str,
+        entries: Vec<LinkStatusEntry>,
+    ) -> Result<(), LinkRejection> {
+        let provider_id = self.link_device_provider(link, device).ok_or_else(|| {
+            LinkRejection(format!(
+                "device `{device}` has no accepted provider snapshot on {link}"
+            ))
+        })?;
         let entries = entries
             .into_iter()
             .map(|entry| {

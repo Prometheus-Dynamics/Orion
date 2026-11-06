@@ -114,7 +114,7 @@ pub struct ActionResults {
 // --- Wire mirrors -------------------------------------------------------------------------------
 
 #[derive(Serialize, Deserialize)]
-enum SubjectWire {
+pub(super) enum SubjectWire {
     Provider(String),
     Executor(String),
     Resource(String),
@@ -714,7 +714,7 @@ pub struct RecordTooLarge {
 }
 
 #[cfg(feature = "std")]
-pub(crate) use parts::{ActionParts, StatusParts};
+pub(crate) use parts::{ActionParts, StatusParts, pack};
 
 /// Host side: answers split to the frame size.
 #[cfg(feature = "std")]

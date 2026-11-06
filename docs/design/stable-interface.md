@@ -206,6 +206,61 @@ Decided at implementation (2026-11-06):
   session's output queue (32 frames).
 - `RequestError` reasons are cut to 256 bytes at a character boundary.
 
+## Step 4 wire (revision 2)
+
+Decided 2026-11-06. Streams as the node serves them (`docs/streams.md`): a publisher declares
+typed series and publishes batches of sample chunks; subscribers get a catalog, a backfill, then
+every batch. Sample chunks keep their encoding (per series, `t0_us` then packed `(Δt, value)`
+pairs). Stream kinds are sent only when the session's revision is at least 2.
+
+| Kind | Name | Direction | Body |
+|---|---|---|---|
+| `0x70` | `StreamDeclare` | provider → host | `req: u32, id: String, series: Vec<Series>` |
+| `0x71` | `StreamPublish` | provider → host | `id: String, chunks: Vec<Chunk>` |
+| `0x72` | `StreamDemand` | host → provider | `id: String, subscribers: u32, series: Vec<u16>` |
+| `0x73` | `StreamSubscribe` | client → host | `req: u32, owner: Subject, id: String, series: Vec<String>, min_interval_us: u32, backfill: Backfill` |
+| `0x74` | `StreamCatalog` | host → client | `req: u32, epoch: u64, series: Vec<Series>, live: bool` |
+| `0x75` | `StreamData` | host → client | `req: u32, epoch: u64, seq: u64, prev_seq: u64, backfill: bool, more: bool, chunks: Vec<Chunk>` |
+| `0x76` | `StreamReset` | host → client | `req: u32, reason: ResetReason` |
+
+Types:
+
+- `Series { name: String, unit: Option<String>, kind: SeriesKind, period_us: u32,
+  history: { full_ms: u32, reduced_ms: u32, reduced_period_ms: u32 }, sampling: Sampling }`;
+  `SeriesKind` is `F32, F64, I64, U32`, `Sampling` is `Always, WhileSubscribed`.
+- `Chunk { series: u16, t0_us: u64, count: u32, data: Vec<u8> }`, the node's `SampleChunk`.
+- `Backfill` is `None, LastMs(u64), Since { epoch: u64, seq: u64 }`.
+- `ResetReason` is `NewEpoch, OutOfRange, Overrun, Removed`.
+
+Publishers:
+
+- A session with the provider role declares streams of its own provider: the owner is implied,
+  `provider/<the provider id of the session's last ProviderState>`, so a declaration before the
+  first `ProviderState` is refused. A refused declaration gets `RequestError { req }`; an accepted
+  one gets its first `StreamDemand`, and another whenever the demand changes. Declaring the same
+  id with the same series again changes nothing; other series start a new epoch.
+- `StreamPublish` is not answered: a batch for a stream the session did not declare, or that does
+  not decode, is dropped and counted. The session's end leaves its streams without a publisher
+  (`live: false`); their history is still served.
+
+Subscribers:
+
+- A session with the client role subscribes with `StreamSubscribe`, answered by `StreamCatalog`,
+  the backfill (`StreamData { backfill: true }`), then each batch, until `RequestEnd { req }` or the
+  session ends. A stream that is not declared yet is waited for. After a `StreamReset` (other than
+  `Removed`) a catalog and the history follow; `Removed` ends nothing, the subscription waits for a
+  new declaration.
+- One subscription per stream per session (a second is refused with `limit` until the first is
+  ended), and at most 8 per session.
+- `StreamData` larger than a frame is split into parts by chunk (`more` on all but the last, the
+  same cursor on all); a chunk larger than a part is split at sample boundaries first, so no batch
+  is ever refused for its size. A subscriber that falls behind gets batches merged while they wait
+  (one frame carries more samples), then `StreamReset { Overrun }` past the node's bound.
+
+Frames stay at 4096 bytes on Unix links: parts carry larger answers, so the host's receive buffer
+does not grow for any transport. Serial and CAN links do not serve streams yet
+(`HostConfig::serve_streams`): their sessions' declarations are refused with `unsupported`.
+
 ## Not covered
 
 Desired-state writes, peers, enrollment, maintenance, observability and blobs stay on the rkyv
@@ -224,7 +279,7 @@ kinds.
 3. **Client role, status and actions.** Request correlation, status query and watch, run, query
    and watch actions. Revision 1. Done.
 4. **Streams.** Declare and publish for providers, subscribe for clients. Sample chunks keep
-   their current encoding. Revision 2.
+   their current encoding. Revision 2. Done.
 5. **Records and the executor role.** Workloads and assignments (`0x12`, `0x13`), resource and
    provider reads. Revision 3.
 6. **Remote transport.** Revision unchanged unless it needs kinds.

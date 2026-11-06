@@ -28,4 +28,6 @@ mod status;
 #[cfg(feature = "std")]
 mod stream_e2e;
 #[cfg(feature = "std")]
+mod streams;
+#[cfg(feature = "std")]
 mod views_e2e;

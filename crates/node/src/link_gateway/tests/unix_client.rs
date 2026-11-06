@@ -25,7 +25,7 @@ use tokio::task::JoinHandle;
 
 /// A client session on one connection: pings to stay alive, and hands over every message the
 /// node sends except the session's own (`Welcome`, `Pong`, `Leases`, `Ack`).
-struct RawClient {
+pub(super) struct RawClient {
     send: mpsc::UnboundedSender<Message>,
     received: mpsc::UnboundedReceiver<Message>,
     task: JoinHandle<()>,
@@ -50,7 +50,12 @@ impl Writer {
 }
 
 impl RawClient {
-    async fn connect(name: &str, path: &Path) -> Self {
+    pub(super) async fn connect(name: &str, path: &Path) -> Self {
+        Self::connect_as(name, path, Roles::CLIENT).await
+    }
+
+    /// A session with `roles`, at the host's interface revision.
+    pub(super) async fn connect_as(name: &str, path: &Path, roles: Roles) -> Self {
         let mut stream = None;
         for _ in 0..200 {
             if let Ok(connected) = UnixStream::connect(path).await {
@@ -64,9 +69,9 @@ impl RawClient {
         let (deliver, received) = mpsc::unbounded_channel();
         let hello = Message::Hello(Hello {
             device_name: name.into(),
-            roles: Roles::CLIENT,
+            roles,
             max_frame: 4096,
-            revision: 1,
+            revision: orion_link::LINK_INTERFACE_REVISION,
         });
         let task = tokio::spawn(async move {
             let (mut reader, mut writer) = stream.into_split();
@@ -118,11 +123,11 @@ impl RawClient {
         }
     }
 
-    fn send(&self, message: Message) {
+    pub(super) fn send(&self, message: Message) {
         self.send.send(message).expect("client task runs");
     }
 
-    async fn next(&mut self) -> Message {
+    pub(super) async fn next(&mut self) -> Message {
         tokio::time::timeout(WAIT, self.received.recv())
             .await
             .expect("an answer within the wait")
@@ -130,7 +135,7 @@ impl RawClient {
     }
 
     /// Nothing arrives within `quiet`.
-    async fn silent_for(&mut self, quiet: Duration) -> bool {
+    pub(super) async fn silent_for(&mut self, quiet: Duration) -> bool {
         tokio::time::timeout(quiet, self.received.recv())
             .await
             .is_err()

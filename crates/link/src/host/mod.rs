@@ -81,6 +81,10 @@ pub struct HostConfig {
     /// not include the provider role is rejected, and client requests are answered with
     /// `RequestError { code: UNSUPPORTED }`. Default false.
     pub serve_clients: bool,
+    /// Whether this link serves streams (revision 2): declarations and batches from providers,
+    /// subscriptions from clients. When false, declarations and subscriptions are answered with
+    /// `RequestError { code: UNSUPPORTED }` and batches are dropped. Default false.
+    pub serve_streams: bool,
 }
 
 impl HostConfig {
@@ -95,6 +99,7 @@ impl HostConfig {
             allowed_devices: None,
             session_seed: 1,
             serve_clients: false,
+            serve_streams: false,
         }
     }
 
@@ -207,6 +212,28 @@ pub enum HostEvent {
         /// Progress (`Running`), output (`Succeeded`) or reason (`Failed`, `Rejected`), as sent.
         payload: Vec<u8>,
     },
+    /// A provider declared a stream (revision 2, links with [`HostConfig::serve_streams`]).
+    /// Answer with [`HostSession::send_stream_demand`], or refuse with
+    /// [`HostSession::send_request_error`] echoing `req`.
+    StreamDeclare {
+        /// The session's device name.
+        device_name: String,
+        /// Request id, for a refusal.
+        req: u32,
+        /// The stream's id; its owner is the session's provider.
+        id: String,
+        /// The series.
+        series: Vec<orion_control_plane::SeriesDecl>,
+    },
+    /// A batch of samples from a provider (revision 2); not answered.
+    StreamPublish {
+        /// The session's device name.
+        device_name: String,
+        /// The stream's id.
+        id: String,
+        /// The samples.
+        chunks: Vec<orion_control_plane::SampleChunk>,
+    },
     /// A client request (revision 1, links with [`HostConfig::serve_clients`]).
     ClientRequest {
         /// The session's device name.
@@ -257,7 +284,15 @@ pub enum ClientRequest {
         /// Which actions.
         filter: orion_control_plane::ActionQuery,
     },
-    /// End the watch `req`. Not answered.
+    /// Subscribe to a stream (revision 2); answer with [`HostSession::send_stream_catalog`],
+    /// [`HostSession::send_stream_data`] and [`HostSession::send_stream_reset`] until ended.
+    StreamSubscribe {
+        /// Request id.
+        req: u32,
+        /// The stream, series, rate and backfill.
+        subscription: Box<orion_control_plane::StreamSubscription>,
+    },
+    /// End the watch or subscription `req`. Not answered.
     End {
         /// The watch's request id.
         req: u32,
@@ -451,6 +486,68 @@ impl<T: Transport> HostSession<T> {
         reason: &str,
     ) -> Result<(), ActionSendError> {
         self.core.send_request_error(req, code, reason)
+    }
+
+    /// Queues a `StreamDemand` for a stream the provider session declared.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionSendError::NotConnected`] without a provider session of revision 2, and as
+    /// [`HostSession::send_status_changes`].
+    pub fn send_stream_demand(
+        &mut self,
+        id: &str,
+        subscribers: u32,
+        series: &[u16],
+    ) -> Result<(), ActionSendError> {
+        self.core.send_stream_demand(id, subscribers, series)
+    }
+
+    /// Queues a subscription's `StreamCatalog`.
+    ///
+    /// # Errors
+    ///
+    /// As [`HostSession::send_status_changes`].
+    pub fn send_stream_catalog(
+        &mut self,
+        req: u32,
+        epoch: u64,
+        series: &[orion_control_plane::SeriesDecl],
+        live: bool,
+    ) -> Result<(), ActionSendError> {
+        self.core.send_stream_catalog(req, epoch, series, live)
+    }
+
+    /// Queues a subscription's samples, split by chunk into as many `StreamData` frames as the
+    /// frame size needs (all or none). Chunks larger than [`crate::message::max_chunk_data`]
+    /// must be split first (`SampleChunk::split`); `data.more` is set per part here.
+    ///
+    /// # Errors
+    ///
+    /// As [`HostSession::send_status_changes`].
+    pub fn send_stream_data(
+        &mut self,
+        data: &crate::message::StreamData,
+    ) -> Result<(), ActionSendError> {
+        self.core.send_stream_data(data)
+    }
+
+    /// Queues a subscription's `StreamReset`.
+    ///
+    /// # Errors
+    ///
+    /// As [`HostSession::send_status_changes`].
+    pub fn send_stream_reset(
+        &mut self,
+        req: u32,
+        reason: orion_control_plane::StreamResetReason,
+    ) -> Result<(), ActionSendError> {
+        self.core.send_stream_reset(req, reason)
+    }
+
+    /// The session's negotiated frame size.
+    pub fn max_frame(&self) -> Option<usize> {
+        self.core.max_frame()
     }
 
     /// The roles the connected session announced.

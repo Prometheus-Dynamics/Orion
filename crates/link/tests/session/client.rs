@@ -12,15 +12,15 @@ use orion_link::{LINK_INTERFACE_REVISION, Stream, StreamDecoder, StreamEncoder};
 
 use crate::sim::host_config;
 
-struct Client {
-    host: HostSession<Stream>,
+pub(crate) struct Client {
+    pub(crate) host: HostSession<Stream>,
     rx: StreamDecoder<4096>,
     seq: u16,
     now: u64,
 }
 
 impl Client {
-    fn new(config: HostConfig) -> Self {
+    pub(crate) fn new(config: HostConfig) -> Self {
         Self {
             host: HostSession::stream(config),
             rx: StreamDecoder::new(),
@@ -29,7 +29,7 @@ impl Client {
         }
     }
 
-    fn send(&mut self, message: &Message) {
+    pub(crate) fn send(&mut self, message: &Message) {
         self.seq = self.seq.wrapping_add(1);
         let mut buf = vec![0u8; 4096];
         let len = message.encode(self.seq, &mut buf).expect("fits");
@@ -39,7 +39,7 @@ impl Client {
         self.host.poll(self.now);
     }
 
-    fn hello(&mut self, roles: Roles, revision: u16, max_frame: u32) {
+    pub(crate) fn hello(&mut self, roles: Roles, revision: u16, max_frame: u32) {
         self.send(&Message::Hello(Hello {
             device_name: "console".into(),
             roles,
@@ -49,7 +49,7 @@ impl Client {
     }
 
     /// Messages the host sent since the last call.
-    fn received(&mut self) -> Vec<Message> {
+    pub(crate) fn received(&mut self) -> Vec<Message> {
         let mut out = Vec::new();
         while let Some(bytes) = self.host.transmit() {
             for byte in bytes {
@@ -61,12 +61,12 @@ impl Client {
         out
     }
 
-    fn events(&mut self) -> Vec<HostEvent> {
+    pub(crate) fn events(&mut self) -> Vec<HostEvent> {
         std::iter::from_fn(|| self.host.next_event()).collect()
     }
 }
 
-fn serving() -> HostConfig {
+pub(crate) fn serving() -> HostConfig {
     let mut config = host_config();
     config.serve_clients = true;
     config
