@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added (measurement)
+
+- `unix_link_latency`, an ignored bench that the perf workflow runs. It times a value from a
+  provider session's publish to a client session's `StreamData` or `StatusChanges` over a Unix
+  link, and reports p50 and p99. The numbers are in docs/testing.md.
+
 ### Changed (memory)
 
 - Link host: a queued frame holds only its own bytes. Frames were encoded into a buffer of the

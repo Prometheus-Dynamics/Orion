@@ -41,6 +41,9 @@ jobs:
       - name: Run release perf harness
         run: set -o pipefail && cargo test -p orion-node --test perf_release -- --include-ignored --nocapture | tee perf_release.log
 
+      - name: Run link latency bench
+        run: set -o pipefail && cargo test -p orion-node --release --features link-gateway --lib unix_link_latency -- --ignored --nocapture | tee link_latency.log
+
       - name: Run Docker perf harness
         env:
           ORION_SKIP_DOCKER_BUILD: "1"

@@ -92,6 +92,45 @@ cargo test -p orion-node --features link-gateway --lib can_gateway_on_vcan0 -- -
 cargo test -p orion-node --features link-gateway --lib can_firmware_on_vcan0 -- --ignored
 ```
 
+### Latency and allocations
+
+`unix_link_latency` (`link_gateway/tests/unix_latency.rs`, ignored, run in the perf workflow)
+times one value's trip through the node over a Unix link. A provider session publishes, and a
+client session receives. Each value waits for the previous one, so nothing coalesces:
+
+```sh
+cargo test -p orion-node --release --features link-gateway --lib unix_link_latency -- --ignored --nocapture
+```
+
+Measured 2026-11-06 on an x86_64 workstation (release, in-process, 2,000 values, load average
+about 110 on 32 cores from other builds):
+
+| Path | p50 | p90 | p99 |
+|---|---|---|---|
+| stream publish to `StreamData` | 34 to 51 us | 50 us to 1.6 ms | 0.1 to 2 ms |
+| status publish to `StatusChanges` | 45 to 53 us | 57 to 141 us | 77 us to 1.7 ms |
+
+The p50 is the path's own cost. The millisecond tail follows the machine's load: it is threads
+waiting to be scheduled, not a timer in the path. On a quiet machine, rerun the bench to get
+the tail.
+
+The bench raises the per-connection frame budget (`ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES`,
+256 frames a second by default). One frame per value exceeds it. A throttled connection's reads
+pause until the window ends. With the default 3 s heartbeat timeout the session survives that,
+but with a timeout shorter than the 1 s window it is declared lost.
+
+Allocation counts on the hot paths (`crates/link/tests/alloc_count.rs` and
+`crates/nt4/tests/alloc_count.rs`) fail when a change adds allocations. Steady state:
+
+| Path | Allocations |
+|---|---|
+| link heartbeat answer | 0 |
+| link stream delivery (a 10-sample batch to a client) | 0 |
+| link status from a device | 0.15 |
+| link stream publish received | 4 |
+| NT4 encode and scalar decode | 0 |
+| NT4 relayed value (client, server and subscriber) | 4.7 |
+
 ## Peer Discovery
 
 `cargo test -p orion-node --no-default-features --features peer-tcp,discovery-mdns` (also part of

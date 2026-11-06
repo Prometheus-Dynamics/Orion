@@ -13,6 +13,8 @@ mod status;
 mod unix;
 mod unix_client;
 #[cfg(target_os = "linux")]
+mod unix_latency;
+#[cfg(target_os = "linux")]
 mod unix_streams;
 
 use crate::{NodeApp, NodeConfig};

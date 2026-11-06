@@ -667,6 +667,13 @@ The shared ABI primitives wait until the hardware repository says they are ready
       chunk and chunks larger than a part are split at sample boundaries (byte-exact), so no
       receive buffer grows; serial and CAN sessions' declarations are refused with `unsupported`
       until their link tasks drain the publisher's demand (with the versioned template, step 8).
+      Measured (2026-11-06, `unix_link_latency`, docs/testing.md): p50 about 45 us from a
+      provider session's publish to a client's `StreamData` or `StatusChanges`.
+- [ ] **A throttled Unix connection can be declared lost.** Past 256 frames a second (the local
+      rate limit), a connection's reads pause until the 1 s window ends. Its pings wait too, so a
+      link whose heartbeat timeout is under 1 s loses the session. The default timeout is 3 s,
+      which is safe. Fix: refuse a link config whose timeout is shorter than the window, or count
+      a throttled connection as heard.
 - [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
       It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.
