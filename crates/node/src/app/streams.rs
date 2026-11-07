@@ -80,6 +80,13 @@ struct Subscriber {
     last_sent_us: Vec<u64>,
 }
 
+impl Subscriber {
+    /// Every series at the publisher's rate: the batch goes out as published.
+    fn takes_everything(&self) -> bool {
+        self.sub.min_interval_us == 0 && self.wanted.iter().all(|w| *w)
+    }
+}
+
 #[derive(Debug)]
 struct Ring {
     full: VecDeque<(u64, f64)>,
@@ -561,8 +568,8 @@ impl NodeApp {
                     publish.stream.id
                 )));
             }
-            // Decode everything first: a malformed batch changes nothing.
-            let mut decoded = Vec::with_capacity(publish.chunks.len());
+            // Check everything first: a malformed batch changes nothing.
+            let mut kinds = Vec::with_capacity(publish.chunks.len());
             for chunk in &publish.chunks {
                 let kind: SeriesKind = stream
                     .series
@@ -574,15 +581,16 @@ impl NodeApp {
                             publish.stream.id, chunk.series
                         ))
                     })?;
-                let samples = chunk.samples(kind).map_err(|err| {
+                chunk.validate(kind).map_err(|err| {
                     NodeError::Status(format!("stream {}: {err}", publish.stream.id))
                 })?;
-                decoded.push((usize::from(chunk.series), samples));
+                kinds.push(kind);
             }
             let mut count = 0u64;
-            for (index, samples) in &decoded {
-                for &(t, v) in samples {
-                    stream.rings[*index].push(t, v);
+            for (chunk, &kind) in publish.chunks.iter().zip(&kinds) {
+                let ring = &mut stream.rings[usize::from(chunk.series)];
+                for (t, v) in chunk.iter(kind).flatten() {
+                    ring.push(t, v);
                     stream.newest_us = stream.newest_us.max(t);
                     count += 1;
                 }
@@ -610,27 +618,34 @@ impl NodeApp {
                 .samples_total
                 .fetch_add(count, Ordering::Relaxed);
             let cursor = stream.cursor();
-            let series = &stream.series;
+            // Subscribers that take the whole batch get it as published. The last subscriber
+            // to see the batch takes it without a copy when it is one of them.
+            let mut left = stream.subscribers.len();
+            let mut batch = publish.chunks;
             for (to, subscriber) in stream.subscribers.iter_mut() {
-                let everything =
-                    subscriber.sub.min_interval_us == 0 && subscriber.wanted.iter().all(|w| *w);
-                let chunks: Vec<SampleChunk> = if everything {
-                    publish.chunks.clone()
+                left -= 1;
+                let chunks: Vec<SampleChunk> = if subscriber.takes_everything() {
+                    if left == 0 {
+                        core::mem::take(&mut batch)
+                    } else {
+                        batch.clone()
+                    }
                 } else {
                     let min = u64::from(subscriber.sub.min_interval_us);
-                    decoded
+                    batch
                         .iter()
-                        .filter(|(index, _)| subscriber.wanted[*index])
-                        .filter_map(|(index, samples)| {
-                            let mut builder =
-                                SampleChunkBuilder::new(*index as u16, series[*index].kind);
-                            for &(t, v) in samples {
-                                let last = subscriber.last_sent_us[*index];
+                        .zip(&kinds)
+                        .filter(|(chunk, _)| subscriber.wanted[usize::from(chunk.series)])
+                        .filter_map(|(chunk, &kind)| {
+                            let index = usize::from(chunk.series);
+                            let mut builder = SampleChunkBuilder::new(chunk.series, kind);
+                            for (t, v) in chunk.iter(kind).flatten() {
+                                let last = subscriber.last_sent_us[index];
                                 if min > 0 && last != 0 && t < last + min {
                                     continue;
                                 }
                                 builder.push(t, v);
-                                subscriber.last_sent_us[*index] = t;
+                                subscriber.last_sent_us[index] = t;
                             }
                             (!builder.is_empty()).then(|| builder.take())
                         })

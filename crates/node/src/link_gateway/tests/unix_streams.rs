@@ -180,3 +180,58 @@ async fn a_provider_session_publishes_a_stream_that_client_sessions_follow() {
     ));
     gateway.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_whole_batch_subscriber_and_a_thinned_one_each_get_every_batch() {
+    let app = test_app("unix-streams-mixed");
+    let path = socket_path("streams-mixed");
+    let gateway = start(&app, vec![unix_link(&path, "")]);
+    let mut publisher = RawClient::connect_as("imu-board", &path, Roles::PROVIDER).await;
+    publisher.send(Message::ProviderState(ProviderState {
+        provider: device_provider(PROVIDER),
+        resources: vec![device_resource("imu-board.imu-0", PROVIDER, "unix")],
+    }));
+    assert!(wait_until(WAIT, || has_provider(&app, PROVIDER)).await);
+    publisher.send(Message::StreamDeclare(StreamDeclare {
+        req: 1,
+        id: "imu".into(),
+        series: vec![SeriesDecl::new("imu.accel_x", SeriesKind::F32, 1_000)],
+    }));
+    assert!(matches!(publisher.next().await, Message::StreamDemand(_)));
+
+    // `a` sorts before `b`: the whole-batch subscriber is served first, the thinned one after it.
+    let mut whole = RawClient::connect("console-a", &path).await;
+    whole.send(subscribe(1, Backfill::None));
+    let mut thinned = RawClient::connect("console-b", &path).await;
+    let mut sub = StreamSubscription::all(stream()).with_backfill(Backfill::None);
+    sub.min_interval_us = 5_000;
+    thinned.send(Message::StreamSubscribe(Box::new(StreamSubscribe {
+        req: 2,
+        subscription: sub,
+    })));
+    for client in [&mut whole, &mut thinned] {
+        assert!(matches!(client.next().await, Message::StreamCatalog(_)));
+        // An empty backfill answer ends the (empty) history.
+        assert!(next_samples(client).await.backfill);
+    }
+
+    let t0 = now_us();
+    for batch in 0..3u64 {
+        publisher.send(Message::StreamPublish(StreamPublish {
+            id: "imu".into(),
+            chunks: vec![chunk(t0 + batch * 10_000, 10)],
+        }));
+        let samples = |data: &StreamData| -> usize {
+            data.chunks
+                .iter()
+                .map(|c| c.samples(SeriesKind::F32).expect("decodes").len())
+                .sum()
+        };
+        let got = next_samples(&mut whole).await;
+        assert_eq!(samples(&got), 10, "batch {batch}");
+        // 10 samples 1 ms apart, at most one per 5 ms.
+        let got = next_samples(&mut thinned).await;
+        assert_eq!(samples(&got), 2, "batch {batch}");
+    }
+    gateway.shutdown().await;
+}

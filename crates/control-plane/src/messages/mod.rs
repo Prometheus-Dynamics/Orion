@@ -64,9 +64,9 @@ pub use status::{
 };
 pub use streams::{
     Backfill, HistoryPolicy, MAX_STREAM_NAME_LEN, MAX_STREAM_SERIES, SampleChunk,
-    SampleChunkBuilder, SampleDecodeError, SampleValue, Sampling, SeriesDecl, SeriesKind,
-    StreamCatalog, StreamCursor, StreamData, StreamDecl, StreamDemand, StreamPublish, StreamRef,
-    StreamReset, StreamResetReason, StreamSubscription,
+    SampleChunkBuilder, SampleDecodeError, SampleIter, SampleValue, Sampling, SeriesDecl,
+    SeriesKind, StreamCatalog, StreamCursor, StreamData, StreamDecl, StreamDemand, StreamPublish,
+    StreamRef, StreamReset, StreamResetReason, StreamSubscription,
 };
 pub use sync::{
     DesiredStateObjectSelector, DesiredStateSection, DesiredStateSectionFingerprints,

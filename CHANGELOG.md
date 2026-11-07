@@ -14,6 +14,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed (memory)
 
+- Node streams: a published batch is decoded where it lies. `SampleChunk::iter` and
+  `SampleChunk::validate` (control plane) walk the samples without allocating. The node now checks
+  a batch and fills its rings that way, where before it built a vector of decoded samples per
+  chunk. The last subscriber that takes the whole batch gets the published chunks by move, not
+  by copy, so a stream with one full-rate subscriber copies nothing between the link and that
+  subscriber's queue.
+
 - Link host: a queued frame holds only its own bytes. Frames were encoded into a buffer of the
   session's frame size (4096 B on most links) and kept it, so a full output queue (32 frames)
   held 128 KiB per session; they are now encoded on the stack and copied out at their length.

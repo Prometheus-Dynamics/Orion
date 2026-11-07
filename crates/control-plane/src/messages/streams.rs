@@ -486,23 +486,75 @@ impl SampleChunk {
     /// The samples, as `(t_us, value)`, decoded with the series' `kind`.
     pub fn samples(&self, kind: SeriesKind) -> Result<Vec<(u64, f64)>, SampleDecodeError> {
         let mut out = Vec::with_capacity(self.count as usize);
-        let mut at = 0usize;
-        let mut t = self.t0_us;
-        for _ in 0..self.count {
-            let dt = read_varint(&self.data, &mut at)?;
-            t = t.checked_add(dt).ok_or(SampleDecodeError)?;
-            let value = match kind {
-                SeriesKind::F32 => f64::from(f32::from_le_bytes(take::<4>(&self.data, &mut at)?)),
-                SeriesKind::F64 => f64::from_le_bytes(take::<8>(&self.data, &mut at)?),
-                SeriesKind::I64 => unzigzag(read_varint(&self.data, &mut at)?) as f64,
-                SeriesKind::U32 => f64::from(u32::from_le_bytes(take::<4>(&self.data, &mut at)?)),
-            };
-            out.push((t, value));
-        }
-        if at != self.data.len() {
-            return Err(SampleDecodeError);
+        for sample in self.iter(kind) {
+            out.push(sample?);
         }
         Ok(out)
+    }
+
+    /// The samples, decoded one at a time without allocating. A malformed chunk yields an error
+    /// and then ends; bytes left over after the last sample are an error too.
+    pub fn iter(&self, kind: SeriesKind) -> SampleIter<'_> {
+        SampleIter {
+            data: &self.data,
+            kind,
+            at: 0,
+            t: self.t0_us,
+            left: self.count,
+            failed: false,
+        }
+    }
+
+    /// Checks that the chunk decodes with `kind`, without allocating.
+    pub fn validate(&self, kind: SeriesKind) -> Result<(), SampleDecodeError> {
+        self.iter(kind).try_for_each(|sample| sample.map(drop))
+    }
+}
+
+/// The samples of a [`SampleChunk`], from [`SampleChunk::iter`].
+#[derive(Clone, Debug)]
+pub struct SampleIter<'a> {
+    data: &'a [u8],
+    kind: SeriesKind,
+    at: usize,
+    t: u64,
+    left: u32,
+    failed: bool,
+}
+
+impl SampleIter<'_> {
+    fn next_sample(&mut self) -> Result<(u64, f64), SampleDecodeError> {
+        let (data, at) = (self.data, &mut self.at);
+        let dt = read_varint(data, at)?;
+        self.t = self.t.checked_add(dt).ok_or(SampleDecodeError)?;
+        let value = match self.kind {
+            SeriesKind::F32 => f64::from(f32::from_le_bytes(take::<4>(data, at)?)),
+            SeriesKind::F64 => f64::from_le_bytes(take::<8>(data, at)?),
+            SeriesKind::I64 => unzigzag(read_varint(data, at)?) as f64,
+            SeriesKind::U32 => f64::from(u32::from_le_bytes(take::<4>(data, at)?)),
+        };
+        Ok((self.t, value))
+    }
+}
+
+impl Iterator for SampleIter<'_> {
+    type Item = Result<(u64, f64), SampleDecodeError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        if self.left == 0 {
+            if self.at != self.data.len() {
+                self.failed = true;
+                return Some(Err(SampleDecodeError));
+            }
+            return None;
+        }
+        self.left -= 1;
+        let sample = self.next_sample();
+        self.failed = sample.is_err();
+        Some(sample)
     }
 }
 
