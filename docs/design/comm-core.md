@@ -250,6 +250,23 @@ identity endpoint.
 | The comm core itself (host facts it already reads, `crates/node/src/host_facts.rs`) | `contract`, `model`, `rev`, `serial`, `hostname`, `os`, `macs`, `time`, `bootloader` when readable, `endpoints` (its own status, events, stream, actions paths), `actions` (the node actions it routes, `reboot` included) |
 | The device package, as one JSON fragment file (for example `/etc/orion/identity.d/*.json`, merged in name order) or as `identity.*` status keys of a provider allowed to publish them | `device_package`, `update_methods`, `manage_url`, `update`, `camera_stream(s)`, `gadget`, `usb_route`, `security`, `diagnostics` |
 
+**Live fields.** Three fields are computed on every request and never cached:
+- `hostname`, from the kernel (`uname`), so a `hostname` change shows at once;
+- `time`, as integer unix seconds;
+- `security` (`on` or `off`), read from the package's security file in the package's precedence
+  order (a writable data copy wins over the image default).
+
+**Passed through.** `update` is copied verbatim from the first line of the updater's state file
+(`/run/board/update.json`), not rebuilt. Its shape (`state`, per-mille `progress`, `phase`, and
+the slot fields on A/B layouts) belongs to the updater.
+
+**Shapes the comm core checks before serving:**
+- `usb_route` must carry the booleans `enabled` and `active`;
+- each `camera_streams` entry must carry `url`, which may be `:<port>/path` on the same host;
+- `endpoints` values are strings.
+
+A fragment that breaks its field's shape is dropped and logged, never served half-valid.
+
 The comm core never invents a package field. A missing required field is `null`, as the schema
 allows, and is never guessed.
 
@@ -257,7 +274,8 @@ allows, and is never guessed.
 - **The contract's own HTTP path and port**, by a minimal HTTP/1.1 `GET` responder in the comm
   core. It is not `axum` or `hyper`. It answers one path and the endpoints' paths, so it also
   works in `comm-core-min`, which has no HTTP stack.
-- **The file** `/run/board/identity.json`, rewritten atomically when a field changes.
+- **The file** `/run/board/identity.json`, rewritten atomically when a non-live field changes. The
+  HTTP answer is always built per request, so its live fields are current.
 - **Signed over Orion:** the same document, plus the node id and public key, the comm-core and
   protocol versions, the tier state (`node: up | down | absent`) and the SSH host-key
   fingerprint. It is signed with the node key and served as one `orion+tcp` request, over local
