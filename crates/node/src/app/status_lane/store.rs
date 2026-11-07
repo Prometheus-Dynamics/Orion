@@ -5,7 +5,7 @@
 //! per-entry key and value size limits.
 
 use orion::control_plane::{StatusEntry, StatusKey, StatusQuery, TypedConfigValue};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 /// Longest status key, in bytes.
 pub(crate) const MAX_STATUS_KEY_BYTES: usize = 128;
@@ -56,6 +56,8 @@ impl std::fmt::Display for StatusPublishError {
 struct Stored {
     entry: StatusEntry,
     publisher: String,
+    /// The entry's place in `expiries`.
+    expiry: (u64, u64),
 }
 
 /// Result of an accepted publish.
@@ -71,7 +73,9 @@ pub(crate) struct PublishOutcome {
 pub(crate) struct StatusStore {
     entries: BTreeMap<StatusKey, Stored>,
     per_publisher: BTreeMap<String, usize>,
-    expiries: BTreeSet<(u64, StatusKey)>,
+    /// `(expires_at_ms, id)` to key: removing an entry's expiry needs no copy of its key.
+    expiries: BTreeMap<(u64, u64), StatusKey>,
+    next_expiry_id: u64,
     /// Sum of the value sizes of every held entry (kept exact by `remove` and `publish`).
     value_bytes: usize,
 }
@@ -87,7 +91,7 @@ impl StatusStore {
 
     /// Earliest expiry time, if any entry is held.
     pub(crate) fn next_expiry_ms(&self) -> Option<u64> {
-        self.expiries.first().map(|(at, _)| *at)
+        self.expiries.first_key_value().map(|((at, _), _)| *at)
     }
 
     /// Applies a batch atomically: either every entry is stored or none is.
@@ -98,14 +102,27 @@ impl StatusStore {
         now_ms: u64,
         limits: StatusLimits,
     ) -> Result<PublishOutcome, StatusPublishError> {
-        // Later entries for the same key win within one batch.
-        let mut batch: BTreeMap<StatusKey, StatusEntry> = BTreeMap::new();
+        // Later entries for the same key win within one batch. One vector, sorted by key (a stable
+        // sort keeps the batch order within a key, so the last of each run wins), instead of a map
+        // node per entry: the common batch is one entry.
+        let mut batch: Vec<(StatusKey, StatusEntry)> = Vec::with_capacity(entries.len());
         for entry in entries {
             validate(&entry, limits.max_value_bytes)?;
-            batch.insert(entry.status_key(), entry);
+            batch.push((entry.status_key(), entry));
         }
-        let new_global = batch
-            .keys()
+        if batch.len() > 1 {
+            batch.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut kept: Vec<(StatusKey, StatusEntry)> = Vec::with_capacity(batch.len());
+            for item in batch {
+                match kept.last_mut() {
+                    Some(last) if last.0 == item.0 => *last = item,
+                    _ => kept.push(item),
+                }
+            }
+            batch = kept;
+        }
+        let keys = || batch.iter().map(|(key, _)| key);
+        let new_global = keys()
             .filter(|key| !self.entries.contains_key(*key))
             .count();
         let needed = self.entries.len().saturating_add(new_global);
@@ -115,8 +132,7 @@ impl StatusStore {
                 max: limits.max_entries,
             });
         }
-        let new_for_publisher = batch
-            .keys()
+        let new_for_publisher = keys()
             .filter(|key| {
                 self.entries
                     .get(*key)
@@ -132,9 +148,8 @@ impl StatusStore {
             });
         }
 
-        let batch_value_bytes: usize = batch.values().map(|e| value_len(&e.value)).sum();
-        let replaced_value_bytes: usize = batch
-            .keys()
+        let batch_value_bytes: usize = batch.iter().map(|(_, e)| value_len(&e.value)).sum();
+        let replaced_value_bytes: usize = keys()
             .filter_map(|key| self.entries.get(key))
             .map(|stored| value_len(&stored.entry.value))
             .sum();
@@ -157,13 +172,23 @@ impl StatusStore {
                 entry.ttl_ms.min(limits.max_ttl_ms)
             };
             entry.published_at_ms = now_ms;
-            let changed = match self.remove(&key) {
-                Some(previous) => previous.entry.value != entry.value,
-                None => true,
+            let previous = self.take(&key);
+            let changed = previous
+                .as_ref()
+                .is_none_or(|previous| previous.entry.value != entry.value);
+            let owner = match previous {
+                // The same publisher replacing its entry: its count and name stay, no new string.
+                Some(previous) if previous.publisher == publisher => previous.publisher,
+                Some(previous) => {
+                    self.release(&previous.publisher);
+                    self.count(publisher)
+                }
+                None => self.count(publisher),
             };
-            self.expiries.insert((entry.expires_at_ms(), key.clone()));
+            self.next_expiry_id = self.next_expiry_id.wrapping_add(1);
+            let expiry = (entry.expires_at_ms(), self.next_expiry_id);
+            self.expiries.insert(expiry, key.clone());
             self.value_bytes = self.value_bytes.saturating_add(value_len(&entry.value));
-            *self.per_publisher.entry(publisher.to_owned()).or_insert(0) += 1;
             if changed {
                 outcome.changed.push(entry.clone());
             }
@@ -172,7 +197,8 @@ impl StatusStore {
                 key,
                 Stored {
                     entry,
-                    publisher: publisher.to_owned(),
+                    publisher: owner,
+                    expiry,
                 },
             );
         }
@@ -182,10 +208,11 @@ impl StatusStore {
     /// Drops every entry whose TTL ran out at `now_ms` and returns their keys.
     pub(crate) fn expire(&mut self, now_ms: u64) -> Vec<StatusKey> {
         let mut expired = Vec::new();
-        while let Some((at, key)) = self.expiries.first().cloned() {
-            if at > now_ms {
+        while let Some(entry) = self.expiries.first_entry() {
+            if entry.key().0 > now_ms {
                 break;
             }
+            let key = entry.remove();
             self.remove(&key);
             expired.push(key);
         }
@@ -204,19 +231,40 @@ impl StatusStore {
     }
 
     fn remove(&mut self, key: &StatusKey) -> Option<Stored> {
+        let stored = self.take(key)?;
+        self.release(&stored.publisher);
+        Some(stored)
+    }
+
+    /// Removes the entry and its expiry and value bytes, but not its publisher's count.
+    fn take(&mut self, key: &StatusKey) -> Option<Stored> {
         let stored = self.entries.remove(key)?;
-        self.expiries
-            .remove(&(stored.entry.expires_at_ms(), key.clone()));
+        self.expiries.remove(&stored.expiry);
         self.value_bytes = self
             .value_bytes
             .saturating_sub(value_len(&stored.entry.value));
-        if let Some(count) = self.per_publisher.get_mut(&stored.publisher) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.per_publisher.remove(&stored.publisher);
+        Some(stored)
+    }
+
+    /// One entry more for `publisher`; returns its name for the stored entry.
+    fn count(&mut self, publisher: &str) -> String {
+        match self.per_publisher.get_mut(publisher) {
+            Some(count) => *count += 1,
+            None => {
+                self.per_publisher.insert(publisher.to_owned(), 1);
             }
         }
-        Some(stored)
+        publisher.to_owned()
+    }
+
+    /// One entry less for `publisher`.
+    fn release(&mut self, publisher: &str) {
+        if let Some(count) = self.per_publisher.get_mut(publisher) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.per_publisher.remove(publisher);
+            }
+        }
     }
 }
 

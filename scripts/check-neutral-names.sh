@@ -28,6 +28,7 @@ ALLOW=(
     # source in the manifests, and its header, shipped verbatim, and the include of it.
     'Cargo.toml'
     'Cargo.lock'
+    'examples/liborion-consumer/Cargo.lock'
     'crates/capi/include/*'
     'crates/capi/cbindgen.toml'
     'scripts/check-neutral-names.sh'
