@@ -14,6 +14,9 @@ pub struct HelloView<'a> {
     pub roles: Roles,
     /// Largest frame (header + payload + CRC) the device can receive and send.
     pub max_frame: u32,
+    /// The highest interface revision the device speaks (`docs/design/stable-interface.md`).
+    /// Appended, and absent on the wire when it is 0, as in `Hello`.
+    pub revision: u16,
 }
 
 impl Encode for HelloView<'_> {
@@ -21,6 +24,9 @@ impl Encode for HelloView<'_> {
         self.device_name.encode(w);
         self.roles.encode(w);
         self.max_frame.encode(w);
+        if self.revision != 0 {
+            self.revision.encode(w);
+        }
     }
 }
 

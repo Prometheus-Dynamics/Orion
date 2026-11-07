@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # liborion (docs/capi.md).
 #
-#   scripts/capi.sh header   regenerate crates/capi/include/orion/orion.h (needs cbindgen)
-#   scripts/capi.sh check    the header is current, the shared ABI header is the ABI crate's,
+#   scripts/capi.sh header   regenerate crates/capi/include/orion/orion.h and the MCU template's
+#                            examples/mcu-template/include/orion_mcu.h (needs cbindgen)
+#   scripts/capi.sh check    the headers are current, the shared ABI header is the ABI crate's,
 #                            the exported symbols are crates/capi/symbols.txt, the SONAME carries
 #                            ORION_ABI_MAJOR, and a C program runs against liborion.a and
-#                            liborion.so
+#                            liborion.so, and the MCU header compiles in each build
 #
 # CBINDGEN overrides the cbindgen binary; CC the C compiler.
 set -euo pipefail
@@ -18,24 +19,35 @@ cbindgen="${CBINDGEN:-cbindgen}"
 cc="${CC:-cc}"
 target_dir="${CARGO_TARGET_DIR:-$root_dir/target}"
 
+mcu=examples/mcu-template
+mcu_header="$mcu/include/orion_mcu.h"
+
 generate() {
     "$cbindgen" --quiet --config "$capi/cbindgen.toml" --crate orion-capi --output "$1" "$capi"
+}
+
+generate_mcu() {
+    "$cbindgen" --quiet --config "$mcu/cbindgen.toml" --crate orion-mcu-template --output "$1" "$mcu"
 }
 
 case "${1:-}" in
 header)
     generate "$header"
-    echo "capi: wrote $header"
+    generate_mcu "$mcu_header"
+    echo "capi: wrote $header and $mcu_header"
     ;;
 check)
     scratch="$(mktemp -d)"
     trap 'rm -rf "$scratch"' EXIT
 
     generate "$scratch/orion.h"
-    if ! diff -u "$header" "$scratch/orion.h"; then
-        echo "capi: $header is out of date; run scripts/capi.sh header" >&2
-        exit 1
-    fi
+    generate_mcu "$scratch/orion_mcu.h"
+    for pair in "$header:$scratch/orion.h" "$mcu_header:$scratch/orion_mcu.h"; do
+        if ! diff -u "${pair%%:*}" "${pair#*:}"; then
+            echo "capi: ${pair%%:*} is out of date; run scripts/capi.sh header" >&2
+            exit 1
+        fi
+    done
 
     abi_dir="$(cargo metadata --format-version 1 --locked |
         python3 -c 'import json, os, sys
@@ -65,6 +77,15 @@ for p in json.load(sys.stdin)["packages"]:
         echo "capi: SONAME is '$soname', want liborion.so.$major" >&2
         exit 1
     fi
+
+    for defines in "-DORION_MCU_UART" "-DORION_MCU_CAN" \
+        "-DORION_MCU_UART -DORION_MCU_XFER -DORION_MCU_SLOTS"; do
+        # -Wno-type-limits: the minor check is always true while ORION_MCU_API_MINOR is 0.
+        # shellcheck disable=SC2086
+        "$cc" -std=c11 -Wall -Wextra -Werror -Wno-type-limits -fsyntax-only $defines \
+            -I "$mcu/include" \
+            "$mcu/tests/c/header.c"
+    done
 
     flags=(-std=c11 -Wall -Wextra -Werror -I "$capi/include")
     "$cc" "${flags[@]}" "$capi/tests/c/smoke.c" "$lib/liborion.a" -lpthread -ldl -lm \

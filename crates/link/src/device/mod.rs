@@ -113,6 +113,10 @@ pub struct DeviceConfig<N = &'static str> {
     /// Shortest spacing between two `Status` frames. Status published faster is coalesced: only
     /// the newest batch is sent.
     pub status_min_interval_ms: u32,
+    /// The interface revision announced in `Hello`: by default the one this `orion-link` was
+    /// built at ([`crate::LINK_INTERFACE_REVISION`]), so the host knows which interface the
+    /// firmware speaks. 0 announces none (a device that predates revisions).
+    pub revision: u16,
 }
 
 impl<N> DeviceConfig<N> {
@@ -128,6 +132,7 @@ impl<N> DeviceConfig<N> {
             state_retry_min_ms: 200,
             missed_heartbeats: 3,
             status_min_interval_ms: 100,
+            revision: crate::LINK_INTERFACE_REVISION,
         }
     }
 }
@@ -481,6 +486,12 @@ impl<
     /// The current session id, while connected.
     pub fn session_id(&self) -> Option<u32> {
         self.core.session_id()
+    }
+
+    /// The session's interface revision while connected: the lower of
+    /// [`DeviceConfig::revision`] and the host's (0 for a host that predates revisions).
+    pub fn session_revision(&self) -> Option<u16> {
+        self.core.session_revision()
     }
 
     /// Largest frame that may currently be sent: the negotiated size while connected, otherwise

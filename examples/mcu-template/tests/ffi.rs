@@ -5,12 +5,17 @@
 use orion_link::host::{HostConfig, HostEvent, HostSession};
 use orion_link::message::{LeaseRecord, NodeId};
 use orion_mcu_template::ffi::{
-    ORION_EVENT_CONNECTED, ORION_EVENT_LEASES, ORION_EVENT_STATE_ACKED, orion_init,
-    orion_lease_count, orion_poll, orion_publish, orion_rx, orion_tx,
+    ORION_EVENT_CONNECTED, ORION_EVENT_LEASES, ORION_EVENT_STATE_ACKED, ORION_MCU_API_VERSION,
+    orion_api_version, orion_init, orion_lease_count, orion_link_revision, orion_poll,
+    orion_publish, orion_rx, orion_session_revision, orion_tx,
 };
 
 #[test]
 fn c_api_connects_publishes_and_counts_leases() {
+    assert_eq!(orion_api_version(), ORION_MCU_API_VERSION);
+    assert_eq!(orion_api_version() >> 16, 1);
+    assert_eq!(orion_link_revision(), orion_link::LINK_INTERFACE_REVISION);
+    assert_eq!(orion_session_revision(), 0, "no session before orion_init");
     let name = b"c-board";
     // SAFETY: the pointers are valid for the given lengths.
     unsafe {
@@ -64,6 +69,11 @@ fn c_api_connects_publishes_and_counts_leases() {
     let wanted = ORION_EVENT_CONNECTED | ORION_EVENT_LEASES | ORION_EVENT_STATE_ACKED;
     assert_eq!(bits & wanted, wanted);
     assert_eq!(orion_lease_count(), 1);
+    // The host's revision is the same build's, so the session runs at it.
+    assert_eq!(
+        orion_session_revision(),
+        orion_link::LINK_INTERFACE_REVISION
+    );
     let (provider, resources) = published.expect("a snapshot");
     assert_eq!(provider.provider_id.as_str(), "provider.c-board");
     assert_eq!(resources.len(), 1);

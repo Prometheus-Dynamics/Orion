@@ -16,6 +16,8 @@ pub struct WelcomeView<'a> {
     pub heartbeat_ms: u32,
     /// Negotiated maximum frame length: the minimum of both sides.
     pub max_frame: u32,
+    /// The host's highest interface revision (0 when the host predates revisions).
+    pub revision: u16,
 }
 
 impl<'a> WelcomeView<'a> {
@@ -31,6 +33,12 @@ impl<'a> WelcomeView<'a> {
             session_id: r.varint_u32()?,
             heartbeat_ms: r.varint_u32()?,
             max_frame: r.varint_u32()?,
+            // Appended; absent from hosts that predate revisions.
+            revision: if r.rest().is_empty() {
+                0
+            } else {
+                r.varint_u16()?
+            },
         })
     }
 }

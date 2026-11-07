@@ -359,7 +359,10 @@ kinds.
    Done: `crates/capi` and `crates/liborion` (docs/capi.md), status queries and watches first;
    actions, records and stream subscriptions follow as minor additions.
 8. **Versioned MCU template.** The template's C API announces its revision and gains a version
-   function.
+   function. Done: the device session announces `LINK_INTERFACE_REVISION` in `Hello`
+   (`DeviceConfig::revision`, appended as in the typed `Hello`) and reads the host's from
+   `Welcome`; the template adds `orion_api_version`, `orion_link_revision` and
+   `orion_session_revision`, and `include/orion_mcu.h` (cbindgen, checked in CI).
 
 The node's footprint is measured at step 2: the gateway (`link-gateway`) is not a default
 feature today, and the packaged node would carry it.

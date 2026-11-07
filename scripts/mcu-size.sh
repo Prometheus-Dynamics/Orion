@@ -91,7 +91,8 @@ orion_port_write_record = 0;
 orion_port_reset = 0;
 EOF
 
-common_roots=(orion_init orion_publish orion_poll orion_lease_count)
+common_roots=(orion_init orion_publish orion_poll orion_lease_count orion_api_version orion_link_revision
+    orion_session_revision)
 declare -A variant_features=(
     [uart]="standalone,ffi-uart"
     [can]="standalone,ffi-can"

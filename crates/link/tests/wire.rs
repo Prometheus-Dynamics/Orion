@@ -120,8 +120,16 @@ fn device_bodies_encode_to_the_recorded_frames() {
         device_name: "imu-board",
         roles: Roles::PROVIDER,
         max_frame: 512,
+        revision: 0,
     };
     assert_eq!(encode(kind::HELLO, seq, &hello), expected, "hello");
+    // The revision is appended, as in the typed `Hello`.
+    let (seq, expected) = frame_of("hello.revision");
+    let hello = HelloView {
+        revision: 3,
+        ..hello
+    };
+    assert_eq!(encode(kind::HELLO, seq, &hello), expected, "hello.revision");
 
     let (seq, expected) = frame_of("provider_state");
     let state = ProviderStateView {
@@ -167,7 +175,14 @@ fn host_bodies_decode_from_the_recorded_frames() {
             session_id: 0x0102_0304,
             heartbeat_ms: 1_000,
             max_frame: 512,
+            revision: 0,
         }
+    );
+    assert_eq!(
+        WelcomeView::decode(&payload_of("welcome.revision"))
+            .unwrap()
+            .revision,
+        3
     );
     for (name, reason) in [
         ("reject.version_mismatch", RejectReason::VersionMismatch),

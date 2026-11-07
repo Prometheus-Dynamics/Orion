@@ -127,7 +127,7 @@ fn hello_backs_off_exponentially_up_to_the_cap() {
             device_name: "dev".into(),
             roles: Roles::PROVIDER,
             max_frame: 256,
-            revision: 0,
+            revision: orion_link::LINK_INTERFACE_REVISION,
         })
     );
 }

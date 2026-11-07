@@ -17,7 +17,12 @@
 //! use orion_link::wire::{self, HelloView, Roles, kind};
 //!
 //! let mut buf = [0u8; 32];
-//! let hello = HelloView { device_name: "imu-board", roles: Roles::PROVIDER, max_frame: 512 };
+//! let hello = HelloView {
+//!     device_name: "imu-board",
+//!     roles: Roles::PROVIDER,
+//!     max_frame: 512,
+//!     revision: 0,
+//! };
 //! let len = wire::encode_frame(kind::HELLO, 0x0100, &hello, &mut buf).unwrap();
 //! assert_eq!(&buf[4..len - 4], b"\x09imu-board\x01\x80\x04");
 //! ```

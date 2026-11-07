@@ -128,3 +128,17 @@ fn can_devices_publishing_views_are_seen_as_records() {
     can_exercise(Packet::FD, 321);
     can_exercise(Packet::new(SegmentMtu::new(12).unwrap()), 322);
 }
+
+#[test]
+fn the_device_announces_its_interface_revision() {
+    let mut pair = StreamPair::new("imu-board", host_config(), 320);
+    assert!(pair.run_until(2_000, StreamPair::connected));
+    assert_eq!(
+        pair.host.revision(),
+        Some(orion_link::LINK_INTERFACE_REVISION)
+    );
+    assert_eq!(
+        pair.device.session_revision(),
+        Some(orion_link::LINK_INTERFACE_REVISION)
+    );
+}

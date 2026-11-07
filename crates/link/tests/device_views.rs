@@ -126,8 +126,13 @@ fn connected() -> (Device, Host) {
     device.poll(0);
     let frames = host.drain(&mut device);
     assert_eq!(frames[0].0, kind::HELLO);
-    // `Hello { "dev", provider, max_frame: 128 }`.
-    assert_eq!(frames[0].2, b"\x03dev\x01\x80\x01");
+    // `Hello { "dev", provider, max_frame: 128, revision: LINK_INTERFACE_REVISION }`.
+    assert_eq!(
+        orion_link::LINK_INTERFACE_REVISION,
+        3,
+        "the last byte below"
+    );
+    assert_eq!(frames[0].2, b"\x03dev\x01\x80\x01\x03");
     host.welcome(&mut device, "node-a", 7);
     assert_eq!(
         events(&mut device),
@@ -332,7 +337,7 @@ fn can_device_writes_segments_into_caller_buffers() {
     assert!(segments > 1);
     let (kind, _, payload) = hello.expect("a complete Hello");
     assert_eq!(kind, kind::HELLO);
-    assert_eq!(payload, b"\x03dev\x01\x80\x01");
+    assert_eq!(payload, b"\x03dev\x01\x80\x01\x03");
     // A buffer shorter than a segment is refused without losing the segment.
     device.poll(250);
     assert_eq!(device.transmit_segment(&mut [0u8; 2]), 0);

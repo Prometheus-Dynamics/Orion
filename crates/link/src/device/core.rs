@@ -122,6 +122,8 @@ struct Session {
     next_ping_at: u32,
     /// Length of the node id in `DeviceCore::node_id`, if it fit.
     node_id_len: Option<usize>,
+    /// The session's interface revision: the lower of the device's and the host's.
+    revision: u16,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -309,6 +311,10 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         self.session().map(|session| session.session_id)
     }
 
+    pub(crate) fn session_revision(&self) -> Option<u16> {
+        self.session().map(|session| session.revision)
+    }
+
     pub(crate) fn max_frame(&self) -> usize {
         self.session()
             .map_or(Self::LOCAL_MAX, |session| session.max_frame)
@@ -466,6 +472,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             last_seq: seq,
             next_ping_at: self.now.wrapping_add(heartbeat_ms),
             node_id_len,
+            revision: welcome.revision.min(self.config.revision),
         });
         bump!(self, connects);
         #[cfg(feature = "xfer")]
@@ -897,6 +904,7 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
                     device_name: self.config.device_name.as_ref(),
                     roles: self.config.roles,
                     max_frame: u32::try_from(Self::LOCAL_MAX).unwrap_or(u32::MAX),
+                    revision: self.config.revision,
                 };
                 let buf = self
                     .leases_buf

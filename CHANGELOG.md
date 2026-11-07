@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- Versioned MCU template (stable interface step 8): `orion_api_version`
+  (`ORION_MCU_API_VERSION`), `orion_link_revision` and `orion_session_revision`, declared in the
+  generated `examples/mcu-template/include/orion_mcu.h`. The orion-link device session announces
+  its interface revision in `Hello` (`DeviceConfig::revision`, default `LINK_INTERFACE_REVISION`)
+  and reads the host's from `Welcome` (`WelcomeView::revision`, `DeviceSession::session_revision`).
+  `HelloView` and `WelcomeView` gain a `revision` field.
+
 - `liborion` (stable interface step 7, docs/capi.md): Orion's C library, static
   (`liborion.a`) and shared (`liborion.so.1`, the SONAME carries the major). A blocking client
   session on a node's `unix:` link (status queries and watches, a pollable fd, pings while it
