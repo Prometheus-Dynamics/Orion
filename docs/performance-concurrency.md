@@ -299,3 +299,23 @@ Release guardrails derived from that run:
 Those thresholds are intended to catch obvious regressions in peer-sync iteration duration while
 preserving headroom for machine-to-machine variance. They also reinforce the current design choice
 to keep larger-cluster peer-sync defaults conservative and operator-tunable.
+
+## Link Path Costs
+
+What one message costs the node on a `unix:` link, measured by `crates/node/tests/link_costs.rs`
+(`cargo test -p orion-node --features link-gateway --test link_costs -- --nocapture`). A counting
+allocator counts the node's threads only: the test's clients run on threads it ignores. Debug
+build, x86_64, 2026-11-07; the test fails only on a blow-up (ceilings 10 to 20 times these), so it
+is a record to compare against, not a tight gate.
+
+| Path | Allocations | Bytes allocated | Wire in | Wire out |
+|---|---|---|---|---|
+| Provider status update, no watcher | 12 per update | 1.4 KB | 21 B | (acks batched) |
+| The same, fanned out to one status watch | 16 per update | 2.5 KB | 21 B | coalesced |
+| Stream batch, 50 `f32` samples, one subscriber | 12 per batch | 2.2 KB | 326 B | 313 B |
+| Idle node, one quiet session | 70 per second | 1.5 KB per second | | |
+
+Under a burst the status lane coalesces: 2,000 updates reached the watch as about 15 answers, and
+200 stream batches as about 16 messages. Allocations per update, not bytes, are what the next
+reductions target (decoding into owned `String`s and `Vec`s, the status entry's clone into the
+lane, per-message queue nodes); the idle rate is timers and heartbeats.

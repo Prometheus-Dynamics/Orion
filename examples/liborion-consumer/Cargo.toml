@@ -1,0 +1,21 @@
+# A program outside Orion's workspace that uses liborion through its Rust wrapper only, the way a
+# consumer in another repository does. `scripts/capi.sh check` builds and runs it in both modes:
+#   cargo build --locked                                          (static: the default)
+#   cargo build --locked --no-default-features --features shared  (against liborion.so.1)
+[package]
+name = "liborion-consumer"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Not a member of Orion's workspace.
+[workspace]
+
+[features]
+default = ["static"]
+static = ["liborion-rs/static"]
+shared = ["liborion-rs/shared"]
+
+[dependencies]
+liborion-rs = { path = "../../crates/liborion-rs", default-features = false }

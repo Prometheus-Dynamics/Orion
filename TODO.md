@@ -799,8 +799,21 @@ The shared ABI primitives wait until the hardware repository says they are ready
       Decided: `orion-capi` uses its `Handle`, `Status`, `BufferDesc` and `FenceDesc` directly; the
       shared library's version is the SONAME major plus a handshake call (rustc's cdylib version
       script overrides named symbol version nodes).
-- [ ] **Static and shared build modes.** Split each dependency into core, surface and wrapper, and
-      build Orion both ways.
+- [ ] **Link path allocations** (visibility done 2026-11-07, docs/performance-concurrency.md
+      "Link Path Costs", `crates/node/tests/link_costs.rs`): 12 allocations and 1.4 KB per
+      provider status update on a `unix:` link, 16 and 2.5 KB with one watch, 12 and 2.2 KB per
+      50-sample stream batch, 70 allocations per second idle. Next: cut per-update allocations
+      (borrowed decode of status entries, no clone into the lane), then measure serial and CAN
+      and the board's PSS (7.9 MB on the test board; the goal is 64 MB boards).
+- [x] **Static and shared build modes** (2026-11-07, scope from the coordinator): each repository
+      splits itself into a core, a small versioned C surface and a Rust wrapper (static by
+      default, shared for consumers outside the image). Orion's split is done: the core crates,
+      `liborion` (the surface) and `liborion-rs` (the wrapper, both modes); an outside consumer
+      (`examples/liborion-consumer`) builds against the wrapper only, in both modes, in CI.
+      Decided: consuming other repositories' surfaces is not Orion's job; the hardware, vision
+      and other repositories provide their own wrappers and consumers adopt them when they exist.
+      `orion-node` is not built against other repositories' shared libraries; static fat LTO
+      stays the default, and per-frame hot loops stay inside one library.
 
 ### Nice to have
 

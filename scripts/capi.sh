@@ -118,6 +118,18 @@ for line in sys.stdin:
         fi
         LD_LIBRARY_PATH="$scratch" "$test" -q
     done
+
+    # A consumer outside the workspace, through the wrapper only, in both modes.
+    consumer=(--locked -q --manifest-path examples/liborion-consumer/Cargo.toml
+        --target-dir "$target_dir")
+    cargo build "${consumer[@]}"
+    "$lib/liborion-consumer"
+    LIBORION_LIB_DIR="$lib" cargo build "${consumer[@]}" --no-default-features --features shared
+    if ! readelf -d "$lib/liborion-consumer" | grep -q "NEEDED.*\[$soname\]"; then
+        echo "capi: the shared liborion-consumer does not link $soname" >&2
+        exit 1
+    fi
+    LD_LIBRARY_PATH="$scratch" "$lib/liborion-consumer"
     echo "capi: ok"
     ;;
 *)

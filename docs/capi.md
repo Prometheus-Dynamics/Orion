@@ -165,7 +165,9 @@ liborion-rs = { path = "...", default-features = false, features = ["shared"] } 
 Both modes call the same C functions, and `Link::connect` and `Latest::connect` run the version
 handshake first. With both features on (`--all-features`), `static` wins; with neither the build
 fails. `scripts/capi.sh check` runs the wrapper's tests in both modes, and checks that the
-shared build's test binary needs `liborion.so.1`.
+shared build's test binary needs `liborion.so.1`. `examples/liborion-consumer` is a program
+outside Orion's workspace that uses only the wrapper, as a consumer in another repository does;
+the same check builds and runs it both ways.
 
 ## Linking
 
