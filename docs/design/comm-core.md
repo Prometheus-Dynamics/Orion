@@ -1,6 +1,8 @@
 # Design: the communication core and the node logic (two layers, three tiers)
 
-Status: design note, for review. Nothing is implemented yet. The access services (SSH, sftp,
+Status: design note, for review. Nothing is implemented yet. The hello and access slices go
+ahead. The extraction, backplane and supervisor slices wait for the user's decision on how far to
+split; [split-options.md](split-options.md) is the input for it. The access services (SSH, sftp,
 forwarding, recovery shell, the built-in `reboot`) are detailed in
 [access-ssh.md](access-ssh.md); this note places them inside the communication core.
 
@@ -89,6 +91,53 @@ form as tight as the three-process one (`access-ssh.md`, risks).
   current relay state (latest status entries, open stream catalogs, link device inventory). This
   is the same bootstrap snapshot a new watcher gets today, so no new state machine is needed.
 
+### Containment inside each process: one bad apple
+
+The process split protects access from the node logic. Inside each process the same rule
+holds: one misbehaving provider, job, plugin, link, peer, session or client must not stall or take
+down the others. **Containing something never means switching it off.** A flaky link may be the
+only way in, so it is limited, retried and reported, and it stays usable.
+
+Rules that apply to every component:
+- **Own task, own failure.** Each link, peer session, client session, provider session, job
+  supervisor and SSH connection runs as its own task. A panic ends that task only; the release
+  profile unwinds, and tokio catches the panic at the task boundary.
+- **No shared lock across I/O or `await`.** Shared state (the status store, the provider
+  registry, the desired state) is held only for in-memory work. No lock is taken inside another
+  component's callback. A slow component therefore holds only its own queue.
+- **Bounded queues per component.** Every component has a send queue with a cap. When it is
+  full, the newest value replaces older ones (latest-value lanes, as the status lane and stream
+  demand do today). Control messages for a client that never reads end in a disconnect of that
+  client, as the NT4 server already does. The client then reconnects.
+- **Per-component deadlines:** a request handler has its budget, a link write its deadline, and a
+  peer sync request its timeout. A deadline that passes fails that request only.
+
+The ladder (what triggers each step, and how bad it has to be):
+
+| Step | Trigger | What happens | Comes back |
+| --- | --- | --- | --- |
+| 1. Fail the request | A request or write misses its deadline, or a handler returns an error. | That request fails with a reason. The component keeps running. | Next request. |
+| 2. Restart the component | The task panics or returns an error, or its link or session drops (EOF, I/O error, liveness timeout: 3 s for NT4, the link's heartbeat timeout for links). | Restarted or reconnected after a backoff: 100 ms, doubling, **capped at 5 s for access paths** (links, SSH, serial, the USB link) and **10 s for everything else**. Never gives up. | Each attempt; the backoff resets after 30 s of health. |
+| 3. Rate-limit the noise | More than 3 restarts or errors of one component within 10 s. | Logs drop to one line per 10 s with a count. Retries continue at the capped backoff. | Health for 30 s. |
+| 4. Report | Any component in step 2 or 3. | Status keys `<component>.state` (`backing_off`, `restarting`, `healthy`), `.reason`, `.restarts`, `.next_retry_ms`, and `orion_component_restarts_total`. `orionctl status` lists them. | When healthy. |
+
+There is no step 5 by default: Orion never disables a component by its own decision.
+
+- **Manual off.** One command takes a part out of the retry loop: `orionctl link release`
+  (this exists today as the `link.release` action), `orionctl provider disable <id>`, or
+  `orionctl peer disable <id>`. A config entry with `enabled = false` does the same. It persists
+  until it is turned back on, so nobody is stuck watching a crash loop.
+- **Configured auto-off.** Allowed only as a policy someone wrote, for example
+  `auto_off = { restarts = 20, within_s = 60 }` on a provider. It is never a default Orion picks.
+  Access paths (links marked `access`, SSH, the serial console, the USB link) refuse such a
+  policy.
+
+| Part | Scope | Interfaces | Risk |
+| --- | --- | --- | --- |
+| One supervisor helper (backoff, rate limit, state keys) used by links, peers, sessions and providers | ~350 | additive status keys and one metric | low |
+| `provider disable` and `peer disable` (the link one exists) | ~200 | two orionctl verbs and two node actions | low |
+| Lock audit: no lock held across `await` or I/O; a clippy lint (`await_holding_lock`) set to deny | ~100 plus fixes found | none | low |
+
 ### Where the status lane and streams live
 
 The hot paths carry live values, so they must not cross the backplane:
@@ -108,8 +157,8 @@ coalesced `write`/`read` pair on a Unix socket.
 
 | Layer | Supervised by | Watchdog | Crash loop |
 | --- | --- | --- | --- |
-| Comm core | systemd (`Restart=always`, `StartLimitIntervalSec=0`, `RestartSteps`/`RestartMaxDelaySec`). Without systemd (initramfs) it is PID 1's child or PID 1 itself and supervises its own children. | Thread outside the runtime pets only while the accept loops and link loops make progress (`access-ssh.md`). | Backoff to 30 s, never gives up. Safe-mode start on broken config: built-in defaults, never wider access. |
-| Node logic | systemd, or the comm core's built-in supervisor without systemd. | The node's existing health-gated watchdog (`crates/node/src/systemd.rs`). | After N fast crashes the node starts in its existing safe mode (`docs/update-recovery.md`). The comm core reports it in hello. |
+| Comm core | systemd (`Restart=always`, `StartLimitIntervalSec=0`, `RestartSteps`/`RestartMaxDelaySec`). Without systemd (initramfs) it is PID 1's child or PID 1 itself and supervises its own children. | Thread outside the runtime pets only while the accept loops and link loops make progress (`access-ssh.md`). | Backoff 1 s doubling to a 10 s cap, never gives up. Safe-mode start on broken config: built-in defaults, never wider access. |
+| Node logic | systemd, or the comm core's built-in supervisor without systemd. | The node's existing health-gated watchdog (`crates/node/src/systemd.rs`). | Backoff 1 s doubling to a 10 s cap, never gives up; the comm core reports the restart count and last exit in hello. Safe mode only when someone configured it (the existing `OnFailure=` drop-in example) or asked for it; never by Orion's own decision. |
 
 The comm core's built-in supervisor is small: fork and exec, a backoff timer, reaping children,
 forwarding signals. It exists only so the initramfs and recovery images (no systemd) get the same
@@ -173,6 +222,42 @@ as SoC ROM USB boot.
     and the SoC ROM path are still below it.
   - `update-recovery.md` changes its "never depend on Orion" line to "never depend on the node
     logic" when this lands.
+
+## Time sync in the comm core
+
+On the test board, `systemd-timesyncd` costs 2.8 MB PSS. Its whole job is an SNTP client that
+slews or steps the clock, plus a saved timestamp so a board without a working RTC never boots
+into the past. The comm core can do the same job inside a process that is already running, with
+two sources:
+
+- **SNTP** (RFC 4330 client mode) to the configured servers. One UDP socket, one request per
+  poll, with poll intervals from 64 s to 1024 s as timesyncd uses. Small offsets are slewed
+  (`adjtimex` with `ADJ_OFFSET`); large ones (over 0.4 s) are stepped (`clock_settime`).
+- **A peer or link time source:** the controller or a peer node over an Orion link or session.
+  Orion already estimates a server clock offset on its links (the NT4 client's RTT-filtered
+  offset, `crates/nt4/src/client/clock.rs`). The same filter feeds the clock discipline from an
+  Orion peer, so a field network with no internet still gets one time.
+
+The rules match timesyncd:
+- the first good sample may step the clock;
+- later samples only slew;
+- the last synchronized time is saved to the state directory every poll, and at start the clock is
+  moved forward to it if the clock is behind;
+- the kernel's `STA_UNSYNC` is cleared once synchronized, so `timedatectl` and the node's
+  existing clock facts (`clock_facts.rs`) report it.
+
+| Item | Value |
+| --- | --- |
+| Lines | ~450: SNTP client ~200, discipline (slew or step, saved time) ~150, peer source glue ~100 |
+| Interfaces | config (`time.servers`, `time.peer_source`), one status key group `time.*`; needs `CAP_SYS_TIME` in the comm core's capability set |
+| Binary size | estimated 20 to 40 KB: no new crates; UDP, `adjtimex` and `clock_settime` come through `libc`, which is already linked |
+| Memory | no new process; one socket and a timer that wakes once per poll interval |
+| Saves | timesyncd's 2.8 MB PSS on the test board |
+| Risk | medium: a clock discipline bug moves time for everything on the board. Mitigations: never step backwards after the first sync; a step needs two agreeing samples; and a mode to only report the offset, run side by side with timesyncd before switching |
+
+An image switches by masking `systemd-timesyncd.service` and turning on `time.enabled`. Both
+running together is refused at start (the comm core checks whether timesyncd is active over its
+pid file and logs instead of disciplining).
 
 ## Tiers: the same protocols everywhere
 
@@ -256,6 +341,12 @@ identity endpoint.
 - `security` (`on` or `off`), read from the package's security file in the package's precedence
   order (a writable data copy wins over the image default).
 
+**The minimum to pair.** The fleet tool needs `contract`, `serial`, `model`, `rev`,
+`hostname`, `os` (`name`, `version`), `device_package` (`version`, `commit`) and `macs`, plus
+`gadget` on a board with a USB link. The signed Orion hello carries exactly these; the rest comes
+from later calls. `update` is large and changes often, so over Orion it is a status key group and
+a stream, not part of the hello.
+
 **Passed through.** `update` is copied verbatim from the first line of the updater's state file
 (`/run/board/update.json`), not rebuilt. Its shape (`state`, per-mille `progress`, `phase`, and
 the slot fields on A/B layouts) belongs to the updater.
@@ -280,8 +371,11 @@ allows, and is never guessed.
   protocol versions, the tier state (`node: up | down | absent`) and the SSH host-key
   fingerprint. It is signed with the node key and served as one `orion+tcp` request, over local
   IPC, and over a link to a device that asks. The comm core answers it without the node logic.
-- **mDNS TXT:** compact keys only (model, serial, contract), additive, so old parsers ignore
-  them.
+- **mDNS:** the contract's own service, `_pd-device._tcp` on port 5899. The instance name is the
+  hostname. The TXT keys are `contract`, `model`, `rev`, `serial`, `os`, `os_ver` and `path`.
+  Every key is always present (a value may be empty), values are limited to `[A-Za-z0-9._:+-]`
+  (anything else becomes `_`), and each is at most 200 characters. This sits next to Orion's own
+  `_orion._tcp` advertisement.
 - **Recovery images:** in the same way. A board in recovery is recognized as itself, with
   `update.state` saying so.
 

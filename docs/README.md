@@ -21,6 +21,7 @@ This directory holds repository-level documentation for the Orion workspace.
 - [remote-operator.md](remote-operator.md): the embeddable remote operator client (`orion-client` feature `remote`), operator enrollment, per-operator authorization, threat model
 - [update-recovery.md](update-recovery.md): design (not implemented) for software update intents, progress, staged rollouts, rollback, and recovery paths that never depend on Orion
 - [design/comm-core.md](design/comm-core.md): design (not implemented): the communication core and the node logic as separate processes, the backplane, recovery images running the comm core, tiers and the crate map, hello identity
+- [design/split-options.md](design/split-options.md): decision input: one process, two processes in one repo, or a separate comm-core dependency; what node logic contains and who consumes it
 - [design/access-ssh.md](design/access-ssh.md): design (not implemented): the standard SSH server (`russh`, sftp, forwarding) in the comm core replacing `sshd` and OpenSSL, its isolation, supervision and safe mode, and the built-in `reboot`
 - [capi.md](capi.md): `liborion`, the C library over the stable interface: link client sessions (status queries and watches), the fd latest-value client, versions, SONAME and the CI checks
 - [link-protocol.md](link-protocol.md): MCU link protocol (UART/CAN framing, link messages, device bring-up) for no_std devices

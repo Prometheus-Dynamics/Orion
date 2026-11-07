@@ -91,10 +91,10 @@ orion-node.service (user orion, no capabilities)      orion-access.service (root
      has made progress within half the watchdog period. It checks a heartbeat the loop bumps once
      per second, even when idle. A wedged runtime therefore stops the pets, and systemd restarts
      the process. This reuses `crates/node/src/systemd.rs` (sd_notify without libsystemd).
-  3. systemd settings: `Restart=always`, `RestartSec=1`, `RestartSteps=5`, `RestartMaxDelaySec=30`
+  3. systemd settings: `Restart=always`, `RestartSec=1`, `RestartSteps=5`, `RestartMaxDelaySec=10`
      (systemd 254+; images on older systemd keep a fixed `RestartSec=2`). Also
      `StartLimitIntervalSec=0`, so the unit never gives up, and `WatchdogSec=10`. This is the
-     crash-loop backoff: it grows to 30 s and never stops.
+     crash-loop backoff: it grows to 10 s and never stops.
   4. Safe-mode start (next section) when config or host keys are broken.
 - **Resources.**
   - `OOMScoreAdjust=-900`, so the kernel kills workloads before the way in.
@@ -253,8 +253,29 @@ Board test: replace `sshd` on the test board, then log in, copy and reboot.
     setuid and pty calls allowed); and fuzzing the `authorized_keys` and options parser.
   - A later step can split pre-auth into an unprivileged child, the same pattern as
     `access-sftp`.
-- **`ssh-key` is a release candidate** (0.7.0-rc.11) pulled in by `russh` 0.65. The note records
-  it, and `deny.toml` and the lockfile pin it until it is stable.
+- **`ssh-key` is a release candidate** (0.7.0-rc.11), which `russh` 0.65 requires. The plan:
+  - **Pin it:** `ssh-key = "=0.7.0-rc.11"` as a direct dependency of the access feature, so a
+    `cargo update` cannot move it to a later release candidate without a reviewed change. Do the
+    same for `russh = "=0.65.1"`.
+  - **Move off it** when `ssh-key` 0.7.0 is final and a `russh` release depends on it.
+  - **Why pin, not avoid:** `russh` 0.65 is the release with ML-KEM hybrid key exchange and the
+    `ring` backend. The release before it uses older RustCrypto crates and `aws-lc-rs` by
+    default.
+- **Pre-auth surface, kept minimal.** Before a user is authenticated, an attacker reaches:
+  - packet framing;
+  - key exchange;
+  - parsing of a public-key blob and a signature (`ssh-key`).
+
+  The access core narrows each one:
+  - offers one key exchange family: `mlkem768x25519-sha256`, then `curve25519-sha256`;
+  - uses Ed25519 host keys, plus ECDSA only when an existing host key needs it;
+  - offers the `chacha20-poly1305@openssh.com` and `aes256-gcm@openssh.com` ciphers;
+  - accepts the `publickey` auth method only, plus `password` or `none` when the policy says
+    so; `keyboard-interactive` is never offered;
+  - accepts user key types Ed25519 and ECDSA (RSA only with the `rsa` feature).
+
+  `authorized_keys` files are parsed from the board's own disk, not from the wire. A fuzz target
+  covers the packet decoder entry and the public-key blob parser, both fed from the wire.
 - **RSA user keys.** If images in the field still carry RSA `authorized_keys`, the `rsa` feature
   brings back the `rsa` crate (pure Rust; it was subject to the Marvin timing advisory,
   RUSTSEC-2023-0071). It is only used for signature **verification** of user keys, where that

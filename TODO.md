@@ -675,11 +675,36 @@ interfaces and risk. Slices, in dependency order:
       status keys.
 - [ ] Access services: `orion-node access` process with SSH, sftp helper, local forwarding,
       safe mode, and the `reboot` claim. +1,062,744 B on x86_64, +965,352 B on aarch64 musl.
-- [ ] Extract the comm core from `orion-node`, about 16,700 lines, module by module.
-- [ ] Status and stream relay without node logic.
-- [ ] Backplane between the comm core and the node logic.
-- [ ] Supervisor for systemd-less images; `comm-core-min` static musl build with a CI size gate.
+- [ ] (On hold until the user decides how far to split; docs/design/split-options.md.) Extract
+      the comm core from `orion-node` (~16,700 lines, module by module), the relay without node
+      logic, the backplane, and the supervisor for systemd-less images.
+- [ ] `comm-core-min` static musl build with a CI size gate.
+- [ ] Containment helper (backoff capped at 5 s for access paths and 10 s otherwise, never
+      giving up; rate-limited logs; `<component>.state` keys), `provider disable` and
+      `peer disable`, and `await_holding_lock` set to deny. Rule from the user: never auto-off
+      unless someone configured it, and access paths are never backed off for good.
+- [ ] Time sync in the comm core (SNTP plus a peer source), to replace timesyncd (2.8 MB PSS).
+      Report only so far; the design is in comm-core.md.
 - [ ] Hardware-layer handle offers (`SCM_RIGHTS`); `usb-bulk` / `usb-gadget` link transport.
+
+### Leanness and hardware paths (2026-11-07, from the coordinator)
+
+- [ ] Idle allocations: the node does 70 allocations per second when idle; the target is 0.
+      Attribute them (which timers or tasks), fix them, and report idle wakeups per second.
+      Also measure the per-message link costs in release builds.
+- [ ] MCU proof on an STM32G4 (thumbv7em-none-eabihf, FDCAN): a device-tier example that
+      publishes one record and one stream over FDCAN and UART. A CI gate for flash
+      (.text+.rodata+.data) and static RAM (.data+.bss and the stack high-water), tracked per
+      commit. A ranked byte breakdown (codec, CRC, framing, xfer, panic/fmt) and the cuts, with
+      today's numbers and the floor. `scripts/mcu-size.sh` and `examples/mcu-template` are the
+      base.
+- [ ] Feature-gating audit: for each crate, a table of its default features, what each pulls
+      in and its size. Land the clear cuts, with consumers opting in. Report orion-node and
+      orionctl sizes before and after.
+- [ ] Hardware paths: CRC through the ARMv8 CRC32 instructions or the STM32 CRC peripheral;
+      check that `ring` uses the AES, SHA and PMULL extensions on the A76; DMA for UART and CAN
+      in the MCU template; no per-message copies or re-encodes on the link and gateway path. Add
+      instructions and bytes moved per message to the link cost test.
 
 ### Decided, starts when the user says
 
