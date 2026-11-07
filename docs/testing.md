@@ -132,6 +132,26 @@ Allocation counts on the hot paths (`crates/link/tests/alloc_count.rs` and
 | NT4 encode and scalar decode | 0 |
 | NT4 relayed value (client, server and subscriber) | 4.7 |
 
+## Fuzzing
+
+`crates/link/fuzz` holds cargo-fuzz targets for the bytes a peer controls. It is its own
+workspace, built with nightly:
+
+| Target | Input |
+| --- | --- |
+| `decode_payload` | A frame kind and payload into `Message::decode_payload`. A body that decodes must encode and decode back to the same message. |
+| `host_session` | A byte stream into a host session serving clients and streams, fed in chunks. At most 1024 frames may go out. |
+| `device_session` | A byte stream into a stream device. |
+
+```bash
+cd crates/link/fuzz && cargo +nightly fuzz run decode_payload -- -max_total_time=60
+```
+
+`scripts/ci-jobs.sh fuzz` runs all three for `FUZZ_SECONDS` each. CI runs that job on the weekly
+schedule and on dispatch, and keeps any crash input as an artifact. A crash found so far gets a
+regression test in `crates/link/tests` with its bytes. The first was a blank executor id in a
+status query, which panicked the node; ids from the peer are now checked when they decode.
+
 ## Peer Discovery
 
 `cargo test -p orion-node --no-default-features --features peer-tcp,discovery-mdns` (also part of

@@ -758,3 +758,22 @@ fn a_body_without_a_revision_decodes_as_revision_0_and_extra_bytes_are_ignored()
     };
     assert_eq!(decoded.revision, 2);
 }
+
+#[test]
+fn a_blank_id_from_the_peer_is_a_decode_error_not_a_panic() {
+    // Found by the `decode_payload` fuzz target: a status query whose subject is an executor with
+    // an empty id panicked in `ExecutorId::new`.
+    let empty = [0x30, 0x01, 0x01, 0x00, 0x01, 0x01, 0x04];
+    let spaces = [0x30, 0x01, 0x01, 0x02, b' ', b' ', 0x01, 0x01, 0x04];
+    for payload in [&empty[..], &spaces[..]] {
+        for kind in [kind::STATUS_QUERY, kind::STATUS_WATCH] {
+            assert!(
+                matches!(
+                    Message::decode_payload(kind, payload),
+                    Err(MessageError::Decode { .. })
+                ),
+                "kind {kind:#x} payload {payload:02x?}"
+            );
+        }
+    }
+}

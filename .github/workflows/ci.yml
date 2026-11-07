@@ -340,6 +340,34 @@ jobs:
           AR_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-ar
         run: ./scripts/ci-jobs.sh cross32
 
+  fuzz:
+    # The link's three fuzz targets, two minutes each on nightly (docs/testing.md, "Fuzzing"):
+    # on the weekly schedule and on dispatch.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+
+      - name: Fuzz (scripts/ci-jobs.sh fuzz)
+        env:
+          FUZZ_SECONDS: 120
+        run: ./scripts/ci-jobs.sh fuzz
+
+      - name: Keep crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: crates/link/fuzz/artifacts
+
   dependency-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 20

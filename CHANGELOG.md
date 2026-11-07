@@ -23,6 +23,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   next publish failed with a broken pipe. A background task now owns the connection, answers
   heartbeats and takes in demand changes. `connect_at` needs a Tokio runtime, as before.
   Test: `an_idle_stream_publisher_keeps_its_session_past_the_heartbeat_timeout`.
+- Link decoding refuses a blank id from the peer (a status subject, an action target, an
+  action result's `handled_by`) with `MessageError::Decode`. Before, the `orion-core`
+  constructor panicked, so a Unix-link client could crash the node with one status query. Found
+  by the new fuzz targets. Test: `a_blank_id_from_the_peer_is_a_decode_error_not_a_panic`.
+- The `camera_provider_publish` and `camera_pipeline_publish` client examples take the node's
+  stream socket as a second argument. They passed the control socket for both, and since
+  `LocalRuntimePublisher` keeps its session on the stream socket, their publish failed (the
+  docker example suite has failed since then).
+
+### Added (testing)
+
+- `crates/link/fuzz`: cargo-fuzz targets for message payloads, a host session and a stream
+  device (`docs/testing.md`, "Fuzzing"), `scripts/ci-jobs.sh fuzz`, and a weekly and on-dispatch
+  CI job that runs each for two minutes.
 
 ### Fixed (tests)
 

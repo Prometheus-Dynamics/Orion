@@ -3,7 +3,7 @@
 # same commands. Each step prints its wall time and CPU time (user + system), and a summary at the
 # end; under GitHub Actions the steps are collapsible groups.
 #
-#   ./scripts/ci-jobs.sh <job>...        jobs: workspace lints no-std link allocators appliance cross32 qemu qemu-node
+#   ./scripts/ci-jobs.sh <job>...        jobs: workspace lints no-std link allocators appliance cross32 qemu qemu-node fuzz (not in all)
 #   ./scripts/ci-jobs.sh all             every job above, in order
 #   CI_JOBS_TIMINGS=file.tsv ...         also append "job<TAB>step<TAB>wall_s<TAB>cpu_s<TAB>rc" rows
 #
@@ -335,9 +335,19 @@ job_qemu_node() {
         --target aarch64-unknown-linux-gnu -- --test-threads=1
 }
 
+# The link's fuzz targets (crates/link/fuzz), FUZZ_SECONDS each (default 60). Needs nightly and
+# cargo-fuzz, so it is not part of `all`.
+job_fuzz() {
+    local t secs="${FUZZ_SECONDS:-60}"
+    for t in decode_payload host_session device_session; do
+        step fuzz "fuzz $t (${secs}s)" \
+            bash -c "cd crates/link/fuzz && cargo +nightly fuzz run --locked $t -- -max_total_time=$secs -rss_limit_mb=2048"
+    done
+}
+
 jobs=("$@")
 if [[ ${#jobs[@]} == 0 ]]; then
-    echo "usage: $0 <workspace|lints|no-std|link|allocators|appliance|cross32|qemu|qemu-node|all>..." >&2
+    echo "usage: $0 <workspace|lints|no-std|link|allocators|appliance|cross32|qemu|qemu-node|fuzz|all>..." >&2
     exit 2
 fi
 if [[ "${jobs[*]}" == "all" ]]; then
@@ -354,6 +364,7 @@ for job in "${jobs[@]}"; do
         cross32) job_cross32 ;;
         qemu) job_qemu ;;
         qemu-node) job_qemu_node ;;
+        fuzz) job_fuzz ;;
         *) echo "unknown job: $job" >&2; exit 2 ;;
     esac
 done

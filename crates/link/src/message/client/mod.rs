@@ -16,7 +16,7 @@ use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, WorkloadId};
 use serde::{Deserialize, Serialize};
 
 use super::body::ValueWire;
-use super::codec::bounded_vec;
+use super::codec::{bounded_vec, id};
 use super::{MessageError, kind};
 
 /// Why the host refused a client request, in a [`RequestError`]. The list only grows; a code this
@@ -115,10 +115,15 @@ pub struct ActionResults {
 
 #[derive(Serialize, Deserialize)]
 pub(super) enum SubjectWire {
+    #[serde(deserialize_with = "id")]
     Provider(String),
+    #[serde(deserialize_with = "id")]
     Executor(String),
+    #[serde(deserialize_with = "id")]
     Resource(String),
+    #[serde(deserialize_with = "id")]
     Workload(String),
+    #[serde(deserialize_with = "id")]
     Node(String),
 }
 
@@ -148,9 +153,13 @@ impl From<SubjectWire> for StatusSubject {
 
 #[derive(Serialize, Deserialize)]
 enum TargetWire {
+    #[serde(deserialize_with = "id")]
     Node(String),
+    #[serde(deserialize_with = "id")]
     Provider(String),
+    #[serde(deserialize_with = "id")]
     Resource(String),
+    #[serde(deserialize_with = "id")]
     Executor(String),
 }
 
@@ -370,6 +379,7 @@ pub(crate) struct ActionRecordWire {
     state: ActionStateWire,
     #[serde(deserialize_with = "bounded_vec")]
     output: Vec<(String, ValueWire)>,
+    #[serde(deserialize_with = "id")]
     handled_by: String,
     requested_by: String,
     created_at_ms: u64,

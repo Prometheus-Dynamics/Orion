@@ -30,6 +30,7 @@ async fn main() {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let [
         ipc_socket,
+        stream_socket,
         client_name,
         executor_id,
         node_id,
@@ -37,7 +38,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         raw_resource_id,
         stream_resource_id,
         width,
-    ] = common::read_exact_args::<8>()?;
+    ] = common::read_exact_args::<9>()?;
     let executor = ExecutorRecord::builder(
         ExecutorId::new(executor_id.clone()),
         NodeId::new(node_id.clone()),
@@ -77,7 +78,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .availability(AvailabilityState::Available)
     .label(format!("mode.width={}", width.parse::<u32>()?))
     .build();
-    let runtime = LocalNodeRuntime::new(&ipc_socket, &ipc_socket);
+    let runtime = LocalNodeRuntime::new(&ipc_socket, &stream_socket);
     let publisher = LocalRuntimePublisher::builder(runtime, client_name)
         .executor(executor.clone())
         .build();

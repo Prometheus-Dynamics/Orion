@@ -1,0 +1,38 @@
+# Fuzz targets for the link's decoders (docs/testing.md, "Fuzzing"). Nightly and cargo-fuzz:
+#   cargo +nightly fuzz run decode_payload -- -max_total_time=60
+[package]
+name = "orion-link-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+orion-link = { path = "..", features = ["std", "alloc", "xfer"] }
+
+# Its own workspace: not part of the Orion build.
+[workspace]
+
+[[bin]]
+name = "decode_payload"
+path = "fuzz_targets/decode_payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "host_session"
+path = "fuzz_targets/host_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "device_session"
+path = "fuzz_targets/device_session.rs"
+test = false
+doc = false
+bench = false

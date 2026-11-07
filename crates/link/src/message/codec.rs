@@ -46,6 +46,18 @@ where
     deserializer.deserialize_seq(BoundedVisitor(PhantomData))
 }
 
+/// Deserializes an id string, refusing a blank one: the `orion-core` id constructors panic on a
+/// blank value, and the bytes come from the peer.
+pub(super) fn id<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<alloc::string::String, D::Error> {
+    let value = alloc::string::String::deserialize(deserializer)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom("blank id"));
+    }
+    Ok(value)
+}
+
 /// A lease set: a sequence of [`LeaseWire`]s, decoded with [`bounded_vec`].
 #[derive(Deserialize)]
 struct LeasesBody {

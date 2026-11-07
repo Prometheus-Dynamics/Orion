@@ -22,7 +22,7 @@ members = [
     "crates/orion",
 ]
 # Standalone crates with their own lockfile and targets (bare-metal templates).
-exclude = ["examples/mcu-template"]
+exclude = ["examples/mcu-template", "crates/link/fuzz"]
 resolver = "3"
 
 [workspace.package]

@@ -15,11 +15,12 @@ async fn main() {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let [
         ipc_socket,
+        stream_socket,
         client_name,
         provider_id,
         node_id,
         raw_resource_id,
-    ] = common::read_exact_args::<5>()?;
+    ] = common::read_exact_args::<6>()?;
     let provider = ProviderRecord::builder(
         ProviderId::new(provider_id.clone()),
         NodeId::new(node_id.clone()),
@@ -37,7 +38,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .lease_state(LeaseState::Unleased)
     .build();
 
-    let runtime = LocalNodeRuntime::new(&ipc_socket, &ipc_socket);
+    let runtime = LocalNodeRuntime::new(&ipc_socket, &stream_socket);
     let publisher = LocalRuntimePublisher::builder(runtime, client_name)
         .provider(provider.clone())
         .build();

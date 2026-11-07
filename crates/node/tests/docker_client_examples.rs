@@ -257,7 +257,7 @@ async fn docker_client_example_reports_expected_errors_for_invalid_usage() {
         output_text(&rejected)
     );
     let stderr = String::from_utf8_lossy(&rejected.stderr);
-    assert!(stderr.contains("expected 8 args"));
+    assert!(stderr.contains("expected 9 args"));
 }
 
 #[tokio::test]
@@ -275,6 +275,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
         [
             "camera_provider_publish",
             "/tmp/orion-node-a-control.sock",
+            &stream_socket("node-a"),
             "example-camera-provider",
             "provider.camera",
             "node-a",
@@ -292,6 +293,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
         [
             "camera_pipeline_publish",
             "/tmp/orion-node-a-control.sock",
+            &stream_socket("node-a"),
             "example-camera-pipeline",
             "executor.camera-stack",
             "node-a",
@@ -439,6 +441,7 @@ async fn docker_client_example_camera_controller_and_consumers_flow() {
         [
             "camera_pipeline_publish",
             "/tmp/orion-node-a-control.sock",
+            &stream_socket("node-a"),
             "example-camera-pipeline",
             "executor.camera-stack",
             "node-a",
