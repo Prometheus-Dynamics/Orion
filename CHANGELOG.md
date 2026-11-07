@@ -15,6 +15,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   never times its session out. Before, a burst over 256 frames stalled the connection for up to
   1 s, and a link with a heartbeat timeout under 1 s lost the session.
 
+### Fixed
+
+- `StreamPublisher` keeps its session while idle. It read its socket only while a request
+  waited, so it never answered the node's stream heartbeat in between: a publisher that went
+  longer than the heartbeat timeout (15 s by default) without publishing was evicted, and its
+  next publish failed with a broken pipe. A background task now owns the connection, answers
+  heartbeats and takes in demand changes. `connect_at` needs a Tokio runtime, as before.
+  Test: `an_idle_stream_publisher_keeps_its_session_past_the_heartbeat_timeout`.
+
 ### Fixed (tests)
 
 - Unit tests of orion-node no longer leave files in the temporary directory. Every path they

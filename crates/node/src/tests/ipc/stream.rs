@@ -401,3 +401,41 @@ async fn node_ipc_stream_server_keeps_partial_frames_across_heartbeat_ticks() {
     server.abort();
     let _ = fs::remove_file(stream_socket_path);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_idle_stream_publisher_keeps_its_session_past_the_heartbeat_timeout() {
+    use orion::control_plane::{
+        SampleChunkBuilder, SeriesDecl, SeriesKind, StatusSubject, StreamDecl, StreamRef,
+    };
+    let (_socket_path, app) = build_stream_ipc_app("idle-publisher");
+    let stream_socket_path = temp_stream_socket_path("idle-publisher");
+    let (_path, _server) = app
+        .start_ipc_stream_server(&stream_socket_path)
+        .await
+        .expect("ipc stream server should start");
+    let mut publisher =
+        orion_client::StreamPublisher::connect_at(&stream_socket_path, "agent.live")
+            .await
+            .expect("publisher connects");
+    let stream = StreamRef {
+        owner: StatusSubject::Node(publisher.node_id().clone()),
+        id: "board.live".into(),
+    };
+    publisher
+        .declare(StreamDecl {
+            owner: stream.owner.clone(),
+            id: stream.id.clone(),
+            series: vec![SeriesDecl::new("cpu", SeriesKind::F32, 100_000)],
+        })
+        .await
+        .expect("declared");
+    // Several heartbeat timeouts (125 ms in tests) without a request.
+    let timeout = app.config.ipc_stream_heartbeat_timeout;
+    tokio::time::sleep(timeout * 4).await;
+    let mut chunk = SampleChunkBuilder::new(0, SeriesKind::F32);
+    chunk.push(1_700_000_000_000_000, 1.0);
+    publisher
+        .publish(&stream, vec![chunk.take()])
+        .await
+        .expect("the idle publisher's session is still up");
+}
