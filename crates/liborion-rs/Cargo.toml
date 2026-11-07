@@ -1,0 +1,30 @@
+[package]
+name = "liborion-rs"
+description = "A safe Rust API over liborion's C surface, linked statically (the Rust core compiled in) or against liborion.so.1"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+# The shared ABI crate comes from git.
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# `static` compiles liborion's Rust core into the program; `shared` (with
+# `default-features = false`) links liborion.so.1 (`-lorion`, from LIBORION_LIB_DIR at build time
+# if set). Both on (`--all-features`): `static` wins. Neither: a build error.
+default = ["static"]
+static = ["dep:orion-capi"]
+shared = []
+
+[dependencies]
+abi.workspace = true
+orion-capi = { workspace = true, optional = true }
+
+[dev-dependencies]
+orion-transport-ipc.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time", "sync"] }

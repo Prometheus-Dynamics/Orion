@@ -8,6 +8,7 @@ mod can_firmware;
 #[cfg(target_os = "linux")]
 mod capi;
 mod capi_requests;
+mod capi_wrapper;
 mod config;
 #[cfg(target_os = "linux")]
 mod device_streams;

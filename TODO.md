@@ -312,9 +312,10 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
 State of every open item (2026-11-06, when the leap started). Nothing else is open.
 
 - **The leap** (in progress, "Decided, starts when the user says" below): steps 5 to 8 are done
-  (step 7 as `liborion`'s first version, on the shared ABI crate). Open: the static Rust wrapper
-  and the static/shared build modes. Streams on serial and CAN, `orionctl` without reqwest and
-  `liborion`'s actions, records and stream subscriptions are done (2026-11-07).
+  (step 7 as `liborion`'s first version, on the shared ABI crate). Open: the static/shared build
+  modes for the other dependencies. Streams on serial and CAN, `orionctl` without reqwest,
+  `liborion`'s actions, records and stream subscriptions, and its Rust wrapper are done
+  (2026-11-07).
 - **Waiting on the user:** release mechanics (version 1.0.0, tag, release gates).
 - **Waiting on others:** protocol 1 on the reference board (the consumers' window).
 - **Blocked on hardware:** real MCU bring-up, the U8 board port, U9 hardware validation (no MCU
@@ -776,7 +777,14 @@ The shared ABI primitives wait until the hardware repository says they are ready
       (every series kind as a double, the kind in `value_type`); record kinds reuse
       `ORION_SUBJECT_*`. No ABI minor bump on dev (frozen-interfaces dev rule); the release
       decides the version.
-- [ ] **Static Rust wrapper** (`static`/`shared` features, `compile_error!` when both).
+- [x] **Rust wrapper** (2026-11-07, `crates/liborion-rs`, docs/capi.md "Rust"): a safe API
+      (`Link`, `Latest`, `Event`) over the C functions, the same declarations in both modes:
+      `static` (default) compiles `orion-capi` in, `shared` links `-lorion` (`LIBORION_LIB_DIR`).
+      Decided: both features on means `static` wins instead of a `compile_error!`, because the
+      workspace's CI builds `--all-features` (as with the opt-in allocators); neither is a
+      `compile_error!`. The wrapper declares the structs itself and asserts the layout hash at
+      compile time (and, statically, that its constants are the core's); `scripts/capi.sh check`
+      runs its tests in both modes and checks the shared test binary needs `liborion.so.1`.
 - [x] **Versioned MCU template** (2026-11-07, step 8). The device session announces its
       interface revision in `Hello` (`DeviceConfig::revision`, default `LINK_INTERFACE_REVISION`,
       2 bytes more per `Hello`; 0 keeps the old bytes) and keeps the session's from `Welcome`

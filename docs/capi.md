@@ -148,6 +148,25 @@ while (orion_latest_next(latest, seen, 1000, &frame, payload, sizeof payload) ==
 A payload larger than the buffer returns `LEMNOS_E_BUFFER_TOO_SMALL` with `payload_len` set; the
 reply is kept and the next call on the handle returns it.
 
+## Rust
+
+`crates/liborion-rs` is a safe Rust API over this surface (`Link`, `Latest`, `Event`), for Rust
+programs built outside the image:
+
+```toml
+liborion-rs = { path = "...", default-features = false, features = ["shared"] }  # or the default, static
+```
+
+- `static` (the default): the library's Rust core is compiled into the program; nothing to
+  install.
+- `shared`: the program links `liborion.so.1` (`-lorion`; set `LIBORION_LIB_DIR` at build time
+  for its directory) and runs with whichever compatible library is installed.
+
+Both modes call the same C functions, and `Link::connect` and `Latest::connect` run the version
+handshake first. With both features on (`--all-features`), `static` wins; with neither the build
+fails. `scripts/capi.sh check` runs the wrapper's tests in both modes, and checks that the
+shared build's test binary needs `liborion.so.1`.
+
 ## Linking
 
 - Shared: `-lorion` (the loader looks for `liborion.so.1`).

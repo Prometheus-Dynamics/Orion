@@ -42,7 +42,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   samples as packed `uint64_t` time and `double` pairs); their answers are `OrionEvent`s read
   with `orion_link_next` (`ORION_EVENT_ACTION`, `_RECORD`, `_RECORD_REMOVED`, `_STREAM_SERIES`,
   `_STREAM_SAMPLES`, `_STREAM_RESET`). Added on dev without a version change (the layout hash is
-  unchanged: `OrionEvent` is the same struct).
+  unchanged: `OrionEvent` is the same struct). `liborion-rs` is a safe Rust API over the same C
+  surface (`Link`, `Latest`, `Event`), linked statically (the default: the Rust core compiled in)
+  or against `liborion.so.1` (`shared`); CI tests it both ways (docs/capi.md, "Rust").
 
 - `tcp:` links (stable interface step 6), off by default (`ORION_NODE_REMOTE_AUTH=keys`): remote
   operators' link sessions, client role only. A handshake signed by the node's identity key and

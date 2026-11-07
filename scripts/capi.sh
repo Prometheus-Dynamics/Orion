@@ -6,7 +6,8 @@
 #   scripts/capi.sh check    the headers are current, the shared ABI header is the ABI crate's,
 #                            the exported symbols are crates/capi/symbols.txt, the SONAME carries
 #                            ORION_ABI_MAJOR, and a C program runs against liborion.a and
-#                            liborion.so, and the MCU header compiles in each build
+#                            liborion.so, the MCU header compiles in each build, and the Rust
+#                            wrapper (crates/liborion-rs) passes its tests in both link modes
 #
 # CBINDGEN overrides the cbindgen binary; CC the C compiler.
 set -euo pipefail
@@ -94,6 +95,29 @@ for p in json.load(sys.stdin)["packages"]:
     ln -sf "$lib/liborion.so" "$scratch/$soname"
     "$cc" "${flags[@]}" "$capi/tests/c/smoke.c" -L "$lib" -lorion -o "$scratch/smoke-shared"
     LD_LIBRARY_PATH="$scratch" "$scratch/smoke-shared"
+
+    # The Rust wrapper: static (the core compiled in), then shared, against this liborion.so.1
+    # (and the test binary must really need it).
+    cargo test --locked -q -p liborion-rs
+    shared_tests="$(LIBORION_LIB_DIR="$lib" cargo test --locked -q -p liborion-rs \
+        --no-default-features --features shared --no-run --message-format=json |
+        python3 -c 'import json, sys
+for line in sys.stdin:
+    m = json.loads(line)
+    # Integration tests only: the unit-test binary of the library calls nothing, so needs nothing.
+    if m.get("reason") == "compiler-artifact" and m.get("executable") and m["target"]["kind"] == ["test"]:
+        print(m["executable"])')"
+    if [[ -z "$shared_tests" ]]; then
+        echo "capi: no liborion-rs test binary in the shared build" >&2
+        exit 1
+    fi
+    for test in $shared_tests; do
+        if ! readelf -d "$test" | grep -q "NEEDED.*\[$soname\]"; then
+            echo "capi: $test does not link $soname" >&2
+            exit 1
+        fi
+        LD_LIBRARY_PATH="$scratch" "$test" -q
+    done
     echo "capi: ok"
     ;;
 *)

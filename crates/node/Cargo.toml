@@ -96,6 +96,7 @@ reqwest.workspace = true
 orion-link = { workspace = true, features = ["std", "actions", "streams"] }
 # liborion's client against a real link (src/link_gateway/tests/capi.rs).
 orion-capi.workspace = true
+liborion-rs.workspace = true
 abi.workspace = true
 
 [[example]]
