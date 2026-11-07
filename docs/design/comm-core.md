@@ -197,7 +197,7 @@ run the comm core alone.
 | Comm-core supervisor for systemd-less images | ~250 | none | low |
 | Hardware-layer handle offers (`SCM_RIGHTS`) | ~400 | new local socket with the hardware layer | low |
 | `usb-bulk` / `usb-gadget` transport in `orion-link` | ~350 | new transport kind (link protocol unchanged) | medium: usbfs and FunctionFS error paths |
-| Hello and board identity in the comm core (next section) | ~400 | additive TXT keys and one `orion+tcp` request | low |
+| Hello and board identity in the comm core (next section) | ~800 | the contract's port and path, a fragment directory, one `orion+tcp` request, additive TXT keys | medium (HTTP responder) |
 | `comm-core-min` static musl build in CI, with a size gate | ~150 (scripts) | none | low |
 | Access services (`access-ssh.md`) | ~2,600 + ~900 tests | new unit, CLI mode | see that note |
 
@@ -215,28 +215,69 @@ Today a device's identity is spread across three places:
 - whatever separate endpoint an image runs for board identity.
 
 The board identity contract moves into the comm core, so a device running Orion needs no separate
-identity endpoint:
+identity endpoint.
 
-- **Hello document:**
-  - node id and public key;
-  - board model and serial;
-  - machine id;
-  - image name and version;
-  - boot id;
-  - comm-core version and protocol versions;
-  - which tiers are present and up (`node: up | down | absent`);
-  - service ports, with the SSH port and host-key fingerprint.
+**The contract (contract 1).** The fleet tool recognizes boards by a JSON identity document:
+- It is served at `GET http://<device>:5899/.well-known/pd-device` and also written to
+  `/run/board/identity.json`.
+- Readers ignore properties they do not know, and later versions only add properties.
+- Required fields:
+  - `contract`;
+  - `model`, `rev`, `serial` (lowercase hex);
+  - `hostname`;
+  - `os`;
+  - `device_package`;
+  - `update_methods`;
+  - `manage_url`;
+  - `macs`.
+- Optional fields:
+  - `bootloader`;
+  - `endpoints`: `metrics`, `logs`, `actions` (`POST <actions>/<id>`), and `status`, `events`,
+    `stream`, where `stream` may name another port, for example `:5898/stream`;
+  - `actions`;
+  - `camera_stream` and `camera_streams`;
+  - `gadget`;
+  - `diagnostics` (run over SSH);
+  - `update` (the updater state, plus the slot list on A/B boards);
+  - `usb_route`;
+  - `security` (`on` or `off`);
+  - `time` (unix seconds).
 
-  The comm core signs it with the node key.
-- **Where it is served:**
-  - compact fields in the mDNS TXT record (additive keys; old parsers ignore them);
-  - the full signed document over one `orion+tcp` request, answered by the comm core without node
-    logic;
-  - over local IPC;
-  - in recovery images the same way.
-- **The fields named by the board identity contract** are the ones to copy. This note lists
-  Orion's side. The contract's exact field list and names come from its owner; Orion adds them
-  unchanged as hello fields.
+**Who fills what.** The comm core builds the document from two sources:
+
+| Source | Fields |
+| --- | --- |
+| The comm core itself (host facts it already reads, `crates/node/src/host_facts.rs`) | `contract`, `model`, `rev`, `serial`, `hostname`, `os`, `macs`, `time`, `bootloader` when readable, `endpoints` (its own status, events, stream, actions paths), `actions` (the node actions it routes, `reboot` included) |
+| The device package, as one JSON fragment file (for example `/etc/orion/identity.d/*.json`, merged in name order) or as `identity.*` status keys of a provider allowed to publish them | `device_package`, `update_methods`, `manage_url`, `update`, `camera_stream(s)`, `gadget`, `usb_route`, `security`, `diagnostics` |
+
+The comm core never invents a package field. A missing required field is `null`, as the schema
+allows, and is never guessed.
+
+**Where it is served:**
+- **The contract's own HTTP path and port**, by a minimal HTTP/1.1 `GET` responder in the comm
+  core. It is not `axum` or `hyper`. It answers one path and the endpoints' paths, so it also
+  works in `comm-core-min`, which has no HTTP stack.
+- **The file** `/run/board/identity.json`, rewritten atomically when a field changes.
+- **Signed over Orion:** the same document, plus the node id and public key, the comm-core and
+  protocol versions, the tier state (`node: up | down | absent`) and the SSH host-key
+  fingerprint. It is signed with the node key and served as one `orion+tcp` request, over local
+  IPC, and over a link to a device that asks. The comm core answers it without the node logic.
+- **mDNS TXT:** compact keys only (model, serial, contract), additive, so old parsers ignore
+  them.
+- **Recovery images:** in the same way. A board in recovery is recognized as itself, with
+  `update.state` saying so.
+
+**Actions endpoint.** `POST <actions>/<id>` maps onto Orion actions on the local node. The comm
+core routes it: through the node logic when it is up, and for `reboot` straight to the access
+claim. Auth on that endpoint follows `security`:
+- `off`: open, as today;
+- `on`: only callers with an Orion operator signature or from a local socket.
+
+| Part | Scope | Interfaces | Risk |
+| --- | --- | --- | --- |
+| Document builder, fragment merge, file writer | ~250 | fragment directory (new, documented) | low |
+| Minimal HTTP responder (GET plus the actions POST) | ~250 | the contract's port and path, unchanged | medium: a hand-written HTTP parser, so it is fuzzed and has strict limits (8 KiB header cap, one request per connection) |
+| Signed hello over `orion+tcp`, IPC, link; TXT keys | ~300 | one new request kind, additive TXT keys | low |
 
 ## Size
 

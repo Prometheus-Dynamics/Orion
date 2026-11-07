@@ -669,8 +669,10 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
 Design notes: docs/design/comm-core.md and docs/design/access-ssh.md. They are sized in lines,
 interfaces and risk. Slices, in dependency order:
 
-- [ ] Hello document: signed identity in the comm core, in mDNS TXT and over `orion+tcp`.
-      Waiting on the board identity contract's field list (asked the coordinator 2026-11-07).
+- [ ] Hello document: the board identity contract (contract 1), served by the comm core on the
+      contract's own port and path and written to `/run/board/identity.json`, plus a signed copy
+      over `orion+tcp`, IPC and links. Package fields come from fragment files or `identity.*`
+      status keys.
 - [ ] Access services: `orion-node access` process with SSH, sftp helper, local forwarding,
       safe mode, and the `reboot` claim. +1,062,744 B on x86_64, +965,352 B on aarch64 musl.
 - [ ] Extract the comm core from `orion-node`, about 16,700 lines, module by module.
