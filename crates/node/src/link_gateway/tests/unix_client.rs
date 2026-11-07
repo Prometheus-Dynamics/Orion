@@ -237,7 +237,8 @@ async fn a_client_queries_and_watches_status_published_by_a_device_on_another_co
 }
 
 fn node_app_with_blink(name: &str) -> NodeApp {
-    let socket = std::env::temp_dir().join(format!("orion-lg-{name}-{}.sock", std::process::id()));
+    let socket =
+        crate::test_temp::dir().join(format!("orion-lg-{name}-{}.sock", std::process::id()));
     NodeApp::builder()
         .config(crate::NodeConfig::for_local_node(NODE).with_ipc_socket_path(socket))
         .with_action_handler(

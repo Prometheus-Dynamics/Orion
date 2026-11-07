@@ -1,7 +1,7 @@
 use crate::NodeError;
 use crate::link_gateway::{
-    CanLinkConfig, DEFAULT_UNIX_MAX_CONNECTIONS, LinkConfig, LinkTransport, SerialLinkConfig,
-    UnixLinkConfig,
+    CanLinkConfig, DEFAULT_UNIX_MAX_CONNECTIONS, DEFAULT_UNIX_MAX_FRAMES_PER_S, LinkConfig,
+    LinkTransport, SerialLinkConfig, UnixLinkConfig,
 };
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -112,19 +112,23 @@ fn can_defaults_and_every_key() {
 
 #[test]
 fn parses_unix_links() {
-    let links = parse("unix:/run/orion/link.sock; unix:/run/b.sock?max_connections=4&allow=imu");
+    let links = parse(
+        "unix:/run/orion/link.sock; unix:/run/b.sock?max_connections=4&max_frames_per_s=500&allow=imu",
+    );
     assert_eq!(links[0].name, "unix:/run/orion/link.sock");
     assert_eq!(
         links[0].transport,
         LinkTransport::Unix(UnixLinkConfig {
             path: "/run/orion/link.sock".into(),
             max_connections: DEFAULT_UNIX_MAX_CONNECTIONS,
+            max_frames_per_s: DEFAULT_UNIX_MAX_FRAMES_PER_S,
         })
     );
     let LinkTransport::Unix(unix) = &links[1].transport else {
         panic!("expected a Unix link");
     };
     assert_eq!(unix.max_connections, 4);
+    assert_eq!(unix.max_frames_per_s, 500);
     assert_eq!(
         links[1].allowed_devices,
         Some(["imu".to_owned()].into_iter().collect())

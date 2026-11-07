@@ -30,8 +30,9 @@ mod unix_link;
 pub use config::{
     CanLinkConfig, DEFAULT_BAUD, DEFAULT_CAN_ADDRESSES, DEFAULT_CAN_DEVICE_BASE,
     DEFAULT_CAN_HOST_BASE, DEFAULT_HEARTBEAT_MS, DEFAULT_MISSED_HEARTBEATS,
-    DEFAULT_UNIX_MAX_CONNECTIONS, LINKS_ENV, LinkConfig, LinkTransport, MAX_CAN_ADDRESSES,
-    MAX_UNIX_CONNECTIONS, SUPPORTED_BAUD_RATES, SerialLinkConfig, UnixLinkConfig,
+    DEFAULT_UNIX_MAX_CONNECTIONS, DEFAULT_UNIX_MAX_FRAMES_PER_S, LINKS_ENV, LinkConfig,
+    LinkTransport, MAX_CAN_ADDRESSES, MAX_UNIX_CONNECTIONS, MAX_UNIX_FRAMES_PER_S,
+    SUPPORTED_BAUD_RATES, SerialLinkConfig, UnixLinkConfig,
 };
 
 use crate::{NodeApp, NodeError};
@@ -106,7 +107,9 @@ impl NodeApp {
                             tokio::spawn(can_link::run(ctx, can, host, opener, shutdown))
                         }
                         LinkTransport::Unix(unix) => {
-                            let limits = unix_link::ConnLimits::from_app(self);
+                            let limits = unix_link::ConnLimits {
+                                max_frames_per_s: unix.max_frames_per_s,
+                            };
                             tokio::spawn(unix_link::run(ctx, unix, host, limits, shutdown))
                         }
                     }

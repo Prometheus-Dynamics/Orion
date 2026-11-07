@@ -386,7 +386,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("orion-audit-{name}-{unique}"))
+        crate::test_temp::dir().join(format!("orion-audit-{name}-{unique}"))
     }
 
     fn read(path: &Path) -> String {

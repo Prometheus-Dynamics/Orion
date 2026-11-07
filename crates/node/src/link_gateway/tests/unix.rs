@@ -15,7 +15,7 @@ use tokio::net::UnixStream;
 use tokio::task::JoinHandle;
 
 pub(super) fn socket_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("orion-ul-{name}-{}.sock", std::process::id()))
+    crate::test_temp::dir().join(format!("orion-ul-{name}-{}.sock", std::process::id()))
 }
 
 pub(super) fn unix_link(path: &Path, query: &str) -> LinkConfig {

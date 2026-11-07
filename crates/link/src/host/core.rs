@@ -234,6 +234,12 @@ impl HostCore {
         true
     }
 
+    pub(crate) fn mark_heard(&mut self) {
+        if self.conn.is_some() {
+            self.heard = true;
+        }
+    }
+
     pub(crate) fn poll(&mut self, now: u64) {
         self.no_session_sent = false;
         if self.heard {

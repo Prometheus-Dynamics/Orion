@@ -87,7 +87,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default();
-        std::env::temp_dir().join(format!(
+        crate::test_temp::dir().join(format!(
             "orion-peer-sync-times-{label}-{}-{nanos}",
             std::process::id()
         ))

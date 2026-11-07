@@ -13,6 +13,14 @@ use orion::control_plane::{
 use orion_client::remote::{NodeTrust, OperatorIdentity, RemoteError, RemoteOperator};
 
 async fn node_with(open: OperatorOpenRead, auto_enroll: Vec<OperatorAutoEnroll>) -> OperatorNode {
+    node_configured(open, auto_enroll, |config| config).await
+}
+
+async fn node_configured(
+    open: OperatorOpenRead,
+    auto_enroll: Vec<OperatorAutoEnroll>,
+    adjust: impl FnOnce(crate::NodeConfig) -> crate::NodeConfig,
+) -> OperatorNode {
     let mut config = test_node_config_with(
         "node-a",
         "node-a-operator",
@@ -27,7 +35,7 @@ async fn node_with(open: OperatorOpenRead, auto_enroll: Vec<OperatorAutoEnroll>)
         .with_operator_open_read(open)
         .with_operator_auto_enroll(auto_enroll);
     let app = NodeApp::builder()
-        .config(config)
+        .config(adjust(config))
         .try_build()
         .expect("node app should build");
     let (addr, server) = app
@@ -196,4 +204,115 @@ fn the_settings_parse_and_match() {
         }
     );
     assert!(OperatorOpenRead::parse("everything").is_err());
+}
+
+/// A local publisher declares a node-owned stream on the IPC stream socket; an unenrolled operator
+/// follows it over `orion+tcp` with series patterns and a backfill, then gets live samples.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_open_read_operator_follows_a_local_publishers_stream_by_pattern() {
+    use orion::control_plane::{
+        Backfill, ClientEventKind, HistoryPolicy, SampleChunkBuilder, SeriesDecl, SeriesKind,
+        StreamDecl,
+    };
+    // The release heartbeat (unit tests use 50 ms): the publisher reads its socket only per
+    // request.
+    let node = node_configured(
+        OperatorOpenRead {
+            status: true,
+            streams: true,
+            state: false,
+        },
+        Vec::new(),
+        |mut config| {
+            config.ipc_stream_heartbeat_interval = Duration::from_secs(5);
+            config.ipc_stream_heartbeat_timeout = Duration::from_secs(15);
+            config
+        },
+    )
+    .await;
+    let stream_socket = crate::test_temp::unique("open-read-publisher", ".sock");
+    let (_, streams) = node
+        .app
+        .start_ipc_stream_server_graceful(&stream_socket)
+        .await
+        .expect("stream server starts");
+    let stream = StreamRef {
+        owner: StatusSubject::Node(NodeId::new("node-a")),
+        id: "board.hardware".into(),
+    };
+    let mut publisher =
+        orion_client::StreamPublisher::connect_at(&stream_socket, "board-agent.live")
+            .await
+            .expect("publisher connects");
+    let series = |name: &str, kind| {
+        SeriesDecl::new(name, kind, 10_000).with_history(HistoryPolicy::full(30_000))
+    };
+    publisher
+        .declare(StreamDecl {
+            owner: stream.owner.clone(),
+            id: stream.id.clone(),
+            series: vec![
+                series("imu.acceleration.x", SeriesKind::F32),
+                series("imu.acceleration.y", SeriesKind::F32),
+                series("status-ring.led.0", SeriesKind::U32),
+            ],
+        })
+        .await
+        .expect("declared");
+
+    let operator = stranger(&node, "operator-console").await;
+    let mut session = operator
+        .open_session("operator-console")
+        .await
+        .expect("a session opens");
+    session
+        .subscribe_stream(
+            StreamSubscription::all(stream.clone())
+                .with_series(["imu.*", "lens.*"])
+                .with_backfill(Backfill::LastMs(5_000)),
+        )
+        .await
+        .expect("subscribed");
+    let next = async |session: &mut orion_client::remote::RemoteSession| {
+        tokio::time::timeout(Duration::from_secs(5), session.next_event())
+            .await
+            .expect("an event within 5 s")
+            .expect("session open")
+            .event
+    };
+    let catalog = next(&mut session).await;
+    assert!(
+        matches!(&catalog, ClientEventKind::StreamCatalog(c) if c.stream == stream),
+        "{catalog:?}"
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_micros() as u64;
+    let mut x = SampleChunkBuilder::new(0, SeriesKind::F32);
+    let mut y = SampleChunkBuilder::new(1, SeriesKind::F32);
+    let mut led = SampleChunkBuilder::new(2, SeriesKind::U32);
+    for n in 0..5u64 {
+        x.push(t + n * 10_000, 0.5);
+        y.push(t + n * 10_000, -9.8);
+        led.push(t + n * 10_000, 255.0);
+    }
+    publisher
+        .publish(&stream, vec![x.take(), y.take(), led.take()])
+        .await
+        .expect("published");
+    loop {
+        match next(&mut session).await {
+            ClientEventKind::StreamData(data) if !data.backfill => {
+                let series: Vec<u16> = data.chunks.iter().map(|c| c.series).collect();
+                assert_eq!(series, [0, 1], "only the imu series");
+                break;
+            }
+            ClientEventKind::StreamData(_) => {}
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    drop(streams);
+    node.server.shutdown().await.expect("listener stops");
 }

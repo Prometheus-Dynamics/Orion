@@ -564,7 +564,7 @@ mod tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("orion-blob-test-{name}-{}", std::process::id()));
+            crate::test_temp::dir().join(format!("orion-blob-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         dir
     }

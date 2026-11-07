@@ -309,7 +309,7 @@ mod tests {
     use orion::control_plane::PeerSyncErrorKind;
     use orion_transport_http::{HttpRequestFailureKind, HttpTransportError};
     use std::{
-        env, fs,
+        fs,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
@@ -348,7 +348,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
             .as_nanos();
-        let root = env::temp_dir().join(format!("orion-audit-drop-{unique}"));
+        let root = crate::test_temp::dir().join(format!("orion-audit-drop-{unique}"));
         let path = root.join("audit").join("events.jsonl");
         let sink = AuditLogSink::new(
             path.clone(),
@@ -399,7 +399,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
             .as_nanos();
-        let root = env::temp_dir().join(format!("orion-audit-drop-count-{unique}"));
+        let root = crate::test_temp::dir().join(format!("orion-audit-drop-count-{unique}"));
         let path = root.join("audit").join("events.jsonl");
         let sink = AuditLogSink::new(path, 1, AuditLogOverloadPolicy::DropNewest, 4 * 1024 * 1024)
             .expect("audit log sink should build");

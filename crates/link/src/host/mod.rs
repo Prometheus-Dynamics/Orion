@@ -403,6 +403,13 @@ impl<T: Transport> HostSession<T> {
         self.core.poll(now_ms);
     }
 
+    /// Counts the device as heard at the next [`poll`](Self::poll), as a received frame would.
+    /// For a transport that holds the device's bytes back (a rate limit applying backpressure):
+    /// the device is alive, its frames are only waiting, so it must not time out.
+    pub fn mark_heard(&mut self) {
+        self.core.mark_heard();
+    }
+
     /// The next event, if any.
     pub fn next_event(&mut self) -> Option<HostEvent> {
         self.core.next_event()

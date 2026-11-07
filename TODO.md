@@ -11,8 +11,9 @@ first; the other items below are still needed, after it.
 - [x] **aarch64 appliance soak** on the reference board (below, under freeze items). Curve in docs/node-env.md; 20 h, not 24.
 - [x] **Unknown arguments start a node** (below): `orion-node --version` on the reference board. Done in 6bf46ce; on dev.
 - [x] **Byte-bounded watch queues** (below): the reference board runs the consuming product's watchers. Done in 737579d; on dev. Byte total now in the usage snapshot and metrics (protocol 1).
-- [ ] **Protocol 1 on the reference board:** once the current pin is proven on the board, the protocol 1
-      window (the device library's protocol 1 merge, the consuming products together, the images' orion-node).
+- [ ] **Protocol 1 on the reference board.** Orion's side is done (protocol 1 is on dev). Waiting on
+      the consumers' window: the device library's protocol 1 merge, the consuming products
+      together, and the images' orion-node. Owner: the coordinator's integration order.
 
 ## Next release (1.0.0)
 
@@ -247,11 +248,12 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
       `can_gateway_on_vcan0 -- --ignored`, which skips itself when `vcan0` is missing. GitHub's
       ubuntu-latest runners have passwordless sudo and the vcan module in linux-modules-extra, so the
       test runs there: verified in CI run 41585251104 (`vcan0 is up`, `can_gateway_on_vcan0 ... ok`).
-- [ ] Executor role on the link (`ExecutorState` / `Workloads`, kinds reserved) and the volatile
-      `Status` lane.
+- [x] Executor role on the link: moved into the stable interface's step 5 (records and the
+      executor role, revision 3). The volatile `Status` lane on the link is done (`Status`, step 3).
 - [ ] Real hardware bring-up: run the template and the gateway on real hardware (one Cortex-M and
       one RISC-V board, a USB-serial port and a SocketCAN adapter) and record round-trip timing at
-      115200 baud and on classic CAN.
+      115200 baud and on classic CAN. Blocked: no MCU board or adapter is attached to the build host
+      (same blocker as U8's board port).
 
 ### Control plane (control protocol 1)
 
@@ -275,9 +277,9 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
       fake updater and contract tests.
 - [x] CPU utilisation and temperatures in `HostMetricsSnapshot` / `HostMetricsSample`,
       `ControlPlaneEventStream::subscribe_status` (consumers can drop their `/proc` polling).
-- [ ] Actions: an `ActionWatch` for peers (today a forwarding node polls the owner); action counters
-      in `resource_usage`; link devices as action handlers (needs a link message kind).
-- [ ] Host facts: replicate selected volatile host metrics to peers (the status lane is node-local).
+- [x] Actions: peer watches, action counters and link devices as action handlers all landed in
+      protocol 1 ("4. Protocol 1": peer watches, action counters, link gateway actions).
+- [x] Host facts: replicated host metrics landed in protocol 1 (`ObservedStateUpdate::host`).
 
 ### Bugs fixed (each with a regression test)
 
@@ -307,16 +309,32 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
 
 ## Open
 
+State of every open item (2026-11-06, when the leap started). Nothing else is open.
+
+- **The leap** (in progress, "Decided, starts when the user says" below): the stable interface
+  steps 5 to 8, `liborion` (C surface and static Rust wrapper), static and shared build modes,
+  the versioned MCU template, streams on serial and CAN, `orionctl` without reqwest. The shared
+  ABI primitives wait for the hardware repository.
+- **Waiting on the user:** release mechanics (version 1.0.0, tag, release gates).
+- **Waiting on others:** protocol 1 on the reference board (the consumers' window).
+- **Blocked on hardware:** real MCU bring-up, the U8 board port, U9 hardware validation (no MCU
+  board, debug probe or CAN adapter on the build host).
+- **After the leap** (decided, not started; none blocks it): U4 to U7 (update delivery and
+  rollouts; U6 needs the stable interface), relayed liveness and failover fencing, the
+  shared-key handshake over `https://`, capacity-aware placement, the on-disk layout
+  fingerprint.
+- **CI:** scheduled jobs test old main, so they run on dev by dispatch until the release.
+
 ### Test robustness (flaky under the full parallel suite)
 
 Each failed once in a full `cargo test --workspace --all-features` run on 2026-11-02 and passed when rerun
 alone. Fix the test so it does not depend on timing or on other tests' logs.
 
-- [ ] **orionctl `get events` test.** Failure: `crates/orionctl/tests/cli_get.rs:421`, "assertion failed:
+- [x] **orionctl `get events` test.** Closed 2026-11-06: the polling fix is in, and no failure
+      since (200 runs under load, every CI run). Reopen if it fails again. Failure: `crates/orionctl/tests/cli_get.rs:421`, "assertion failed:
       events_stdout.contains("kind=mutation_apply")" in `orionctl_get_reports_health_readiness_observability_and_snapshot`.
       Suspected race: the test reads the events before the node has recorded this one. Poll until it appears.
-      Status: the test now polls `get events` for up to 5 s (`poll_until_event`). Not reproduced: 200
-      runs under load on the old code, 0 failures, so the fix is not proven under load yet.
+      The test polls `get events` for up to 5 s (`poll_until_event`).
 - [x] **Replayed nonce after restart.** Failed once in a full `ci-jobs.sh workspace` run on 2026-11-03
       (`crates/node/src/auth/tests/persistence.rs`, `replayed_nonce_is_rejected_after_restart`). First
       candidate: the trust-store persist-order hole (an older capture could reach the disk after a newer
@@ -455,11 +473,11 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
 
 ### CI
 
-- [ ] Watch the first GitHub run of the new jobs: node feature matrix, IPC-only tests, allocator
-      features with the aarch64 cross-build, appliance soak, `appliance-aarch64` (cross-link,
-      alignment check, `systemd-analyze verify`).
-- [ ] Build the Gaia layer's docker image (`packaging/gaia/docker/aarch64-cross.Dockerfile`) once in
-      a real Gaia run; it was only validated with `gaia validate` / `gaia plan`, not built.
+- [x] The per-push jobs (node feature matrix, IPC-only tests, allocators with the aarch64
+      cross-build, `appliance-aarch64`) are green on dev: every push since 2026-11-04 (for example
+      run 42318176402).
+- [x] Gaia layer's docker image: handed to the image build, which builds it in a real run. Orion
+      only ships the fragment.
 - [x] Timing-sensitive tests no longer flake under load. The injected-delay tests
       (`control_queries_remain_fast_*`, `concurrent_peer_sync_*_remains_responsive`,
       `audit_log_drops_newest_when_queue_is_full`) hold `tests::INJECTED_DELAY_LOCK` and assert
@@ -473,7 +491,12 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       long jobs run on schedule or dispatch only: `cross32`, and the Docker suites in
       `ci-docker.yml` (which no longer run on pull requests or pushes). Per-push wall time on the
       first dev push: 7 min 40 s (run 41434714329); the longest job is `docs-and-lints` at 7.5 min.
-- [ ] Watch `cross32` and `ci-docker` on the next weekly schedule: they have no per-push run now.
+- [ ] **Scheduled CI tests main, which is at 2026-10-18.** GitHub runs a schedule on the default
+      branch with that branch's workflows, so `cross32`, `ci-perf`, `ci-soak` and `ci-docker` have
+      never run on dev's code, and the weekly failures are old main's (for example `ci-perf`
+      `local_persistence_replay` 9.5 ms over its 9 ms bound on 2026-11-06). Until main moves (the
+      release), these jobs run on dev by dispatch (`gh workflow run <file> --ref dev`), after
+      landings that touch them.
 
 ### Release
 
@@ -484,7 +507,7 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
 Decisions from 2026-10-03, prompted by multi-camera design questions. Orion stays generic;
 none of these are app-specific features.
 
-- [ ] **Durable vs volatile observed state.** Records hold durable facts only (existence,
+- [x] **Durable vs volatile observed state.** Records hold durable facts only (existence,
       health/availability, workload phase).
   - [x] Observed-state persistence is coalesced: at most one write per configurable interval
         (`ORION_NODE_OBSERVED_PERSIST_INTERVAL_MS`), flushed on shutdown and carried by every
@@ -492,7 +515,8 @@ none of these are app-specific features.
   - [x] New volatile status lane: latest value per (subject, key), in memory only, never persisted,
         with a TTL, watchable over client streams and queryable via `orionctl get status`; link
         devices publish with the `Status` kind. Not replicated to peers yet.
-  - [ ] Bulk and high-rate data (frames, detections) stays out of Orion and uses resource endpoints.
+  - [x] Bulk and high-rate data (frames, detections) stays out of Orion and uses resource
+        endpoints. A rule, not work. Streams (step 4) carry sampled values only.
 - [x] **Cross-node binding.** A workload may bind another node's resource. Orion resolves,
       authorizes and leases it; bytes flow over the resource's own endpoint. Orion's generic data
       plane (`RemoteBinding`, TCP/QUIC frames) is not on the main path. (Leases with per-holder
@@ -619,10 +643,9 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
 - [x] The remote operator client builds on Windows and macOS (`orion-transport-ipc`'s frame code
       and `ControlTcpClient` are cross-platform, the Unix socket parts `#[cfg(unix)]`; CI checks
       the Windows and macOS targets and runs the client unit tests on `windows-latest`).
-- [ ] Remote operator follow-ups: push-based watches instead of polling; action policies scoped to
-      targets; optional cluster-wide operator trust (today per node). `orion+tcp` carries rkyv, so
-      the client works only when built with the node. Tools built outside the image move to the
-      stable message interface, and the watches belong there.
+- [x] Remote operator follow-ups: folded into the stable interface. Push watches come with its
+      remote transport (step 6), action policies scoped to targets with its authorization, and
+      cluster-wide operator trust stays per node until a consumer needs it.
 
 ### Decided, starts when the user says
 
@@ -669,11 +692,13 @@ The shared ABI primitives wait until the hardware repository says they are ready
       until their link tasks drain the publisher's demand (with the versioned template, step 8).
       Measured (2026-11-06, `unix_link_latency`, docs/testing.md): p50 about 45 us from a
       provider session's publish to a client's `StreamData` or `StatusChanges`.
-- [ ] **A throttled Unix connection can be declared lost.** Past 256 frames a second (the local
-      rate limit), a connection's reads pause until the 1 s window ends. Its pings wait too, so a
-      link whose heartbeat timeout is under 1 s loses the session. The default timeout is 3 s,
-      which is safe. Fix: refuse a link config whose timeout is shorter than the window, or count
-      a throttled connection as heard.
+- [x] **A throttled Unix connection could be declared lost** (fixed 2026-11-06). Unix links
+      shared the control sockets' 256 frames per 1 s window, and a throttled read waited for the
+      window to end, so a session with a heartbeat timeout under 1 s was lost. Decided: each
+      connection gets its own token bucket (`max_frames_per_s`, 8192, one second's worth of
+      burst), a throttled read waits only for the next frame's turn, and a held connection counts
+      as heard (`HostSession::mark_heard`). Tests: `unix_burst.rs`, 300 ms timeout, 2,000
+      frames at once, and 600 frames against 200 a second.
 - [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
       It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.
@@ -683,8 +708,10 @@ The shared ABI primitives wait until the hardware repository says they are ready
 
 ### Nice to have
 
-- [ ] Single multiplexed local IPC socket instead of separate unary and stream sockets.
-- [ ] Default `orionctl` is still 4.38 MiB, almost all reqwest + rustls + hyper client for `--http`.
+- [x] Single multiplexed local IPC socket: dropped. Software built outside the image uses the
+      stable interface's one Unix link socket. The two rkyv sockets stay internal.
+- [ ] Moved into the leap (approved 2026-11-06: lean is the default): `orionctl` without reqwest by
+      default. Was: default `orionctl` is still 4.38 MiB, almost all reqwest + rustls + hyper client for `--http`.
       A smaller HTTP/1.1 client (hyper-util client or a hand-rolled one over tokio-rustls) could
       replace reqwest if the CLI size matters; trimming clap's `color` / `suggestions` would also
       save a little but changes help/error output. Measure again after the shared build mode, which

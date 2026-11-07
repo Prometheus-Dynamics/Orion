@@ -144,7 +144,7 @@ async fn only_listed_operators_write_update_intents_and_nothing_else() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_intent_writes_are_audited() {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::test_temp::dir().join(format!(
         "orion-update-audit-{}-{}",
         std::process::id(),
         NodeApp::wall_clock_ms()

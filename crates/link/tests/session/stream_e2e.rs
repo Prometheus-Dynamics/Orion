@@ -5,7 +5,9 @@ use orion_link::host::{HostEvent, HostSession};
 use orion_link::message::{Message, RejectReason, kind};
 use orion_link::{FrameHeader, StreamEncoder};
 
-use crate::sim::{Faults, HEARTBEAT_MS, StreamPair, host_config, leases, provider, resources};
+use crate::sim::{
+    Faults, HEARTBEAT_MS, STEP_MS, StreamPair, host_config, leases, provider, resources,
+};
 
 fn connected_pair(seed: u64) -> StreamPair {
     let mut pair = StreamPair::new("imu-board", host_config(), seed);
@@ -225,6 +227,22 @@ fn device_loss_is_detected_by_the_host() {
     }));
     assert!(pair.now - frozen_at <= 3 * u64::from(HEARTBEAT_MS) + 50);
     assert!(!pair.host.is_connected());
+}
+
+#[test]
+fn a_device_held_back_by_the_transport_is_not_lost() {
+    // The device's bytes wait in the transport (frozen here); the transport tells the host.
+    let mut pair = connected_pair(10);
+    pair.device_frozen = true;
+    for _ in 0..(10 * u64::from(HEARTBEAT_MS) / STEP_MS) {
+        pair.host.mark_heard();
+        pair.step();
+    }
+    assert_eq!(
+        pair.count_host(|e| matches!(e, HostEvent::DeviceLost { .. })),
+        0
+    );
+    assert!(pair.host.is_connected());
 }
 
 #[test]

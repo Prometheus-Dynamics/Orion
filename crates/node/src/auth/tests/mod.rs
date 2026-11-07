@@ -20,7 +20,7 @@ mod local_ipc;
 mod persistence;
 
 fn temp_state_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
+    crate::test_temp::dir().join(format!(
         "orion-node-auth-{}-{}-{}",
         name,
         std::process::id(),

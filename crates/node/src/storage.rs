@@ -790,7 +790,7 @@ mod tests {
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("orion-storage-{label}-{unique}"));
+        let path = crate::test_temp::dir().join(format!("orion-storage-{label}-{unique}"));
         fs::create_dir_all(&path).expect("temporary storage directory should be created");
         path
     }

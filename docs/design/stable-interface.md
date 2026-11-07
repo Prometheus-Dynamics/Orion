@@ -115,10 +115,12 @@ with the buffer sized per transport.
   applies. A caller the policy admits to nothing is disconnected at connect; the client role's
   requests are authorized per request (see "Step 3 wire").
 - **Ownership:** a session publishes only for its own provider or executor, as local clients do.
-- **Rate limit:** each session has the local control budget (`ORION_NODE_LOCAL_RATE_LIMIT_WINDOW_MS`
-  and `ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES`). Past it the connection is not read until the
-  window ends: frames wait instead of being refused, so the final result of an action the session
-  was handed is never lost, and no exemption is needed.
+- **Rate limit:** each connection has its own frame budget (the link's `max_frames_per_s`,
+  8192 by default, a token bucket of one second's worth). Past it, reads wait for the next
+  frame's turn. Frames wait instead of being refused, so the final result of an action the
+  session was handed is never lost, and no exemption is needed. A connection held back counts as
+  heard, so the wait never times its session out. (Until 2026-11-06 this was the control
+  sockets' budget, 256 frames per 1 s window, and a throttled read waited for the window to end.)
 - **Queues:** host to client traffic is bounded in bytes per session. Watches coalesce to the
   latest value per key when the queue is full; stream data reports the gap with its cursor, as
   today.

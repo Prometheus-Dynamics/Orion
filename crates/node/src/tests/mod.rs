@@ -598,39 +598,15 @@ fn test_node_config_with(
 }
 
 fn temp_state_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "orion-node-{}-{}-{}",
-        name,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time should be after epoch")
-            .as_nanos()
-    ))
+    crate::test_temp::unique(name, "")
 }
 
 fn temp_socket_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "orion-node-ipc-{}-{}-{}.sock",
-        name,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time should be after epoch")
-            .as_nanos()
-    ))
+    crate::test_temp::unique(&format!("ipc-{name}"), ".sock")
 }
 
 fn temp_stream_socket_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "orion-node-ipc-stream-{}-{}-{}.sock",
-        name,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time should be after epoch")
-            .as_nanos()
-    ))
+    crate::test_temp::unique(&format!("ipc-stream-{name}"), ".sock")
 }
 
 fn write_test_tls_files(name: &str) -> (PathBuf, PathBuf, PathBuf) {

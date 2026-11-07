@@ -40,13 +40,13 @@ fn unique(name: &str) -> String {
 }
 
 fn temp_state_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("orion-discovery-{}", unique(name)))
+    crate::test_temp::dir().join(format!("orion-discovery-{}", unique(name)))
 }
 
 fn node_config(node_id: &str, state_dir: Option<PathBuf>) -> NodeConfig {
     let mut config = NodeConfig::for_local_node(NodeId::new(node_id))
         .with_http_bind_addr("127.0.0.1:0".parse().expect("address"))
-        .with_ipc_socket_path(std::env::temp_dir().join(format!("{}.sock", unique(node_id))))
+        .with_ipc_socket_path(crate::test_temp::dir().join(format!("{}.sock", unique(node_id))))
         .with_reconcile_interval(Duration::from_millis(50))
         .with_peer_authentication(PeerAuthenticationMode::Required);
     if let Some(state_dir) = state_dir {

@@ -11,7 +11,7 @@ const PROVIDER: &str = "imu.provider";
 const RESOURCE: &str = "imu.sample";
 
 fn state_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
+    crate::test_temp::dir().join(format!(
         "orion-lg-persist-{name}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -23,7 +23,8 @@ fn state_dir(name: &str) -> PathBuf {
 
 /// A node with its state in `dir`. Building it again on the same directory is a restart.
 fn persisted_app(dir: &Path) -> NodeApp {
-    let socket = std::env::temp_dir().join(format!("orion-lg-persist-{}.sock", std::process::id()));
+    let socket =
+        crate::test_temp::dir().join(format!("orion-lg-persist-{}.sock", std::process::id()));
     let config = NodeConfig::for_local_node(NODE)
         .with_ipc_socket_path(socket)
         .with_state_dir(dir);
@@ -162,7 +163,8 @@ async fn an_ipc_provider_cannot_claim_a_persisted_id_at_startup() {
     let app = persisted_app(&dir);
     app.restore_link_devices(&[link(LINK)])
         .expect("the restore should succeed before the IPC servers start");
-    let socket = std::env::temp_dir().join(format!("orion-lg-startup-{}.sock", std::process::id()));
+    let socket =
+        crate::test_temp::dir().join(format!("orion-lg-startup-{}.sock", std::process::id()));
     let (_path, server) = app
         .start_ipc_server_graceful(&socket)
         .await

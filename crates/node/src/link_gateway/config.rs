@@ -33,6 +33,10 @@ pub const DEFAULT_CAN_ADDRESSES: RangeInclusive<u32> = 1..=16;
 pub const MAX_CAN_ADDRESSES: u32 = 512;
 /// Default number of connections a Unix link serves at once.
 pub const DEFAULT_UNIX_MAX_CONNECTIONS: u32 = 32;
+/// Default frames per second each connection of a Unix link may send.
+pub const DEFAULT_UNIX_MAX_FRAMES_PER_S: u32 = 8_192;
+/// Most frames per second a Unix link may be configured to allow per connection.
+pub const MAX_UNIX_FRAMES_PER_S: u32 = 1_000_000;
 /// Most connections a Unix link may be configured to serve.
 pub const MAX_UNIX_CONNECTIONS: u32 = 1024;
 /// `sun_path` length on Linux: a socket path must be shorter, its terminating NUL included.
@@ -86,6 +90,10 @@ pub struct UnixLinkConfig {
     pub path: PathBuf,
     /// Connections served at once (`max_connections=`); further connections are closed at once.
     pub max_connections: u32,
+    /// Frames each connection may send per second, sustained (`max_frames_per_s=`). A burst of
+    /// one second's worth is read at once; past it, reads wait for the next frame's turn and the
+    /// socket pushes back on the sender. The session never times out while it waits.
+    pub max_frames_per_s: u32,
 }
 
 /// `serial:<path>` settings.
@@ -213,6 +221,14 @@ impl LinkConfig {
                         format!("max_connections must be between 1 and {MAX_UNIX_CONNECTIONS}"),
                     ));
                 }
+                let max_frames_per_s =
+                    params.number("max_frames_per_s", DEFAULT_UNIX_MAX_FRAMES_PER_S)?;
+                if !(1..=MAX_UNIX_FRAMES_PER_S).contains(&max_frames_per_s) {
+                    return Err(link_error(
+                        entry,
+                        format!("max_frames_per_s must be between 1 and {MAX_UNIX_FRAMES_PER_S}"),
+                    ));
+                }
                 if !target.starts_with('/') {
                     return Err(link_error(entry, "the socket path must be absolute"));
                 }
@@ -225,6 +241,7 @@ impl LinkConfig {
                 LinkTransport::Unix(UnixLinkConfig {
                     path: PathBuf::from(target),
                     max_connections,
+                    max_frames_per_s,
                 })
             }
             other => {

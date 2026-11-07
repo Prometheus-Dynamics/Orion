@@ -323,13 +323,16 @@ framed as on a serial port; the path must be absolute and shorter than 108 bytes
 | Key | Default | Valid values | Meaning |
 | --- | --- | --- | --- |
 | `max_connections` | `32` | `1`-`1024` | Connections served at once; a connection past it is closed at once. |
+| `max_frames_per_s` | `8192` | `1`-`1000000` | Frames each connection may send per second, sustained; a burst of one second's worth is read at once. |
 
 A Unix link judges each caller at connect by its `SO_PEERCRED` identity, like the control sockets:
 `ORION_NODE_LOCAL_AUTH` and `ORION_NODE_LOCAL_AUTH_ALLOW` admit it, and so does
 `ORION_NODE_LOCAL_PROVIDER_ALLOW` (a provider session needs no more). A caller admitted by none is
-disconnected. Frames from one connection are read within the local control budget
-(`ORION_NODE_LOCAL_RATE_LIMIT_WINDOW_MS`, `ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES`): past it the
-connection is not read until the window ends, so nothing is dropped. Output waiting for a connection
+disconnected. Frames from one connection are read within its own budget (`max_frames_per_s`, a
+token bucket holding one second's worth; not the control sockets' rate limit). Past it, each read
+waits only for the next frame's turn, and the socket pushes back on the sender, so nothing is
+dropped. A connection held back this way counts as heard: its session never times out for
+frames the node made wait, whatever the heartbeat. Output waiting for a connection
 is bounded at 64 KiB; a connection that takes no output for 5 s is closed. A second connection
 whose `Hello` names a device already connected on the link is closed. A stale socket at the path is
 replaced at start and removed at shutdown; any other file there is left alone and the link reports

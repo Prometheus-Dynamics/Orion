@@ -464,8 +464,8 @@ so USB adapters can be unplugged and replugged.
 A Unix link (`unix:/run/orion/link.sock?max_connections=32`) is a socket the node listens on, for
 software on the same machine: each connection is one session (`HostSession<Stream>`, COBS framed as
 on a serial port), so the existing provider kinds work over it unchanged. The caller's `SO_PEERCRED`
-identity is judged at connect by the node's local policy, frames are read within the local control
-budget, and output is bounded per connection (`docs/node-env.md`, "Link Gateway"). A device name
+identity is judged at connect by the node's local policy, frames are read within a per-connection
+budget (backpressure, never a dropped frame or a lost session), and output is bounded per connection (`docs/node-env.md`, "Link Gateway"). A device name
 belongs to one connection at a time. Release, attach and firmware transfers do not apply to it.
 Frames are limited to `HOST_MAX_FRAME` (4096) like the other links: a larger limit for local
 sockets comes with the kinds that need it.

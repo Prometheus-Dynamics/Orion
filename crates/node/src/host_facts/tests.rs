@@ -20,7 +20,7 @@ fn temp_root(label: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time after epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!(
+    crate::test_temp::dir().join(format!(
         "orion-host-facts-{label}-{}-{unique}",
         std::process::id()
     ))

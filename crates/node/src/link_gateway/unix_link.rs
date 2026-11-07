@@ -23,7 +23,6 @@
 use super::UnixLinkConfig;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, LinkSend, REOPEN_DELAY};
 use super::unix_client::LinkClient;
-use crate::NodeApp;
 use crate::auth::{LocalAdmission, LocalAdmissionPolicy};
 use orion::transport::ipc::UnixPeerIdentity;
 use orion_link::Stream;
@@ -49,26 +48,54 @@ const INBOUND_CHUNKS: usize = 64;
 /// Read buffer per connection.
 const READ_BUF: usize = 4096;
 
-/// Per-connection limits, from the node's runtime tuning.
+/// While a connection is held back by its frame budget, the link task hears of it at least this
+/// often, so the session counts as heard and never times out for frames the node made wait.
+const HELD_NOTICE: Duration = Duration::from_millis(100);
+
+/// Per-connection limits, from the link's config (`max_frames_per_s=`).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ConnLimits {
-    pub(super) rate_window: Duration,
-    pub(super) rate_max_frames: u32,
+    /// Frames read per second, sustained. A burst of one second's worth reads at once.
+    pub(super) max_frames_per_s: u32,
 }
 
-impl ConnLimits {
-    pub(super) fn from_app(app: &NodeApp) -> Self {
-        let tuning = &app.config.runtime_tuning;
+/// A token bucket of frames: refilled continuously at the rate, holding one second's worth. A
+/// connection past it waits for the next frame's token (1 / rate), not for a window to end.
+struct FrameBudget {
+    rate: f64,
+    tokens: f64,
+    refilled: tokio::time::Instant,
+}
+
+impl FrameBudget {
+    fn new(limits: ConnLimits, now: tokio::time::Instant) -> Self {
+        let rate = f64::from(limits.max_frames_per_s.max(1));
         Self {
-            rate_window: tuning.local_rate_limit_window.max(Duration::from_millis(1)),
-            rate_max_frames: tuning.local_rate_limit_max_messages.max(1),
+            rate,
+            tokens: rate,
+            refilled: now,
         }
+    }
+
+    /// When reading may go on, or `None` if it may now.
+    fn wait_until(&mut self, now: tokio::time::Instant) -> Option<tokio::time::Instant> {
+        let elapsed = now.saturating_duration_since(self.refilled).as_secs_f64();
+        self.tokens = (self.tokens + elapsed * self.rate).min(self.rate);
+        self.refilled = now;
+        (self.tokens < 1.0).then(|| now + Duration::from_secs_f64((1.0 - self.tokens) / self.rate))
+    }
+
+    /// Frames read: a read may take more than the tokens left, and the debt is waited off.
+    fn spend(&mut self, frames: u32) {
+        self.tokens -= f64::from(frames);
     }
 }
 
 /// What a connection's I/O task tells the link task.
 enum Inbound {
     Bytes(u64, Vec<u8>),
+    /// The connection's reads wait for its frame budget: its device is alive.
+    Held(u64),
     Closed(u64, Option<io::Error>),
 }
 
@@ -143,6 +170,11 @@ pub(super) async fn run(
                     if let Some(conn) = conns.get_mut(&id) {
                         ctx.status.bytes_rx += bytes.len() as u64;
                         conn.session.receive(&bytes);
+                    }
+                }
+                Some(Inbound::Held(id)) => {
+                    if let Some(conn) = conns.get_mut(&id) {
+                        conn.session.mark_heard();
                     }
                 }
                 Some(Inbound::Closed(id, error)) => {
@@ -543,10 +575,19 @@ async fn serve_conn(
     let (mut reader, mut writer) = stream.into_split();
     let mut buf = vec![0u8; READ_BUF];
     let mut counter = FrameCounter { in_frame: false };
-    let mut window_start = tokio::time::Instant::now();
-    let mut window_frames = 0u32;
+    let mut budget = FrameBudget::new(limits, tokio::time::Instant::now());
+    let mut told_held: Option<tokio::time::Instant> = None;
     let error = loop {
-        let throttled = window_frames >= limits.rate_max_frames;
+        let now = tokio::time::Instant::now();
+        let resume = budget.wait_until(now);
+        if resume.is_some() && told_held.is_none_or(|at| now >= at + HELD_NOTICE) {
+            // Best effort: a full channel means the link task has plenty to do with this
+            // connection already.
+            let _ = inbound.try_send(Inbound::Held(id));
+            told_held = Some(now);
+        }
+        // Wake at least every notice period while held, so the notices keep coming.
+        let wake = resume.map(|at| at.min(now + HELD_NOTICE));
         tokio::select! {
             biased;
             frame = out.recv() => {
@@ -569,20 +610,12 @@ async fn serve_conn(
                     )),
                 }
             }
-            () = tokio::time::sleep_until(window_start + limits.rate_window), if throttled => {
-                window_start = tokio::time::Instant::now();
-                window_frames = 0;
-            }
-            read = reader.read(&mut buf), if !throttled => match read {
+            () = tokio::time::sleep_until(wake.unwrap_or(now)), if wake.is_some() => {}
+            read = reader.read(&mut buf), if resume.is_none() => match read {
                 Ok(0) => break None,
                 Ok(n) => {
                     let chunk = buf.get(..n).unwrap_or_default();
-                    let now = tokio::time::Instant::now();
-                    if now >= window_start + limits.rate_window {
-                        window_start = now;
-                        window_frames = 0;
-                    }
-                    window_frames = window_frames.saturating_add(counter.count(chunk));
+                    budget.spend(counter.count(chunk));
                     if inbound.send(Inbound::Bytes(id, chunk.to_vec())).await.is_err() {
                         return;
                     }
@@ -599,11 +632,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn frames_past_the_budget_wait_for_the_next_window() {
+    async fn frames_past_the_budget_wait_for_their_tokens_and_the_link_hears_of_it() {
         let (node_side, mut peer) = UnixStream::pair().expect("pair");
         let (_out, out_rx) = mpsc::unbounded_channel();
-        let (inbound_tx, mut inbound) = mpsc::channel(16);
-        let window = Duration::from_millis(300);
+        let (inbound_tx, mut inbound) = mpsc::channel(64);
+        // 20 frames a second: a burst of 20 reads at once, then one frame per 50 ms.
         tokio::spawn(serve_conn(
             1,
             node_side,
@@ -612,30 +645,54 @@ mod tests {
             inbound_tx,
             Arc::new(Notify::new()),
             ConnLimits {
-                rate_window: window,
-                rate_max_frames: 2,
+                max_frames_per_s: 20,
             },
         ));
         let started = tokio::time::Instant::now();
+        let (mut frames, mut held) = (0usize, 0usize);
         let mut arrivals = Vec::new();
-        for frame in 0..3u8 {
+        for frame in 0..23u8 {
             peer.write_all(&[frame + 1, 0]).await.expect("write");
-            match inbound.recv().await {
-                Some(Inbound::Bytes(1, bytes)) => assert_eq!(bytes, vec![frame + 1, 0]),
-                _ => panic!("expected bytes"),
+            loop {
+                match inbound.recv().await {
+                    Some(Inbound::Bytes(1, bytes)) => {
+                        frames += bytes.iter().filter(|b| **b == 0).count();
+                        arrivals.push(started.elapsed());
+                        break;
+                    }
+                    Some(Inbound::Held(1)) => held += 1,
+                    _ => panic!("expected bytes"),
+                }
             }
-            arrivals.push(started.elapsed());
         }
-        assert!(arrivals[1] < window / 2, "within the budget: {arrivals:?}");
+        assert_eq!(frames, 23);
         assert!(
-            arrivals[2] >= window - Duration::from_millis(20),
-            "past the budget the frame waits for the window: {arrivals:?}"
+            arrivals[19] < Duration::from_millis(40),
+            "the burst: {arrivals:?}"
         );
+        // Each frame past the burst waits about 50 ms for its token, never a window.
+        for pair in arrivals[19..].windows(2) {
+            let gap = pair[1] - pair[0];
+            assert!(
+                gap < Duration::from_millis(120),
+                "gap {gap:?}: {arrivals:?}"
+            );
+        }
+        assert!(
+            arrivals[22] >= Duration::from_millis(120),
+            "throttled: {arrivals:?}"
+        );
+        assert!(held >= 1, "the link task hears that the connection is held");
         drop(peer);
-        assert!(matches!(
-            inbound.recv().await,
-            Some(Inbound::Closed(1, None))
-        ));
+        loop {
+            match inbound.recv().await {
+                Some(Inbound::Held(1)) => {}
+                other => {
+                    assert!(matches!(other, Some(Inbound::Closed(1, None))));
+                    break;
+                }
+            }
+        }
     }
 
     #[test]

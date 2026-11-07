@@ -11,6 +11,8 @@ mod persist;
 mod serial;
 mod status;
 mod unix;
+#[cfg(target_os = "linux")]
+mod unix_burst;
 mod unix_client;
 #[cfg(target_os = "linux")]
 mod unix_latency;
@@ -27,7 +29,8 @@ pub(super) const NODE: &str = "node-link";
 pub(super) const HEARTBEAT_MS: u32 = 100;
 
 pub(super) fn test_app(name: &str) -> NodeApp {
-    let socket = std::env::temp_dir().join(format!("orion-lg-{name}-{}.sock", std::process::id()));
+    let socket =
+        crate::test_temp::dir().join(format!("orion-lg-{name}-{}.sock", std::process::id()));
     NodeApp::try_new(NodeConfig::for_local_node(NODE).with_ipc_socket_path(socket))
         .expect("node app should build")
 }

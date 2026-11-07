@@ -705,7 +705,7 @@ mod tests {
     // failed with "cannot rewrite desired snapshot without encoded desired bytes".
     #[test]
     fn revision_only_bundle_past_cadence_defers_desired_rewrite() {
-        let state_dir = std::env::temp_dir().join(format!(
+        let state_dir = crate::test_temp::dir().join(format!(
             "orion-persist-cadence-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -760,7 +760,7 @@ mod tests {
     // back as one consistent state.
     #[test]
     fn deferred_persist_writes_history_and_manifest_together() {
-        let state_dir = std::env::temp_dir().join(format!(
+        let state_dir = crate::test_temp::dir().join(format!(
             "orion-persist-deferred-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

@@ -6,6 +6,22 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed (latency)
+
+- Unix links: each connection gets its own frame budget, `max_frames_per_s=` (default 8192 a
+  second, with a burst of one second's worth), instead of the control sockets' 256 frames per
+  1 s window. Past the budget a read waits only for the next frame's turn, never for a window to
+  end. A connection held back counts as heard (new `HostSession::mark_heard`), so backpressure
+  never times its session out. Before, a burst over 256 frames stalled the connection for up to
+  1 s, and a link with a heartbeat timeout under 1 s lost the session.
+
+### Fixed (tests)
+
+- Unit tests of orion-node no longer leave files in the temporary directory. Every path they
+  make is under one directory per test process (`orion-test-<pid>`). It is removed at exit, and
+  a later test process removes those of processes that are gone. Before, each run left about 15
+  state directories and sockets in `/tmp`, and a RAM-backed `/tmp` had filled up with 39,000 of them.
+
 ### Added (measurement)
 
 - `unix_link_latency`, an ignored bench that the perf workflow runs. It times a value from a

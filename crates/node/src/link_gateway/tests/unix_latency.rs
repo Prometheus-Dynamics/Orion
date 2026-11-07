@@ -49,15 +49,7 @@ async fn provider_session(app: &NodeApp, path: &std::path::Path) -> RawClient {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "latency measurement; run in release with --ignored --nocapture"]
 async fn unix_link_latency() {
-    // One frame per value is more than the default per-connection budget (256 frames a second),
-    // and a throttled session outlasts this test's 300 ms heartbeat timeout.
-    let socket = std::env::temp_dir().join(format!("orion-lg-latency-{}.sock", std::process::id()));
-    let app = NodeApp::try_new(
-        NodeConfig::for_local_node(NODE)
-            .with_ipc_socket_path(socket)
-            .with_runtime_tuning_mut(|t| t.with_local_rate_limit_max_messages(1_000_000)),
-    )
-    .expect("node app should build");
+    let app = test_app("unix-latency");
     let path = socket_path("latency");
     let gateway = start(&app, vec![unix_link(&path, "")]);
     let mut publisher = provider_session(&app, &path).await;

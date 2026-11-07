@@ -382,10 +382,10 @@ fn write_master(fd: &OwnedFd, mut bytes: &[u8]) {
 
 /// A node with a blob directory of its own, so blob push works in the test.
 pub(super) fn firmware_app(name: &str) -> (NodeApp, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("orion-lg-fw-{name}-{}", std::process::id()));
+    let dir = crate::test_temp::dir().join(format!("orion-lg-fw-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let socket =
-        std::env::temp_dir().join(format!("orion-lg-fw-{name}-{}.sock", std::process::id()));
+        crate::test_temp::dir().join(format!("orion-lg-fw-{name}-{}.sock", std::process::id()));
     let mut config = crate::NodeConfig::for_local_node(NODE).with_ipc_socket_path(socket);
     config.runtime_tuning.blobs.dir = Some(dir.clone());
     let app = NodeApp::try_new(config).expect("node app should build");

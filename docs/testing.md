@@ -102,22 +102,23 @@ client session receives. Each value waits for the previous one, so nothing coale
 cargo test -p orion-node --release --features link-gateway --lib unix_link_latency -- --ignored --nocapture
 ```
 
-Measured 2026-11-06 on an x86_64 workstation (release, in-process, 2,000 values, load average
-about 110 on 32 cores from other builds):
+Measured 2026-11-06, release, in-process, 2,000 values per path, three runs each:
 
-| Path | p50 | p90 | p99 |
-|---|---|---|---|
-| stream publish to `StreamData` | 34 to 51 us | 50 us to 1.6 ms | 0.1 to 2 ms |
-| status publish to `StatusChanges` | 45 to 53 us | 57 to 141 us | 77 us to 1.7 ms |
+| Path | Machine | p50 | p90 | p99 |
+|---|---|---|---|---|
+| stream publish to `StreamData` | aarch64 board, Cortex-A76 (load 0.3) | 45 us | 48 to 49 us | 74 to 136 us |
+| status publish to `StatusChanges` | aarch64 board, Cortex-A76 (load 0.3) | 56 to 57 us | 60 to 61 us | 113 to 119 us |
+| stream publish to `StreamData` | x86_64 workstation (load ~110) | 34 to 51 us | 50 us to 1.6 ms | 0.1 to 2 ms |
+| status publish to `StatusChanges` | x86_64 workstation (load ~110) | 45 to 53 us | 57 to 141 us | 77 us to 1.7 ms |
 
-The p50 is the path's own cost. The millisecond tail follows the machine's load: it is threads
-waiting to be scheduled, not a timer in the path. On a quiet machine, rerun the bench to get
-the tail.
+On the board the tail stays near the median. The workstation's millisecond tail came from its
+load: threads waiting to be scheduled, not a timer in the path. The board binary is the test
+binary cross-built for `aarch64-unknown-linux-musl` (`zig cc` as the C compiler, `rust-lld` as
+the linker) and run as `orion_node-* unix_link_latency --ignored --nocapture`.
 
-The bench raises the per-connection frame budget (`ORION_NODE_LOCAL_RATE_LIMIT_MAX_MESSAGES`,
-256 frames a second by default). One frame per value exceeds it. A throttled connection's reads
-pause until the window ends. With the default 3 s heartbeat timeout the session survives that,
-but with a timeout shorter than the 1 s window it is declared lost.
+`unix_burst.rs` sends bursts at a link with a 300 ms heartbeat timeout. 2,000 frames at once
+pass inside the default budget in well under a second. 600 frames against a 200-a-second budget
+wait about two seconds, and no session is lost.
 
 Allocation counts on the hot paths (`crates/link/tests/alloc_count.rs` and
 `crates/nt4/tests/alloc_count.rs`) fail when a change adds allocations. Steady state:
