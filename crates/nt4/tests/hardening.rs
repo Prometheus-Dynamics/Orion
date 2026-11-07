@@ -261,3 +261,22 @@ async fn client_that_never_reads_its_control_messages_is_disconnected() {
         "a client that cannot keep up must be disconnected, not buffered forever"
     );
 }
+
+#[tokio::test]
+async fn messages_larger_than_one_read_chunk_arrive_whole() {
+    // Both sides read 4 KiB at a time (`net::ws_config`); a 200 KiB value takes many reads each
+    // way: publisher to server, then server to subscriber.
+    let server = start_server().await;
+    let publisher = connect(&server, "pub").await;
+    let topic = publisher.handle().publish("/big/blob", "string").unwrap();
+    let text: String = (0..200 * 1024)
+        .map(|i| char::from(b'a' + (i % 26) as u8))
+        .collect();
+    topic.set(Value::String(text.clone())).unwrap();
+    wait_for_value(&server, "/big/blob", Value::String(text.clone())).await;
+
+    let subscriber = connect(&server, "sub").await;
+    let mut sub = subscriber.handle().subscribe(&["/big/"], prefix()).unwrap();
+    let event = next_match(&mut sub, |e| matches!(e, TopicEvent::Value { .. })).await;
+    assert_eq!(value_of(&event), Some(("/big/blob", Value::String(text))));
+}

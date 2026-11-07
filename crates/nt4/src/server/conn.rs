@@ -8,7 +8,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
-use tokio_tungstenite::accept_hdr_async;
+use tokio_tungstenite::accept_hdr_async_with_config;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
@@ -101,9 +101,12 @@ async fn serve(
 ) -> Result<()> {
     let mut name = String::new();
     let callback = |req: &Request, response: Response| handshake(req, response, &mut name);
-    let mut socket = tokio::time::timeout(liveness.timeout, accept_hdr_async(stream, callback))
-        .await
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out"))??;
+    let mut socket = tokio::time::timeout(
+        liveness.timeout,
+        accept_hdr_async_with_config(stream, callback, Some(crate::net::ws_config())),
+    )
+    .await
+    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out"))??;
 
     let (tx, mut rx) = mailbox::channel(CONTROL_CAPACITY);
     let client = lock(&state).add_client(name, tx);

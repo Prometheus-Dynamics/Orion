@@ -13,7 +13,7 @@ use tokio::time::{Instant, sleep, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
-use tokio_tungstenite::{WebSocketStream, client_async};
+use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
 use super::clock::{ClockFilter, Sample};
 use super::subscription::{TopicEvent, TopicInfo};
@@ -151,7 +151,9 @@ async fn connect(config: &ClientConfig) -> Result<Socket> {
     let handshake = async {
         let stream = TcpStream::connect((config.host.as_str(), config.port)).await?;
         crate::net::tune(&stream, config.liveness_timeout);
-        client_async(request, stream).await.map_err(Error::from)
+        client_async_with_config(request, stream, Some(crate::net::ws_config()))
+            .await
+            .map_err(Error::from)
     };
     let (socket, response) = timeout(config.connect_timeout, handshake)
         .await

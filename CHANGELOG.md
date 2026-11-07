@@ -11,6 +11,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `orion-transport-http`'s `client` (and so `orionctl` and the node's HTTP client) no longer uses
   reqwest or hyper: HTTP/1.1 over tokio with kept-alive connections, rustls for https, system
   roots from rustls-native-certs. `HttpTransportError::request_failed_from_reqwest` is removed.
+- `orion-nt4` client and server: WebSocket reads ask for 4 KiB at a time instead of tungstenite's
+  128 KiB default. tungstenite zero-fills that much before every read, idle polls included, which
+  a board profile showed as 7% of an NT4 client's process in `memset`. An idle connection also
+  holds 4 KiB of read buffer instead of 128 KiB. Messages larger than 4 KiB still arrive whole.
 
 ### Added
 

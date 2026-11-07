@@ -4,6 +4,22 @@ use std::time::Duration;
 
 use socket2::{SockRef, TcpKeepalive};
 use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+
+/// Most bytes one socket read asks for. tungstenite zero-fills that much of its read buffer
+/// before every read, including reads that find nothing (`FrameCodec::read_in` in 0.29). With
+/// its default of 128 KiB, an idle poll of a connection cleared 128 KiB, which a board profile
+/// showed as 7% of an NT4 client's process in `memset`. NT4 messages are batches of small
+/// frames, and 4 KiB covers a typical TCP segment run in one read. Larger messages still work:
+/// the buffer grows and fills over several reads.
+const READ_CHUNK: usize = 4 * 1024;
+
+/// The WebSocket settings for both the client and the server: tungstenite's defaults with a
+/// [`READ_CHUNK`] read buffer (also the buffer's starting size, so a connection holds 4 KiB
+/// instead of 128 KiB when idle).
+pub(crate) fn ws_config() -> WebSocketConfig {
+    WebSocketConfig::default().read_buffer_size(READ_CHUNK)
+}
 
 /// Keepalive probes start after this much silence, and repeat this often.
 const KEEPALIVE: Duration = Duration::from_secs(1);
