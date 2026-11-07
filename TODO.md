@@ -692,6 +692,13 @@ The shared ABI primitives wait until the hardware repository says they are ready
       until their link tasks drain the publisher's demand (with the versioned template, step 8).
       Measured (2026-11-06, `unix_link_latency`, docs/testing.md): p50 about 45 us from a
       provider session's publish to a client's `StreamData` or `StatusChanges`.
+      5 done (revision 3: the executor role and record reads on Unix links). Decided: an executor
+      session registers a second local client, `link:<link>/<device>#executor` (Executor role,
+      provider lane), and the gateway sets its node id; the wire workload carries no requirements
+      or placement; a record watch recomputes its filtered records when desired or observed state
+      changes and keeps a 64-bit digest per record, not the record, so it sends only changes; one
+      record watch per session. Tests: `tests/session/executor.rs` (link),
+      `link_gateway/tests/unix_executor.rs` (node).
 - [x] **A throttled Unix connection could be declared lost** (fixed 2026-11-06). Unix links
       shared the control sockets' 256 frames per 1 s window, and a throttled read waited for the
       window to end, so a session with a heartbeat timeout under 1 s was lost. Decided: each
@@ -711,6 +718,10 @@ The shared ABI primitives wait until the hardware repository says they are ready
       It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.
 - [ ] **Shared ABI primitives.** Use the hardware repository's ABI primitives crate where they fit.
+      Ready: the hardware repository's ABI crate 1.0 is frozen (layout hash 0xa02cfb4a8dd4545b).
+      Decided: `orion-capi` uses its `Handle`, `Status`, `BufferDesc` and `FenceDesc` directly; the
+      shared library's version is the SONAME major plus a handshake call (rustc's cdylib version
+      script overrides named symbol version nodes).
 - [ ] **Static and shared build modes.** Split each dependency into core, surface and wrapper, and
       build Orion both ways.
 

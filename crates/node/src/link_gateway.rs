@@ -25,6 +25,8 @@ mod tests;
 #[cfg(target_os = "linux")]
 mod unix_client;
 #[cfg(target_os = "linux")]
+mod unix_executor;
+#[cfg(target_os = "linux")]
 mod unix_link;
 
 pub use config::{

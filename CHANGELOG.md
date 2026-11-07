@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- Link interface revision 3 (stable interface step 5), served on Unix links: the executor role
+  (`ExecutorState` `0x12`, `Workloads` `0x13`) and record reads (`RecordQuery` `0x80`,
+  `RecordWatch` `0x81`, `Records` `0x82`) of workloads, resources, providers and executors. A
+  record watch keeps a 64-bit digest per record and sends only what changed. Bodies in
+  docs/design/stable-interface.md ("Step 5 wire"); fixtures in the link encoding tests.
+
 ### Changed (latency)
 
 - Unix links: each connection gets its own frame budget, `max_frames_per_s=` (default 8192 a

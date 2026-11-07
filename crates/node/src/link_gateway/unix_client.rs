@@ -27,7 +27,9 @@ use orion::control_plane::{
 use orion::transport::ipc::{LocalAddress, UnixPeerIdentity};
 use orion_link::Stream;
 use orion_link::host::{ActionSendError, ClientRequest, HostSession};
-use orion_link::message::{self as lm, ErrorCode};
+use orion_link::message::{self as lm, ErrorCode, ExecutorState, Roles};
+
+use super::unix_executor::{ExecutorLink, RecordChange, RecordWatch, WorkloadChange};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -82,6 +84,12 @@ enum Answer {
         subscribers: u32,
         series: Vec<u16>,
     },
+    /// To the executor: its workloads (no request).
+    Workloads(WorkloadChange),
+    Records {
+        req: u32,
+        change: RecordChange,
+    },
 }
 
 impl Answer {
@@ -92,9 +100,10 @@ impl Answer {
             | Self::Actions { req, .. }
             | Self::Error { req, .. }
             | Self::Catalog { req, .. }
-            | Self::Reset { req, .. } => *req,
+            | Self::Reset { req, .. }
+            | Self::Records { req, .. } => *req,
             Self::Data(data) => data.req,
-            Self::Demand { .. } => 0,
+            Self::Demand { .. } | Self::Workloads(_) => 0,
         }
     }
 }
@@ -142,6 +151,13 @@ impl Answer {
                 .sum(),
             Self::Reset { .. } => 0,
             Self::Demand { series, .. } => series.len() * 2,
+            // Workloads and records carry configs and lists: a flat charge each.
+            Self::Workloads(change) => {
+                (change.workloads.len() + change.removed.len()) * 4 * RECORD_BYTES
+            }
+            Self::Records { change, .. } => {
+                (change.updated.len() + change.removed.len()) * 4 * RECORD_BYTES
+            }
         };
         RECORD_BYTES + records
     }
@@ -227,6 +243,9 @@ pub(super) struct LinkClient {
     subscriptions: BTreeMap<StreamRef, Subscription>,
     /// Streams the provider session declared, by id.
     declared: BTreeMap<String, StreamRef>,
+    /// The session's executor, when it took the executor role (revision 3).
+    executor: Option<ExecutorLink>,
+    record_watch: Option<RecordWatch>,
     answers: Answers,
 }
 
@@ -252,8 +271,12 @@ impl LinkClient {
         device: &str,
         identity: UnixPeerIdentity,
         wake: Arc<Notify>,
-        client_role: bool,
+        roles: Roles,
     ) -> Self {
+        let client_role = roles.contains(Roles::CLIENT);
+        let executor = roles
+            .contains(Roles::EXECUTOR)
+            .then(|| ExecutorLink::open(app, link, device, &identity, wake.clone()));
         let name = format!("link:{link}/{device}");
         let source = LocalAddress::new(name.clone());
         let refused = if client_role {
@@ -280,6 +303,8 @@ impl LinkClient {
             runs: BTreeMap::new(),
             subscriptions: BTreeMap::new(),
             declared: BTreeMap::new(),
+            executor,
+            record_watch: None,
             answers: Answers::default(),
         }
     }
@@ -288,6 +313,16 @@ impl LinkClient {
     pub(super) fn close(self, app: &NodeApp) {
         if self.registered {
             app.remove_link_client(&self.source);
+        }
+        if let Some(executor) = self.executor {
+            executor.close(app);
+        }
+    }
+
+    /// An executor session's `ExecutorState`.
+    pub(super) fn executor_state(&mut self, app: &NodeApp, state: ExecutorState) {
+        if let Some(executor) = self.executor.as_mut() {
+            executor.state(app, &self.identity, state);
         }
     }
 
@@ -363,7 +398,9 @@ impl LinkClient {
         // node's event queue, which has its own byte cap and is drained only once these are out.
         if matches!(
             request,
-            ClientRequest::StatusQuery { .. } | ClientRequest::ActionQuery { .. }
+            ClientRequest::StatusQuery { .. }
+                | ClientRequest::ActionQuery { .. }
+                | ClientRequest::RecordQuery { .. }
         ) && self.answers.bytes >= ANSWER_BYTES
         {
             self.refuse(
@@ -402,6 +439,23 @@ impl LinkClient {
                 }
             }
             ClientRequest::ActionRun { req, request } => self.run(app, req, *request),
+            ClientRequest::RecordQuery { req, filter } => {
+                if let Some(change) = RecordWatch::new(req, filter).next_change(app) {
+                    self.answers.push_back(Answer::Records { req, change });
+                }
+            }
+            ClientRequest::RecordWatch { req, filter } => {
+                if self.record_watch.is_some() {
+                    self.refuse(
+                        req,
+                        ErrorCode::LIMIT,
+                        "one record watch per session; end it or open another connection",
+                    );
+                } else {
+                    // The bootstrap goes out with the next pump.
+                    self.record_watch = Some(RecordWatch::new(req, filter));
+                }
+            }
             ClientRequest::StreamSubscribe { req, subscription } => {
                 self.subscribe(app, req, *subscription);
             }
@@ -497,7 +551,13 @@ impl LinkClient {
     }
 
     fn end(&mut self, app: &NodeApp, req: u32) {
-        if self.status_watch == Some(req) {
+        if self
+            .record_watch
+            .as_ref()
+            .is_some_and(|watch| watch.req == req)
+        {
+            self.record_watch = None;
+        } else if self.status_watch == Some(req) {
             self.status_watch = None;
             app.end_link_client_watch(&self.source, LinkWatch::Status);
         } else if self
@@ -614,6 +674,19 @@ impl LinkClient {
     /// events for the client. Returns whether work is left (answers that did not fit, or events
     /// past this pump's share): the caller pumps again once frames have moved on.
     pub(super) fn pump(&mut self, app: &NodeApp, session: &mut HostSession<Stream>) -> bool {
+        // Executor workloads and record changes are computed only once earlier answers are out,
+        // so neither piles up behind a slow reader.
+        if self.answers.is_empty() {
+            if let Some(change) = self.executor.as_mut().and_then(|e| e.next_change(app)) {
+                self.answers.push_back(Answer::Workloads(change));
+            }
+            if let Some(watch) = self.record_watch.as_mut()
+                && let Some(change) = watch.next_change(app)
+            {
+                let req = watch.req;
+                self.answers.push_back(Answer::Records { req, change });
+            }
+        }
         if !self.registered {
             self.flush(app, session);
             return !self.answers.is_empty();
@@ -662,6 +735,12 @@ impl LinkClient {
                     subscribers,
                     series,
                 } => session.send_stream_demand(id, *subscribers, series),
+                Answer::Workloads(change) => {
+                    session.send_workloads(change.bootstrap, &change.workloads, &change.removed)
+                }
+                Answer::Records { req, change } => {
+                    session.send_records(*req, change.bootstrap, &change.updated, &change.removed)
+                }
             };
             match sent {
                 Ok(()) => {
@@ -672,6 +751,13 @@ impl LinkClient {
                     if matches!(answer, Answer::Demand { .. }) =>
                 {
                     // Too many series to list in one frame: the provider keeps sampling them all.
+                    self.answers.pop_front();
+                }
+                Err(ActionSendError::TooLarge { max_frame, .. })
+                    if matches!(answer, Answer::Workloads(_)) =>
+                {
+                    // A workload record larger than a frame cannot reach the executor.
+                    debug!(link = %self.link, device = %self.device, max_frame, "workloads larger than a frame not sent");
                     self.answers.pop_front();
                 }
                 Err(ActionSendError::TooLarge { max_frame, .. }) => {
@@ -705,6 +791,8 @@ fn request_id(request: &ClientRequest) -> u32 {
         | ClientRequest::ActionQuery { req, .. }
         | ClientRequest::ActionWatch { req, .. }
         | ClientRequest::StreamSubscribe { req, .. }
+        | ClientRequest::RecordQuery { req, .. }
+        | ClientRequest::RecordWatch { req, .. }
         | ClientRequest::End { req } => *req,
         _ => 0,
     }

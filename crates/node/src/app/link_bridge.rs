@@ -44,6 +44,8 @@ pub(super) struct LinkBridgeState {
     /// Per-link control slots: firmware jobs and release flags (`slots.rs`).
     slots: Mutex<BTreeMap<String, slots::LinkSlot>>,
     desired_changed: tokio::sync::watch::Sender<u64>,
+    /// Moves with every desired or observed change (record watches, `link_records.rs`).
+    pub(super) state_changed: tokio::sync::watch::Sender<u64>,
     /// Last content of `link-devices.rkyv`. `None` until the gateway restored it, so nothing is
     /// written over a file that has not been read.
     persisted: Mutex<Option<Vec<LinkDeviceRecord>>>,
@@ -57,6 +59,7 @@ impl Default for LinkBridgeState {
             status: Mutex::new(BTreeMap::new()),
             slots: Mutex::new(BTreeMap::new()),
             desired_changed: tokio::sync::watch::Sender::new(0),
+            state_changed: tokio::sync::watch::Sender::new(0),
             persisted: Mutex::new(None),
         }
     }
@@ -396,6 +399,10 @@ impl NodeApp {
         self.state
             .links
             .desired_changed
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
+        self.state
+            .links
+            .state_changed
             .send_modify(|generation| *generation = generation.wrapping_add(1));
     }
 

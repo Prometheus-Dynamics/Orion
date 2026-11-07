@@ -263,6 +263,68 @@ Frames stay at 4096 bytes on Unix links: parts carry larger answers, so the host
 does not grow for any transport. Serial and CAN links do not serve streams yet
 (`HostConfig::serve_streams`): their sessions' declarations are refused with `unsupported`.
 
+## Step 5 wire (revision 3)
+
+Decided 2026-11-06. The executor role, and client reads of the node's records. Kinds of this
+step are sent only when the session's revision is at least 3. Only Unix links serve them, as for
+the client role.
+
+| Kind | Name | Direction | Body |
+|---|---|---|---|
+| `0x12` | `ExecutorState` | executor → host | `executor: Executor, workloads: Vec<Observed>, resources: Vec<Resource>` |
+| `0x13` | `Workloads` | host → executor | `bootstrap: bool, more: bool, workloads: Vec<Workload>, removed: Vec<String>` |
+| `0x80` | `RecordQuery` | client → host | `req: u32, filter: RecordFilter` |
+| `0x81` | `RecordWatch` | client → host | `req: u32, filter: RecordFilter` |
+| `0x82` | `Records` | host → client | `req: u32, bootstrap: bool, more: bool, updated: Vec<Record>, removed: Vec<RecordKey>` |
+
+Types:
+
+- `Executor { executor_id: String, node_id: String, runtime_types: Vec<String> }`. The host
+  overwrites `node_id` with its own, as for provider state: an executor session runs on the node
+  it talks to.
+- `Observed { workload_id: String, state: ObservedState }`; `ObservedState` is `Pending,
+  Assigned, Starting, Running, Stopped, Completed, Failed` (the node's order).
+- `Resource`: the provider kinds' resource body (kind `0x10`).
+- `Workload { workload_id, runtime_type, artifact_id: String, config: Option<Config>,
+  desired: DesiredState, observed: ObservedState, assigned_node: Option<String>,
+  bindings: Vec<Binding>, restart: RestartPolicy }`, with `Config { schema_id: String,
+  payload: Vec<(String, Value)> }`, `Binding { resource_id: String, node_id: String,
+  remote: Option<{ endpoints: Vec<String>, available: bool }> }`, `DesiredState` `Running,
+  Stopped`, `RestartPolicy` `Never, OnFailure, Always`. A workload's requirements and placement
+  are the node's inputs for choosing where it runs; the wire does not carry them.
+- `RecordKind` is `Workload, Resource, Provider, Executor`. `RecordFilter { kind: RecordKind,
+  id: Option<String>, node: Option<String> }` (`node`: the assigned node of a workload, the node
+  of a provider or executor, the node of a resource's provider).
+- `Record` is `Workload(Workload), Resource(Resource), Provider(Provider), Executor(Executor)`,
+  `Provider` the provider kinds' body; `RecordKey { kind: RecordKind, id:
+  String }`.
+
+Executors:
+
+- A session with the executor role (`0x02`) sends `ExecutorState` whenever its state changes:
+  the node applies it as a local executor's state update, the workloads' records from the node's
+  desired state with the observed state the executor reports. A workload the node does not
+  assign to the executor is ignored. `ExecutorState` is acknowledged with `Ack`, as provider
+  state.
+- The host answers the first `ExecutorState` with `Workloads { bootstrap: true }`, the workloads
+  assigned to the executor, then sends each change: changed or new workloads in `workloads`,
+  unassigned ones by id in `removed`. Parts as for client answers (`more`). The session's end
+  leaves the executor's workloads to the node's lease and liveness rules, as for a local
+  executor that disconnects.
+
+Records:
+
+- `RecordQuery` is answered by one `Records { bootstrap: true }`; `RecordWatch` by a first
+  bootstrap, then by changes until `RequestEnd` or the session's end. Each change carries the
+  records that differ from what the client was sent last, and the keys of those gone. The host
+  keeps a 64-bit digest per record a watch has sent, not the record.
+- One record watch per session. Records larger than a frame end the request with `limit`, as
+  status records do.
+
+Authorization: an executor session is a local executor client of the session's caller and needs
+the provider lane, like a provider session. Record reads are client requests, authorized like
+status queries.
+
 ## Not covered
 
 Desired-state writes, peers, enrollment, maintenance, observability and blobs stay on the rkyv
@@ -283,7 +345,7 @@ kinds.
 4. **Streams.** Declare and publish for providers, subscribe for clients. Sample chunks keep
    their current encoding. Revision 2. Done.
 5. **Records and the executor role.** Workloads and assignments (`0x12`, `0x13`), resource and
-   provider reads. Revision 3.
+   provider reads. Revision 3. Done.
 6. **Remote transport.** Revision unchanged unless it needs kinds.
 7. **`liborion`.** A C library over the interface: opaque handles, byte buffers, a pollable fd,
    and a blocking client for the fd latest-value channel.

@@ -274,6 +274,7 @@ impl LinkConfig {
         // Only a Unix link's callers have a peer identity to authorize client requests with.
         config.serve_clients = self.serves_clients();
         config.serve_streams = self.serves_clients();
+        config.serve_executors = self.serves_clients();
         config
     }
 

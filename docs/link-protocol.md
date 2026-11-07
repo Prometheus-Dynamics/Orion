@@ -170,7 +170,7 @@ Reject reasons (one byte; unknown codes are reported as `Other(code)`):
 | --- | --- | --- |
 | 1 | `VersionMismatch` | Back off and retry. |
 | 2 | `UnknownDevice` (empty name, or not on the link's allowlist) | Back off and retry. |
-| 3 | `UnsupportedRoles` (no role the host serves: `provider`, and `client` on Unix links at revision 1) | Back off and retry. |
+| 3 | `UnsupportedRoles` (no role the host serves: `provider`, and `client` on Unix links at revision 1, `executor` on Unix links at revision 3) | Back off and retry. |
 | 4 | `FrameTooSmall` (`max_frame` below the host minimum, default 32) | Back off and retry. |
 | 5 | `NoSession` (session traffic from a device the host has no session for, for example after a host restart) | Reconnect immediately, without backoff and without a `Rejected` event. |
 
@@ -656,3 +656,4 @@ includes it. Revisions do not change `LINK_PROTOCOL_VERSION`.
 | 0 | The protocol as of version 1, before revisions. |
 | 1 | The client role (`roles` bit 2) and kinds `0x40`, `0x41`, `0x50`-`0x52`, `0x60`-`0x63`: status query and watch, and running, querying and watching actions. Served on Unix links. The record and filter bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 3 wire"). |
 | 2 | Streams, kinds `0x70`-`0x76`: providers declare and publish, clients subscribe. Served on Unix links. The bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 4 wire"). |
+| 3 | The executor role (`roles` bit 1) with kinds `0x12` `ExecutorState` and `0x13` `Workloads`, and record reads, kinds `0x80`-`0x82`: query and watch workloads, resources, providers and executors. Served on Unix links. The bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 5 wire"). |

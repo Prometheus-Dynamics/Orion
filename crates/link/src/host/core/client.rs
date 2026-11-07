@@ -77,6 +77,25 @@ impl HostCore {
                     subscription: std::boxed::Box::new(subscription),
                 }
             }
+            Ok(Message::RecordQuery(body) | Message::RecordWatch(body))
+                if !self.config.serve_executors =>
+            {
+                let _ = body;
+                refuse(
+                    self,
+                    ErrorCode::UNSUPPORTED,
+                    "this link does not serve records",
+                );
+                return;
+            }
+            Ok(Message::RecordQuery(body)) => crate::host::ClientRequest::RecordQuery {
+                req: body.req,
+                filter: body.filter,
+            },
+            Ok(Message::RecordWatch(body)) => crate::host::ClientRequest::RecordWatch {
+                req: body.req,
+                filter: body.filter,
+            },
             Ok(Message::RequestEnd { req }) => crate::host::ClientRequest::End { req },
             _ => {
                 self.decode_error();

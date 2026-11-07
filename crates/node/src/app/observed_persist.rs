@@ -96,6 +96,8 @@ impl NodeApp {
     /// observed watchers.
     pub(super) fn note_observed_change(&self) {
         self.notify_observed_watchers();
+        #[cfg(all(feature = "link-gateway", target_os = "linux"))]
+        self.notify_link_state_change();
     }
 
     /// Persists an applied-revision change, coalesced when a coalescer runs.

@@ -16,6 +16,7 @@ use crate::message::{
 use super::ActionSendError;
 
 mod client;
+mod executor;
 mod streams;
 use crate::transport::seq_newer;
 
@@ -53,6 +54,8 @@ pub(crate) struct HostCore {
     events: VecDeque<HostEvent>,
     leases: Vec<LeaseRecord>,
     last_state: Option<ProviderState>,
+    /// The executor state last reported in this session (revision 3).
+    last_executor_state: Option<std::boxed::Box<message::ExecutorState>>,
     /// The device's last reported firmware state in this session (feature `xfer`).
     #[cfg(feature = "xfer")]
     last_info: Option<DeviceInfo>,
@@ -90,6 +93,7 @@ impl HostCore {
             events: VecDeque::new(),
             leases: Vec::new(),
             last_state: None,
+            last_executor_state: None,
             #[cfg(feature = "xfer")]
             last_info: None,
             last_catalog: None,
@@ -302,6 +306,10 @@ impl HostCore {
             self.on_provider_stream(frame, roles);
             return;
         }
+        if frame.kind() == kind::EXECUTOR_STATE {
+            self.on_executor_state(frame, roles, limit);
+            return;
+        }
         if !roles.contains(Roles::PROVIDER)
             && matches!(
                 frame.kind(),
@@ -452,13 +460,18 @@ impl HostCore {
         }
         let revision = hello.revision.min(crate::LINK_INTERFACE_REVISION);
         let client = config.serve_clients && revision >= 1 && hello.roles.contains(Roles::CLIENT);
-        if !hello.roles.contains(Roles::PROVIDER) && !client {
+        let executor =
+            config.serve_executors && revision >= 3 && hello.roles.contains(Roles::EXECUTOR);
+        if !hello.roles.contains(Roles::PROVIDER) && !client && !executor {
             self.reject(Some(hello.device_name), RejectReason::UnsupportedRoles);
             return;
         }
         // Only the roles this host serves count for the session.
-        let roles =
-            Roles(hello.roles.0 & Roles::PROVIDER.0 | if client { Roles::CLIENT.0 } else { 0 });
+        let roles = Roles(
+            hello.roles.0 & Roles::PROVIDER.0
+                | if client { Roles::CLIENT.0 } else { 0 }
+                | if executor { Roles::EXECUTOR.0 } else { 0 },
+        );
         if hello.max_frame < config.min_device_frame {
             self.reject(Some(hello.device_name), RejectReason::FrameTooSmall);
             return;
@@ -492,6 +505,7 @@ impl HostCore {
         self.next_session_id = self.next_session_id.wrapping_add(1).max(1);
         self.out.clear();
         self.last_state = None;
+        self.last_executor_state = None;
         self.last_catalog = None;
         #[cfg(feature = "xfer")]
         {

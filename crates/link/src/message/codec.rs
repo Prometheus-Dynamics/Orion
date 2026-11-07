@@ -352,6 +352,11 @@ impl Message {
             Self::StreamCatalog(_) => kind::STREAM_CATALOG,
             Self::StreamData(_) => kind::STREAM_DATA,
             Self::StreamReset(_) => kind::STREAM_RESET,
+            Self::ExecutorState(_) => kind::EXECUTOR_STATE,
+            Self::Workloads(_) => kind::WORKLOADS,
+            Self::RecordQuery(_) => kind::RECORD_QUERY,
+            Self::RecordWatch(_) => kind::RECORD_WATCH,
+            Self::Records(_) => kind::RECORDS,
             Self::Unknown(kind) => *kind,
         }
     }
@@ -369,6 +374,9 @@ impl Message {
             return encoded;
         }
         if let Some(encoded) = super::streams::encode_stream(self, seq, buf) {
+            return encoded;
+        }
+        if let Some(encoded) = super::records::encode_records(self, seq, buf) {
             return encoded;
         }
         match self {
@@ -406,7 +414,13 @@ impl Message {
             | Self::StreamSubscribe(_)
             | Self::StreamCatalog(_)
             | Self::StreamData(_)
-            | Self::StreamReset(_) => Err(MessageError::Encode),
+            | Self::StreamReset(_)
+            // Encoded by `records::encode_records` above.
+            | Self::ExecutorState(_)
+            | Self::Workloads(_)
+            | Self::RecordQuery(_)
+            | Self::RecordWatch(_)
+            | Self::Records(_) => Err(MessageError::Encode),
         }
     }
 
@@ -431,6 +445,9 @@ impl Message {
             return decoded;
         }
         if let Some(decoded) = super::streams::decode_stream(kind, payload) {
+            return decoded;
+        }
+        if let Some(decoded) = super::records::decode_records(kind, payload) {
             return decoded;
         }
         Ok(match kind {

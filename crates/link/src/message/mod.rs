@@ -18,6 +18,7 @@
 pub(crate) mod body;
 mod client;
 mod codec;
+mod records;
 mod streams;
 
 use alloc::string::String;
@@ -45,6 +46,12 @@ pub use codec::{
     encode_action_cancel, encode_action_request, encode_leases, encode_provider_state,
     encode_status,
 };
+pub use records::{
+    ExecutorState, ObservedWorkload, Record, RecordFilter, RecordKey, RecordKind, RecordRequest,
+    Records, Workloads, encode_executor_state,
+};
+#[cfg(feature = "std")]
+pub(crate) use records::{RecordParts, WorkloadParts};
 #[cfg(feature = "std")]
 pub(crate) use streams::encode_data;
 #[cfg(feature = "std")]
@@ -303,6 +310,16 @@ pub enum Message {
     StreamData(StreamData),
     /// [`kind::STREAM_RESET`] (revision 2).
     StreamReset(StreamReset),
+    /// [`kind::EXECUTOR_STATE`] (revision 3).
+    ExecutorState(alloc::boxed::Box<ExecutorState>),
+    /// [`kind::WORKLOADS`] (revision 3).
+    Workloads(Workloads),
+    /// [`kind::RECORD_QUERY`] (revision 3).
+    RecordQuery(RecordRequest),
+    /// [`kind::RECORD_WATCH`] (revision 3).
+    RecordWatch(RecordRequest),
+    /// [`kind::RECORDS`] (revision 3).
+    Records(Records),
     /// A kind this build does not handle (including the reserved kinds). Ignored by sessions.
     Unknown(u8),
 }

@@ -17,6 +17,8 @@ mod unix_backlog;
 mod unix_burst;
 mod unix_client;
 #[cfg(target_os = "linux")]
+mod unix_executor;
+#[cfg(target_os = "linux")]
 mod unix_latency;
 #[cfg(target_os = "linux")]
 mod unix_streams;

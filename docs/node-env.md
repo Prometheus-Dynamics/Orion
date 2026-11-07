@@ -348,6 +348,13 @@ refused (`not authorized`). A session holds one status watch, one action watch, 
 unfinished actions it ran, and at most 8 stream subscriptions. A provider session also declares
 and publishes streams of its own provider (revision 2).
 
+At revision 3 a session may also take the executor role. It registers a local executor client
+named `link:<link>/<device name>#executor`, admitted like a provider session (the provider lane).
+Its `ExecutorState` is applied as that executor's state, with the node's own id; it gets the
+workloads the node assigns to it, then each change. A client session reads records (workloads with
+their observed state, resources, providers, executors) by query, or holds one record watch, which
+sends only the records that changed since its last answer and the keys of those gone.
+
 Example: `ORION_NODE_LINKS='serial:/dev/ttyAMA0?baud=115200&allow=imu-board;can:can0?device_base=0x600&host_base=0x680&addresses=1-16&allow=motor-a,motor-b'`.
 
 ## Safe mode

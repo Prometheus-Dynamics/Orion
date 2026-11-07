@@ -354,7 +354,7 @@ impl From<ActionStateWire> for ActionState {
     }
 }
 
-fn map_to_wire(
+pub(super) fn map_to_wire(
     map: &alloc::collections::BTreeMap<String, TypedConfigValue>,
 ) -> Vec<(String, ValueWire)> {
     map.iter()
@@ -362,7 +362,7 @@ fn map_to_wire(
         .collect()
 }
 
-fn map_from_wire(
+pub(super) fn map_from_wire(
     pairs: Vec<(String, ValueWire)>,
 ) -> alloc::collections::BTreeMap<String, TypedConfigValue> {
     pairs

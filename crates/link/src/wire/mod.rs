@@ -78,9 +78,11 @@ pub mod kind {
     pub const PROVIDER_STATE: u8 = 0x10;
     /// `Leases(Vec<LeaseRecord>)`, host → device.
     pub const LEASES: u8 = 0x11;
-    /// Reserved for the executor role (device → host executor snapshot).
+    /// `ExecutorState { executor, workloads, resources }`, executor → host. Revision 3 (reserved
+    /// before it).
     pub const EXECUTOR_STATE: u8 = 0x12;
-    /// Reserved for the executor role (host → device workload assignments).
+    /// `Workloads { bootstrap, more, workloads, removed }`, host → executor: the workloads
+    /// assigned to the session's executor. Revision 3 (reserved before it).
     pub const WORKLOADS: u8 = 0x13;
     /// `Status(Vec<StatusEntry>)`, device → host: volatile status values, fire-and-forget.
     pub const STATUS: u8 = 0x14;
@@ -159,6 +161,13 @@ pub mod kind {
     /// `StreamReset { req, reason }`, host → client. Revision 2.
     pub const STREAM_RESET: u8 = 0x76;
 
+    /// `RecordQuery { req, filter }`, client → host. Revision 3.
+    pub const RECORD_QUERY: u8 = 0x80;
+    /// `RecordWatch { req, filter }`, client → host. Revision 3.
+    pub const RECORD_WATCH: u8 = 0x81;
+    /// `Records { req, bootstrap, more, updated, removed }`, host → client. Revision 3.
+    pub const RECORDS: u8 = 0x82;
+
     /// Whether `kind` is a request a client sends (revision 1 and later).
     #[must_use]
     pub const fn is_client_request(kind: u8) -> bool {
@@ -171,6 +180,8 @@ pub mod kind {
                 | ACTION_QUERY
                 | ACTION_WATCH
                 | STREAM_SUBSCRIBE
+                | RECORD_QUERY
+                | RECORD_WATCH
         )
     }
 
@@ -186,6 +197,7 @@ pub mod kind {
         match kind {
             0x40..=0x6F => 1,
             0x70..=0x7F => 2,
+            EXECUTOR_STATE | WORKLOADS | 0x80..=0x8F => 3,
             _ => 0,
         }
     }
@@ -205,7 +217,8 @@ pub struct Roles(pub u8);
 impl Roles {
     /// The device publishes provider and resource state and receives leases.
     pub const PROVIDER: Self = Self(0x01);
-    /// The device runs workloads (reserved; not served by v1 hosts).
+    /// The session runs workloads: it sends `ExecutorState` and gets `Workloads` (revision 3,
+    /// hosts that serve executors).
     pub const EXECUTOR: Self = Self(0x02);
     /// The session queries and watches status and runs, queries and watches actions (revision 1).
     pub const CLIENT: Self = Self(0x04);

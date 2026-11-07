@@ -30,6 +30,9 @@ use orion_link::message::{
     StreamReset, StreamSubscribe,
 };
 
+#[path = "encoding/records.rs"]
+mod records;
+
 const FIXTURE: &str = "tests/fixtures/link_encodings.txt";
 
 fn provider() -> ProviderRecord {
@@ -218,6 +221,7 @@ fn canonical_messages() -> Vec<(&'static str, Message)> {
     .into_iter()
     .chain(client_messages())
     .chain(stream_messages())
+    .chain(records::record_messages(provider(), resource()))
     .collect()
 }
 
@@ -528,12 +532,19 @@ fn kind_numbers_are_stable() {
         [0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76]
     );
     assert_eq!(
+        [kind::RECORD_QUERY, kind::RECORD_WATCH, kind::RECORDS],
+        [0x80, 0x81, 0x82]
+    );
+    assert_eq!(
         [
             kind::revision(0x33),
             kind::revision(0x63),
-            kind::revision(0x76)
+            kind::revision(0x76),
+            kind::revision(kind::EXECUTOR_STATE),
+            kind::revision(kind::WORKLOADS),
+            kind::revision(0x82)
         ],
-        [0, 1, 2]
+        [0, 1, 2, 3, 3, 3]
     );
     assert_eq!(
         (Roles::PROVIDER.0, Roles::EXECUTOR.0, Roles::CLIENT.0),
@@ -615,7 +626,7 @@ fn borrowed_encoders_match_owned_messages() {
 
 #[test]
 fn unknown_kinds_and_reject_codes_decode_without_error() {
-    for kind in [0x00, 0x7E, 0xFF, kind::EXECUTOR_STATE, kind::WORKLOADS] {
+    for kind in [0x00, 0x7E, 0x8F, 0xFF] {
         assert_eq!(
             Message::decode_payload(kind, b"anything").unwrap(),
             Message::Unknown(kind)

@@ -16,6 +16,8 @@ pub(crate) use link_bridge::slots::{CanSlot, FirmwareCommand, JobReport, SerialS
 #[cfg(all(feature = "link-gateway", target_os = "linux"))]
 mod link_clients;
 #[cfg(all(feature = "link-gateway", target_os = "linux"))]
+mod link_records;
+#[cfg(all(feature = "link-gateway", target_os = "linux"))]
 pub(crate) use link_clients::LinkWatch;
 mod local_clients;
 mod local_control;

@@ -86,6 +86,10 @@ pub struct HostConfig {
     /// subscriptions from clients. When false, declarations and subscriptions are answered with
     /// `RequestError { code: UNSUPPORTED }` and batches are dropped. Default false.
     pub serve_streams: bool,
+    /// Whether this link serves the executor role and record reads (revision 3). When false, a
+    /// `Hello` with only the executor role is rejected, executor state is ignored, and record
+    /// requests are answered with `RequestError { code: UNSUPPORTED }`. Default false.
+    pub serve_executors: bool,
 }
 
 impl HostConfig {
@@ -101,6 +105,7 @@ impl HostConfig {
             session_seed: 1,
             serve_clients: false,
             serve_streams: false,
+            serve_executors: false,
         }
     }
 
@@ -235,6 +240,15 @@ pub enum HostEvent {
         /// The samples.
         chunks: Vec<orion_control_plane::SampleChunk>,
     },
+    /// An executor's state (revision 3, links with [`HostConfig::serve_executors`]), already
+    /// acknowledged. Retransmissions of the same state are not repeated. Answer with
+    /// [`HostSession::send_workloads`].
+    ExecutorState {
+        /// The session's device name.
+        device_name: String,
+        /// The state as sent; the gateway owns the executor's `node_id`.
+        state: Box<crate::message::ExecutorState>,
+    },
     /// A client request (revision 1, links with [`HostConfig::serve_clients`]).
     ClientRequest {
         /// The session's device name.
@@ -292,6 +306,20 @@ pub enum ClientRequest {
         req: u32,
         /// The stream, series, rate and backfill.
         subscription: Box<orion_control_plane::StreamSubscription>,
+    },
+    /// Answer once with the matching records (revision 3), with [`HostSession::send_records`].
+    RecordQuery {
+        /// Request id.
+        req: u32,
+        /// Which records.
+        filter: crate::message::RecordFilter,
+    },
+    /// Answer with the matching records, then with their changes until ended (revision 3).
+    RecordWatch {
+        /// Request id.
+        req: u32,
+        /// Which records.
+        filter: crate::message::RecordFilter,
     },
     /// End the watch or subscription `req`. Not answered.
     End {
@@ -554,6 +582,39 @@ impl<T: Transport> HostSession<T> {
         reason: orion_control_plane::StreamResetReason,
     ) -> Result<(), ActionSendError> {
         self.core.send_stream_reset(req, reason)
+    }
+
+    /// Queues the workloads assigned to the session's executor (revision 3): the whole set with
+    /// `bootstrap`, else the changed workloads and the ids of those no longer assigned. Split as
+    /// [`HostSession::send_status_changes`].
+    ///
+    /// # Errors
+    ///
+    /// [`ActionSendError::NotConnected`] without an executor session, otherwise as
+    /// [`HostSession::send_status_changes`].
+    pub fn send_workloads(
+        &mut self,
+        bootstrap: bool,
+        workloads: &[orion_control_plane::WorkloadRecord],
+        removed: &[orion_core::WorkloadId],
+    ) -> Result<(), ActionSendError> {
+        self.core.send_workloads(bootstrap, workloads, removed)
+    }
+
+    /// Queues one answer to a record request (revision 3), split as
+    /// [`HostSession::send_status_changes`].
+    ///
+    /// # Errors
+    ///
+    /// As [`HostSession::send_status_changes`].
+    pub fn send_records(
+        &mut self,
+        req: u32,
+        bootstrap: bool,
+        updated: &[crate::message::Record],
+        removed: &[crate::message::RecordKey],
+    ) -> Result<(), ActionSendError> {
+        self.core.send_records(req, bootstrap, updated, removed)
     }
 
     /// The session's negotiated frame size.

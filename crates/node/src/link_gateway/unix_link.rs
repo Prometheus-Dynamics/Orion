@@ -32,7 +32,6 @@ use crate::auth::{LocalAdmission, LocalAdmissionPolicy};
 use orion::transport::ipc::UnixPeerIdentity;
 use orion_link::Stream;
 use orion_link::host::{ActionSendError, HostConfig, HostEvent, HostSession};
-use orion_link::message::Roles;
 use std::collections::BTreeMap;
 use std::io;
 use std::os::unix::fs::FileTypeExt;
@@ -143,6 +142,7 @@ pub(super) async fn run(
     let mut tick = tokio::time::interval(LinkContext::tick_period(host.heartbeat_ms));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut desired = ctx.app.link_desired_changes();
+    let mut state_changes = ctx.app.link_state_changes();
     let mut listener: Option<UnixListener> = None;
     let mut reopen_at = Instant::now();
     let mut lease_refresh_at = Instant::now() + LEASE_REFRESH;
@@ -230,6 +230,8 @@ pub(super) async fn run(
             () = drained.notified() => {}
             () = client_wake.notified() => {}
             changed = desired.changed() => refresh = changed.is_ok(),
+            // Record watches and executors' workloads see the change at the pump below.
+            _ = state_changes.changed() => {}
             command = commands.recv(), if commands_open => match command {
                 Some(command) => ctx.accept_action(command, |device, send| {
                     let conn = conns
@@ -285,7 +287,8 @@ pub(super) async fn run(
                 match &event {
                     HostEvent::ClientRequest { .. }
                     | HostEvent::StreamDeclare { .. }
-                    | HostEvent::StreamPublish { .. } => {
+                    | HostEvent::StreamPublish { .. }
+                    | HostEvent::ExecutorState { .. } => {
                         if let Some(client) = conn.client.as_mut() {
                             match event {
                                 HostEvent::ClientRequest { request, .. } => {
@@ -296,6 +299,9 @@ pub(super) async fn run(
                                 } => client.declare(&ctx.app, req, id, series),
                                 HostEvent::StreamPublish { id, chunks, .. } => {
                                     client.publish(&ctx.app, &id, chunks);
+                                }
+                                HostEvent::ExecutorState { state, .. } => {
+                                    client.executor_state(&ctx.app, *state);
                                 }
                                 _ => {}
                             }
@@ -315,7 +321,7 @@ pub(super) async fn run(
                             device_name,
                             conn.identity.clone(),
                             client_wake.clone(),
-                            roles.contains(Roles::CLIENT),
+                            *roles,
                         ));
                     }
                     HostEvent::DeviceLost { .. } => {
