@@ -22,7 +22,7 @@ use crate::app::LinkWatch;
 use orion::control_plane::{
     ActionQuery, ActionResult, ClientEvent, ClientEventKind, ControlMessage, SampleChunk,
     SeriesDecl, SeriesKind, StatusEntry, StatusKey, StreamRef, StreamResetReason,
-    StreamSubscription,
+    StreamSubscription, TypedConfigValue,
 };
 use orion::transport::ipc::{LocalAddress, UnixPeerIdentity};
 use orion_link::Stream;
@@ -41,6 +41,11 @@ pub(super) const MAX_SUBSCRIPTIONS: usize = 8;
 const EVENTS_PER_DRAIN: usize = 32;
 /// Drains per pump, so one busy client does not hold the link task.
 const DRAINS_PER_PUMP: usize = 4;
+/// Bytes of answers a session may have waiting for its output. Past it, queries are refused
+/// with `limit` and the connection is not read until the answers drain below it.
+pub(super) const ANSWER_BYTES: usize = 256 * 1024;
+/// Bytes charged per record or message of an answer, on top of its strings and data.
+const RECORD_BYTES: usize = 64;
 
 /// An answer waiting for room in the session's output.
 #[derive(Debug)]
@@ -94,6 +99,106 @@ impl Answer {
     }
 }
 
+fn value_bytes(value: &TypedConfigValue) -> usize {
+    match value {
+        TypedConfigValue::String(text) => text.len(),
+        TypedConfigValue::Bytes(bytes) => bytes.len(),
+        _ => 0,
+    }
+}
+
+impl Answer {
+    /// The bytes this answer is charged while it waits: an estimate of what it holds.
+    fn bytes(&self) -> usize {
+        let records = match self {
+            Self::Status {
+                updated, expired, ..
+            } => {
+                let updated = updated
+                    .iter()
+                    .map(|entry| RECORD_BYTES + entry.key.len() + value_bytes(&entry.value));
+                let expired = expired.iter().map(|key| RECORD_BYTES + key.key.len());
+                updated.chain(expired).sum()
+            }
+            Self::Actions { results, .. } => results
+                .iter()
+                .map(|result| {
+                    RECORD_BYTES
+                        + result.action_id.len()
+                        + result.name.len()
+                        + result
+                            .output
+                            .iter()
+                            .map(|(key, value)| RECORD_BYTES + key.len() + value_bytes(value))
+                            .sum::<usize>()
+                })
+                .sum(),
+            Self::Error { reason, .. } => reason.len(),
+            Self::Catalog { series, .. } => series.len() * RECORD_BYTES,
+            Self::Data(data) => data
+                .chunks
+                .iter()
+                .map(|chunk| RECORD_BYTES + chunk.data.len())
+                .sum(),
+            Self::Reset { .. } => 0,
+            Self::Demand { series, .. } => series.len() * 2,
+        };
+        RECORD_BYTES + records
+    }
+}
+
+/// The session's waiting answers, in order, with the bytes each is charged; `bytes` is their
+/// total and stays exact through every change.
+#[derive(Debug, Default)]
+struct Answers {
+    items: VecDeque<(Answer, usize)>,
+    bytes: usize,
+}
+
+impl Answers {
+    fn push_back(&mut self, answer: Answer) {
+        let bytes = answer.bytes();
+        self.bytes += bytes;
+        self.items.push_back((answer, bytes));
+    }
+
+    fn push_front(&mut self, answer: Answer) {
+        let bytes = answer.bytes();
+        self.bytes += bytes;
+        self.items.push_front((answer, bytes));
+    }
+
+    fn front(&self) -> Option<&Answer> {
+        self.items.front().map(|(answer, _)| answer)
+    }
+
+    fn pop_front(&mut self) {
+        if let Some((_, bytes)) = self.items.pop_front() {
+            self.bytes -= bytes;
+        }
+    }
+
+    fn retain(&mut self, mut keep: impl FnMut(&Answer) -> bool) {
+        let bytes = &mut self.bytes;
+        self.items.retain(|(answer, charged)| {
+            let kept = keep(answer);
+            if !kept {
+                *bytes -= *charged;
+            }
+            kept
+        });
+    }
+
+    fn clear(&mut self) {
+        self.items.clear();
+        self.bytes = 0;
+    }
+
+    fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
 /// A stream subscription of the session.
 struct Subscription {
     req: u32,
@@ -122,7 +227,7 @@ pub(super) struct LinkClient {
     subscriptions: BTreeMap<StreamRef, Subscription>,
     /// Streams the provider session declared, by id.
     declared: BTreeMap<String, StreamRef>,
-    answers: VecDeque<Answer>,
+    answers: Answers,
 }
 
 /// The error code for a request the node refused.
@@ -175,7 +280,7 @@ impl LinkClient {
             runs: BTreeMap::new(),
             subscriptions: BTreeMap::new(),
             declared: BTreeMap::new(),
-            answers: VecDeque::new(),
+            answers: Answers::default(),
         }
     }
 
@@ -251,6 +356,21 @@ impl LinkClient {
         let req = request_id(&request);
         if let Some((code, reason)) = self.refused.clone() {
             self.refuse(req, code, reason);
+            return;
+        }
+        // Queries copy their whole answer into the queue; past the cap they wait for the client
+        // to read what it already asked for. Watches, runs and subscriptions answer through the
+        // node's event queue, which has its own byte cap and is drained only once these are out.
+        if matches!(
+            request,
+            ClientRequest::StatusQuery { .. } | ClientRequest::ActionQuery { .. }
+        ) && self.answers.bytes >= ANSWER_BYTES
+        {
+            self.refuse(
+                req,
+                ErrorCode::LIMIT,
+                "answers to earlier requests are still waiting to be read",
+            );
             return;
         }
         match request {
@@ -483,6 +603,11 @@ impl LinkClient {
             }
             _ => {}
         }
+    }
+
+    /// Bytes of the answers waiting for the session's output.
+    pub(super) fn answer_bytes(&self) -> usize {
+        self.answers.bytes
     }
 
     /// Queues waiting answers while the session's output has room, then takes the node's new

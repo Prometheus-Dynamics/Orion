@@ -333,7 +333,10 @@ token bucket holding one second's worth; not the control sockets' rate limit). P
 waits only for the next frame's turn, and the socket pushes back on the sender, so nothing is
 dropped. A connection held back this way counts as heard: its session never times out for
 frames the node made wait, whatever the heartbeat. Output waiting for a connection
-is bounded at 64 KiB; a connection that takes no output for 5 s is closed. A second connection
+is bounded at 64 KiB; a connection that takes no output for 5 s is closed. Answers a client
+session has asked for but not yet taken are bounded at 256 KiB (each answer is at most 32
+frames): past it, status and action queries are refused with `limit` and the connection is not
+read until the answers drain, again without timing the session out. A second connection
 whose `Hello` names a device already connected on the link is closed. A stale socket at the path is
 replaced at start and removed at shutdown; any other file there is left alone and the link reports
 the error. `link.release`, `link.attach` and firmware transfers do not apply to Unix links.

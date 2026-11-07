@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 /// A client session on one connection: pings to stay alive, and hands over every message the
@@ -28,6 +28,8 @@ use tokio::task::JoinHandle;
 pub(super) struct RawClient {
     send: mpsc::UnboundedSender<Message>,
     received: mpsc::UnboundedReceiver<Message>,
+    /// Whether the client reads the node's output (it keeps sending, pings included, either way).
+    reading: watch::Sender<bool>,
     task: JoinHandle<()>,
 }
 
@@ -73,6 +75,7 @@ impl RawClient {
             max_frame: 4096,
             revision: orion_link::LINK_INTERFACE_REVISION,
         });
+        let (reading, mut reads) = watch::channel(true);
         let task = tokio::spawn(async move {
             let (mut reader, mut writer) = stream.into_split();
             let mut out = Writer { seq: 0 };
@@ -96,7 +99,12 @@ impl RawClient {
                             return;
                         }
                     }
-                    read = reader.read(&mut buf) => {
+                    changed = reads.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                    }
+                    read = reader.read(&mut buf), if *reads.borrow() => {
                         let Ok(n) = read else { return };
                         if n == 0 {
                             return;
@@ -119,8 +127,14 @@ impl RawClient {
         Self {
             send,
             received,
+            reading,
             task,
         }
+    }
+
+    /// Stops or resumes reading the node's output.
+    pub(super) fn set_reading(&self, reading: bool) {
+        let _ = self.reading.send(reading);
     }
 
     pub(super) fn send(&self, message: Message) {

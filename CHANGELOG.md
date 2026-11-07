@@ -17,6 +17,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Fixed
 
+- Unix links bound the answers a client session holds: 256 KiB of answers not yet taken.
+  Past it, status and action queries are refused with `limit` and the connection is not read
+  until the answers drain. Before, a client that sent queries without reading their answers
+  made the node copy every answer into memory. Test:
+  `queries_past_the_answer_cap_are_refused_and_the_session_stays_up`.
+- A Unix link connection whose peer was slow to take output stopped being read until the write
+  finished (up to 5 s), so its pings went unread and a session with a short heartbeat was lost.
+  Writes now run in their own task.
 - `StreamPublisher` keeps its session while idle. It read its socket only while a request
   waited, so it never answered the node's stream heartbeat in between: a publisher that went
   longer than the heartbeat timeout (15 s by default) without publishing was evicted, and its

@@ -12,6 +12,8 @@ mod serial;
 mod status;
 mod unix;
 #[cfg(target_os = "linux")]
+mod unix_backlog;
+#[cfg(target_os = "linux")]
 mod unix_burst;
 mod unix_client;
 #[cfg(target_os = "linux")]

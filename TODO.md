@@ -699,6 +699,14 @@ The shared ABI primitives wait until the hardware repository says they are ready
       burst), a throttled read waits only for the next frame's turn, and a held connection counts
       as heard (`HostSession::mark_heard`). Tests: `unix_burst.rs`, 300 ms timeout, 2,000
       frames at once, and 600 frames against 200 a second.
+- [x] **Answers a Unix session holds are bounded in bytes** (2026-11-06). A client could send
+      queries without reading, and each copied its whole answer into the session's queue.
+      Decided: 256 KiB of answers not yet taken per session (`ANSWER_BYTES`), past it queries are
+      refused with `limit` and the connection is not read until they drain (held counts as
+      heard); writes run in their own task, so a slow reader's pings are still read. Watches,
+      runs and subscriptions answer through the node's byte-capped client event queue. Test:
+      `unix_backlog.rs`. Fuzzing (`crates/link/fuzz`, docs/testing.md) found one panic, a blank
+      peer id at decode, now refused.
 - [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
       It includes a blocking client for the fd latest-value channel.
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.

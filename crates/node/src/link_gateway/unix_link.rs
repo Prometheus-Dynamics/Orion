@@ -11,18 +11,23 @@
 //!   provider role needs the provider lane, which full admission includes.
 //! - **One session per device.** A connection whose `Hello` names a device already connected on
 //!   another connection of the link is closed; the first keeps it.
-//! - **Rate limit.** Frames from a connection are read within the local control budget
-//!   (`ORION_NODE_LOCAL_RATE_LIMIT_WINDOW_MS`, `_MAX_MESSAGES`): past it, the connection is not read
-//!   until the window ends. Nothing is refused, so an action's final result is never lost.
+//! - **Rate limit.** Frames from a connection are read within its own budget
+//!   (`max_frames_per_s`, a token bucket): past it, a read waits for the next frame's turn.
+//!   Nothing is refused, so an action's final result is never lost.
 //! - **Queues.** Output waiting for a connection is bounded in bytes ([`QUEUE_BYTES`]); past it, frames
 //!   stay in the session, which bounds and counts its own queue. A connection that takes no output
-//!   for [`WRITE_TIMEOUT`] is closed.
+//!   for [`WRITE_TIMEOUT`] is closed. Answers the session's client has not taken yet are bounded
+//!   in bytes ([`ANSWER_BYTES`]); past it, queries are refused with `limit` and the connection is
+//!   not read until they drain.
+//! - **Held is heard.** A connection the node does not read (budget or answers) tells the link
+//!   task every [`HELD_NOTICE`], so its session is not timed out. Writes run in their own task,
+//!   so a peer slow to take output still has its pings read.
 //! - Firmware transfers and `link.release` / `link.attach` do not apply: a Unix link has no port to
 //!   hand over.
 
 use super::UnixLinkConfig;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, LinkSend, REOPEN_DELAY};
-use super::unix_client::LinkClient;
+use super::unix_client::{ANSWER_BYTES, LinkClient};
 use crate::auth::{LocalAdmission, LocalAdmissionPolicy};
 use orion::transport::ipc::UnixPeerIdentity;
 use orion_link::Stream;
@@ -36,7 +41,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{Notify, mpsc, watch};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
 /// Output bytes waiting for one connection above which no more frames are pulled from its session.
@@ -103,6 +108,11 @@ struct Conn {
     session: HostSession<Stream>,
     out: mpsc::UnboundedSender<Vec<u8>>,
     pending: Arc<AtomicUsize>,
+    /// The session's answers waiting for output, in bytes, as last counted; the connection is
+    /// not read while it is at [`ANSWER_BYTES`] or more.
+    backlog: Arc<AtomicUsize>,
+    /// Wakes the connection's reader when the backlog falls below [`ANSWER_BYTES`].
+    room: Arc<Notify>,
     /// The caller's identity, for its session's client requests.
     identity: UnixPeerIdentity,
     /// The current session's client and stream publisher.
@@ -345,6 +355,11 @@ pub(super) async fn run(
                     break;
                 }
             }
+            let backlog = conn.client.as_ref().map_or(0, LinkClient::answer_bytes);
+            let before = conn.backlog.swap(backlog, Ordering::AcqRel);
+            if before >= ANSWER_BYTES && backlog < ANSWER_BYTES {
+                conn.room.notify_one();
+            }
         }
 
         if refresh || Instant::now() >= lease_refresh_at {
@@ -465,19 +480,27 @@ fn admit(
     );
     let (out, out_rx) = mpsc::unbounded_channel();
     let pending = Arc::new(AtomicUsize::new(0));
+    let backlog = Arc::new(AtomicUsize::new(0));
+    let room = Arc::new(Notify::new());
     tokio::spawn(serve_conn(
         id,
         stream,
         out_rx,
-        pending.clone(),
+        Shared {
+            pending: pending.clone(),
+            backlog: backlog.clone(),
+            room: room.clone(),
+            drained: drained.clone(),
+        },
         inbound.clone(),
-        drained.clone(),
         limits,
     ));
     Some(Conn {
         session: HostSession::stream(host.clone()),
         out,
         pending,
+        backlog,
+        room,
         identity,
         client: None,
     })
@@ -563,16 +586,39 @@ impl FrameCounter {
 /// One connection's I/O: reads within the rate limit into the link task's channel, and writes what
 /// the link task queued. Ends when the peer hangs up, on an I/O error, or when the link task drops
 /// the connection.
+/// What a connection's task shares with the link task.
+struct Shared {
+    /// Output bytes handed to the connection and not yet written.
+    pending: Arc<AtomicUsize>,
+    /// The session's waiting answers in bytes ([`Conn::backlog`]).
+    backlog: Arc<AtomicUsize>,
+    /// Notified when the backlog falls below [`ANSWER_BYTES`].
+    room: Arc<Notify>,
+    /// Notified when `pending` falls below [`QUEUE_BYTES`].
+    drained: Arc<Notify>,
+}
+
 async fn serve_conn(
     id: u64,
     stream: UnixStream,
-    mut out: mpsc::UnboundedReceiver<Vec<u8>>,
-    pending: Arc<AtomicUsize>,
+    out: mpsc::UnboundedReceiver<Vec<u8>>,
+    shared: Shared,
     inbound: mpsc::Sender<Inbound>,
-    drained: Arc<Notify>,
     limits: ConnLimits,
 ) {
-    let (mut reader, mut writer) = stream.into_split();
+    let Shared {
+        pending,
+        backlog,
+        room,
+        drained,
+    } = shared;
+    let (mut reader, writer) = stream.into_split();
+    // Writes run on their own, so a peer slow to take its output never stops the reads (its
+    // pings) or the held notices.
+    let (write_end_tx, mut write_end) = oneshot::channel();
+    let writes = tokio::spawn(async move {
+        let _ = write_end_tx.send(write_out(writer, out, &pending, &drained).await);
+    });
     let mut buf = vec![0u8; READ_BUF];
     let mut counter = FrameCounter { in_frame: false };
     let mut budget = FrameBudget::new(limits, tokio::time::Instant::now());
@@ -580,43 +626,33 @@ async fn serve_conn(
     let error = loop {
         let now = tokio::time::Instant::now();
         let resume = budget.wait_until(now);
-        if resume.is_some() && told_held.is_none_or(|at| now >= at + HELD_NOTICE) {
+        // Past its answer cap the session reads nothing more until the client takes its answers.
+        let full = backlog.load(Ordering::Acquire) >= ANSWER_BYTES;
+        let held = resume.is_some() || full;
+        if held && told_held.is_none_or(|at| now >= at + HELD_NOTICE) {
             // Best effort: a full channel means the link task has plenty to do with this
             // connection already.
             let _ = inbound.try_send(Inbound::Held(id));
             told_held = Some(now);
         }
         // Wake at least every notice period while held, so the notices keep coming.
-        let wake = resume.map(|at| at.min(now + HELD_NOTICE));
+        let wake = held.then(|| resume.map_or(now + HELD_NOTICE, |at| at.min(now + HELD_NOTICE)));
         tokio::select! {
             biased;
-            frame = out.recv() => {
-                let Some(frame) = frame else {
-                    // The link task dropped the connection.
-                    return;
-                };
-                let len = frame.len();
-                let written = tokio::time::timeout(WRITE_TIMEOUT, writer.write_all(&frame)).await;
-                let before = pending.fetch_sub(len, Ordering::AcqRel);
-                if before >= QUEUE_BYTES && before - len < QUEUE_BYTES {
-                    drained.notify_one();
-                }
-                match written {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => break Some(error),
-                    Err(_) => break Some(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "the peer took no output",
-                    )),
-                }
-            }
+            ended = &mut write_end => match ended {
+                Ok(Some(error)) => break Some(error),
+                // The link task dropped the connection.
+                Ok(None) | Err(_) => return,
+            },
             () = tokio::time::sleep_until(wake.unwrap_or(now)), if wake.is_some() => {}
-            read = reader.read(&mut buf), if resume.is_none() => match read {
+            () = room.notified(), if full => {}
+            read = reader.read(&mut buf), if !held => match read {
                 Ok(0) => break None,
                 Ok(n) => {
                     let chunk = buf.get(..n).unwrap_or_default();
                     budget.spend(counter.count(chunk));
                     if inbound.send(Inbound::Bytes(id, chunk.to_vec())).await.is_err() {
+                        writes.abort();
                         return;
                     }
                 }
@@ -624,12 +660,97 @@ async fn serve_conn(
             },
         }
     };
+    writes.abort();
     let _ = inbound.send(Inbound::Closed(id, error)).await;
+}
+
+/// Writes the connection's output until the link task drops it (`None`) or a write fails or
+/// takes longer than [`WRITE_TIMEOUT`].
+async fn write_out(
+    mut writer: tokio::net::unix::OwnedWriteHalf,
+    mut out: mpsc::UnboundedReceiver<Vec<u8>>,
+    pending: &AtomicUsize,
+    drained: &Notify,
+) -> Option<io::Error> {
+    while let Some(frame) = out.recv().await {
+        let len = frame.len();
+        let written = tokio::time::timeout(WRITE_TIMEOUT, writer.write_all(&frame)).await;
+        let before = pending.fetch_sub(len, Ordering::AcqRel);
+        if before >= QUEUE_BYTES && before - len < QUEUE_BYTES {
+            drained.notify_one();
+        }
+        match written {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Some(error),
+            Err(_) => {
+                return Some(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the peer took no output",
+                ));
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn shared() -> Shared {
+        Shared {
+            pending: Arc::new(AtomicUsize::new(0)),
+            backlog: Arc::new(AtomicUsize::new(0)),
+            room: Arc::new(Notify::new()),
+            drained: Arc::new(Notify::new()),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_session_at_its_answer_cap_is_not_read_until_the_answers_drain() {
+        let (node_side, mut peer) = UnixStream::pair().expect("pair");
+        let (_out, out_rx) = mpsc::unbounded_channel();
+        let (inbound_tx, mut inbound) = mpsc::channel(64);
+        let shared = shared();
+        let (backlog, room) = (shared.backlog.clone(), shared.room.clone());
+        backlog.store(ANSWER_BYTES, Ordering::Release);
+        tokio::spawn(serve_conn(
+            1,
+            node_side,
+            out_rx,
+            shared,
+            inbound_tx,
+            ConnLimits {
+                max_frames_per_s: 1_000,
+            },
+        ));
+        peer.write_all(&[1, 0]).await.expect("write");
+        // Held: only notices for 300 ms, so the session is not timed out meanwhile.
+        let held_until = tokio::time::Instant::now() + Duration::from_millis(300);
+        let mut held = 0;
+        while let Ok(event) = tokio::time::timeout_at(held_until, inbound.recv()).await {
+            assert!(matches!(event, Some(Inbound::Held(1))), "read while held");
+            held += 1;
+        }
+        assert!(held >= 2, "notices while held: {held}");
+        backlog.store(0, Ordering::Release);
+        room.notify_one();
+        let read_at = tokio::time::Instant::now();
+        loop {
+            match inbound.recv().await {
+                Some(Inbound::Held(1)) => {}
+                Some(Inbound::Bytes(1, bytes)) => {
+                    assert_eq!(bytes, [1, 0]);
+                    break;
+                }
+                _ => panic!("expected the held frame"),
+            }
+        }
+        assert!(
+            read_at.elapsed() < Duration::from_millis(50),
+            "the read resumes when the answers drain, not at the next notice"
+        );
+    }
 
     #[tokio::test]
     async fn frames_past_the_budget_wait_for_their_tokens_and_the_link_hears_of_it() {
@@ -641,9 +762,8 @@ mod tests {
             1,
             node_side,
             out_rx,
-            Arc::new(AtomicUsize::new(0)),
+            shared(),
             inbound_tx,
-            Arc::new(Notify::new()),
             ConnLimits {
                 max_frames_per_s: 20,
             },
