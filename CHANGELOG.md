@@ -63,6 +63,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Fixed
 
+- `orion-nt4`: a peer whose link dropped without a close (an unplugged USB network gadget) left
+  the connection `ESTABLISHED` for minutes, so the client never reported `Disconnected` and the
+  server kept the client. The client now drops a connection that hears nothing for
+  `ClientConfig::liveness_timeout` (3 s) and reconnects; the server pings each client every
+  `ServerConfig::ping_interval` (1 s) and closes one silent for `ServerConfig::client_timeout`
+  (3 s). Both sides set TCP keepalive (1 s / 1 s / 3 probes) and `TCP_USER_TIMEOUT` on Linux.
+  `ClientConfig` and `ServerConfig` gain these fields (struct literals need
+  `..ServerConfig::default()`); the `client` feature no longer pulls tokio-tungstenite's
+  `connect`.
 - A link session's full output queue dropped its oldest frame for each new `Pong`, `Ack` or
   `Leases`, so a client that kept pinging while it read nothing lost parts of answers already
   queued (answers out of order, seen under load in `unix_backlog`). Those frames now have their

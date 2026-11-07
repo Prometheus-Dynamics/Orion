@@ -22,8 +22,9 @@ path = "src/lib.rs"
 # Both halves are on by default. A consumer that needs one side builds with
 # `default-features = false, features = ["client"]` (or `"server"`).
 default = ["client", "server"]
-# The client needs the WebSocket connector (`connect_async`); the server needs only the handshake.
-client = ["tokio-tungstenite/connect"]
+# Both sides need only the WebSocket handshake: the client opens its TCP connection itself, so
+# it can set keepalive and `TCP_USER_TIMEOUT` before the handshake.
+client = []
 server = []
 
 [[example]]
@@ -42,6 +43,7 @@ rmp.workspace = true
 rmpv.workspace = true
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
+socket2.workspace = true
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-tungstenite.workspace = true
@@ -49,3 +51,4 @@ tokio-tungstenite.workspace = true
 [dev-dependencies]
 clap = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "io-std", "io-util"] }
+tokio-tungstenite = { workspace = true, features = ["connect"] }

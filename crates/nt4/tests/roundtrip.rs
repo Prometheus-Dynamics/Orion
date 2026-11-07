@@ -16,6 +16,7 @@ async fn start_server() -> Server {
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         persist_path: None,
+        ..ServerConfig::default()
     };
     Server::start(config).await.unwrap()
 }
@@ -341,6 +342,7 @@ async fn persistent_topics_survive_a_server_restart() {
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         persist_path: Some(path.clone()),
+        ..ServerConfig::default()
     };
     {
         let server = Server::start(config.clone()).await.unwrap();

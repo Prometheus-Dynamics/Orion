@@ -54,6 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let server = Server::start(ServerConfig {
         bind: args.bind,
         persist_path: args.persist,
+        ..ServerConfig::default()
     })
     .await?;
     let host = server.handle();

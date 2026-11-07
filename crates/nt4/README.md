@@ -59,7 +59,13 @@ loop {
 ```
 
 The client reconnects on its own with backoff (`ClientConfig::reconnect_min` and
-`reconnect_max`). Subscriptions and publications are sent again after each connect, and the last
+`reconnect_max`). A link that drops without a close (an unplugged USB network gadget, a pulled
+cable) is noticed within `ClientConfig::liveness_timeout` (3 s): the server answers the client's
+pings, so a connection that hears nothing for that long is dropped (`Disconnected`) and
+reconnected. The server pings each client every `ServerConfig::ping_interval` (1 s) and closes a
+connection silent for `ServerConfig::client_timeout` (3 s). Both sides set TCP keepalive (1 s
+idle, 1 s interval, 3 probes) and, on Linux, `TCP_USER_TIMEOUT` to the same timeout, so
+unacknowledged writes fail too. Subscriptions and publications are sent again after each connect, and the last
 value of each publication is re-sent. Values set while disconnected are kept (the last one per
 publication). `ClientHandle::server_time_us()` gives the server clock estimate, which RTT pings
 (`[-1, ...]` binary frames, about one a second) keep following: a sample's RTT counts for less as

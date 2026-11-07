@@ -13,7 +13,7 @@ use tokio::time::{Instant, sleep, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::{WebSocketStream, client_async};
 
 use super::clock::{ClockFilter, Sample};
 use super::subscription::{TopicEvent, TopicInfo};
@@ -28,7 +28,7 @@ use crate::time::now_micros;
 use crate::value::Value;
 use crate::{SUBPROTOCOL_V4_0, SUBPROTOCOL_V4_1};
 
-type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type Socket = WebSocketStream<TcpStream>;
 
 /// Offered in this order; the server picks one and the client accepts either.
 const OFFERED_SUBPROTOCOLS: &str = "v4.1.networktables.first.wpi.edu, networktables.first.wpi.edu";
@@ -104,7 +104,7 @@ pub(crate) async fn run(
             Ok(socket) => {
                 backoff = config.reconnect_min;
                 let _ = events.send(ClientEvent::Connected);
-                serve(socket, &mut state, &mut commands, &events, &shared).await
+                serve(socket, &config, &mut state, &mut commands, &events, &shared).await
             }
             Err(e) => Outcome::Lost(e.to_string()),
         };
@@ -148,7 +148,12 @@ async fn connect(config: &ClientConfig) -> Result<Socket> {
         SEC_WEBSOCKET_PROTOCOL,
         HeaderValue::from_static(OFFERED_SUBPROTOCOLS),
     );
-    let (socket, response) = timeout(config.connect_timeout, connect_async(request))
+    let handshake = async {
+        let stream = TcpStream::connect((config.host.as_str(), config.port)).await?;
+        crate::net::tune(&stream, config.liveness_timeout);
+        client_async(request, stream).await.map_err(Error::from)
+    };
+    let (socket, response) = timeout(config.connect_timeout, handshake)
         .await
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out"))??;
     let selected = response
@@ -165,6 +170,7 @@ async fn connect(config: &ClientConfig) -> Result<Socket> {
 
 async fn serve(
     mut socket: Socket,
+    config: &ClientConfig,
     state: &mut State,
     commands: &mut mailbox::Receiver<u32, Command>,
     events: &mpsc::UnboundedSender<ClientEvent>,
@@ -190,9 +196,14 @@ async fn serve(
     }
 
     let mut next_ping = Instant::now();
+    // Anything from the server proves the link; it answers every ping.
+    let mut heard = Instant::now();
     loop {
         tokio::select! {
             incoming = socket.next() => {
+                if matches!(incoming, Some(Ok(_))) {
+                    heard = Instant::now();
+                }
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         on_text(text.as_str(), state, &mut link, events);
@@ -234,6 +245,12 @@ async fn serve(
                         let _ = events.send(ClientEvent::ProtocolWarning(e.to_string()));
                     }
                 }
+            }
+            () = sleep_until(heard + config.liveness_timeout) => {
+                return Outcome::Lost(format!(
+                    "nothing from the server for {} ms",
+                    config.liveness_timeout.as_millis()
+                ));
             }
             () = sleep_until(next_ping) => {
                 let t = now_micros();

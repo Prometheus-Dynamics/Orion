@@ -60,6 +60,11 @@ pub struct ClientConfig {
     pub reconnect_max: Duration,
     /// Time allowed for the TCP and WebSocket handshake.
     pub connect_timeout: Duration,
+    /// A connection that receives nothing for this long is dropped (`Disconnected`) and
+    /// reconnected. The client pings about every second and the server answers each ping, so
+    /// silence means the link is gone. It also bounds unacknowledged writes (`TCP_USER_TIMEOUT`
+    /// on Linux). Default 3 s.
+    pub liveness_timeout: Duration,
 }
 
 impl ClientConfig {
@@ -72,6 +77,7 @@ impl ClientConfig {
             reconnect_min: Duration::from_millis(250),
             reconnect_max: Duration::from_secs(5),
             connect_timeout: Duration::from_secs(5),
+            liveness_timeout: Duration::from_secs(3),
         }
     }
 }

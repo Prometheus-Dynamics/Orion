@@ -89,6 +89,7 @@ fn a_relayed_value_costs_a_bounded_number_of_allocations() {
         let server = Server::start(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
             persist_path: None,
+            ..ServerConfig::default()
         })
         .await
         .unwrap();

@@ -22,6 +22,7 @@ async fn start_server() -> Server {
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         persist_path: None,
+        ..ServerConfig::default()
     };
     Server::start(config).await.unwrap()
 }
@@ -129,6 +130,7 @@ async fn persisted_json_topics_reload_with_their_type() {
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         persist_path: Some(path.clone()),
+        ..ServerConfig::default()
     };
     {
         let server = Server::start(config.clone()).await.unwrap();
@@ -158,6 +160,7 @@ async fn persistence_is_compact_and_written_after_a_debounce() {
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         persist_path: Some(path.clone()),
+        ..ServerConfig::default()
     };
     let server = Server::start(config).await.unwrap();
     server

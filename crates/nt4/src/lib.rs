@@ -19,6 +19,8 @@ mod codec;
 mod error;
 mod mailbox;
 mod message;
+#[cfg(any(feature = "client", feature = "server"))]
+mod net;
 #[cfg(feature = "server")]
 mod server;
 mod time;

@@ -45,6 +45,13 @@ pub struct ServerConfig {
     /// written (compact JSON, synced to disk) within about a second, and any pending change is
     /// written when the [`Server`] is dropped. Restored on start.
     pub persist_path: Option<PathBuf>,
+    /// A client connection that sends nothing for this long is closed. The server sends a
+    /// WebSocket ping every [`ServerConfig::ping_interval`], which every client answers, so
+    /// silence means the client's link is gone. It also bounds unacknowledged writes
+    /// (`TCP_USER_TIMEOUT` on Linux). Default 3 s.
+    pub client_timeout: Duration,
+    /// How often each client is sent a WebSocket ping. Default 1 s.
+    pub ping_interval: Duration,
 }
 
 impl Default for ServerConfig {
@@ -52,6 +59,8 @@ impl Default for ServerConfig {
         Self {
             bind: SocketAddr::from(([0, 0, 0, 0], crate::DEFAULT_PORT)),
             persist_path: None,
+            client_timeout: Duration::from_secs(3),
+            ping_interval: Duration::from_secs(1),
         }
     }
 }
@@ -77,7 +86,11 @@ impl Server {
         let persist_enabled = config.persist_path.is_some();
         let inner = Arc::new(Mutex::new(state));
         let writes = Arc::new(Mutex::new(()));
-        let task = tokio::spawn(conn::accept_loop(listener, Arc::clone(&inner)));
+        let liveness = conn::Liveness {
+            timeout: config.client_timeout.max(Duration::from_millis(10)),
+            ping_every: config.ping_interval.max(Duration::from_millis(10)),
+        };
+        let task = tokio::spawn(conn::accept_loop(listener, Arc::clone(&inner), liveness));
         let persister = persist_enabled
             .then(|| tokio::spawn(persist_loop(Arc::clone(&inner), Arc::clone(&writes))));
         Ok(Self {

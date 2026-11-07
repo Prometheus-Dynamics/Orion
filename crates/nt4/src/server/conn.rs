@@ -7,6 +7,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -24,17 +25,31 @@ pub(super) fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// When a client connection is considered gone.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Liveness {
+    /// Silence after which the connection is closed.
+    pub(super) timeout: Duration,
+    /// WebSocket pings sent this often.
+    pub(super) ping_every: Duration,
+}
+
 /// Accepts connections until the owning task is aborted; each connection runs in a `JoinSet`, so
 /// aborting this loop also ends them.
-pub(super) async fn accept_loop(listener: TcpListener, state: std::sync::Arc<Mutex<State>>) {
+pub(super) async fn accept_loop(
+    listener: TcpListener,
+    state: std::sync::Arc<Mutex<State>>,
+    liveness: Liveness,
+) {
     let mut connections = JoinSet::new();
     loop {
         tokio::select! {
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
+                    crate::net::tune(&stream, liveness.timeout);
                     let state = std::sync::Arc::clone(&state);
                     connections.spawn(async move {
-                        let _ = serve(stream, state).await;
+                        let _ = serve(stream, state, liveness).await;
                     });
                 }
                 // Typically EMFILE: back off instead of spinning.
@@ -79,21 +94,42 @@ fn handshake(
 
 // The handshake error type is fixed by tungstenite's `Callback` trait.
 #[allow(clippy::result_large_err)]
-async fn serve(stream: TcpStream, state: std::sync::Arc<Mutex<State>>) -> Result<()> {
+async fn serve(
+    stream: TcpStream,
+    state: std::sync::Arc<Mutex<State>>,
+    liveness: Liveness,
+) -> Result<()> {
     let mut name = String::new();
     let callback = |req: &Request, response: Response| handshake(req, response, &mut name);
-    let mut socket = accept_hdr_async(stream, callback).await?;
+    let mut socket = tokio::time::timeout(liveness.timeout, accept_hdr_async(stream, callback))
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out"))??;
 
     let (tx, mut rx) = mailbox::channel(CONTROL_CAPACITY);
     let client = lock(&state).add_client(name, tx);
+    let mut heard = Instant::now();
+    let mut ping = tokio::time::interval(liveness.ping_every);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
-            incoming = socket.next() => match incoming {
+            incoming = socket.next() => {
+                if matches!(incoming, Some(Ok(_))) {
+                    heard = Instant::now();
+                }
+                match incoming {
                 Some(Ok(Message::Text(text))) => handle_text(&state, client, text.as_str()),
                 Some(Ok(Message::Binary(bytes))) => handle_binary(&state, client, &bytes),
                 Some(Ok(_)) => {}
                 Some(Err(_)) | None => break,
+                }
             },
+            // The client's WebSocket answers with a pong, which counts as hearing from it.
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            }
+            () = tokio::time::sleep_until(heard + liveness.timeout) => break,
             outgoing = rx.recv() => {
                 let sent = match outgoing {
                     Some(Outgoing::Text(text)) => socket.send(Message::Text(text)).await,
