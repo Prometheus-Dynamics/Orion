@@ -62,19 +62,4 @@ impl HttpTransportError {
             message: message.into(),
         }
     }
-
-    #[cfg(feature = "client")]
-    pub fn request_failed_from_reqwest(err: reqwest::Error) -> Self {
-        let kind = if err.is_timeout() {
-            HttpRequestFailureKind::Timeout
-        } else if err.is_connect() {
-            HttpRequestFailureKind::Connectivity
-        } else {
-            HttpRequestFailureKind::Other
-        };
-        Self::RequestFailed {
-            kind,
-            message: err.to_string(),
-        }
-    }
 }

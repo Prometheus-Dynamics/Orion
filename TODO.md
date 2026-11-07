@@ -313,8 +313,8 @@ State of every open item (2026-11-06, when the leap started). Nothing else is op
 
 - **The leap** (in progress, "Decided, starts when the user says" below): steps 5 to 8 are done
   (step 7 as `liborion`'s first version, on the shared ABI crate). Open: `liborion`'s actions,
-  records and stream subscriptions, the static Rust wrapper and the static/shared build modes,
-  `orionctl` without reqwest. Streams on serial and CAN are done (2026-11-07).
+  records and stream subscriptions, the static Rust wrapper and the static/shared build modes.
+  Streams on serial and CAN and `orionctl` without reqwest are done (2026-11-07).
 - **Waiting on the user:** release mechanics (version 1.0.0, tag, release gates).
 - **Waiting on others:** protocol 1 on the reference board (the consumers' window).
 - **Blocked on hardware:** real MCU bring-up, the U8 board port, U9 hardware validation (no MCU
@@ -792,8 +792,15 @@ The shared ABI primitives wait until the hardware repository says they are ready
 
 - [x] Single multiplexed local IPC socket: dropped. Software built outside the image uses the
       stable interface's one Unix link socket. The two rkyv sockets stay internal.
-- [ ] Moved into the leap (approved 2026-11-06: lean is the default): `orionctl` without reqwest by
-      default. Was: default `orionctl` is still 4.38 MiB, almost all reqwest + rustls + hyper client for `--http`.
+- [x] Moved into the leap (approved 2026-11-06: lean is the default): `orionctl` without reqwest by
+      default. Done 2026-11-07: `orion-transport-http`'s `client` is a hand-rolled HTTP/1.1 client
+      over tokio and tokio-rustls (httparse for the response head; Content-Length, chunked and
+      close-delimited bodies; up to 4 kept-alive connections, idle 30 s; a reused connection the
+      server closed before any response byte is retried once on a new one). Decided: `--http`
+      stays in the default build; https without `--ca-cert` uses the system roots
+      (rustls-native-certs); reqwest stays only as a test dependency. Measured: release `orionctl`
+      4,339,384 B, 106 crates (`--no-default-features --features yaml,toml`: 3,111,192 B). reqwest
+      itself was only ~250 KiB; the rest of the HTTP half is rustls + ring. Was: default `orionctl` is still 4.38 MiB, almost all reqwest + rustls + hyper client for `--http`.
       A smaller HTTP/1.1 client (hyper-util client or a hand-rolled one over tokio-rustls) could
       replace reqwest if the CLI size matters; trimming clap's `color` / `suggestions` would also
       save a little but changes help/error output. Measure again after the shared build mode, which

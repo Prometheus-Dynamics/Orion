@@ -21,7 +21,7 @@ path = "src/main.rs"
 # Every feature is on by default, so a plain build behaves exactly as before. Turning them off
 # gives a smaller CLI; requesting a disabled capability fails with an error naming the feature.
 # - `http`: `--http` remote targets (and `get health` / `get readiness`) via the HTTP *client*
-#   half of orion-transport-http (reqwest + rustls; no axum/hyper server stack). Without it,
+#   half of orion-transport-http (HTTP/1.1 over tokio and rustls; no reqwest, no axum/hyper). Without it,
 #   orionctl talks to orion-node over local IPC only.
 # - `yaml`: `-o yaml` output and YAML workload specs (serde_yaml).
 # - `toml`: `-o toml` output and TOML workload specs (toml).

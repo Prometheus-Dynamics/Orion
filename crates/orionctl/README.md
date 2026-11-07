@@ -22,7 +22,8 @@ Structured file/config support:
 Cargo features (all on by default, so a plain build behaves as before):
 
 - `http`: `--http` remote targets, including `get health` and `get readiness`. It links only the
-  client half of `orion-transport-http` (reqwest over rustls), not the axum/hyper server.
+  client half of `orion-transport-http` (HTTP/1.1 over tokio and rustls), not reqwest or the
+  axum/hyper server.
 - `yaml`: `-o yaml` and YAML workload specs.
 - `toml`: `-o toml` and TOML workload specs.
 

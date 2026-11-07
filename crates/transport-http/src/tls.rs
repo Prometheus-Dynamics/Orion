@@ -1,5 +1,6 @@
-//! TLS configuration. The client config (`client` feature) is plain PEM bytes handed to reqwest;
-//! the server side (`server` feature) builds rustls acceptors with optional client auth.
+//! TLS configuration. The client side (`client` feature) builds a rustls client config from PEM
+//! bytes or the system's roots; the server side (`server` feature) builds rustls acceptors with
+//! optional client auth.
 
 #[cfg(feature = "server")]
 use std::{
@@ -18,8 +19,10 @@ use rustls::ServerConfig;
 #[cfg(feature = "server")]
 use tokio_rustls::TlsAcceptor;
 
-#[cfg(feature = "server")]
+#[cfg(any(feature = "client", feature = "server"))]
 use crate::HttpTransportError;
+#[cfg(all(feature = "client", not(feature = "server")))]
+use std::sync::Arc;
 
 #[cfg(feature = "client")]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -224,4 +227,112 @@ fn fingerprint_server_tls_config(tls: &HttpServerTlsConfig) -> Result<u64, HttpT
     }
 
     Ok(hasher.finish())
+}
+
+/// Which server certificates an `https://` client trusts.
+#[cfg(feature = "client")]
+pub(crate) enum ClientTrust {
+    /// The system's CA roots.
+    Platform,
+    /// Only the given root, with an optional client identity.
+    Explicit(HttpClientTlsConfig),
+    /// Any certificate (signatures are still checked).
+    Any,
+}
+
+/// The rustls client config for `trust`.
+#[cfg(feature = "client")]
+pub(crate) fn client_tls_config(
+    trust: ClientTrust,
+) -> Result<rustls::ClientConfig, HttpTransportError> {
+    use orion_transport_common::{parse_cert_chain, parse_private_key};
+    let tls_error = |message: String| HttpTransportError::Tls(message);
+    let builder = rustls::ClientConfig::builder();
+    let config = match trust {
+        ClientTrust::Platform => {
+            let loaded = rustls_native_certs::load_native_certs();
+            let mut roots = rustls::RootCertStore::empty();
+            let (added, _) = roots.add_parsable_certificates(loaded.certs);
+            if added == 0 {
+                return Err(tls_error(
+                    "no CA roots in the system trust store".to_owned(),
+                ));
+            }
+            builder.with_root_certificates(roots).with_no_client_auth()
+        }
+        ClientTrust::Explicit(tls) => {
+            let mut roots = rustls::RootCertStore::empty();
+            for cert in parse_cert_chain(&tls.root_cert_pem, "CA certificate").map_err(tls_error)? {
+                roots
+                    .add(cert)
+                    .map_err(|err| tls_error(format!("CA certificate: {err}")))?;
+            }
+            let builder = builder.with_root_certificates(roots);
+            match (tls.client_cert_pem, tls.client_key_pem) {
+                (Some(cert), Some(key)) => builder
+                    .with_client_auth_cert(
+                        parse_cert_chain(&cert, "client certificate").map_err(tls_error)?,
+                        parse_private_key(&key, "client key").map_err(tls_error)?,
+                    )
+                    .map_err(|err| tls_error(format!("client identity: {err}")))?,
+                _ => builder.with_no_client_auth(),
+            }
+        }
+        ClientTrust::Any => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AnyServer::new()))
+            .with_no_client_auth(),
+    };
+    Ok(config)
+}
+
+/// Accepts any server certificate; the handshake's signatures are still verified.
+#[cfg(feature = "client")]
+#[derive(Debug)]
+struct AnyServer(rustls::crypto::WebPkiSupportedAlgorithms);
+
+#[cfg(feature = "client")]
+impl AnyServer {
+    fn new() -> Self {
+        let provider = rustls::crypto::CryptoProvider::get_default()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(rustls::crypto::ring::default_provider()));
+        Self(provider.signature_verification_algorithms)
+    }
+}
+
+#[cfg(feature = "client")]
+impl rustls::client::danger::ServerCertVerifier for AnyServer {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.0)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.0)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.0.supported_schemes()
+    }
 }

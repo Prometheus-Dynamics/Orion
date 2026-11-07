@@ -117,7 +117,7 @@ The facade crate `orion` is feature-gated by subsystem.
 - `orion-client` defaults to local IPC support through its `ipc` feature.
 - `orion-node` enables `transport-http`, `peer-tcp`, `transport-tcp`, and `transport-quic` by
   default. The local IPC control plane is always built. `cargo build -p orion-node
-  --no-default-features` produces an IPC-only node without the HTTP stack (no axum, hyper, reqwest,
+  --no-default-features` produces an IPC-only node without the HTTP stack (no axum, hyper
   or rustls). In that build the HTTP control and probe listeners and HTTP TLS are unavailable, and
   configuring them fails at startup with an error. You can add back any of the transport features
   independently.
@@ -149,7 +149,7 @@ The facade crate `orion` is feature-gated by subsystem.
   stable interface: client sessions on a node's link socket and the fd latest-value channel, behind
   opaque handles, with a version handshake. See [`docs/capi.md`](docs/capi.md).
 - `orion-transport-http` exposes its protocol types (payloads, routes, codec, errors, and handler
-  traits) without the network stack. `client` adds `HttpClient` (reqwest over rustls, no
+  traits) without the network stack. `client` adds `HttpClient` (HTTP/1.1 over tokio and rustls, no
   axum/hyper server), `server` adds `HttpServer` (axum, hyper, tokio-rustls), and the default
   `transport` feature enables both.
 - `orionctl` features `http` (`--http` remote targets, HTTP client only), `yaml` and `toml`

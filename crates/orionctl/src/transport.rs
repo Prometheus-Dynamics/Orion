@@ -110,16 +110,9 @@ impl HttpTargetExt for HttpTargetArgs {
     fn map_client_construction_error(&self, scheme: HttpTargetScheme, error: &str) -> String {
         if scheme == HttpTargetScheme::Https
             && self.ca_cert.is_none()
-            && error == "failed to configure HTTP TLS: builder error"
+            && error == "failed to configure HTTP TLS: no CA roots in the system trust store"
         {
             return "failed to initialize HTTPS trust verification from the system trust store; this image may be missing CA roots. Provide --ca-cert for the Orion server CA, or install a system CA bundle."
-                .to_owned();
-        }
-
-        if scheme == HttpTargetScheme::Http
-            && error == "failed to configure HTTP TLS: builder error"
-        {
-            return "failed to initialize a plain HTTP client; this indicates a runtime/build issue, not missing TLS credentials."
                 .to_owned();
         }
 

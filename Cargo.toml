@@ -82,6 +82,7 @@ curve25519-dalek = { version = "5.0.0", default-features = false, features = ["z
 ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast", "rand_core", "zeroize"] }
 futures-util = { version = "0.3.34", default-features = false }
 http = "1.5"
+httparse = "1.10"
 hyper = "1.11"
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 libc = "0.2"
@@ -103,6 +104,7 @@ reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no
 # string code compiles with `pointer_width_64` on 32-bit targets.
 rkyv = { version = "0.8.18", default-features = false, features = ["alloc", "bytecheck", "uuid-1", "little_endian", "pointer_width_64"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-native-certs = "0.8"
 rustls-pemfile = "2.2"
 rustls-pki-types = "1.15"
 sha2 = { version = "0.11.0", default-features = false }

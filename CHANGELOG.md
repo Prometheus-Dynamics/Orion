@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed
+
+- `orion-transport-http`'s `client` (and so `orionctl` and the node's HTTP client) no longer uses
+  reqwest or hyper: HTTP/1.1 over tokio with kept-alive connections, rustls for https, system
+  roots from rustls-native-certs. `HttpTransportError::request_failed_from_reqwest` is removed.
+
 ### Added
 
 - Streams from serial and CAN devices (interface revision 2): the no_std device session's

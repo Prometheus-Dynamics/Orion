@@ -48,7 +48,7 @@ A standalone node that only serves local IPC clients can shed most of its networ
 settings below are collected in `packaging/systemd/orion-node.env.example`, and "Running under
 systemd" below covers the service side:
 
-- build with `cargo build -p orion-node --release --no-default-features` to get an IPC-only binary. This build drops the HTTP stack (the `transport-http` feature: axum, hyper, reqwest, and rustls), the `orion+tcp` peer transport, and the TCP and QUIC data-plane transports. Add `--features transport-http`, `peer-tcp`, `transport-tcp`, or `transport-quic` to keep any of them.
+- build with `cargo build -p orion-node --release --no-default-features` to get an IPC-only binary. This build drops the HTTP stack (the `transport-http` feature: axum, hyper and rustls), the `orion+tcp` peer transport, and the TCP and QUIC data-plane transports. Add `--features transport-http`, `peer-tcp`, `transport-tcp`, or `transport-quic` to keep any of them.
 - to cluster such appliances without the HTTP stack, build with `--no-default-features --features peer-tcp`, set `ORION_NODE_PEER_ADDR`, and list peers as `node-id=orion+tcp://host:port|<public-key-hex>` (see `docs/peer-sync.md` for the threat model: requests and responses are signed, traffic is not encrypted).
 - with a default (HTTP-enabled) build, set `ORION_NODE_HTTP_ADDR=off` to skip the HTTP control listener. The optional probe listener on `ORION_NODE_HTTP_PROBE_ADDR` still works.
 - in a build without `transport-http`, the HTTP listener is always off:
