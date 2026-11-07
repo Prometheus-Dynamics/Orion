@@ -25,7 +25,7 @@ members = [
     "crates/liborion-rs",
 ]
 # Standalone crates with their own lockfile and targets (bare-metal templates).
-exclude = ["examples/mcu-template", "crates/link/fuzz"]
+exclude = ["examples/mcu-template", "examples/stm32g4-device", "crates/link/fuzz"]
 resolver = "3"
 
 [workspace.package]

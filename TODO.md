@@ -696,17 +696,21 @@ interfaces and risk. Slices, in dependency order:
 - [ ] Idle wake-ups: 20 per second with one link session. 10 are the link task's fixed tick;
       schedule it from the next deadline (device loss, lease refresh, rate limits, operator
       recheck) for the unix, serial and CAN loops.
-- [ ] MCU proof on an STM32G4 (thumbv7em-none-eabihf, FDCAN): a device-tier example that
-      publishes one record and one stream over FDCAN and UART. A CI gate for flash
-      (.text+.rodata+.data) and static RAM (.data+.bss and the stack high-water), tracked per
-      commit. A ranked byte breakdown (codec, CRC, framing, xfer, panic/fmt) and the cuts, with
-      today's numbers and the floor. `scripts/mcu-size.sh` and `examples/mcu-template` are the
-      base.
+- [x] MCU proof on an STM32G4: `examples/stm32g4-device` (FDCAN or UART, one record, one
+      stream, painted stack high-water as status). `scripts/device-size.sh` gates flash, static
+      RAM and the static stack bound against a committed baseline. The README has the ranked
+      breakdown, the cuts and the floor: 9,228 B flash and 1,988 B RAM today, from 11,612 and
+      2,236.
+- [ ] Bring up the STM32G4 example on a real board against the CAN gateway: check the FDCAN
+      bit timing, the `hw-crc` CRC unit setup and the painted high-water against the static
+      bound.
 - [ ] Feature-gating audit: for each crate, a table of its default features, what each pulls
       in and its size. Land the clear cuts, with consumers opting in. Report orion-node and
       orionctl sizes before and after.
-- [ ] Hardware paths: CRC through the ARMv8 CRC32 instructions or the STM32 CRC peripheral;
-      check that `ring` uses the AES, SHA and PMULL extensions on the A76; DMA for UART and CAN
+- [x] CRC-32C on the ARMv8 and SSE4.2 instructions (compile-time or detected at run time with
+      std), and `crc-extern` for an MCU CRC peripheral: 1,010 to 41 ns per 126-byte frame on
+      the test board.
+- [ ] Hardware paths: check that `ring` uses the AES, SHA and PMULL extensions on the A76; DMA for UART and CAN
       in the MCU template; no per-message copies or re-encodes on the link and gateway path. Add
       instructions and bytes moved per message to the link cost test.
 

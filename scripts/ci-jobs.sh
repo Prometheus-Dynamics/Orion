@@ -227,6 +227,15 @@ job_link() {
     # Builds and links every template variant (UART, CAN, the global-heap variant where the core
     # has compare-and-swap) on every core, and checks the flash/RAM budgets.
     step link "mcu-size (build, link, budgets)" env MCU_SIZE_CHECK_BUDGET=1 MCU_SIZE_BREAKDOWN=1 ./scripts/mcu-size.sh
+    # A whole STM32G4 firmware (record + stream over FDCAN or UART): lint every variant, then
+    # check flash, static RAM and the stack bound against examples/stm32g4-device/size-baseline.txt.
+    step link "stm32g4-device fmt, clippy" bash -c '
+        cd examples/stm32g4-device &&
+        cargo fmt --check &&
+        for f in link-can,small-mem link-uart,small-mem link-can,small-mem,hw-crc link-can; do
+            cargo clippy --locked --release --no-default-features --features "$f" -- -D warnings || exit 1
+        done'
+    step link "device-size (stm32g4-device against its baseline)" env DEVICE_SIZE_BREAKDOWN=1 ./scripts/device-size.sh
 }
 
 # Each opt-in global allocator alone (--all-features enables both; jemalloc wins): lint, build,

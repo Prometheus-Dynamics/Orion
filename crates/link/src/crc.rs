@@ -59,6 +59,115 @@ fn update_byte(crc: u32, byte: u8) -> u32 {
     (crc >> 8) ^ BYTE_TABLE[((crc ^ u32::from(byte)) & 0xFF) as usize]
 }
 
+/// Software CRC-32C of `bytes`, continuing from the reflected register `state`.
+fn update_software(mut state: u32, bytes: &[u8]) -> u32 {
+    for &byte in bytes {
+        state = update_byte(state, byte);
+    }
+    state
+}
+
+#[cfg(feature = "crc-extern")]
+unsafe extern "Rust" {
+    /// The firmware's CRC-32C routine (feature `crc-extern`): continues the reflected CRC-32C
+    /// register `state` (initially `0xFFFF_FFFF`, no final XOR) over `bytes` and returns the new
+    /// register. Defined by the firmware with `#[unsafe(no_mangle)]`, for example over the STM32
+    /// CRC unit with polynomial `0x1EDC_6F41`, byte-reversed input and reversed output, `INIT`
+    /// set to `state.reverse_bits()`.
+    pub fn orion_link_crc32c_update(state: u32, bytes: &[u8]) -> u32;
+}
+
+#[inline]
+fn update_slice(state: u32, bytes: &[u8]) -> u32 {
+    #[cfg(feature = "crc-extern")]
+    {
+        // SAFETY: the firmware defines the routine with this signature (feature contract).
+        return unsafe { orion_link_crc32c_update(state, bytes) };
+    }
+    #[cfg(all(
+        not(feature = "crc-extern"),
+        target_arch = "aarch64",
+        target_feature = "crc"
+    ))]
+    {
+        // SAFETY: the target is built with the `crc` feature.
+        return unsafe { hw::aarch64(state, bytes) };
+    }
+    #[cfg(all(
+        not(feature = "crc-extern"),
+        target_arch = "x86_64",
+        target_feature = "sse4.2"
+    ))]
+    {
+        // SAFETY: the target is built with SSE4.2.
+        return unsafe { hw::x86_64(state, bytes) };
+    }
+    #[allow(unreachable_code)]
+    {
+        #[cfg(all(
+            feature = "std",
+            not(feature = "crc-extern"),
+            target_arch = "aarch64",
+            not(target_feature = "crc")
+        ))]
+        if std::arch::is_aarch64_feature_detected!("crc") {
+            // SAFETY: the CPU reported the `crc` feature.
+            return unsafe { hw::aarch64(state, bytes) };
+        }
+        #[cfg(all(
+            feature = "std",
+            not(feature = "crc-extern"),
+            target_arch = "x86_64",
+            not(target_feature = "sse4.2")
+        ))]
+        if std::arch::is_x86_feature_detected!("sse4.2") {
+            // SAFETY: the CPU reported SSE4.2.
+            return unsafe { hw::x86_64(state, bytes) };
+        }
+        update_software(state, bytes)
+    }
+}
+
+/// The CRC-32C instructions: eight bytes per instruction, then the tail byte by byte. Both use
+/// the reflected Castagnoli polynomial, the same register the software path keeps.
+#[cfg(all(
+    not(feature = "crc-extern"),
+    any(target_arch = "aarch64", target_arch = "x86_64")
+))]
+#[allow(dead_code)]
+mod hw {
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "crc")]
+    pub unsafe fn aarch64(mut state: u32, bytes: &[u8]) -> u32 {
+        use core::arch::aarch64::{__crc32cb, __crc32cd};
+        let (words, tail) = bytes.as_chunks::<8>();
+        for word in words {
+            state = __crc32cd(state, u64::from_le_bytes(*word));
+        }
+        for &byte in tail {
+            state = __crc32cb(state, byte);
+        }
+        state
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "sse4.2")]
+    pub unsafe fn x86_64(state: u32, bytes: &[u8]) -> u32 {
+        use core::arch::x86_64::{_mm_crc32_u8, _mm_crc32_u64};
+        let mut wide = u64::from(state);
+        let (words, tail) = bytes.as_chunks::<8>();
+        for word in words {
+            wide = _mm_crc32_u64(wide, u64::from_le_bytes(*word));
+        }
+        // The 64-bit form keeps the CRC in the low 32 bits.
+        let mut state = wide as u32;
+        for &byte in tail {
+            state = _mm_crc32_u8(state, byte);
+        }
+        state
+    }
+}
+
 /// Incremental CRC-32C state.
 ///
 /// ```
@@ -80,10 +189,13 @@ impl Crc32c {
     }
 
     /// Feeds `bytes` into the checksum.
+    ///
+    /// Uses the CPU's CRC-32C instructions where it has them: ARMv8 `CRC32CB/CRC32CX` (built for a
+    /// target with the `crc` feature, or detected at run time with `std`), x86-64 SSE4.2 `crc32`
+    /// (likewise). With the `crc-extern` feature a firmware supplies the routine instead, for
+    /// example over a CRC peripheral (see [`orion_link_crc32c_update`]).
     pub fn update(&mut self, bytes: &[u8]) {
-        for &byte in bytes {
-            self.state = update_byte(self.state, byte);
-        }
+        self.state = update_slice(self.state, bytes);
     }
 
     /// Feeds a single byte into the checksum.
@@ -110,4 +222,33 @@ pub fn crc32c(bytes: &[u8]) -> u32 {
     let mut crc = Crc32c::new();
     crc.update(bytes);
     crc.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The hardware paths (when this machine has them) agree with the software one at every
+    /// length and alignment, including split updates.
+    #[test]
+    fn every_path_matches_the_software_crc() {
+        let data: [u8; 300] = core::array::from_fn(|i| (i as u8).wrapping_mul(31).wrapping_add(7));
+        for start in 0..9 {
+            for len in [0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 200, 291] {
+                let bytes = &data[start..start + len];
+                let want = update_software(0xFFFF_FFFF, bytes);
+                assert_eq!(
+                    update_slice(0xFFFF_FFFF, bytes),
+                    want,
+                    "start {start} len {len}"
+                );
+                let (a, b) = bytes.split_at(len / 3);
+                let mut crc = Crc32c::new();
+                crc.update(a);
+                crc.update(b);
+                assert_eq!(crc.finish(), want ^ 0xFFFF_FFFF);
+            }
+        }
+        assert_eq!(crc32c(b"123456789"), 0xE306_9283);
+    }
 }

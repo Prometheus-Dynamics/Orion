@@ -137,7 +137,8 @@ jobs:
     # (`device`) without an allocator or any dependency, the full-record messages and session
     # conveniences with `alloc`. The MCU template must link as a bare-metal staticlib, including on
     # cores without compare-and-swap (thumbv6m, riscv32imc), and its minimal UART build must stay
-    # within the flash/RAM budgets in scripts/mcu-size.sh.
+    # within the flash/RAM budgets in scripts/mcu-size.sh. The STM32G4 device example must stay
+    # within its committed size baseline (scripts/device-size.sh).
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -151,12 +152,16 @@ jobs:
           components: clippy, rustfmt
           targets: thumbv6m-none-eabi, thumbv7em-none-eabihf, thumbv8m.main-none-eabihf, riscv32imc-unknown-none-elf, riscv32imac-unknown-none-elf
 
+      - name: Install nightly Rust (stack bound of scripts/device-size.sh)
+        run: rustup toolchain install nightly-2026-10-15 --profile minimal --target thumbv7em-none-eabihf # keep in sync with scripts/device-size.sh
+
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             .
             examples/mcu-template
+            examples/stm32g4-device
 
       - name: orion-link and the MCU template (scripts/ci-jobs.sh link)
         run: ./scripts/ci-jobs.sh link

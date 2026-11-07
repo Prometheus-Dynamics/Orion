@@ -422,6 +422,15 @@ release, LTO, `--gc-sections`): about 7.8 KB of flash and 0.7 KB of static RAM o
 (`thumbv6m-none-eabi`) for UART, 8.1 KB for CAN; 7.7 KB on Cortex-M4F; 9.7 KB on RV32IMC. No
 `core::fmt`, no panic machinery, and no atomics are linked, so cores without compare-and-swap work
 as well. `scripts/mcu-size.sh` reports every target, and CI enforces a size budget.
+A whole firmware is tracked too: [`examples/stm32g4-device`](../examples/stm32g4-device) is an
+STM32G4 publishing one record and one stream over FDCAN or UART. It has 9.2 KB of flash and 2.0 KB
+of RAM (the stack bound included). `scripts/device-size.sh` checks it against a committed baseline
+on every commit.
+
+The link's CRC-32C uses the CPU's instructions where it has them: ARMv8 `CRC32C*` and x86-64
+SSE4.2 `crc32`, chosen at build time or detected at run time with `std`. On the test board's
+Cortex-A76 that is 41 ns instead of 1,010 ns per 126-byte frame. With feature `crc-extern` a
+firmware supplies the routine, for example over its CRC peripheral.
 
 With feature `actions` (device side of protocol 1 actions, see "Actions") the minimal UART build
 grows by about 0.6 KB of flash and 160 bytes of RAM on Cortex-M0+ (`uart-actions` in
