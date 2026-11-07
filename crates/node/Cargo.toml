@@ -93,7 +93,7 @@ sha2.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
 # The link gateway tests drive a simulated device session (`orion_link::device`, feature `actions`).
-orion-link = { workspace = true, features = ["std", "actions"] }
+orion-link = { workspace = true, features = ["std", "actions", "streams"] }
 # liborion's client against a real link (src/link_gateway/tests/capi.rs).
 orion-capi.workspace = true
 abi.workspace = true

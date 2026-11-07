@@ -227,6 +227,13 @@ pub fn payload_area(buf: &mut [u8]) -> &mut [u8] {
     buf.get_mut(HEADER_LEN..end).unwrap_or_default()
 }
 
+/// [`payload_area`], read only.
+#[cfg(feature = "streams")]
+pub(crate) fn payload_area_ref(buf: &[u8]) -> &[u8] {
+    let end = buf.len().saturating_sub(CRC_LEN);
+    buf.get(HEADER_LEN..end).unwrap_or_default()
+}
+
 /// Validates the length and CRC of `bytes` and returns a borrowed view.
 ///
 /// The version byte is reported, not checked, so the caller can answer a mismatch (for example

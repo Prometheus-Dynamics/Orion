@@ -7,6 +7,7 @@
 //! device, so transfers to different devices can run at once.
 
 use super::CanLinkConfig;
+use super::device_streams;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, LinkSend, REOPEN_DELAY};
 use super::firmware::{DeviceSeen, FirmwareJob};
 use crate::actions::ActionOutcome;
@@ -89,6 +90,7 @@ pub(super) async fn run<P: CanIo>(
     // What the task knows of each device it has seen (its firmware job replays it on start).
     let mut seen: BTreeMap<String, DeviceSeen> = BTreeMap::new();
     let mut running: BTreeMap<String, FirmwareJob> = BTreeMap::new();
+    let stream_wake = ctx.streams.wake();
 
     loop {
         if socket.is_none() && Instant::now() >= reopen_at {
@@ -149,6 +151,7 @@ pub(super) async fn run<P: CanIo>(
                     release_open = false;
                 }
             }
+            () = stream_wake.notified() => {}
             _ = tick.tick() => {}
         }
 
@@ -203,6 +206,16 @@ pub(super) async fn run<P: CanIo>(
                 bus.set_leases(address, leases);
             }
         }
+
+        ctx.streams.pump(&ctx.app, |device, out| {
+            match bus
+                .address_of(device)
+                .and_then(|address| bus.session_mut(address))
+            {
+                Some(session) => device_streams::send(session, out),
+                None => Err(ActionSendError::NotConnected),
+            }
+        });
 
         // Firmware jobs: one step each; a finished job ends its action, and a handoff releases its
         // device (its bootloader owns the bus now).
@@ -321,6 +334,8 @@ fn event_device(event: &HostEvent) -> Option<&str> {
         | HostEvent::DeviceInfo { device_name, .. }
         | HostEvent::Xfer { device_name, .. }
         | HostEvent::ActionResult { device_name, .. }
+        | HostEvent::StreamDeclare { device_name, .. }
+        | HostEvent::StreamPublish { device_name, .. }
         | HostEvent::LeasesTooLarge { device_name, .. } => Some(device_name.as_str()),
         HostEvent::DeviceRejected { device_name, .. } => device_name.as_deref(),
         _ => None,

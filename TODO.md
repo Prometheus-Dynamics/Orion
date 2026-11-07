@@ -314,7 +314,7 @@ State of every open item (2026-11-06, when the leap started). Nothing else is op
 - **The leap** (in progress, "Decided, starts when the user says" below): steps 5 to 8 are done
   (step 7 as `liborion`'s first version, on the shared ABI crate). Open: `liborion`'s actions,
   records and stream subscriptions, the static Rust wrapper and the static/shared build modes,
-  streams on serial and CAN, `orionctl` without reqwest.
+  `orionctl` without reqwest. Streams on serial and CAN are done (2026-11-07).
 - **Waiting on the user:** release mechanics (version 1.0.0, tag, release gates).
 - **Waiting on others:** protocol 1 on the reference board (the consumers' window).
 - **Blocked on hardware:** real MCU bring-up, the U8 board port, U9 hardware validation (no MCU
@@ -704,8 +704,13 @@ The shared ABI primitives wait until the hardware repository says they are ready
       of its own provider, a client session subscribes, at most 8 per session). Decided: frames
       stay at 4096 bytes on every transport, stream data larger than a frame goes in parts by
       chunk and chunks larger than a part are split at sample boundaries (byte-exact), so no
-      receive buffer grows; serial and CAN sessions' declarations are refused with `unsupported`
-      until their link tasks drain the publisher's demand (with the versioned template, step 8).
+      receive buffer grows. Serial and CAN devices publish streams (2026-11-07): the device session
+      (`orion-link` feature `streams`) declares one stream of at most 64 series, sent once its
+      snapshot is acknowledged and repeated until the host answers (`StreamDemand` accepts it,
+      `RequestError` refuses it for the session; declarations are idempotent on the node), and
+      keeps one batch waiting at a time (`StreamError::Pending` is the device's backpressure);
+      the demand is a 64-bit series mask. The gateway registers each declaring device as
+      publisher `link:<link>/<device>` and removes it when the session ends.
       Measured (2026-11-06, `unix_link_latency`, docs/testing.md): p50 about 45 us from a
       provider session's publish to a client's `StreamData` or `StatusChanges`.
       5 done (revision 3: the executor role and record reads on Unix links). Decided: an executor

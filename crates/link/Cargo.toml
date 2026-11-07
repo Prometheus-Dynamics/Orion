@@ -29,6 +29,9 @@ device = []
 # `ActionRequested` event. Adds one receive-sized buffer and a few bytes of state to the device
 # session; off, the minimal device build is unchanged.
 actions = ["device"]
+# Device-side streams (interface revision 2): one declared stream, its batches and the host's
+# demand. Adds two transmit-sized buffers to the device session; off, nothing changes.
+streams = ["device"]
 # Firmware transfer over the link (kinds 0x20-0x28): the device session's transfer state,
 # `DeviceInfo`, and the host driver. Needs `device`; the sink trait and the wire types are always
 # compiled, and dead-stripped where unused.

@@ -295,7 +295,8 @@ impl LinkConfig {
         config.session_seed = session_seed;
         // Only Unix and TCP links' callers have an identity to authorize client requests with.
         config.serve_clients = self.serves_clients();
-        config.serve_streams = self.serves_clients();
+        // Every link serves providers' streams; only Unix and TCP links have subscribers.
+        config.serve_streams = true;
         config.serve_executors = self.serves_clients();
         // A TCP link's sessions are operators: no provider or executor roles.
         config.serve_devices = !matches!(self.transport, LinkTransport::Tcp(_));

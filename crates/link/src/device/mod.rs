@@ -177,6 +177,46 @@ impl ::core::fmt::Display for PublishError {
 #[cfg(feature = "std")]
 impl std::error::Error for PublishError {}
 
+#[cfg(feature = "streams")]
+impl From<PublishError> for StreamError {
+    fn from(error: PublishError) -> Self {
+        Self::Publish(error)
+    }
+}
+
+/// Why a stream call was refused (feature `streams`).
+#[cfg(feature = "streams")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StreamError {
+    /// No series, or more than [`crate::wire::MAX_STREAM_SERIES`].
+    Series,
+    /// No stream is declared.
+    NotDeclared,
+    /// The host has not accepted the declaration in this session (or refused it).
+    NotAccepted,
+    /// The previous batch is not sent yet: keep the samples and publish them with the next one.
+    Pending,
+    /// The frame does not fit.
+    Publish(PublishError),
+}
+
+#[cfg(all(feature = "streams", feature = "std"))]
+impl ::core::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        match self {
+            Self::Series => f.write_str("a stream has 1 to 64 series"),
+            Self::NotDeclared => f.write_str("no stream is declared"),
+            Self::NotAccepted => f.write_str("the host has not accepted the stream"),
+            Self::Pending => f.write_str("the previous batch is not sent yet"),
+            Self::Publish(error) => error.fmt(f),
+        }
+    }
+}
+
+#[cfg(all(feature = "streams", feature = "std"))]
+impl std::error::Error for StreamError {}
+
 /// Why a [`DeviceSession::report_action`] was refused. The device keeps running its action.
 #[cfg(feature = "actions")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,6 +500,67 @@ impl<
             crate::wire::ActionState::Running,
             buf.get(..len).unwrap_or_default(),
         )
+    }
+
+    /// Declares the device's stream (feature `streams`, interface revision 2), replacing an earlier
+    /// declaration: its id and series, in the order chunks name them by index. It is sent once the
+    /// snapshot is acknowledged, in every session, until the host answers: a
+    /// [`DeviceEvent::StreamDemand`] accepts it, a [`DeviceEvent::StreamRefused`] refuses it.
+    ///
+    /// # Errors
+    ///
+    /// [`StreamError::Series`] for no series or too many, [`StreamError::Publish`] if the
+    /// declaration does not fit the largest frame (`min(RX, TX)`).
+    #[cfg(feature = "streams")]
+    pub fn declare_stream(
+        &mut self,
+        id: &str,
+        series: &[crate::wire::SeriesView<'_>],
+    ) -> Result<(), StreamError> {
+        if self.core.declare_stream(id, series)? {
+            self.cursor = T::Cursor::default();
+        }
+        Ok(())
+    }
+
+    /// Queues a batch of the declared stream ([`crate::wire::ChunkView`]s, one per series
+    /// sampled; [`crate::wire::SampleWriter`] writes them). Not acknowledged: it is sent once, as
+    /// soon as the link is free, and lost with the session. One batch waits at a time.
+    ///
+    /// # Errors
+    ///
+    /// [`StreamError::NotDeclared`], [`StreamError::NotAccepted`] before the host accepted the
+    /// stream in this session, [`StreamError::Pending`] while the previous batch waits, and
+    /// [`StreamError::Publish`] if the batch does not fit the negotiated frame size.
+    #[cfg(feature = "streams")]
+    pub fn publish_stream(
+        &mut self,
+        chunks: &[crate::wire::ChunkView<'_>],
+    ) -> Result<(), StreamError> {
+        if self.core.publish_stream(chunks)? {
+            self.cursor = T::Cursor::default();
+        }
+        Ok(())
+    }
+
+    /// Who subscribes to the stream, once the host accepted it in this session (feature
+    /// `streams`). A series sampled `WhileSubscribed` is sampled while
+    /// [`crate::wire::StreamDemandView::wants`] it.
+    #[cfg(feature = "streams")]
+    pub fn stream_demand(&self) -> Option<crate::wire::StreamDemandView> {
+        self.core.stream_demand()
+    }
+
+    /// Whether the host accepted the stream in this session (feature `streams`).
+    #[cfg(feature = "streams")]
+    pub fn stream_accepted(&self) -> bool {
+        self.core.stream_accepted()
+    }
+
+    /// Whether a batch waits to be sent (feature `streams`).
+    #[cfg(feature = "streams")]
+    pub fn stream_pending(&self) -> bool {
+        self.core.stream_pending()
     }
 
     /// The current lease set (empty when not connected or before the host sent one). Strings

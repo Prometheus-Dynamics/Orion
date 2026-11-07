@@ -1,5 +1,6 @@
 //! Host-session events → node provider path, shared by serial and CAN links.
 
+use super::device_streams::DeviceStreams;
 use crate::NodeApp;
 use crate::app::{CanSlot, LinkActionCommand, SerialSlot};
 use crate::control_plane::{LinkDeviceActions, LinkStatusSnapshot};
@@ -32,6 +33,8 @@ pub(super) struct LinkContext {
     /// The action names each connected device declared in its session (devices that declared
     /// none are absent: their names are not checked).
     declared: BTreeMap<String, Vec<String>>,
+    /// The devices' streams (revision 2).
+    pub(super) streams: DeviceStreams,
 }
 
 /// Requests sent to devices of one link and not yet final. Ids are per link and wrap.
@@ -79,13 +82,14 @@ impl LinkContext {
         };
         Self {
             app,
-            name,
             started: Instant::now(),
             accepted: BTreeSet::new(),
             status,
             last_logged_error: None,
             actions: SentActions::default(),
             declared: BTreeMap::new(),
+            streams: DeviceStreams::new(&name),
+            name,
         }
     }
 
@@ -296,6 +300,7 @@ impl LinkContext {
                 info!(link = %self.name, device = %device_name, session_id, max_frame, "link device connected");
                 self.accepted.remove(&device_name);
                 self.declared.remove(&device_name);
+                self.streams.lost(&self.app, &device_name);
                 // Seed the lease set of a device the node already knows, so it has its leases
                 // before its first snapshot arrives.
                 LeaseAction::Set(
@@ -358,6 +363,7 @@ impl LinkContext {
                 info!(link = %self.name, device = %device_name, "link device lost; marking its resources unavailable");
                 self.accepted.remove(&device_name);
                 self.declared.remove(&device_name);
+                self.streams.lost(&self.app, &device_name);
                 self.fail_device_actions(
                     &device_name,
                     "link device disconnected before the action finished",
@@ -377,6 +383,25 @@ impl LinkContext {
             HostEvent::ActionCatalog { device_name, names } => {
                 debug!(link = %self.name, device = %device_name, names = names.len(), "link device declared its actions");
                 self.declared.insert(device_name, names);
+                LeaseAction::Keep
+            }
+            HostEvent::StreamDeclare {
+                device_name,
+                req,
+                id,
+                series,
+            } => {
+                debug!(link = %self.name, device = %device_name, id, series = series.len(), "link device declared a stream");
+                self.streams
+                    .declare(&self.app, &device_name, req, id, series);
+                LeaseAction::Keep
+            }
+            HostEvent::StreamPublish {
+                device_name,
+                id,
+                chunks,
+            } => {
+                self.streams.publish(&self.app, &device_name, &id, chunks);
                 LeaseAction::Keep
             }
             HostEvent::DeviceRejected {
@@ -451,6 +476,7 @@ impl LinkContext {
     /// Gateway shutdown: mark every device of this link lost.
     pub(super) fn close(&mut self) {
         self.accepted.clear();
+        self.streams.close(&self.app);
         self.status.open = false;
         self.actions.pending.clear();
         self.app

@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- Streams from serial and CAN devices (interface revision 2): the no_std device session's
+  feature `streams` (`DeviceSession::declare_stream`, `publish_stream`, `stream_demand`,
+  `DeviceEvent::StreamDemand` / `StreamRefused`, and the borrowed `wire::SeriesView`,
+  `ChunkView` and `SampleWriter`), served by the gateway on every link: each declaring device is
+  a publisher of its own, `link:<link>/<device>`. `HostBus::session_mut`.
+
 - Versioned MCU template (stable interface step 8): `orion_api_version`
   (`ORION_MCU_API_VERSION`), `orion_link_revision` and `orion_session_revision`, declared in the
   generated `examples/mcu-template/include/orion_mcu.h`. The orion-link device session announces

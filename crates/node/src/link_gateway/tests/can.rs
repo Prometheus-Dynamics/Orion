@@ -61,15 +61,15 @@ impl CanIo for MemoryPort {
 }
 
 /// A simulated CAN device at `address`.
-struct BusDevice {
-    device: Arc<Mutex<CanDevice<256, 256, String>>>,
+pub(super) struct BusDevice {
+    pub(super) device: Arc<Mutex<CanDevice<256, 256, String>>>,
     events: Arc<Mutex<Vec<DeviceEvent>>>,
     unplugged: Arc<AtomicBool>,
     task: JoinHandle<()>,
 }
 
 impl BusDevice {
-    fn start<P: CanIo>(name: &str, ids: CanLinkIds, transport: Packet, port: P) -> Self {
+    pub(super) fn start<P: CanIo>(name: &str, ids: CanLinkIds, transport: Packet, port: P) -> Self {
         let device = Arc::new(Mutex::new(CanDevice::<256, 256, String>::new(
             fast_device(name),
             transport,
@@ -122,7 +122,7 @@ impl BusDevice {
         }
     }
 
-    fn publish(&self, provider: &ProviderRecord, resources: &[ResourceRecord]) {
+    pub(super) fn publish(&self, provider: &ProviderRecord, resources: &[ResourceRecord]) {
         self.device
             .lock()
             .expect("device lock")
@@ -148,14 +148,14 @@ impl Drop for BusDevice {
     }
 }
 
-fn can_config(link: &LinkConfig) -> CanLinkConfig {
+pub(super) fn can_config(link: &LinkConfig) -> CanLinkConfig {
     match &link.transport {
         LinkTransport::Can(can) => can.clone(),
         _ => panic!("expected a CAN link"),
     }
 }
 
-fn provider_for(address: u32) -> (ProviderRecord, Vec<ResourceRecord>) {
+pub(super) fn provider_for(address: u32) -> (ProviderRecord, Vec<ResourceRecord>) {
     let provider_id = format!("provider.dev-{address}");
     (
         device_provider(&provider_id),

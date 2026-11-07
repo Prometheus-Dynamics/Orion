@@ -15,6 +15,8 @@ mod can_e2e;
 #[cfg(feature = "std")]
 mod client;
 mod device_scripted;
+#[cfg(all(feature = "std", feature = "streams"))]
+mod device_streams;
 #[cfg(feature = "std")]
 mod executor;
 #[cfg(all(feature = "std", feature = "xfer"))]

@@ -28,6 +28,9 @@ macro_rules! bump {
     };
 }
 
+#[cfg(feature = "streams")]
+mod streams;
+
 /// Smallest heartbeat the device accepts from a host, so a bad `Welcome` cannot cause a ping flood.
 const MIN_HEARTBEAT_MS: u32 = 10;
 
@@ -102,6 +105,12 @@ pub(crate) enum Source {
     /// The action catalog (its payload kept for retransmission).
     #[cfg(feature = "actions")]
     Catalog,
+    /// The stream declaration (its payload kept for retransmission).
+    #[cfg(feature = "streams")]
+    StreamDecl,
+    /// The stream batch waiting.
+    #[cfg(feature = "streams")]
+    StreamBatch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,6 +226,18 @@ pub(crate) struct DeviceCore<N, const RX: usize, const TX: usize, const ST: usiz
     /// Holds the encoded `ActionCatalog` payload, and then its frame while it is sent.
     #[cfg(feature = "actions")]
     catalog_buf: [u8; RX],
+    /// The declared stream (feature `streams`).
+    #[cfg(feature = "streams")]
+    stream: Option<streams::StreamSlot>,
+    /// The last declaration's request id.
+    #[cfg(feature = "streams")]
+    stream_req: u32,
+    /// Holds the encoded `StreamDeclare` payload, and then its frame while it is sent.
+    #[cfg(feature = "streams")]
+    stream_decl_buf: [u8; TX],
+    /// Holds the waiting `StreamPublish` payload, and then its frame while it is sent.
+    #[cfg(feature = "streams")]
+    stream_batch_buf: [u8; TX],
     #[cfg(feature = "xfer")]
     xfer: XferState,
     #[cfg(feature = "stats")]
@@ -271,6 +292,14 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             catalog: None,
             #[cfg(feature = "actions")]
             catalog_buf: [0; RX],
+            #[cfg(feature = "streams")]
+            stream: None,
+            #[cfg(feature = "streams")]
+            stream_req: 0,
+            #[cfg(feature = "streams")]
+            stream_decl_buf: [0; TX],
+            #[cfg(feature = "streams")]
+            stream_batch_buf: [0; TX],
             #[cfg(feature = "xfer")]
             xfer: XferState::new(),
             #[cfg(feature = "stats")]
@@ -502,6 +531,8 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
                 });
             }
         }
+        #[cfg(feature = "streams")]
+        self.stream_on_welcome(welcome.revision.min(self.config.revision));
         // The host has not seen the declared names in this session either.
         #[cfg(feature = "actions")]
         if let Some(catalog) = self.catalog {
@@ -561,6 +592,10 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             kind::ACTION_REQUEST => self.on_action_request(payload),
             #[cfg(feature = "actions")]
             kind::ACTION_CANCEL => self.on_action_cancel(payload),
+            #[cfg(feature = "streams")]
+            kind::STREAM_DEMAND => self.on_stream_demand(payload),
+            #[cfg(feature = "streams")]
+            kind::REQUEST_ERROR => self.on_request_error(payload),
             kind::PING => match self.pong.read(&mut Reader::new(payload)) {
                 Ok(()) => {}
                 Err(_) => self.decode_error(),
@@ -866,6 +901,10 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
             Source::Action => &self.action_buf,
             #[cfg(feature = "actions")]
             Source::Catalog => &self.catalog_buf,
+            #[cfg(feature = "streams")]
+            Source::StreamDecl => &self.stream_decl_buf,
+            #[cfg(feature = "streams")]
+            Source::StreamBatch => &self.stream_batch_buf,
             #[cfg(feature = "xfer")]
             Source::Info => self.xfer.info_buf(),
         };
@@ -961,8 +1000,17 @@ impl<N: AsRef<str>, const RX: usize, const TX: usize, const ST: usize> DeviceCor
         if let Some(info) = self.select_info() {
             return Some(info);
         }
-        self.select_snapshot()
-            .or_else(|| self.select_status(max_frame))
+        if let Some(snapshot) = self.select_snapshot() {
+            return Some(snapshot);
+        }
+        #[cfg(feature = "streams")]
+        if let Some(outgoing) = self
+            .select_stream_decl(max_frame)
+            .or_else(|| self.select_stream_batch(max_frame))
+        {
+            return Some(outgoing);
+        }
+        self.select_status(max_frame)
     }
 
     /// The `ActionCatalog` frame, while the host has not acknowledged its latest transmission.

@@ -427,6 +427,45 @@ With feature `actions` (device side of protocol 1 actions, see "Actions") the mi
 grows by about 0.6 KB of flash and 160 bytes of RAM on Cortex-M0+ (`uart-actions` in
 `scripts/mcu-size.sh`); the default build is unchanged.
 
+### Device streams
+
+With feature `streams` (interface revision 2) a device publishes one stream of its provider:
+sampled series the node keeps a history of and forwards to subscribers (Unix and TCP link
+clients, `orionctl`). The session adds two transmit-sized buffers.
+
+```rust
+use orion_link::wire::{HistoryView, SampleWriter, Sampling, SeriesKind, SeriesView};
+
+const SERIES: [SeriesView<'static>; 1] = [SeriesView {
+    name: "accel_x",
+    unit: Some("m/s2"),
+    kind: SeriesKind::F32,
+    period_us: 1_000,
+    history: HistoryView { full_ms: 10_000, reduced_ms: 0, reduced_period_ms: 0 },
+    sampling: Sampling::WhileSubscribed,
+}];
+session.declare_stream("imu", &SERIES)?;
+// ... on DeviceEvent::StreamDemand, sample while `stream_demand()` wants series 0:
+let mut writer = SampleWriter::new(&mut chunk_buf);
+writer.push_f32(now_us, accel_x);
+match session.publish_stream(&[writer.chunk(0)]) {
+    Ok(()) => writer.clear(),
+    Err(StreamError::Pending) => {} // the previous batch is still going: keep sampling into it
+    Err(_) => {}
+}
+```
+
+- The declaration is sent once the snapshot is acknowledged, in every session, and repeated (with
+  the snapshot's backoff) until the host answers: `StreamDemand` accepts it
+  (`DeviceEvent::StreamDemand`; `stream_demand()` gives the subscribers and a 64-bit series
+  mask, so a stream has at most 64 series), `RequestError` refuses it for the session
+  (`DeviceEvent::StreamRefused { code }`; `1` also when the session's revision is below 2).
+- Batches are not acknowledged and are lost with the session. One waits at a time:
+  `publish_stream` returns `StreamError::Pending` while the previous one is not out, so a device
+  sampling faster than its link accumulates samples instead of losing them.
+- Chunk times are microseconds on the device's clock; `SampleWriter` writes the node's sample
+  encoding (a varint delta, then the value).
+
 `examples/mcu-template` is a complete, chip-agnostic starting point (`embedded-io` UART and
 `embedded-can` ports and C entry points, no allocator by default), and
 `crates/link/examples/sim_device.rs` prints a full session timeline on the host.
@@ -475,7 +514,8 @@ watches the node's status and runs, queries and watches actions, as a local cont
 named `link:<link>/<device name>` with the caller's identity, so the control sockets'
 authorization and rate limit apply to each request. From revision 2 a Unix link session also
 carries streams: a provider session publishes streams of its own provider, under the same local
-address, and a client session subscribes to any stream of the node.
+address, and a client session subscribes to any stream of the node. Serial and CAN devices publish
+streams as well (see "Device streams"); each is a publisher of its own, `link:<link>/<device>`.
 
 ### Remote links
 
@@ -691,5 +731,5 @@ includes it. Revisions do not change `LINK_PROTOCOL_VERSION`.
 |---|---|
 | 0 | The protocol as of version 1, before revisions. |
 | 1 | The client role (`roles` bit 2) and kinds `0x40`, `0x41`, `0x50`-`0x52`, `0x60`-`0x63`: status query and watch, and running, querying and watching actions. Served on Unix links. The record and filter bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 3 wire"). |
-| 2 | Streams, kinds `0x70`-`0x76`: providers declare and publish, clients subscribe. Served on Unix links. The bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 4 wire"). |
+| 2 | Streams, kinds `0x70`-`0x76`: providers declare and publish, clients subscribe. Providers publish on every link; clients subscribe on Unix and TCP links. The bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 4 wire"). |
 | 3 | The executor role (`roles` bit 1) with kinds `0x12` `ExecutorState` and `0x13` `Workloads`, and record reads, kinds `0x80`-`0x82`: query and watch workloads, resources, providers and executors. Served on Unix links. The bodies are in [design/stable-interface.md](design/stable-interface.md) ("Step 5 wire"). |

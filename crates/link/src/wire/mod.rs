@@ -35,6 +35,8 @@ mod views;
 
 #[cfg(feature = "alloc")]
 mod records;
+#[cfg(feature = "streams")]
+mod streams;
 
 #[cfg(feature = "actions")]
 pub(crate) use action::ActionCatalogBody;
@@ -54,6 +56,14 @@ pub use views::{
     LeaseState, Ownership, ProviderBody, ProviderStateView, ProviderView, ResourceBody,
     ResourceStateView, ResourceView, StateBody, StatusBody, StatusView, Value,
 };
+
+#[cfg(feature = "streams")]
+pub use streams::{
+    ChunkView, HistoryView, MAX_STREAM_SERIES, SampleWriter, Sampling, SeriesKind, SeriesView,
+    StreamDemandView, decode_request_error, decode_stream_demand,
+};
+#[cfg(feature = "streams")]
+pub(crate) use streams::{StreamDeclareBody, StreamPublishBody};
 
 use crate::frame::{self, FrameHeader};
 

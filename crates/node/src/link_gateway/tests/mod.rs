@@ -8,6 +8,8 @@ mod can_firmware;
 #[cfg(target_os = "linux")]
 mod capi;
 mod config;
+#[cfg(target_os = "linux")]
+mod device_streams;
 mod firmware;
 mod persist;
 #[cfg(target_os = "linux")]

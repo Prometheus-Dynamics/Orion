@@ -250,7 +250,7 @@ pub(super) struct LinkClient {
 }
 
 /// The error code for a request the node refused.
-fn code_for(error: &NodeError) -> ErrorCode {
+pub(super) fn code_for(error: &NodeError) -> ErrorCode {
     match error {
         NodeError::Authorization(_)
         | NodeError::ClientRoleMismatch { .. }

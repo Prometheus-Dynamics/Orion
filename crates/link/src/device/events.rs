@@ -47,6 +47,18 @@ pub enum DeviceEvent {
         /// The `id` of the request to stop.
         id: u32,
     },
+    /// The host accepted the device's stream, or who subscribes to it changed (feature
+    /// `streams`). Read it with `DeviceSession::stream_demand`.
+    #[cfg(feature = "streams")]
+    StreamDemand,
+    /// The host refused the device's stream for this session (feature `streams`): `code` is the
+    /// link's error code (`1`, unsupported, for a session of a revision without streams). The
+    /// declaration is sent again in the next session.
+    #[cfg(feature = "streams")]
+    StreamRefused {
+        /// The error code.
+        code: u16,
+    },
 }
 
 // Queued events are stored as plain integers (a tag and two words each). Integer arrays let a
@@ -62,6 +74,19 @@ const STATE_TOO_LARGE: u8 = 6;
 const ACTION_REQUESTED: u8 = 7;
 #[cfg(feature = "actions")]
 const ACTION_CANCEL_REQUESTED: u8 = 8;
+#[cfg(feature = "streams")]
+const STREAM_DEMAND: u8 = 9;
+#[cfg(feature = "streams")]
+const STREAM_REFUSED: u8 = 10;
+
+/// Tags whose repeats queued back to back collapse into one (the data is read from the session).
+fn collapses(tag: u8) -> bool {
+    #[cfg(feature = "streams")]
+    if tag == STREAM_DEMAND {
+        return true;
+    }
+    matches!(tag, LEASES_CHANGED | STATE_ACKED)
+}
 
 fn pack(event: DeviceEvent) -> (u8, usize, usize) {
     match event {
@@ -78,6 +103,10 @@ fn pack(event: DeviceEvent) -> (u8, usize, usize) {
         DeviceEvent::ActionRequested => (ACTION_REQUESTED, 0, 0),
         #[cfg(feature = "actions")]
         DeviceEvent::ActionCancelRequested { id } => (ACTION_CANCEL_REQUESTED, id as usize, 0),
+        #[cfg(feature = "streams")]
+        DeviceEvent::StreamDemand => (STREAM_DEMAND, 0, 0),
+        #[cfg(feature = "streams")]
+        DeviceEvent::StreamRefused { code } => (STREAM_REFUSED, usize::from(code), 0),
     }
 }
 
@@ -98,6 +127,10 @@ fn unpack(tag: u8, a: usize, b: usize) -> Option<DeviceEvent> {
         ACTION_REQUESTED => DeviceEvent::ActionRequested,
         #[cfg(feature = "actions")]
         ACTION_CANCEL_REQUESTED => DeviceEvent::ActionCancelRequested { id: a as u32 },
+        #[cfg(feature = "streams")]
+        STREAM_DEMAND => DeviceEvent::StreamDemand,
+        #[cfg(feature = "streams")]
+        STREAM_REFUSED => DeviceEvent::StreamRefused { code: a as u16 },
         _ => return None,
     })
 }
@@ -134,7 +167,7 @@ impl EventQueue {
         let (tag, a, b) = pack(event);
         if let Some(last_offset) = self.len.checked_sub(1)
             && self.tags.get(self.index(last_offset)) == Some(&tag)
-            && matches!(tag, LEASES_CHANGED | STATE_ACKED)
+            && collapses(tag)
         {
             return true;
         }

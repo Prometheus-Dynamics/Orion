@@ -11,6 +11,8 @@
 mod can_link;
 mod config;
 #[cfg(target_os = "linux")]
+mod device_streams;
+#[cfg(target_os = "linux")]
 mod events;
 #[cfg(target_os = "linux")]
 pub(crate) mod firmware;

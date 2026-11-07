@@ -217,6 +217,13 @@ impl HostBus {
         self.devices.get(&address).map(|device| &device.session)
     }
 
+    /// The session of the device at `address`, to queue frames on it.
+    pub fn session_mut(&mut self, address: u32) -> Option<&mut HostSession<Packet>> {
+        self.devices
+            .get_mut(&address)
+            .map(|device| &mut device.session)
+    }
+
     /// Queues an `ActionRequest` for the device at `address`; see [`HostSession::send_action`].
     ///
     /// # Errors

@@ -6,6 +6,7 @@
 //! it owns the session (`firmware.rs`).
 
 use super::SerialLinkConfig;
+use super::device_streams;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, LinkSend, REOPEN_DELAY};
 use super::firmware::{DeviceSeen, FirmwareJob};
 use super::serial::SerialPort;
@@ -49,6 +50,7 @@ pub(super) async fn run(
     let mut held = false;
     let mut seen = DeviceSeen::default();
     let mut job: Option<FirmwareJob> = None;
+    let stream_wake = ctx.streams.wake();
 
     loop {
         if port.is_none() && !held && Instant::now() >= reopen_at {
@@ -114,6 +116,7 @@ pub(super) async fn run(
                     release_open = false;
                 }
             }
+            () = stream_wake.notified() => {}
             _ = tick.tick() => {}
         }
 
@@ -154,6 +157,11 @@ pub(super) async fn run(
                 session.set_leases(leases);
             }
         }
+        ctx.streams
+            .pump(&ctx.app, |device, out| match session.device_name() {
+                Some(current) if current == device => device_streams::send(&mut session, out),
+                _ => Err(ActionSendError::NotConnected),
+            });
         if let Some(mut running) = job.take() {
             match running.drive(ctx.now_ms(), |request| session.send_xfer(request)) {
                 None => job = Some(running),

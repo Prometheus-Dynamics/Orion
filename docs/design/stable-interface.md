@@ -266,8 +266,11 @@ Subscribers:
   (one frame carries more samples), then `StreamReset { Overrun }` past the node's bound.
 
 Frames stay at 4096 bytes on Unix links: parts carry larger answers, so the host's receive buffer
-does not grow for any transport. Serial and CAN links do not serve streams yet
-(`HostConfig::serve_streams`): their sessions' declarations are refused with `unsupported`.
+does not grow for any transport. Serial and CAN devices publish streams too (decided
+2026-11-07): the no_std device session (`orion-link` feature `streams`) declares one stream,
+publishes batches and keeps the host's demand; the gateway registers each device that declares one
+as a publisher of its own, `link:<link>/<device>`, removed when its session ends. Only Unix and TCP
+links have subscribers.
 
 ## Step 5 wire (revision 3)
 
