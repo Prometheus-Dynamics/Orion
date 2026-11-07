@@ -29,13 +29,6 @@ impl OutQueue {
         self.lens.push_back(frame.len());
     }
 
-    /// Drops the oldest frame.
-    pub(crate) fn pop_front(&mut self) {
-        if let Some(len) = self.lens.pop_front() {
-            self.bytes.drain(..len);
-        }
-    }
-
     /// Moves the oldest frame into `out` (replacing its contents). `false` when empty.
     pub(crate) fn pop_into(&mut self, out: &mut Vec<u8>) -> bool {
         let Some(len) = self.lens.pop_front() else {

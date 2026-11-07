@@ -34,6 +34,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Fixed
 
+- A link session's full output queue dropped its oldest frame for each new `Pong`, `Ack` or
+  `Leases`, so a client that kept pinging while it read nothing lost parts of answers already
+  queued (answers out of order, seen under load in `unix_backlog`). Those frames now have their
+  own 8 frames of room above the answers' 32 and are dropped themselves past it, never a queued
+  answer. Test: `pings_while_the_client_reads_nothing_never_cut_a_queued_answer`.
+
 - Unix link record reads (`RecordQuery`, `RecordWatch`) are authorized per request, as a state
   snapshot query. Before, only the session's client registration was checked.
 

@@ -66,5 +66,19 @@ async fn a_burst_past_the_budget_waits_without_losing_the_session() {
     // 200 frames a second, 600 sent at once: about two seconds of backpressure, more than six
     // heartbeat timeouts.
     let took = burst("burst-held", "&max_frames_per_s=200", 600).await;
-    assert!(took >= Duration::from_millis(1_500), "throttled: {took:?}");
+    // The budget is spent per read, so the frames of the last read (up to a read buffer's
+    // worth; more of them when the machine is busy and reads come in fuller) are let through
+    // without their wait. Unthrottled, the same burst takes milliseconds.
+    let frame = {
+        let message = Message::Status(vec![LinkStatus::new("count", TypedConfigValue::Int(599))]);
+        let mut bytes = vec![0u8; 256];
+        let len = message.encode(1, &mut bytes).expect("fits");
+        orion_link::StreamEncoder::for_frame(&bytes[..len]).count()
+    };
+    let unwaited = 200 + crate::link_gateway::unix_link::READ_BUF.div_ceil(frame);
+    let floor = Duration::from_secs_f64(600usize.saturating_sub(unwaited) as f64 / 200.0);
+    assert!(
+        took >= floor.mul_f64(0.9),
+        "throttled: {took:?}, floor {floor:?} ({frame} bytes a frame)"
+    );
 }

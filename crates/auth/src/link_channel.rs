@@ -52,6 +52,10 @@ pub const ROTATE_RECORDS: u64 = 1 << 20;
 /// Seconds after which callers should rotate a direction's key ([`Sealer::rotate`]).
 pub const ROTATE_AFTER_SECS: u64 = 600;
 
+/// Whether ChaCha20 runs its portable code where a SIMD backend exists: an aarch64 build without
+/// `--cfg chacha20_force_neon` (see `build.rs`). About 2.3x slower per record on a Cortex-A76.
+pub const PORTABLE_CHACHA20: bool = cfg!(link_channel_portable_chacha20);
+
 /// Link bytes.
 pub const KIND_DATA: u8 = 0;
 /// The sender's later records use its next key.
@@ -797,6 +801,17 @@ mod tests {
             derive(&[1; 32], &[0; 32], &[0; 32]),
             Err(ChannelError::Malformed(_))
         ));
+    }
+
+    /// Orion's own aarch64 builds set the cfg (`.cargo/config.toml`); a build that loses it
+    /// fails here instead of running 2.3x slower.
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn aarch64_builds_get_the_neon_backend() {
+        assert!(
+            !PORTABLE_CHACHA20,
+            "build with RUSTFLAGS=\"--cfg chacha20_force_neon\" (see crates/auth/build.rs)"
+        );
     }
 
     #[test]

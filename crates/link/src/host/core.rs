@@ -24,8 +24,14 @@ use crate::transport::seq_newer;
 use super::xfer::{DeviceInfo, XferReply, XferRequest};
 use super::{HOST_MAX_FRAME, HostConfig, HostEvent, HostStats};
 
-/// Frames queued for transmission per link; the oldest is dropped beyond this.
+/// Frames answers and actions may fill in a link's output queue; past it they wait
+/// (`Congested`), so a queued answer is never cut.
 const OUT_CAPACITY: usize = 32;
+/// Room above [`OUT_CAPACITY`] for the session's own frames (`Pong`, `Ack`, `Leases`, `Reject`):
+/// a peer that keeps pinging while it reads nothing must not push queued answers out. Past it,
+/// the new frame is dropped and counted (`frames_dropped`); each of them is resent or superseded
+/// (leases go out again after the next `Pong`).
+const CONTROL_RESERVE: usize = 8;
 /// Events queued per link; the oldest is dropped beyond this.
 const EVENT_CAPACITY: usize = 64;
 
@@ -162,7 +168,7 @@ impl HostCore {
         let queued = with_frame(
             limit,
             |buf| message::encode_with(kind, seq, body, buf),
-            |frame| self.push_dropping_oldest(frame),
+            |frame| self.push_control(frame),
         );
         if queued.is_ok() {
             self.seq = seq;
@@ -170,11 +176,12 @@ impl HostCore {
         queued.is_ok()
     }
 
-    /// Queues `frame`, dropping the oldest frame when the queue is full.
-    fn push_dropping_oldest(&mut self, frame: &[u8]) {
-        if self.out.len() >= OUT_CAPACITY {
-            self.out.pop_front();
+    /// Queues one of the session's own frames, within [`CONTROL_RESERVE`] above the answers'
+    /// room; past it the frame is dropped, never one queued before it.
+    fn push_control(&mut self, frame: &[u8]) {
+        if self.out.len() >= OUT_CAPACITY + CONTROL_RESERVE {
             self.stats.frames_dropped = self.stats.frames_dropped.wrapping_add(1);
+            return;
         }
         self.out.push_back(frame);
     }
@@ -556,7 +563,7 @@ impl HostCore {
         let queued = with_frame(
             limit,
             |buf| encode(seq, buf),
-            |frame| self.push_dropping_oldest(frame),
+            |frame| self.push_control(frame),
         );
         if queued.is_ok() {
             self.seq = seq;

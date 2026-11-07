@@ -51,7 +51,7 @@ pub(super) const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Inbound chunks buffered for the link task, across its connections.
 const INBOUND_CHUNKS: usize = 64;
 /// Read buffer per connection.
-const READ_BUF: usize = 4096;
+pub(super) const READ_BUF: usize = 4096;
 
 /// While a connection is held back by its frame budget, the link task hears of it at least this
 /// often, so the session counts as heard and never times out for frames the node made wait.
@@ -164,6 +164,14 @@ pub(super) async fn run(
     limits: ConnLimits,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    if matches!(config.endpoint, Endpoint::Tcp(_)) && orion_auth::link_channel::PORTABLE_CHACHA20 {
+        warn!(
+            link = %ctx.name,
+            "this build seals tcp: link records with ChaCha20's portable code, about 2.3x the CPU of \
+             its NEON backend; build aarch64 with RUSTFLAGS=\"--cfg chacha20_force_neon\" \
+             (docs/link-protocol.md, \"Remote links\")"
+        );
+    }
     let policy = ctx.app.local_admission.clone();
     let mut tick = tokio::time::interval(LinkContext::tick_period(host.heartbeat_ms));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

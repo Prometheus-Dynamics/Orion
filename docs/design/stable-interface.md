@@ -208,7 +208,10 @@ Decided at implementation (2026-11-06):
 - Answers wait in the gateway while the session's output is full; the node's events for the client
   stay in its queue, where status coalesces to the newest value per key and action results to the
   newest per action. An answer is queued as all of its parts or none, and needs at most the
-  session's output queue (32 frames).
+  session's output queue (32 frames). The session's own frames (`Pong`, `Ack`, `Leases`,
+  `Reject`) have 8 more frames of room; past it the new one is dropped and counted, so a queued
+  answer is never cut by a peer that pings without reading (until 2026-11-06 the oldest frame was
+  dropped, which could cut one).
 - `RequestError` reasons are cut to 256 bytes at a character boundary.
 
 ## Step 4 wire (revision 2)

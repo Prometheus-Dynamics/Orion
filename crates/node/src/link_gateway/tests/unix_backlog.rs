@@ -3,9 +3,10 @@
 //! answers drain. The session stays up meanwhile.
 
 use super::serial::{WAIT, start};
-use super::unix::{socket_path, unix_link};
+use super::unix::socket_path;
 use super::unix_client::RawClient;
 use super::*;
+use crate::link_gateway::LinkConfig;
 use crate::link_gateway::unix_client::ANSWER_BYTES;
 use orion::ProviderId;
 use orion::control_plane::{StatusQuery, StatusSubject, TypedConfigValue};
@@ -17,13 +18,21 @@ const PROVIDER: &str = "provider.imu-board";
 const ENTRIES: usize = 60;
 const VALUE_BYTES: usize = 1_000;
 const QUERIES: u32 = 40;
+/// This link's heartbeat: well above scheduler noise on a loaded machine (the shared 100 ms gives
+/// a 300 ms timeout, which a starved test process can miss), so only the cap's hold is tested.
+const BACKLOG_HEARTBEAT_MS: u64 = 400;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queries_past_the_answer_cap_are_refused_and_the_session_stays_up() {
     let name = "unix-backlog";
     let app = test_app(name);
     let path = socket_path(name);
-    let gateway = start(&app, vec![unix_link(&path, "")]);
+    let link = LinkConfig::parse(&format!(
+        "unix:{}?heartbeat_ms={BACKLOG_HEARTBEAT_MS}&missed_heartbeats=3",
+        path.display()
+    ))
+    .expect("link should parse");
+    let gateway = start(&app, vec![link]);
     let publisher = RawClient::connect_as("imu-board", &path, Roles::PROVIDER).await;
     publisher.send(Message::ProviderState(ProviderState {
         provider: device_provider(PROVIDER),
@@ -50,8 +59,8 @@ async fn queries_past_the_answer_cap_are_refused_and_the_session_stays_up() {
             filter: filter.clone(),
         }));
     }
-    // Several heartbeat timeouts without reading a byte.
-    tokio::time::sleep(Duration::from_millis(u64::from(HEARTBEAT_MS) * 10)).await;
+    // Two heartbeat timeouts without reading a byte.
+    tokio::time::sleep(Duration::from_millis(BACKLOG_HEARTBEAT_MS * 6)).await;
     client.set_reading(true);
 
     let (mut answered, mut limited) = (0u32, 0u32);
@@ -59,13 +68,23 @@ async fn queries_past_the_answer_cap_are_refused_and_the_session_stays_up() {
     while answered + limited < QUERIES {
         match client.next().await {
             Message::StatusChanges(changes) if !changes.more => {
-                assert_eq!(changes.req, answered + limited + 1, "in order");
+                assert_eq!(
+                    changes.req,
+                    answered + limited + 1,
+                    "in order (device timeouts: {})",
+                    app.link_status()[0].device_timeouts
+                );
                 answered += 1;
             }
             Message::StatusChanges(_) => {}
             Message::RequestError(error) => {
                 assert_eq!(error.code, ErrorCode::LIMIT, "{error:?}");
-                assert_eq!(error.req, answered + limited + 1, "in order");
+                assert_eq!(
+                    error.req,
+                    answered + limited + 1,
+                    "in order (device timeouts: {})",
+                    app.link_status()[0].device_timeouts
+                );
                 first_error.get_or_insert(error.reason.clone());
                 limited += 1;
             }

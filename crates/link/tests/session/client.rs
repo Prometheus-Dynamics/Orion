@@ -261,3 +261,54 @@ fn a_host_that_serves_no_devices_takes_only_the_client_role() {
         HostEvent::DeviceConnected { roles, .. } if *roles == Roles::CLIENT
     )));
 }
+
+#[test]
+fn pings_while_the_client_reads_nothing_never_cut_a_queued_answer() {
+    let mut client = Client::new(serving());
+    client.hello(Roles::CLIENT, 1, 512);
+    client.received();
+    let entries: Vec<cp::StatusEntry> = (0..20).map(entry).collect();
+    // Fill the answers' room, as a client that asks without reading does.
+    let mut req = 0;
+    loop {
+        req += 1;
+        match client.host.send_status_changes(req, true, &entries, &[]) {
+            Ok(()) => {}
+            Err(ActionSendError::Congested) => break,
+            Err(other) => panic!("unexpected {other:?}"),
+        }
+    }
+    let answered = req - 1;
+    assert!(answered >= 2, "several answers fit: {answered}");
+    // It keeps pinging: the pongs take the reserve and then are dropped, never an answer.
+    for _ in 0..40 {
+        client.send(&Message::Ping { now_ms: 0 });
+    }
+    let mut parts: Vec<StatusChanges> = Vec::new();
+    let mut pongs = 0;
+    for message in client.received() {
+        match message {
+            Message::StatusChanges(part) => parts.push(part),
+            Message::Pong { .. } => pongs += 1,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert!(
+        (1..=8).contains(&pongs),
+        "pongs within the reserve: {pongs}"
+    );
+    let finals: Vec<u32> = parts.iter().filter(|p| !p.more).map(|p| p.req).collect();
+    assert_eq!(
+        finals,
+        (1..=answered).collect::<Vec<_>>(),
+        "every answer, whole and in order"
+    );
+    for req in 1..=answered {
+        let joined: Vec<cp::StatusEntry> = parts
+            .iter()
+            .filter(|part| part.req == req)
+            .flat_map(|part| part.updated.clone())
+            .collect();
+        assert_eq!(joined, entries, "answer {req} is whole");
+    }
+}

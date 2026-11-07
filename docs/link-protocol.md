@@ -502,8 +502,16 @@ at the time (`docs/node-env.md`, "Link Gateway").
 
 Cost on a Cortex-A76 (a reference board, release build, `link_channel_cost` example): a handshake
 takes about 1.1 ms of CPU for both sides together; sealing a 64-byte frame takes 1.3 us, a 4 KiB
-frame 16 us, about 256 MB/s (aarch64 builds use the NEON backend, `.cargo/config.toml`; the
-portable code takes 1.7 us and 37 us). Opening costs the same.
+frame 16 us, about 256 MB/s. Opening costs the same. Those numbers need ChaCha20's NEON backend,
+which chacha20 0.9 uses only when the top-level build passes `--cfg chacha20_force_neon`: Orion's
+own builds set it (`.cargo/config.toml`), and a product that builds Orion as a dependency sets it
+for its aarch64 targets, in its `.cargo/config.toml` (`[target.aarch64-unknown-linux-gnu]
+rustflags = ["--cfg", "chacha20_force_neon"]`) or `RUSTFLAGS`. Without it the portable code takes
+1.7 us and 37 us, and the node logs a warning when a `tcp:` link starts. chacha20 0.10 needs no
+cfg, but its NEON code is slower than 0.9's portable code under `opt-level = "z"` (55 us at 4 KiB;
+6 us at `opt-level = 3`), and fat LTO overrides per-package opt levels, so 0.9 with the cfg is
+the fastest choice for size-optimized images. `link_channel_cost` checks it on a target:
+`LINK_CHANNEL_MAX_SEAL_4K_NS=25000` fails above 25 us.
 
 Bridging, kept generic (nothing about the device's resource types is assumed):
 

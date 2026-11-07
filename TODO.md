@@ -323,18 +323,30 @@ State of every open item (2026-11-06, when the leap started). Nothing else is op
   rollouts; U6 needs the stable interface), relayed liveness and failover fencing, the
   shared-key handshake over `https://`, capacity-aware placement, the on-disk layout
   fingerprint.
-- **CI:** scheduled jobs test old main, so they run on dev by dispatch until the release.
+- **CI (decided 2026-11-06, item dropped):** the user said no to making dev the default branch
+  or moving main. Dev stays covered by per-push CI; the heavier jobs (`cross32`, `ci-perf`,
+  `ci-docker`, `ci-soak`) are dispatched on dev by hand (`gh workflow run <file> --ref dev`)
+  after changes in those areas. Their scheduled runs test main and are not dev's results.
 
 ### Test robustness (flaky under the full parallel suite)
 
 Each failed once in a full `cargo test --workspace --all-features` run on 2026-11-02 and passed when rerun
 alone. Fix the test so it does not depend on timing or on other tests' logs.
 
-- [ ] `link_gateway::tests::unix_backlog::queries_past_the_answer_cap_are_refused_and_the_session_stays_up`
-      failed once (2026-11-06, full `ci-jobs.sh workspace` run with the host at load 59): request
-      5's answer came where 4's was expected ("in order"). Passed 6 of 6 alone. Suspect: an
-      answer's frames dropped when the session's output queue is full under load; check the
-      link's `dropped` counter if it recurs.
+- [x] `link_gateway::tests::unix_backlog::queries_past_the_answer_cap_are_refused_and_the_session_stays_up`
+      (fixed 2026-11-06). Failed under load: answers out of order, or a session timed out.
+      Causes: a full session output queue dropped its oldest frame for every new `Pong`, so a
+      client pinging without reading lost parts of queued answers (a real bug: fixed in
+      orion-link, control frames get their own reserve and are dropped themselves); and the
+      test's 300 ms heartbeat timeout was within a starved process's scheduling delay (the test
+      now uses 400 ms heartbeats, 1.2 s timeouts). Stress: 144 concurrent runs on 2 cores, 0
+      failures (5 of 144 before, then 144 of 144 once the heartbeat no longer masked the drop).
+- [x] `link_gateway::tests::unix_burst::a_burst_past_the_budget_waits_without_losing_the_session`
+      (fixed 2026-11-06). Failed once in the gates at 1.496 s against a fixed 1.5 s floor (1.67 s
+      alone). The budget is spent per read, so the last read's frames (up to 4 KiB of them,
+      fuller reads on a busy machine) pass without their wait. The floor now counts that read
+      from the frame size (1.02 s for 21-byte frames, asserted at 90%); unthrottled, the burst
+      takes milliseconds.
 - [x] **orionctl `get events` test.** Closed 2026-11-06: the polling fix is in, and no failure
       since (200 runs under load, every CI run). Reopen if it fails again. Failure: `crates/orionctl/tests/cli_get.rs:421`, "assertion failed:
       events_stdout.contains("kind=mutation_apply")" in `orionctl_get_reports_health_readiness_observability_and_snapshot`.
@@ -496,12 +508,6 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       long jobs run on schedule or dispatch only: `cross32`, and the Docker suites in
       `ci-docker.yml` (which no longer run on pull requests or pushes). Per-push wall time on the
       first dev push: 7 min 40 s (run 41434714329); the longest job is `docs-and-lints` at 7.5 min.
-- [ ] **Scheduled CI tests main, which is at 2026-10-18.** GitHub runs a schedule on the default
-      branch with that branch's workflows, so `cross32`, `ci-perf`, `ci-soak` and `ci-docker` have
-      never run on dev's code, and the weekly failures are old main's (for example `ci-perf`
-      `local_persistence_replay` 9.5 ms over its 9 ms bound on 2026-11-06). Until main moves (the
-      release), these jobs run on dev by dispatch (`gh workflow run <file> --ref dev`), after
-      landings that touch them.
 
 ### Release
 
@@ -716,7 +722,15 @@ The shared ABI primitives wait until the hardware repository says they are ready
       Measured on a reference board (Cortex-A76, release, `link_channel_cost`): handshake about 1.1 ms of
       CPU for both sides; per frame, seal and open each 1.3 us at 64 B, 1.8 us at 256 B, 4.7 us at
       1 KiB and 16 us at 4 KiB (256 MB/s), with ChaCha20's NEON backend, which
-      `.cargo/config.toml` selects for aarch64 (the portable code: 1.7 us and 37 us). Each
+      `.cargo/config.toml` selects for aarch64 (the portable code: 1.7 us and 37 us).
+      Decided (2026-11-06): stay on chacha20poly1305 0.10 (chacha20 0.9), whose NEON backend needs
+      `--cfg chacha20_force_neon` in the top-level build; products building Orion as a
+      dependency set it for aarch64. chacha20 0.10 (chacha20poly1305 0.11) picks NEON without a
+      cfg, but under `opt-level = "z"` its NEON code takes 55 us per 4 KiB (6 us at
+      `opt-level = 3`), slower than 0.9's portable code, and fat LTO overrides per-package opt
+      levels. `orion_auth::link_channel::PORTABLE_CHACHA20` (build.rs) reports a build without
+      the cfg; the node warns when a `tcp:` link starts on it, an aarch64 unit test fails on it,
+      and `link_channel_cost` with `LINK_CHANNEL_MAX_SEAL_4K_NS=25000` fails above 25 us. Each
       request is authorized by the operator's policy at the time, and a removed operator's
       connections close within a second (its watches stop). Tests: `link_gateway/tests/remote_link.rs`, `link_channel` unit tests.
 - [x] **A throttled Unix connection could be declared lost** (fixed 2026-11-06). Unix links

@@ -4,9 +4,15 @@
 //! ```text
 //! cargo run --release -p orion-auth --features link-channel --example link_channel_cost
 //! ```
+//!
+//! With `LINK_CHANNEL_MAX_SEAL_4K_NS` set, it exits with status 1 when sealing a 4 KiB frame
+//! takes longer: a check that a build got ChaCha20's SIMD backend (NEON on aarch64, which
+//! chacha20 0.10 selects at compile time) and not the portable code. On a Cortex-A76 the SIMD
+//! backend takes about 16 us and the portable code about 37 us, so 25000 tells them apart. On aarch64 that needs
+//! `--cfg chacha20_force_neon` (`crates/auth/build.rs`).
 
 use orion_auth::crypto::SigningKey;
-use orion_auth::link_channel::{ClientHandshake, ServerHandshake};
+use orion_auth::link_channel::{ClientHandshake, PORTABLE_CHACHA20, ServerHandshake};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -24,6 +30,7 @@ fn main() {
         let server = server.finish(&done.auth).expect("server finish");
         (done, server)
     };
+    println!("portable ChaCha20 (no SIMD backend in this build): {PORTABLE_CHACHA20}");
     let rounds = 200;
     let started = Instant::now();
     for _ in 0..rounds {
@@ -34,6 +41,9 @@ fn main() {
         started.elapsed().as_secs_f64() * 1e6 / f64::from(rounds)
     );
 
+    let ceiling: Option<f64> = std::env::var("LINK_CHANNEL_MAX_SEAL_4K_NS")
+        .ok()
+        .and_then(|value| value.parse().ok());
     let (mut client, _server) = handshake();
     for size in [16usize, 64, 256, 1024, 4096] {
         let payload = vec![0x5au8; size];
@@ -68,5 +78,12 @@ fn main() {
             "{size:>5} B frame: seal {seal:>7.0} ns, open {open:>7.0} ns, {:.0} MB/s sealed",
             size as f64 / seal * 1e3
         );
+        if size == 4096
+            && let Some(ceiling) = ceiling
+            && seal > ceiling
+        {
+            eprintln!("sealing 4 KiB took {seal:.0} ns, over {ceiling:.0}: the portable backend?");
+            std::process::exit(1);
+        }
     }
 }
