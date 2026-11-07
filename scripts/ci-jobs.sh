@@ -341,7 +341,7 @@ job_fuzz() {
     local t secs="${FUZZ_SECONDS:-60}"
     for t in decode_payload host_session device_session; do
         step fuzz "fuzz $t (${secs}s)" \
-            bash -c "cd crates/link/fuzz && cargo +nightly fuzz run --locked $t -- -max_total_time=$secs -rss_limit_mb=2048"
+            bash -c "cd crates/link/fuzz && cargo +nightly fuzz run $t -- -max_total_time=$secs -rss_limit_mb=2048"
     done
 }
 
