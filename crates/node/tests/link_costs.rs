@@ -71,6 +71,41 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static GLOBAL: Counting = Counting;
 
+/// Context switches so far of the runtime's worker threads (`tokio-rt-worker`): each one is a
+/// wake-up of the node. Linux only; 0 elsewhere.
+fn worker_wakeups() -> u64 {
+    // Reading /proc allocates; that is the test's cost, not the node's.
+    let was = IGNORED.with(|ignored| ignored.replace(true));
+    let wakeups = read_worker_wakeups();
+    IGNORED.with(|ignored| ignored.set(was));
+    wakeups
+}
+
+fn read_worker_wakeups() -> u64 {
+    let Ok(tasks) = std::fs::read_dir("/proc/self/task") else {
+        return 0;
+    };
+    tasks
+        .filter_map(Result::ok)
+        .filter(|task| {
+            std::fs::read_to_string(task.path().join("comm"))
+                .is_ok_and(|name| name.trim() == "tokio-rt-worker")
+        })
+        .filter_map(|task| std::fs::read_to_string(task.path().join("status")).ok())
+        .map(|status| {
+            status
+                .lines()
+                .filter_map(|line| {
+                    let (key, value) = line.split_once(':')?;
+                    key.ends_with("voluntary_ctxt_switches")
+                        .then(|| value.trim().parse::<u64>().ok())
+                        .flatten()
+                })
+                .sum::<u64>()
+        })
+        .sum()
+}
+
 fn snapshot() -> (u64, u64) {
     (
         ALLOCATIONS.load(Ordering::Relaxed),
@@ -289,9 +324,11 @@ fn what_a_message_costs_the_node_on_a_unix_link() {
 
     // Idle: what the node allocates per second with one quiet session.
     let before = snapshot();
+    let wakeups_before = worker_wakeups();
     let idle_for = Duration::from_secs(1);
     std::thread::sleep(idle_for);
     let after = snapshot();
+    let idle_wakeups = worker_wakeups() - wakeups_before;
     let idle = (after.0 - before.0, after.1 - before.1);
 
     // Status updates from the provider, nobody watching.
@@ -422,9 +459,10 @@ fn what_a_message_costs_the_node_on_a_unix_link() {
     );
 
     println!(
-        "node idle, one session: {:.0} allocs/s, {:.0} B/s allocated",
+        "node idle, one session: {:.0} allocs/s, {:.0} B/s allocated, {:.0} wake-ups/s",
         idle.0 as f64 / idle_for.as_secs_f64(),
-        idle.1 as f64 / idle_for.as_secs_f64()
+        idle.1 as f64 / idle_for.as_secs_f64(),
+        idle_wakeups as f64 / idle_for.as_secs_f64()
     );
     print("status update (no watcher)", &publish);
     print("status update fanned out to 1 watch", &watched);
@@ -449,7 +487,9 @@ fn what_a_message_costs_the_node_on_a_unix_link() {
         "stream batch: {:.1} allocs",
         streamed.allocations
     );
-    assert!(idle.0 < 20_000, "idle: {} allocs in a second", idle.0);
+    // Idle allocates nothing today (link status is updated in place, only when it changed); a
+    // few allocations of slack keep the test calm on a busy machine.
+    assert!(idle.0 <= 10, "idle: {} allocs in a second", idle.0);
 
     drop((provider, watcher));
     runtime.block_on(gateway.shutdown());

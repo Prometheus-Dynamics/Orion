@@ -460,17 +460,31 @@ impl LinkContext {
     }
 
     /// Publishes the status (`NodeApp::link_status`).
+    /// Hands the link's counters and devices to the node. Called on every turn of the link's
+    /// loop, so it allocates nothing when nothing changed: the device and action lists are rebuilt
+    /// only when they differ, and the node's copy is updated in place only when it differs.
     pub(super) fn publish_status(&mut self) {
-        self.status.devices = self.accepted.iter().cloned().collect();
-        self.status.actions = self
-            .declared
-            .iter()
-            .map(|(device, names)| LinkDeviceActions {
-                device: device.clone(),
-                names: names.clone(),
-            })
-            .collect();
-        self.app.record_link_status(self.status.clone());
+        if !self.status.devices.iter().eq(self.accepted.iter()) {
+            self.status.devices = self.accepted.iter().cloned().collect();
+        }
+        let actions_match = self.status.actions.len() == self.declared.len()
+            && self
+                .status
+                .actions
+                .iter()
+                .zip(&self.declared)
+                .all(|(have, (device, names))| &have.device == device && &have.names == names);
+        if !actions_match {
+            self.status.actions = self
+                .declared
+                .iter()
+                .map(|(device, names)| LinkDeviceActions {
+                    device: device.clone(),
+                    names: names.clone(),
+                })
+                .collect();
+        }
+        self.app.record_link_status(&self.status);
     }
 
     /// Gateway shutdown: mark every device of this link lost.

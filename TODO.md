@@ -689,9 +689,13 @@ interfaces and risk. Slices, in dependency order:
 
 ### Leanness and hardware paths (2026-11-07, from the coordinator)
 
-- [ ] Idle allocations: the node does 70 allocations per second when idle; the target is 0.
-      Attribute them (which timers or tasks), fix them, and report idle wakeups per second.
-      Also measure the per-message link costs in release builds.
+- [x] Idle allocations: 70 per second to 0. They came from the link task's status republish
+      on every tick, which is now an in-place update made only on change. The link cost test
+      gates idle allocations at 10 or fewer per second and prints wake-ups; release numbers are
+      recorded in docs/performance-concurrency.md.
+- [ ] Idle wake-ups: 20 per second with one link session. 10 are the link task's fixed tick;
+      schedule it from the next deadline (device loss, lease refresh, rate limits, operator
+      recheck) for the unix, serial and CAN loops.
 - [ ] MCU proof on an STM32G4 (thumbv7em-none-eabihf, FDCAN): a device-tier example that
       publishes one record and one stream over FDCAN and UART. A CI gate for flash
       (.text+.rodata+.data) and static RAM (.data+.bss and the stack high-water), tracked per

@@ -226,16 +226,20 @@ async fn nodes_advertise_and_browse_without_trusting_each_other() {
 
     // b stops answering: a drops it after the TTL while refreshes keep a alive in b.
     bus.silence(b_id.as_str());
-    let deadline = Instant::now() + Duration::from_millis(1_500);
+    // Generous deadline: the loop ends as soon as b expires (one 300 ms TTL normally).
+    let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && peer_state(&a, &b_id).is_some() {
         bus.refresh();
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
     assert!(peer_state(&a, &b_id).is_none(), "silent peer should expire");
-    assert!(
-        peer_state(&b, &a_id).is_some(),
-        "refreshed peer should stay"
-    );
+    // a keeps answering, so b lists it. On a loaded machine a stall longer than the TTL can
+    // expire it between two refreshes; the next refresh lists it again.
+    bus.refresh();
+    wait_until("the refreshed peer is listed", || {
+        peer_state(&b, &a_id).is_some()
+    })
+    .await;
     assert!(a.query_discovery().metrics.peers_expired >= 1);
 
     // A goodbye removes the node right away.

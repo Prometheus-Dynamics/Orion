@@ -308,12 +308,23 @@ allocator counts the node's threads only: the test's clients run on threads it i
 build, x86_64, 2026-11-07; the test fails only on a blow-up (ceilings 10 to 20 times these), so it
 is a record to compare against, not a tight gate.
 
-| Path | Allocations | Bytes allocated | Wire in | Wire out |
+| Path | Allocations (debug / release) | Bytes allocated (release) | Wire in | Wire out |
 |---|---|---|---|---|
-| Provider status update, no watcher | 8.0 per update (was 12) | 580 B (was 1.4 KB) | 21 B | (acks batched) |
-| The same, fanned out to one status watch | 11.9 per update (was 16) | 1.6 KB (was 2.5 KB) | 21 B | coalesced |
-| Stream batch, 50 `f32` samples, one subscriber | 12 per batch | 2.2 KB | 326 B | 313 B |
-| Idle node, one quiet session | 70 per second | 1.5 KB per second | | |
+| Provider status update, no watcher | 8.0 / 8.0 per update (was 12) | 588 B (was 1.4 KB) | 21 B | (acks batched) |
+| The same, fanned out to one status watch | 11.9 / 11.2 per update (was 16) | 1.5 KB (was 2.5 KB) | 21 B | coalesced |
+| Stream batch, 50 `f32` samples, one subscriber | 11.8 / 12.1 per batch | 2.2 KB | 326 B | 313 B |
+| Idle node, one quiet session | 0 per second (was 70) | 0 | | |
+
+The release column is `cargo test --release` without LTO. Allocation counts barely change between
+the two builds, because they come from the code's data structures, not from debug checks.
+
+Idle, the node's runtime threads wake about 20 times per second (context switches of the
+`tokio-rt-worker` threads, printed by the same test). Ten of those are the link task's fixed
+tick (a quarter of the heartbeat, at most 100 ms), which drives loss detection, lease refresh and
+the rate limits; scheduling it from the next deadline instead is the next reduction. The idle
+allocations were the link task republishing its status snapshot on every tick: the snapshot is now
+updated in place, and only when it changed. The test fails if idle allocates more than 10 per
+second.
 
 Under a burst the status lane coalesces: 2,000 updates reached the watch as about 15 answers, and
 200 stream batches as about 16 messages. Allocations per update, not bytes, are what the next

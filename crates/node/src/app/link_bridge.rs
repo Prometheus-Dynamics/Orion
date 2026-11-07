@@ -420,8 +420,35 @@ impl NodeApp {
         self.state.links.desired_changed.subscribe()
     }
 
-    pub(crate) fn record_link_status(&self, status: LinkStatusSnapshot) {
-        lock(&self.state.links.status).insert(status.name.clone(), status);
+    /// Stores a link's latest snapshot. Allocation-free when it is unchanged (the common case:
+    /// the link task calls this on every turn) and reuses the stored buffers when it changed.
+    pub(crate) fn record_link_status(&self, status: &LinkStatusSnapshot) {
+        let mut all = lock(&self.state.links.status);
+        match all.get_mut(&status.name) {
+            Some(stored) if stored == status => {}
+            Some(stored) => {
+                // Field by field, so the strings and lists reuse their buffers (a derived
+                // `clone_from` would reallocate all of them on every counter change).
+                let mut name = std::mem::take(&mut stored.name);
+                let mut devices = std::mem::take(&mut stored.devices);
+                let mut actions = std::mem::take(&mut stored.actions);
+                let mut last_error = stored.last_error.take();
+                name.clone_from(&status.name);
+                devices.clone_from(&status.devices);
+                actions.clone_from(&status.actions);
+                last_error.clone_from(&status.last_error);
+                *stored = LinkStatusSnapshot {
+                    name,
+                    devices,
+                    actions,
+                    last_error,
+                    ..*status
+                };
+            }
+            None => {
+                all.insert(status.name.clone(), status.clone());
+            }
+        }
     }
 
     /// Counters and connected devices of every configured link (feature `link-gateway`).

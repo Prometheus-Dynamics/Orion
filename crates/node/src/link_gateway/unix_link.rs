@@ -173,6 +173,8 @@ pub(super) async fn run(
         );
     }
     let policy = ctx.app.local_admission.clone();
+    // Connection ids of one turn, kept across turns so a turn does not allocate.
+    let mut ids: Vec<u64> = Vec::new();
     let mut tick = tokio::time::interval(LinkContext::tick_period(host.heartbeat_ms));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut desired = ctx.app.link_desired_changes();
@@ -344,8 +346,9 @@ pub(super) async fn run(
         }
 
         let now = ctx.now_ms();
-        let ids: Vec<u64> = conns.keys().copied().collect();
-        for id in ids {
+        ids.clear();
+        ids.extend(conns.keys().copied());
+        for &id in &ids {
             let mut events = Vec::new();
             if let Some(conn) = conns.get_mut(&id) {
                 conn.session.poll(now);
