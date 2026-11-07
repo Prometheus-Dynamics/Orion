@@ -15,6 +15,9 @@ instead of silently falling back.
 | `ORION_NODE_IPC_SOCKET` | `${TMPDIR}/orion-<node-id>-control.sock` | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_IPC_STREAM_SOCKET` | `${TMPDIR}/orion-<node-id>-control-stream.sock` | Filesystem path | Invalid Unicode fails startup. |
 | `ORION_NODE_HTTP_PROBE_ADDR` | unset | Socket address | Invalid address fails startup. |
+| `ORION_NODE_IDENTITY_ADDR` | unset (off) | Socket address, for example `0.0.0.0:5899`, or `off` | The board identity endpoint (`GET /.well-known/pd-device`, identity contract 1, `crates/node/src/identity.rs`). It needs no HTTP feature. An invalid address fails startup; a bind failure fails startup. |
+| `ORION_NODE_IDENTITY_BASE` | unset | Path to the device package's identity document (one JSON object) | Passed through as it is, under the live fields. Unreadable or not an object: the built-in minimal document (serial, os, MACs) is served instead. |
+| `ORION_NODE_IDENTITY_SECURITY_FILES` | unset | Comma-separated `KEY=value` files | `BOARD_SECURITY` from the last file that sets it gives the live `security` field (`1` is `on`, anything else `off`). Missing files are skipped. |
 | `ORION_NODE_RUNTIME_WORKER_THREADS` | `2` | Positive integer | Zero or invalid integer fails startup. |
 | `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` | unset (Tokio default `512`) | Positive integer | Zero or invalid integer fails startup. |
 | `ORION_NODE_RECONCILE_MS` | `250` | Integer milliseconds, minimum effective value `1` | Invalid integer fails startup. Minimum idle gap between reconcile passes (see below); also the peer sync interval. |

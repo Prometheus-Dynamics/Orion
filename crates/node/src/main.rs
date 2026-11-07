@@ -287,6 +287,10 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     } else {
         None
     };
+    let identity_server = match &process.identity {
+        Some(identity) => Some(orion_node::identity::IdentityServer::start(identity).await?),
+        None => None,
+    };
     let snapshot = app.snapshot();
     let http_scheme = if app.http_tls_cert_path().is_some() {
         "https"
@@ -388,6 +392,9 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     }
     if let Some(discovery) = discovery {
         discovery.shutdown().await;
+    }
+    if let Some(identity_server) = identity_server {
+        identity_server.shutdown().await;
     }
     link_gateway.shutdown().await;
     reconcile_loop.shutdown().await;

@@ -107,6 +107,9 @@ pub struct NodeProcessConfig {
     /// for single-node appliances that only use local IPC.
     pub http_enabled: bool,
     pub runtime_threads: NodeRuntimeThreads,
+    /// The board identity endpoint (`ORION_NODE_IDENTITY_ADDR`, off by default; see
+    /// [`crate::identity`]).
+    pub identity: Option<crate::identity::IdentityConfig>,
     /// Listener for `orion+tcp` peers (`ORION_NODE_PEER_ADDR`, feature `peer-tcp`).
     pub peer_tcp_addr: Option<SocketAddr>,
     /// Microcontroller links to serve (`ORION_NODE_LINKS`, feature `link-gateway`).
@@ -452,6 +455,7 @@ impl NodeProcessConfig {
         let shutdown_after_init = NodeConfig::try_shutdown_after_init_from_env()?;
         let http_enabled = NodeConfig::http_enabled_from_env();
         let runtime_threads = NodeRuntimeThreads::try_from_env()?;
+        let identity = crate::identity::IdentityConfig::try_from_env()?;
         let peer_tcp_addr = NodeConfig::try_peer_tcp_addr_from_env()?;
         #[cfg(feature = "link-gateway")]
         let links = crate::link_gateway::LinkConfig::try_from_env()?;
@@ -536,6 +540,7 @@ impl NodeProcessConfig {
                 shutdown_after_init,
                 http_enabled,
                 runtime_threads,
+                identity,
                 peer_tcp_addr,
                 #[cfg(feature = "link-gateway")]
                 links,

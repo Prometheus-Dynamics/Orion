@@ -18,6 +18,7 @@ mod config;
 #[cfg(feature = "discovery-mdns")]
 pub mod discovery;
 pub mod host_facts;
+pub mod identity;
 #[cfg(feature = "link-gateway")]
 pub mod link_gateway;
 mod lock;

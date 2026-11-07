@@ -8,6 +8,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- `orion-node` link tasks allocate nothing while idle (70 allocations per second before): a
+  link's status snapshot is updated in place, and only when it changed.
+
 - `orion-transport-http`'s `client` (and so `orionctl` and the node's HTTP client) no longer uses
   reqwest or hyper: HTTP/1.1 over tokio with kept-alive connections, rustls for https, system
   roots from rustls-native-certs. `HttpTransportError::request_failed_from_reqwest` is removed.
@@ -17,6 +20,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   holds 4 KiB of read buffer instead of 128 KiB. Messages larger than 4 KiB still arrive whole.
 
 ### Added
+
+- `orion-node` serves the board identity document (contract 1, `GET /.well-known/pd-device`)
+  when `ORION_NODE_IDENTITY_ADDR` is set. It passes the device package's document through
+  (`ORION_NODE_IDENTITY_BASE`), or builds a minimal one from host facts, and computes `hostname`,
+  `time` and `security` on every request. A small built-in responder serves it, so builds without
+  `transport-http` have it too. This is the first slice of the hello in
+  `docs/design/comm-core.md`.
 
 - Streams from serial and CAN devices (interface revision 2): the no_std device session's
   feature `streams` (`DeviceSession::declare_stream`, `publish_stream`, `stream_demand`,
