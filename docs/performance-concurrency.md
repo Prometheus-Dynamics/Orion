@@ -310,8 +310,8 @@ is a record to compare against, not a tight gate.
 
 | Path | Allocations | Bytes allocated | Wire in | Wire out |
 |---|---|---|---|---|
-| Provider status update, no watcher | 9.3 per update (was 12) | 640 B (was 1.4 KB) | 21 B | (acks batched) |
-| The same, fanned out to one status watch | 13.5 per update (was 16) | 1.7 KB (was 2.5 KB) | 21 B | coalesced |
+| Provider status update, no watcher | 8.0 per update (was 12) | 580 B (was 1.4 KB) | 21 B | (acks batched) |
+| The same, fanned out to one status watch | 11.9 per update (was 16) | 1.6 KB (was 2.5 KB) | 21 B | coalesced |
 | Stream batch, 50 `f32` samples, one subscriber | 12 per batch | 2.2 KB | 326 B | 313 B |
 | Idle node, one quiet session | 70 per second | 1.5 KB per second | | |
 
@@ -323,4 +323,7 @@ lane, per-message queue nodes); the idle rate is timers and heartbeats.
 The status store's update path was the first reduction. A publish batch is a sorted `Vec`, not a
 `BTreeMap`. A publisher that updates its own key reuses the stored publisher name and count. The
 expiry index is keyed by `(deadline, id)` with the id in the entry, so it no longer clones the key
-twice per update.
+twice per update. The link bridge builds a device's publisher name (`link:<link>/<device>`) once,
+when the device claims its provider, instead of formatting it on every batch. What remains is
+mostly decoding: the frame, the device name, the entry list and each key are owned values. Below
+that, the work is borrowed decoding.

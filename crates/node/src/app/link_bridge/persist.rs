@@ -64,6 +64,7 @@ impl NodeApp {
                         link: record.link.clone(),
                         device: record.device.clone(),
                         connected: false,
+                        publisher: format!("link:{}/{}", record.link, record.device).into(),
                         provider: provider.clone(),
                         resources: record.resources.clone(),
                     }),

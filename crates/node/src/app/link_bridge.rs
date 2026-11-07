@@ -31,7 +31,7 @@ use orion::{
 };
 use orion_link::message::StatusEntry as LinkStatusEntry;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use tracing::warn;
 
 /// Shared bridge state, one per node.
@@ -76,6 +76,9 @@ struct DeviceClaim {
     link: String,
     device: String,
     connected: bool,
+    /// The status-lane publisher name, `link:<link>/<device>`, built once at claim time so the
+    /// per-batch publish path does not format it.
+    publisher: Arc<str>,
     provider: ProviderRecord,
     resources: Vec<ResourceRecord>,
 }
@@ -151,6 +154,7 @@ impl NodeApp {
                     link: link.to_owned(),
                     device: device.to_owned(),
                     connected: true,
+                    publisher: Arc::from(format!("link:{link}/{device}")),
                     provider: provider.clone(),
                     resources: resources.clone(),
                 }),
@@ -255,13 +259,18 @@ impl NodeApp {
     /// The device must have an accepted provider snapshot on `link`.
     /// The provider of `device` on `link`, while it is connected with an accepted snapshot.
     pub(crate) fn link_device_provider(&self, link: &str, device: &str) -> Option<ProviderId> {
+        self.link_device_publisher(link, device).map(|(id, _)| id)
+    }
+
+    /// The provider of a connected `device` on `link` and its status-lane publisher name.
+    fn link_device_publisher(&self, link: &str, device: &str) -> Option<(ProviderId, Arc<str>)> {
         lock(&self.state.links.owners)
             .iter()
             .find_map(|(id, owner)| match owner {
                 ProviderOwner::Device(claim)
                     if claim.connected && claim.link == link && claim.device == device =>
                 {
-                    Some(id.clone())
+                    Some((id.clone(), claim.publisher.clone()))
                 }
                 _ => None,
             })
@@ -273,11 +282,12 @@ impl NodeApp {
         device: &str,
         entries: Vec<LinkStatusEntry>,
     ) -> Result<(), LinkRejection> {
-        let provider_id = self.link_device_provider(link, device).ok_or_else(|| {
-            LinkRejection(format!(
-                "device `{device}` has no accepted provider snapshot on {link}"
-            ))
-        })?;
+        let (provider_id, publisher) =
+            self.link_device_publisher(link, device).ok_or_else(|| {
+                LinkRejection(format!(
+                    "device `{device}` has no accepted provider snapshot on {link}"
+                ))
+            })?;
         let entries = entries
             .into_iter()
             .map(|entry| {
@@ -289,7 +299,7 @@ impl NodeApp {
                 .with_ttl_ms(u64::from(entry.ttl_ms))
             })
             .collect();
-        self.publish_status_as(&format!("link:{link}/{device}"), entries)
+        self.publish_status_as(&publisher, entries)
             .map_err(|error| LinkRejection(error.to_string()))
     }
 
