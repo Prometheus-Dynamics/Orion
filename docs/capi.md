@@ -185,3 +185,8 @@ pending events; a latest-value connection holds nothing between calls. One `orio
 Size: a C program linked statically against the release `liborion.a` (aarch64 musl, stripped)
 is 435 KiB, musl included. It ran on a Cortex-A76 board with the same `ORION_LAYOUT_HASH` as on
 x86_64.
+
+Actions, records and streams (2026-11-07) cost the shared library 75 KiB, mostly JSON for results
+and records: the release `liborion.so` (x86_64, stripped) went from 460,456 to 537,304 bytes. A
+static program pays only for what it calls (`--gc-sections`): the smoke test, which uses none of
+them, grew 16 KiB (444,224 to 460,624 bytes, glibc).
