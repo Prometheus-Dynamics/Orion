@@ -664,6 +664,21 @@ manager, which keeps out-of-band paths that never depend on Orion. Milestones in
       remote transport (step 6), action policies scoped to targets with its authorization, and
       cluster-wide operator trust stays per node until a consumer needs it.
 
+### Communication core and access (design 2026-11-07, from the coordinator)
+
+Design notes: docs/design/comm-core.md and docs/design/access-ssh.md. They are sized in lines,
+interfaces and risk. Slices, in dependency order:
+
+- [ ] Hello document: signed identity in the comm core, in mDNS TXT and over `orion+tcp`.
+      Waiting on the board identity contract's field list (asked the coordinator 2026-11-07).
+- [ ] Access services: `orion-node access` process with SSH, sftp helper, local forwarding,
+      safe mode, and the `reboot` claim. +1,062,744 B on x86_64, +965,352 B on aarch64 musl.
+- [ ] Extract the comm core from `orion-node`, about 16,700 lines, module by module.
+- [ ] Status and stream relay without node logic.
+- [ ] Backplane between the comm core and the node logic.
+- [ ] Supervisor for systemd-less images; `comm-core-min` static musl build with a CI size gate.
+- [ ] Hardware-layer handle offers (`SCM_RIGHTS`); `usb-bulk` / `usb-gadget` link transport.
+
 ### Decided, starts when the user says
 
 Decided by the user on 2026-11-03; none of it has started. New work stays paused until the user
