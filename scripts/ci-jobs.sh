@@ -3,7 +3,7 @@
 # same commands. Each step prints its wall time and CPU time (user + system), and a summary at the
 # end; under GitHub Actions the steps are collapsible groups.
 #
-#   ./scripts/ci-jobs.sh <job>...        jobs: workspace lints no-std link allocators appliance cross32
+#   ./scripts/ci-jobs.sh <job>...        jobs: workspace lints no-std link allocators appliance cross32 qemu qemu-node
 #   ./scripts/ci-jobs.sh all             every job above, in order
 #   CI_JOBS_TIMINGS=file.tsv ...         also append "job<TAB>step<TAB>wall_s<TAB>cpu_s<TAB>rc" rows
 #
@@ -311,13 +311,37 @@ job_cross32() {
         done' _ "${CARGO_TARGET_DIR:-target}" "$riscv" "$armv7"
 }
 
+# The wire and its users on the board CPUs, under qemu-user: aarch64 (Pi-class boards) and armv7
+# (32-bit, so `usize` and alignment differ from the x86_64 host). The link crate with its recorded
+# fixtures and allocation counts, the control-plane records, and NT4. Each target's runner and
+# sysroot are set by the CI workflow (docs/development.md, "CI jobs").
+job_qemu() {
+    local t
+    for t in aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf; do
+        step qemu "test orion-link [all-features] $t" \
+            cargo test --locked -p orion-link --all-features --target "$t"
+        step qemu "test orion-control-plane [all-features] $t" \
+            cargo test --locked -p orion-control-plane --all-features --target "$t"
+        step qemu "test orion-nt4 [all-features] $t" \
+            cargo test --locked -p orion-nt4 --all-features --target "$t"
+    done
+}
+
+# The node's link gateway (serial, CAN bridging, Unix sessions, streams) on aarch64 under
+# qemu-user, one test at a time: the timing-based tests fail when run in parallel under emulation.
+job_qemu_node() {
+    step qemu-node "test orion-node [link-gateway] aarch64 (serial)" \
+        cargo test --locked -p orion-node --no-default-features --features link-gateway --lib \
+        --target aarch64-unknown-linux-gnu -- --test-threads=1
+}
+
 jobs=("$@")
 if [[ ${#jobs[@]} == 0 ]]; then
-    echo "usage: $0 <workspace|lints|no-std|link|allocators|appliance|cross32|all>..." >&2
+    echo "usage: $0 <workspace|lints|no-std|link|allocators|appliance|cross32|qemu|qemu-node|all>..." >&2
     exit 2
 fi
 if [[ "${jobs[*]}" == "all" ]]; then
-    jobs=(workspace lints no-std link allocators appliance cross32)
+    jobs=(workspace lints no-std link allocators appliance cross32 qemu qemu-node)
 fi
 for job in "${jobs[@]}"; do
     case "$job" in
@@ -328,6 +352,8 @@ for job in "${jobs[@]}"; do
         allocators) job_allocators ;;
         appliance) job_appliance ;;
         cross32) job_cross32 ;;
+        qemu) job_qemu ;;
+        qemu-node) job_qemu_node ;;
         *) echo "unknown job: $job" >&2; exit 2 ;;
     esac
 done

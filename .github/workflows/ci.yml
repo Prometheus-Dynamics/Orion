@@ -248,6 +248,57 @@ jobs:
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
         run: ./scripts/ci-jobs.sh appliance
 
+  qemu:
+    # The link crate (recorded fixtures, allocation counts), the control-plane records and NT4
+    # under qemu-user on aarch64 and armv7 (32-bit), on every push: the wire must decode the same
+    # on the board CPUs as on the x86_64 host.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
+          targets: aarch64-unknown-linux-gnu, armv7-unknown-linux-gnueabihf
+
+      - name: Install cross compilers and qemu-user
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+            gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-static
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Tests under qemu (scripts/ci-jobs.sh qemu)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static -L /usr/aarch64-linux-gnu
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+          CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc
+          AR_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-ar
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER: qemu-arm-static -L /usr/arm-linux-gnueabihf
+        run: ./scripts/ci-jobs.sh qemu
+
+      - name: Node link gateway tests under qemu aarch64 (scripts/ci-jobs.sh qemu-node)
+        # About ten minutes, one test at a time: on dispatch and the schedule only.
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static -L /usr/aarch64-linux-gnu
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+          CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc
+          AR_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-ar
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER: qemu-arm-static -L /usr/arm-linux-gnueabihf
+        run: ./scripts/ci-jobs.sh qemu-node
+
   cross32:
     # The IPC-only orion-node and orionctl for the K230D (riscv64) and Flame (RV1106G2, Cortex-A7,
     # armv7) boards: cross-built in release for riscv64gc-unknown-linux-gnu and
