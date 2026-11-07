@@ -6,6 +6,7 @@
 
 use core::ffi::{CStr, c_char};
 use core::mem::{align_of, offset_of, size_of};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::os::fd::IntoRawFd;
 use std::path::Path;
@@ -18,6 +19,9 @@ use orion_core::{ExecutorId, NodeId, ProviderId, ResourceId, WorkloadId};
 
 use crate::latest::{LatestClient, Reply};
 use crate::link::{self, Event, LinkClient};
+
+mod requests;
+pub use requests::*;
 
 /// Breaking changes to this surface.
 pub const ORION_ABI_MAJOR: u16 = 1;
@@ -506,7 +510,7 @@ fn subject_parts(subject: &StatusSubject) -> (u32, &str) {
 }
 
 /// Fills `out` from `event`; returns the bytes it needs, in order.
-fn describe<'a>(event: &'a Event, out: &mut OrionEvent) -> [&'a [u8]; 3] {
+fn describe<'a>(event: &'a Event, out: &mut OrionEvent) -> [Cow<'a, [u8]>; 3] {
     let none: &[u8] = &[];
     let mut parts = [none; 3];
     out.flags = 0;
@@ -514,6 +518,10 @@ fn describe<'a>(event: &'a Event, out: &mut OrionEvent) -> [&'a [u8]; 3] {
     out.value_type = ORION_VALUE_NONE;
     (out.int_value, out.uint_value, out.float_value) = (0, 0, 0.0);
     (out.ttl_ms, out.published_at_ms, out.reserved) = (0, 0, 0);
+    if let Some(parts) = requests::describe(event, out) {
+        set_lengths(out, &parts);
+        return parts;
+    }
     match event {
         Event::Status {
             req,
@@ -558,10 +566,17 @@ fn describe<'a>(event: &'a Event, out: &mut OrionEvent) -> [&'a [u8]; 3] {
             out.uint_value = u64::from(*code);
             parts[2] = reason.as_bytes();
         }
+        // Described by `requests::describe`.
+        _ => {}
     }
-    let len = |part: &[u8]| u32::try_from(part.len()).unwrap_or(u32::MAX);
-    (out.subject_len, out.key_len, out.data_len) = (len(parts[0]), len(parts[1]), len(parts[2]));
+    let parts = parts.map(Cow::Borrowed);
+    set_lengths(out, &parts);
     parts
+}
+
+fn set_lengths(out: &mut OrionEvent, parts: &[Cow<'_, [u8]>; 3]) {
+    let len = |part: &[u8]| u32::try_from(part.len()).unwrap_or(u32::MAX);
+    (out.subject_len, out.key_len, out.data_len) = (len(&parts[0]), len(&parts[1]), len(&parts[2]));
 }
 
 /// The next event, waiting up to `timeout_ms` (-1: until one comes, 0: only what has arrived).
@@ -607,7 +622,7 @@ pub unsafe extern "C" fn orion_link_next(
             return Ok(Status::BUFFER_TOO_SMALL);
         }
         let mut at = 0;
-        for part in parts {
+        for part in &parts {
             buf[at..at + part.len()].copy_from_slice(part);
             at += part.len();
         }

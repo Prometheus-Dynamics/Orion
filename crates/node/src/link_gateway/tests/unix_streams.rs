@@ -17,7 +17,7 @@ use orion_link::message::{
 
 const PROVIDER: &str = "provider.imu-board";
 
-fn now_us() -> u64 {
+pub(super) fn now_us() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock after 1970")
@@ -25,7 +25,7 @@ fn now_us() -> u64 {
 }
 
 /// `count` samples 1 ms apart from `t0_us`.
-fn chunk(t0_us: u64, count: u64) -> SampleChunk {
+pub(super) fn chunk(t0_us: u64, count: u64) -> SampleChunk {
     let mut builder = SampleChunkBuilder::new(0, SeriesKind::F32);
     for i in 0..count {
         builder.push(t0_us + i * 1_000, i as f64);

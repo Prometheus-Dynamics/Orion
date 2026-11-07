@@ -66,7 +66,7 @@ the shared library).
 ## Link client
 
 A client session on a node's `unix:` link (docs/link-protocol.md, client role): status queries
-and watches.
+and watches, actions, record queries and watches, and stream subscriptions.
 
 ```c
 LemnosHandle link;
@@ -96,8 +96,35 @@ waits. A program with its own event loop polls `orion_link_fd` for reading and w
 latest after `orion_link_service_in_ms`, then calls `orion_link_next(link, 0, ...)` until it
 returns `-EAGAIN`.
 
-Not in this version (they follow as minor additions): running and watching actions, record reads
-and watches, and stream subscriptions.
+### Actions, records and streams
+
+Their answers are `OrionEvent`s too, read with the same `orion_link_next`, so one loop serves
+every request of a session; `req` tells them apart.
+
+- `orion_link_action_run(link, ORION_SUBJECT_NODE, "node-a", "blink-1", "blink",
+  "{\"times\": 3}", 0, &req)` runs an action (target kind `ORION_SUBJECT_NODE`, `_PROVIDER`,
+  `_RESOURCE` or `_EXECUTOR`; arguments as a JSON object of scalars or `NULL`; a deadline in ms
+  or 0). `orion_link_action_watch(link, action_id_or_NULL, &req)` watches. Each state is an
+  `ORION_EVENT_ACTION`: subject = target id, key = action id, data = the result as JSON,
+  `uint_value` = `ORION_ACTION_*` (final: `SUCCEEDED`, `FAILED`, `REJECTED`, `TIMED_OUT`,
+  `CANCELLED`), `int_value` = progress in per-mille or -1.
+- `orion_link_record_query` / `orion_link_record_watch(link, kind, id_or_NULL, node_or_NULL,
+  &req)` read workloads, resources, providers or executors (`kind` is the `ORION_SUBJECT_*` of
+  the same name). `ORION_EVENT_RECORD`: `subject_kind` and subject = the record's kind and id,
+  data = the record as JSON; `ORION_EVENT_RECORD_REMOVED` when one leaves a watch's set.
+- `orion_link_stream_subscribe(link, owner_kind, owner_id, stream_id, series_or_NULL,
+  min_interval_us, backfill_ms, &req)` follows a stream (`series`: comma-separated names or
+  `prefix*` patterns). First the catalog, one `ORION_EVENT_STREAM_SERIES` per series (key =
+  name, data = unit, `int_value` = index, `uint_value` = epoch, `ttl_ms` = sampling period in
+  microseconds, `ORION_EVENT_LIVE` when published), then `ORION_EVENT_STREAM_SAMPLES` (`int_value`
+  = series index, `uint_value` = batch sequence, data = `data_len / 16` pairs of a native-endian
+  `uint64_t` time in microseconds and a `double`, `ORION_EVENT_BOOTSTRAP` for the backfill), each
+  batch ending with `ORION_EVENT_ANSWERED`. `ORION_EVENT_STREAM_RESET` (`uint_value` =
+  `ORION_STREAM_RESET_*`) says the position no longer holds; a new catalog follows unless the
+  stream is gone. `orion_link_end(link, req)` ends a watch or subscription.
+
+JSON data is the node's own serde form of `ActionResult` and of the records
+(docs/link-protocol.md); it is bytes in the buffer like any other data, not NUL-terminated.
 
 ## Latest-value client
 

@@ -15,7 +15,7 @@ use orion_capi::{
 use orion_link::message::{Message, ProviderState, Roles, StatusEntry as LinkStatus};
 use std::ffi::CString;
 
-const PROVIDER: &str = "provider.imu-board";
+pub(super) const PROVIDER: &str = "provider.imu-board";
 
 fn empty_event() -> OrionEvent {
     OrionEvent {
@@ -38,7 +38,7 @@ fn empty_event() -> OrionEvent {
 }
 
 /// A provider session publishing status on the link at `path`.
-async fn publisher(app: &NodeApp, path: &std::path::Path) -> RawClient {
+pub(super) async fn publisher(app: &NodeApp, path: &std::path::Path) -> RawClient {
     let publisher = RawClient::connect_as("imu-board", path, Roles::PROVIDER).await;
     publisher.send(Message::ProviderState(ProviderState {
         provider: device_provider(PROVIDER),
@@ -49,7 +49,7 @@ async fn publisher(app: &NodeApp, path: &std::path::Path) -> RawClient {
 }
 
 /// The next event through the C surface, with its bytes.
-fn next(handle: abi::Handle, buf: &mut Vec<u8>) -> (OrionEvent, Vec<u8>) {
+pub(super) fn next(handle: abi::Handle, buf: &mut Vec<u8>) -> (OrionEvent, Vec<u8>) {
     let mut event = empty_event();
     loop {
         // SAFETY: a valid event and a buffer of `buf.len()` bytes.

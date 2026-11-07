@@ -147,6 +147,86 @@
 #define ORION_LAYOUT_HASH 2882856130551868970
 
 /*
+ A state of an action: `subject_kind` and the subject are its target, the key its action id,
+ the data its result as JSON. `uint_value` is `ORION_ACTION_*`, `int_value` the progress in
+ per-mille (-1: unknown), `published_at_ms` the time of the state.
+ */
+#define ORION_EVENT_ACTION 5
+
+/*
+ A record set or replaced: `subject_kind` is its kind, the subject its id, the data the record
+ as JSON. `ORION_EVENT_BOOTSTRAP` when part of the current set.
+ */
+#define ORION_EVENT_RECORD 6
+
+/*
+ A record gone from a watch's set: `subject_kind` and the subject name it.
+ */
+#define ORION_EVENT_RECORD_REMOVED 7
+
+/*
+ One series of a subscribed stream (the catalog, one event per series in index order, first
+ and again after a reset): the key is its name, the data its unit (may be empty), `int_value`
+ its index, `uint_value` the publisher's epoch, `value_type` its kind (`ORION_VALUE_F64`,
+ `ORION_VALUE_INT` or `ORION_VALUE_UINT`; samples are always doubles), `ttl_ms` its sampling
+ period in microseconds (0: on change). `ORION_EVENT_LIVE` when the stream has a publisher.
+ */
+#define ORION_EVENT_STREAM_SERIES 8
+
+/*
+ Samples of one series: `int_value` is its index, `uint_value` the batch's sequence, and the
+ data `data_len / 16` samples, each a native-endian `uint64_t` time (microseconds since the
+ Unix epoch) then a `double` value, oldest first (copy them out: the buffer may be unaligned).
+ `ORION_EVENT_BOOTSTRAP` for history (the backfill).
+ */
+#define ORION_EVENT_STREAM_SAMPLES 9
+
+/*
+ The subscription's position no longer holds: `uint_value` is `ORION_STREAM_RESET_*`. The
+ catalog and a backfill follow, unless the stream is gone.
+ */
+#define ORION_EVENT_STREAM_RESET 10
+
+/*
+ `ORION_EVENT_STREAM_SERIES`: the stream has a publisher.
+ */
+#define ORION_EVENT_LIVE 2
+
+#define ORION_ACTION_ACCEPTED 1
+
+#define ORION_ACTION_RUNNING 2
+
+#define ORION_ACTION_SUCCEEDED 3
+
+#define ORION_ACTION_FAILED 4
+
+#define ORION_ACTION_REJECTED 5
+
+#define ORION_ACTION_TIMED_OUT 6
+
+#define ORION_ACTION_CANCELLED 7
+
+/*
+ The publisher restarted or declared other series.
+ */
+#define ORION_STREAM_RESET_NEW_EPOCH 1
+
+/*
+ The position is older than the history the node keeps.
+ */
+#define ORION_STREAM_RESET_OUT_OF_RANGE 2
+
+/*
+ The subscriber fell too far behind; queued samples were dropped.
+ */
+#define ORION_STREAM_RESET_OVERRUN 3
+
+/*
+ The stream is gone.
+ */
+#define ORION_STREAM_RESET_REMOVED 4
+
+/*
  One thing the node said. Its bytes (subject id, then key, then data) are in the caller's
  buffer, back to back and not NUL-terminated.
  */
@@ -373,6 +453,88 @@ LemnosStatus orion_latest_next(LemnosHandle handle,
                                OrionLatestFrame *frame,
                                uint8_t *payload,
                                size_t cap);
+
+/*
+ Runs the action `name` on the target `target_kind` (`ORION_SUBJECT_NODE`, `_PROVIDER`,
+ `_RESOURCE` or `_EXECUTOR`) `target_id`, as `action_id` (resubmitting the same request follows
+ the existing action instead of running it again). `args_json` is null or a JSON object of
+ scalars; `deadline_ms` is 0 or the time the action has. `req` (may be null) receives the
+ request id: `ORION_EVENT_ACTION` events with it follow the action until a final state.
+
+ # Safety
+
+ The strings are null (`args_json` only) or NUL-terminated UTF-8; `req` is null or writable.
+ */
+LemnosStatus orion_link_action_run(LemnosHandle handle,
+                                   uint32_t target_kind,
+                                   const char *target_id,
+                                   const char *action_id,
+                                   const char *name,
+                                   const char *args_json,
+                                   uint64_t deadline_ms,
+                                   uint32_t *req);
+
+/*
+ Watches the action `action_id` (null: every action the session may see): `ORION_EVENT_ACTION`
+ events for the current states, then each change, each answer ending with
+ `ORION_EVENT_ANSWERED`.
+
+ # Safety
+
+ `action_id` is null or NUL-terminated UTF-8; `req` is null or writable.
+ */
+LemnosStatus orion_link_action_watch(LemnosHandle handle, const char *action_id, uint32_t *req);
+
+/*
+ Asks once for the records of `kind` (`ORION_SUBJECT_WORKLOAD`, `_RESOURCE`, `_PROVIDER` or
+ `_EXECUTOR`), only `record_id` if not null, only those of `node_id` if not null:
+ `ORION_EVENT_RECORD` events, then `ORION_EVENT_ANSWERED`.
+
+ # Safety
+
+ The strings are null or NUL-terminated UTF-8; `req` is null or writable.
+ */
+LemnosStatus orion_link_record_query(LemnosHandle handle,
+                                     uint32_t kind,
+                                     const char *record_id,
+                                     const char *node_id,
+                                     uint32_t *req);
+
+/*
+ Watches the records selected as for `orion_link_record_query`: the current set (a bootstrap),
+ then each change (`ORION_EVENT_RECORD`, `ORION_EVENT_RECORD_REMOVED`), each answer ending with
+ `ORION_EVENT_ANSWERED`.
+
+ # Safety
+
+ As `orion_link_record_query`.
+ */
+LemnosStatus orion_link_record_watch(LemnosHandle handle,
+                                     uint32_t kind,
+                                     const char *record_id,
+                                     const char *node_id,
+                                     uint32_t *req);
+
+/*
+ Subscribes to the stream `stream_id` of the subject `owner_kind` `owner_id`: the series in
+ `series` (null or empty: all; names or prefixes ending in `*`, separated by commas), at most
+ one sample per series per `min_interval_us` (0: every sample), starting with the last
+ `backfill_ms` of history (0: live only). The answers are `ORION_EVENT_STREAM_SERIES`, then
+ `ORION_EVENT_STREAM_SAMPLES`, each batch ending with `ORION_EVENT_ANSWERED`, until
+ `orion_link_end`.
+
+ # Safety
+
+ The strings are null (`series` only) or NUL-terminated UTF-8; `req` is null or writable.
+ */
+LemnosStatus orion_link_stream_subscribe(LemnosHandle handle,
+                                         uint32_t owner_kind,
+                                         const char *owner_id,
+                                         const char *stream_id,
+                                         const char *series,
+                                         uint32_t min_interval_us,
+                                         uint64_t backfill_ms,
+                                         uint32_t *req);
 
 #ifdef __cplusplus
 }  // extern "C"

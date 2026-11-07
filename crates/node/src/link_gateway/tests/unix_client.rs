@@ -250,7 +250,7 @@ async fn a_client_queries_and_watches_status_published_by_a_device_on_another_co
     gateway.shutdown().await;
 }
 
-fn node_app_with_blink(name: &str) -> NodeApp {
+pub(super) fn node_app_with_blink(name: &str) -> NodeApp {
     let socket =
         crate::test_temp::dir().join(format!("orion-lg-{name}-{}.sock", std::process::id()));
     NodeApp::builder()

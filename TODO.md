@@ -312,9 +312,9 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
 State of every open item (2026-11-06, when the leap started). Nothing else is open.
 
 - **The leap** (in progress, "Decided, starts when the user says" below): steps 5 to 8 are done
-  (step 7 as `liborion`'s first version, on the shared ABI crate). Open: `liborion`'s actions,
-  records and stream subscriptions, the static Rust wrapper and the static/shared build modes.
-  Streams on serial and CAN and `orionctl` without reqwest are done (2026-11-07).
+  (step 7 as `liborion`'s first version, on the shared ABI crate). Open: the static Rust wrapper
+  and the static/shared build modes. Streams on serial and CAN, `orionctl` without reqwest and
+  `liborion`'s actions, records and stream subscriptions are done (2026-11-07).
 - **Waiting on the user:** release mechanics (version 1.0.0, tag, release gates).
 - **Waiting on others:** protocol 1 on the reference board (the consumers' window).
 - **Blocked on hardware:** real MCU bring-up, the U8 board port, U9 hardware validation (no MCU
@@ -768,9 +768,15 @@ The shared ABI primitives wait until the hardware repository says they are ready
       (`abc9908`), not on crates.io, so both crates are `publish = false`; its name appears only
       in `Cargo.toml`, `Cargo.lock`, `crates/capi/include/` and `cbindgen.toml` (allowlisted in
       `scripts/check-neutral-names.sh`). CI job `capi`.
-- [ ] **`liborion` next (minor additions):** actions (run, query, watch), record reads and
-      watches, stream subscriptions; then the static Rust wrapper (`static`/`shared` features,
-      `compile_error!` when both).
+- [x] **`liborion` actions, records, streams** (2026-11-07, docs/capi.md "Actions, records and
+      streams"): five functions, answers as `OrionEvent`s on the same `orion_link_next`.
+      Decided: no new struct (the layout hash stays); JSON for action arguments (an object of
+      scalars), results and records, since their shapes are open-ended and C callers already
+      parse JSON elsewhere; samples as packed native-endian `{uint64_t t_us; double v}` pairs
+      (every series kind as a double, the kind in `value_type`); record kinds reuse
+      `ORION_SUBJECT_*`. No ABI minor bump on dev (frozen-interfaces dev rule); the release
+      decides the version.
+- [ ] **Static Rust wrapper** (`static`/`shared` features, `compile_error!` when both).
 - [x] **Versioned MCU template** (2026-11-07, step 8). The device session announces its
       interface revision in `Hello` (`DeviceConfig::revision`, default `LINK_INTERFACE_REVISION`,
       2 bytes more per `Hello`; 0 keeps the old bytes) and keeps the session's from `Welcome`
