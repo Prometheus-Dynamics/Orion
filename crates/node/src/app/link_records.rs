@@ -26,7 +26,7 @@ impl NodeApp {
         identity: &UnixPeerIdentity,
         wake: Arc<Notify>,
     ) -> Result<(), NodeError> {
-        self.serve_link_client_message(
+        self.serve_link_local_message(
             source,
             identity,
             ControlMessage::ClientHello(ClientHello {
@@ -69,7 +69,7 @@ impl NodeApp {
                 })
                 .collect()
         };
-        self.serve_link_client_message(
+        self.serve_link_local_message(
             source,
             identity,
             ControlMessage::ExecutorState(ExecutorStateUpdate {
@@ -79,7 +79,7 @@ impl NodeApp {
             }),
         )?;
         if watch {
-            self.serve_link_client_message(
+            self.serve_link_local_message(
                 source,
                 identity,
                 ControlMessage::WatchExecutorWorkloads(ExecutorWorkloadQuery { executor_id }),

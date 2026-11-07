@@ -8,6 +8,8 @@ pub mod discovery;
 #[cfg(feature = "enrollment")]
 pub mod enrollment;
 pub mod hex;
+#[cfg(feature = "link-channel")]
+pub mod link_channel;
 pub mod peer_tcp;
 
 use alloc::{

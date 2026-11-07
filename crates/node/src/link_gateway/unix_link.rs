@@ -25,21 +25,22 @@
 //! - Firmware transfers and `link.release` / `link.attach` do not apply: a Unix link has no port to
 //!   hand over.
 
-use super::UnixLinkConfig;
 use super::events::{LEASE_REFRESH, LeaseAction, LinkContext, LinkSend, REOPEN_DELAY};
+use super::remote_link::{self, ConnRead, ConnWrite, HANDSHAKE_TIMEOUT};
 use super::unix_client::{ANSWER_BYTES, LinkClient};
+use crate::app::LinkCaller;
 use crate::auth::{LocalAdmission, LocalAdmissionPolicy};
-use orion::transport::ipc::UnixPeerIdentity;
 use orion_link::Stream;
 use orion_link::host::{ActionSendError, HostConfig, HostEvent, HostSession};
 use std::collections::BTreeMap;
 use std::io;
+use std::net::SocketAddr;
 use std::os::unix::fs::FileTypeExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
@@ -112,8 +113,10 @@ struct Conn {
     backlog: Arc<AtomicUsize>,
     /// Wakes the connection's reader when the backlog falls below [`ANSWER_BYTES`].
     room: Arc<Notify>,
-    /// The caller's identity, for its session's client requests.
-    identity: UnixPeerIdentity,
+    /// Who the session's client requests are for.
+    caller: LinkCaller,
+    /// When an operator's enrollment was last checked ([`still_admitted`]).
+    checked: Instant,
     /// The current session's client and stream publisher.
     client: Option<LinkClient>,
 }
@@ -131,9 +134,32 @@ struct Retired {
     dropped: u64,
 }
 
+/// Where a link listens: a Unix socket path, or a TCP address (`tcp:` links, remote operators).
+#[derive(Clone, Debug)]
+pub(super) enum Endpoint {
+    Unix(PathBuf),
+    Tcp(SocketAddr),
+}
+
+/// What the link task listens with.
+pub(super) struct Listen {
+    pub(super) endpoint: Endpoint,
+    pub(super) max_connections: u32,
+}
+
+enum Listener {
+    Unix(UnixListener),
+    Tcp(TcpListener),
+}
+
+enum Incoming {
+    Unix(UnixStream),
+    Tcp(TcpStream, SocketAddr),
+}
+
 pub(super) async fn run(
     mut ctx: LinkContext,
-    config: UnixLinkConfig,
+    config: Listen,
     host: HostConfig,
     limits: ConnLimits,
     mut shutdown: watch::Receiver<bool>,
@@ -143,7 +169,10 @@ pub(super) async fn run(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut desired = ctx.app.link_desired_changes();
     let mut state_changes = ctx.app.link_state_changes();
-    let mut listener: Option<UnixListener> = None;
+    let mut listener: Option<Listener> = None;
+    // `tcp:` connections whose handshake finished, and how many are still in one.
+    let (ready_tx, mut ready) = mpsc::channel::<remote_link::Accepted>(8);
+    let handshaking = Arc::new(AtomicUsize::new(0));
     let mut reopen_at = Instant::now();
     let mut lease_refresh_at = Instant::now() + LEASE_REFRESH;
     let mut commands = ctx.open_actions();
@@ -158,13 +187,13 @@ pub(super) async fn run(
 
     loop {
         if listener.is_none() && Instant::now() >= reopen_at {
-            match bind(&config) {
+            match bind(&config.endpoint).await {
                 Ok(bound) => {
                     listener = Some(bound);
                     ctx.opened();
                 }
                 Err(error) => {
-                    ctx.io_error(&format!("bind {}", config.path.display()), &error);
+                    ctx.io_error(&format!("bind {}", endpoint_name(&config.endpoint)), &error);
                     reopen_at = Instant::now() + REOPEN_DELAY;
                 }
             }
@@ -195,8 +224,27 @@ pub(super) async fn run(
                 }
                 None => {}
             },
+            Some(accepted) = ready.recv() => {
+                handshaking.fetch_sub(1, Ordering::AcqRel);
+                if conns.len() >= config.max_connections as usize {
+                    warn!(link = %ctx.name, max_connections = config.max_connections, "link is full; closing the new connection");
+                } else {
+                    let conn = start_conn(
+                        next_id,
+                        accepted.reader,
+                        accepted.writer,
+                        accepted.caller,
+                        &host,
+                        limits,
+                        &inbound_tx,
+                        &drained,
+                    );
+                    conns.insert(next_id, conn);
+                    next_id += 1;
+                }
+            }
             accepted = accept(listener.as_ref()) => match accepted {
-                Ok(stream) => {
+                Ok(Incoming::Unix(stream)) => {
                     if let Some(conn) = admit(
                         &ctx.name,
                         &policy,
@@ -211,6 +259,35 @@ pub(super) async fn run(
                     ) {
                         conns.insert(next_id, conn);
                         next_id += 1;
+                    }
+                }
+                Ok(Incoming::Tcp(stream, peer)) => {
+                    // Handshakes count against the link's connections, so a flood of them cannot
+                    // grow past it.
+                    let open = conns.len() + handshaking.load(Ordering::Acquire);
+                    if open >= config.max_connections as usize {
+                        warn!(link = %ctx.name, %peer, max_connections = config.max_connections, "link is full; closing the new connection");
+                    } else {
+                        handshaking.fetch_add(1, Ordering::AcqRel);
+                        let (app, ready_tx, handshaking, link) =
+                            (ctx.app.clone(), ready_tx.clone(), handshaking.clone(), ctx.name.clone());
+                        tokio::spawn(async move {
+                            match tokio::time::timeout(
+                                HANDSHAKE_TIMEOUT,
+                                remote_link::handshake(&app, stream, peer),
+                            )
+                            .await
+                            {
+                                Ok(Ok(accepted)) => {
+                                    if ready_tx.send(accepted).await.is_ok() {
+                                        return;
+                                    }
+                                }
+                                Ok(Err(error)) => debug!(%link, %peer, %error, "tcp link handshake failed"),
+                                Err(_) => debug!(%link, %peer, "tcp link handshake timed out"),
+                            }
+                            handshaking.fetch_sub(1, Ordering::AcqRel);
+                        });
                     }
                 }
                 Err(error) => {
@@ -319,7 +396,7 @@ pub(super) async fn run(
                             &ctx.app,
                             &ctx.name,
                             device_name,
-                            conn.identity.clone(),
+                            conn.caller.clone(),
                             client_wake.clone(),
                             *roles,
                         ));
@@ -342,6 +419,16 @@ pub(super) async fn run(
                     // The device stays with its first connection: nothing of this one reached the
                     // provider path, so it is dropped without a `DeviceLost`.
                     retire(&mut retired, &conn.session);
+                }
+                continue;
+            }
+            // An operator removed while connected loses the connection, so its watches stop.
+            if conns
+                .get_mut(&id)
+                .is_some_and(|conn| !still_admitted(&ctx, conn))
+            {
+                if let Some(conn) = conns.remove(&id) {
+                    drop_conn(&mut ctx, &mut retired, conn);
                 }
                 continue;
             }
@@ -386,8 +473,8 @@ pub(super) async fn run(
     for (_, conn) in std::mem::take(&mut conns) {
         drop_conn(&mut ctx, &mut retired, conn);
     }
-    if listener.take().is_some() {
-        let _ = std::fs::remove_file(&config.path);
+    if let (Some(Listener::Unix(_)), Endpoint::Unix(path)) = (listener.take(), &config.endpoint) {
+        let _ = std::fs::remove_file(path);
     }
     update_stats(&mut ctx, &retired, &conns);
     ctx.close();
@@ -420,9 +507,23 @@ fn taken_elsewhere(conns: &BTreeMap<u64, Conn>, id: u64, device: &str) -> bool {
 }
 
 /// Binds the socket, replacing a stale socket file at the path (never any other kind of file).
-fn bind(config: &UnixLinkConfig) -> io::Result<UnixListener> {
-    match std::fs::symlink_metadata(&config.path) {
-        Ok(meta) if meta.file_type().is_socket() => std::fs::remove_file(&config.path)?,
+fn endpoint_name(endpoint: &Endpoint) -> String {
+    match endpoint {
+        Endpoint::Unix(path) => path.display().to_string(),
+        Endpoint::Tcp(addr) => addr.to_string(),
+    }
+}
+
+async fn bind(endpoint: &Endpoint) -> io::Result<Listener> {
+    match endpoint {
+        Endpoint::Unix(path) => bind_unix(path).map(Listener::Unix),
+        Endpoint::Tcp(addr) => TcpListener::bind(addr).await.map(Listener::Tcp),
+    }
+}
+
+fn bind_unix(path: &std::path::Path) -> io::Result<UnixListener> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_socket() => std::fs::remove_file(path)?,
         Ok(_) => {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
@@ -432,12 +533,19 @@ fn bind(config: &UnixLinkConfig) -> io::Result<UnixListener> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    UnixListener::bind(&config.path)
+    UnixListener::bind(path)
 }
 
-async fn accept(listener: Option<&UnixListener>) -> io::Result<UnixStream> {
+async fn accept(listener: Option<&Listener>) -> io::Result<Incoming> {
     match listener {
-        Some(listener) => listener.accept().await.map(|(stream, _)| stream),
+        Some(Listener::Unix(listener)) => listener
+            .accept()
+            .await
+            .map(|(stream, _)| Incoming::Unix(stream)),
+        Some(Listener::Tcp(listener)) => listener
+            .accept()
+            .await
+            .map(|(stream, peer)| Incoming::Tcp(stream, peer)),
         None => std::future::pending().await,
     }
 }
@@ -484,13 +592,39 @@ fn admit(
         ?admission,
         "unix link connection"
     );
+    let (reader, writer) = stream.into_split();
+    Some(start_conn(
+        id,
+        reader,
+        writer,
+        LinkCaller::Local(identity),
+        host,
+        limits,
+        inbound,
+        drained,
+    ))
+}
+
+/// Starts the I/O task of an admitted connection.
+#[allow(clippy::too_many_arguments)]
+fn start_conn<R: ConnRead, W: ConnWrite>(
+    id: u64,
+    reader: R,
+    writer: W,
+    caller: LinkCaller,
+    host: &HostConfig,
+    limits: ConnLimits,
+    inbound: &mpsc::Sender<Inbound>,
+    drained: &Arc<Notify>,
+) -> Conn {
     let (out, out_rx) = mpsc::unbounded_channel();
     let pending = Arc::new(AtomicUsize::new(0));
     let backlog = Arc::new(AtomicUsize::new(0));
     let room = Arc::new(Notify::new());
     tokio::spawn(serve_conn(
         id,
-        stream,
+        reader,
+        writer,
         out_rx,
         Shared {
             pending: pending.clone(),
@@ -501,15 +635,39 @@ fn admit(
         inbound.clone(),
         limits,
     ));
-    Some(Conn {
+    Conn {
         session: HostSession::stream(host.clone()),
         out,
         pending,
         backlog,
         room,
-        identity,
+        caller,
+        checked: Instant::now(),
         client: None,
-    })
+    }
+}
+
+/// How often an operator's connection checks that its operator is still enrolled.
+const OPERATOR_RECHECK: Duration = Duration::from_secs(1);
+
+/// Whether the connection may stay: an operator's (a `tcp:` link) is closed within
+/// [`OPERATOR_RECHECK`] of the operator's removal or key change. Requests are checked each time
+/// anyway; this ends the watches.
+fn still_admitted(ctx: &LinkContext, conn: &mut Conn) -> bool {
+    let LinkCaller::Operator { principal, key } = &conn.caller else {
+        return true;
+    };
+    if conn.checked.elapsed() < OPERATOR_RECHECK {
+        return true;
+    }
+    conn.checked = Instant::now();
+    match ctx.app.security.enrolled_operator(principal, *key, false) {
+        Ok(_) => true,
+        Err(error) => {
+            info!(link = %ctx.name, %error, "operator connection closed");
+            false
+        }
+    }
 }
 
 /// A closed connection: its device is lost, its counters retired. Dropping `conn.out` ends its
@@ -604,9 +762,10 @@ struct Shared {
     drained: Arc<Notify>,
 }
 
-async fn serve_conn(
+async fn serve_conn<R: ConnRead, W: ConnWrite>(
     id: u64,
-    stream: UnixStream,
+    mut reader: R,
+    writer: W,
     out: mpsc::UnboundedReceiver<Vec<u8>>,
     shared: Shared,
     inbound: mpsc::Sender<Inbound>,
@@ -618,7 +777,6 @@ async fn serve_conn(
         room,
         drained,
     } = shared;
-    let (mut reader, writer) = stream.into_split();
     // Writes run on their own, so a peer slow to take its output never stops the reads (its
     // pings) or the held notices.
     let (write_end_tx, mut write_end) = oneshot::channel();
@@ -652,7 +810,7 @@ async fn serve_conn(
             },
             () = tokio::time::sleep_until(wake.unwrap_or(now)), if wake.is_some() => {}
             () = room.notified(), if full => {}
-            read = reader.read(&mut buf), if !held => match read {
+            read = reader.read_bytes(&mut buf), if !held => match read {
                 Ok(0) => break None,
                 Ok(n) => {
                     let chunk = buf.get(..n).unwrap_or_default();
@@ -672,15 +830,15 @@ async fn serve_conn(
 
 /// Writes the connection's output until the link task drops it (`None`) or a write fails or
 /// takes longer than [`WRITE_TIMEOUT`].
-async fn write_out(
-    mut writer: tokio::net::unix::OwnedWriteHalf,
+async fn write_out<W: ConnWrite>(
+    mut writer: W,
     mut out: mpsc::UnboundedReceiver<Vec<u8>>,
     pending: &AtomicUsize,
     drained: &Notify,
 ) -> Option<io::Error> {
     while let Some(frame) = out.recv().await {
         let len = frame.len();
-        let written = tokio::time::timeout(WRITE_TIMEOUT, writer.write_all(&frame)).await;
+        let written = tokio::time::timeout(WRITE_TIMEOUT, writer.write_bytes(&frame)).await;
         let before = pending.fetch_sub(len, Ordering::AcqRel);
         if before >= QUEUE_BYTES && before - len < QUEUE_BYTES {
             drained.notify_one();
@@ -702,6 +860,7 @@ async fn write_out(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     fn shared() -> Shared {
         Shared {
@@ -720,9 +879,11 @@ mod tests {
         let shared = shared();
         let (backlog, room) = (shared.backlog.clone(), shared.room.clone());
         backlog.store(ANSWER_BYTES, Ordering::Release);
+        let (node_read, node_write) = node_side.into_split();
         tokio::spawn(serve_conn(
             1,
-            node_side,
+            node_read,
+            node_write,
             out_rx,
             shared,
             inbound_tx,
@@ -764,9 +925,11 @@ mod tests {
         let (_out, out_rx) = mpsc::unbounded_channel();
         let (inbound_tx, mut inbound) = mpsc::channel(64);
         // 20 frames a second: a burst of 20 reads at once, then one frame per 50 ms.
+        let (node_read, node_write) = node_side.into_split();
         tokio::spawn(serve_conn(
             1,
-            node_side,
+            node_read,
+            node_write,
             out_rx,
             shared(),
             inbound_tx,

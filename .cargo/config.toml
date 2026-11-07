@@ -4,5 +4,13 @@
 # default to this for aarch64; this pins it for toolchains configured otherwise. Note that a
 # RUSTFLAGS or CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS environment variable replaces
 # these flags; carry them over when you set one. See packaging/README.md.
+#
+# `chacha20_force_neon` selects the NEON backend of the `chacha20` crate (the `tcp:` link channel,
+# orion-auth `link-channel`): about 2.3x the portable code on a Cortex-A76 (16 us instead of 37 us
+# to seal a 4 KiB frame, docs/link-protocol.md "Remote links"). Every aarch64 Linux target has
+# NEON.
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=65536"]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=65536", "--cfg", "chacha20_force_neon"]
+
+[target.aarch64-unknown-linux-musl]
+rustflags = ["--cfg", "chacha20_force_neon"]

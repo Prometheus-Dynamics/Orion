@@ -230,3 +230,34 @@ fn a_malformed_request_body_is_answered_invalid() {
             && error.reason.chars().all(|c| c == 'é')
     ));
 }
+
+#[test]
+fn a_host_that_serves_no_devices_takes_only_the_client_role() {
+    let mut config = serving();
+    config.serve_executors = true;
+    config.serve_devices = false;
+    for roles in [
+        Roles::PROVIDER,
+        Roles::EXECUTOR,
+        Roles(Roles::PROVIDER.0 | Roles::EXECUTOR.0),
+    ] {
+        let mut client = Client::new(config.clone());
+        client.hello(roles, LINK_INTERFACE_REVISION, 4096);
+        assert_eq!(
+            client.received(),
+            vec![Message::Reject(RejectReason::UnsupportedRoles)],
+            "{roles:?}"
+        );
+    }
+    let mut client = Client::new(config);
+    client.hello(
+        Roles(Roles::PROVIDER.0 | Roles::EXECUTOR.0 | Roles::CLIENT.0),
+        LINK_INTERFACE_REVISION,
+        4096,
+    );
+    assert!(matches!(&client.received()[..], [Message::Welcome(_)]));
+    assert!(client.events().iter().any(|event| matches!(
+        event,
+        HostEvent::DeviceConnected { roles, .. } if *roles == Roles::CLIENT
+    )));
+}

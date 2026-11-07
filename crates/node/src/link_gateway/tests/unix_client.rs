@@ -363,5 +363,13 @@ async fn a_caller_admitted_only_to_the_provider_lane_is_not_authorized_for_clien
         client.next().await,
         Message::RequestError(e) if e.req == 9 && e.code == ErrorCode::NOT_AUTHORIZED
     ));
+    client.send(Message::RecordQuery(orion_link::message::RecordRequest {
+        req: 10,
+        filter: orion_link::message::RecordFilter::all(orion_link::message::RecordKind::Workload),
+    }));
+    assert!(matches!(
+        client.next().await,
+        Message::RequestError(e) if e.req == 10 && e.code == ErrorCode::NOT_AUTHORIZED
+    ));
     gateway.shutdown().await;
 }

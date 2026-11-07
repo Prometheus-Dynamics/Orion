@@ -369,6 +369,58 @@ impl NodeSecurity {
         }
     }
 
+    /// The enrolled operator `principal` (`operator:<name>`) whose key is `key`, with its policy
+    /// now: for a `tcp:` link session, whose handshake proved the key, at connect and again for
+    /// every request (so a removal or a policy change applies to open sessions). An operator that
+    /// is not enrolled is recorded as pending when `record_pending` is set, as for `OperatorHello`.
+    #[cfg(all(feature = "link-gateway", target_os = "linux"))]
+    pub(crate) fn enrolled_operator(
+        &self,
+        principal: &str,
+        key: [u8; 32],
+        record_pending: bool,
+    ) -> Result<AuthenticatedOperator, NodeError> {
+        let operator_id = OperatorId::from_principal(&orion_core::NodeId::new(principal))
+            .ok_or_else(|| {
+                NodeError::Authentication(format!("invalid operator principal `{principal}`"))
+            })?;
+        let mut trust = write_rwlock(self.operators.write(), "operators");
+        if trust.revoked.contains(&operator_id) {
+            return Err(NodeError::Authorization(format!(
+                "operator {operator_id} was removed from node {}",
+                self.local_node_id
+            )));
+        }
+        match trust.enrolled.get_mut(&operator_id) {
+            Some(operator) if operator.key == key => {
+                operator.last_seen_ms = now_ms();
+                let policy = operator.policy.clone();
+                Ok(AuthenticatedOperator {
+                    operator_id: operator_id.clone(),
+                    public_key_hex: PublicKeyHex::new(encode_hex(&key)),
+                    allowed_actions: trust.effective_actions(&policy),
+                    policy,
+                })
+            }
+            Some(_) => Err(NodeError::Authentication(format!(
+                "operator {operator_id} signed with key {}, not its enrolled key",
+                key_fingerprint(&key)
+            ))),
+            None => {
+                if record_pending {
+                    trust.record_pending(&operator_id, key, now_ms());
+                }
+                Err(NodeError::Authorization(format!(
+                    "operator {operator_id} is not enrolled on node {} (key fingerprint {}); \
+                     approve it with `orionctl operators enroll {operator_id} --fingerprint {}`",
+                    self.local_node_id,
+                    key_fingerprint(&key),
+                    key_fingerprint(&key)
+                )))
+            }
+        }
+    }
+
     /// Pins `key` for `operator_id` with `policy`, lifting a revocation.
     pub(crate) fn enroll_operator(
         &self,

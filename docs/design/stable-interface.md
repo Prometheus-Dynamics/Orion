@@ -98,7 +98,7 @@ requests can be pipelined and watches told apart. A request the host refuses is 
 | serial | COBS, `0x00`-delimited | one | today |
 | CAN, CAN FD | segments | one per address | today |
 | Unix stream socket | COBS, as serial | one per connection | step 2 |
-| remote (TCP) | COBS inside TLS or the `orion+tcp` signing | one per connection | step 6 |
+| remote (TCP) | COBS inside sealed records (`link_channel`) | one per connection | step 6 |
 
 A Unix link is configured like the others: `ORION_NODE_LINKS='unix:/run/orion/link.sock?...'`.
 Its frames stay at `HOST_MAX_FRAME` (4096) for now. The host's receive buffer is sized by that
@@ -124,8 +124,11 @@ with the buffer sized per transport.
 - **Queues:** host to client traffic is bounded in bytes per session. Watches coalesce to the
   latest value per key when the queue is full; stream data reports the gap with its cursor, as
   today.
-- **Remote:** decided at step 6. The options are the operator identities of `orion+tcp` (ed25519,
-  enrollment) or TLS client certificates.
+- **Remote:** decided at step 6 (2026-11-06): the operator identities of `orion+tcp` (ed25519,
+  enrollment), not TLS client certificates. A `tcp:` link's handshake proves the operator's
+  enrolled key and the node's identity key; each request is authorized by the operator's policy
+  at the time. Off by default: one switch, `ORION_NODE_REMOTE_AUTH=keys`. See
+  [link-protocol.md](../link-protocol.md), "Remote links".
 
 ## Step 3 wire (revision 1)
 
@@ -346,7 +349,8 @@ kinds.
    their current encoding. Revision 2. Done.
 5. **Records and the executor role.** Workloads and assignments (`0x12`, `0x13`), resource and
    provider reads. Revision 3. Done.
-6. **Remote transport.** Revision unchanged unless it needs kinds.
+6. **Remote transport.** Revision unchanged (no new kinds). `tcp:` links: a handshake signed by
+   the node's and the operator's ed25519 keys, then sealed records; client role only. Done.
 7. **`liborion`.** A C library over the interface: opaque handles, byte buffers, a pollable fd,
    and a blocking client for the fd latest-value channel.
 8. **Versioned MCU template.** The template's C API announces its revision and gains a version

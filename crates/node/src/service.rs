@@ -45,6 +45,10 @@ pub enum ControlSurface {
     PeerTcp,
     LocalIpc,
     LocalIpcStream,
+    /// Client requests of an operator's session on a `tcp:` link (`docs/link-protocol.md`). The
+    /// operator was authenticated by the link's handshake; its policy authorizes each request,
+    /// which is then served on the session's local client.
+    RemoteLink,
 }
 
 impl ControlSurface {
@@ -81,6 +85,9 @@ pub struct ControlRequestContext {
     /// Set when the request is an open-mode private-link message whose signature verified
     /// (`docs/discovery.md`, "Private links"). Trust is decided later, on the private-link policy.
     pub(crate) private_link: Option<crate::auth::PrivateLinkProof>,
+    /// Authenticate and authorize the request, but do not serve it (answered `Accepted`). For
+    /// reads served outside the pipeline, such as a link session's record reads.
+    pub check_only: bool,
 }
 
 impl ControlRequestContext {
@@ -95,6 +102,7 @@ impl ControlRequestContext {
             session: None,
             remote_addr: None,
             private_link: None,
+            check_only: false,
         }
     }
 
@@ -132,6 +140,7 @@ impl ControlRequestContext {
             session: None,
             remote_addr: None,
             private_link: None,
+            check_only: false,
         }
     }
 
@@ -331,6 +340,35 @@ impl ControlRequest {
             ),
             body: ControlRequestBody::Control(Box::new(message)),
         }
+    }
+
+    /// A client request of `operator`'s session on a `tcp:` link, served on its local client
+    /// `source`.
+    #[cfg(all(feature = "link-gateway", target_os = "linux"))]
+    pub(crate) fn remote_link(
+        source: LocalAddress,
+        operator: AuthenticatedOperator,
+        message: ControlMessage,
+    ) -> Self {
+        let mut context = ControlRequestContext::local_with_identity(
+            ControlSurface::RemoteLink,
+            source,
+            LocalAddress::new("orion"),
+            None,
+        );
+        context.principal = ControlPrincipal::Operator(operator);
+        Self {
+            context,
+            body: ControlRequestBody::Control(Box::new(message)),
+        }
+    }
+
+    /// Only authenticate and authorize this request ([`ControlRequestContext::check_only`]).
+    #[cfg(all(feature = "link-gateway", target_os = "linux"))]
+    #[must_use]
+    pub(crate) fn check_only(mut self) -> Self {
+        self.context.check_only = true;
+        self
     }
 
     pub fn health() -> Self {
@@ -546,6 +584,9 @@ impl RequestService<ControlRequest> for NodeControlService {
 
     fn serve(&self, request: ControlRequest) -> Result<Self::Response, Self::Error> {
         let ControlRequest { context, body } = request;
+        if context.check_only {
+            return Ok(ControlResponse::Local(Box::new(ControlMessage::Accepted)));
+        }
 
         match body {
             ControlRequestBody::Control(message) => match context.surface {
@@ -595,7 +636,9 @@ impl RequestService<ControlRequest> for NodeControlService {
                         )
                         .map(|response| ControlResponse::Http(Box::new(response)))
                 }
-                ControlSurface::LocalIpc | ControlSurface::LocalIpcStream => {
+                ControlSurface::LocalIpc
+                | ControlSurface::LocalIpcStream
+                | ControlSurface::RemoteLink => {
                     let source = context.local_source().ok_or_else(|| {
                         NodeError::Storage(
                             "local control request missing local source address".into(),

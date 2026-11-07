@@ -18,13 +18,13 @@
 
 use crate::NodeApp;
 use crate::NodeError;
-use crate::app::LinkWatch;
+use crate::app::{LinkCaller, LinkWatch};
 use orion::control_plane::{
     ActionQuery, ActionResult, ClientEvent, ClientEventKind, ControlMessage, SampleChunk,
     SeriesDecl, SeriesKind, StatusEntry, StatusKey, StreamRef, StreamResetReason,
     StreamSubscription, TypedConfigValue,
 };
-use orion::transport::ipc::{LocalAddress, UnixPeerIdentity};
+use orion::transport::ipc::LocalAddress;
 use orion_link::Stream;
 use orion_link::host::{ActionSendError, ClientRequest, HostSession};
 use orion_link::message::{self as lm, ErrorCode, ExecutorState, Roles};
@@ -227,7 +227,7 @@ pub(super) struct LinkClient {
     source: LocalAddress,
     link: String,
     device: String,
-    identity: UnixPeerIdentity,
+    caller: LinkCaller,
     wake: Arc<Notify>,
     /// Whether a local client is registered at `source` (the session's client, or its streams'
     /// publisher).
@@ -269,18 +269,30 @@ impl LinkClient {
         app: &NodeApp,
         link: &str,
         device: &str,
-        identity: UnixPeerIdentity,
+        caller: LinkCaller,
         wake: Arc<Notify>,
         roles: Roles,
     ) -> Self {
         let client_role = roles.contains(Roles::CLIENT);
-        let executor = roles
-            .contains(Roles::EXECUTOR)
-            .then(|| ExecutorLink::open(app, link, device, &identity, wake.clone()));
+        // Only Unix links serve the executor role (`HostConfig::serve_devices`).
+        let executor = match &caller {
+            LinkCaller::Local(identity) if roles.contains(Roles::EXECUTOR) => Some(
+                ExecutorLink::open(app, link, device, identity, wake.clone()),
+            ),
+            _ => None,
+        };
         let name = format!("link:{link}/{device}");
-        let source = LocalAddress::new(name.clone());
+        let source = match &caller {
+            LinkCaller::Local(_) => LocalAddress::new(name.clone()),
+            // Under the remote sessions' reserved prefix: nothing on the local socket may speak
+            // as an operator's client.
+            LinkCaller::Operator { principal, .. } => LocalAddress::new(format!(
+                "{}{principal}/{name}",
+                orion::control_plane::REMOTE_SESSION_PREFIX
+            )),
+        };
         let refused = if client_role {
-            app.register_link_client(&source, &name, &identity, wake.clone())
+            app.register_link_client(&source, &name, &caller, wake.clone())
                 .err()
                 .map(|error| {
                     debug!(link, device, %error, "link client not registered; its requests are refused");
@@ -293,7 +305,7 @@ impl LinkClient {
             source,
             link: link.to_owned(),
             device: device.to_owned(),
-            identity,
+            caller,
             wake,
             registered: client_role && refused.is_none(),
             refused,
@@ -321,8 +333,10 @@ impl LinkClient {
 
     /// An executor session's `ExecutorState`.
     pub(super) fn executor_state(&mut self, app: &NodeApp, state: ExecutorState) {
-        if let Some(executor) = self.executor.as_mut() {
-            executor.state(app, &self.identity, state);
+        if let (Some(executor), LinkCaller::Local(identity)) =
+            (self.executor.as_mut(), &self.caller)
+        {
+            executor.state(app, identity, state);
         }
     }
 
@@ -373,7 +387,7 @@ impl LinkClient {
         req: u32,
         message: ControlMessage,
     ) -> Option<ControlMessage> {
-        match app.serve_link_client_message(&self.source, &self.identity, message) {
+        match app.serve_link_client_message(&self.source, &self.caller, message) {
             Ok(response) => Some(response),
             Err(error) => {
                 self.refuse(req, code_for(&error), error.to_string());
@@ -439,6 +453,11 @@ impl LinkClient {
                 }
             }
             ClientRequest::ActionRun { req, request } => self.run(app, req, *request),
+            ClientRequest::RecordQuery { req, .. } | ClientRequest::RecordWatch { req, .. }
+                if let Err(error) = app.authorize_link_read(&self.source, &self.caller) =>
+            {
+                self.refuse(req, code_for(&error), error.to_string());
+            }
             ClientRequest::RecordQuery { req, filter } => {
                 if let Some(change) = RecordWatch::new(req, filter).next_change(app) {
                     self.answers.push_back(Answer::Records { req, change });
@@ -575,7 +594,7 @@ impl LinkClient {
             self.subscriptions.remove(&stream);
             let _ = app.serve_link_client_message(
                 &self.source,
-                &self.identity,
+                &self.caller,
                 ControlMessage::UnsubscribeStream(stream),
             );
         } else {

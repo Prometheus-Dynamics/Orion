@@ -15,6 +15,8 @@ mod events;
 #[cfg(target_os = "linux")]
 pub(crate) mod firmware;
 #[cfg(target_os = "linux")]
+mod remote_link;
+#[cfg(target_os = "linux")]
 mod serial;
 #[cfg(target_os = "linux")]
 mod serial_link;
@@ -33,8 +35,8 @@ pub use config::{
     CanLinkConfig, DEFAULT_BAUD, DEFAULT_CAN_ADDRESSES, DEFAULT_CAN_DEVICE_BASE,
     DEFAULT_CAN_HOST_BASE, DEFAULT_HEARTBEAT_MS, DEFAULT_MISSED_HEARTBEATS,
     DEFAULT_UNIX_MAX_CONNECTIONS, DEFAULT_UNIX_MAX_FRAMES_PER_S, LINKS_ENV, LinkConfig,
-    LinkTransport, MAX_CAN_ADDRESSES, MAX_UNIX_CONNECTIONS, MAX_UNIX_FRAMES_PER_S,
-    SUPPORTED_BAUD_RATES, SerialLinkConfig, UnixLinkConfig,
+    LinkTransport, MAX_CAN_ADDRESSES, MAX_UNIX_CONNECTIONS, MAX_UNIX_FRAMES_PER_S, REMOTE_AUTH_ENV,
+    SUPPORTED_BAUD_RATES, SerialLinkConfig, TcpLinkConfig, UnixLinkConfig,
 };
 
 use crate::{NodeApp, NodeError};
@@ -112,7 +114,21 @@ impl NodeApp {
                             let limits = unix_link::ConnLimits {
                                 max_frames_per_s: unix.max_frames_per_s,
                             };
-                            tokio::spawn(unix_link::run(ctx, unix, host, limits, shutdown))
+                            let listen = unix_link::Listen {
+                                endpoint: unix_link::Endpoint::Unix(unix.path),
+                                max_connections: unix.max_connections,
+                            };
+                            tokio::spawn(unix_link::run(ctx, listen, host, limits, shutdown))
+                        }
+                        LinkTransport::Tcp(tcp) => {
+                            let limits = unix_link::ConnLimits {
+                                max_frames_per_s: tcp.max_frames_per_s,
+                            };
+                            let listen = unix_link::Listen {
+                                endpoint: unix_link::Endpoint::Tcp(tcp.addr),
+                                max_connections: tcp.max_connections,
+                            };
+                            tokio::spawn(unix_link::run(ctx, listen, host, limits, shutdown))
                         }
                     }
                 })

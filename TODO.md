@@ -330,6 +330,11 @@ State of every open item (2026-11-06, when the leap started). Nothing else is op
 Each failed once in a full `cargo test --workspace --all-features` run on 2026-11-02 and passed when rerun
 alone. Fix the test so it does not depend on timing or on other tests' logs.
 
+- [ ] `link_gateway::tests::unix_backlog::queries_past_the_answer_cap_are_refused_and_the_session_stays_up`
+      failed once (2026-11-06, full `ci-jobs.sh workspace` run with the host at load 59): request
+      5's answer came where 4's was expected ("in order"). Passed 6 of 6 alone. Suspect: an
+      answer's frames dropped when the session's output queue is full under load; check the
+      link's `dropped` counter if it recurs.
 - [x] **orionctl `get events` test.** Closed 2026-11-06: the polling fix is in, and no failure
       since (200 runs under load, every CI run). Reopen if it fails again. Failure: `crates/orionctl/tests/cli_get.rs:421`, "assertion failed:
       events_stdout.contains("kind=mutation_apply")" in `orionctl_get_reports_health_readiness_observability_and_snapshot`.
@@ -699,6 +704,21 @@ The shared ABI primitives wait until the hardware repository says they are ready
       changes and keeps a 64-bit digest per record, not the record, so it sends only changes; one
       record watch per session. Tests: `tests/session/executor.rs` (link),
       `link_gateway/tests/unix_executor.rs` (node).
+      6 done (2026-11-06, no new kinds: `tcp:` links for remote operators, client role only,
+      watches pushed as on Unix links). Decided: off by default, one switch
+      `ORION_NODE_REMOTE_AUTH=keys`; operators' enrolled ed25519 keys, not TLS. Handshake: X25519
+      ephemeral keys, the node's identity key and the operator's key each sign the transcript,
+      HKDF-SHA256 per direction. Records: ChaCha20-Poly1305 (no AES hardware on the K230, and it
+      needs none on the Cortex-A76), the record's number as nonce (replays and reordering end the
+      connection), rotation every 10 minutes or 2^20 records. Pure Rust, `no_std`: X25519 from
+      curve25519-dalek 5 (already in the tree through ed25519-dalek; x25519-dalek 2 would add a
+      second copy), chacha20poly1305 0.10, HKDF from the existing hmac. No ring or OpenSSL.
+      Measured on a reference board (Cortex-A76, release, `link_channel_cost`): handshake about 1.1 ms of
+      CPU for both sides; per frame, seal and open each 1.3 us at 64 B, 1.8 us at 256 B, 4.7 us at
+      1 KiB and 16 us at 4 KiB (256 MB/s), with ChaCha20's NEON backend, which
+      `.cargo/config.toml` selects for aarch64 (the portable code: 1.7 us and 37 us). Each
+      request is authorized by the operator's policy at the time, and a removed operator's
+      connections close within a second (its watches stop). Tests: `link_gateway/tests/remote_link.rs`, `link_channel` unit tests.
 - [x] **A throttled Unix connection could be declared lost** (fixed 2026-11-06). Unix links
       shared the control sockets' 256 frames per 1 s window, and a throttled read waited for the
       window to end, so a session with a heartbeat timeout under 1 s was lost. Decided: each

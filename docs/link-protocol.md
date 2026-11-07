@@ -470,12 +470,40 @@ belongs to one connection at a time. Release, attach and firmware transfers do n
 Frames are limited to `HOST_MAX_FRAME` (4096) like the other links: a larger limit for local
 sockets comes with the kinds that need it.
 
-A Unix link session may also take the client role (revision 1, see "Revisions"): it queries and
+A Unix or TCP link session may also take the client role (revision 1, see "Revisions"): it queries and
 watches the node's status and runs, queries and watches actions, as a local control-plane client
 named `link:<link>/<device name>` with the caller's identity, so the control sockets'
 authorization and rate limit apply to each request. From revision 2 a Unix link session also
 carries streams: a provider session publishes streams of its own provider, under the same local
 address, and a client session subscribes to any stream of the node.
+
+### Remote links
+
+A `tcp:` link (`tcp:0.0.0.0:7461`, with `ORION_NODE_REMOTE_AUTH=keys`; off by default) carries the
+same link frames for remote operators, for tools built outside the image. A connection opens with
+the link channel's handshake (`orion_auth::link_channel`, feature `link-channel`):
+
+1. client → node `ClientHello`: an ephemeral X25519 key and 32 random bytes.
+2. node → client `ServerHello`: the node's ephemeral key, random bytes, node id and ed25519
+   identity key, signed over both hellos. A client that pinned the node's key checks it.
+3. client → node `ClientAuth`: the operator principal (`operator:<name>`) and its ed25519 key,
+   signed over the whole handshake.
+
+Both directions' keys come from HKDF-SHA256 of the X25519 secret, salted with the handshake's
+hash. The node answers with a sealed `accept` record for an enrolled operator, or `refuse` with the
+reason, and closes. After that every byte is in sealed records: `[u16 LE length][ciphertext][tag]`,
+ChaCha20-Poly1305, the record's number in its direction as the nonce, so a replayed, dropped or
+reordered record fails and ends the connection. A sender rotates its key with a `rotate` record
+(every 10 minutes and every 2^20 records); the next key is HKDF of the current one. Inside, the
+link frames are COBS framed as on a Unix link, and the link task serves the connection as one: a
+session per connection, the same budgets and queues. Sessions take only the client role
+(`HostConfig::serve_devices` is false), and each request is authorized by the operator's policy
+at the time (`docs/node-env.md`, "Link Gateway").
+
+Cost on a Cortex-A76 (a reference board, release build, `link_channel_cost` example): a handshake
+takes about 1.1 ms of CPU for both sides together; sealing a 64-byte frame takes 1.3 us, a 4 KiB
+frame 16 us, about 256 MB/s (aarch64 builds use the NEON backend, `.cargo/config.toml`; the
+portable code takes 1.7 us and 37 us). Opening costs the same.
 
 Bridging, kept generic (nothing about the device's resource types is assumed):
 

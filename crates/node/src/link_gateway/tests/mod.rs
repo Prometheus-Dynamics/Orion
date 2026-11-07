@@ -8,6 +8,8 @@ mod can_firmware;
 mod config;
 mod firmware;
 mod persist;
+#[cfg(target_os = "linux")]
+mod remote_link;
 mod serial;
 mod status;
 mod unix;

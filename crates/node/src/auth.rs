@@ -213,6 +213,12 @@ impl NodeSecurity {
         self.identity.verifying_key().to_bytes()
     }
 
+    /// This node's identity key, for the `tcp:` link handshake (its own signature domain).
+    #[cfg(all(feature = "link-gateway", target_os = "linux"))]
+    pub(crate) fn identity_key(&self) -> Arc<SigningKey> {
+        self.identity.clone()
+    }
+
     /// Signs `message` with this node's identity key (used by the enrollment handshake, whose
     /// messages are domain-separated by their own prefix).
     #[cfg_attr(not(feature = "discovery-mdns"), allow(dead_code))]

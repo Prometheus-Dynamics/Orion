@@ -290,7 +290,7 @@ quarantined cluster state.
 
 | Variable | Default | Valid values | Failure behavior |
 | --- | --- | --- | --- |
-| `ORION_NODE_LINKS` | unset (no links) | `;`-separated `<kind>:<target>[?key=value&...]` entries, `kind` = `serial`, `can` or `unix` | Any malformed entry, unknown or misplaced key, out-of-range value, duplicate key, or duplicate link fails startup with `NodeError::Config` naming the entry. A port, interface or socket that cannot be opened does not fail startup; the link retries every second and logs the error. |
+| `ORION_NODE_LINKS` | unset (no links) | `;`-separated `<kind>:<target>[?key=value&...]` entries, `kind` = `serial`, `can`, `unix` or `tcp` | Any malformed entry, unknown or misplaced key, out-of-range value, duplicate key, or duplicate link fails startup with `NodeError::Config` naming the entry. A port, interface or socket that cannot be opened does not fail startup; the link retries every second and logs the error. |
 
 Keys for every link:
 
@@ -340,6 +340,27 @@ read until the answers drain, again without timing the session out. A second con
 whose `Hello` names a device already connected on the link is closed. A stale socket at the path is
 replaced at start and removed at shutdown; any other file there is left alone and the link reports
 the error. `link.release`, `link.attach` and firmware transfers do not apply to Unix links.
+
+`tcp:<address>:<port>` keys (remote operators' link sessions, `docs/link-protocol.md` "Remote
+links"; the same `max_connections` and `max_frames_per_s` as a Unix link, handshakes counted
+against `max_connections`):
+
+| Variable | Default | Valid values | Failure behavior |
+| --- | --- | --- | --- |
+| `ORION_NODE_REMOTE_AUTH` | `off` | `off`, `keys` | `tcp:` links are served only with `keys`: a `tcp:` entry in `ORION_NODE_LINKS` without it fails startup, and so does any other value. |
+
+A `tcp:` link (`tcp:0.0.0.0:7461`) serves remote operators. Each connection opens with a
+handshake: the node signs with its identity key, the operator with its enrolled ed25519 key
+(`docs/remote-operator.md`, "Enrollment"), and the connection is then sealed (ChaCha20-Poly1305,
+replay-proof, keys rotated every 10 minutes). An operator that is not enrolled is refused with the
+reason and listed as pending, for `orionctl operators enroll`; `ORION_NODE_OPERATOR_OPEN_READ` and
+`ORION_NODE_OPERATOR_AUTO_ENROLL` do not apply. A handshake that takes over 5 s is closed. Sessions
+take the client role only: provider and executor roles are refused (`Reject { UnsupportedRoles }`).
+Each request is authorized by the operator's policy as it is then, so a removal or a policy change
+applies to open sessions, and a removed operator's connections are closed within a second, which
+ends its watches: record reads, status queries and watches and stream subscriptions need
+`read`, actions their patterns. The session's client is registered under the remote sessions'
+reserved address (`remote-session/operator:<name>/link:<link>/<device name>`).
 
 A Unix link session may take the client role (`docs/link-protocol.md`, "Revisions"). Its requests
 are those of a local control-plane client named `link:<link>/<device name>`, authorized with the

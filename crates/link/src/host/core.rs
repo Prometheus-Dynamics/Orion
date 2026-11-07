@@ -460,15 +460,18 @@ impl HostCore {
         }
         let revision = hello.revision.min(crate::LINK_INTERFACE_REVISION);
         let client = config.serve_clients && revision >= 1 && hello.roles.contains(Roles::CLIENT);
-        let executor =
-            config.serve_executors && revision >= 3 && hello.roles.contains(Roles::EXECUTOR);
-        if !hello.roles.contains(Roles::PROVIDER) && !client && !executor {
+        let executor = config.serve_devices
+            && config.serve_executors
+            && revision >= 3
+            && hello.roles.contains(Roles::EXECUTOR);
+        let provider = config.serve_devices && hello.roles.contains(Roles::PROVIDER);
+        if !provider && !client && !executor {
             self.reject(Some(hello.device_name), RejectReason::UnsupportedRoles);
             return;
         }
         // Only the roles this host serves count for the session.
         let roles = Roles(
-            hello.roles.0 & Roles::PROVIDER.0
+            if provider { Roles::PROVIDER.0 } else { 0 }
                 | if client { Roles::CLIENT.0 } else { 0 }
                 | if executor { Roles::EXECUTOR.0 } else { 0 },
         );

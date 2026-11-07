@@ -3,7 +3,8 @@
 //! Syntax: a `;`-separated list of `<kind>:<target>[?key=value&key=value...]` entries, for example
 //! `serial:/dev/ttyAMA0?baud=115200&allow=imu-board` or
 //! `can:can0?device_base=0x600&host_base=0x680&addresses=1-16&fd=false` or
-//! `unix:/run/orion/link.sock?max_connections=16`. Every key is documented
+//! `unix:/run/orion/link.sock?max_connections=16` or `tcp:0.0.0.0:7461` (remote operators, with
+//! `ORION_NODE_REMOTE_AUTH=keys`). Every key is documented
 //! in docs/node-env.md ("Link gateway").
 
 use crate::NodeError;
@@ -16,6 +17,8 @@ use std::path::PathBuf;
 
 /// Environment variable holding the link list.
 pub const LINKS_ENV: &str = "ORION_NODE_LINKS";
+/// The switch for `tcp:` links: `keys` (operators' enrolled ed25519 keys) or `off` (default).
+pub const REMOTE_AUTH_ENV: &str = "ORION_NODE_REMOTE_AUTH";
 
 /// Default serial baud rate.
 pub const DEFAULT_BAUD: u32 = 115_200;
@@ -80,6 +83,20 @@ pub enum LinkTransport {
     /// A Unix stream socket the node listens on: one session per connection, COBS framed as on a
     /// serial port.
     Unix(UnixLinkConfig),
+    /// A TCP address the node listens on for remote operators' link sessions (client role only),
+    /// sealed by the link channel. Needs `ORION_NODE_REMOTE_AUTH=keys`.
+    Tcp(TcpLinkConfig),
+}
+
+/// `tcp:<address>:<port>` settings. The limits are a Unix link's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TcpLinkConfig {
+    /// Listen address, e.g. `0.0.0.0:7461`.
+    pub addr: std::net::SocketAddr,
+    /// Connections served at once, handshakes included (`max_connections=`).
+    pub max_connections: u32,
+    /// Frames each connection may send per second (`max_frames_per_s=`).
+    pub max_frames_per_s: u32,
 }
 
 /// `unix:<path>` settings.
@@ -141,13 +158,17 @@ impl CanLinkConfig {
 impl LinkConfig {
     /// Reads [`LINKS_ENV`]. Unset or blank means no links.
     pub fn try_from_env() -> Result<Vec<Self>, NodeError> {
-        match std::env::var(LINKS_ENV) {
-            Ok(raw) => Self::parse_list(&raw),
-            Err(std::env::VarError::NotPresent) => Ok(Vec::new()),
-            Err(std::env::VarError::NotUnicode(_)) => Err(NodeError::Config(format!(
-                "{LINKS_ENV} must be valid unicode"
-            ))),
-        }
+        let links = match std::env::var(LINKS_ENV) {
+            Ok(raw) => Self::parse_list(&raw)?,
+            Err(std::env::VarError::NotPresent) => Vec::new(),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(NodeError::Config(format!(
+                    "{LINKS_ENV} must be valid unicode"
+                )));
+            }
+        };
+        check_remote_auth(&links, std::env::var(REMOTE_AUTH_ENV).ok().as_deref())?;
+        Ok(links)
     }
 
     /// Parses a `;`-separated link list. Empty entries are ignored.
@@ -168,7 +189,7 @@ impl LinkConfig {
         let (kind, rest) = entry.split_once(':').ok_or_else(|| {
             link_error(
                 entry,
-                "expected `serial:<path>`, `can:<interface>` or `unix:<path>`",
+                "expected `serial:<path>`, `can:<interface>`, `unix:<path>` or `tcp:<address>`",
             )
         })?;
         let (target, query) = rest.split_once('?').unwrap_or((rest, ""));
@@ -213,22 +234,7 @@ impl LinkConfig {
             }
             "can" => LinkTransport::Can(parse_can(entry, target, &mut params)?),
             "unix" => {
-                let max_connections =
-                    params.number("max_connections", DEFAULT_UNIX_MAX_CONNECTIONS)?;
-                if !(1..=MAX_UNIX_CONNECTIONS).contains(&max_connections) {
-                    return Err(link_error(
-                        entry,
-                        format!("max_connections must be between 1 and {MAX_UNIX_CONNECTIONS}"),
-                    ));
-                }
-                let max_frames_per_s =
-                    params.number("max_frames_per_s", DEFAULT_UNIX_MAX_FRAMES_PER_S)?;
-                if !(1..=MAX_UNIX_FRAMES_PER_S).contains(&max_frames_per_s) {
-                    return Err(link_error(
-                        entry,
-                        format!("max_frames_per_s must be between 1 and {MAX_UNIX_FRAMES_PER_S}"),
-                    ));
-                }
+                let (max_connections, max_frames_per_s) = connection_limits(entry, &mut params)?;
                 if !target.starts_with('/') {
                     return Err(link_error(entry, "the socket path must be absolute"));
                 }
@@ -244,10 +250,26 @@ impl LinkConfig {
                     max_frames_per_s,
                 })
             }
+            "tcp" => {
+                let (max_connections, max_frames_per_s) = connection_limits(entry, &mut params)?;
+                let addr = target.parse().map_err(|_| {
+                    link_error(
+                        entry,
+                        "expected `tcp:<address>:<port>`, e.g. `tcp:0.0.0.0:7461`",
+                    )
+                })?;
+                LinkTransport::Tcp(TcpLinkConfig {
+                    addr,
+                    max_connections,
+                    max_frames_per_s,
+                })
+            }
             other => {
                 return Err(link_error(
                     entry,
-                    format!("unknown link kind `{other}`; expected `serial`, `can` or `unix`"),
+                    format!(
+                        "unknown link kind `{other}`; expected `serial`, `can`, `unix` or `tcp`"
+                    ),
                 ));
             }
         };
@@ -271,24 +293,75 @@ impl LinkConfig {
         config.max_frame = self.max_frame;
         config.allowed_devices = self.allowed_devices.clone();
         config.session_seed = session_seed;
-        // Only a Unix link's callers have a peer identity to authorize client requests with.
+        // Only Unix and TCP links' callers have an identity to authorize client requests with.
         config.serve_clients = self.serves_clients();
         config.serve_streams = self.serves_clients();
         config.serve_executors = self.serves_clients();
+        // A TCP link's sessions are operators: no provider or executor roles.
+        config.serve_devices = !matches!(self.transport, LinkTransport::Tcp(_));
         config
     }
 
-    /// Whether this link serves the client role (revision 1): Unix links only.
+    /// Whether this link serves the client role (revision 1): Unix and TCP links.
     #[must_use]
     pub fn serves_clients(&self) -> bool {
         #[cfg(target_os = "linux")]
         {
-            matches!(self.transport, LinkTransport::Unix(_))
+            matches!(
+                self.transport,
+                LinkTransport::Unix(_) | LinkTransport::Tcp(_)
+            )
         }
         #[cfg(not(target_os = "linux"))]
         {
             false
         }
+    }
+}
+
+/// `max_connections=` and `max_frames_per_s=` of a Unix or TCP link.
+fn connection_limits(entry: &str, params: &mut Params<'_>) -> Result<(u32, u32), NodeError> {
+    let max_connections = params.number("max_connections", DEFAULT_UNIX_MAX_CONNECTIONS)?;
+    if !(1..=MAX_UNIX_CONNECTIONS).contains(&max_connections) {
+        return Err(link_error(
+            entry,
+            format!("max_connections must be between 1 and {MAX_UNIX_CONNECTIONS}"),
+        ));
+    }
+    let max_frames_per_s = params.number("max_frames_per_s", DEFAULT_UNIX_MAX_FRAMES_PER_S)?;
+    if !(1..=MAX_UNIX_FRAMES_PER_S).contains(&max_frames_per_s) {
+        return Err(link_error(
+            entry,
+            format!("max_frames_per_s must be between 1 and {MAX_UNIX_FRAMES_PER_S}"),
+        ));
+    }
+    Ok((max_connections, max_frames_per_s))
+}
+
+/// `tcp:` links are served only with `ORION_NODE_REMOTE_AUTH=keys`; it is off by default.
+pub(crate) fn check_remote_auth(
+    links: &[LinkConfig],
+    remote_auth: Option<&str>,
+) -> Result<(), NodeError> {
+    let keys = match remote_auth.map(str::trim) {
+        None | Some("" | "off") => false,
+        Some("keys") => true,
+        Some(other) => {
+            return Err(NodeError::Config(format!(
+                "{REMOTE_AUTH_ENV}={other} is not supported; use `keys` or `off`"
+            )));
+        }
+    };
+    match links
+        .iter()
+        .find(|link| matches!(link.transport, LinkTransport::Tcp(_)))
+    {
+        Some(link) if !keys => Err(NodeError::Config(format!(
+            "{LINKS_ENV}: {} needs {REMOTE_AUTH_ENV}=keys (remote link sessions are off by \
+             default; see docs/node-env.md)",
+            link.name
+        ))),
+        _ => Ok(()),
     }
 }
 

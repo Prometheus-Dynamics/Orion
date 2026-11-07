@@ -90,6 +90,10 @@ pub struct HostConfig {
     /// `Hello` with only the executor role is rejected, executor state is ignored, and record
     /// requests are answered with `RequestError { code: UNSUPPORTED }`. Default false.
     pub serve_executors: bool,
+    /// Whether this link serves the provider and executor roles. When false (remote links, whose
+    /// sessions are operators), only the client role counts and a `Hello` without it is
+    /// rejected. Default true.
+    pub serve_devices: bool,
 }
 
 impl HostConfig {
@@ -106,6 +110,7 @@ impl HostConfig {
             serve_clients: false,
             serve_streams: false,
             serve_executors: false,
+            serve_devices: true,
         }
     }
 

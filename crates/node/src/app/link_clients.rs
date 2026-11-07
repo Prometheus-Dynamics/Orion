@@ -17,6 +17,16 @@ use orion_core::SessionId;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
+/// Who a link session's client acts for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LinkCaller {
+    /// The caller on a Unix link (`SO_PEERCRED`), authorized by the local policy.
+    Local(UnixPeerIdentity),
+    /// An enrolled operator on a `tcp:` link, authenticated by the link's handshake and
+    /// authorized by its policy, looked up again for every request.
+    Operator { principal: String, key: [u8; 32] },
+}
+
 /// Which of a link client's watches to end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LinkWatch {
@@ -30,17 +40,61 @@ impl NodeApp {
     pub(crate) fn serve_link_client_message(
         &self,
         source: &LocalAddress,
-        identity: &UnixPeerIdentity,
+        caller: &LinkCaller,
         message: ControlMessage,
     ) -> Result<ControlMessage, NodeError> {
-        let response = self
-            .serve_control_request(ControlRequest::from_local_message(
+        self.serve_link_request(self.link_request(source, caller, message)?)
+    }
+
+    /// Whether `caller` may read the node's records (a link session's record query or watch):
+    /// authorized as a state snapshot query, which they are a filtered view of.
+    pub(crate) fn authorize_link_read(
+        &self,
+        source: &LocalAddress,
+        caller: &LinkCaller,
+    ) -> Result<(), NodeError> {
+        self.serve_link_request(
+            self.link_request(source, caller, ControlMessage::QueryStateSnapshot)?
+                .check_only(),
+        )
+        .map(drop)
+    }
+
+    fn link_request(
+        &self,
+        source: &LocalAddress,
+        caller: &LinkCaller,
+        message: ControlMessage,
+    ) -> Result<ControlRequest, NodeError> {
+        Ok(match caller {
+            LinkCaller::Local(identity) => ControlRequest::from_local_message(
                 ControlSurface::LocalIpc,
                 source.clone(),
                 LocalAddress::new("orion"),
                 message,
                 Some(identity.clone()),
-            ))?
+            ),
+            LinkCaller::Operator { principal, key } => ControlRequest::remote_link(
+                source.clone(),
+                self.security.enrolled_operator(principal, *key, false)?,
+                message,
+            ),
+        })
+    }
+
+    /// Serves one control message for a Unix link caller (the executor role's requests).
+    pub(crate) fn serve_link_local_message(
+        &self,
+        source: &LocalAddress,
+        identity: &UnixPeerIdentity,
+        message: ControlMessage,
+    ) -> Result<ControlMessage, NodeError> {
+        self.serve_link_client_message(source, &LinkCaller::Local(identity.clone()), message)
+    }
+
+    fn serve_link_request(&self, request: ControlRequest) -> Result<ControlMessage, NodeError> {
+        let response = self
+            .serve_control_request(request)?
             .into_local()
             .map_err(NodeError::IpcTransport)?;
         match response {
@@ -55,17 +109,41 @@ impl NodeApp {
         &self,
         source: &LocalAddress,
         client_name: &str,
-        identity: &UnixPeerIdentity,
+        caller: &LinkCaller,
         wake: Arc<Notify>,
     ) -> Result<(), NodeError> {
-        self.serve_link_client_message(
-            source,
-            identity,
-            ControlMessage::ClientHello(ClientHello {
-                client_name: orion_core::ClientName::new(client_name.to_owned()),
-                role: ClientRole::ControlPlane,
-            }),
-        )?;
+        let hello = ControlMessage::ClientHello(ClientHello {
+            client_name: orion_core::ClientName::new(client_name.to_owned()),
+            role: ClientRole::ControlPlane,
+        });
+        match caller {
+            LinkCaller::Local(_) => {
+                self.serve_link_client_message(source, caller, hello)?;
+            }
+            // Operators are never local control-plane clients: the session is allowed as a push
+            // session is, then registered directly, as `open_remote_session` does.
+            LinkCaller::Operator { .. } => {
+                self.serve_link_request(
+                    self.link_request(
+                        source,
+                        caller,
+                        ControlMessage::OpenSession(orion::control_plane::SessionOpen {
+                            client_name: client_name.to_owned(),
+                        }),
+                    )?
+                    .check_only(),
+                )?;
+                match self.apply_local_control_message(source, hello)? {
+                    ControlMessage::ClientWelcome(_) => {}
+                    ControlMessage::Rejected(why) => return Err(NodeError::Authorization(why)),
+                    other => {
+                        return Err(NodeError::Storage(format!(
+                            "unexpected answer to a link session's hello: {other:?}"
+                        )));
+                    }
+                }
+            }
+        }
         self.with_client_mut(source, |client| client.link_wake = Some(wake))
     }
 

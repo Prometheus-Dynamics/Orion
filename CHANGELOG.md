@@ -8,6 +8,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `tcp:` links (stable interface step 6), off by default (`ORION_NODE_REMOTE_AUTH=keys`): remote
+  operators' link sessions, client role only. A handshake signed by the node's identity key and
+  the operator's enrolled ed25519 key, then ChaCha20-Poly1305 records with counter nonces (replay
+  and reordering end the connection) and key rotation every 10 minutes. Each request is
+  authorized by the operator's policy at the time; unknown operators are refused with the reason
+  and listed as pending. The channel is `orion_auth::link_channel` (feature `link-channel`,
+  `no_std`), pure Rust (curve25519-dalek, already in the tree for ed25519, and chacha20poly1305).
+  aarch64 builds select ChaCha20's NEON backend (`.cargo/config.toml`).
+- `HostConfig::serve_devices` (orion-link): off, a link serves only the client role.
 - Link interface revision 3 (stable interface step 5), served on Unix links: the executor role
   (`ExecutorState` `0x12`, `Workloads` `0x13`) and record reads (`RecordQuery` `0x80`,
   `RecordWatch` `0x81`, `Records` `0x82`) of workloads, resources, providers and executors. A
@@ -24,6 +33,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   1 s, and a link with a heartbeat timeout under 1 s lost the session.
 
 ### Fixed
+
+- Unix link record reads (`RecordQuery`, `RecordWatch`) are authorized per request, as a state
+  snapshot query. Before, only the session's client registration was checked.
 
 - Unix links bound the answers a client session holds: 256 KiB of answers not yet taken.
   Past it, status and action queries are refused with `limit` and the connection is not read

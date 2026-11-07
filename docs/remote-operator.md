@@ -23,6 +23,11 @@ Operators are a **principal kind of their own**, distinct from peer nodes:
   peers, and refuse every sync message, desired-state write and observed update from them;
 - what they may do is decided **per operator** by an `OperatorPolicy`.
 
+Tools that speak the stable link interface instead (`docs/design/stable-interface.md`, any
+language, no rkyv) connect to a `tcp:` link with the same operator identity and policy
+(`docs/link-protocol.md`, "Remote links"; off by default, `ORION_NODE_REMOTE_AUTH=keys`). Unlike
+`orion+tcp`, that connection is encrypted as well as signed.
+
 ## Client API
 
 ```toml
