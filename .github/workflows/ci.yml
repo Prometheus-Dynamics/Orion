@@ -161,6 +161,30 @@ jobs:
       - name: orion-link and the MCU template (scripts/ci-jobs.sh link)
         run: ./scripts/ci-jobs.sh link
 
+  capi:
+    # liborion (docs/capi.md): the header is cbindgen's output, the shared ABI header is the ABI
+    # crate's, the exported symbols and the SONAME are as recorded, and a C program checks the
+    # layouts and runs against liborion.a and liborion.so.1.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0 # keep in sync with rust-toolchain.toml
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cbindgen
+        run: cargo install --locked cbindgen --version 0.29.4
+
+      - name: liborion (scripts/ci-jobs.sh capi)
+        run: ./scripts/ci-jobs.sh capi
+
   no-std:
     # The model crates (core, data-plane, control-plane, auth, runtime, cluster) and the `orion`
     # facade's model features must build `no_std` + `alloc` for bare-metal MCU targets. The script

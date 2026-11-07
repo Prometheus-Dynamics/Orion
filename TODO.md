@@ -311,10 +311,11 @@ format versions (`link-devices.rkyv`, `peer-sync-times.json`).
 
 State of every open item (2026-11-06, when the leap started). Nothing else is open.
 
-- **The leap** (in progress, "Decided, starts when the user says" below): the stable interface
-  steps 5 to 8, `liborion` (C surface and static Rust wrapper), static and shared build modes,
-  the versioned MCU template, streams on serial and CAN, `orionctl` without reqwest. The shared
-  ABI primitives wait for the hardware repository.
+- **The leap** (in progress, "Decided, starts when the user says" below): steps 5 and 6 and
+  `liborion`'s first version (step 7, on the shared ABI crate) are done. Open: `liborion`'s
+  actions, records and stream subscriptions, the static Rust wrapper and the static/shared build
+  modes, the versioned MCU template (step 8), streams on serial and CAN, `orionctl` without
+  reqwest.
 - **Waiting on the user:** release mechanics (version 1.0.0, tag, release gates).
 - **Waiting on others:** protocol 1 on the reference board (the consumers' window).
 - **Blocked on hardware:** real MCU bring-up, the U8 board port, U9 hardware validation (no MCU
@@ -347,6 +348,11 @@ alone. Fix the test so it does not depend on timing or on other tests' logs.
       fuller reads on a busy machine) pass without their wait. The floor now counts that read
       from the frame size (1.02 s for 21-byte frames, asserted at 90%); unthrottled, the burst
       takes milliseconds.
+- [x] `tests::cluster::binding::binding_becomes_unavailable_when_the_owner_disappears_and_recovers`
+      (fixed 2026-11-07). Timed out waiting for the remote binding: with a 300 ms liveness, one
+      round on a starved machine outlasted the window, so peers lapsed between rounds. It now
+      uses 2 s (still well inside each phase's 10 s wait). 48 concurrent runs on 2 cores: 47
+      failures before, 0 after.
 - [x] **orionctl `get events` test.** Closed 2026-11-06: the polling fix is in, and no failure
       since (200 runs under load, every CI run). Reopen if it fails again. Failure: `crates/orionctl/tests/cli_get.rs:421`, "assertion failed:
       events_stdout.contains("kind=mutation_apply")" in `orionctl_get_reports_health_readiness_observability_and_snapshot`.
@@ -748,10 +754,21 @@ The shared ABI primitives wait until the hardware repository says they are ready
       runs and subscriptions answer through the node's byte-capped client event queue. Test:
       `unix_backlog.rs`. Fuzzing (`crates/link/fuzz`, docs/testing.md) found one panic, a blank
       peer id at decode, now refused.
-- [ ] **`liborion` over it.** A C library with opaque handles and byte buffers, on the interface above.
-      It includes a blocking client for the fd latest-value channel.
+- [x] **`liborion` over it** (2026-11-06, docs/capi.md). `crates/capi` (the Rust core and the
+      `extern "C"` surface) and `crates/liborion` (`liborion.a`, `liborion.so.1`). Link client
+      sessions with status queries and watches (pollable fd, `orion_link_service_in_ms`, pings
+      while waiting) and a blocking fd latest-value client. Decided: the filter is call
+      parameters, not a struct, so every struct is pointer-free and fixed-width and
+      `ORION_LAYOUT_HASH` (`0x2801f6607019ee2a`) is one value on every target (asserted at
+      compile time); the ABI crate is the git dependency `abi` pinned at its 1.0 freeze
+      (`abc9908`), not on crates.io, so both crates are `publish = false`; its name appears only
+      in `Cargo.toml`, `Cargo.lock`, `crates/capi/include/` and `cbindgen.toml` (allowlisted in
+      `scripts/check-neutral-names.sh`). CI job `capi`.
+- [ ] **`liborion` next (minor additions):** actions (run, query, watch), record reads and
+      watches, stream subscriptions; then the static Rust wrapper (`static`/`shared` features,
+      `compile_error!` when both).
 - [ ] **Versioned MCU template.** Give the template's C API a version, on the same interface.
-- [ ] **Shared ABI primitives.** Use the hardware repository's ABI primitives crate where they fit.
+- [x] **Shared ABI primitives** (2026-11-06): `liborion` uses them (above). Use the hardware repository's ABI primitives crate where they fit.
       Ready: the hardware repository's ABI crate 1.0 is frozen (layout hash 0xa02cfb4a8dd4545b).
       Decided: `orion-capi` uses its `Handle`, `Status`, `BufferDesc` and `FenceDesc` directly; the
       shared library's version is the SONAME major plus a handshake call (rustc's cdylib version

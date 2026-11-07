@@ -5,6 +5,8 @@
 mod actions;
 mod can;
 mod can_firmware;
+#[cfg(target_os = "linux")]
+mod capi;
 mod config;
 mod firmware;
 mod persist;

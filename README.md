@@ -145,6 +145,9 @@ The facade crate `orion` is feature-gated by subsystem.
   and SocketCAN, configured with `ORION_NODE_LINKS`) and bridges each `orion-link` device into the
   node as an ordinary provider. It also works in the IPC-only build
   (`--no-default-features --features link-gateway`). See `docs/link-protocol.md`.
+- `liborion` (`crates/liborion`, `liborion.a` and `liborion.so.1`) is the C library over the
+  stable interface: client sessions on a node's link socket and the fd latest-value channel, behind
+  opaque handles, with a version handshake. See [`docs/capi.md`](docs/capi.md).
 - `orion-transport-http` exposes its protocol types (payloads, routes, codec, errors, and handler
   traits) without the network stack. `client` adds `HttpClient` (reqwest over rustls, no
   axum/hyper server), `server` adds `HttpServer` (axum, hyper, tokio-rustls), and the default

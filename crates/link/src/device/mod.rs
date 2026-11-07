@@ -48,7 +48,7 @@
 //! buffer for the newest status batch (`ST` is 0 for a device that never publishes status, see
 //! [`DeviceSession`]), an 18-byte ping/pong buffer, the node id ([`NODE_ID_CAPACITY`] bytes), a
 //! 4-slot event queue, and timers. With feature `actions` add one more `RX`-byte buffer for the
-//! declared action names (see [`DeviceSession::declare_actions`]). Counters ([`DeviceStats`]) are compiled in with feature
+//! declared action names (see `DeviceSession::declare_actions`). Counters ([`DeviceStats`]) are compiled in with feature
 //! `stats`. Nothing allocates, panics, or formats. With feature `alloc`, the same session also
 //! accepts the full Orion records (`ProviderRecord`, `ResourceRecord`, `StatusEntry`) and decodes
 //! the lease set into `LeaseRecord`s (`DeviceSession::lease_records`).

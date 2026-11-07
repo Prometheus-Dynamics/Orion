@@ -20,6 +20,7 @@ This directory holds repository-level documentation for the Orion workspace.
 - [device-agent.md](device-agent.md): the device-agent contract: claiming node actions (`update`, `reboot`, `locate`) over local IPC, progress, `update.*` status keys that survive reboots, result semantics, disconnects
 - [remote-operator.md](remote-operator.md): the embeddable remote operator client (`orion-client` feature `remote`), operator enrollment, per-operator authorization, threat model
 - [update-recovery.md](update-recovery.md): design (not implemented) for software update intents, progress, staged rollouts, rollback, and recovery paths that never depend on Orion
+- [capi.md](capi.md): `liborion`, the C library over the stable interface: link client sessions (status queries and watches), the fd latest-value client, versions, SONAME and the CI checks
 - [link-protocol.md](link-protocol.md): MCU link protocol (UART/CAN framing, link messages, device bring-up) for no_std devices
 
 ## Where To Start

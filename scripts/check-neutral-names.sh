@@ -6,7 +6,8 @@
 #
 # Allowlisted (see ALLOW below): the orion-nt4 crate and its interop scripts, which implement the
 # FRC NetworkTables 4 wire protocol whose own vocabulary (WPILib, FRC, robot) is part of the
-# protocol, and CHANGELOG.md, which records history.
+# protocol, CHANGELOG.md, which records history, and the few files that name liborion's shared
+# ABI crate.
 #
 # Only git-tracked text files are scanned. Run from anywhere: ./scripts/check-neutral-names.sh
 set -euo pipefail
@@ -23,6 +24,12 @@ ALLOW=(
     'scripts/nt4-interop.sh'
     'scripts/nt4_interop.py'
     'CHANGELOG.md'
+    # liborion uses the hardware repository's ABI crate (docs/capi.md): its package name and
+    # source in the manifests, and its header, shipped verbatim, and the include of it.
+    'Cargo.toml'
+    'Cargo.lock'
+    'crates/capi/include/*'
+    'crates/capi/cbindgen.toml'
     'scripts/check-neutral-names.sh'
 )
 

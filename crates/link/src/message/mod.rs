@@ -207,7 +207,7 @@ pub enum LinkActionState {
     Failed,
     /// Refused by the device without running; the payload is the reason.
     Rejected,
-    /// Stopped at the host's [`ActionCancel`]; the payload is empty. Final.
+    /// Stopped at the host's [`Message::ActionCancel`]; the payload is empty. Final.
     Cancelled,
 }
 

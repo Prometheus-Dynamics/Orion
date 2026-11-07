@@ -81,7 +81,7 @@ impl Encode for XferStatus {
     }
 }
 
-/// How the device should run a verified image, in [`XferActivate`] (`Activate`, kind `0x27`).
+/// How the device should run a verified image, in `XferActivate` (`Activate`, kind `0x27`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ActivateMode {
     /// Boot the new slot on trial: it stays on trial until a `Confirm`, and the device's

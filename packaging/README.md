@@ -68,9 +68,10 @@ arm64 kernels run with 4 KiB, 16 KiB (common on small single-board computers) or
 and refuse to load an ELF whose `PT_LOAD` segments are aligned to less than the page size. The
 workspace `.cargo/config.toml` links `aarch64-unknown-linux-gnu` binaries with
 `-z max-page-size=65536`, so one binary runs on all three. GNU ld and LLD already default to 64 KiB
-for aarch64; the setting protects against toolchains configured otherwise. A `RUSTFLAGS` or
-`CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` environment variable replaces it, so carry it
-over (`-C link-arg=-Wl,-z,max-page-size=65536`) when you set one. Pass it through the
+for aarch64; the setting protects against toolchains configured otherwise. A `RUSTFLAGS` (or
+`CARGO_ENCODED_RUSTFLAGS`) environment variable replaces it, so carry it over
+(`-C link-arg=-Wl,-z,max-page-size=65536`, and `--cfg chacha20_force_neon`) when you set one;
+`CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` adds to it. Pass it through the
 compiler driver as one `-Wl,` argument: some GCC drivers (Buildroot's Bootlin toolchains, for one)
 drop a bare `-z` followed by a separate argument, and the binary silently ends up 4 KiB aligned. Check a binary with:
 

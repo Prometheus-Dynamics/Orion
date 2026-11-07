@@ -2,8 +2,8 @@
 # pages, and the kernel refuses to map an ELF whose PT_LOAD segments are aligned to less than its
 # page size. Align to 64 KiB so one aarch64 binary runs on all three. GNU ld and LLD already
 # default to this for aarch64; this pins it for toolchains configured otherwise. Note that a
-# RUSTFLAGS or CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS environment variable replaces
-# these flags; carry them over when you set one. See packaging/README.md.
+# RUSTFLAGS (or CARGO_ENCODED_RUSTFLAGS) environment variable replaces these flags; carry them
+# over when you set one. CARGO_TARGET_<TRIPLE>_RUSTFLAGS adds to them. See packaging/README.md.
 #
 # `chacha20_force_neon` selects the NEON backend of the `chacha20` crate (the `tcp:` link channel,
 # orion-auth `link-channel`): about 2.3x the portable code on a Cortex-A76 (16 us instead of 37 us

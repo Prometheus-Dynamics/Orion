@@ -20,6 +20,8 @@ members = [
     "crates/nt4",
     "crates/perf-check",
     "crates/orion",
+    "crates/capi",
+    "crates/liborion",
 ]
 # Standalone crates with their own lockfile and targets (bare-metal templates).
 exclude = ["examples/mcu-template", "crates/link/fuzz"]
@@ -35,6 +37,9 @@ rust-version = "1.94"
 authors = ["Mathias Petersen"]
 
 [workspace.dependencies]
+# The hardware repository's ABI crate 1.0 (frozen): the shared C-ABI vocabulary of liborion.
+abi = { package = "lemnos-abi", git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "abc9908b83065ba784f31c47996925afaf1ff6a2", default-features = false, features = ["std"] }
+orion-capi = { path = "crates/capi", version = "1.0.1-dev" }
 # The model crates (core, data-plane, control-plane, auth, runtime, cluster) support `no_std` +
 # `alloc`; their default `std` feature is off here, so every std consumer opts in explicitly with
 # `features = ["std"]`.

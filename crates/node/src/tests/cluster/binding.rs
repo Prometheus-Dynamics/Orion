@@ -153,7 +153,11 @@ async fn competing_workloads_for_an_exclusive_resource_resolve_deterministically
 
 #[tokio::test]
 async fn binding_becomes_unavailable_when_the_owner_disappears_and_recovers() {
-    let (a, b, c, _provider) = camera_cluster(FAST, Duration::from_secs(30)).await;
+    // Liveness 2 s, not FAST: on a starved machine one round can take longer than 300 ms, so the
+    // peers lapsed between rounds and the binding never showed available. 2 s still lapses well
+    // within each phase's 10 s wait once node-b is partitioned away.
+    let liveness = Duration::from_secs(2);
+    let (a, b, c, _provider) = camera_cluster(liveness, Duration::from_secs(30)).await;
     let all = [&a, &b, &c];
     write_local(
         &a.app,

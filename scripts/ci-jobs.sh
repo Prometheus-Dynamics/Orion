@@ -144,6 +144,12 @@ job_no_std() {
     step no-std "check-no-std.sh" ./scripts/check-no-std.sh
 }
 
+# liborion: the header is cbindgen's, the symbols and SONAME are as recorded, and a C program
+# runs against the static and the shared library (docs/capi.md).
+job_capi() {
+    step capi "liborion (scripts/capi.sh check)" scripts/capi.sh check
+}
+
 # orion-link for microcontrollers, and the MCU template with its size budget.
 job_link() {
     local all_targets=(thumbv6m-none-eabi thumbv7em-none-eabihf thumbv8m.main-none-eabihf
@@ -347,11 +353,11 @@ job_fuzz() {
 
 jobs=("$@")
 if [[ ${#jobs[@]} == 0 ]]; then
-    echo "usage: $0 <workspace|lints|no-std|link|allocators|appliance|cross32|qemu|qemu-node|fuzz|all>..." >&2
+    echo "usage: $0 <workspace|lints|no-std|link|capi|allocators|appliance|cross32|qemu|qemu-node|fuzz|all>..." >&2
     exit 2
 fi
 if [[ "${jobs[*]}" == "all" ]]; then
-    jobs=(workspace lints no-std link allocators appliance cross32 qemu qemu-node)
+    jobs=(workspace lints no-std link capi allocators appliance cross32 qemu qemu-node)
 fi
 for job in "${jobs[@]}"; do
     case "$job" in
@@ -359,6 +365,7 @@ for job in "${jobs[@]}"; do
         lints) job_lints ;;
         no-std) job_no_std ;;
         link) job_link ;;
+        capi) job_capi ;;
         allocators) job_allocators ;;
         appliance) job_appliance ;;
         cross32) job_cross32 ;;

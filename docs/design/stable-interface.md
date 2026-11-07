@@ -355,7 +355,9 @@ kinds.
 6. **Remote transport.** Revision unchanged (no new kinds). `tcp:` links: a handshake signed by
    the node's and the operator's ed25519 keys, then sealed records; client role only. Done.
 7. **`liborion`.** A C library over the interface: opaque handles, byte buffers, a pollable fd,
-   and a blocking client for the fd latest-value channel.
+   and a blocking client for the fd latest-value channel. Revision unchanged (no new kinds).
+   Done: `crates/capi` and `crates/liborion` (docs/capi.md), status queries and watches first;
+   actions, records and stream subscriptions follow as minor additions.
 8. **Versioned MCU template.** The template's C API announces its revision and gains a version
    function.
 
