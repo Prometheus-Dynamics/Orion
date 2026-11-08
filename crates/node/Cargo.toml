@@ -28,7 +28,7 @@ path = "src/main.rs"
 # transport is opt-in. Add any of `transport-http`, `peer-tcp`, `transport-tcp` or
 # `transport-quic` independently, or `full` for all four (what the default build was before).
 default = []
-full = ["transport-http", "transport-tcp", "transport-quic", "peer-tcp"]
+full = ["transport-http", "transport-tcp", "transport-quic", "peer-tcp", "time-sync"]
 transport-http = ["orion-transport-http/transport", "orion-transport-common/tls", "dep:rcgen"]
 # Peer sync over plain TCP (`orion+tcp://` peers, `ORION_NODE_PEER_ADDR` listener) with ed25519
 # signed requests and responses. Needs only tokio, so `--no-default-features --features peer-tcp`
@@ -50,6 +50,9 @@ discovery-mdns = ["peer-tcp", "dep:mdns-sd", "orion-auth/enrollment"]
 # directly over $NOTIFY_SOCKET (no libsystemd). A no-op unless systemd sets NOTIFY_SOCKET /
 # WATCHDOG_USEC. See docs/node-env.md ("Running under systemd") and packaging/systemd/.
 systemd-notify = []
+# Clock sync from SNTP servers or another Orion node, and serving this node's clock, in place of
+# systemd-timesyncd (`ORION_NODE_TIME_SYNC`). No new dependencies. See docs/time-sync.md.
+time-sync = []
 alloc-mimalloc = ["dep:mimalloc"]
 alloc-jemalloc = ["dep:tikv-jemallocator"]
 

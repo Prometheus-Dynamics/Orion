@@ -9,6 +9,7 @@ image runs.
 | `systemd/orion-node.service` | `/etc/systemd/system/orion-node.service` or `/usr/lib/systemd/system/` | The unit: `Type=notify`, watchdog, restart policy, `orion` user, hardening. |
 | `systemd/orion-node-safe.service` | `/etc/systemd/system/orion-node-safe.service` (not enabled) | The safe-mode unit, the same identity, state and hardening as `orion-node.service` (keep the two in step). See "Safe mode" below. |
 | `systemd/orion-node.service.d/safe-mode.conf.example` | a drop-in under `orion-node.service.d/` (not installed) | Starts the safe-mode unit when `orion-node` gives up. |
+| `systemd/orion-node.service.d/time-sync.conf.example` | a drop-in under `orion-node.service.d/` (not installed) | Lets the node keep the clock (`CAP_SYS_TIME`, `@clock`, `ORION_NODE_TIME_SYNC=discipline`) once `systemd-timesyncd` is masked; see `docs/time-sync.md`. |
 | `systemd/orion-node.env.example` | `/etc/default/orion-node.env` | Node settings: the single-node appliance profile from `docs/node-env.md`, with clustering, discovery and link examples commented out. |
 | `systemd/orion.sysusers` | `/usr/lib/sysusers.d/orion.conf` | Creates the `orion` user and group (member of `dialout`) at boot through `systemd-sysusers`. |
 | `buildroot/orion-users.table` | `BR2_ROOTFS_USERS_TABLES` entry | The same user, created at image build time (read-only root filesystems). |

@@ -64,6 +64,8 @@ mod status_lane;
 pub(crate) use status_lane::store::STATUS_VALUE_CEILING_BYTES;
 mod streams;
 mod task_handle;
+#[cfg(feature = "time-sync")]
+mod time_status;
 mod tls_bootstrap;
 mod types;
 #[cfg(test)]

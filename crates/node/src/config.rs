@@ -9,10 +9,11 @@ pub use placement::PlacementTuning;
 pub(crate) use runtime_tuning::normalize_runtime_tuning_duration;
 #[cfg(test)]
 pub(crate) use runtime_tuning::parse_config_value;
+use runtime_tuning::parse_env_or;
 #[cfg(test)]
 pub(crate) use runtime_tuning::runtime_tuning_doc_defaults;
 pub use runtime_tuning::{AuditLogOverloadPolicy, NodeRuntimeTuning};
-use runtime_tuning::{bool_env_or_false, duration_ms_env_or, parse_env_or};
+pub(crate) use runtime_tuning::{bool_env_or_false, duration_ms_env_or};
 
 use crate::NodeError;
 use crate::PeerSyncExecution;

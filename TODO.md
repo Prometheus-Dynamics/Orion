@@ -685,12 +685,15 @@ interfaces and risk. Slices, in dependency order:
       giving up; rate-limited logs; `<component>.state` keys), `provider disable` and
       `peer disable`, and `await_holding_lock` set to deny. Rule from the user: never auto-off
       unless someone configured it, and access paths are never backed off for good.
-- [ ] Time sync in the comm core (SNTP plus the Orion peer source), to replace timesyncd
-      (2.8 MB PSS). Approved by the user on 2026-11-07: the comm core holds `CAP_SYS_TIME`.
-      First case: test board #2 has no RTC and its clock runs about 1.9 h behind (timesyncd is
-      not syncing); it takes time from a peer (the controller or the PC). Done when that board
-      converges and the image can drop timesyncd (tell the image owner, A/B against the
-      hardware-layer worker).
+- [ ] Time sync (SNTP plus the Orion peer source), to replace timesyncd (2.8 MB PSS). Approved
+      by the user on 2026-11-07. Done in `orion-node` feature `time-sync` (docs/time-sync.md):
+      `report` and `discipline` modes, a node serves its clock over UDP and TCP, saved time for
+      boards without an RTC. +93 KB default build, +84 KB `full`. Test board #2 measured itself
+      13,711 s behind the PC (over TCP through an SSH tunnel; the controller's clock is a year
+      off, so it is no source). Left: the image masks timesyncd and turns on `discipline` with
+      `CAP_SYS_TIME` (the image owner), an A/B against timesyncd with the hardware-layer worker,
+      and moving it into the comm core with the extraction. A signed time exchange over
+      `orion+tcp` for networks that need it.
 - [ ] Hardware-layer handle offers (`SCM_RIGHTS`); `usb-bulk` / `usb-gadget` link transport.
 
 ### Leanness and hardware paths (2026-11-07, from the coordinator)

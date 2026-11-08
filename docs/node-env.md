@@ -435,7 +435,8 @@ mode" above.
 ## Clock Facts
 
 The node reports its clock source and synchronization state in its observed node record (see
-[Clock Facts](observability.md#clock-facts)); Orion never adjusts the clock. The kernel reports
+[Clock Facts](observability.md#clock-facts)). Orion adjusts the clock only with the time sync
+(below) set to `discipline`. The kernel reports
 whether the clock is synchronized but not which daemon disciplines it, so operators declare it.
 
 | Variable | Default | Valid values | Failure behavior |
@@ -446,6 +447,19 @@ whether the clock is synchronized but not which daemon disciplines it, so operat
 The refresh interval is `ORION_NODE_CLOCK_REFRESH_MS` under Runtime Tuning. Programmatic callers
 set all three through `NodeRuntimeTuning::with_clock_refresh_interval`, `with_clock_source`, and
 `with_clock_timebase`.
+
+## Time Sync
+
+Feature `time-sync` (in `full`). The node keeps the clock right from SNTP servers or another
+Orion node, in place of `systemd-timesyncd`; see [time-sync.md](time-sync.md).
+
+| Variable | Default | Valid values | Failure behavior |
+| --- | --- | --- | --- |
+| `ORION_NODE_TIME_SYNC` | `off` | `off`, `report` (measure and publish `time.*` status, never touch the clock), `discipline` (also slew or step it; needs `CAP_SYS_TIME`) | Any other value fails startup. `discipline` only reports while `systemd-timesyncd` runs. |
+| `ORION_NODE_TIME_SERVERS` | unset | Comma-separated `host[:port]` (port 123 by default), or `tcp://host:port` for an Orion node's time service over TCP | Required when `ORION_NODE_TIME_SYNC` is not `off`. |
+| `ORION_NODE_TIME_SERVE` | unset | `addr:port` to serve this node's clock on, over UDP (SNTP) and TCP | A bind failure fails startup. |
+| `ORION_NODE_TIME_SERVE_AUTHORITY` | `false` | Boolean: serve the clock while it is not synchronized (stratum 10), as a field network's reference | Invalid booleans fail startup. |
+| `ORION_NODE_TIME_POLL_MIN_MS` / `ORION_NODE_TIME_POLL_MAX_MS` | `64000` / `1024000` | Milliseconds; minimum above 0 and at most the maximum | Invalid values fail startup. |
 
 ## Host Facts
 

@@ -1,0 +1,9 @@
+# Drop-in for orion-node.service when the node keeps the clock (ORION_NODE_TIME_SYNC=discipline,
+# docs/time-sync.md). Install as /etc/systemd/system/orion-node.service.d/time-sync.conf and mask
+# systemd-timesyncd.service. CAP_SYS_TIME is the only capability it adds; @clock allows
+# clock_settime next to the unit's @system-service filter.
+[Service]
+CapabilityBoundingSet=CAP_SYS_TIME
+AmbientCapabilities=CAP_SYS_TIME
+SystemCallFilter=@clock
+Environment=ORION_NODE_TIME_SYNC=discipline

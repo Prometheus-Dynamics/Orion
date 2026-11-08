@@ -40,6 +40,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `orion-node` feature `time-sync` (in `full`): keeps the clock from SNTP servers or another
+  Orion node (`ORION_NODE_TIME_SYNC=report|discipline`, `ORION_NODE_TIME_SERVERS`), and serves
+  this node's clock over UDP and TCP (`ORION_NODE_TIME_SERVE`), in place of
+  `systemd-timesyncd`. It publishes `time.*` status keys. See docs/time-sync.md and the drop-in
+  `packaging/systemd/orion-node.service.d/time-sync.conf.example`.
 - `orion-link`: `HostSession::recycle_status` and `HostBus::recycle_status` take back a
   `HostEvent::Status` batch, so the next status frame decodes into it.
 - `OperatorRejection` (`orion-auth`, re-exported by `orion-client`) and

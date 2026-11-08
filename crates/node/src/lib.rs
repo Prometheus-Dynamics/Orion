@@ -37,6 +37,8 @@ mod storage;
 mod storage_io;
 #[cfg(all(feature = "systemd-notify", unix))]
 pub mod systemd;
+#[cfg(feature = "time-sync")]
+pub mod time_sync;
 mod transport_security;
 
 pub mod control_plane {
