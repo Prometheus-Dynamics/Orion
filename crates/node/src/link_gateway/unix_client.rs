@@ -363,12 +363,12 @@ impl LinkClient {
     }
 
     /// A provider session's `StreamPublish`: dropped (and logged) when refused.
-    pub(super) fn publish(&mut self, app: &NodeApp, id: &str, chunks: Vec<SampleChunk>) {
+    pub(super) fn publish(&mut self, app: &NodeApp, id: &str, chunks: &mut Vec<SampleChunk>) {
         let Some(stream) = self.declared.get(id) else {
             debug!(link = %self.link, device = %self.device, id, "batch for a stream the session did not declare");
             return;
         };
-        if let Err(error) = app.publish_link_stream(&self.source, stream.clone(), chunks) {
+        if let Err(error) = app.publish_link_stream(&self.source, stream, chunks) {
             debug!(link = %self.link, device = %self.device, id, %error, "stream batch dropped");
         }
     }

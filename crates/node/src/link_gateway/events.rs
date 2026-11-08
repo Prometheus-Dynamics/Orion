@@ -34,6 +34,8 @@ pub(super) struct LinkContext {
     /// The decoded batch of the last `Status` event, for the link loop to hand back to the
     /// session it came from (`HostSession::recycle_status`).
     status_spare: Option<Vec<orion_link::message::StatusEntry>>,
+    /// The last stream batch's chunk list, likewise (`HostSession::recycle_chunks`).
+    chunk_spare: Option<Vec<orion::control_plane::SampleChunk>>,
     pub(super) status: LinkStatusSnapshot,
     last_logged_error: Option<String>,
     /// Actions sent to this link's devices, by the id the device sees.
@@ -95,6 +97,7 @@ impl LinkContext {
             accepted: BTreeSet::new(),
             status_batch: Vec::new(),
             status_spare: None,
+            chunk_spare: None,
             status,
             last_logged_error: None,
             actions: SentActions::default(),
@@ -434,9 +437,11 @@ impl LinkContext {
             HostEvent::StreamPublish {
                 device_name,
                 id,
-                chunks,
+                mut chunks,
             } => {
-                self.streams.publish(&self.app, &device_name, &id, chunks);
+                self.streams
+                    .publish(&self.app, &device_name, &id, &mut chunks);
+                self.chunk_spare = Some(chunks);
                 LeaseAction::Keep
             }
             HostEvent::DeviceRejected {
@@ -490,6 +495,11 @@ impl LinkContext {
     /// The decoded entries of the last `Status` event handled, to recycle into its session.
     pub(super) fn take_status_spare(&mut self) -> Option<Vec<orion_link::message::StatusEntry>> {
         self.status_spare.take()
+    }
+
+    /// The chunk list of the last stream batch handled, to hand back to its session.
+    pub(super) fn take_chunk_spare(&mut self) -> Option<Vec<orion::control_plane::SampleChunk>> {
+        self.chunk_spare.take()
     }
 
     pub(super) fn accepted(&self) -> impl Iterator<Item = &str> {

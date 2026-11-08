@@ -37,6 +37,8 @@ const IRREGULAR_PERIOD_US: u64 = 100_000;
 #[derive(Debug, Default)]
 pub(super) struct StreamsState {
     registry: Mutex<StreamRegistry>,
+    /// The last batch's emptied outbox, reused by the next so a batch allocates no list.
+    spare_outbox: Mutex<Vec<(LocalAddress, ClientEventKind)>>,
     next_epoch: AtomicU64,
     pub(super) batches_total: AtomicU64,
     pub(super) samples_total: AtomicU64,
@@ -204,6 +206,12 @@ impl Ring {
 /// What to queue for which client once the stream lock is released.
 #[derive(Default)]
 struct Outbox(Vec<(LocalAddress, ClientEventKind)>);
+
+/// A [`StreamPublish`], borrowed.
+struct StreamPublishRef<'a> {
+    stream: &'a StreamRef,
+    chunks: &'a mut Vec<SampleChunk>,
+}
 
 impl Outbox {
     fn push(&mut self, to: &LocalAddress, event: ClientEventKind) {
@@ -374,14 +382,16 @@ impl Stream {
 }
 
 impl NodeApp {
-    fn deliver_stream_events(&self, out: Outbox) {
+    /// Queues `out`'s events to their clients and flushes them; returns the emptied list for
+    /// reuse.
+    fn deliver_stream_events(&self, mut out: Outbox) -> Vec<(LocalAddress, ClientEventKind)> {
         if out.0.is_empty() {
-            return;
+            return out.0;
         }
         let mut flushes = Vec::<PendingClientStreamFlush>::new();
         let mut gone = Vec::new();
         self.with_client_registry_txn(|txn| {
-            for (to, event) in out.0 {
+            for (to, event) in out.0.drain(..) {
                 match txn.client_mut(&to) {
                     Ok(client) => {
                         enqueue_stream_event(client, event);
@@ -406,6 +416,7 @@ impl NodeApp {
         for client in gone {
             self.forget_stream_client(&client);
         }
+        out.0
     }
 
     /// `DeclareStream` from local client `source`.
@@ -546,12 +557,29 @@ impl NodeApp {
     pub(super) fn publish_stream_samples(
         &self,
         source: &LocalAddress,
-        publish: StreamPublish,
+        mut publish: StreamPublish,
     ) -> Result<(), NodeError> {
-        let mut out = Outbox::default();
+        self.publish_stream_batch(source, &publish.stream, &mut publish.chunks)
+    }
+
+    /// A batch of `stream` from `source`, without taking the stream's identity by value: a link
+    /// device's stream reference stays with its session. A subscriber that takes the batch as it
+    /// is takes `chunks`; otherwise `chunks` is left as it was, for the caller to reuse.
+    pub(super) fn publish_stream_batch(
+        &self,
+        source: &LocalAddress,
+        stream_ref: &StreamRef,
+        chunks: &mut Vec<SampleChunk>,
+    ) -> Result<(), NodeError> {
+        let publish = StreamPublishRef {
+            stream: stream_ref,
+            chunks,
+        };
+        // Only the first subscriber's event list allocates, once.
+        let mut out = Outbox(std::mem::take(&mut *lock(&self.state.streams.spare_outbox)));
         {
             let mut registry = lock(&self.state.streams.registry);
-            let Some(stream) = registry.streams.get_mut(&publish.stream) else {
+            let Some(stream) = registry.streams.get_mut(publish.stream) else {
                 return Err(NodeError::Status(format!(
                     "stream {} of {} is not declared",
                     publish.stream.id, publish.stream.owner
@@ -569,8 +597,7 @@ impl NodeApp {
                 )));
             }
             // Check everything first: a malformed batch changes nothing.
-            let mut kinds = Vec::with_capacity(publish.chunks.len());
-            for chunk in &publish.chunks {
+            for chunk in publish.chunks.iter() {
                 let kind: SeriesKind = stream
                     .series
                     .get(usize::from(chunk.series))
@@ -584,10 +611,12 @@ impl NodeApp {
                 chunk.validate(kind).map_err(|err| {
                     NodeError::Status(format!("stream {}: {err}", publish.stream.id))
                 })?;
-                kinds.push(kind);
             }
+            // Every chunk's series exists (checked above), so indexing cannot fail.
+            let series = &stream.series;
             let mut count = 0u64;
-            for (chunk, &kind) in publish.chunks.iter().zip(&kinds) {
+            for chunk in publish.chunks.iter() {
+                let kind = series[usize::from(chunk.series)].kind;
                 let ring = &mut stream.rings[usize::from(chunk.series)];
                 for (t, v) in chunk.iter(kind).flatten() {
                     ring.push(t, v);
@@ -621,12 +650,12 @@ impl NodeApp {
             // Subscribers that take the whole batch get it as published. The last subscriber
             // to see the batch takes it without a copy when it is one of them.
             let mut left = stream.subscribers.len();
-            let mut batch = publish.chunks;
+            let batch = publish.chunks;
             for (to, subscriber) in stream.subscribers.iter_mut() {
                 left -= 1;
                 let chunks: Vec<SampleChunk> = if subscriber.takes_everything() {
                     if left == 0 {
-                        core::mem::take(&mut batch)
+                        core::mem::take(batch)
                     } else {
                         batch.clone()
                     }
@@ -634,10 +663,10 @@ impl NodeApp {
                     let min = u64::from(subscriber.sub.min_interval_us);
                     batch
                         .iter()
-                        .zip(&kinds)
-                        .filter(|(chunk, _)| subscriber.wanted[usize::from(chunk.series)])
-                        .filter_map(|(chunk, &kind)| {
+                        .filter(|chunk| subscriber.wanted[usize::from(chunk.series)])
+                        .filter_map(|chunk| {
                             let index = usize::from(chunk.series);
+                            let kind = series[index].kind;
                             let mut builder = SampleChunkBuilder::new(chunk.series, kind);
                             for (t, v) in chunk.iter(kind).flatten() {
                                 let last = subscriber.last_sent_us[index];
@@ -667,7 +696,11 @@ impl NodeApp {
                 subscriber.last_seq = seq;
             }
         }
-        self.deliver_stream_events(out);
+        let spare = self.deliver_stream_events(out);
+        let mut kept = lock(&self.state.streams.spare_outbox);
+        if kept.capacity() < spare.capacity() {
+            *kept = spare;
+        }
         Ok(())
     }
 

@@ -16,6 +16,7 @@ image runs.
 | `systemd/orion-node.preset` | `/usr/lib/systemd/system-preset/80-orion-node.preset` | Enables the unit on images that apply presets (`systemctl preset-all`). |
 | `gaia/orion-node.toml` | imported by a Gaia build | Builds, installs and stages all of the above in a Gaia image (Gaia >= 2.0). |
 | `gaia/orionctl.toml` | optionally imported after `orion-node.toml` | Builds the IPC-only `orionctl` and installs it as `/usr/bin/orionctl`. |
+| `gaia/liborion.toml` | optionally imported after `orion-node.toml` | Builds `liborion.so`, checks its exports against `crates/capi/symbols.txt` (Gaia >= 2.0.5), installs it as `/usr/lib/liborion.so.1`. |
 | `gaia/docker/aarch64-cross.Dockerfile` | used by the Gaia layer | Cross-build environment for `aarch64-unknown-linux-gnu`. |
 
 ## Build
@@ -236,6 +237,15 @@ import it never build `orionctl`. Redeclare `orionctl` after the import for YAML
 (`features = ["yaml", "toml"]`). `orionctl` uses `/run/orion/control.sock` when it exists; for a
 root shell, run the node with `ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root` (see "IPC
 clients").
+
+### `liborion` on the image
+
+Images whose programs use the C library import `gaia/liborion.toml` after the node layer. It
+builds the `liborion` package for the same target in the same cross image and installs
+`/usr/lib/liborion.so.1` (the SONAME), mode 0644. Its `surface = { exports =
+"crates/capi/symbols.txt" }` makes Gaia (>= 2.0.5) fail a build whose library exports a symbol
+not on that list or misses one on it. Once a program in the image loads `liborion.so.1`,
+`gaia image:check` also checks that program's imports against the list.
 
 Things the image provides:
 

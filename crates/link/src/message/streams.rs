@@ -277,6 +277,83 @@ where
     deserializer.deserialize_seq(Chunks)
 }
 
+/// Decodes a [`kind::STREAM_PUBLISH`] payload into `chunks`, reusing the chunks already there
+/// and their data buffers, and returns the stream id borrowed from `payload`: a provider that
+/// keeps publishing the same series costs no allocation once its buffers are large enough.
+/// `chunks` holds exactly the decoded chunks afterwards, or none on error.
+#[cfg(feature = "std")]
+pub(crate) fn decode_publish_into<'a>(
+    payload: &'a [u8],
+    chunks: &mut Vec<cp::SampleChunk>,
+) -> Result<&'a str, MessageError> {
+    use serde::de::{DeserializeSeed, Error as _, SeqAccess, Visitor};
+
+    struct Fill<'v>(&'v mut Vec<cp::SampleChunk>);
+
+    impl<'de> DeserializeSeed<'de> for Fill<'_> {
+        type Value = ();
+
+        fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+            deserializer.deserialize_seq(self)
+        }
+    }
+
+    impl<'de> Visitor<'de> for Fill<'_> {
+        type Value = ();
+
+        fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("a sequence of sample chunks")
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+            let mut len = 0;
+            while let Some(wire) = seq.next_element::<ChunkWire<'de>>()? {
+                match self.0.get_mut(len) {
+                    Some(slot) => {
+                        slot.series = wire.series;
+                        slot.t0_us = wire.t0_us;
+                        slot.count = wire.count;
+                        slot.data.clear();
+                        slot.data.extend_from_slice(wire.data);
+                    }
+                    None => self.0.push(wire.into()),
+                }
+                len += 1;
+            }
+            self.0.truncate(len);
+            Ok(())
+        }
+    }
+
+    struct Body<'v>(&'v mut Vec<cp::SampleChunk>);
+
+    impl<'de> Visitor<'de> for Body<'_> {
+        type Value = &'de str;
+
+        fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("a stream batch")
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<&'de str, A::Error> {
+            let id: &'de str = seq
+                .next_element()?
+                .ok_or_else(|| A::Error::invalid_length(0, &self))?;
+            seq.next_element_seed(Fill(self.0))?
+                .ok_or_else(|| A::Error::invalid_length(1, &"a stream batch"))?;
+            Ok(id)
+        }
+    }
+
+    let mut deserializer = postcard::Deserializer::from_bytes(payload);
+    let decoded = serde::Deserializer::deserialize_tuple(&mut deserializer, 2, Body(chunks));
+    if decoded.is_err() {
+        chunks.clear();
+    }
+    decoded.map_err(|_| MessageError::Decode {
+        kind: kind::STREAM_PUBLISH,
+    })
+}
+
 #[derive(Serialize, Deserialize)]
 enum BackfillWire {
     None,
@@ -790,5 +867,55 @@ pub(crate) mod parts {
                 buf,
             )
         }
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod publish_into_tests {
+    use super::*;
+    use alloc::vec;
+
+    fn chunk(series: u16, data: &[u8]) -> cp::SampleChunk {
+        cp::SampleChunk {
+            series,
+            t0_us: 7,
+            count: 1,
+            data: data.to_vec(),
+        }
+    }
+
+    fn payload(id: &str, chunks: &[cp::SampleChunk]) -> Vec<u8> {
+        postcard::to_allocvec(&PublishRef {
+            id,
+            chunks: ChunksRef(chunks),
+        })
+        .expect("encode")
+    }
+
+    #[test]
+    fn decodes_into_the_chunks_already_there() {
+        let mut chunks = vec![chunk(0, &[0; 64]), chunk(1, &[0; 64]), chunk(2, &[1])];
+        let buffer = chunks[0].data.as_ptr();
+        let sent = [chunk(4, &[1, 2, 3, 4]), chunk(5, &[5, 6, 7, 8])];
+        let bytes = payload("imu", &sent);
+        assert_eq!(decode_publish_into(&bytes, &mut chunks), Ok("imu"));
+        assert_eq!(chunks, sent);
+        // The first chunk's data buffer was reused, not replaced.
+        assert_eq!(chunks[0].data.as_ptr(), buffer);
+    }
+
+    #[test]
+    fn a_malformed_batch_leaves_no_chunks() {
+        let mut chunks = vec![chunk(0, &[1])];
+        let bytes = payload("imu", &[chunk(4, &[1, 2, 3, 4])]);
+        assert!(decode_publish_into(&bytes[..bytes.len() - 2], &mut chunks).is_err());
+        assert!(chunks.is_empty());
+        // And it matches the owned decoder.
+        let owned: PublishBody = postcard::from_bytes(&bytes).expect("decodes");
+        assert_eq!(
+            decode_publish_into(&bytes, &mut chunks),
+            Ok(owned.id.as_str())
+        );
+        assert_eq!(chunks, owned.chunks);
     }
 }

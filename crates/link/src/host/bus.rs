@@ -208,6 +208,14 @@ impl HostBus {
         }
     }
 
+    /// Hands the chunk list of a stream batch of the device at `address` back (see
+    /// [`HostSession::recycle_chunks`]).
+    pub fn recycle_chunks(&mut self, address: u32, chunks: Vec<orion_control_plane::SampleChunk>) {
+        if let Some(device) = self.devices.get_mut(&address) {
+            device.session.recycle_chunks(chunks);
+        }
+    }
+
     /// Replaces the lease set of the device at `address` (creating its session if needed, so
     /// leases can be set before the device appears). Returns whether it changed.
     pub fn set_leases(&mut self, address: u32, leases: Vec<LeaseRecord>) -> bool {

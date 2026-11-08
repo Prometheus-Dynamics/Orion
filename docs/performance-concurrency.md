@@ -312,7 +312,8 @@ is a record to compare against, not a tight gate.
 |---|---|---|---|---|---|
 | Provider status update, no watcher | 0.1 per update in release (was 8, before that 12) | 32 B (was 588 B) | about 3,500 (was 5,000) | 21 B | (acks batched) |
 | The same, fanned out to one status watch | 5.3 per update (was 11.2) | 1.3 KB (was 1.5 KB) | about 5,000 (was 6,900) | 21 B | coalesced |
-| Stream batch, 50 `f32` samples, one subscriber | 10.5 per batch (was 12.1) | 1.8 KB | about 81,000 (was 92,000) | 326 B | 313 B |
+| Stream batch, 50 `f32` samples, one subscriber | 5.5 per batch (was 10.5, before that 12.1) | 1.3 KB (was 1.8 KB) | about 81,000 (was 92,000) | 326 B | 313 B |
+| The same stream, no subscriber | 0.3 per batch | 94 B | about 37,000 | 327 B | |
 | Idle node, one quiet session | 0 per second (was 70) | 0 | | | |
 
 The release column is `cargo test --release`, the workspace release profile. Allocation counts
@@ -356,11 +357,16 @@ used to make is now reused:
   into the stored entries, the key moves between expiry slots, and changed entries are cloned
   only while someone watches. A watch starts under the store lock, so it sees a batch either in
   its bootstrap or as a change;
-- device names on host events are `Arc<str>`, not a `String` per event.
+- device names on host events are `Arc<str>`, not a `String` per event;
+- a stream batch is decoded into the session's recycled chunk list, reusing each chunk's data
+  buffer, and names its stream with the `Arc<str>` id kept from the declaration. With no
+  subscriber the list goes back to the session; the batch outbox is reused, and the per-batch
+  series kinds list is gone.
 
 The fan-out (5.3 per update) clones each changed entry for the watch queue, the per-client
-coalescing map and the wire record; the stream batch (10.5) decodes into owned chunks and
-copies the stream reference per subscriber. Those are the next reductions.
+coalescing map and the wire record. The subscribed stream batch (5.5) hands its chunk list and
+the chunks' data to the subscriber, and clones the subscriber's address and the stream
+reference (owner subject and id) into the event. Those are the next reductions.
 
 Under a burst the status lane coalesces: 2,000 updates reached the watch as about 15 answers, and
 200 stream batches as about 16 messages. Allocations per update, not bytes, are what the next

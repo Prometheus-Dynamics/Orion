@@ -730,9 +730,11 @@ interfaces and risk. Slices, in dependency order:
         the per-client coalescing map and the wire record. Sharing one `Arc` entry through
         the client queue needs the queue's `StatusChange` to hold shared entries (node-internal
         type change, ~150 lines, low risk);
-      - stream batch, 10.5 per batch: decode into recycled chunks (as status), the stream
-        reference and subject cloned per subscriber in the outbox (interned or `Arc` ids:
-        orion-core id newtypes, archive format kept by a `with` wrapper, medium risk);
+      - stream batch: done for unsubscribed streams (0.3 per batch: recycled chunk lists with
+        their data buffers, `Arc` ids from the declaration, reused outbox). Subscribed: 5.5 per
+        batch, left are the chunk list and data moved to the subscriber (a queue-side pool),
+        and the address, owner subject and id cloned per subscriber event (interned or `Arc`
+        ids: orion-core id newtypes, archive format kept by a `with` wrapper, medium risk);
       - serial and CAN loops: their read paths already reuse buffers; check them in a cost
         test over a pty and vcan.
 - [x] Typed operator rejection: `OperatorRejection::{OtherKey, NotEnrolled, Removed}` with

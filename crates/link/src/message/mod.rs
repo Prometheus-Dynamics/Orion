@@ -53,6 +53,8 @@ pub use records::{
 #[cfg(feature = "std")]
 pub(crate) use records::{RecordParts, WorkloadParts};
 #[cfg(feature = "std")]
+pub(crate) use streams::decode_publish_into;
+#[cfg(feature = "std")]
 pub(crate) use streams::encode_data;
 #[cfg(feature = "std")]
 pub(crate) use streams::parts::DataParts;

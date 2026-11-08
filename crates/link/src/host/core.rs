@@ -37,6 +37,9 @@ const CONTROL_RESERVE: usize = 8;
 const EVENT_CAPACITY: usize = 64;
 /// Recycled status batches kept per link (see `HostCore::recycle_status`).
 const STATUS_SPARES: usize = EVENT_CAPACITY;
+/// Stream ids kept per session, so a batch names its stream without a new string. A provider
+/// that declares more streams still works; its other batches allocate their id.
+const STREAM_IDS: usize = 64;
 
 #[derive(Debug, Clone)]
 struct Conn {
@@ -78,6 +81,11 @@ pub(crate) struct HostCore {
     /// next so their keys are reused. One per status frame a single read may carry, up to
     /// [`STATUS_SPARES`].
     status_spare: Vec<Vec<StatusEntry>>,
+    /// Sample chunk lists handed back by the host (`HostSession::recycle_chunks`), decoded into
+    /// next so their data buffers are reused.
+    chunk_spare: Vec<Vec<orion_control_plane::SampleChunk>>,
+    /// The ids of the streams the session declared, shared with the batches' events.
+    stream_ids: Vec<Arc<str>>,
 }
 
 /// Encodes a frame of at most `limit` bytes on the stack and hands it to `then`, so a queued
@@ -115,12 +123,20 @@ impl HostCore {
             no_session_sent: false,
             stats: HostStats::default(),
             status_spare: Vec::new(),
+            chunk_spare: Vec::new(),
+            stream_ids: Vec::new(),
         }
     }
 
     pub(crate) fn recycle_status(&mut self, entries: Vec<StatusEntry>) {
         if self.status_spare.len() < STATUS_SPARES && entries.capacity() > 0 {
             self.status_spare.push(entries);
+        }
+    }
+
+    pub(crate) fn recycle_chunks(&mut self, chunks: Vec<orion_control_plane::SampleChunk>) {
+        if self.chunk_spare.len() < STATUS_SPARES && chunks.capacity() > 0 {
+            self.chunk_spare.push(chunks);
         }
     }
 
@@ -176,8 +192,10 @@ impl HostCore {
 
     fn emit(&mut self, event: HostEvent) {
         if self.events.len() >= EVENT_CAPACITY {
-            if let Some(HostEvent::Status { entries, .. }) = self.events.pop_front() {
-                self.recycle_status(entries);
+            match self.events.pop_front() {
+                Some(HostEvent::Status { entries, .. }) => self.recycle_status(entries),
+                Some(HostEvent::StreamPublish { chunks, .. }) => self.recycle_chunks(chunks),
+                _ => {}
             }
             self.stats.events_dropped = self.stats.events_dropped.wrapping_add(1);
         }
@@ -224,6 +242,8 @@ impl HostCore {
             self.out.clear();
             self.last_state = None;
             self.last_catalog = None;
+            self.stream_ids.clear();
+            self.stream_ids.clear();
             #[cfg(feature = "xfer")]
             {
                 self.last_info = None;

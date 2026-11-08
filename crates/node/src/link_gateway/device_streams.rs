@@ -110,7 +110,7 @@ impl DeviceStreams {
         app: &NodeApp,
         device: &str,
         id: &str,
-        chunks: Vec<SampleChunk>,
+        chunks: &mut Vec<SampleChunk>,
     ) {
         let Some((publisher, stream)) = self
             .devices
@@ -120,7 +120,7 @@ impl DeviceStreams {
             debug!(link = %self.link, device, id, "batch for a stream the device did not declare");
             return;
         };
-        if let Err(error) = app.publish_link_stream(&publisher.source, stream.clone(), chunks) {
+        if let Err(error) = app.publish_link_stream(&publisher.source, stream, chunks) {
             debug!(link = %self.link, device, id, %error, "device stream batch dropped");
         }
     }

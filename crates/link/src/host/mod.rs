@@ -240,9 +240,10 @@ pub enum HostEvent {
     StreamPublish {
         /// The session's device name.
         device_name: Arc<str>,
-        /// The stream's id.
-        id: String,
-        /// The samples.
+        /// The stream's id, shared with the session's declaration.
+        id: Arc<str>,
+        /// The samples. Hand the list back with [`HostSession::recycle_chunks`] when done, so
+        /// the next batch is decoded into it.
         chunks: Vec<orion_control_plane::SampleChunk>,
     },
     /// An executor's state (revision 3, links with [`HostConfig::serve_executors`]), already
@@ -655,6 +656,12 @@ impl<T: Transport> HostSession<T> {
     /// frame decodes into it, reusing its keys instead of allocating new ones.
     pub fn recycle_status(&mut self, entries: Vec<crate::message::StatusEntry>) {
         self.core.recycle_status(entries);
+    }
+
+    /// Hands back the chunk list of a [`HostEvent::StreamPublish`]: the next batch is decoded
+    /// into it, reusing the chunks' data buffers.
+    pub fn recycle_chunks(&mut self, chunks: Vec<orion_control_plane::SampleChunk>) {
+        self.core.recycle_chunks(chunks);
     }
 
     /// The connected device's name.

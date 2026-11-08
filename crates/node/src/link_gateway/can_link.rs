@@ -215,6 +215,9 @@ pub(super) async fn run<P: CanIo>(
             if let Some(entries) = ctx.take_status_spare() {
                 bus.recycle_status(address, entries);
             }
+            if let Some(chunks) = ctx.take_chunk_spare() {
+                bus.recycle_chunks(address, chunks);
+            }
         }
 
         ctx.streams.pump(&ctx.app, |device, out| {

@@ -429,8 +429,9 @@ pub(super) async fn run(
                                 HostEvent::StreamDeclare {
                                     req, id, series, ..
                                 } => client.declare(&ctx.app, req, id, series),
-                                HostEvent::StreamPublish { id, chunks, .. } => {
-                                    client.publish(&ctx.app, &id, chunks);
+                                HostEvent::StreamPublish { id, mut chunks, .. } => {
+                                    client.publish(&ctx.app, &id, &mut chunks);
+                                    conn.session.recycle_chunks(chunks);
                                 }
                                 HostEvent::ExecutorState { state, .. } => {
                                     client.executor_state(&ctx.app, *state);
@@ -470,6 +471,9 @@ pub(super) async fn run(
                     }
                     if let Some(entries) = ctx.take_status_spare() {
                         conn.session.recycle_status(entries);
+                    }
+                    if let Some(chunks) = ctx.take_chunk_spare() {
+                        conn.session.recycle_chunks(chunks);
                     }
                 }
             }

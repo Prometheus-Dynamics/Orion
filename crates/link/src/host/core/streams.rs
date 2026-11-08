@@ -1,7 +1,9 @@
 //! Streams (revision 2) on the host session: provider declarations and batches reported to the
 //! gateway, and the answers to providers and subscribers queued in frames.
 
-use super::HostCore;
+use std::sync::Arc;
+
+use super::{HostCore, STREAM_IDS};
 use crate::frame::{FRAME_OVERHEAD, FrameView};
 use crate::host::{ActionSendError, HostEvent};
 use crate::message::{self, ErrorCode, Message, Roles, kind};
@@ -36,18 +38,42 @@ impl HostCore {
         let Some(device_name) = self.device_arc() else {
             return;
         };
+        if !declare {
+            // A batch: decoded into recycled chunks, its id shared with the declaration.
+            let mut chunks = self.chunk_spare.pop().unwrap_or_default();
+            match message::decode_publish_into(frame.payload(), &mut chunks) {
+                Ok(id) => {
+                    let id = match self.stream_ids.iter().find(|known| ***known == *id) {
+                        Some(known) => Arc::clone(known),
+                        None => Arc::from(id),
+                    };
+                    self.emit(HostEvent::StreamPublish {
+                        device_name,
+                        id,
+                        chunks,
+                    });
+                }
+                Err(_) => {
+                    self.recycle_chunks(chunks);
+                    self.decode_error();
+                }
+            }
+            return;
+        }
         match Message::decode(frame) {
-            Ok(Message::StreamDeclare(body)) => self.emit(HostEvent::StreamDeclare {
-                device_name,
-                req: body.req,
-                id: body.id,
-                series: body.series,
-            }),
-            Ok(Message::StreamPublish(body)) => self.emit(HostEvent::StreamPublish {
-                device_name,
-                id: body.id,
-                chunks: body.chunks,
-            }),
+            Ok(Message::StreamDeclare(body)) => {
+                if self.stream_ids.len() < STREAM_IDS
+                    && !self.stream_ids.iter().any(|known| **known == *body.id)
+                {
+                    self.stream_ids.push(Arc::from(body.id.as_str()));
+                }
+                self.emit(HostEvent::StreamDeclare {
+                    device_name,
+                    req: body.req,
+                    id: body.id,
+                    series: body.series,
+                });
+            }
             _ => {
                 self.decode_error();
                 refuse(self, ErrorCode::INVALID, "malformed stream declaration");

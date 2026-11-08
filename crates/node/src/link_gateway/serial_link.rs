@@ -166,6 +166,9 @@ pub(super) async fn run(
             if let Some(entries) = ctx.take_status_spare() {
                 session.recycle_status(entries);
             }
+            if let Some(chunks) = ctx.take_chunk_spare() {
+                session.recycle_chunks(chunks);
+            }
         }
         ctx.streams
             .pump(&ctx.app, |device, out| match session.device_name() {

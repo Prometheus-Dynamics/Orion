@@ -564,6 +564,55 @@ fn what_a_message_costs_the_node_on_a_unix_link() {
         watcher.read - sub_read,
     );
 
+    // Stream batches nobody subscribes to (a device's telemetry kept for later readers): the
+    // node keeps them in the stream's history. A status update after them, which the watcher
+    // sees, marks the last batch handled: frames of a session are handled in order.
+    let mut provider = provider;
+    let (provider, watcher) = client(move || {
+        provider.send(&Message::StreamDeclare(StreamDeclare {
+            req: 10,
+            id: "temp".into(),
+            series: vec![SeriesDecl::new("temp.board", SeriesKind::F32, 1_000)],
+        }));
+        provider.until(|message| matches!(message, Message::StreamDemand(d) if d.id == "temp"));
+        (provider, watcher)
+    });
+    let mut provider = provider;
+    let mut frames: Vec<Vec<u8>> = (0..BATCHES)
+        .map(|batch| {
+            let mut builder = SampleChunkBuilder::new(0, SeriesKind::F32);
+            for i in 0..SAMPLES {
+                builder.push(t0 + (batch * SAMPLES + i) * 1_000, i as f64);
+            }
+            provider.encode(&Message::StreamPublish(StreamPublish {
+                id: "temp".into(),
+                chunks: vec![builder.take()],
+            }))
+        })
+        .collect();
+    let fence = 3 * MESSAGES;
+    frames.push(provider.encode(&status(fence)));
+    let fence = TypedConfigValue::UInt(fence);
+    let written = provider.written;
+    let mut watcher = watcher;
+    let before = snapshot();
+    let (provider, watcher) = client(move || {
+        let writer = std::thread::spawn(move || {
+            IGNORED.with(|ignored| ignored.set(true));
+            for frame in &frames {
+                provider.write(frame);
+            }
+            provider
+        });
+        watcher.until(|message| {
+            matches!(message, Message::StatusChanges(c)
+                if c.updated.iter().any(|entry| entry.value == fence))
+        });
+        (writer.join().expect("writer"), watcher)
+    });
+    let after = snapshot();
+    let unwatched = per(BATCHES, before, after, provider.written - written, 0);
+
     println!(
         "node idle, one session: {:.0} allocs/s, {:.0} B/s allocated, {:.0} wake-ups/s",
         idle.0 as f64 / idle_for.as_secs_f64(),
@@ -573,6 +622,7 @@ fn what_a_message_costs_the_node_on_a_unix_link() {
     print("status update (no watcher)", &publish);
     print("status update fanned out to 1 watch", &watched);
     print(&format!("stream batch ({SAMPLES} f32 samples)"), &streamed);
+    print("stream batch, no subscriber", &unwatched);
     println!(
         "watch answers: {changes} for {MESSAGES} updates; stream messages: {batches} for {BATCHES} batches"
     );
@@ -590,6 +640,13 @@ fn what_a_message_costs_the_node_on_a_unix_link() {
         watched.allocations < 400.0,
         "fan-out: {:.1} allocs",
         watched.allocations
+    );
+    // An unsubscribed batch is decoded into the session's recycled chunks and kept in the
+    // stream's history in place; the fence's fan-out is spread over the batches.
+    assert!(
+        unwatched.allocations < 1.0,
+        "unsubscribed stream batch: {:.1} allocs",
+        unwatched.allocations
     );
     assert!(
         streamed.allocations < 400.0,

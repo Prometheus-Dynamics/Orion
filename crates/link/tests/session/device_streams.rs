@@ -90,7 +90,7 @@ fn declarations(pair: &StreamPair) -> Vec<(u32, String, Vec<cp::SeriesDecl>)> {
 fn batches(events: impl Iterator<Item = HostEvent>) -> Vec<(String, Vec<cp::SampleChunk>)> {
     events
         .filter_map(|event| match event {
-            HostEvent::StreamPublish { id, chunks, .. } => Some((id, chunks)),
+            HostEvent::StreamPublish { id, chunks, .. } => Some((id.to_string(), chunks)),
             _ => None,
         })
         .collect()

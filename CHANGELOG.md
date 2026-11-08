@@ -8,6 +8,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- Stream batches from link devices allocate less: decoded into the session's recycled chunk
+  lists (data buffers reused), the stream id shared from the declaration
+  (`HostEvent::StreamPublish::id` is now `Arc<str>`; hand chunk lists back with
+  `HostSession::recycle_chunks` / `HostBus::recycle_chunks`). An unsubscribed batch costs 0.3
+  allocations, a subscribed one 5.5 (was 10.5).
 - A link device's status update costs the node no allocation in steady state (8 before): read
   and write buffers are pooled per connection, status frames decode into recycled batches, and
   the status store refreshes a publisher's existing keys in place. Fan-out to a watcher went
@@ -39,6 +44,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   holds 4 KiB of read buffer instead of 128 KiB. Messages larger than 4 KiB still arrive whole.
 
 ### Added
+
+- `packaging/gaia/liborion.toml`: optional Gaia layer that builds `liborion.so`, checks its
+  exports against `crates/capi/symbols.txt` and installs `/usr/lib/liborion.so.1`.
 
 - `orion-node` feature `time-sync` (in `full`): keeps the clock from SNTP servers or another
   Orion node (`ORION_NODE_TIME_SYNC=report|discipline`, `ORION_NODE_TIME_SERVERS`), and serves

@@ -9,7 +9,7 @@ use crate::service::{ControlRequest, ControlSurface};
 use orion::{
     control_plane::{
         ClientEvent, ClientEventKind, ClientHello, ClientRole, ClientSession, ControlMessage,
-        SampleChunk, SeriesDecl, StatusSubject, StreamDecl, StreamPublish, StreamRef,
+        SampleChunk, SeriesDecl, StatusSubject, StreamDecl, StreamRef,
     },
     transport::ipc::{LocalAddress, UnixPeerIdentity},
 };
@@ -211,10 +211,10 @@ impl NodeApp {
     pub(crate) fn publish_link_stream(
         &self,
         source: &LocalAddress,
-        stream: StreamRef,
-        chunks: Vec<SampleChunk>,
+        stream: &StreamRef,
+        chunks: &mut Vec<SampleChunk>,
     ) -> Result<(), NodeError> {
-        self.publish_stream_samples(source, StreamPublish { stream, chunks })
+        self.publish_stream_batch(source, stream, chunks)
     }
 
     /// Takes up to `max` queued events of a link client, oldest first.
