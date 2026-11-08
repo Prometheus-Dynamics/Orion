@@ -248,7 +248,7 @@ impl DeviceSeen {
                 max_frame,
                 ..
             } => {
-                self.connected = Some((device_name.clone(), *max_frame));
+                self.connected = Some((device_name.to_string(), *max_frame));
                 self.info = None;
             }
             HostEvent::DeviceInfo { device_name, info } if self.is_connected(device_name) => {
@@ -324,19 +324,19 @@ impl FirmwareJob {
                 device_name,
                 max_frame,
                 ..
-            } if device_name == &self.device => {
+            } if device_name[..] == self.device => {
                 // A new session's state is unknown until its `DeviceInfo`: the health gate of the
                 // old session does not open a `Confirm` to a device that may have rebooted.
                 self.driver.set_confirm_gate(false);
                 self.driver.on_connected(*max_frame);
             }
-            HostEvent::DeviceInfo { device_name, info } if device_name == &self.device => {
+            HostEvent::DeviceInfo { device_name, info } if device_name[..] == self.device => {
                 self.apply_info(info);
             }
-            HostEvent::Xfer { device_name, reply } if device_name == &self.device => {
+            HostEvent::Xfer { device_name, reply } if device_name[..] == self.device => {
                 self.driver.on_reply(reply);
             }
-            HostEvent::DeviceLost { device_name } if device_name == &self.device => {
+            HostEvent::DeviceLost { device_name } if device_name[..] == self.device => {
                 self.driver.on_lost();
             }
             _ => {}

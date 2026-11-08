@@ -269,6 +269,7 @@ mod tests {
 #[cfg(test)]
 mod rejection_tests {
     use super::OperatorRejection;
+    use alloc::format;
 
     #[test]
     fn rejection_codes_round_trip_inside_wrapped_messages() {

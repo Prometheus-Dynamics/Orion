@@ -138,7 +138,7 @@ pub(super) async fn run(
                 if let Some(device) = session.device_name().map(str::to_owned) {
                     // The device is lost to this node until it is attached again.
                     let lost = HostEvent::DeviceLost {
-                        device_name: device,
+                        device_name: device.into(),
                     };
                     seen.on_event(&lost);
                     ctx.handle(lost);
@@ -162,6 +162,9 @@ pub(super) async fn run(
             }
             if let LeaseAction::Set(leases) = ctx.handle(event) {
                 session.set_leases(leases);
+            }
+            if let Some(entries) = ctx.take_status_spare() {
+                session.recycle_status(entries);
             }
         }
         ctx.streams

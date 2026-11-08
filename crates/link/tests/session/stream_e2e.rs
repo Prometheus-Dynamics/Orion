@@ -30,7 +30,7 @@ fn handshake_publish_and_ack() {
     ));
     assert!(matches!(
         &pair.host_events[0].1,
-        HostEvent::DeviceConnected { device_name, .. } if device_name == "imu-board"
+        HostEvent::DeviceConnected { device_name, .. } if &device_name[..] == "imu-board"
     ));
     assert_eq!(pair.host_states(), vec![&resources("imu-board", 1)]);
     assert_eq!(pair.count_device(|e| *e == DeviceEvent::StateAcked), 1);
@@ -222,7 +222,7 @@ fn device_loss_is_detected_by_the_host() {
     let frozen_at = pair.now;
     assert!(pair.run_until(5_000, |p| {
         p.count_host(
-            |e| matches!(e, HostEvent::DeviceLost { device_name } if device_name == "imu-board"),
+            |e| matches!(e, HostEvent::DeviceLost { device_name } if &device_name[..] == "imu-board"),
         ) == 1
     }));
     assert!(pair.now - frozen_at <= 3 * u64::from(HEARTBEAT_MS) + 50);

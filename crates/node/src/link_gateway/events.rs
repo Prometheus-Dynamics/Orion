@@ -10,6 +10,7 @@ use orion_link::host::{ActionSendError, HostEvent};
 use orion_link::message::{LeaseRecord, LinkActionState, decode_action_map, encode_action_map};
 use orion_link::wire::decode_progress;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::{debug, info, warn};
@@ -27,14 +28,19 @@ pub(super) struct LinkContext {
     /// The desired-state revision the lease sets were last computed for.
     leases_revision: Option<orion::Revision>,
     /// Devices whose current-session snapshot was accepted.
-    accepted: BTreeSet<String>,
+    accepted: BTreeSet<Arc<str>>,
+    /// The last status batch handed to the node, refilled in place by the next one.
+    status_batch: Vec<orion::control_plane::StatusEntry>,
+    /// The decoded batch of the last `Status` event, for the link loop to hand back to the
+    /// session it came from (`HostSession::recycle_status`).
+    status_spare: Option<Vec<orion_link::message::StatusEntry>>,
     pub(super) status: LinkStatusSnapshot,
     last_logged_error: Option<String>,
     /// Actions sent to this link's devices, by the id the device sees.
     actions: SentActions,
     /// The action names each connected device declared in its session (devices that declared
     /// none are absent: their names are not checked).
-    declared: BTreeMap<String, Vec<String>>,
+    declared: BTreeMap<Arc<str>, Vec<String>>,
     /// The devices' streams (revision 2).
     pub(super) streams: DeviceStreams,
 }
@@ -87,6 +93,8 @@ impl LinkContext {
             started: Instant::now(),
             leases_revision: None,
             accepted: BTreeSet::new(),
+            status_batch: Vec::new(),
+            status_spare: None,
             status,
             last_logged_error: None,
             actions: SentActions::default(),
@@ -135,7 +143,7 @@ impl LinkContext {
             self.accept_cancel(&device, &action_id, id, send);
             return;
         }
-        if let Some(names) = self.declared.get(&device)
+        if let Some(names) = self.declared.get(device.as_str())
             && !names.contains(&request.name)
         {
             let reason = format!(
@@ -321,8 +329,8 @@ impl LinkContext {
                 ..
             } => {
                 info!(link = %self.name, device = %device_name, session_id, max_frame, "link device connected");
-                self.accepted.remove(&device_name);
-                self.declared.remove(&device_name);
+                self.accepted.remove(&*device_name);
+                self.declared.remove(&*device_name);
                 self.streams.lost(&self.app, &device_name);
                 // Seed the lease set of a device the node already knows, so it has its leases
                 // before its first snapshot arrives.
@@ -358,7 +366,7 @@ impl LinkContext {
                         self.status.snapshot_rejects += 1;
                         self.status.last_error =
                             Some(format!("device `{device_name}`: {rejection}"));
-                        if self.accepted.remove(&device_name) {
+                        if self.accepted.remove(&*device_name) {
                             self.app.link_device_lost(&self.name, &device_name);
                         }
                         LeaseAction::Set(Vec::new())
@@ -367,13 +375,17 @@ impl LinkContext {
             }
             HostEvent::Status {
                 device_name,
-                entries,
+                mut entries,
             } => {
                 let count = entries.len();
-                match self
-                    .app
-                    .link_publish_device_status(&self.name, &device_name, entries)
-                {
+                let published = self.app.link_publish_device_status(
+                    &self.name,
+                    &device_name,
+                    &mut entries,
+                    &mut self.status_batch,
+                );
+                self.status_spare = Some(entries);
+                match published {
                     Ok(()) => self.status.status_batches += 1,
                     Err(rejection) => {
                         debug!(link = %self.name, device = %device_name, entries = count, reason = %rejection, "link device status rejected");
@@ -384,8 +396,8 @@ impl LinkContext {
             }
             HostEvent::DeviceLost { device_name } => {
                 info!(link = %self.name, device = %device_name, "link device lost; marking its resources unavailable");
-                self.accepted.remove(&device_name);
-                self.declared.remove(&device_name);
+                self.accepted.remove(&*device_name);
+                self.declared.remove(&*device_name);
                 self.streams.lost(&self.app, &device_name);
                 self.fail_device_actions(
                     &device_name,
@@ -475,8 +487,13 @@ impl LinkContext {
         self.app.link_device_leases(device_name)
     }
 
-    pub(super) fn accepted(&self) -> impl Iterator<Item = &String> {
-        self.accepted.iter()
+    /// The decoded entries of the last `Status` event handled, to recycle into its session.
+    pub(super) fn take_status_spare(&mut self) -> Option<Vec<orion_link::message::StatusEntry>> {
+        self.status_spare.take()
+    }
+
+    pub(super) fn accepted(&self) -> impl Iterator<Item = &str> {
+        self.accepted.iter().map(|device| &**device)
     }
 
     /// Records an I/O failure (logged once per distinct message).
@@ -501,8 +518,14 @@ impl LinkContext {
     /// loop, so it allocates nothing when nothing changed: the device and action lists are rebuilt
     /// only when they differ, and the node's copy is updated in place only when it differs.
     pub(super) fn publish_status(&mut self) {
-        if !self.status.devices.iter().eq(self.accepted.iter()) {
-            self.status.devices = self.accepted.iter().cloned().collect();
+        if !self
+            .status
+            .devices
+            .iter()
+            .map(String::as_str)
+            .eq(self.accepted())
+        {
+            self.status.devices = self.accepted().map(String::from).collect();
         }
         let actions_match = self.status.actions.len() == self.declared.len()
             && self
@@ -510,13 +533,13 @@ impl LinkContext {
                 .actions
                 .iter()
                 .zip(&self.declared)
-                .all(|(have, (device, names))| &have.device == device && &have.names == names);
+                .all(|(have, (device, names))| have.device == **device && &have.names == names);
         if !actions_match {
             self.status.actions = self
                 .declared
                 .iter()
                 .map(|(device, names)| LinkDeviceActions {
-                    device: device.clone(),
+                    device: device.to_string(),
                     names: names.clone(),
                 })
                 .collect();

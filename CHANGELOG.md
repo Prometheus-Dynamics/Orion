@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- A link device's status update costs the node no allocation in steady state (8 before): read
+  and write buffers are pooled per connection, status frames decode into recycled batches, and
+  the status store refreshes a publisher's existing keys in place. Fan-out to a watcher went
+  from 11 to 5 allocations per update.
+- `orion-link`: `HostEvent` device names are `Arc<str>` instead of `String`.
+  `HostBus::next_frame` no longer allocates.
 - `orion-node` and `orionctl` default features are now empty: IPC only (with JSON for
   `orionctl`). The new `full` feature brings back the old defaults (`orion-node`: HTTP, TCP,
   QUIC and peer TCP; `orionctl`: HTTP, YAML and TOML). Default builds are about half the size.
@@ -34,6 +40,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `orion-link`: `HostSession::recycle_status` and `HostBus::recycle_status` take back a
+  `HostEvent::Status` batch, so the next status frame decodes into it.
 - `OperatorRejection` (`orion-auth`, re-exported by `orion-client`) and
   `RemoteError::operator_rejection()`: why a node refused an operator (`OtherKey`,
   `NotEnrolled`, `Removed`). The node prefixes the error message with the code, for example

@@ -577,9 +577,12 @@ fn what_a_message_costs_the_node_on_a_unix_link() {
         "watch answers: {changes} for {MESSAGES} updates; stream messages: {batches} for {BATCHES} batches"
     );
 
-    // Blow-up ceilings only (see the module docs).
+    // Blow-up ceilings only (see the module docs), except the unwatched status update: it
+    // reuses its read buffer, decoded batch and stored entry, so it allocates only while the
+    // pools fill (0.1 per update over this run). The ceiling catches a per-message allocation
+    // coming back.
     assert!(
-        publish.allocations < 200.0,
+        publish.allocations < 1.0,
         "status update: {:.1} allocs",
         publish.allocations
     );

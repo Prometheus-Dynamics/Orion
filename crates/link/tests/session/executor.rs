@@ -79,7 +79,7 @@ fn executor_state_is_acknowledged_and_reported_once_per_change() {
         matches!(
             &events[..],
             [HostEvent::ExecutorState { device_name, state }]
-                if device_name == "console"
+                if &device_name[..] == "console"
                     && state.workloads[0].state == WorkloadObservedState::Running
         ),
         "{events:?}"

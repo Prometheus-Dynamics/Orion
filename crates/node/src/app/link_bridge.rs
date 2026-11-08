@@ -276,30 +276,63 @@ impl NodeApp {
             })
     }
 
+    /// `batch` is the caller's reusable batch: entries whose subject and key match the previous
+    /// batch's are refilled in place, so a device that keeps reporting the same keys costs no
+    /// allocation here.
     pub(crate) fn link_publish_device_status(
         &self,
         link: &str,
         device: &str,
-        entries: Vec<LinkStatusEntry>,
+        entries: &mut [LinkStatusEntry],
+        batch: &mut Vec<StatusEntry>,
     ) -> Result<(), LinkRejection> {
-        let (provider_id, publisher) =
-            self.link_device_publisher(link, device).ok_or_else(|| {
-                LinkRejection(format!(
+        let publisher = {
+            let owners = lock(&self.state.links.owners);
+            let Some((id, publisher)) = owners.iter().find_map(|(id, owner)| match owner {
+                ProviderOwner::Device(claim)
+                    if claim.connected && claim.link == link && claim.device == device =>
+                {
+                    Some((id, &claim.publisher))
+                }
+                _ => None,
+            }) else {
+                return Err(LinkRejection(format!(
                     "device `{device}` has no accepted provider snapshot on {link}"
-                ))
-            })?;
-        let entries = entries
-            .into_iter()
-            .map(|entry| {
-                StatusEntry::new(
-                    StatusSubject::Provider(provider_id.clone()),
-                    entry.key,
-                    entry.value,
-                )
-                .with_ttl_ms(u64::from(entry.ttl_ms))
-            })
-            .collect();
-        self.publish_status_as(&publisher, entries)
+                )));
+            };
+            batch.truncate(entries.len());
+            for (i, entry) in entries.iter_mut().enumerate() {
+                let ttl_ms = u64::from(entry.ttl_ms);
+                // The decoded entry keeps its key for the session to decode into next time.
+                let value = std::mem::replace(
+                    &mut entry.value,
+                    orion::control_plane::TypedConfigValue::Bool(false),
+                );
+                match batch.get_mut(i) {
+                    Some(slot)
+                        if slot.key == entry.key
+                            && matches!(&slot.subject, StatusSubject::Provider(held) if held == id) =>
+                    {
+                        slot.value = value;
+                        slot.ttl_ms = ttl_ms;
+                    }
+                    slot => {
+                        let fresh = StatusEntry::new(
+                            StatusSubject::Provider(id.clone()),
+                            entry.key.clone(),
+                            value,
+                        )
+                        .with_ttl_ms(ttl_ms);
+                        match slot {
+                            Some(slot) => *slot = fresh,
+                            None => batch.push(fresh),
+                        }
+                    }
+                }
+            }
+            Arc::clone(publisher)
+        };
+        self.publish_status_in(&publisher, batch)
             .map_err(|error| LinkRejection(error.to_string()))
     }
 

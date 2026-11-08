@@ -10,7 +10,8 @@ use serde::Serialize;
 
 use crate::frame::{FRAME_OVERHEAD, FrameView};
 use crate::message::{
-    self, Hello, LeaseRecord, Message, ProviderState, RejectReason, Roles, Welcome, kind,
+    self, Hello, LeaseRecord, Message, ProviderState, RejectReason, Roles, StatusEntry, Welcome,
+    kind,
 };
 
 use super::ActionSendError;
@@ -34,10 +35,12 @@ const OUT_CAPACITY: usize = 32;
 const CONTROL_RESERVE: usize = 8;
 /// Events queued per link; the oldest is dropped beyond this.
 const EVENT_CAPACITY: usize = 64;
+/// Recycled status batches kept per link (see `HostCore::recycle_status`).
+const STATUS_SPARES: usize = EVENT_CAPACITY;
 
 #[derive(Debug, Clone)]
 struct Conn {
-    device_name: String,
+    device_name: Arc<str>,
     session_id: u32,
     max_frame: usize,
     /// Newest device sequence number accepted.
@@ -71,6 +74,10 @@ pub(crate) struct HostCore {
     last_heard: u64,
     no_session_sent: bool,
     stats: HostStats,
+    /// Status batches handed back by the host (`HostSession::recycle_status`), decoded into
+    /// next so their keys are reused. One per status frame a single read may carry, up to
+    /// [`STATUS_SPARES`].
+    status_spare: Vec<Vec<StatusEntry>>,
 }
 
 /// Encodes a frame of at most `limit` bytes on the stack and hands it to `then`, so a queued
@@ -107,6 +114,13 @@ impl HostCore {
             last_heard: 0,
             no_session_sent: false,
             stats: HostStats::default(),
+            status_spare: Vec::new(),
+        }
+    }
+
+    pub(crate) fn recycle_status(&mut self, entries: Vec<StatusEntry>) {
+        if self.status_spare.len() < STATUS_SPARES && entries.capacity() > 0 {
+            self.status_spare.push(entries);
         }
     }
 
@@ -115,7 +129,12 @@ impl HostCore {
     }
 
     pub(crate) fn device_name(&self) -> Option<&str> {
-        self.conn.as_ref().map(|conn| conn.device_name.as_str())
+        self.conn.as_ref().map(|conn| &*conn.device_name)
+    }
+
+    /// The device name as the events carry it: a reference count, not a copy.
+    fn device_arc(&self) -> Option<Arc<str>> {
+        self.conn.as_ref().map(|conn| Arc::clone(&conn.device_name))
     }
 
     pub(crate) fn session_id(&self) -> Option<u32> {
@@ -157,7 +176,9 @@ impl HostCore {
 
     fn emit(&mut self, event: HostEvent) {
         if self.events.len() >= EVENT_CAPACITY {
-            self.events.pop_front();
+            if let Some(HostEvent::Status { entries, .. }) = self.events.pop_front() {
+                self.recycle_status(entries);
+            }
             self.stats.events_dropped = self.stats.events_dropped.wrapping_add(1);
         }
         self.events.push_back(event);
@@ -224,7 +245,7 @@ impl HostCore {
         let limit = conn.max_frame;
         let leases = core::mem::take(&mut self.leases);
         if !self.queue(kind::LEASES, leases.as_slice(), limit) {
-            let device_name = self.device_name().map(String::from).unwrap_or_default();
+            let device_name = self.device_arc().unwrap_or_default();
             let mut probe = vec![0u8; HOST_MAX_FRAME];
             let frame_len = message::encode_leases(&leases, 0, &mut probe).unwrap_or(usize::MAX);
             self.emit(HostEvent::LeasesTooLarge {
@@ -353,7 +374,7 @@ impl HostCore {
             },
             kind::ACTION_RESULT => match Message::decode(frame) {
                 Ok(Message::ActionResult(result)) => {
-                    if let Some(device_name) = self.device_name().map(String::from) {
+                    if let Some(device_name) = self.device_arc() {
                         self.emit(HostEvent::ActionResult {
                             device_name,
                             id: result.id,
@@ -370,18 +391,24 @@ impl HostCore {
             kind::XFER_ACK | kind::XFER_RESULT | kind::XFER_ABORT => {
                 self.on_xfer_reply(frame.kind(), frame.payload());
             }
-            kind::STATUS => match message::decode_status(frame.payload()) {
-                Ok(entries) => {
-                    self.stats.status_received = self.stats.status_received.wrapping_add(1);
-                    if let Some(device_name) = self.device_name().map(String::from) {
-                        self.emit(HostEvent::Status {
-                            device_name,
-                            entries,
-                        });
+            kind::STATUS => {
+                let mut entries = self.status_spare.pop().unwrap_or_default();
+                match message::decode_status_into(frame.payload(), &mut entries) {
+                    Ok(()) => {
+                        self.stats.status_received = self.stats.status_received.wrapping_add(1);
+                        if let Some(device_name) = self.device_arc() {
+                            self.emit(HostEvent::Status {
+                                device_name,
+                                entries,
+                            });
+                        }
+                    }
+                    Err(_) => {
+                        self.recycle_status(entries);
+                        self.decode_error();
                     }
                 }
-                Err(_) => self.decode_error(),
-            },
+            }
             kind::PING => match Message::decode(frame) {
                 Ok(Message::Ping { now_ms }) => {
                     let _ = self.queue(kind::PONG, &now_ms, limit);
@@ -457,7 +484,7 @@ impl HostCore {
         if self.last_catalog.as_ref() == Some(&names) {
             return;
         }
-        let Some(device_name) = self.device_name().map(String::from) else {
+        let Some(device_name) = self.device_arc() else {
             return;
         };
         self.last_catalog = Some(names.clone());
@@ -505,7 +532,7 @@ impl HostCore {
             .max(FRAME_OVERHEAD);
         self.heard = true;
         if let Some(conn) = &mut self.conn
-            && conn.device_name == hello.device_name
+            && *conn.device_name == *hello.device_name
             && !conn.confirmed
         {
             // The device did not get our Welcome yet: repeat it within the same session.
@@ -520,7 +547,7 @@ impl HostCore {
         if self
             .conn
             .as_ref()
-            .is_some_and(|conn| conn.device_name != hello.device_name)
+            .is_some_and(|conn| *conn.device_name != *hello.device_name)
         {
             self.lose();
         }
@@ -534,8 +561,9 @@ impl HostCore {
         {
             self.last_info = None;
         }
+        let device_name: Arc<str> = Arc::from(hello.device_name);
         self.conn = Some(Conn {
-            device_name: hello.device_name.clone(),
+            device_name: Arc::clone(&device_name),
             session_id,
             max_frame,
             last_seq: seq,
@@ -545,7 +573,7 @@ impl HostCore {
         });
         self.stats.sessions = self.stats.sessions.wrapping_add(1);
         self.emit(HostEvent::DeviceConnected {
-            device_name: hello.device_name,
+            device_name,
             session_id,
             roles,
             max_frame,
@@ -673,7 +701,7 @@ impl HostCore {
             return;
         }
         self.last_info = Some(info.clone());
-        if let Some(device_name) = self.device_name().map(String::from) {
+        if let Some(device_name) = self.device_arc() {
             self.emit(HostEvent::DeviceInfo { device_name, info });
         }
     }
@@ -688,7 +716,7 @@ impl HostCore {
         };
         match reply {
             Some(reply) => {
-                if let Some(device_name) = self.device_name().map(String::from) {
+                if let Some(device_name) = self.device_arc() {
                     self.emit(HostEvent::Xfer { device_name, reply });
                 }
             }
@@ -701,7 +729,7 @@ impl HostCore {
         if self.last_state.as_ref() == Some(&state) {
             return; // retransmission of a snapshot we already have
         }
-        let Some(device_name) = self.device_name().map(String::from) else {
+        let Some(device_name) = self.device_arc() else {
             return;
         };
         self.last_state = Some(state.clone());

@@ -140,7 +140,7 @@ pub enum HostEvent {
     /// restarted: replace everything known about it.
     DeviceConnected {
         /// Announced device name.
-        device_name: String,
+        device_name: Arc<str>,
         /// The new session.
         session_id: u32,
         /// Announced roles.
@@ -151,7 +151,7 @@ pub enum HostEvent {
     /// A new provider snapshot (retransmissions of the same snapshot are not repeated).
     ProviderState {
         /// The device that sent it.
-        device_name: String,
+        device_name: Arc<str>,
         /// Provider record as sent; the gateway owns `node_id`.
         provider: ProviderRecord,
         /// Full resource set.
@@ -160,7 +160,7 @@ pub enum HostEvent {
     /// Volatile status values (fire-and-forget; not acknowledged, newest value per key wins).
     Status {
         /// The device that sent them.
-        device_name: String,
+        device_name: Arc<str>,
         /// The entries, in the order sent.
         entries: Vec<StatusEntry>,
     },
@@ -168,7 +168,7 @@ pub enum HostEvent {
     /// mid-session. Mark its resources unavailable.
     DeviceLost {
         /// The lost device.
-        device_name: String,
+        device_name: Arc<str>,
     },
     /// A `Hello` was refused (for diagnostics).
     DeviceRejected {
@@ -182,7 +182,7 @@ pub enum HostEvent {
     #[cfg(feature = "xfer")]
     DeviceInfo {
         /// The device that sent it.
-        device_name: String,
+        device_name: Arc<str>,
         /// The report.
         info: xfer::DeviceInfo,
     },
@@ -190,14 +190,14 @@ pub enum HostEvent {
     #[cfg(feature = "xfer")]
     Xfer {
         /// The device that replied.
-        device_name: String,
+        device_name: Arc<str>,
         /// The reply.
         reply: xfer::XferReply,
     },
     /// The lease set does not fit the negotiated frame size and was not sent.
     LeasesTooLarge {
         /// Affected device.
-        device_name: String,
+        device_name: Arc<str>,
         /// Encoded frame length.
         frame_len: usize,
         /// Negotiated frame limit.
@@ -207,7 +207,7 @@ pub enum HostEvent {
     /// A device that declares nothing sends no event.
     ActionCatalog {
         /// The device that declared them.
-        device_name: String,
+        device_name: Arc<str>,
         /// The names, as the device declared them.
         names: Vec<String>,
     },
@@ -215,7 +215,7 @@ pub enum HostEvent {
     /// gateway matches `id` to its own record of the request.
     ActionResult {
         /// The device that sent it.
-        device_name: String,
+        device_name: Arc<str>,
         /// The `id` of the request.
         id: u32,
         /// The state reported.
@@ -228,7 +228,7 @@ pub enum HostEvent {
     /// [`HostSession::send_request_error`] echoing `req`.
     StreamDeclare {
         /// The session's device name.
-        device_name: String,
+        device_name: Arc<str>,
         /// Request id, for a refusal.
         req: u32,
         /// The stream's id; its owner is the session's provider.
@@ -239,7 +239,7 @@ pub enum HostEvent {
     /// A batch of samples from a provider (revision 2); not answered.
     StreamPublish {
         /// The session's device name.
-        device_name: String,
+        device_name: Arc<str>,
         /// The stream's id.
         id: String,
         /// The samples.
@@ -250,14 +250,14 @@ pub enum HostEvent {
     /// [`HostSession::send_workloads`].
     ExecutorState {
         /// The session's device name.
-        device_name: String,
+        device_name: Arc<str>,
         /// The state as sent; the gateway owns the executor's `node_id`.
         state: Box<crate::message::ExecutorState>,
     },
     /// A client request (revision 1, links with [`HostConfig::serve_clients`]).
     ClientRequest {
         /// The session's device name.
-        device_name: String,
+        device_name: Arc<str>,
         /// The request.
         request: ClientRequest,
     },
@@ -649,6 +649,12 @@ impl<T: Transport> HostSession<T> {
     /// The current lease set.
     pub fn leases(&self) -> &[LeaseRecord] {
         self.core.leases()
+    }
+
+    /// Hands a [`HostEvent::Status`] batch back once the host is done with it: the next status
+    /// frame decodes into it, reusing its keys instead of allocating new ones.
+    pub fn recycle_status(&mut self, entries: Vec<crate::message::StatusEntry>) {
+        self.core.recycle_status(entries);
     }
 
     /// The connected device's name.

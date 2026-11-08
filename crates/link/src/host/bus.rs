@@ -178,27 +178,34 @@ impl HostBus {
     /// keep the frame and send it later; each device's frames must go out in order.
     pub fn next_frame(&mut self) -> Option<BusFrame> {
         let start = self.tx_next;
-        let order: Vec<u32> = self
-            .devices
-            .range(start..)
-            .chain(self.devices.range(..start))
-            .map(|(&address, _)| address)
-            .collect();
-        for address in order {
-            let Some(device) = self.devices.get_mut(&address) else {
-                continue;
+        // Devices from `start` up, then the ones below it: no list of addresses is built.
+        for wrapped in [false, true] {
+            let devices = if wrapped {
+                self.devices.range_mut(..start)
+            } else {
+                self.devices.range_mut(start..)
             };
-            if let Some(segment) = device.session.next_segment() {
-                self.tx_next = address.wrapping_add(1);
-                return Some(BusFrame {
-                    address,
-                    id: device.ids.host_to_device,
-                    extended: device.ids.extended,
-                    segment,
-                });
+            for (&address, device) in devices {
+                if let Some(segment) = device.session.next_segment() {
+                    self.tx_next = address.wrapping_add(1);
+                    return Some(BusFrame {
+                        address,
+                        id: device.ids.host_to_device,
+                        extended: device.ids.extended,
+                        segment,
+                    });
+                }
             }
         }
         None
+    }
+
+    /// Hands a status batch of the device at `address` back (see
+    /// [`HostSession::recycle_status`]).
+    pub fn recycle_status(&mut self, address: u32, entries: Vec<crate::message::StatusEntry>) {
+        if let Some(device) = self.devices.get_mut(&address) {
+            device.session.recycle_status(entries);
+        }
     }
 
     /// Replaces the lease set of the device at `address` (creating its session if needed, so

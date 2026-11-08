@@ -310,9 +310,9 @@ is a record to compare against, not a tight gate.
 
 | Path | Allocations (debug / release) | Bytes allocated (release) | Instructions (release) | Wire in | Wire out |
 |---|---|---|---|---|---|
-| Provider status update, no watcher | 8.0 / 8.0 per update (was 12) | 588 B (was 1.4 KB) | about 5,000 | 21 B | (acks batched) |
-| The same, fanned out to one status watch | 11.9 / 11.2 per update (was 16) | 1.5 KB (was 2.5 KB) | about 6,900 | 21 B | coalesced |
-| Stream batch, 50 `f32` samples, one subscriber | 11.8 / 12.1 per batch | 2.2 KB | about 92,000 | 326 B | 313 B |
+| Provider status update, no watcher | 0.1 per update in release (was 8, before that 12) | 32 B (was 588 B) | about 3,500 (was 5,000) | 21 B | (acks batched) |
+| The same, fanned out to one status watch | 5.3 per update (was 11.2) | 1.3 KB (was 1.5 KB) | about 5,000 (was 6,900) | 21 B | coalesced |
+| Stream batch, 50 `f32` samples, one subscriber | 10.5 per batch (was 12.1) | 1.8 KB | about 81,000 (was 92,000) | 326 B | 313 B |
 | Idle node, one quiet session | 0 per second (was 70) | 0 | | | |
 
 The release column is `cargo test --release`, the workspace release profile. Allocation counts
@@ -342,6 +342,25 @@ updated in place, only when it changed. The once-a-second lease check rebuilds t
 only when the desired-state revision moved.
 
 The test fails if idle allocates more than 10 times or wakes more than 10 times per second.
+
+**Per-message allocations, status:** an unwatched status update allocates nothing once the
+pools are warm (the 0.1 is them filling over the run; the test fails above 1). Each copy it
+used to make is now reused:
+- the read chunk travels from the connection's reader to the link task in a pooled buffer that
+  comes back after decoding, and each outgoing frame does the same through the writer;
+- the session decodes a status frame into a batch the link task handed back
+  (`HostSession::recycle_status`), so keys are copied into existing strings, and a batch
+  dropped from a full event queue goes back to the pool too;
+- the link task refills its last status batch in place when the device repeats its keys;
+- the store applies a batch that only refreshes its publisher's keys in place: values move
+  into the stored entries, the key moves between expiry slots, and changed entries are cloned
+  only while someone watches. A watch starts under the store lock, so it sees a batch either in
+  its bootstrap or as a change;
+- device names on host events are `Arc<str>`, not a `String` per event.
+
+The fan-out (5.3 per update) clones each changed entry for the watch queue, the per-client
+coalescing map and the wire record; the stream batch (10.5) decodes into owned chunks and
+copies the stream reference per subscriber. Those are the next reductions.
 
 Under a burst the status lane coalesces: 2,000 updates reached the watch as about 15 answers, and
 200 stream batches as about 16 messages. Allocations per update, not bytes, are what the next

@@ -1,8 +1,6 @@
 //! The client role (revision 1) on the host session: requests reported to the gateway, refusals,
 //! and answers queued as parts that fit the session's frame size.
 
-use std::string::String;
-
 use super::{HostCore, OUT_CAPACITY};
 use crate::frame::{FRAME_OVERHEAD, FrameView};
 use crate::host::{ActionSendError, HostEvent};
@@ -103,7 +101,7 @@ impl HostCore {
                 return;
             }
         };
-        if let Some(device_name) = self.device_name().map(String::from) {
+        if let Some(device_name) = self.device_arc() {
             self.emit(HostEvent::ClientRequest {
                 device_name,
                 request,

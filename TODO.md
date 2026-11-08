@@ -720,9 +720,18 @@ interfaces and risk. Slices, in dependency order:
 - [ ] Remaining gating cuts (docs/design/feature-gating.md, "Left"): rustls optional in
       `orion-transport-tcp`, `orion-client` dependency trims, `orionctl` on a current-thread
       runtime, `default-features = false` on three workspace links.
-- [ ] Per-message allocations to 0 on the link and gateway path (status update 8, fan-out 12,
-      stream batch 12 today): pooled or reused encode buffers, no per-message `Vec` or
-      `String`. Report it in the same release-build table in docs/performance-concurrency.md.
+- [ ] Per-message allocations to 0 on the link and gateway path. Status update, no watcher:
+      8 to 0 (pooled read/write buffers, recycled decode batches, in-place store refresh; the
+      cost test gates it below 1). Left, in the same table in docs/performance-concurrency.md:
+      - fan-out to a watcher, 5.3 per update: the changed entry is cloned for the watch queue,
+        the per-client coalescing map and the wire record. Sharing one `Arc` entry through
+        the client queue needs the queue's `StatusChange` to hold shared entries (node-internal
+        type change, ~150 lines, low risk);
+      - stream batch, 10.5 per batch: decode into recycled chunks (as status), the stream
+        reference and subject cloned per subscriber in the outbox (interned or `Arc` ids:
+        orion-core id newtypes, archive format kept by a `with` wrapper, medium risk);
+      - serial and CAN loops: their read paths already reuse buffers; check them in a cost
+        test over a pty and vcan.
 - [x] Typed operator rejection: `OperatorRejection::{OtherKey, NotEnrolled, Removed}` with
       codes `operator.other_key`, `operator.not_enrolled` and `operator.removed`, carried as a
       `[code]` prefix on the error message (additive, protocol 1 compatible);

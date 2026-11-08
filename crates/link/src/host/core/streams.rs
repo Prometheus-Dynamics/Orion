@@ -1,8 +1,6 @@
 //! Streams (revision 2) on the host session: provider declarations and batches reported to the
 //! gateway, and the answers to providers and subscribers queued in frames.
 
-use std::string::String;
-
 use super::HostCore;
 use crate::frame::{FRAME_OVERHEAD, FrameView};
 use crate::host::{ActionSendError, HostEvent};
@@ -35,7 +33,7 @@ impl HostCore {
             );
             return;
         }
-        let Some(device_name) = self.device_name().map(String::from) else {
+        let Some(device_name) = self.device_arc() else {
             return;
         };
         match Message::decode(frame) {

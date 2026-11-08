@@ -172,7 +172,7 @@ pub(super) async fn run<P: CanIo>(
                     // The session goes: nothing is routed to the device until it is attached.
                     bus.forget(address);
                     let _ = ctx.handle(HostEvent::DeviceLost {
-                        device_name: device.clone(),
+                        device_name: device.clone().into(),
                     });
                     if pending
                         .as_ref()
@@ -212,6 +212,9 @@ pub(super) async fn run<P: CanIo>(
             if let LeaseAction::Set(leases) = ctx.handle(event.event) {
                 bus.set_leases(address, leases);
             }
+            if let Some(entries) = ctx.take_status_spare() {
+                bus.recycle_status(address, entries);
+            }
         }
 
         ctx.streams.pump(&ctx.app, |device, out| {
@@ -249,7 +252,7 @@ pub(super) async fn run<P: CanIo>(
             lease_refresh_at = Instant::now() + LEASE_REFRESH;
         }
         if ctx.leases_due(refresh, periodic) {
-            let accepted: Vec<String> = ctx.accepted().cloned().collect();
+            let accepted: Vec<String> = ctx.accepted().map(String::from).collect();
             for name in accepted {
                 if let (Some(address), Some(leases)) =
                     (bus.address_of(&name), ctx.refreshed_leases(&name))
@@ -346,7 +349,7 @@ fn event_device(event: &HostEvent) -> Option<&str> {
         | HostEvent::ActionResult { device_name, .. }
         | HostEvent::StreamDeclare { device_name, .. }
         | HostEvent::StreamPublish { device_name, .. }
-        | HostEvent::LeasesTooLarge { device_name, .. } => Some(device_name.as_str()),
+        | HostEvent::LeasesTooLarge { device_name, .. } => Some(&**device_name),
         HostEvent::DeviceRejected { device_name, .. } => device_name.as_deref(),
         _ => None,
     }

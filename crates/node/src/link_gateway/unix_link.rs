@@ -104,9 +104,40 @@ enum Inbound {
     Closed(u64, Option<io::Error>),
 }
 
+/// Byte buffers shared by a connection's reader, writer and link task: a read chunk or an
+/// outgoing frame travels in one of them and comes back when done, so steady traffic allocates
+/// none.
+#[derive(Clone, Default)]
+struct Buffers(Arc<std::sync::Mutex<Vec<Vec<u8>>>>);
+
+impl Buffers {
+    /// Buffers kept for reuse: enough for the reads and frames in flight at once.
+    const KEPT: usize = 16;
+
+    fn take(&self) -> Vec<u8> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop()
+            .unwrap_or_default()
+    }
+
+    fn give(&self, mut buffer: Vec<u8>) {
+        let mut kept = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if kept.len() < Self::KEPT && buffer.capacity() <= 64 * 1024 {
+            buffer.clear();
+            kept.push(buffer);
+        }
+    }
+}
+
 struct Conn {
     session: HostSession<Stream>,
     out: mpsc::UnboundedSender<Vec<u8>>,
+    buffers: Buffers,
     pending: Arc<AtomicUsize>,
     /// The session's answers waiting for output, in bytes, as last counted; the connection is
     /// not read while it is at [`ANSWER_BYTES`] or more.
@@ -175,6 +206,8 @@ pub(super) async fn run(
     let policy = ctx.app.local_admission.clone();
     // Connection ids of one turn, kept across turns so a turn does not allocate.
     let mut ids: Vec<u64> = Vec::new();
+    // One turn's events of one connection, reused across turns.
+    let mut events: Vec<HostEvent> = Vec::new();
     let mut desired = ctx.app.link_desired_changes();
     let mut state_changes = ctx.app.link_state_changes();
     let mut listener: Option<Listener> = None;
@@ -229,6 +262,7 @@ pub(super) async fn run(
                     if let Some(conn) = conns.get_mut(&id) {
                         ctx.status.bytes_rx += bytes.len() as u64;
                         conn.session.receive(&bytes);
+                        conn.buffers.give(bytes);
                     }
                 }
                 Some(Inbound::Held(id)) => {
@@ -359,7 +393,7 @@ pub(super) async fn run(
         ids.clear();
         ids.extend(conns.keys().copied());
         for &id in &ids {
-            let mut events = Vec::new();
+            events.clear();
             if let Some(conn) = conns.get_mut(&id) {
                 conn.session.poll(now);
                 while let Some(event) = conn.session.next_event() {
@@ -367,7 +401,7 @@ pub(super) async fn run(
                 }
             }
             let mut duplicate = false;
-            for event in events {
+            for event in events.drain(..) {
                 if let HostEvent::DeviceConnected { device_name, .. } = &event
                     && taken_elsewhere(&conns, id, device_name)
                 {
@@ -429,10 +463,14 @@ pub(super) async fn run(
                     }
                     _ => {}
                 }
-                if let LeaseAction::Set(leases) = ctx.handle(event)
-                    && let Some(conn) = conns.get_mut(&id)
-                {
-                    conn.session.set_leases(leases);
+                let leases = ctx.handle(event);
+                if let Some(conn) = conns.get_mut(&id) {
+                    if let LeaseAction::Set(leases) = leases {
+                        conn.session.set_leases(leases);
+                    }
+                    if let Some(entries) = ctx.take_status_spare() {
+                        conn.session.recycle_status(entries);
+                    }
                 }
             }
             if duplicate {
@@ -509,9 +547,11 @@ pub(super) async fn run(
 fn transmit(ctx: &mut LinkContext, conn: &mut Conn) -> usize {
     let mut moved = 0;
     while conn.pending.load(Ordering::Acquire) < QUEUE_BYTES {
-        let Some(bytes) = conn.session.transmit() else {
+        let mut bytes = conn.buffers.take();
+        if !conn.session.transmit_into(&mut bytes) {
+            conn.buffers.give(bytes);
             break;
-        };
+        }
         ctx.status.frames_tx += 1;
         ctx.status.bytes_tx += bytes.len() as u64;
         conn.pending.fetch_add(bytes.len(), Ordering::AcqRel);
@@ -645,6 +685,7 @@ fn start_conn<R: ConnRead, W: ConnWrite>(
     let pending = Arc::new(AtomicUsize::new(0));
     let backlog = Arc::new(AtomicUsize::new(0));
     let room = Arc::new(Notify::new());
+    let buffers = Buffers::default();
     tokio::spawn(serve_conn(
         id,
         reader,
@@ -655,6 +696,7 @@ fn start_conn<R: ConnRead, W: ConnWrite>(
             backlog: backlog.clone(),
             room: room.clone(),
             drained: drained.clone(),
+            buffers: buffers.clone(),
         },
         inbound.clone(),
         limits,
@@ -662,6 +704,7 @@ fn start_conn<R: ConnRead, W: ConnWrite>(
     Conn {
         session: HostSession::stream(host.clone()),
         out,
+        buffers,
         pending,
         backlog,
         room,
@@ -704,7 +747,7 @@ fn drop_conn(ctx: &mut LinkContext, retired: &mut Retired, mut conn: Conn) {
     // actions in flight on it fail at once.
     if let Some(device) = conn.session.device_name().map(str::to_owned) {
         let _ = ctx.handle(HostEvent::DeviceLost {
-            device_name: device,
+            device_name: device.into(),
         });
     }
     retire(retired, &conn.session);
@@ -784,6 +827,7 @@ struct Shared {
     room: Arc<Notify>,
     /// Notified when `pending` falls below [`QUEUE_BYTES`].
     drained: Arc<Notify>,
+    buffers: Buffers,
 }
 
 async fn serve_conn<R: ConnRead, W: ConnWrite>(
@@ -800,12 +844,14 @@ async fn serve_conn<R: ConnRead, W: ConnWrite>(
         backlog,
         room,
         drained,
+        buffers,
     } = shared;
     // Writes run on their own, so a peer slow to take its output never stops the reads (its
     // pings) or the held notices.
     let (write_end_tx, mut write_end) = oneshot::channel();
+    let returned = buffers.clone();
     let writes = tokio::spawn(async move {
-        let _ = write_end_tx.send(write_out(writer, out, &pending, &drained).await);
+        let _ = write_end_tx.send(write_out(writer, out, &pending, &drained, &returned).await);
     });
     let mut buf = vec![0u8; READ_BUF];
     let mut counter = FrameCounter { in_frame: false };
@@ -839,7 +885,9 @@ async fn serve_conn<R: ConnRead, W: ConnWrite>(
                 Ok(n) => {
                     let chunk = buf.get(..n).unwrap_or_default();
                     budget.spend(counter.count(chunk));
-                    if inbound.send(Inbound::Bytes(id, chunk.to_vec())).await.is_err() {
+                    let mut bytes = buffers.take();
+                    bytes.extend_from_slice(chunk);
+                    if inbound.send(Inbound::Bytes(id, bytes)).await.is_err() {
                         writes.abort();
                         return;
                     }
@@ -859,10 +907,12 @@ async fn write_out<W: ConnWrite>(
     mut out: mpsc::UnboundedReceiver<Vec<u8>>,
     pending: &AtomicUsize,
     drained: &Notify,
+    buffers: &Buffers,
 ) -> Option<io::Error> {
     while let Some(frame) = out.recv().await {
         let len = frame.len();
         let written = tokio::time::timeout(WRITE_TIMEOUT, writer.write_bytes(&frame)).await;
+        buffers.give(frame);
         let before = pending.fetch_sub(len, Ordering::AcqRel);
         if before >= QUEUE_BYTES && before - len < QUEUE_BYTES {
             drained.notify_one();
@@ -892,6 +942,7 @@ mod tests {
             backlog: Arc::new(AtomicUsize::new(0)),
             room: Arc::new(Notify::new()),
             drained: Arc::new(Notify::new()),
+            buffers: Buffers::default(),
         }
     }
 

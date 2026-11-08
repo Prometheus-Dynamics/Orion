@@ -4,7 +4,9 @@
 //! milliseconds. Memory is bounded by the node-wide and per-publisher entry caps plus the fixed
 //! per-entry key and value size limits.
 
-use orion::control_plane::{StatusEntry, StatusKey, StatusQuery, TypedConfigValue};
+use orion::control_plane::{StatusEntry, StatusKey, StatusQuery, StatusSubject, TypedConfigValue};
+use std::borrow::Borrow;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 /// Longest status key, in bytes.
@@ -52,6 +54,60 @@ impl std::fmt::Display for StatusPublishError {
     }
 }
 
+/// A `(subject, key)` identity seen through a reference, so an incoming entry can look up the
+/// stored one without building (and allocating) a [`StatusKey`].
+trait KeyView {
+    fn subject(&self) -> &StatusSubject;
+    fn key(&self) -> &str;
+}
+
+impl KeyView for StatusKey {
+    fn subject(&self) -> &StatusSubject {
+        &self.subject
+    }
+    fn key(&self) -> &str {
+        &self.key
+    }
+}
+
+impl KeyView for StatusEntry {
+    fn subject(&self) -> &StatusSubject {
+        &self.subject
+    }
+    fn key(&self) -> &str {
+        &self.key
+    }
+}
+
+// The order is `StatusKey`'s derived one (subject, then key), which `Borrow` requires.
+impl PartialEq for dyn KeyView + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.subject() == other.subject() && self.key() == other.key()
+    }
+}
+
+impl Eq for dyn KeyView + '_ {}
+
+impl PartialOrd for dyn KeyView + '_ {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for dyn KeyView + '_ {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.subject()
+            .cmp(other.subject())
+            .then_with(|| self.key().cmp(other.key()))
+    }
+}
+
+impl<'a> Borrow<dyn KeyView + 'a> for StatusKey {
+    fn borrow(&self) -> &(dyn KeyView + 'a) {
+        self
+    }
+}
+
 #[derive(Debug)]
 struct Stored {
     entry: StatusEntry,
@@ -95,6 +151,7 @@ impl StatusStore {
     }
 
     /// Applies a batch atomically: either every entry is stored or none is.
+    #[cfg(test)]
     pub(crate) fn publish(
         &mut self,
         publisher: &str,
@@ -102,12 +159,37 @@ impl StatusStore {
         now_ms: u64,
         limits: StatusLimits,
     ) -> Result<PublishOutcome, StatusPublishError> {
+        let mut entries = entries;
+        self.publish_with(publisher, &mut entries, now_ms, limits, true)
+    }
+
+    /// [`Self::publish`], collecting the changed entries only when `watched` (someone is told).
+    ///
+    /// A batch that only refreshes keys its publisher already holds, the steady state of a
+    /// device reporting the same keys, is applied in place: no key is copied and nothing is
+    /// allocated unless a watcher needs the changed entries. Then only the values are taken
+    /// from `entries`, which keeps the subjects and keys for the caller to fill again; any other
+    /// batch is moved out, leaving `entries` empty.
+    pub(crate) fn publish_with(
+        &mut self,
+        publisher: &str,
+        entries: &mut Vec<StatusEntry>,
+        now_ms: u64,
+        limits: StatusLimits,
+        watched: bool,
+    ) -> Result<PublishOutcome, StatusPublishError> {
+        for entry in entries.iter() {
+            validate(entry, limits.max_value_bytes)?;
+        }
+        if self.refreshes_only(publisher, entries) {
+            return self.refresh(entries, now_ms, limits, watched);
+        }
+        let entries = std::mem::take(entries);
         // Later entries for the same key win within one batch. One vector, sorted by key (a stable
         // sort keeps the batch order within a key, so the last of each run wins), instead of a map
         // node per entry: the common batch is one entry.
         let mut batch: Vec<(StatusKey, StatusEntry)> = Vec::with_capacity(entries.len());
         for entry in entries {
-            validate(&entry, limits.max_value_bytes)?;
             batch.push((entry.status_key(), entry));
         }
         if batch.len() > 1 {
@@ -189,7 +271,7 @@ impl StatusStore {
             let expiry = (entry.expires_at_ms(), self.next_expiry_id);
             self.expiries.insert(expiry, key.clone());
             self.value_bytes = self.value_bytes.saturating_add(value_len(&entry.value));
-            if changed {
+            if changed && watched {
                 outcome.changed.push(entry.clone());
             }
             outcome.accepted += 1;
@@ -201,6 +283,83 @@ impl StatusStore {
                     expiry,
                 },
             );
+        }
+        Ok(outcome)
+    }
+
+    /// Whether every entry of the batch replaces one `publisher` already holds, with no key twice
+    /// (small batches only: the check is quadratic).
+    fn refreshes_only(&self, publisher: &str, entries: &[StatusEntry]) -> bool {
+        const MAX_IN_PLACE: usize = 16;
+        entries.len() <= MAX_IN_PLACE
+            && entries.iter().enumerate().all(|(i, entry)| {
+                let view: &dyn KeyView = entry;
+                self.entries
+                    .get(view)
+                    .is_some_and(|stored| stored.publisher == publisher)
+                    && entries[..i].iter().all(|earlier| {
+                        let earlier: &dyn KeyView = earlier;
+                        earlier != view
+                    })
+            })
+    }
+
+    /// Applies a batch of [`Self::refreshes_only`] entries in place.
+    fn refresh(
+        &mut self,
+        entries: &mut [StatusEntry],
+        now_ms: u64,
+        limits: StatusLimits,
+        watched: bool,
+    ) -> Result<PublishOutcome, StatusPublishError> {
+        let mut replaced_value_bytes = 0usize;
+        let mut batch_value_bytes = 0usize;
+        for entry in entries.iter() {
+            let view: &dyn KeyView = entry;
+            if let Some(stored) = self.entries.get(view) {
+                replaced_value_bytes += value_len(&stored.entry.value);
+            }
+            batch_value_bytes += value_len(&entry.value);
+        }
+        let needed_value_bytes = self
+            .value_bytes
+            .saturating_sub(replaced_value_bytes)
+            .saturating_add(batch_value_bytes);
+        if needed_value_bytes > limits.max_total_value_bytes {
+            return Err(StatusPublishError::ValueBytesFull {
+                needed: needed_value_bytes,
+                max: limits.max_total_value_bytes,
+            });
+        }
+        self.value_bytes = needed_value_bytes;
+        let mut outcome = PublishOutcome {
+            changed: Vec::new(),
+            accepted: entries.len(),
+        };
+        for entry in entries.iter_mut() {
+            let view: &dyn KeyView = &*entry;
+            let Some(stored) = self.entries.get_mut(view) else {
+                continue; // checked by `refreshes_only`
+            };
+            let ttl_ms = if entry.ttl_ms == 0 {
+                limits.max_ttl_ms
+            } else {
+                entry.ttl_ms.min(limits.max_ttl_ms)
+            };
+            let changed = stored.entry.value != entry.value;
+            stored.entry.value = std::mem::replace(&mut entry.value, TypedConfigValue::Bool(false));
+            stored.entry.ttl_ms = ttl_ms;
+            stored.entry.published_at_ms = now_ms;
+            self.next_expiry_id = self.next_expiry_id.wrapping_add(1);
+            let expiry = (stored.entry.expires_at_ms(), self.next_expiry_id);
+            let previous = std::mem::replace(&mut stored.expiry, expiry);
+            if changed && watched {
+                outcome.changed.push(stored.entry.clone());
+            }
+            // The key moves from the old expiry slot to the new one: no copy.
+            if let Some(key) = self.expiries.remove(&previous) {
+                self.expiries.insert(expiry, key);
+            }
         }
         Ok(outcome)
     }
@@ -350,6 +509,63 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].value, TypedConfigValue::UInt(29));
         assert_eq!(all[0].ttl_ms, 1_000, "TTL is capped at the node maximum");
+    }
+
+    #[test]
+    fn a_refresh_in_place_moves_the_expiry_and_keeps_the_batch() {
+        let mut store = StatusStore::default();
+        let mut batch = vec![entry("p", "fps", 30), entry("p", "temp", 40)];
+        store
+            .publish_with("a", &mut batch.clone(), 0, LIMITS, true)
+            .expect("first publish");
+        let refreshed = store
+            .publish_with("a", &mut batch, 900, LIMITS, false)
+            .expect("refresh");
+        assert_eq!(refreshed.accepted, 2);
+        assert!(refreshed.changed.is_empty(), "nobody watches");
+        assert_eq!(
+            batch.len(),
+            2,
+            "an in-place refresh leaves the subjects and keys"
+        );
+        assert_eq!(batch[0].key, "fps");
+        // The first publish expired at 1,000; the refresh moved both to 1,900.
+        assert!(store.expire(1_000).is_empty());
+        assert_eq!(store.len(), 2);
+        assert_eq!(store.next_expiry_ms(), Some(1_900));
+        assert_eq!(store.expire(1_900).len(), 2);
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn a_batch_with_a_new_key_or_a_repeated_key_takes_the_full_path() {
+        let mut store = StatusStore::default();
+        store
+            .publish("a", vec![entry("p", "fps", 30)], 0, LIMITS)
+            .expect("publish");
+        let mut batch = vec![entry("p", "fps", 31), entry("p", "new", 1)];
+        let outcome = store
+            .publish_with("a", &mut batch, 1, LIMITS, true)
+            .expect("publish");
+        assert_eq!(outcome.changed.len(), 2);
+        assert!(batch.is_empty(), "the full path moves the batch out");
+        let mut repeated = vec![entry("p", "fps", 32), entry("p", "fps", 33)];
+        store
+            .publish_with("a", &mut repeated, 2, LIMITS, true)
+            .expect("publish");
+        let all = store.query(&StatusQuery::all(), 2);
+        let fps = all.iter().find(|entry| entry.key == "fps").expect("fps");
+        assert_eq!(
+            fps.value,
+            TypedConfigValue::UInt(33),
+            "the last of a key wins"
+        );
+        // Another publisher's key is not refreshed in place either.
+        let mut other = vec![entry("p", "fps", 34)];
+        store
+            .publish_with("b", &mut other, 3, LIMITS, true)
+            .expect("publish");
+        assert_eq!(store.publishers(), 2);
     }
 
     #[test]

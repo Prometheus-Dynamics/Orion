@@ -1,8 +1,6 @@
 //! The executor role and record reads (revision 3) on the host session: executor state reported
 //! to the gateway and acknowledged, and workload and record answers queued as parts.
 
-use std::string::String;
-
 use super::HostCore;
 use crate::frame::{FRAME_OVERHEAD, FrameView};
 use crate::host::{ActionSendError, HostEvent};
@@ -25,7 +23,7 @@ impl HostCore {
         if self.last_executor_state.as_deref() == Some(&*state) {
             return; // retransmission of a state we already have
         }
-        let Some(device_name) = self.device_name().map(String::from) else {
+        let Some(device_name) = self.device_arc() else {
             return;
         };
         self.last_executor_state = Some(state.clone());

@@ -303,6 +303,62 @@ pub(crate) fn decode_status(payload: &[u8]) -> Result<Vec<StatusEntry>, MessageE
     decode_body::<StatusBody>(kind::STATUS, payload).map(|body| body.entries)
 }
 
+/// Decodes a [`kind::STATUS`] body into `out`, reusing its entries: a key that fits the old
+/// key's capacity is copied in place, so a device that keeps sending the same keys costs no
+/// allocation for them. `out` holds exactly the decoded entries afterwards, or none on error.
+#[cfg(feature = "std")]
+pub(crate) fn decode_status_into(
+    payload: &[u8],
+    out: &mut Vec<StatusEntry>,
+) -> Result<(), MessageError> {
+    #[derive(Deserialize)]
+    struct EntryRef<'a> {
+        key: &'a str,
+        #[serde(with = "super::body::value")]
+        value: crate::message::TypedConfigValue,
+        ttl_ms: u32,
+    }
+
+    struct Fill<'v>(&'v mut Vec<StatusEntry>);
+
+    impl<'de> Visitor<'de> for Fill<'_> {
+        type Value = ();
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a sequence of status entries")
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+            let mut len = 0;
+            while let Some(entry) = seq.next_element::<EntryRef<'de>>()? {
+                match self.0.get_mut(len) {
+                    Some(slot) => {
+                        slot.key.clear();
+                        slot.key.push_str(entry.key);
+                        slot.value = entry.value;
+                        slot.ttl_ms = entry.ttl_ms;
+                    }
+                    None => self.0.push(StatusEntry {
+                        key: entry.key.into(),
+                        value: entry.value,
+                        ttl_ms: entry.ttl_ms,
+                    }),
+                }
+                len += 1;
+            }
+            self.0.truncate(len);
+            Ok(())
+        }
+    }
+
+    let mut deserializer = postcard::Deserializer::from_bytes(payload);
+    let decoded = Deserializer::deserialize_seq(&mut deserializer, Fill(out));
+    if decoded.is_err() {
+        out.clear();
+    }
+    decoded.map_err(|_| MessageError::Decode { kind: kind::STATUS })
+}
+
 /// Decodes one body type directly. Sessions use this instead of [`Message::decode`] so a device
 /// only links the decoders for the kinds it actually receives.
 pub(crate) fn decode_body<'a, T: Deserialize<'a>>(
@@ -491,5 +547,44 @@ impl Message {
     pub fn decode_frame(bytes: &[u8]) -> Result<(FrameHeader, Self), MessageError> {
         let view = frame::decode(bytes)?;
         Ok((view.header(), Self::decode(&view)?))
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod status_into_tests {
+    use super::*;
+    use crate::message::TypedConfigValue;
+
+    fn payload(entries: &[StatusEntry]) -> Vec<u8> {
+        postcard::to_allocvec(entries).expect("encode")
+    }
+
+    fn entry(key: &str, value: u64) -> StatusEntry {
+        StatusEntry {
+            key: key.into(),
+            value: TypedConfigValue::UInt(value),
+            ttl_ms: 5,
+        }
+    }
+
+    #[test]
+    fn a_status_batch_decodes_into_the_previous_one_reusing_its_keys() {
+        let mut out = Vec::new();
+        decode_status_into(
+            &payload(&[entry("temperature", 1), entry("fps", 2)]),
+            &mut out,
+        )
+        .expect("first");
+        assert_eq!(out, [entry("temperature", 1), entry("fps", 2)]);
+        let key_buffer = out[0].key.as_ptr();
+        decode_status_into(&payload(&[entry("temperature", 3)]), &mut out).expect("second");
+        assert_eq!(out, [entry("temperature", 3)]);
+        assert_eq!(
+            out[0].key.as_ptr(),
+            key_buffer,
+            "the key's buffer is reused"
+        );
+        assert!(decode_status_into(&[0x05, 0xFF], &mut out).is_err());
+        assert!(out.is_empty(), "a failed decode leaves no entries");
     }
 }

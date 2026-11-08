@@ -192,13 +192,27 @@ impl NodeApp {
         publisher: &str,
         entries: Vec<StatusEntry>,
     ) -> Result<(), NodeError> {
+        let mut entries = entries;
+        self.publish_status_in(publisher, &mut entries)
+    }
+
+    /// [`Self::publish_status_as`] from a caller's reusable batch (see
+    /// `StatusStore::publish_with` for what is left in it).
+    pub(super) fn publish_status_in(
+        &self,
+        publisher: &str,
+        entries: &mut Vec<StatusEntry>,
+    ) -> Result<(), NodeError> {
         let now_ms = Self::current_time_ms();
         let count = entries.len() as u64;
         let limits = self.status_limits();
         let (expired, result) = {
             let mut store = lock(&self.state.status.store);
+            // Under the store lock: a watch starts under it too (`subscribe_status_watch`), so
+            // a watcher either sees this batch in its bootstrap or is told about it.
+            let watched = self.has_status_watchers();
             let expired = store.expire(now_ms);
-            let result = store.publish(publisher, entries, now_ms, limits);
+            let result = store.publish_with(publisher, entries, now_ms, limits, watched);
             (expired, result)
         };
         let status = &self.state.status;
@@ -233,8 +247,11 @@ impl NodeApp {
         source: &LocalAddress,
         query: StatusQuery,
     ) -> Result<(), NodeError> {
-        let current = self.query_status(&query);
-        self.with_client_mut(source, |client| {
+        self.sweep_expired_status();
+        // The bootstrap and the watch start under the store lock, so no publish falls between.
+        let store = lock(&self.state.status.store);
+        let current = store.query(&query, Self::current_time_ms());
+        let result = self.with_client_mut(source, |client| {
             client.status_watch = Some(query);
             enqueue_status_event(
                 client,
@@ -244,7 +261,9 @@ impl NodeApp {
                     expired: Vec::new(),
                 },
             );
-        })
+        });
+        drop(store);
+        result
         // The stream server flushes queued events right after it sends the `Accepted` response.
     }
 
@@ -329,6 +348,13 @@ impl NodeApp {
                 }
             }
         }
+    }
+
+    /// Whether any client watches status (then a publish collects what changed for them).
+    fn has_status_watchers(&self) -> bool {
+        self.clients_read()
+            .values()
+            .any(|client| client.status_watch.is_some())
     }
 
     pub(super) fn status_lane_usage(&self) -> StatusLaneUsageSnapshot {

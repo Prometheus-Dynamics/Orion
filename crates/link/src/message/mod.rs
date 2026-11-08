@@ -41,7 +41,7 @@ pub use client::{
 pub(crate) use client::{ActionParts, StatusParts, pack as client_pack};
 pub(crate) use codec::decode_leases;
 #[cfg(feature = "std")]
-pub(crate) use codec::{decode_status, encode_with};
+pub(crate) use codec::{decode_status_into, encode_with};
 pub use codec::{
     encode_action_cancel, encode_action_request, encode_leases, encode_provider_state,
     encode_status,
