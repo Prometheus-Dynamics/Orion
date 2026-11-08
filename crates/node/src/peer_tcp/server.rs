@@ -73,7 +73,7 @@ impl NodeApp {
                 crate::auth::failure_log::record(crate::auth::failure_log::AuthFailure {
                     side: "node serves peer request",
                     peer: &peer,
-                    key_fingerprint: "none",
+                    key_fingerprint: "in error",
                     check: "request",
                     transcript_len: request.len(),
                     nonce_len: 0,

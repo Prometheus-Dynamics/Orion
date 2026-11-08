@@ -40,10 +40,10 @@ jobs:
           ORION_SKIP_DOCKER_BUILD: "1"
           ORION_TEST_IMAGE: orion-node-test:ci
           RUST_TEST_THREADS: "1"
-        run: cargo test -p orion-node --test docker_cluster_soak -- --ignored --nocapture
+        run: cargo test -p orion-node --features full --test docker_cluster_soak -- --ignored --nocapture
 
       - name: Run appliance memory soak
         env:
           ORION_SOAK_DURATION_SECS: "600"
           RUST_TEST_THREADS: "1"
-        run: cargo test -p orion-node --test appliance_memory_soak -- --ignored --nocapture
+        run: cargo test -p orion-node --features full --test appliance_memory_soak -- --ignored --nocapture

@@ -675,16 +675,22 @@ interfaces and risk. Slices, in dependency order:
       status keys.
 - [ ] Access services: `orion-node access` process with SSH, sftp helper, local forwarding,
       safe mode, and the `reboot` claim. +1,062,744 B on x86_64, +965,352 B on aarch64 musl.
-- [ ] (On hold until the user decides how far to split; docs/design/split-options.md.) Extract
-      the comm core from `orion-node` (~16,700 lines, module by module), the relay without node
-      logic, the backplane, and the supervisor for systemd-less images.
+- [ ] Extract the comm core from `orion-node` (~16,700 lines, module by module), the relay
+      without node logic, the backplane, and the supervisor for systemd-less images. The user
+      chose option (b) on 2026-11-07 (docs/design/split-options.md): one repository, two
+      processes. Draw it so (c) stays possible: the "what runs where" placement piece stays a
+      separable module with its own interface. Starts after the hello and access slices.
 - [ ] `comm-core-min` static musl build with a CI size gate.
 - [ ] Containment helper (backoff capped at 5 s for access paths and 10 s otherwise, never
       giving up; rate-limited logs; `<component>.state` keys), `provider disable` and
       `peer disable`, and `await_holding_lock` set to deny. Rule from the user: never auto-off
       unless someone configured it, and access paths are never backed off for good.
-- [ ] Time sync in the comm core (SNTP plus a peer source), to replace timesyncd (2.8 MB PSS).
-      Report only so far; the design is in comm-core.md.
+- [ ] Time sync in the comm core (SNTP plus the Orion peer source), to replace timesyncd
+      (2.8 MB PSS). Approved by the user on 2026-11-07: the comm core holds `CAP_SYS_TIME`.
+      First case: test board #2 has no RTC and its clock runs about 1.9 h behind (timesyncd is
+      not syncing); it takes time from a peer (the controller or the PC). Done when that board
+      converges and the image can drop timesyncd (tell the image owner, A/B against the
+      hardware-layer worker).
 - [ ] Hardware-layer handle offers (`SCM_RIGHTS`); `usb-bulk` / `usb-gadget` link transport.
 
 ### Leanness and hardware paths (2026-11-07, from the coordinator)
@@ -707,9 +713,24 @@ interfaces and risk. Slices, in dependency order:
 - [ ] Bring up the STM32G4 example on a real board against the CAN gateway: check the FDCAN
       bit timing, the `hw-crc` CRC unit setup and the painted high-water against the static
       bound.
-- [ ] Feature-gating audit: for each crate, a table of its default features, what each pulls
-      in and its size. Land the clear cuts, with consumers opting in. Report orion-node and
-      orionctl sizes before and after.
+- [x] Feature-gating audit: docs/design/feature-gating.md. orion-node and orionctl default to
+      `[]` with a `full` feature (the old defaults), and the node's log filter is `Targets`
+      (no regex). Default builds: orion-node 6,425,336 to 3,349,848 B, orionctl 4,372,032 to
+      2,146,912 B; full builds 6,052,528 and 4,339,384 B.
+- [ ] Remaining gating cuts (docs/design/feature-gating.md, "Left"): rustls optional in
+      `orion-transport-tcp`, `orion-client` dependency trims, `orionctl` on a current-thread
+      runtime, `default-features = false` on three workspace links.
+- [ ] Per-message allocations to 0 on the link and gateway path (status update 8, fan-out 12,
+      stream batch 12 today): pooled or reused encode buffers, no per-message `Vec` or
+      `String`. Report it in the same release-build table in docs/performance-concurrency.md.
+- [x] Typed operator rejection: `OperatorRejection::{OtherKey, NotEnrolled, Removed}` with
+      codes `operator.other_key`, `operator.not_enrolled` and `operator.removed`, carried as a
+      `[code]` prefix on the error message (additive, protocol 1 compatible);
+      `RemoteError::operator_rejection()` reads it.
+- [x] Authentication failure log: one full line per failure kind (side, host without port,
+      check, error), then one summary line with the suppressed count at most every 5 min,
+      over at most 256 tracked kinds. Before, the key held the source port, so a client
+      retrying every 20 s logged every attempt.
 - [x] CRC-32C on the ARMv8 and SSE4.2 instructions (compile-time or detected at run time with
       std), and `crc-extern` for an MCU CRC peripheral: 1,010 to 41 ns per 126-byte frame on
       the test board.

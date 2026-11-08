@@ -35,6 +35,47 @@ pub const PEER_TCP_STATUS_PUSH: u8 = 2;
 /// Largest response header: status, signature length, signature, key length, key.
 pub const PEER_TCP_RESPONSE_HEADER_MAX_BYTES: usize = 3 + 64 + 32;
 
+/// Why a node refused an operator, as a stable code at the start of an error body
+/// (`[operator.other_key] operator x signed with key ...`). Additive: the human-readable message
+/// that follows is unchanged, so clients that only show the text keep working, and a client
+/// matches the code instead of the wording.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OperatorRejection {
+    /// The operator id is enrolled with a different key than the one that signed the request.
+    OtherKey,
+    /// The operator id is not enrolled on this node (the request is recorded as pending).
+    NotEnrolled,
+    /// The operator was removed from this node.
+    Removed,
+}
+
+impl OperatorRejection {
+    /// The stable code: `operator.other_key`, `operator.not_enrolled`, `operator.removed`.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::OtherKey => "operator.other_key",
+            Self::NotEnrolled => "operator.not_enrolled",
+            Self::Removed => "operator.removed",
+        }
+    }
+
+    /// `message` with this rejection's code in front, as the node sends it.
+    #[must_use]
+    pub fn tag(self, message: &str) -> String {
+        format!("[{}] {message}", self.code())
+    }
+
+    /// The rejection an error body starts with, if any (anywhere a code in brackets begins the
+    /// text, after prefixes such as `operator x: `).
+    #[must_use]
+    pub fn parse(message: &str) -> Option<Self> {
+        [Self::OtherKey, Self::NotEnrolled, Self::Removed]
+            .into_iter()
+            .find(|rejection| message.contains(&format!("[{}] ", rejection.code())))
+    }
+}
+
 /// A malformed `orion+tcp` response frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerTcpFrameError(pub String);
@@ -222,5 +263,26 @@ mod tests {
         );
         assert!(peer_tcp_authority("orion+tcp://host").is_err());
         assert!(peer_tcp_authority("http://host:1").is_err());
+    }
+}
+
+#[cfg(test)]
+mod rejection_tests {
+    use super::OperatorRejection;
+
+    #[test]
+    fn rejection_codes_round_trip_inside_wrapped_messages() {
+        for rejection in [
+            OperatorRejection::OtherKey,
+            OperatorRejection::NotEnrolled,
+            OperatorRejection::Removed,
+        ] {
+            let body = format!(
+                "authentication failed: {}",
+                rejection.tag("operator x: text")
+            );
+            assert_eq!(OperatorRejection::parse(&body), Some(rejection));
+        }
+        assert_eq!(OperatorRejection::parse("operator x is not enrolled"), None);
     }
 }

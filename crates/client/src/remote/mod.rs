@@ -47,7 +47,7 @@ mod operator;
 mod session;
 mod watch;
 
-pub use error::RemoteError;
+pub use error::{OperatorRejection, RemoteError};
 pub use identity::OperatorIdentity;
 pub use operator::{NodeTrust, RemoteOperator, RemoteOperatorConfig};
 pub use orion_control_plane::{

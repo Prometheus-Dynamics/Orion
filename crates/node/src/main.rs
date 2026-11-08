@@ -4,7 +4,10 @@ use std::io;
 mod cli;
 use tracing::info;
 use tracing::warn;
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::filter::{LevelFilter, Targets};
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 // Opt-in global allocators, set only for the binary so library users keep control. `alloc-jemalloc`
 // wins when both features are enabled (for example `cargo clippy --all-features`); enabling only
@@ -28,12 +31,26 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 static JEMALLOC_CONF: &[u8; 105] = b"narenas:2,background_thread:true,max_background_threads:1,\
 dirty_decay_ms:1000,muzzy_decay_ms:0,thp:never\0";
 
+/// Logs to stderr, filtered by `RUST_LOG` (default `info`). The filter is a comma-separated list
+/// of `level` and `target=level` directives (`tracing_subscriber`'s `Targets`): the same syntax
+/// as before for those, without span and field filters, and without linking a regex engine. An
+/// invalid `RUST_LOG` falls back to `info` with a warning.
 fn init_tracing() {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = fmt()
-        .with_env_filter(env_filter)
-        .with_writer(io::stderr)
+    let info = || Targets::new().with_default(LevelFilter::INFO);
+    let (filter, invalid) = match std::env::var("RUST_LOG") {
+        Ok(spec) if !spec.trim().is_empty() => match spec.parse::<Targets>() {
+            Ok(targets) => (targets, None),
+            Err(error) => (info(), Some((spec, error))),
+        },
+        _ => (info(), None),
+    };
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(io::stderr))
+        .with(filter)
         .try_init();
+    if let Some((spec, error)) = invalid {
+        tracing::warn!(%spec, %error, "RUST_LOG is not a valid filter; logging at info");
+    }
 }
 
 /// Stand-in for the HTTP server handles in builds without the `transport-http` feature, so the

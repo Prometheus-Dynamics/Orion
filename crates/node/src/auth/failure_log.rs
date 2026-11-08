@@ -1,6 +1,7 @@
 //! Rate-limited warn logs for failed authentication (hellos, operator requests, peer responses).
 //!
-//! One line per `(side, peer, check)` per window, with how many failures the window suppressed.
+//! The first failure of a kind (side, host without port, check, error) logs in full; repeats log
+//! one summary line per window with how many were suppressed.
 //! Fields are identities, fingerprints and lengths only: never key or signature bytes.
 
 use std::{
@@ -10,44 +11,71 @@ use std::{
 };
 use tracing::warn;
 
-const WINDOW: Duration = Duration::from_secs(10);
+/// After the first line of a repeating failure, at most one summary line per window.
+const WINDOW: Duration = Duration::from_secs(300);
+/// Distinct failures tracked at once; past it the stalest is forgotten (and would log again).
+const MAX_TRACKED: usize = 256;
 
-static BUCKETS: Mutex<BTreeMap<String, (Option<Instant>, u64)>> = Mutex::new(BTreeMap::new());
+/// Per failure key: when its last line was logged, and how many failures it suppressed since.
+static BUCKETS: Mutex<BTreeMap<String, (Instant, u64)>> = Mutex::new(BTreeMap::new());
 
-/// One failed authentication check.
 pub(crate) struct AuthFailure<'a> {
-    /// Which side and message failed, e.g. `"node serves peer request"`.
     pub(crate) side: &'static str,
-    /// The peer's address, or its node or operator id when no address is known.
     pub(crate) peer: &'a str,
-    /// Fingerprint of the key the peer presented (`sha256:...`), or `"none"`.
     pub(crate) key_fingerprint: &'a str,
-    /// Which check failed, e.g. `"signature"` or `"key"`.
     pub(crate) check: &'static str,
-    /// Length of the signed transcript: the canonical bytes, or the request frame on the serve path.
     pub(crate) transcript_len: usize,
-    /// Length of the nonce the message carries, or 0 when it has none.
     pub(crate) nonce_len: usize,
     pub(crate) error: &'a str,
 }
 
-/// Logs `failure` at warn, at most once per window for its `(side, peer, check)`.
-pub(crate) fn record(failure: AuthFailure<'_>) {
-    let key = format!("{}|{}|{}", failure.side, failure.peer, failure.check);
-    let now = Instant::now();
-    let suppressed = {
-        let mut buckets = BUCKETS.lock().unwrap_or_else(PoisonError::into_inner);
-        let entry = buckets.entry(key).or_insert((None, 0));
-        if entry
-            .0
-            .is_some_and(|last| now.duration_since(last) < WINDOW)
-        {
+/// The peer without its source port: every new connection from one host comes from another
+/// ephemeral port, and is still the same failing client.
+fn host(peer: &str) -> &str {
+    match peer.rsplit_once(':') {
+        Some((host, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => {
+            host.trim_start_matches('[').trim_end_matches(']')
+        }
+        _ => peer,
+    }
+}
+
+/// What to log for one failure: `None` to stay quiet, `Some(n)` for a line that also reports
+/// the `n` identical failures suppressed since the last one.
+fn admit(key: String, now: Instant) -> Option<u64> {
+    let mut buckets = BUCKETS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(entry) = buckets.get_mut(&key) {
+        if now.duration_since(entry.0) < WINDOW {
             entry.1 += 1;
-            return;
+            return None;
         }
         let suppressed = entry.1;
-        *entry = (Some(now), 0);
-        suppressed
+        *entry = (now, 0);
+        return Some(suppressed);
+    }
+    if buckets.len() >= MAX_TRACKED {
+        let stalest = buckets
+            .iter()
+            .min_by_key(|(_, (at, _))| *at)
+            .map(|(key, _)| key.clone());
+        if let Some(stalest) = stalest {
+            buckets.remove(&stalest);
+        }
+    }
+    buckets.insert(key, (now, 0));
+    Some(0)
+}
+
+/// Logs a failed authentication: the first time in full, then a summary at most once per
+/// [`WINDOW`] with the count of identical failures (same side, host, check and error).
+pub(crate) fn record(failure: AuthFailure<'_>) {
+    let host = host(failure.peer);
+    let key = format!(
+        "{}|{host}|{}|{}",
+        failure.side, failure.check, failure.error
+    );
+    let Some(suppressed) = admit(key, Instant::now()) else {
+        return;
     };
     warn!(
         side = failure.side,
@@ -57,7 +85,33 @@ pub(crate) fn record(failure: AuthFailure<'_>) {
         transcript_len = failure.transcript_len,
         nonce_len = failure.nonce_len,
         suppressed,
+        window_s = WINDOW.as_secs(),
         error = failure.error,
         "authentication failed"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_source_port_is_not_part_of_the_failure() {
+        assert_eq!(host("172.31.209.221:53474"), "172.31.209.221");
+        assert_eq!(host("[fe80::1]:5900"), "fe80::1");
+        assert_eq!(host("node-a"), "node-a");
+    }
+
+    #[test]
+    fn a_repeating_failure_logs_once_then_a_summary_per_window() {
+        let key = || "test|10.0.0.1|request|repeat".to_owned();
+        let start = Instant::now();
+        assert_eq!(admit(key(), start), Some(0));
+        assert_eq!(admit(key(), start + Duration::from_secs(20)), None);
+        assert_eq!(admit(key(), start + Duration::from_secs(40)), None);
+        assert_eq!(
+            admit(key(), start + WINDOW + Duration::from_secs(1)),
+            Some(2)
+        );
+    }
 }

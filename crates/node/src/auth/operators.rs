@@ -14,6 +14,7 @@ use crate::{NodeError, NodeStorage};
 use orion::control_plane::{
     OperatorEnrollmentMethod, OperatorId, OperatorPolicy, OperatorRecord, OperatorTrustState,
 };
+use orion_auth::peer_tcp::OperatorRejection;
 use orion_auth::{
     PeerRequestAuth, PeerRequestPayload,
     crypto::{key_fingerprint, verify_peer_request},
@@ -313,9 +314,11 @@ impl NodeSecurity {
         let enrolled = {
             let mut trust = write_rwlock(self.operators.write(), "operators");
             if trust.revoked.contains(&operator_id) {
-                return Err(NodeError::Authorization(format!(
-                    "operator {operator_id} was removed from node {}",
-                    self.local_node_id
+                return Err(NodeError::Authorization(OperatorRejection::Removed.tag(
+                    &format!(
+                        "operator {operator_id} was removed from node {}",
+                        self.local_node_id
+                    ),
                 )));
             }
             match trust.enrolled.get_mut(&operator_id) {
@@ -330,9 +333,11 @@ impl NodeSecurity {
                     })
                 }
                 Some(_) => {
-                    return Err(NodeError::Authentication(format!(
-                        "operator {operator_id} signed with key {}, not its enrolled key",
-                        key_fingerprint(&key)
+                    return Err(NodeError::Authentication(OperatorRejection::OtherKey.tag(
+                        &format!(
+                            "operator {operator_id} signed with key {}, not its enrolled key",
+                            key_fingerprint(&key)
+                        ),
                     )));
                 }
                 None => {
@@ -358,14 +363,14 @@ impl NodeSecurity {
                     public_key: key,
                 })
             }
-            None => Err(NodeError::Authorization(format!(
+            None => Err(NodeError::Authorization(OperatorRejection::NotEnrolled.tag(&format!(
                 "operator {operator_id} is not enrolled on node {} (key fingerprint {}); approve \
                  it with `orionctl operators enroll {operator_id} --fingerprint {}` or enroll \
                  with the shared enrollment key",
                 self.local_node_id,
                 key_fingerprint(&key),
                 key_fingerprint(&key)
-            ))),
+            )))),
         }
     }
 
@@ -386,9 +391,11 @@ impl NodeSecurity {
             })?;
         let mut trust = write_rwlock(self.operators.write(), "operators");
         if trust.revoked.contains(&operator_id) {
-            return Err(NodeError::Authorization(format!(
-                "operator {operator_id} was removed from node {}",
-                self.local_node_id
+            return Err(NodeError::Authorization(OperatorRejection::Removed.tag(
+                &format!(
+                    "operator {operator_id} was removed from node {}",
+                    self.local_node_id
+                ),
             )));
         }
         match trust.enrolled.get_mut(&operator_id) {
@@ -402,21 +409,25 @@ impl NodeSecurity {
                     policy,
                 })
             }
-            Some(_) => Err(NodeError::Authentication(format!(
-                "operator {operator_id} signed with key {}, not its enrolled key",
-                key_fingerprint(&key)
+            Some(_) => Err(NodeError::Authentication(OperatorRejection::OtherKey.tag(
+                &format!(
+                    "operator {operator_id} signed with key {}, not its enrolled key",
+                    key_fingerprint(&key)
+                ),
             ))),
             None => {
                 if record_pending {
                     trust.record_pending(&operator_id, key, now_ms());
                 }
-                Err(NodeError::Authorization(format!(
-                    "operator {operator_id} is not enrolled on node {} (key fingerprint {}); \
+                Err(NodeError::Authorization(
+                    OperatorRejection::NotEnrolled.tag(&format!(
+                        "operator {operator_id} is not enrolled on node {} (key fingerprint {}); \
                      approve it with `orionctl operators enroll {operator_id} --fingerprint {}`",
-                    self.local_node_id,
-                    key_fingerprint(&key),
-                    key_fingerprint(&key)
-                )))
+                        self.local_node_id,
+                        key_fingerprint(&key),
+                        key_fingerprint(&key)
+                    )),
+                ))
             }
         }
     }

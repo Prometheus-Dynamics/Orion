@@ -8,6 +8,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- `orion-node` and `orionctl` default features are now empty: IPC only (with JSON for
+  `orionctl`). The new `full` feature brings back the old defaults (`orion-node`: HTTP, TCP,
+  QUIC and peer TCP; `orionctl`: HTTP, YAML and TOML). Default builds are about half the size.
+  `orion-transport-common` and `orion-transport-http` default to no features too.
+- `orion-node`'s `RUST_LOG` takes `level` and `target=level` directives only (no span or field
+  filters), so the node links no regex engine: −370 KB on the full build.
+- `orion-node` logs a repeating authentication failure once, then one summary line with a count
+  at most every 5 minutes, per source host (not per source port).
 - `orion-link`'s CRC-32C uses the ARMv8 CRC and x86-64 SSE4.2 instructions when the target has
   them, or when detected at run time with `std`. That is about 24 times faster on a Cortex-A76.
 - `orion-node` link tasks sleep until their next deadline instead of ticking at a quarter
@@ -26,6 +34,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `OperatorRejection` (`orion-auth`, re-exported by `orion-client`) and
+  `RemoteError::operator_rejection()`: why a node refused an operator (`OtherKey`,
+  `NotEnrolled`, `Removed`). The node prefixes the error message with the code, for example
+  `[operator.other_key]`, so older clients see the same text as before plus the prefix.
 - `orion-link`: `HostSession::next_poll_ms` and `HostBus::next_poll_ms`, the latest time `poll`
   must run again, so a host loop can sleep until it.
 

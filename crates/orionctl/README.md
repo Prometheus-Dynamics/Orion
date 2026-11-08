@@ -19,7 +19,7 @@ Structured file/config support:
 - structured output supports `-o json`, `-o yaml`, and `-o toml`
   - TOML output is wrapped under a top-level `value` key so list-shaped responses remain valid TOML
 
-Cargo features (all on by default, so a plain build behaves as before):
+Cargo features (all opt-in; `--features full` enables all three):
 
 - `http`: `--http` remote targets, including `get health` and `get readiness`. It links only the
   client half of `orion-transport-http` (HTTP/1.1 over tokio and rustls), not reqwest or the
@@ -27,17 +27,17 @@ Cargo features (all on by default, so a plain build behaves as before):
 - `yaml`: `-o yaml` and YAML workload specs.
 - `toml`: `-o toml` and TOML workload specs.
 
-JSON and summary output and local IPC are always available. `cargo build -p orionctl
---no-default-features` gives an IPC-only CLI with JSON output; add back `--features yaml,toml` or
-`--features http` as needed. Asking a build for something it was compiled without (for example
+JSON and summary output and local IPC are always available. The default build is the IPC-only
+CLI with JSON output; add `--features yaml,toml`, `--features http` or `--features full` as
+needed. Asking a build for something it was compiled without (for example
 `--http` or `-o yaml`) fails with an error that names the missing feature. Release-profile sizes
 (x86_64, stripped):
 
 | Build | Size | Crates (total / runtime) |
 | --- | --- | --- |
-| default (`http`, `yaml`, `toml`) | 4.38 MiB | 139 / 111 |
-| `--no-default-features --features yaml,toml` | 2.65 MiB | 68 / 45 |
-| `--no-default-features` (IPC + JSON) | 1.80 MiB | 57 / 34 |
+| `--features full` (`http`, `yaml`, `toml`) | 4.38 MiB | 139 / 111 |
+| `--features yaml,toml` | 2.65 MiB | 68 / 45 |
+| default (IPC + JSON) | 1.80 MiB | 57 / 34 |
 
 Workload apply supports both direct flags and full specs:
 

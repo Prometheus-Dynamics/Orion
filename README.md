@@ -115,12 +115,12 @@ The facade crate `orion` is feature-gated by subsystem.
 - `service`, `macros`, and `cluster` are explicit opt-ins.
 - Transport layers stay opt-in through `transport-http`, `transport-ipc`, `transport-tcp`, and `transport-quic`.
 - `orion-client` defaults to local IPC support through its `ipc` feature.
-- `orion-node` enables `transport-http`, `peer-tcp`, `transport-tcp`, and `transport-quic` by
-  default. The local IPC control plane is always built. `cargo build -p orion-node
-  --no-default-features` produces an IPC-only node without the HTTP stack (no axum, hyper
-  or rustls). In that build the HTTP control and probe listeners and HTTP TLS are unavailable, and
-  configuring them fails at startup with an error. You can add back any of the transport features
-  independently.
+- `orion-node`'s default build is the IPC-only node: the local IPC control plane, no network
+  stack and no TLS (3.3 MB on x86_64). Every transport is opt-in: `transport-http`, `peer-tcp`,
+  `transport-tcp` and `transport-quic` are independent features, and `full` enables all four
+  (6.1 MB, the default build before 2026-11-07). Without `transport-http`, the HTTP control and
+  probe listeners and HTTP TLS are unavailable, and configuring them fails at startup with an
+  error.
 - `orion-node`'s `peer-tcp` feature syncs desired state with `orion+tcp://` peers over plain TCP
   with ed25519-signed requests and responses (`ORION_NODE_PEER_ADDR` listener). It needs only
   tokio, so `--no-default-features --features peer-tcp` gives a small IPC-only node that can still
@@ -152,11 +152,10 @@ The facade crate `orion` is feature-gated by subsystem.
   traits) without the network stack. `client` adds `HttpClient` (HTTP/1.1 over tokio and rustls, no
   axum/hyper server), `server` adds `HttpServer` (axum, hyper, tokio-rustls), and the default
   `transport` feature enables both.
-- `orionctl` features `http` (`--http` remote targets, HTTP client only), `yaml` and `toml`
-  (output formats and workload spec files) are all on by default. `cargo build -p orionctl
-  --no-default-features` gives an IPC-only CLI with JSON output (1.80 MiB stripped, against
-  4.38 MiB for the default build); requesting a disabled transport or format fails with an error
-  that names the feature. See [`crates/orionctl/README.md`](crates/orionctl/README.md).
+- `orionctl`'s default build is the IPC-only CLI with JSON output (2.1 MB). The features `http`
+  (`--http` remote targets, HTTP client only), `yaml` and `toml` (output formats and workload spec
+  files) are opt-in, and `full` enables all three (4.3 MB). Requesting a disabled transport or
+  format fails with an error that names the feature. See [`crates/orionctl/README.md`](crates/orionctl/README.md).
 
 For production consumers that want a narrow dependency surface, prefer direct crate dependencies or disable default features on the facade and opt in explicitly.
 

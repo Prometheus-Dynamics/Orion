@@ -92,8 +92,8 @@ job_lints() {
     step lints "clippy --workspace --all-features" clippy --workspace --all-targets --all-features
 
     # orion-node: the empty build, each optional feature alone (cfg gaps show up as unused code or
-    # missing items), the shipped appliance sets, and the defaults. Supersets of these (defaults
-    # plus one feature, peer-tcp plus one transport) add no new cfg combination.
+    # missing items), the shipped appliance sets, and `full` (every transport). Supersets of these
+    # (`full` plus one feature, peer-tcp plus one transport) add no new cfg combination.
     local features
     for features in "" transport-http transport-tcp transport-quic peer-tcp link-gateway \
         systemd-notify peer-tcp,discovery-mdns peer-tcp,discovery-mdns,systemd-notify \
@@ -101,7 +101,7 @@ job_lints() {
         step lints "clippy orion-node --no-default-features [${features}]" \
             clippy -p orion-node --no-default-features ${features:+--features "$features"} --all-targets
     done
-    step lints "clippy orion-node [defaults]" clippy -p orion-node --all-targets
+    step lints "clippy orion-node [full]" clippy -p orion-node --features full --all-targets
 
     # orion-node tests in the builds the all-features run cannot stand for: IPC-only, the packaged
     # appliance (orion+tcp sync, remote operators, discovery, sd_notify), and the IPC-only gateway.

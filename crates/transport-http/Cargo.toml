@@ -22,8 +22,9 @@ path = "src/lib.rs"
 # - `client`: `HttpClient` + client TLS config: HTTP/1.1 over tokio, rustls for https (no reqwest,
 #   no hyper), so operator tools (orionctl) link only this half.
 # - `server`: `HttpServer` + server TLS/client-auth config (axum, hyper, tokio-rustls).
-# - `transport`: both halves; kept for compatibility (orion-node and the `orion` facade use it).
-default = ["transport"]
+# - `transport`: both halves (orion-node and the `orion` facade use it).
+# The default is the protocol layer only; every network half is opt-in.
+default = []
 transport = ["client", "server"]
 client = [
     "dep:http",

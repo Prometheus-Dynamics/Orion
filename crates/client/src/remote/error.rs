@@ -1,3 +1,4 @@
+pub use orion_auth::peer_tcp::OperatorRejection;
 use thiserror::Error;
 
 /// Errors of the remote operator client.
@@ -47,6 +48,17 @@ pub enum RemoteError {
 impl RemoteError {
     /// Whether the node refused the request because the operator is not enrolled there.
     pub fn is_not_enrolled(&self) -> bool {
-        matches!(self, Self::Rejected(message) if message.contains("is not enrolled"))
+        self.operator_rejection() == Some(OperatorRejection::NotEnrolled)
+            || matches!(self, Self::Rejected(message) if message.contains("is not enrolled"))
+    }
+
+    /// Why the node refused the operator, from the stable code in its answer:
+    /// [`OperatorRejection::OtherKey`] when the operator id is enrolled with a different key,
+    /// `NotEnrolled`, or `Removed`. `None` for other refusals and for nodes older than the code.
+    pub fn operator_rejection(&self) -> Option<OperatorRejection> {
+        match self {
+            Self::Rejected(message) => OperatorRejection::parse(message),
+            _ => None,
+        }
     }
 }

@@ -6,7 +6,11 @@
 
 Logging is initialized from `RUST_LOG` through `tracing-subscriber`.
 
-If `RUST_LOG` is unset, the node defaults to `info`.
+If `RUST_LOG` is unset, the node defaults to `info`. `RUST_LOG` is a comma-separated list of
+directives, each a `level` (the default for every target) or a `target=level`. Span and field
+filters (`target[span{field=value}]=level`) are not supported: the node uses `tracing-subscriber`'s
+`Targets` filter, which needs no regex engine (about 370 KB less binary). An invalid `RUST_LOG`
+logs a warning and falls back to `info`.
 
 Example:
 

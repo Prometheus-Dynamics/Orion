@@ -54,15 +54,16 @@ The feature matrix is chosen for distinct `cfg` combinations, not as a cross pro
 - **orion-node clippy**: the empty build, each optional feature alone (`transport-http`,
   `transport-tcp`, `transport-quic`, `peer-tcp`, `link-gateway`, `systemd-notify`, and
   `discovery-mdns` with the `peer-tcp` it needs), the shipped appliance sets (with and without
-  `link-gateway`), the defaults, and everything (`--workspace --all-features`). Unions of these
-  (defaults plus one feature, `peer-tcp` plus one transport) add no `cfg` combination that one of
+  `link-gateway`), `full` (every transport), and everything (`--workspace --all-features`). Unions
+  of these (`full` plus one feature, `peer-tcp` plus one transport) add no `cfg` combination that one of
   them does not have, so they are not linted separately.
 - **orion-node tests** run with all features (`workspace` job) and in the three builds that compile
   different code paths: IPC-only (`--no-default-features`), the packaged appliance
   (`peer-tcp,discovery-mdns,systemd-notify`, which includes the orion+tcp, remote-operator,
   discovery and sd_notify tests), and the IPC-only gateway (`link-gateway`).
-- **orionctl / orion-transport-http**: the non-default feature sets only; their default sets equal
-  their all-features builds. `cargo test -p orionctl --no-default-features` builds the slim CLI.
+- **orionctl**: the default (IPC + JSON), `yaml,toml` and `http` sets; `full` equals the
+  all-features build. **orion-transport-http**: the non-default feature sets; its default set
+  equals its all-features build.
 - **orion-link**: clippy for every feature set on three cores that differ in atomics (thumbv6m:
   load/store only, riscv32imc: none, thumbv7em: full; thumbv8m.main and riscv32imac lint
   identically to thumbv7em), release builds of `[]`, `device` and `alloc` on all five cores, and

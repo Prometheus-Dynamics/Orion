@@ -8,6 +8,6 @@
 pub(crate) fn disabled(capability: &str, feature: &str) -> String {
     format!(
         "{capability} is not available: this orionctl was built without the `{feature}` feature \
-         (rebuild with `cargo build -p orionctl --features {feature}`, or use the default build)"
+         (rebuild with `cargo build -p orionctl --features {feature}`, or `--features full`)"
     )
 }

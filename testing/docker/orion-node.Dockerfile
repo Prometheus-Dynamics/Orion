@@ -2,8 +2,8 @@ FROM rust:1.86-bookworm AS builder
 WORKDIR /workspace
 
 COPY . .
-RUN cargo build --release -p orion-node --bin orion-node -p orion-client --examples
-RUN cargo build --release -p orionctl --bin orionctl
+RUN cargo build --release -p orion-node --features full --bin orion-node -p orion-client --examples
+RUN cargo build --release -p orionctl --features full --bin orionctl
 
 FROM debian:bookworm-slim
 RUN apt-get update \

@@ -51,7 +51,7 @@ jobs:
           ORION_SKIP_DOCKER_BUILD: "1"
           ORION_TEST_IMAGE: orion-node-test:ci
           RUST_TEST_THREADS: "1"
-        run: cargo test -p orion-node --test ${{ matrix.suite }} -- --ignored --nocapture
+        run: cargo test -p orion-node --features full --test ${{ matrix.suite }} -- --ignored --nocapture
 
   orionctl-minimal-rootfs:
     runs-on: ubuntu-latest

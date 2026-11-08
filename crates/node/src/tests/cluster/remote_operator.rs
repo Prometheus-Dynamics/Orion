@@ -382,6 +382,11 @@ async fn unenrolled_replayed_and_tampered_requests_are_refused() {
     )
     .expect_err("the enrolled key is pinned");
     assert!(err.to_string().contains("not its enrolled key"), "{err}");
+    assert_eq!(
+        orion_auth::peer_tcp::OperatorRejection::parse(&err.to_string()),
+        Some(orion_auth::peer_tcp::OperatorRejection::OtherKey),
+        "{err}"
+    );
     // Unsigned operator messages are refused.
     assert!(
         serve(

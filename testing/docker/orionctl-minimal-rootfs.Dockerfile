@@ -2,7 +2,7 @@ FROM rust:1.86-bookworm AS builder
 WORKDIR /workspace
 
 COPY . .
-RUN cargo build --release -p orionctl --bin orionctl
+RUN cargo build --release -p orionctl --features full --bin orionctl
 
 FROM debian:bookworm-slim
 WORKDIR /opt/orion
