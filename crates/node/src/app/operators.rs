@@ -106,6 +106,7 @@ impl NodeApp {
             ControlMessage::OpenSession(open) => {
                 self.open_remote_session(&operator.operator_id, open)
             }
+            ControlMessage::OfferTime(offer) => self.accept_time_offer(&offer),
             message @ (ControlMessage::WatchStatus(_)
             | ControlMessage::WatchState(_)
             | ControlMessage::WatchActions(_)

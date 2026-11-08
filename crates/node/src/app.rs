@@ -42,6 +42,7 @@ mod peer_sync_tcp;
 mod peer_transport;
 #[cfg(all(test, peer_sync))]
 pub(crate) use peer_transport::PeerSyncTransport;
+mod host_key_status;
 mod persistence;
 mod placement;
 mod private_link;
@@ -64,7 +65,6 @@ mod status_lane;
 pub(crate) use status_lane::store::STATUS_VALUE_CEILING_BYTES;
 mod streams;
 mod task_handle;
-#[cfg(feature = "time-sync")]
 mod time_status;
 mod tls_bootstrap;
 mod types;
@@ -217,6 +217,8 @@ pub struct NodeApp {
     pub(crate) peer_tcp_bound: Arc<std::sync::OnceLock<std::net::SocketAddr>>,
     /// Set when the node runs in safe mode (`docs/update-recovery.md`); fixed for this process.
     safe_mode: Option<safe_mode::SafeModeCause>,
+    #[cfg(feature = "time-sync")]
+    pub(crate) operator_time: Arc<crate::time_sync::OperatorTime>,
     pub(crate) control_middlewares: Arc<[ControlMiddlewareHandle]>,
     /// Which local callers are admitted: the control sockets and the `unix:` links judge by it.
     #[cfg_attr(

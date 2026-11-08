@@ -52,6 +52,8 @@ use store::{
 };
 
 const IDENTITY_FILE: &str = "node-identity.ed25519";
+pub(crate) use store::trust_store_readable;
+
 const TRUST_STORE_FILE: &str = "trusted-peers.rkyv";
 const NONCE_CACHE_LIMIT: usize = 256;
 #[derive(Clone, Debug, PartialEq, Eq)]

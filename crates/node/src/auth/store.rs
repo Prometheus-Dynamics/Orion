@@ -323,6 +323,11 @@ pub(super) fn load_next_outbound_nonce(storage: Option<&NodeStorage>) -> Result<
         .max(1))
 }
 
+/// Whether `bytes` are a trust store this build reads.
+pub(crate) fn trust_store_readable(bytes: &[u8]) -> bool {
+    load_trusted_peer_store("trusted peer store", bytes).is_ok()
+}
+
 fn load_trusted_peer_store(context: &str, bytes: &[u8]) -> Result<TrustedPeerStore, NodeError> {
     orion::decode_from_slice(bytes).map_err(|err| decode_store_error(context, err))
 }
@@ -333,7 +338,7 @@ impl NodeStorage {
     }
 
     pub fn trust_store_path(&self) -> PathBuf {
-        self.root().join(TRUST_STORE_FILE)
+        self.trust_root().join(TRUST_STORE_FILE)
     }
 }
 

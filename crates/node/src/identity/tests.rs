@@ -25,6 +25,7 @@ fn config(base: Option<&str>, security: &[&str]) -> IdentityConfig {
         addr: "127.0.0.1:0".parse().unwrap(),
         base: base.map(PathBuf::from),
         security_files: security.iter().map(PathBuf::from).collect(),
+        ssh_host_keys: None,
     }
 }
 

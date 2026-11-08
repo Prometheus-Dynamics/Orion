@@ -25,6 +25,30 @@ use orion_core::NodeId;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
+/// An operator offering its clock to the node (the `operator` time source, `docs/time-sync.md`).
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+pub struct TimeOffer {
+    /// 0 opens an exchange; otherwise the token of the node's [`TimeTurn`].
+    pub token: u64,
+    /// The operator's clock when it sent this offer; unused when opening.
+    pub unix_ns: u64,
+    /// How far the operator's clock is from a reference (NTP stratum, 1 to 15).
+    pub stratum: u8,
+}
+
+/// The node's answer to a [`TimeOffer`].
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+pub struct TimeTurn {
+    /// Send the clock back with this; 0 once the offer was taken.
+    pub token: u64,
+    /// When the node would like the next offer, in milliseconds; 0 when opening.
+    pub next_ms: u64,
+}
+
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
@@ -140,4 +164,7 @@ pub enum ControlMessage {
     /// Announces the sender's `orion+tcp` listener port after a signed hello on a private link
     /// (open mode only, `docs/discovery.md`); answered with `Accepted`.
     RobotLinkListener(RobotLinkListener),
+    /// One step of an operator serving its clock to the node (operators allowed `clock.set`);
+    /// answered with `HttpResponsePayload::TimeTurn`.
+    OfferTime(TimeOffer),
 }

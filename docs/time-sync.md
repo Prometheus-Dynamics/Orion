@@ -8,7 +8,7 @@ variables in [node-env.md](node-env.md#time-sync).
 ## Sources
 
 - **SNTP servers** (RFC 4330, client mode): any NTP server, `host[:port]`.
-- **Another Orion node.** A node started with `ORION_NODE_TIME_SERVE=addr:port` answers SNTP on
+- **Another Orion node**, a fleet peer, written `peer://host[:port]`. A node started with `ORION_NODE_TIME_SERVE=addr:port` answers SNTP on
   that port, over UDP and also over TCP (the same 48 bytes each way, one exchange per
   connection). A board with no internet takes its time from the controller or a PC that has it.
   A source written `tcp://host:port` is asked over TCP, so time also crosses TCP-only paths,
@@ -49,6 +49,40 @@ They follow timesyncd:
   while the offset stays under 50 ms.
 - The last synchronized time is saved to `<state dir>/time-sync.last`. At start, a clock behind
   it (a board without a working RTC) is stepped forward to it before the first sample.
+
+## An operator's clock
+
+A board on a network with no internet can take its time from the computer managing it, over the
+Orion connection that computer already has. The board needs no address for it.
+
+- On the node: put `operator` in `ORION_NODE_TIME_SERVERS`, first if it should win
+  (`ORION_NODE_TIME_SERVERS=operator,pool.ntp.org`).
+- On the computer: `RemoteOperator::serve_time(stratum)` runs until aborted, at the pace the node
+  asks for (`offer_time` is one round). `stratum` is 3 for a computer kept by NTP.
+- The operator must be allowed the action `clock.set`; serving the time is the same power as
+  setting it. Any other operator is refused.
+
+The exchange is two signed requests. The node opens with a token holding its monotonic time; the
+operator answers at once with its clock, and the node measures the round trip on its own clock.
+When no operator is offering, the next source in the list is used.
+
+## Wrong sources
+
+List order is rank. A source whose time cannot be right is passed over for the next one, and
+`time.error` says why:
+
+- before this build existed (never earlier than 2026-01-01; `SOURCE_DATE_EPOCH` when the build
+  sets it): applies to every source;
+- from a fleet peer only (`peer://host[:port]`, or `tcp://host:port`): over a day behind the last
+  synchronized time, or over 400 days past it. Internet NTP and `operator` are not held to this,
+  so a board left off for a week still takes the right time.
+
+## Synchronized flag
+
+`/run/orion/time-synced` (`ORION_NODE_TIME_SYNCED_FILE`, `off` for none) exists while the node
+disciplines the clock and it is synchronized, the role of timesyncd's
+`/run/systemd/timesync/synchronized`. It is removed at start, at shutdown and when adjusting the
+clock fails. `report` mode never creates it.
 
 ## Status
 

@@ -15,6 +15,9 @@ use orion::{
 };
 use std::sync::Arc;
 
+/// The action whose grant also lets an operator serve its clock to the node.
+const CLOCK_SET_ACTION: &str = "clock.set";
+
 #[derive(Clone)]
 struct NodeSecurityAuthenticator {
     security: Arc<NodeSecurity>,
@@ -326,6 +329,14 @@ impl NodeSecurityAuthorizer {
                     return refuse("operators may only write update intents");
                 }
                 Ok(())
+            }
+            // Serving the board its time moves its clock: the same grant as setting it.
+            ControlOperation::OfferTime => {
+                if operator.allows_action(CLOCK_SET_ACTION) {
+                    Ok(())
+                } else {
+                    refuse("its policy does not allow `clock.set`")
+                }
             }
             ControlOperation::RunAction => {
                 let crate::service::ControlRequestBody::Control(message) = &request.body else {

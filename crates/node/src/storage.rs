@@ -31,8 +31,8 @@ const MUTATION_HISTORY_BASELINE_FILE: &str = "mutation-history-baseline.rkyv";
 pub(crate) const MAINTENANCE_STATE_FILE: &str = "maintenance-state.rkyv";
 const ARTIFACT_METADATA_FILE: &str = "metadata.rkyv";
 const ARTIFACT_PAYLOAD_FILE: &str = "payload.bin";
-/// Snapshot format of the released layout. A state directory holding any other format is not read:
-/// its files are moved aside (see [`NodeStorage::move_unsupported_format_aside`]).
+/// Snapshot format of the released layout. A state directory holding any other format is not
+/// read and not touched: this build keeps its own state beside it (see `layout`).
 pub(crate) const SNAPSHOT_FORMAT_VERSION: u32 = 1;
 /// Written while the node runs in safe mode (`docs/update-recovery.md`); holds the cause.
 const SAFE_MODE_MARKER_FILE: &str = "safe-mode.txt";
@@ -64,6 +64,8 @@ pub struct DesiredStateSectionCounts {
     pub leases: u64,
     pub update_intents: u64,
 }
+
+mod layout;
 
 #[derive(Clone, Debug, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct SnapshotManifest {
@@ -109,11 +111,21 @@ pub enum UnsupportedSnapshotFormat {
 #[derive(Clone, Debug)]
 pub struct NodeStorage {
     root: PathBuf,
+    /// Where the cluster state files live: `root`, or this build's own directory when `root`
+    /// holds state it cannot read (`layout`).
+    state_root: PathBuf,
+    /// Where the peer trust store lives: `root`, or this build's own directory (`layout`).
+    trust_root: PathBuf,
 }
 
 impl NodeStorage {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        let root = root.into();
+        Self {
+            state_root: root.clone(),
+            trust_root: root.clone(),
+            root,
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -121,31 +133,31 @@ impl NodeStorage {
     }
 
     pub fn snapshot_manifest_path(&self) -> PathBuf {
-        self.root.join(SNAPSHOT_MANIFEST_FILE)
+        self.state_root.join(SNAPSHOT_MANIFEST_FILE)
     }
 
     pub fn snapshot_desired_path(&self) -> PathBuf {
-        self.root.join(SNAPSHOT_DESIRED_FILE)
+        self.state_root.join(SNAPSHOT_DESIRED_FILE)
     }
 
     pub fn snapshot_observed_path(&self) -> PathBuf {
-        self.root.join(SNAPSHOT_OBSERVED_FILE)
+        self.state_root.join(SNAPSHOT_OBSERVED_FILE)
     }
 
     pub fn snapshot_applied_path(&self) -> PathBuf {
-        self.root.join(SNAPSHOT_APPLIED_FILE)
+        self.state_root.join(SNAPSHOT_APPLIED_FILE)
     }
 
     pub fn mutation_history_path(&self) -> PathBuf {
-        self.root.join(MUTATION_HISTORY_FILE)
+        self.state_root.join(MUTATION_HISTORY_FILE)
     }
 
     pub fn mutation_history_baseline_path(&self) -> PathBuf {
-        self.root.join(MUTATION_HISTORY_BASELINE_FILE)
+        self.state_root.join(MUTATION_HISTORY_BASELINE_FILE)
     }
 
     pub fn maintenance_state_path(&self) -> PathBuf {
-        self.root.join(MAINTENANCE_STATE_FILE)
+        self.state_root.join(MAINTENANCE_STATE_FILE)
     }
 
     pub fn ensure_layout(&self) -> Result<(), NodeError> {
@@ -373,8 +385,7 @@ impl NodeStorage {
     }
 
     /// The snapshot manifest of a state directory this build does not read: one whose format is
-    /// not the current format (`SNAPSHOT_FORMAT_VERSION`), or one that does not decode at all (an older layout or a
-    /// damaged file). `None` when there is no manifest or its format is the current one.
+    /// not the current format (`SNAPSHOT_FORMAT_VERSION`), or one that does not decode at all. `None` when there is no manifest or its format is the current one.
     pub fn unsupported_snapshot_format(
         &self,
     ) -> Result<Option<UnsupportedSnapshotFormat>, NodeError> {
@@ -397,21 +408,11 @@ impl NodeStorage {
         self.move_files_aside("quarantine", names)
     }
 
-    /// Moves the cluster state files of a state directory in an unsupported snapshot format into a
-    /// fresh `unsupported-format-<unix ms>/` directory. Nothing is deleted; the node then starts
-    /// with an empty desired state.
-    pub fn move_unsupported_format_aside(
-        &self,
-        names: &[&str],
-    ) -> Result<Option<PathBuf>, NodeError> {
-        self.move_files_aside("unsupported-format", names)
-    }
-
     fn move_files_aside(&self, prefix: &str, names: &[&str]) -> Result<Option<PathBuf>, NodeError> {
         let present: Vec<&str> = names
             .iter()
             .copied()
-            .filter(|name| self.root.join(name).exists())
+            .filter(|name| self.state_root.join(name).exists())
             .collect();
         if present.is_empty() {
             return Ok(None);
@@ -421,7 +422,7 @@ impl NodeStorage {
             .map(|elapsed| elapsed.as_millis() as u64)
             .unwrap_or(0);
         let dir = loop {
-            let candidate = self.root.join(format!("{prefix}-{stamp}"));
+            let candidate = self.state_root.join(format!("{prefix}-{stamp}"));
             if !candidate.exists() {
                 break candidate;
             }
@@ -429,7 +430,7 @@ impl NodeStorage {
         };
         std::fs::create_dir_all(&dir).map_err(|err| NodeError::Storage(err.to_string()))?;
         for name in present {
-            std::fs::rename(self.root.join(name), dir.join(name))
+            std::fs::rename(self.state_root.join(name), dir.join(name))
                 .map_err(|err| NodeError::Storage(err.to_string()))?;
         }
         self.sync_root_directory()?;
@@ -644,7 +645,7 @@ impl NodeStorage {
 
     /// Makes the renames of every deferred write in the storage root durable.
     pub(crate) fn sync_root_directory(&self) -> Result<(), NodeError> {
-        sync_parent_directory(&self.root)
+        sync_parent_directory(&self.state_root)
     }
 
     fn atomic_write_stream(&self, path: &Path, content: &mut dyn Read) -> Result<(), NodeError> {

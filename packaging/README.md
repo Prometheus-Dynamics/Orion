@@ -23,13 +23,15 @@ image runs.
 
 ```sh
 cargo build -p orion-node --release --target aarch64-unknown-linux-gnu \
-  --no-default-features --features peer-tcp,discovery-mdns,systemd-notify
+  --no-default-features --features peer-tcp,discovery-mdns,systemd-notify,time-sync
 ```
 
 - `systemd-notify` is required by the unit (`Type=notify` and `WatchdogSec=`). Without it,
   systemd times out waiting for `READY=1` after `TimeoutStartSec=`.
 - `peer-tcp` and `discovery-mdns` let the device join other nodes over `orion+tcp` without the
   HTTP stack. Drop them for a strictly standalone node.
+- `time-sync` lets the node keep the clock instead of `systemd-timesyncd`; it does nothing until
+  `ORION_NODE_TIME_SYNC` is set (`docs/time-sync.md`).
 - Add `link-gateway` to serve microcontrollers over serial or SocketCAN (`ORION_NODE_LINKS`).
 - The release profile is size-optimized (`opt-level = "z"`, fat LTO, stripped). The appliance build
   above is about 3.1 MiB for aarch64.
@@ -205,7 +207,7 @@ The layer declares (all ids can be replaced by a later layer that declares the s
 
 | Id | Kind | What |
 | --- | --- | --- |
-| `orion-node` | `[[artifacts]]`, `kind = "rust"` | `package = "orion-node"`, `target = "aarch64-unknown-linux-gnu"`, `profile = "release"`, `no_default_features = true`, `features = ["peer-tcp", "discovery-mdns", "systemd-notify"]`, built in the `gaia/docker/aarch64-cross.Dockerfile` image. |
+| `orion-node` | `[[artifacts]]`, `kind = "rust"` | `package = "orion-node"`, `target = "aarch64-unknown-linux-gnu"`, `profile = "release"`, `no_default_features = true`, `features = ["peer-tcp", "discovery-mdns", "systemd-notify", "time-sync"]`, built in the `gaia/docker/aarch64-cross.Dockerfile` image. |
 | `install-orion-node` | `[[install]]` | `/usr/bin/orion-node`, mode 0755. |
 | `orion-node-service` | `[[stage.services]]` | `orion-node.service` (staged to `/etc/systemd/system/`). |
 | `orion-node-env` | `[[stage.files]]` | `/etc/default/orion-node.env` from the example. |

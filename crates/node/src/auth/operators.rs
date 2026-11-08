@@ -26,6 +26,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
 };
+use tracing::warn;
 
 const OPERATORS_FILE: &str = "trusted-operators.json";
 const STORE_VERSION: u32 = 1;
@@ -134,12 +135,15 @@ pub(super) fn load_operator_trust(
     let bytes = blocking_read_file(&path, "read trusted operator store")?;
     let file: StoreFile = serde_json::from_slice(&bytes)
         .map_err(|err| NodeError::Storage(format!("failed to decode {}: {err}", path.display())))?;
+    // Access must survive a rollback: a store from another version is read for what this build
+    // understands.
     if file.version != STORE_VERSION {
-        return Err(NodeError::Storage(format!(
-            "{} has unsupported version {}",
-            path.display(),
-            file.version
-        )));
+        warn!(
+            path = %path.display(),
+            version = file.version,
+            expected = STORE_VERSION,
+            "reading a trusted operator store of another version"
+        );
     }
     for operator in file.operators {
         let key = parse_key_hex(&operator.public_key_hex).map_err(|err| {

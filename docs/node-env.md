@@ -18,6 +18,7 @@ instead of silently falling back.
 | `ORION_NODE_IDENTITY_ADDR` | unset (off) | Socket address, for example `0.0.0.0:5899`, or `off` | The board identity endpoint (`GET /.well-known/pd-device`, identity contract 1, `crates/node/src/identity.rs`). It needs no HTTP feature. An invalid address fails startup; a bind failure fails startup. |
 | `ORION_NODE_IDENTITY_BASE` | unset | Path to the device package's identity document (one JSON object) | Passed through as it is, under the live fields. Unreadable or not an object: the built-in minimal document (serial, os, MACs) is served instead. |
 | `ORION_NODE_IDENTITY_SECURITY_FILES` | unset | Comma-separated `KEY=value` files | `BOARD_SECURITY` from the last file that sets it gives the live `security` field (`1` is `on`, anything else `off`). Missing files are skipped. |
+| `ORION_NODE_SSH_HOST_KEYS` | unset | Directory of OpenSSH `*.pub` files | Publishes each key's fingerprint as the status key `identity.ssh_host_key.<type>` (`ed25519`, `ecdsa`, `rsa`; value `SHA256:<base64>`) and adds `ssh_host_keys` to the identity document. Read again every minute. An unreadable directory publishes nothing; no error. |
 | `ORION_NODE_RUNTIME_WORKER_THREADS` | `2` | Positive integer | Zero or invalid integer fails startup. |
 | `ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS` | unset (Tokio default `512`) | Positive integer | Zero or invalid integer fails startup. |
 | `ORION_NODE_RECONCILE_MS` | `250` | Integer milliseconds, minimum effective value `1` | Invalid integer fails startup. Minimum idle gap between reconcile passes (see below); also the peer sync interval. |
@@ -420,13 +421,13 @@ The node reads one snapshot format, format 1, the layout of the first release. T
 manifest that does not decode with the current layout (a pre-release directory, or a damaged
 manifest), is not read and never blocks startup:
 
-- the cluster state files (`snapshot-*.rkyv`, `mutation-history*.rkyv`) are renamed into
-  `<state dir>/unsupported-format-<unix ms>/`; nothing is deleted;
-- the node logs one error that names the format it found, the format it reads (1), and the moved
-  directory;
-- the node starts with an empty desired state and gets its desired state back from peers and
-  local clients, as on a fresh node.
+- nothing in it is moved, rewritten or deleted, and a build that reads it finds it unchanged;
+- the node keeps its own cluster state in `<state dir>/layouts/<stamp>/` (where a later start finds
+  it again) and logs one warning naming that directory;
+- the node starts with an empty desired state the first time and gets its desired state back from
+  peers and local clients, as on a fresh node.
 
+The same holds when a section does not decode and `<state dir>/state-layout` names another build.
 This is not safe mode: the maintenance state and the other stores are left as they are. Damaged
 state in a readable directory (a decodable manifest whose applied or desired section does not
 decode) is quarantined to `<state dir>/quarantine-<unix ms>/` and starts safe mode, see "Safe
@@ -456,7 +457,8 @@ Orion node, in place of `systemd-timesyncd`; see [time-sync.md](time-sync.md).
 | Variable | Default | Valid values | Failure behavior |
 | --- | --- | --- | --- |
 | `ORION_NODE_TIME_SYNC` | `off` | `off`, `report` (measure and publish `time.*` status, never touch the clock), `discipline` (also slew or step it; needs `CAP_SYS_TIME`) | Any other value fails startup. `discipline` only reports while `systemd-timesyncd` runs. |
-| `ORION_NODE_TIME_SERVERS` | unset | Comma-separated `host[:port]` (port 123 by default), or `tcp://host:port` for an Orion node's time service over TCP | Required when `ORION_NODE_TIME_SYNC` is not `off`. |
+| `ORION_NODE_TIME_SERVERS` | unset | Comma-separated, in rank order: `operator` (a connected operator's clock, `docs/time-sync.md`), `host[:port]` (NTP, port 123 by default), `peer://host[:port]` (another Orion node), or `tcp://host:port` for an Orion node's time service over TCP | Required when `ORION_NODE_TIME_SYNC` is not `off`. |
+| `ORION_NODE_TIME_SYNCED_FILE` | `/run/orion/time-synced` | Path, or `off` | Exists only while the node disciplines the clock and it is synchronized. |
 | `ORION_NODE_TIME_SERVE` | unset | `addr:port` to serve this node's clock on, over UDP (SNTP) and TCP | A bind failure fails startup. |
 | `ORION_NODE_TIME_SERVE_AUTHORITY` | `false` | Boolean: serve the clock while it is not synchronized (stratum 10), as a field network's reference | Invalid booleans fail startup. |
 | `ORION_NODE_TIME_POLL_MIN_MS` / `ORION_NODE_TIME_POLL_MAX_MS` | `64000` / `1024000` | Milliseconds; minimum above 0 and at most the maximum | Invalid values fail startup. |

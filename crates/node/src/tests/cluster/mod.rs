@@ -34,6 +34,8 @@ mod remote_operator;
 mod remote_operator_actions;
 #[cfg(feature = "peer-tcp")]
 mod remote_session;
+#[cfg(all(feature = "peer-tcp", feature = "time-sync"))]
+mod remote_time;
 mod stale_peers;
 #[cfg(feature = "peer-tcp")]
 mod streams;

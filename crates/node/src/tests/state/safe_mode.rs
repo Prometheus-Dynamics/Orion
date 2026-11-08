@@ -79,22 +79,16 @@ fn start_over_rewritten_manifest(
     (build(&state_dir, None), state_dir)
 }
 
-/// The directories `unsupported-format-<ms>` under a state directory.
-fn unsupported_format_dirs(state_dir: &std::path::Path) -> Vec<PathBuf> {
-    fs::read_dir(state_dir)
-        .expect("state dir should list")
-        .map(|entry| entry.expect("entry should read").path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("unsupported-format-"))
-        })
-        .collect()
+/// This build's own state directory, when the root held state it could not read.
+fn own_layout_dirs(state_dir: &std::path::Path) -> Vec<PathBuf> {
+    fs::read_dir(state_dir.join("layouts"))
+        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+        .unwrap_or_default()
 }
 
 #[test]
-fn snapshot_in_another_format_is_moved_aside_and_the_node_starts_fresh() {
-    // A manifest that decodes but names another format (here a newer one) is moved aside.
+fn snapshot_in_another_format_is_left_alone_and_the_node_starts_on_its_own_state() {
+    // A manifest that decodes but names another format (here a newer one).
     let (app, state_dir) = start_over_rewritten_manifest("safe-other-format", |state_dir| {
         let storage = NodeStorage::new(state_dir.to_path_buf());
         let mut manifest = storage
@@ -108,30 +102,26 @@ fn snapshot_in_another_format_is_moved_aside_and_the_node_starts_fresh() {
         )
         .expect("manifest should be written");
     });
+    let newer = fs::read(state_dir.join("snapshot-manifest.rkyv")).expect("still there");
 
-    // Not safe mode: the node is up with an empty desired state and nothing was deleted.
     assert_eq!(app.safe_mode(), None);
     assert!(app.state_snapshot().state.desired.providers.is_empty());
-    let moved = unsupported_format_dirs(&state_dir);
-    assert_eq!(
-        moved.len(),
-        1,
-        "one unsupported-format directory is expected"
-    );
-    assert!(moved[0].join("snapshot-manifest.rkyv").exists());
-    assert!(!state_dir.join("snapshot-manifest.rkyv").exists());
+    let own = own_layout_dirs(&state_dir);
+    assert_eq!(own.len(), 1, "this build's own directory is expected");
 
-    // The fresh state persists again and the moved files stay where they were.
+    // This build persists beside the newer state, which stays byte-identical.
     app.persist_state().expect("fresh state should persist");
-    assert!(state_dir.join("snapshot-manifest.rkyv").exists());
-    assert!(moved[0].join("snapshot-manifest.rkyv").exists());
+    assert!(own[0].join("snapshot-manifest.rkyv").exists());
+    assert_eq!(
+        fs::read(state_dir.join("snapshot-manifest.rkyv")).expect("still there"),
+        newer
+    );
 
     let _ = fs::remove_dir_all(state_dir);
 }
 
 #[test]
-fn undecodable_snapshot_manifest_is_moved_aside_and_the_node_starts_fresh() {
-    // A manifest that does not decode with the current layout (an older layout, or damage).
+fn undecodable_snapshot_manifest_is_left_alone_and_the_node_starts_fresh() {
     let (app, state_dir) = start_over_rewritten_manifest("safe-undecodable", |state_dir| {
         fs::write(
             state_dir.join("snapshot-manifest.rkyv"),
@@ -141,8 +131,11 @@ fn undecodable_snapshot_manifest_is_moved_aside_and_the_node_starts_fresh() {
     });
 
     assert_eq!(app.safe_mode(), None);
-    assert_eq!(unsupported_format_dirs(&state_dir).len(), 1);
-    assert!(!state_dir.join("snapshot-manifest.rkyv").exists());
+    assert_eq!(own_layout_dirs(&state_dir).len(), 1);
+    assert_eq!(
+        fs::read(state_dir.join("snapshot-manifest.rkyv")).expect("still there"),
+        b"not an archived manifest"
+    );
 
     let _ = fs::remove_dir_all(state_dir);
 }
@@ -250,5 +243,89 @@ fn safe_mode_is_reported_by_readiness_health_and_metrics() {
         app.safe_mode_metrics()
     );
 
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn state_another_build_wrote_is_never_touched_and_its_writer_finds_it_again() {
+    // The manifest decodes, a section does not, and the stamp names another layout: a rollback
+    // or a slot switch, not damage.
+    let state_dir = temp_state_dir("safe-other-layout");
+    let app = build(&state_dir, None);
+    app.persist_state().expect("state should persist");
+    drop(app);
+    let applied = state_dir.join("snapshot-applied.rkyv");
+    let readable = fs::read(&applied).expect("applied section");
+    fs::write(&applied, b"a newer layout").expect("applied section should be written");
+    fs::write(state_dir.join("state-layout"), "newer build").expect("stamp");
+
+    // The older build runs normally on its own state, a second start included.
+    for _ in 0..2 {
+        let older = build(&state_dir, None);
+        assert_eq!(older.safe_mode(), None);
+        older.persist_state().expect("its own state persists");
+    }
+    assert_eq!(fs::read(&applied).expect("kept"), b"a newer layout");
+    assert_eq!(
+        fs::read_to_string(state_dir.join("state-layout")).expect("stamp"),
+        "newer build"
+    );
+    assert!(!state_dir.join("safe-mode.txt").exists());
+    assert_eq!(own_layout_dirs(&state_dir).len(), 1);
+
+    // Its writer comes back: here, this build reading the root again once it can.
+    fs::write(&applied, readable).expect("applied section should be written");
+    let mut storage = NodeStorage::new(state_dir.clone());
+    assert_eq!(storage.settle_state_root().expect("settles"), None);
+
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn a_state_directory_with_no_stamp_is_not_damage_either() {
+    let state_dir = temp_state_dir("safe-no-stamp");
+    let app = build(&state_dir, None);
+    app.persist_state().expect("state should persist");
+    drop(app);
+    fs::write(state_dir.join("snapshot-applied.rkyv"), b"older").expect("section");
+    fs::remove_file(state_dir.join("state-layout")).expect("stamp");
+
+    assert_eq!(build(&state_dir, None).safe_mode(), None);
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn a_marker_from_the_old_newer_format_rule_is_cleared() {
+    let state_dir = temp_state_dir("safe-stale-marker");
+    fs::create_dir_all(&state_dir).expect("state dir");
+    fs::write(
+        state_dir.join("safe-mode.txt"),
+        "state quarantined to /x/quarantine-1: snapshot format 6 is newer than this build reads (5)",
+    )
+    .expect("marker");
+
+    assert_eq!(build(&state_dir, None).safe_mode(), None);
+    assert!(!state_dir.join("safe-mode.txt").exists());
+    let _ = fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn an_unreadable_trust_store_is_left_alone_and_never_stops_the_node() {
+    let state_dir = temp_state_dir("safe-trust-store");
+    fs::create_dir_all(&state_dir).expect("state dir");
+    let store = state_dir.join("trusted-peers.rkyv");
+    fs::write(&store, b"a newer layout").expect("store");
+
+    let app = build(&state_dir, None);
+
+    assert_eq!(app.safe_mode(), None);
+    assert_eq!(fs::read(&store).expect("kept"), b"a newer layout");
+    let status = app.query_status(&orion::control_plane::StatusQuery::default());
+    assert!(
+        status
+            .iter()
+            .any(|entry| entry.key.as_str() == "auth.trust_store_unreadable"),
+        "{status:?}"
+    );
     let _ = fs::remove_dir_all(state_dir);
 }

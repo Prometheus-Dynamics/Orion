@@ -6,6 +6,24 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- Time sync: the `operator` source in `ORION_NODE_TIME_SERVERS` takes the clock of a connected
+  remote operator allowed `clock.set` (`RemoteOperator::offer_time` and `serve_time`, new
+  `ControlMessage::OfferTime`). A source reporting a time that cannot be right is passed over.
+  `/run/orion/time-synced` (`ORION_NODE_TIME_SYNCED_FILE`) exists while the clock is synchronized.
+- `ORION_NODE_SSH_HOST_KEYS`: SSH host key fingerprints as `identity.ssh_host_key.<type>` status
+  keys and `ssh_host_keys` in the identity document.
+- The Gaia `orion-node` layer builds `time-sync`.
+
+### Fixed
+
+- A node never moves, rewrites, quarantines or enters safe mode over state another build wrote:
+  it keeps its own state in `layouts/<stamp>/` and the writer finds its files unchanged. A
+  `state-layout` stamp tells a different layout from damage. Stale "newer format" safe-mode
+  markers are cleared. The trusted operator store is read across versions, and an unreadable peer trust store no longer
+  stops the node from starting.
+
 ### Changed
 
 - `orion-transport-tcp` links rustls only with its new `tls` feature; the TLS types and

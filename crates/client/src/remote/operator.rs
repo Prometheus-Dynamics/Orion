@@ -355,6 +355,7 @@ pub(crate) fn unexpected(request: &str, response: &HttpResponsePayload) -> Remot
         HttpResponsePayload::Actions(_) => "actions",
         HttpResponsePayload::OperatorWelcome(_) => "operator welcome",
         HttpResponsePayload::Status(_) => "status",
+        HttpResponsePayload::TimeTurn(_) => "time turn",
         HttpResponsePayload::Session(_) => "session",
     };
     RemoteError::UnexpectedResponse(format!("{kind} response to {request}"))

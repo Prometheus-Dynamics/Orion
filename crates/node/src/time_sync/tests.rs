@@ -1,4 +1,5 @@
 use super::*;
+use orion::control_plane::TimeOffer;
 use std::sync::Mutex;
 
 const S: i64 = 1_000_000_000;
@@ -30,6 +31,7 @@ fn config(mode: TimeSyncMode, servers: Vec<String>) -> TimeSyncConfig {
         serve_authority: false,
         min_poll: Duration::from_secs(64),
         max_poll: Duration::from_secs(1024),
+        synced_file: None,
     }
 }
 
@@ -61,11 +63,11 @@ async fn a_board_behind_its_peer_steps_after_two_agreeing_samples() {
         Some(saved.clone()),
         false,
     );
-    syncer.apply(best_sample(&syncer.config.servers).await);
+    syncer.apply(best_sample(&syncer.config.servers, &OperatorTime::default(), None).await);
     assert_eq!(syncer.status.last_action, "waiting for a second sample");
     assert!(clock.steps.lock().expect("steps").is_empty());
     assert_eq!(syncer.poll, FIRST_POLL);
-    syncer.apply(best_sample(&syncer.config.servers).await);
+    syncer.apply(best_sample(&syncer.config.servers, &OperatorTime::default(), None).await);
     let steps = clock.steps.lock().expect("steps").clone();
     assert_eq!(steps.len(), 1, "{:?}", syncer.status);
     // Loopback answers in well under 100 ms even on a loaded machine.
@@ -93,7 +95,7 @@ async fn report_mode_measures_and_never_touches_the_clock() {
         false,
     );
     for _ in 0..2 {
-        syncer.apply(best_sample(&syncer.config.servers).await);
+        syncer.apply(best_sample(&syncer.config.servers, &OperatorTime::default(), None).await);
     }
     assert_eq!(syncer.status.last_action, "would step");
     assert!(!syncer.status.synced);
@@ -151,7 +153,7 @@ async fn an_unanswered_server_is_an_error_and_the_poll_backs_off() {
         None,
         false,
     );
-    syncer.apply(best_sample(&syncer.config.servers).await);
+    syncer.apply(best_sample(&syncer.config.servers, &OperatorTime::default(), None).await);
     assert!(syncer.status.error.is_some());
     assert!(syncer.poll >= FIRST_POLL && syncer.poll <= Duration::from_secs(64));
 }
@@ -167,10 +169,135 @@ async fn a_tcp_source_answers_like_the_udp_one() {
         || ServedClock::Synced(2),
         move || sntp::NtpTime::from_unix_ns(sntp::unix_now_ns() + i128::from(5 * S)),
     ));
-    let (source, sample) = best_sample(&[format!("tcp://{addr}")])
+    let (source, sample) = best_sample(&[format!("tcp://{addr}")], &OperatorTime::default(), None)
         .await
         .expect("sample");
     assert_eq!(source, format!("tcp://{addr}"));
     assert!((sample.offset_ns - 5 * S).abs() < S / 10, "{sample:?}");
     assert_eq!(sample.stratum, 2);
+}
+
+const NOW_MS: i64 = 1_800_000_000_000;
+const DAY: i64 = 86_400_000;
+
+#[test]
+fn a_source_before_the_floor_is_refused_from_every_source() {
+    assert!(implausible(1_000, None, false).is_some());
+    assert!(implausible(1_000, None, true).is_some());
+    // The controller's clock on a 2025 date.
+    assert!(implausible(1_750_000_000_000, Some(NOW_MS), false).is_some());
+    assert_eq!(implausible(NOW_MS, None, false), None);
+}
+
+#[test]
+fn only_a_fleet_peer_is_held_to_the_saved_time() {
+    let saved = Some(NOW_MS);
+    assert!(implausible(NOW_MS - 2 * DAY, saved, true).is_some());
+    assert!(implausible(NOW_MS + 401 * DAY, saved, true).is_some());
+    // A peer within bounds, the RTC a little fast or the board off for months, is normal.
+    assert_eq!(implausible(NOW_MS + 90 * DAY, saved, true), None);
+    assert_eq!(implausible(NOW_MS - 3_600_000, saved, true), None);
+    // Internet NTP or the managing computer is believed however long the board was off.
+    assert_eq!(implausible(NOW_MS + 500 * DAY, saved, false), None);
+    assert_eq!(implausible(NOW_MS - 2 * DAY, saved, false), None);
+}
+
+#[tokio::test]
+async fn a_wrong_peer_is_passed_over_for_the_next_source() {
+    // The first peer is about a month behind the last synchronized time.
+    let wrong = peer_source(-30 * 24 * 3600 * S).await;
+    let right = peer_source(0).await;
+    let saved = (sntp::unix_now_ns() / 1_000_000) as i64;
+    let wrong = format!("peer://{wrong}");
+    let servers = vec![wrong, right.to_string()];
+    let (source, _) = best_sample(&servers, &OperatorTime::default(), Some(saved))
+        .await
+        .expect("the second source answers");
+    assert_eq!(source, right.to_string());
+}
+
+fn offer_clock(operator: &OperatorTime, ahead_ns: i64) {
+    let turn = operator
+        .offer(&TimeOffer {
+            token: 0,
+            unix_ns: 0,
+            stratum: 3,
+        })
+        .expect("opened");
+    assert_ne!(turn.token, 0);
+    let unix_ns = (sntp::unix_now_ns() + i128::from(ahead_ns)) as u64;
+    let taken = operator
+        .offer(&TimeOffer {
+            token: turn.token,
+            unix_ns,
+            stratum: 3,
+        })
+        .expect("taken");
+    assert_eq!(taken.token, 0);
+}
+
+#[tokio::test]
+async fn an_operators_clock_ranks_first_and_is_used_once() {
+    let operator = OperatorTime::default();
+    operator.listen();
+    offer_clock(&operator, 7 * S);
+    let peer = peer_source(0).await;
+    let servers = vec![OPERATOR_SOURCE.to_owned(), peer.to_string()];
+    let (source, sample) = best_sample(&servers, &operator, None)
+        .await
+        .expect("sample");
+    assert_eq!(source, OPERATOR_SOURCE);
+    assert!((sample.offset_ns - 7 * S).abs() < S, "{}", sample.offset_ns);
+    assert_eq!(sample.stratum, 3);
+    // Used once: the next round falls through to the next source.
+    let (source, _) = best_sample(&servers, &operator, None)
+        .await
+        .expect("sample");
+    assert_eq!(source, peer.to_string());
+}
+
+#[test]
+fn offers_are_refused_unless_operator_is_a_source_or_the_token_is_foreign() {
+    let operator = OperatorTime::default();
+    let opening = TimeOffer {
+        token: 0,
+        unix_ns: 0,
+        stratum: 3,
+    };
+    assert!(operator.offer(&opening).is_err());
+    operator.listen();
+    let foreign = TimeOffer {
+        token: u64::MAX,
+        unix_ns: 0,
+        stratum: 3,
+    };
+    assert!(operator.offer(&foreign).is_err());
+}
+
+#[test]
+fn the_synced_file_follows_the_sync_state() {
+    let dir = std::env::temp_dir().join(format!("orion-synced-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let flag = dir.join("time-synced");
+    let mut config = config(TimeSyncMode::Discipline, Vec::new());
+    config.synced_file = Some(flag.clone());
+    let mut syncer = Syncer::new(
+        config,
+        Arc::new(FakeClock::default()),
+        ServedState::default(),
+        None,
+        false,
+    );
+    let sample = |offset_ns| sntp::Sample {
+        offset_ns,
+        delay_ns: 1_000_000,
+        stratum: 2,
+    };
+    syncer.apply(Err("no server answered".to_owned()));
+    assert!(!flag.exists(), "not synced yet");
+    syncer.apply(Ok(("a".to_owned(), sample(1_000_000))));
+    assert!(flag.exists(), "synced");
+    syncer.set_synced_file(false);
+    assert!(!flag.exists(), "sync lost");
+    let _ = std::fs::remove_dir_all(dir);
 }

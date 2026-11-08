@@ -248,6 +248,7 @@ impl HttpCodec {
             | HttpResponsePayload::Actions(_)
             | HttpResponsePayload::OperatorWelcome(_)
             | HttpResponsePayload::Status(_)
+            | HttpResponsePayload::TimeTurn(_)
             | HttpResponsePayload::Session(_)) => Ok(HttpResponse {
                 status: 200,
                 body: encode_to_vec(payload)

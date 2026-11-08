@@ -361,11 +361,10 @@ update is also a rolling Orion update. Two cases:
 - **Make bumps rare.** Batch layout changes into one bump per release, prefer additive messages,
   and record in the release notes whether a release is "sync-compatible" with the previous one.
 - **State directory downgrade.** A state directory written by one `orion-node` is not read by an
-  `orion-node` that expects another snapshot format: it is moved aside to
-  `<state dir>/unsupported-format-<unix ms>/` and the node starts with an empty desired state that
-  it pulls from peers ([node-env.md](node-env.md#state-directory-format)). A rollback to the old
-  slot therefore needs its own readable state directory. The device manager can snapshot the state
-  directory before switching slots, since it controls the partition layout.
+  `orion-node` that expects another snapshot format, and is not touched either: the node keeps its
+  own state in `<state dir>/layouts/<stamp>/` and starts with an empty desired state that it pulls
+  from peers ([node-env.md](node-env.md#state-directory-format)). Going back to the build that
+  wrote it finds it unchanged, so a rollback and a roll forward each keep their own state.
 
 ## Delivery and progress
 
@@ -561,7 +560,7 @@ decoded) starts the node so that it can be inspected and repaired, never so that
   normal plus a restart), which avoids resurrecting deleted objects from a stale copy.
 
 Implemented (U2), with these details: the cause persists in `safe-mode.txt` in the state directory;
-`orionctl maintenance exit` clears it and a restart leaves safe mode. Maintenance changes other
+`orionctl maintenance exit` clears it and a restart leaves safe mode. State that a different build wrote is never safe mode and is never moved or rewritten: a section that does not decode is damage only when the `state-layout` stamp names this build's layout. Otherwise the node leaves those files byte-identical, keeps its own state in `layouts/<stamp>/` beside them, and starts normally on defaults, and the build that wrote them finds them where it left them. Enrolled operators are in `trusted-operators.json`, which is read across versions. A peer trust store it cannot read gets the same treatment: left untouched, the node runs without those peers and keeps its own store beside it. Status on the node says so: `state.root_unreadable` and `auth.trust_store_unreadable`. A marker written by a build that treated a newer snapshot format as damage is cleared at start. Maintenance changes other
 than `exit` are refused in safe mode. An unreadable identity key (`node-identity.ed25519`) puts the node in
 safe mode with outbound peer sync off; the key file is left untouched. The packaged unit does not
 include an `OnFailure=` safe-mode unit yet: it restarts with `Restart=always` and no start limit,

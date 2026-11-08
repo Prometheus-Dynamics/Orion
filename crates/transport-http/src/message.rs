@@ -3,7 +3,7 @@ use orion_auth::{AuthenticatedPeerRequest, PeerRequestPayload};
 use orion_control_plane::{
     ActionResult, ControlMessage, DesiredStateSummary, EnrollmentChallenge, MutationBatch,
     NodeHealthSnapshot, NodeObservabilitySnapshot, NodeReadinessSnapshot, ObservedStateUpdate,
-    OperatorWelcome, PeerHello, SessionWelcome, StateSnapshot, StatusEntry,
+    OperatorWelcome, PeerHello, SessionWelcome, StateSnapshot, StatusEntry, TimeTurn,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,8 @@ pub enum HttpResponsePayload {
     OperatorWelcome(Box<OperatorWelcome>),
     /// Status-lane entries for a remote operator's `QueryStatus`.
     Status(Vec<StatusEntry>),
+    /// The node's turn in an operator's `OfferTime` exchange.
+    TimeTurn(TimeTurn),
     /// Answer to `OpenSession`: the connection is a push session from here on.
     Session(SessionWelcome),
 }
@@ -82,6 +84,7 @@ impl HttpRequestPayload {
                 // HTTP they are refused: a session needs its own `orion+tcp` connection).
                 ControlMessage::OperatorHello
                 | ControlMessage::QueryStatus(_)
+                | ControlMessage::OfferTime(_)
                 | ControlMessage::OpenSession(_)
                 | ControlMessage::WatchStatus(_)
                 | ControlMessage::WatchState(_)

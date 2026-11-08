@@ -10,7 +10,9 @@
 
 use super::{NodeApp, NodeError};
 use crate::storage::NodeStorage;
-use orion::control_plane::{MaintenanceMode, MaintenanceState};
+use orion::control_plane::{
+    MaintenanceMode, MaintenanceState, StatusEntry, StatusSubject, TypedConfigValue,
+};
 use std::path::PathBuf;
 use tracing::warn;
 
@@ -66,7 +68,31 @@ pub(super) fn quarantine_files(
     Ok(SafeModeCause::StateQuarantined { reason, quarantine })
 }
 
+/// A marker left by a build that treated a newer snapshot format as damage. No build does now,
+/// so the marker no longer means anything and must not keep the node in safe mode.
+pub(super) fn is_stale_format_marker(marker: &str) -> bool {
+    marker.contains("is newer than this build reads")
+}
+
 impl NodeApp {
+    /// Says in status which stores a different build left that this one runs without.
+    pub(super) fn publish_unreadable_stores(&self, state_root: bool, trust_store: bool) {
+        let subject = StatusSubject::Node(self.config.node_id.clone());
+        let entries: Vec<StatusEntry> = [
+            ("state.root_unreadable", state_root),
+            ("auth.trust_store_unreadable", trust_store),
+        ]
+        .into_iter()
+        .filter(|(_, unreadable)| *unreadable)
+        .map(|(key, _)| StatusEntry::new(subject.clone(), key, TypedConfigValue::Bool(true)))
+        .collect();
+        if !entries.is_empty()
+            && let Err(error) = self.publish_status_as("node:state", entries)
+        {
+            warn!(%error, "failed to publish which stores could not be read");
+        }
+    }
+
     /// The cause of safe mode, when this process runs in it.
     pub fn safe_mode(&self) -> Option<&SafeModeCause> {
         self.safe_mode.as_ref()

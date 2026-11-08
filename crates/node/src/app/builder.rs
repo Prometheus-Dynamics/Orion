@@ -15,10 +15,7 @@ use crate::auth::{
 use crate::config::{NodeConfig, NodeRuntimeTuning, normalize_runtime_tuning_duration};
 use crate::peer::{PeerConfig, PeerState};
 use crate::service::{ControlMiddleware, ControlMiddlewareHandle};
-use crate::storage::{
-    CLUSTER_STATE_FILES, MAINTENANCE_STATE_FILE, NodeStorage, SNAPSHOT_FORMAT_VERSION,
-    UnsupportedSnapshotFormat,
-};
+use crate::storage::{CLUSTER_STATE_FILES, MAINTENANCE_STATE_FILE, NodeStorage};
 use crate::transport_security::NodeTransportSecurityManager;
 #[cfg(feature = "transport-quic")]
 use orion::transport::quic::QuicTransport;
@@ -37,7 +34,7 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use tracing::{error, warn};
+use tracing::warn;
 
 impl Default for NodeAppBuilder {
     fn default() -> Self {
@@ -357,7 +354,29 @@ impl NodeAppBuilder {
         store.replace_desired(self.desired.unwrap_or_default());
         store.observed = self.observed.unwrap_or_default();
         store.applied = self.applied.unwrap_or_default();
-        let storage = config.state_dir.clone().map(NodeStorage::new);
+        let mut storage = config.state_dir.clone().map(NodeStorage::new);
+        let mut state_root_unreadable = false;
+        let mut trust_store_unreadable = false;
+        if let Some(storage) = storage.as_mut() {
+            if let Some(own) = storage.settle_state_root()? {
+                state_root_unreadable = true;
+                warn!(
+                    node = %config.node_id,
+                    own = %own.display(),
+                    "the state directory holds state this orion-node cannot read; leaving it \
+                     untouched and keeping this build's state beside it"
+                );
+            }
+            trust_store_unreadable =
+                storage.settle_trust_store(crate::auth::trust_store_readable)?;
+            if trust_store_unreadable {
+                warn!(
+                    node = %config.node_id,
+                    "the peer trust store cannot be read; leaving it untouched and running without \
+                     those peers"
+                );
+            }
+        }
         // Set by the first state problem found; any of them puts the node into safe mode.
         let mut quarantined: Option<super::safe_mode::SafeModeCause> = None;
         let maintenance_state = match storage
@@ -564,6 +583,8 @@ impl NodeAppBuilder {
 
         let mut app = NodeApp {
             safe_mode: None,
+            #[cfg(feature = "time-sync")]
+            operator_time: Default::default(),
             config,
             runtime,
             state,
@@ -614,29 +635,6 @@ impl NodeAppBuilder {
         control_middlewares.extend(self.control_middlewares);
         app.control_middlewares = Arc::from(control_middlewares);
 
-        // A state directory in any other snapshot format is not read. Its cluster state files are
-        // moved aside (renamed, never deleted) and the node starts with an empty desired state, so
-        // a non-current state directory never blocks startup or sends the node into a restart loop.
-        if let Some(storage) = app.storage.as_ref()
-            && let Some(found) = storage.unsupported_snapshot_format()?
-        {
-            let found = match found {
-                UnsupportedSnapshotFormat::Found(version) => format!("format {version}"),
-                UnsupportedSnapshotFormat::Undecodable => {
-                    "a manifest this build cannot decode".to_owned()
-                }
-            };
-            let moved = storage.move_unsupported_format_aside(&CLUSTER_STATE_FILES)?;
-            error!(
-                node = %app.config.node_id,
-                found = %found,
-                expected = SNAPSHOT_FORMAT_VERSION,
-                moved_to = moved.as_ref().map(|dir| dir.display().to_string()).unwrap_or_default(),
-                "state directory holds snapshot {found}, but this orion-node reads snapshot format \
-                 {SNAPSHOT_FORMAT_VERSION}; the cluster state files were moved aside and the node \
-                 starts with an empty desired state"
-            );
-        }
         app.seed_clock_from_desired();
         if self.auto_startup_replay && app.storage.is_some() {
             if let Err(err) = app.replay_state() {
@@ -655,6 +653,11 @@ impl NodeAppBuilder {
                     )?);
                 }
             }
+            if let Some(storage) = app.storage.as_ref()
+                && let Err(err) = storage.stamp_state_layout()
+            {
+                warn!(node = %app.config.node_id, error = %err, "could not record the state layout");
+            }
         } else if app.storage.is_none() {
             app.state.lifecycle.set_replay_state(true);
         }
@@ -663,6 +666,17 @@ impl NodeAppBuilder {
         // or the environment. The first one that applies is the reported cause.
         let identity_error = app.security.identity_error().map(str::to_owned);
         let persisted = match app.storage.as_ref().map(NodeStorage::load_safe_mode_marker) {
+            Some(Ok(Some(marker))) if super::safe_mode::is_stale_format_marker(&marker) => {
+                warn!(node = %app.config.node_id, %marker, "clearing a stale safe mode marker");
+                if let Some(Err(err)) = app
+                    .storage
+                    .as_ref()
+                    .map(NodeStorage::clear_safe_mode_marker)
+                {
+                    warn!(node = %app.config.node_id, error = %err, "could not clear the safe mode marker");
+                }
+                None
+            }
             Some(Ok(marker)) => marker,
             Some(Err(err)) => {
                 warn!(node = %app.config.node_id, error = %err, "could not read the safe mode marker");
@@ -684,6 +698,7 @@ impl NodeAppBuilder {
         if let Some(cause) = cause {
             app.activate_safe_mode(cause);
         }
+        app.publish_unreadable_stores(state_root_unreadable, trust_store_unreadable);
 
         Ok(app)
     }

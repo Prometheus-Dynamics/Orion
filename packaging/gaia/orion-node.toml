@@ -45,7 +45,7 @@ profile = "release"
 # Appliance build: IPC control plane, orion+tcp peer sync, mDNS discovery, sd_notify + watchdog.
 # No HTTP stack and no TCP/QUIC data-plane transports.
 no_default_features = true
-features = ["peer-tcp", "discovery-mdns", "systemd-notify"]
+features = ["peer-tcp", "discovery-mdns", "systemd-notify", "time-sync"]
 # Variant with microcontroller links (serial / SocketCAN), configured by ORION_NODE_LINKS:
 # features = ["peer-tcp", "discovery-mdns", "systemd-notify", "link-gateway"]
 target_name = "orion-node"

@@ -77,6 +77,7 @@ pub(super) fn unexpected_response(
         HttpResponsePayload::Actions(_) => "actions",
         HttpResponsePayload::OperatorWelcome(_) => "operator welcome",
         HttpResponsePayload::Status(_) => "status",
+        HttpResponsePayload::TimeTurn(_) => "time turn",
         HttpResponsePayload::Session(_) => "session",
     };
     NodeError::Storage(format!(

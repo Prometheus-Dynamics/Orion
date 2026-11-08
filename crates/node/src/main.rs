@@ -310,6 +310,8 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
         Some(identity) => Some(orion_node::identity::IdentityServer::start(identity).await?),
         None => None,
     };
+    let host_key_status = orion_node::identity::ssh_host_keys_dir_from_env()
+        .map(|dir| app.spawn_host_key_status(dir));
     let snapshot = app.snapshot();
     let http_scheme = if app.http_tls_cert_path().is_some() {
         "https"
@@ -411,6 +413,9 @@ async fn run(process: NodeProcessConfig) -> Result<(), orion_node::NodeError> {
     }
     if let Some(discovery) = discovery {
         discovery.shutdown().await;
+    }
+    if let Some(host_key_status) = host_key_status {
+        host_key_status.abort();
     }
     if let Some(identity_server) = identity_server {
         identity_server.shutdown().await;

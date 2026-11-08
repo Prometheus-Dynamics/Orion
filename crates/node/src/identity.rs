@@ -14,12 +14,16 @@
 //! - **Live fields**, computed on every request and never cached: `hostname` (the kernel's),
 //!   `time` (unix seconds) and, when `ORION_NODE_IDENTITY_SECURITY_FILES` is set, `security`:
 //!   `BOARD_SECURITY` from those `KEY=value` files, where a later file wins over an earlier one
-//!   (`1` is `"on"`, anything else `"off"`).
+//!   (`1` is `"on"`, anything else `"off"`), and, when `ORION_NODE_SSH_HOST_KEYS` is set,
+//!   `ssh_host_keys`: `[{"type": "ed25519", "sha256": "SHA256:..."}]`.
 //!
 //! The responder is a minimal HTTP/1.1 `GET` server, not the HTTP control stack, so builds
 //! without `transport-http` can serve it. One request per connection, an 8 KiB header limit,
 //! and a 5 s read deadline. Each connection is its own task: a slow or broken client affects
 //! only itself.
+
+mod ssh_host_keys;
+pub use ssh_host_keys::{SshHostKey, read_ssh_host_keys, ssh_host_keys_dir_from_env};
 
 use crate::NodeError;
 use crate::host_facts::{firmware_string, parse_os_release};
@@ -53,6 +57,8 @@ pub struct IdentityConfig {
     pub base: Option<PathBuf>,
     /// `ORION_NODE_IDENTITY_SECURITY_FILES`: comma-separated, later files win.
     pub security_files: Vec<PathBuf>,
+    /// `ORION_NODE_SSH_HOST_KEYS`: a directory of OpenSSH `*.pub` files.
+    pub ssh_host_keys: Option<PathBuf>,
 }
 
 impl IdentityConfig {
@@ -86,6 +92,7 @@ impl IdentityConfig {
             addr,
             base,
             security_files,
+            ssh_host_keys: ssh_host_keys_dir_from_env(),
         }))
     }
 }
@@ -97,6 +104,7 @@ pub struct IdentitySource {
     root: PathBuf,
     base: Option<PathBuf>,
     security_files: Vec<PathBuf>,
+    ssh_host_keys: Option<PathBuf>,
 }
 
 impl IdentitySource {
@@ -109,6 +117,7 @@ impl IdentitySource {
             root: root.into(),
             base: config.base.clone(),
             security_files: config.security_files.clone(),
+            ssh_host_keys: config.ssh_host_keys.clone(),
         }
     }
 
@@ -127,6 +136,13 @@ impl IdentitySource {
         document.insert("time".into(), json!(now));
         if let Some(security) = self.security() {
             document.insert("security".into(), json!(security));
+        }
+        if let Some(dir) = &self.ssh_host_keys {
+            let keys: Vec<Value> = read_ssh_host_keys(&self.path(dir))
+                .into_iter()
+                .map(|key| json!({"type": key.kind, "sha256": key.sha256}))
+                .collect();
+            document.insert("ssh_host_keys".into(), Value::Array(keys));
         }
         Value::Object(document)
     }

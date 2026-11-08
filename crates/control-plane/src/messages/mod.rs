@@ -24,7 +24,7 @@ pub use client::{
     ExecutorStateUpdate, ExecutorWorkloadQuery, ObservedStateUpdate, PeerEnrollment,
     PeerIdentityUpdate, ProviderLeaseQuery, ProviderStateUpdate, StateWatch,
 };
-pub use control::ControlMessage;
+pub use control::{ControlMessage, TimeOffer, TimeTurn};
 pub use discovery::{
     DiscoveredPeerEnrollment, DiscoveredPeerRecord, DiscoveredPeerState, DiscoveryMetricsSnapshot,
     DiscoverySnapshot, ENROLLMENT_PROTOCOL_VERSION, EnrollmentChallenge, EnrollmentConfirm,

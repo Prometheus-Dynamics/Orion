@@ -148,6 +148,9 @@ impl NodeApp {
             ControlMessage::OperatorHello | ControlMessage::OpenSession(_) => Ok(
                 ControlMessage::Rejected("only served to remote operators".into()),
             ),
+            ControlMessage::OfferTime(_) => Ok(ControlMessage::Rejected(
+                "only a remote operator can offer its clock".to_owned(),
+            )),
             ControlMessage::RobotLinkListener(_) => Ok(ControlMessage::Rejected(
                 "only sent between peers on a private link".into(),
             )),
@@ -227,6 +230,7 @@ impl NodeApp {
                     | orion::transport::http::HttpResponsePayload::Session(_)
                     | orion::transport::http::HttpResponsePayload::Actions(_)
                     | orion::transport::http::HttpResponsePayload::OperatorWelcome(_)
+                    | orion::transport::http::HttpResponsePayload::TimeTurn(_)
                     | orion::transport::http::HttpResponsePayload::Status(_) => {
                         ControlMessage::Rejected("response is not valid for sync request".into())
                     }

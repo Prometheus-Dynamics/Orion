@@ -15,6 +15,48 @@ const AGREE_NS: i64 = 100_000_000;
 /// Answers whose round trip took longer are not used.
 pub(crate) const MAX_DELAY_NS: i64 = 1_000_000_000;
 
+/// No clock is right before this build existed (never before 2026-01-01): a source saying so is
+/// broken. Unix milliseconds, from `build.rs`.
+const EARLIEST_PLAUSIBLE_MS: i64 = {
+    match i64::from_str_radix(env!("ORION_BUILD_FLOOR_MS"), 10) {
+        Ok(ms) => ms,
+        Err(_) => panic!("ORION_BUILD_FLOOR_MS is not a number"),
+    }
+};
+const DAY_MS: i64 = 86_400_000;
+/// How far before the last synchronized time a source may be: a clock is not a day younger than
+/// it was. Beyond this the source is wrong, not the board.
+const MAX_BEHIND_SAVED_MS: i64 = DAY_MS;
+/// How far past it: a board may sit unpowered for months, not for this long.
+const MAX_AHEAD_SAVED_MS: i64 = 400 * DAY_MS;
+
+/// Why a source's time cannot be right, or `None`. `saved_ms` is the last synchronized time.
+/// Every source is held to the floor. Only a fleet peer is held to the saved time: a board off
+/// for a week must still take the right time from the internet or the computer managing it.
+pub(crate) fn implausible(
+    source_time_ms: i64,
+    saved_ms: Option<i64>,
+    fleet_peer: bool,
+) -> Option<String> {
+    if source_time_ms < EARLIEST_PLAUSIBLE_MS {
+        return Some(format!(
+            "its time ({source_time_ms} ms) is before this build existed"
+        ));
+    }
+    let saved_ms = saved_ms.filter(|_| fleet_peer)?;
+    if source_time_ms < saved_ms.saturating_sub(MAX_BEHIND_SAVED_MS) {
+        return Some(format!(
+            "its time ({source_time_ms} ms) is over a day behind the last synchronized time"
+        ));
+    }
+    if source_time_ms > saved_ms.saturating_add(MAX_AHEAD_SAVED_MS) {
+        return Some(format!(
+            "its time ({source_time_ms} ms) is over 400 days past the last synchronized time"
+        ));
+    }
+    None
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
     /// Nothing to do yet (a large offset waiting for a second, agreeing sample).

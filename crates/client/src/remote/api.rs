@@ -13,14 +13,67 @@ use orion_control_plane::{
     ActionQuery, ActionRequest, ActionResult, ControlMessage, ENROLLMENT_PROTOCOL_VERSION,
     EnrollmentConfirm, EnrollmentHello, EnrollmentRole, MutationBatch, NodeObservabilitySnapshot,
     NodeRecord, OperatorTrustState, OperatorWelcome, StateSnapshot, StatusEntry, StatusQuery,
-    UpdateIntentView, update_intent_views,
+    TimeOffer, TimeTurn, UpdateIntentView, update_intent_views,
 };
 use orion_core::NodeId;
 use orion_transport_http::HttpResponsePayload;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::time::Instant;
 
+/// The waits of [`RemoteOperator::serve_time`].
+const TIME_OFFER_RETRY: Duration = Duration::from_secs(5);
+const TIME_OFFER_MIN: Duration = Duration::from_secs(1);
+const TIME_OFFER_MAX: Duration = Duration::from_secs(64);
+
 impl RemoteOperator {
+    /// Offers this computer's clock to the node, once (`docs/time-sync.md`, "An operator's
+    /// clock"): the node takes it when `ORION_NODE_TIME_SERVERS` lists `operator`. Needs the
+    /// action grant `clock.set`. `stratum` says how far this clock is from a reference (3 suits
+    /// a computer kept by NTP). Returns how long the node would like to wait for the next offer.
+    pub async fn offer_time(&self, stratum: u8) -> Result<Duration, RemoteError> {
+        let opened = self
+            .time_turn(TimeOffer {
+                token: 0,
+                unix_ns: 0,
+                stratum,
+            })
+            .await?;
+        let unix_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| u64::try_from(since.as_nanos()).unwrap_or(u64::MAX))
+            .unwrap_or(0);
+        let taken = self
+            .time_turn(TimeOffer {
+                token: opened.token,
+                unix_ns,
+                stratum,
+            })
+            .await?;
+        Ok(Duration::from_millis(taken.next_ms).clamp(TIME_OFFER_MIN, TIME_OFFER_MAX))
+    }
+
+    /// Keeps offering this computer's clock at the pace the node asks for, and after a failure
+    /// (the node away, or refusing) tries again. Abort the task to stop.
+    pub fn serve_time(&self, stratum: u8) -> tokio::task::JoinHandle<()> {
+        let operator = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let wait = operator
+                    .offer_time(stratum)
+                    .await
+                    .unwrap_or(TIME_OFFER_RETRY);
+                tokio::time::sleep(wait).await;
+            }
+        })
+    }
+
+    async fn time_turn(&self, offer: TimeOffer) -> Result<TimeTurn, RemoteError> {
+        match self.request(ControlMessage::OfferTime(offer)).await? {
+            HttpResponsePayload::TimeTurn(turn) => Ok(turn),
+            other => Err(unexpected("OfferTime", &other)),
+        }
+    }
+
     /// Runs the shared-key enrollment handshake (`docs/discovery.md`) with the node as an
     /// operator. `key` is the cluster's enrollment key (`ORION_NODE_ENROLLMENT_KEY`).
     ///

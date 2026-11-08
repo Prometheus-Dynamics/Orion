@@ -33,6 +33,9 @@ impl NodeApp {
         match message {
             ControlMessage::Hello(_) => Ok(HttpResponsePayload::Hello(self.peer_hello()?)),
             // Acted on by `note_private_link_message` before dispatch; only the acknowledgement is left.
+            ControlMessage::OfferTime(_) => Err(NodeError::Authorization(
+                "only a remote operator can offer its clock".to_owned(),
+            )),
             ControlMessage::RobotLinkListener(_) => Ok(HttpResponsePayload::Accepted),
             // A configured peer's push session for the actions it forwarded (`docs/actions.md`,
             // "Peer watches").

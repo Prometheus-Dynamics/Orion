@@ -51,6 +51,7 @@ pub use messages::{
     OperatorTrustState, OperatorWelcome, OperatorsSnapshot, action_pattern_matches,
     validate_action_patterns,
 };
+pub use messages::{TimeOffer, TimeTurn};
 #[cfg(feature = "std")]
 pub use metrics_export::{
     MetricsExportConfig, render_clock_metrics, render_communication_metrics,
@@ -320,6 +321,7 @@ mod tests {
             | ControlMessage::SubscribeStream(_)
             | ControlMessage::UnsubscribeStream(_)
             | ControlMessage::RobotLinkListener(_)
+            | ControlMessage::OfferTime(_)
             | ControlMessage::OperatorHello
             | ControlMessage::QueryOperators
             | ControlMessage::Operators(_)

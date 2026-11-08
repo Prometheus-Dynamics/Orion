@@ -4,8 +4,11 @@
 //! - `ORION_NODE_TIME_SYNC`: `off` (the default), `report` (measure and publish `time.*` status
 //!   keys, never touch the clock: safe beside timesyncd), or `discipline` (also slew or step the
 //!   clock; needs `CAP_SYS_TIME`, and falls back to `report` while timesyncd runs).
-//! - `ORION_NODE_TIME_SERVERS`: `host[:port]` list, port 123 by default. Another Orion node is a
-//!   source like any server, at the port it serves on; `tcp://host:port` asks it over TCP.
+//! - `ORION_NODE_TIME_SERVERS`: `host[:port]` list in rank order, port 123 by default. Another
+//!   Orion node is a fleet peer: `peer://host[:port]`, or `tcp://host:port` to ask it over TCP.
+//!   `operator` is the clock of a connected remote operator (see `operator`).
+//! - `ORION_NODE_TIME_SYNCED_FILE`: created while the clock is disciplined and synchronized
+//!   (`/run/orion/time-synced` by default; `off` for none).
 //! - `ORION_NODE_TIME_SERVE`: serve this node's clock on `addr:port`, SNTP over UDP and the
 //!   same exchange over TCP. Answers say
 //!   "unsynchronized" until the clock is, unless `ORION_NODE_TIME_SERVE_AUTHORITY=1` makes this
@@ -16,6 +19,7 @@
 //! board without a working RTC) is stepped forward to it. See `discipline` for the rules.
 
 mod discipline;
+mod operator;
 mod sntp;
 
 use std::net::SocketAddr;
@@ -31,7 +35,10 @@ use tracing::{debug, info, warn};
 
 use crate::NodeError;
 use crate::config::{bool_env_or_false, duration_ms_env_or};
-pub(crate) use discipline::{Action, Clock, Discipline, KernelClock, timesyncd_running};
+pub(crate) use discipline::{
+    Action, Clock, Discipline, KernelClock, implausible, timesyncd_running,
+};
+pub(crate) use operator::{OPERATOR_SOURCE, OperatorTime};
 pub(crate) use sntp::ServedClock;
 
 /// Polls this often until the first sample is in (and while a step waits for agreement).
@@ -39,6 +46,9 @@ const FIRST_POLL: Duration = Duration::from_secs(2);
 /// An offset below this lets the poll interval grow.
 const CALM_NS: i64 = 50_000_000;
 const SAVED_TIME_FILE: &str = "time-sync.last";
+const DEFAULT_SYNCED_FILE: &str = "/run/orion/time-synced";
+/// Another Orion node over UDP. `tcp://` is always one: only Orion answers SNTP over TCP.
+const PEER_SCHEME: &str = "peer://";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimeSyncMode {
@@ -55,6 +65,8 @@ pub struct TimeSyncConfig {
     pub serve_authority: bool,
     pub min_poll: Duration,
     pub max_poll: Duration,
+    /// Exists while the clock is disciplined and synchronized.
+    pub synced_file: Option<PathBuf>,
 }
 
 impl TimeSyncConfig {
@@ -80,9 +92,16 @@ impl TimeSyncConfig {
             .map(str::trim)
             .filter(|server| !server.is_empty())
             .map(|server| {
-                let (scheme, host) = match server.strip_prefix("tcp://") {
-                    Some(host) => ("tcp://", host),
-                    None => ("", server),
+                if server == OPERATOR_SOURCE {
+                    return server.to_owned();
+                }
+                let (scheme, host) = match (
+                    server.strip_prefix("tcp://"),
+                    server.strip_prefix(PEER_SCHEME),
+                ) {
+                    (Some(host), _) => ("tcp://", host),
+                    (_, Some(host)) => (PEER_SCHEME, host),
+                    _ => ("", server),
                 };
                 if host
                     .rsplit_once(':')
@@ -124,6 +143,11 @@ impl TimeSyncConfig {
             serve_authority: bool_env_or_false("ORION_NODE_TIME_SERVE_AUTHORITY")?,
             min_poll,
             max_poll,
+            synced_file: match std::env::var("ORION_NODE_TIME_SYNCED_FILE") {
+                Ok(value) if value.trim() == "off" => None,
+                Ok(value) if !value.trim().is_empty() => Some(PathBuf::from(value.trim())),
+                _ => Some(PathBuf::from(DEFAULT_SYNCED_FILE)),
+            },
         })
     }
 
@@ -207,6 +231,7 @@ fn kernel_served_clock() -> ServedClock {
 pub struct TimeSyncHandle {
     shutdown: watch::Sender<bool>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
+    synced_file: Option<PathBuf>,
 }
 
 impl TimeSyncHandle {
@@ -216,16 +241,51 @@ impl TimeSyncHandle {
             task.abort();
             let _ = task.await;
         }
+        remove_synced_file(self.synced_file.as_deref());
     }
 }
 
-/// Where a sample came from, and the sample. A `tcp://` source is asked over TCP.
-async fn best_sample(servers: &[String]) -> Result<(String, sntp::Sample), String> {
+fn remove_synced_file(path: Option<&std::path::Path>) {
+    if let Some(path) = path
+        && let Err(error) = std::fs::remove_file(path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        warn!(%error, path = %path.display(), "could not remove the time-synced file");
+    }
+}
+
+/// The time a sample says it is, in unix milliseconds.
+fn sample_time_ms(sample: &sntp::Sample) -> i64 {
+    let ns = sntp::unix_now_ns() + i128::from(sample.offset_ns);
+    i64::try_from(ns / 1_000_000).unwrap_or(i64::MAX)
+}
+
+/// The first source, in rank order, with an answer that is not obviously wrong, and that answer.
+/// A `tcp://` source is asked over TCP.
+async fn best_sample(
+    servers: &[String],
+    operator: &OperatorTime,
+    saved_ms: Option<i64>,
+) -> Result<(String, sntp::Sample), String> {
     let mut last_error = String::from("no server answered");
     for server in servers {
-        let (carrier, host) = match server.strip_prefix("tcp://") {
-            Some(host) => (sntp::Carrier::Tcp, host),
-            None => (sntp::Carrier::Udp, server.as_str()),
+        if server == OPERATOR_SOURCE {
+            match operator.take() {
+                Some(sample) => match implausible(sample_time_ms(&sample), saved_ms, false) {
+                    Some(why) => last_error = format!("{server}: {why}"),
+                    None => return Ok((server.clone(), sample)),
+                },
+                None => last_error = format!("{server}: no operator is offering its clock"),
+            }
+            continue;
+        }
+        let (carrier, host, fleet_peer) = match (
+            server.strip_prefix("tcp://"),
+            server.strip_prefix(PEER_SCHEME),
+        ) {
+            (Some(host), _) => (sntp::Carrier::Tcp, host, true),
+            (_, Some(host)) => (sntp::Carrier::Udp, host, true),
+            _ => (sntp::Carrier::Udp, server.as_str(), false),
         };
         let addrs = match tokio::net::lookup_host(host).await {
             Ok(addrs) => addrs,
@@ -238,6 +298,11 @@ async fn best_sample(servers: &[String]) -> Result<(String, sntp::Sample), Strin
             match sntp::query_over(carrier, addr).await {
                 Ok(sample) => {
                     debug!(%server, %addr, offset_ms = sample.offset_ns / 1_000_000, delay_ms = sample.delay_ns / 1_000_000, stratum = sample.stratum, "time sample");
+                    if let Some(why) = implausible(sample_time_ms(&sample), saved_ms, fleet_peer) {
+                        warn!(%server, %why, "ignoring a time source");
+                        last_error = format!("{server}: {why}");
+                        continue;
+                    }
                     return Ok((server.clone(), sample));
                 }
                 Err(error) => last_error = format!("{server} ({addr}): {error}"),
@@ -255,8 +320,11 @@ pub(crate) struct Syncer {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) served: ServedState,
     pub(crate) saved_time: Option<PathBuf>,
+    /// The last synchronized time, the anchor for telling a wrong source from a right one.
+    pub(crate) saved_ms: Option<i64>,
     pub(crate) status: TimeStatus,
     pub(crate) poll: Duration,
+    synced_file_up: bool,
 }
 
 impl Syncer {
@@ -283,20 +351,22 @@ impl Syncer {
             clock,
             served,
             saved_time,
+            saved_ms: None,
             status,
             poll: FIRST_POLL,
+            synced_file_up: false,
         }
     }
 
     /// At start: a clock behind the last synchronized time moves forward to it.
     pub(crate) fn restore_saved_time(&mut self) {
-        let (true, Some(path)) = (self.disciplining, self.saved_time.as_ref()) else {
+        let Some(path) = self.saved_time.as_ref() else {
             return;
         };
-        let Some(saved_ms) = std::fs::read_to_string(path)
+        self.saved_ms = std::fs::read_to_string(path)
             .ok()
-            .and_then(|text| text.trim().parse::<i64>().ok())
-        else {
+            .and_then(|text| text.trim().parse::<i64>().ok());
+        let (true, Some(saved_ms)) = (self.disciplining, self.saved_ms) else {
             return;
         };
         let now_ms = (sntp::unix_now_ns() / 1_000_000) as i64;
@@ -374,12 +444,16 @@ impl Syncer {
         let synced_now =
             self.disciplining && self.discipline.synced() && self.status.error.is_none();
         self.status.synced = synced_now;
+        self.set_synced_file(synced_now);
         if synced_now {
             self.served.set_synced(sample.stratum);
             if let Some(path) = &self.saved_time {
-                let now_ms = (sntp::unix_now_ns() / 1_000_000).to_string();
-                if let Err(error) = std::fs::write(path, now_ms) {
-                    warn!(%error, path = %path.display(), "could not save the synchronized time");
+                let now_ms = sntp::unix_now_ns() / 1_000_000;
+                match std::fs::write(path, now_ms.to_string()) {
+                    Ok(()) => self.saved_ms = i64::try_from(now_ms).ok(),
+                    Err(error) => {
+                        warn!(%error, path = %path.display(), "could not save the synchronized time");
+                    }
                 }
             }
         }
@@ -396,14 +470,35 @@ impl Syncer {
     }
 }
 
+impl Syncer {
+    /// Touches the file only when the state changes, so a steady clock writes nothing.
+    fn set_synced_file(&mut self, up: bool) {
+        if up == self.synced_file_up {
+            return;
+        }
+        self.synced_file_up = up;
+        if !up {
+            remove_synced_file(self.config.synced_file.as_deref());
+        } else if let Some(path) = &self.config.synced_file
+            && let Err(error) = std::fs::write(path, b"")
+        {
+            warn!(%error, path = %path.display(), "could not write the time-synced file");
+        }
+    }
+}
+
 /// Starts the time service and the sync loop, as configured. `publish` files the `time.*`
 /// status keys (with a time-to-live of three polls).
 pub(crate) fn spawn(
     config: TimeSyncConfig,
     state_dir: Option<PathBuf>,
+    operator: Arc<OperatorTime>,
     publish: impl Fn(&TimeStatus, Duration) + Send + 'static,
 ) -> Result<TimeSyncHandle, NodeError> {
     let (shutdown, mut stop) = watch::channel(false);
+    let synced_file = config.synced_file.clone();
+    // Left by a run that did not shut down: nothing vouches for the clock yet.
+    remove_synced_file(synced_file.as_deref());
     let served = ServedState::default();
     let mut tasks = Vec::new();
     if let Some(addr) = config.serve {
@@ -434,6 +529,18 @@ pub(crate) fn spawn(
         )));
     }
     if config.mode != TimeSyncMode::Off {
+        if config
+            .servers
+            .iter()
+            .any(|server| server == OPERATOR_SOURCE)
+        {
+            operator.listen();
+        }
+        // First in rank: an offer is worth acting on when it comes, not at the next poll.
+        let operator_first = config
+            .servers
+            .first()
+            .is_some_and(|server| server == OPERATOR_SOURCE);
         let saved_time = state_dir.map(|dir| dir.join(SAVED_TIME_FILE));
         let mut syncer = Syncer::new(
             config,
@@ -445,11 +552,16 @@ pub(crate) fn spawn(
         tasks.push(tokio::spawn(async move {
             syncer.restore_saved_time();
             loop {
-                let result = best_sample(&syncer.config.servers).await;
+                let result = best_sample(&syncer.config.servers, &operator, syncer.saved_ms).await;
                 syncer.apply(result);
+                if syncer.status.last_action == "stepped" {
+                    operator.forget();
+                }
+                operator.set_poll(syncer.poll);
                 publish(&syncer.status, syncer.poll.saturating_mul(3));
                 tokio::select! {
                     () = tokio::time::sleep(syncer.poll) => {}
+                    () = operator.arrived.notified(), if operator_first => {}
                     changed = stop.changed() => {
                         if changed.is_err() || *stop.borrow() {
                             return;
@@ -459,7 +571,11 @@ pub(crate) fn spawn(
             }
         }));
     }
-    Ok(TimeSyncHandle { shutdown, tasks })
+    Ok(TimeSyncHandle {
+        shutdown,
+        tasks,
+        synced_file,
+    })
 }
 
 #[cfg(test)]
