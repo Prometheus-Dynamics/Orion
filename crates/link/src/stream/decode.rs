@@ -141,10 +141,34 @@ impl<const N: usize> StreamDecoder<N> {
     }
 
     pub(crate) fn push_slice_status(&mut self, bytes: &[u8]) -> (usize, Status) {
-        for (index, &byte) in bytes.iter().enumerate() {
+        let mut index = 0;
+        while let Some(&byte) = bytes.get(index) {
+            // Inside a block, its data bytes up to the next zero are copied as one run; the code
+            // bytes, delimiters and a full buffer take the byte path. Hosts only, as the
+            // encoder's run copies.
+            #[cfg(feature = "std")]
+            if self.block_left > 0 && !self.finished && !self.discarding {
+                let rest = bytes.get(index..).unwrap_or_default();
+                let want = rest.len().min(usize::from(self.block_left));
+                let run = rest.get(..want).unwrap_or_default();
+                let run = run
+                    .get(..run.iter().position(|&b| b == 0).unwrap_or(want))
+                    .unwrap_or_default();
+                if !run.is_empty()
+                    && let Some(to) = self.buf.get_mut(self.len..self.len + run.len())
+                {
+                    to.copy_from_slice(run);
+                    self.len += run.len();
+                    // run.len() <= block_left, a u8.
+                    self.block_left -= run.len() as u8;
+                    index += run.len();
+                    continue;
+                }
+            }
+            index += 1;
             let status = self.push_status(byte);
             if status != Status::Pending {
-                return (index.saturating_add(1), status);
+                return (index, status);
             }
         }
         (bytes.len(), Status::Pending)

@@ -137,10 +137,28 @@ impl<'a> StreamEncoder<'a> {
     /// written. Returns 0 once the frame is complete.
     pub fn fill(&mut self, out: &mut [u8]) -> usize {
         let mut written = 0;
-        for slot in out.iter_mut() {
+        while written < out.len() {
+            // A block's data bytes are copied as runs, not one `next` at a time. Hosts only: on a
+            // device the byte path is smaller, and its links are slower than its loop.
+            #[cfg(feature = "std")]
+            if self.state == State::Data && self.block_left > 0 {
+                let room = out.get_mut(written..).unwrap_or_default();
+                let take = self.block_left.min(room.len());
+                let n = self
+                    .src
+                    .copy_to(self.pos, room.get_mut(..take).unwrap_or_default());
+                if n > 0 {
+                    self.pos = self.pos.saturating_add(n);
+                    self.block_left -= n;
+                    written += n;
+                    continue;
+                }
+            }
             match self.next() {
                 Some(byte) => {
-                    *slot = byte;
+                    if let Some(slot) = out.get_mut(written) {
+                        *slot = byte;
+                    }
                     written += 1;
                 }
                 None => break,
@@ -152,18 +170,24 @@ impl<'a> StreamEncoder<'a> {
     /// Starts the next block at `self.pos` and returns its code byte.
     fn start_block(&mut self) -> u8 {
         let len = self.src.len();
-        let mut run = 0;
-        let mut zero = false;
-        while run < MAX_RUN {
-            match self.src.get(self.pos.saturating_add(run)) {
-                Some(0) => {
-                    zero = true;
-                    break;
+        #[cfg(feature = "std")]
+        let (run, zero) = self.src.nonzero_run(self.pos, MAX_RUN);
+        #[cfg(not(feature = "std"))]
+        let (run, zero) = {
+            let mut run = 0;
+            let mut zero = false;
+            while run < MAX_RUN {
+                match self.src.get(self.pos.saturating_add(run)) {
+                    Some(0) => {
+                        zero = true;
+                        break;
+                    }
+                    Some(_) => run += 1,
+                    None => break,
                 }
-                Some(_) => run += 1,
-                None => break,
             }
-        }
+            (run, zero)
+        };
         self.block_left = run;
         self.block_end = if zero {
             BlockEnd::Zero

@@ -228,3 +228,85 @@ fn packet_random_faults() {
         }
     }
 }
+
+/// Long payloads, mostly nonzero so COBS runs reach their 254-byte limit, sometimes dense in zeros.
+fn cobs_payload(rng: &mut Rng) -> Vec<u8> {
+    let len = rng.below(700);
+    let zeros = [0, 1, 30][rng.below(3)];
+    (0..len)
+        .map(|_| {
+            if rng.chance(zeros) {
+                0
+            } else {
+                1 + rng.below(255) as u8
+            }
+        })
+        .collect()
+}
+
+/// The encoder's run copies and the decoder's slice path give exactly what the byte-at-a-time
+/// paths give, for any split of the output or input.
+#[test]
+fn stream_chunked_paths_match_byte_paths() {
+    for case in 0..CASES {
+        let mut rng = Rng::new(case ^ 0xC0B5);
+        let mut wire = Vec::new();
+        for i in 0..1 + rng.below(4) {
+            let header = FrameHeader::new(rng.byte(), i as u16);
+            let payload = cobs_payload(&mut rng);
+            let mut encoder = StreamEncoder::for_message(header, &payload);
+            if rng.chance(30) {
+                encoder = encoder.with_leading_delimiter();
+            }
+            let bytewise: Vec<u8> = encoder.clone().collect();
+            let mut chunked = Vec::new();
+            let mut chunk = [0u8; 600];
+            loop {
+                let size = 1 + rng.below(chunk.len());
+                let n = encoder.fill(&mut chunk[..size]);
+                if n == 0 {
+                    break;
+                }
+                chunked.extend_from_slice(&chunk[..n]);
+            }
+            assert_eq!(chunked, bytewise, "case {case}: encoder");
+            wire.extend_from_slice(&bytewise);
+            if rng.chance(20) {
+                let at = rng.below(wire.len());
+                wire[at] = rng.byte();
+            }
+        }
+        // A buffer smaller than the longest frames, so overflows are covered too.
+        type Decoder = StreamDecoder<400>;
+        let mut bytewise = Vec::new();
+        let mut decoder = Decoder::new();
+        for &byte in &wire {
+            match decoder.push(byte) {
+                Ok(Some(frame)) => bytewise.push(Ok((frame.kind(), frame.payload().to_vec()))),
+                Ok(None) => {}
+                Err(error) => bytewise.push(Err(error)),
+            }
+        }
+        let mut chunked = Vec::new();
+        let mut decoder = Decoder::new();
+        let mut rest = &wire[..];
+        while !rest.is_empty() {
+            let size = 1 + rng.below(rest.len());
+            let (used, result) = decoder.push_slice(&rest[..size]);
+            match result {
+                Ok(Some(frame)) => chunked.push(Ok((frame.kind(), frame.payload().to_vec()))),
+                Ok(None) => {}
+                Err(error) => chunked.push(Err(error)),
+            }
+            rest = &rest[used..];
+        }
+        assert_eq!(chunked, bytewise, "case {case}: decoder");
+        assert_eq!(decoder.stats(), {
+            let mut again = Decoder::new();
+            for &byte in &wire {
+                let _ = again.push(byte);
+            }
+            again.stats()
+        });
+    }
+}

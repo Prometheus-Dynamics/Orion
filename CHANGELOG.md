@@ -14,6 +14,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   `HostSession::recycle_chunks` / `HostBus::recycle_chunks`). An unsubscribed batch costs 0.3
   allocations, a subscribed one 2.8 (was 10.5): a live batch that merges into the subscriber's
   queued `StreamData` clones no stream reference.
+- The stream (COBS) encoder copies a block's data as runs and scans for zeros over contiguous
+  slices, and the decoder copies a block's data up to the next zero in one step: fewer
+  instructions per relayed byte, the same bytes (a property test checks both against the
+  byte-at-a-time paths for any split). Hosts (`std`) only; device builds keep the smaller byte
+  paths.
 - A status watcher's queued change is merged in place (sorted entries, keys looked up, not
   cloned into maps), and the last watcher takes the change lists by move: fan-out to one
   watcher costs 1.5 to 3 allocations per update, from 5 to 8.

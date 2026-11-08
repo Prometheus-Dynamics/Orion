@@ -312,7 +312,7 @@ is a record to compare against, not a tight gate.
 |---|---|---|---|---|---|
 | Provider status update, no watcher | 0.1 per update in release (was 8, before that 12) | 32 B (was 588 B) | about 3,500 (was 5,000) | 21 B | (acks batched) |
 | The same, fanned out to one status watch | 1.5 to 3 per update (was 11.2), with how the burst coalesces | 0.3 to 0.5 KB (was 1.5 KB) | about 5,000 (was 6,900) | 21 B | coalesced |
-| Stream batch, 50 `f32` samples, one subscriber | 2.8 per batch (was 10.5, before that 12.1) | 1.2 KB (was 1.8 KB) | about 81,000 (was 92,000) | 326 B | 313 B |
+| Stream batch, 50 `f32` samples, one subscriber | 2.8 per batch (was 10.5, before that 12.1) | 1.2 KB (was 1.8 KB) | about 74,000 (was 92,000) | 326 B | 313 B |
 | The same stream, no subscriber | 0.3 per batch | 94 B | about 37,000 | 327 B | |
 | Idle node, one quiet session | 0 per second (was 70) | 0 | | | |
 
