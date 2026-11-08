@@ -288,24 +288,47 @@ impl NodeApp {
         if updated.is_empty() && expired.is_empty() {
             return;
         }
+        let (mut updated, mut expired) = (updated, expired);
         let mut flushes = Vec::<PendingClientStreamFlush>::new();
         self.with_client_registry_txn(|txn| {
+            let mut watchers = txn
+                .clients_mut()
+                .filter(|(_, client)| client.status_watch.is_some())
+                .count();
             for (source, client) in txn.clients_mut() {
                 let Some(query) = client.status_watch.as_ref() else {
                     continue;
                 };
-                let change = StatusChange {
-                    bootstrap: false,
-                    updated: updated
+                watchers -= 1;
+                // The last watcher takes the lists when it wants all of them: one watcher, the
+                // common case, clones nothing.
+                let change = if watchers == 0
+                    && updated
                         .iter()
-                        .filter(|entry| query.matches(&entry.subject, &entry.key))
-                        .cloned()
-                        .collect(),
-                    expired: expired
+                        .all(|entry| query.matches(&entry.subject, &entry.key))
+                    && expired
                         .iter()
-                        .filter(|key| query.matches(&key.subject, &key.key))
-                        .cloned()
-                        .collect(),
+                        .all(|key| query.matches(&key.subject, &key.key))
+                {
+                    StatusChange {
+                        bootstrap: false,
+                        updated: std::mem::take(&mut updated),
+                        expired: std::mem::take(&mut expired),
+                    }
+                } else {
+                    StatusChange {
+                        bootstrap: false,
+                        updated: updated
+                            .iter()
+                            .filter(|entry| query.matches(&entry.subject, &entry.key))
+                            .cloned()
+                            .collect(),
+                        expired: expired
+                            .iter()
+                            .filter(|key| query.matches(&key.subject, &key.key))
+                            .cloned()
+                            .collect(),
+                    }
                 };
                 if change.is_empty() {
                     continue;

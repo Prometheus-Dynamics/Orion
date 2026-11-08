@@ -726,9 +726,9 @@ interfaces and risk. Slices, in dependency order:
 - [ ] Per-message allocations to 0 on the link and gateway path. Status update, no watcher:
       8 to 0 (pooled read/write buffers, recycled decode batches, in-place store refresh; the
       cost test gates it below 1). Left, in the same table in docs/performance-concurrency.md:
-      - fan-out to a watcher, 3 to 5 per update (the per-client merge is in place now, no
-        key clones): the changed entry is cloned for the watch queue, plus the lane's change
-        list and the wire record. Sharing one `Arc` entry through
+      - fan-out to a watcher, 1.5 to 3 per update (in-place per-client merge, the last
+        watcher takes the lists by move): left are the store's clone of the changed entry,
+        its change list and the wire record. Sharing one `Arc` entry through
         the client queue needs the queue's `StatusChange` to hold shared entries (node-internal
         type change, ~150 lines, low risk);
       - stream batch: done for unsubscribed streams (0.3 per batch: recycled chunk lists with

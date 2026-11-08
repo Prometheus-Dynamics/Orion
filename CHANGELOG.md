@@ -15,7 +15,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   allocations, a subscribed one 2.8 (was 10.5): a live batch that merges into the subscriber's
   queued `StreamData` clones no stream reference.
 - A status watcher's queued change is merged in place (sorted entries, keys looked up, not
-  cloned into maps): fan-out to one watcher costs 3 to 5 allocations per update, from 5 to 8.
+  cloned into maps), and the last watcher takes the change lists by move: fan-out to one
+  watcher costs 1.5 to 3 allocations per update, from 5 to 8.
 - A link device's status update costs the node no allocation in steady state (8 before): read
   and write buffers are pooled per connection, status frames decode into recycled batches, and
   the status store refreshes a publisher's existing keys in place. Fan-out to a watcher went
