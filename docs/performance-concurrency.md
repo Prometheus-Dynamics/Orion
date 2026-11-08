@@ -311,7 +311,7 @@ is a record to compare against, not a tight gate.
 | Path | Allocations (debug / release) | Bytes allocated (release) | Instructions (release) | Wire in | Wire out |
 |---|---|---|---|---|---|
 | Provider status update, no watcher | 0.1 per update in release (was 8, before that 12) | 32 B (was 588 B) | about 3,500 (was 5,000) | 21 B | (acks batched) |
-| The same, fanned out to one status watch | 5.3 per update (was 11.2) | 1.3 KB (was 1.5 KB) | about 5,000 (was 6,900) | 21 B | coalesced |
+| The same, fanned out to one status watch | 3 to 5 per update (was 11.2), with how the burst coalesces | 0.5 to 0.8 KB (was 1.5 KB) | about 5,000 (was 6,900) | 21 B | coalesced |
 | Stream batch, 50 `f32` samples, one subscriber | 2.8 per batch (was 10.5, before that 12.1) | 1.2 KB (was 1.8 KB) | about 81,000 (was 92,000) | 326 B | 313 B |
 | The same stream, no subscriber | 0.3 per batch | 94 B | about 37,000 | 327 B | |
 | Idle node, one quiet session | 0 per second (was 70) | 0 | | | |
@@ -366,8 +366,10 @@ used to make is now reused:
   still queued for that client. A merge clones no stream reference, and the emptied chunk list
   goes back to the session.
 
-The fan-out (5.3 per update) clones each changed entry for the watch queue, the per-client
-coalescing map and the wire record. The subscribed stream batch (2.8) moves the chunks' data
+The fan-out (3 to 5 per update) merges into the watcher's queued status event in place: its
+entries and expired keys stay sorted by key, so a merge looks keys up instead of cloning them
+into two maps. What is left is the changed entry's clone for the watch, the lane's change list,
+and the wire record. The subscribed stream batch (2.8) moves the chunks' data
 to the subscriber, clones the subscriber's address for the outbox, and grows the merged event's
 chunk list. When a batch does not merge, it also clones the stream reference (owner subject and
 id) and takes the chunk list. Those are the next reductions.

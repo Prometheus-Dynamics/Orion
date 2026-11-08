@@ -3,12 +3,14 @@ use orion::{
     ExecutorId, ProviderId,
     control_plane::{
         ActionQuery, ActionRequest, ActionResult, ClientEvent, ClientEventKind, ClientSession,
-        LeaseRecord, StateSnapshot, StateWatch, StatusChange, StatusEntry, StatusKey, StatusQuery,
-        WorkloadRecord,
+        LeaseRecord, StateSnapshot, StateWatch, StatusChange, StatusQuery, WorkloadRecord,
     },
     transport::ipc::{ControlEnvelope, LocalAddress},
 };
 use std::collections::{BTreeMap, VecDeque};
+
+mod status_merge;
+use status_merge::{merge_status_change, normalized};
 
 /// The observed state last seen by observed-state watchers (`StateWatch::include_observed`) and a
 /// generation that moves whenever it changes.
@@ -393,43 +395,25 @@ pub(super) fn enqueue_provider_leases_event(
 
 /// Queues a status change, merging it into a status event that is still queued so a slow watcher
 /// holds at most one status event with the newest value per key (bounded by the lane's caps).
+/// The merged event goes to the back of the queue, and its entries and expired keys are sorted
+/// by key. Merging happens in place: no key is cloned.
 pub(super) fn enqueue_status_event(client: &mut LocalClientState, change: StatusChange) {
-    let mut updated: BTreeMap<StatusKey, StatusEntry> = BTreeMap::new();
-    let mut expired: BTreeMap<StatusKey, ()> = BTreeMap::new();
-    let mut bootstrap = change.bootstrap;
-    if let Some(position) = client
+    let queued = client
         .queued_events
         .position(|event| matches!(event.event, ClientEventKind::Status(_)))
-        && let Some(ClientEvent {
+        .and_then(|position| client.queued_events.remove(position));
+    let merged = match queued {
+        Some(ClientEvent {
             event: ClientEventKind::Status(queued),
             ..
-        }) = client.queued_events.remove(position)
-    {
-        bootstrap |= queued.bootstrap;
-        for entry in queued.updated {
-            updated.insert(entry.status_key(), entry);
+        }) => {
+            let mut queued = normalized(queued);
+            merge_status_change(&mut queued, change);
+            queued
         }
-        for key in queued.expired {
-            expired.insert(key, ());
-        }
-    }
-    for key in change.expired {
-        updated.remove(&key);
-        expired.insert(key, ());
-    }
-    for entry in change.updated {
-        let key = entry.status_key();
-        expired.remove(&key);
-        updated.insert(key, entry);
-    }
-    enqueue_client_event(
-        client,
-        ClientEventKind::Status(StatusChange {
-            bootstrap,
-            updated: updated.into_values().collect(),
-            expired: expired.into_keys().collect(),
-        }),
-    );
+        _ => normalized(change),
+    };
+    enqueue_client_event(client, ClientEventKind::Status(merged));
 }
 
 /// Queues an action request for a handler client. Requests are never coalesced or dropped in
