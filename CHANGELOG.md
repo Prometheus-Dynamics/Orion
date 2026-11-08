@@ -12,7 +12,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   lists (data buffers reused), the stream id shared from the declaration
   (`HostEvent::StreamPublish::id` is now `Arc<str>`; hand chunk lists back with
   `HostSession::recycle_chunks` / `HostBus::recycle_chunks`). An unsubscribed batch costs 0.3
-  allocations, a subscribed one 5.5 (was 10.5).
+  allocations, a subscribed one 2.8 (was 10.5): a live batch that merges into the subscriber's
+  queued `StreamData` clones no stream reference.
 - A link device's status update costs the node no allocation in steady state (8 before): read
   and write buffers are pooled per connection, status frames decode into recycled batches, and
   the status store refreshes a publisher's existing keys in place. Fan-out to a watcher went

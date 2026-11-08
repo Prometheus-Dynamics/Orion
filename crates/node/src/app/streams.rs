@@ -6,8 +6,8 @@
 //! computed under the stream lock, then queued and flushed like status changes.
 
 use super::local_clients::{
-    PendingClientStreamFlush, enqueue_stream_event, execute_client_stream_flush,
-    finalize_client_stream_flush, prepare_client_stream_flush,
+    PendingClientStreamFlush, enqueue_live_stream_data, enqueue_stream_event,
+    execute_client_stream_flush, finalize_client_stream_flush, prepare_client_stream_flush,
 };
 use super::{NodeApp, NodeError};
 use orion::{
@@ -38,7 +38,7 @@ const IRREGULAR_PERIOD_US: u64 = 100_000;
 pub(super) struct StreamsState {
     registry: Mutex<StreamRegistry>,
     /// The last batch's emptied outbox, reused by the next so a batch allocates no list.
-    spare_outbox: Mutex<Vec<(LocalAddress, ClientEventKind)>>,
+    spare_outbox: Mutex<Vec<(LocalAddress, Out)>>,
     next_epoch: AtomicU64,
     pub(super) batches_total: AtomicU64,
     pub(super) samples_total: AtomicU64,
@@ -205,7 +205,19 @@ impl Ring {
 
 /// What to queue for which client once the stream lock is released.
 #[derive(Default)]
-struct Outbox(Vec<(LocalAddress, ClientEventKind)>);
+struct Outbox(Vec<(LocalAddress, Out)>);
+
+#[derive(Debug)]
+enum Out {
+    Event(ClientEventKind),
+    /// A live batch of the stream being published, made into a `StreamData` only if it does not
+    /// merge into one still queued: a merge clones no stream reference and keeps the list.
+    Live {
+        cursor: StreamCursor,
+        prev_seq: u64,
+        chunks: Vec<SampleChunk>,
+    },
+}
 
 /// A [`StreamPublish`], borrowed.
 struct StreamPublishRef<'a> {
@@ -215,7 +227,7 @@ struct StreamPublishRef<'a> {
 
 impl Outbox {
     fn push(&mut self, to: &LocalAddress, event: ClientEventKind) {
-        self.0.push((to.clone(), event));
+        self.0.push((to.clone(), Out::Event(event)));
     }
 }
 
@@ -382,9 +394,20 @@ impl Stream {
 }
 
 impl NodeApp {
+    /// Queues `out`'s events to their clients and flushes them.
+    fn deliver_stream_events(&self, out: Outbox) {
+        self.deliver_stream_batch(out, None, &mut Vec::new());
+    }
+
     /// Queues `out`'s events to their clients and flushes them; returns the emptied list for
-    /// reuse.
-    fn deliver_stream_events(&self, mut out: Outbox) -> Vec<(LocalAddress, ClientEventKind)> {
+    /// reuse. Its live batches are of `stream`; the first chunk list a merge empties is left in
+    /// `reclaim` when that has none.
+    fn deliver_stream_batch(
+        &self,
+        mut out: Outbox,
+        stream: Option<&StreamRef>,
+        reclaim: &mut Vec<SampleChunk>,
+    ) -> Vec<(LocalAddress, Out)> {
         if out.0.is_empty() {
             return out.0;
         }
@@ -394,7 +417,29 @@ impl NodeApp {
             for (to, event) in out.0.drain(..) {
                 match txn.client_mut(&to) {
                     Ok(client) => {
-                        enqueue_stream_event(client, event);
+                        match (event, stream) {
+                            (Out::Event(event), _) => enqueue_stream_event(client, event),
+                            (
+                                Out::Live {
+                                    cursor,
+                                    prev_seq,
+                                    mut chunks,
+                                },
+                                Some(stream),
+                            ) => {
+                                enqueue_live_stream_data(
+                                    client,
+                                    stream,
+                                    cursor,
+                                    prev_seq,
+                                    &mut chunks,
+                                );
+                                if reclaim.capacity() == 0 {
+                                    *reclaim = chunks;
+                                }
+                            }
+                            (Out::Live { .. }, None) => {}
+                        }
                         if let Some(flush) = prepare_client_stream_flush(&to, client) {
                             if let Some(existing) = flushes.iter().position(|f| f.source == to) {
                                 flushes[existing] = flush;
@@ -650,7 +695,7 @@ impl NodeApp {
             // Subscribers that take the whole batch get it as published. The last subscriber
             // to see the batch takes it without a copy when it is one of them.
             let mut left = stream.subscribers.len();
-            let batch = publish.chunks;
+            let batch = &mut *publish.chunks;
             for (to, subscriber) in stream.subscribers.iter_mut() {
                 left -= 1;
                 let chunks: Vec<SampleChunk> = if subscriber.takes_everything() {
@@ -683,20 +728,18 @@ impl NodeApp {
                 if chunks.is_empty() {
                     continue;
                 }
-                out.push(
-                    to,
-                    ClientEventKind::StreamData(StreamData {
-                        stream: publish.stream.clone(),
+                out.0.push((
+                    to.clone(),
+                    Out::Live {
                         cursor,
                         prev_seq: subscriber.last_seq,
-                        backfill: false,
                         chunks,
-                    }),
-                );
+                    },
+                ));
                 subscriber.last_seq = seq;
             }
         }
-        let spare = self.deliver_stream_events(out);
+        let spare = self.deliver_stream_batch(out, Some(publish.stream), publish.chunks);
         let mut kept = lock(&self.state.streams.spare_outbox);
         if kept.capacity() < spare.capacity() {
             *kept = spare;

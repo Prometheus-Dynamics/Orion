@@ -731,9 +731,10 @@ interfaces and risk. Slices, in dependency order:
         the client queue needs the queue's `StatusChange` to hold shared entries (node-internal
         type change, ~150 lines, low risk);
       - stream batch: done for unsubscribed streams (0.3 per batch: recycled chunk lists with
-        their data buffers, `Arc` ids from the declaration, reused outbox). Subscribed: 5.5 per
-        batch, left are the chunk list and data moved to the subscriber (a queue-side pool),
-        and the address, owner subject and id cloned per subscriber event (interned or `Arc`
+        their data buffers, `Arc` ids from the declaration, reused outbox). Subscribed: 2.8 per
+        batch (a batch that merges into the queued event clones nothing and hands its list
+        back); left are the chunk data moved to the subscriber, the outbox address clone, and
+        on an unmerged batch the owner subject and id clones (interned or `Arc`
         ids: orion-core id newtypes, archive format kept by a `with` wrapper, medium risk);
       - serial and CAN loops: their read paths already reuse buffers; check them in a cost
         test over a pty and vcan.

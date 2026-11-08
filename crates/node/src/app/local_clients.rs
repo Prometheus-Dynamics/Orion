@@ -470,43 +470,81 @@ pub(super) fn enqueue_action_results_event(
 /// instead (it resubscribes from its cursor).
 const MAX_MERGED_STREAM_BYTES: usize = 1024 * 1024;
 
+/// Queues a live batch of `stream` as [`enqueue_stream_event`] does, building its `StreamData`
+/// only when it does not merge: a merge empties `chunks` and leaves its list to the caller.
+pub(super) fn enqueue_live_stream_data(
+    client: &mut LocalClientState,
+    stream: &orion::control_plane::StreamRef,
+    cursor: orion::control_plane::StreamCursor,
+    prev_seq: u64,
+    chunks: &mut Vec<orion::control_plane::SampleChunk>,
+) {
+    if !merge_live_stream_data(client, stream, cursor, chunks) {
+        enqueue_client_event(
+            client,
+            ClientEventKind::StreamData(orion::control_plane::StreamData {
+                stream: stream.clone(),
+                cursor,
+                prev_seq,
+                backfill: false,
+                chunks: std::mem::take(chunks),
+            }),
+        );
+    }
+}
+
+/// Moves `chunks` into the live `StreamData` of `stream` (and `cursor`'s epoch) still queued;
+/// `false`, with `chunks` untouched, when there is none.
+fn merge_live_stream_data(
+    client: &mut LocalClientState,
+    stream: &orion::control_plane::StreamRef,
+    cursor: orion::control_plane::StreamCursor,
+    chunks: &mut Vec<orion::control_plane::SampleChunk>,
+) -> bool {
+    let queued = client.queued_events.position(|queued| {
+        matches!(&queued.event, ClientEventKind::StreamData(q)
+            if !q.backfill && q.stream == *stream && q.cursor.epoch == cursor.epoch)
+    });
+    let Some(position) = queued else {
+        return false;
+    };
+    let Some(ClientEvent {
+        event: ClientEventKind::StreamData(merged),
+        ..
+    }) = client.queued_events.event_mut(position)
+    else {
+        return false;
+    };
+    merged.cursor = cursor;
+    merged.chunks.append(chunks);
+    let bytes = stream_data_bytes(merged);
+    if bytes > MAX_MERGED_STREAM_BYTES {
+        let stream = merged.stream.clone();
+        client.queued_events.remove(position);
+        client.dropped_events = client.dropped_events.saturating_add(1);
+        enqueue_client_event(
+            client,
+            ClientEventKind::StreamReset(orion::control_plane::StreamReset {
+                stream,
+                reason: orion::control_plane::StreamResetReason::Overrun,
+            }),
+        );
+    } else {
+        client.queued_events.recharge(position, bytes);
+    }
+    true
+}
+
 /// Queues a stream event. Live batches of one stream (and epoch) merge into the one still
 /// queued, so a slow subscriber holds one growing event per stream rather than losing older
 /// batches to the queue limit; past [`MAX_MERGED_STREAM_BYTES`] its queued samples are dropped for
 /// a `StreamReset { reason: Overrun }`. A newer demand replaces a queued one.
 pub(super) fn enqueue_stream_event(client: &mut LocalClientState, event: ClientEventKind) {
     match event {
-        ClientEventKind::StreamData(data) if !data.backfill => {
-            let queued = client.queued_events.position(|queued| {
-                matches!(&queued.event, ClientEventKind::StreamData(q)
-                    if !q.backfill && q.stream == data.stream && q.cursor.epoch == data.cursor.epoch)
-            });
-            if let Some(position) = queued
-                && let Some(ClientEvent {
-                    event: ClientEventKind::StreamData(merged),
-                    ..
-                }) = client.queued_events.event_mut(position)
-            {
-                merged.cursor = data.cursor;
-                merged.chunks.extend(data.chunks);
-                let bytes = stream_data_bytes(merged);
-                if bytes > MAX_MERGED_STREAM_BYTES {
-                    let stream = merged.stream.clone();
-                    client.queued_events.remove(position);
-                    client.dropped_events = client.dropped_events.saturating_add(1);
-                    enqueue_client_event(
-                        client,
-                        ClientEventKind::StreamReset(orion::control_plane::StreamReset {
-                            stream,
-                            reason: orion::control_plane::StreamResetReason::Overrun,
-                        }),
-                    );
-                } else {
-                    client.queued_events.recharge(position, bytes);
-                }
-                return;
+        ClientEventKind::StreamData(mut data) if !data.backfill => {
+            if !merge_live_stream_data(client, &data.stream, data.cursor, &mut data.chunks) {
+                enqueue_client_event(client, ClientEventKind::StreamData(data));
             }
-            enqueue_client_event(client, ClientEventKind::StreamData(data));
         }
         ClientEventKind::StreamDemand(demand) => {
             client.queued_events.retain(|queued| {
