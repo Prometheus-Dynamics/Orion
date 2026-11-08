@@ -315,6 +315,14 @@ is a record to compare against, not a tight gate.
 | Stream batch, 50 `f32` samples, one subscriber | 2.8 per batch (was 10.5, before that 12.1) | 1.2 KB (was 1.8 KB) | about 74,000 (was 92,000) | 326 B | 313 B |
 | The same stream, no subscriber | 0.3 per batch | 94 B | about 37,000 | 327 B | |
 | Idle node, one quiet session | 0 per second (was 70) | 0 | | | |
+| `serial:` link (pty), provider status update, no watcher | 0.1 per update | 19 B | about 5,100 | 21 B | |
+| `serial:` link (pty), stream batch, no subscriber | 0.2 per batch | 35 B | about 33,000 | 327 B | |
+| `serial:` link (pty), idle | 0 per second, 2 wake-ups per second | 0 | | | |
+
+The `serial:` rows come from `crates/node/tests/link_costs_serial.rs`: the same harness
+(`tests/link_costs_harness`) with the device on the master side of a pseudo-terminal. A serial
+link carries one device, so fan-out is measured on the unix link only. Both tests gate an
+unwatched status update and an unsubscribed stream batch below one allocation.
 
 The release column is `cargo test --release`, the workspace release profile. Allocation counts
 barely change between the two builds, because they come from the code's data structures, not
@@ -387,3 +395,20 @@ twice per update. The link bridge builds a device's publisher name (`link:<link>
 when the device claims its provider, instead of formatting it on every batch. What remains is
 mostly decoding: the frame, the device name, the entry list and each key are owned values. Below
 that, the work is borrowed decoding.
+
+## Crypto Instructions on the Test Board
+
+`ring` 0.17 (the TLS and signature backend) picks its AArch64 code paths at run time from the
+kernel's hardware capabilities. Measured on the test board's Cortex-A76 (CPU part `0xd0b`, which
+reports `aes pmull sha1 sha2`), one thread, 1 MiB buffers, 2026-11-07:
+
+| Primitive | Throughput |
+| --- | ---: |
+| SHA-256 | 1,457 MiB/s |
+| AES-128-GCM seal | 2,097 MiB/s |
+| ChaCha20-Poly1305 seal (no dedicated instructions; NEON) | 763 MiB/s |
+
+The SHA-256 and AES-GCM rates need the SHA2, AES and PMULL instructions. The portable code
+manages a few hundred MiB/s at best on this core. So TLS on the board uses the hardware, and
+rustls prefers AES-GCM when both sides support it. No build flag is needed.
+

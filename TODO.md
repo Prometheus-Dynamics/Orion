@@ -739,8 +739,9 @@ interfaces and risk. Slices, in dependency order:
         back); left are the chunk data moved to the subscriber, the outbox address clone, and
         on an unmerged batch the owner subject and id clones (interned or `Arc`
         ids: orion-core id newtypes, archive format kept by a `with` wrapper, medium risk);
-      - serial and CAN loops: their read paths already reuse buffers; check them in a cost
-        test over a pty and vcan.
+      - serial loop: checked by `tests/link_costs_serial.rs` over a pty (0.1 per status update,
+        0.2 per unsubscribed stream batch, 0 idle; gated below 1). CAN loop: same check over
+        vcan, which needs the `vcan` module loaded (root), so it stays a manual run.
 - [x] Typed operator rejection: `OperatorRejection::{OtherKey, NotEnrolled, Removed}` with
       codes `operator.other_key`, `operator.not_enrolled` and `operator.removed`, carried as a
       `[code]` prefix on the error message (additive, protocol 1 compatible);
@@ -752,9 +753,12 @@ interfaces and risk. Slices, in dependency order:
 - [x] CRC-32C on the ARMv8 and SSE4.2 instructions (compile-time or detected at run time with
       std), and `crc-extern` for an MCU CRC peripheral: 1,010 to 41 ns per 126-byte frame on
       the test board.
-- [ ] Hardware paths: check that `ring` uses the AES, SHA and PMULL extensions on the A76; DMA for UART and CAN
-      in the MCU template; no per-message copies or re-encodes on the link and gateway path. Add
-      instructions and bytes moved per message to the link cost test.
+- [x] `ring` uses the AES, SHA2 and PMULL instructions on the test board's A76, picked at run
+      time (SHA-256 1,457 MiB/s, AES-128-GCM 2,097 MiB/s; docs/performance-concurrency.md,
+      "Crypto Instructions on the Test Board"). The link cost test prints instructions and wire
+      bytes per message.
+- [ ] Hardware paths, left: DMA for UART and CAN in the MCU template; the remaining copies on
+      the link and gateway path (see the per-message allocations item).
 
 ### Decided, starts when the user says
 

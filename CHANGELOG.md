@@ -60,6 +60,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `crates/node/tests/link_costs_serial.rs`: the link cost test over a `serial:` link on a
+  pseudo-terminal (status update 0.1 allocations, unsubscribed stream batch 0.2, idle 0),
+  sharing `tests/link_costs_harness` with the unix-link test.
+- docs/performance-concurrency.md, "Crypto Instructions on the Test Board": `ring` uses the
+  A76's SHA2, AES and PMULL instructions (SHA-256 1,457 MiB/s, AES-128-GCM 2,097 MiB/s).
+
 - `packaging/gaia/liborion.toml`: optional Gaia layer that builds `liborion.so`, checks its
   exports against `crates/capi/symbols.txt` and installs `/usr/lib/liborion.so.1`.
 
