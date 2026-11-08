@@ -67,9 +67,10 @@ fn update_software(mut state: u32, bytes: &[u8]) -> u32 {
     state
 }
 
-#[cfg(feature = "crc-extern")]
+#[cfg(all(feature = "crc-extern", target_os = "none"))]
 unsafe extern "Rust" {
-    /// The firmware's CRC-32C routine (feature `crc-extern`): continues the reflected CRC-32C
+    /// The firmware's CRC-32C routine (feature `crc-extern`, bare-metal targets only; on hosted
+    /// targets the feature does nothing, so `--all-features` builds link): continues the reflected CRC-32C
     /// register `state` (initially `0xFFFF_FFFF`, no final XOR) over `bytes` and returns the new
     /// register. Defined by the firmware with `#[unsafe(no_mangle)]`, for example over the STM32
     /// CRC unit with polynomial `0x1EDC_6F41`, byte-reversed input and reversed output, `INIT`
@@ -79,13 +80,13 @@ unsafe extern "Rust" {
 
 #[inline]
 fn update_slice(state: u32, bytes: &[u8]) -> u32 {
-    #[cfg(feature = "crc-extern")]
+    #[cfg(all(feature = "crc-extern", target_os = "none"))]
     {
         // SAFETY: the firmware defines the routine with this signature (feature contract).
         return unsafe { orion_link_crc32c_update(state, bytes) };
     }
     #[cfg(all(
-        not(feature = "crc-extern"),
+        not(all(feature = "crc-extern", target_os = "none")),
         target_arch = "aarch64",
         target_feature = "crc"
     ))]
@@ -94,7 +95,7 @@ fn update_slice(state: u32, bytes: &[u8]) -> u32 {
         return unsafe { hw::aarch64(state, bytes) };
     }
     #[cfg(all(
-        not(feature = "crc-extern"),
+        not(all(feature = "crc-extern", target_os = "none")),
         target_arch = "x86_64",
         target_feature = "sse4.2"
     ))]
@@ -106,7 +107,7 @@ fn update_slice(state: u32, bytes: &[u8]) -> u32 {
     {
         #[cfg(all(
             feature = "std",
-            not(feature = "crc-extern"),
+            not(all(feature = "crc-extern", target_os = "none")),
             target_arch = "aarch64",
             not(target_feature = "crc")
         ))]
@@ -116,7 +117,7 @@ fn update_slice(state: u32, bytes: &[u8]) -> u32 {
         }
         #[cfg(all(
             feature = "std",
-            not(feature = "crc-extern"),
+            not(all(feature = "crc-extern", target_os = "none")),
             target_arch = "x86_64",
             not(target_feature = "sse4.2")
         ))]
@@ -131,7 +132,7 @@ fn update_slice(state: u32, bytes: &[u8]) -> u32 {
 /// The CRC-32C instructions: eight bytes per instruction, then the tail byte by byte. Both use
 /// the reflected Castagnoli polynomial, the same register the software path keeps.
 #[cfg(all(
-    not(feature = "crc-extern"),
+    not(all(feature = "crc-extern", target_os = "none")),
     any(target_arch = "aarch64", target_arch = "x86_64")
 ))]
 #[allow(dead_code)]
@@ -192,8 +193,8 @@ impl Crc32c {
     ///
     /// Uses the CPU's CRC-32C instructions where it has them: ARMv8 `CRC32CB/CRC32CX` (built for a
     /// target with the `crc` feature, or detected at run time with `std`), x86-64 SSE4.2 `crc32`
-    /// (likewise). With the `crc-extern` feature a firmware supplies the routine instead, for
-    /// example over a CRC peripheral (see [`orion_link_crc32c_update`]).
+    /// (likewise). With the `crc-extern` feature a bare-metal firmware supplies the routine
+    /// instead, for example over a CRC peripheral (`orion_link_crc32c_update`).
     pub fn update(&mut self, bytes: &[u8]) {
         self.state = update_slice(self.state, bytes);
     }

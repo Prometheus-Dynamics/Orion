@@ -155,6 +155,15 @@ impl HostBus {
         }
     }
 
+    /// The earliest [`HostSession::next_poll_ms`] of the bus's devices.
+    #[must_use]
+    pub fn next_poll_ms(&self) -> Option<u64> {
+        self.devices
+            .values()
+            .filter_map(|device| device.session.next_poll_ms())
+            .min()
+    }
+
     /// The next event from any device.
     pub fn next_event(&mut self) -> Option<BusEvent> {
         self.devices.iter_mut().find_map(|(&address, device)| {

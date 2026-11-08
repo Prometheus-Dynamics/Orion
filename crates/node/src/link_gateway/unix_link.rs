@@ -175,8 +175,6 @@ pub(super) async fn run(
     let policy = ctx.app.local_admission.clone();
     // Connection ids of one turn, kept across turns so a turn does not allocate.
     let mut ids: Vec<u64> = Vec::new();
-    let mut tick = tokio::time::interval(LinkContext::tick_period(host.heartbeat_ms));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut desired = ctx.app.link_desired_changes();
     let mut state_changes = ctx.app.link_state_changes();
     let mut listener: Option<Listener> = None;
@@ -211,6 +209,18 @@ pub(super) async fn run(
 
         let mut refresh = false;
         let mut closed: Vec<u64> = Vec::new();
+        let reopen = listener.is_none().then_some(reopen_at);
+        let rechecks = conns
+            .values()
+            .filter(|conn| matches!(conn.caller, LinkCaller::Operator { .. }))
+            .map(|conn| conn.checked + OPERATOR_RECHECK);
+        let wake = ctx.wake_at(
+            conns
+                .values()
+                .filter_map(|conn| conn.session.next_poll_ms())
+                .min(),
+            [lease_refresh_at].into_iter().chain(reopen).chain(rechecks),
+        );
         tokio::select! {
             biased;
             _ = shutdown.changed() => break,
@@ -336,7 +346,7 @@ pub(super) async fn run(
                 }),
                 None => commands_open = false,
             },
-            _ = tick.tick() => {}
+            () = tokio::time::sleep_until(wake) => {}
         }
 
         for id in closed {
@@ -466,8 +476,11 @@ pub(super) async fn run(
             }
         }
 
-        if refresh || Instant::now() >= lease_refresh_at {
+        let periodic = Instant::now() >= lease_refresh_at;
+        if periodic {
             lease_refresh_at = Instant::now() + LEASE_REFRESH;
+        }
+        if ctx.leases_due(refresh, periodic) {
             for conn in conns.values_mut() {
                 if let Some(leases) = conn
                     .session

@@ -245,6 +245,19 @@ impl HostCore {
         true
     }
 
+    /// When [`HostCore::poll`] next has something to do: the current session's device-loss
+    /// deadline, `0` (at once) when a frame was heard since the last poll, `None` without a
+    /// session.
+    pub(crate) fn poll_deadline(&self) -> Option<u64> {
+        self.conn.as_ref()?;
+        if self.heard {
+            return Some(0);
+        }
+        let timeout = u64::from(self.config.heartbeat_ms)
+            .saturating_mul(u64::from(self.config.missed_heartbeats.max(1)));
+        Some(self.last_heard.saturating_add(timeout))
+    }
+
     pub(crate) fn mark_heard(&mut self) {
         if self.conn.is_some() {
             self.heard = true;

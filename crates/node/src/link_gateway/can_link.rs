@@ -63,8 +63,7 @@ pub(super) async fn run<P: CanIo>(
     mut open: impl FnMut() -> io::Result<P> + Send,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut tick = tokio::time::interval(LinkContext::tick_period(host.heartbeat_ms));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let job_period = LinkContext::job_period(host.heartbeat_ms);
     let transport = if config.fd {
         Packet::FD
     } else {
@@ -108,6 +107,14 @@ pub(super) async fn run<P: CanIo>(
 
         let mut refresh = false;
         let mut failure: Option<(&str, io::Error)> = None;
+        let reopen = socket.is_none().then_some(reopen_at);
+        let driving = (!running.is_empty()).then(|| Instant::now() + job_period);
+        let wake = ctx.wake_at(
+            bus.next_poll_ms(),
+            [Some(lease_refresh_at), reopen, driving]
+                .into_iter()
+                .flatten(),
+        );
         tokio::select! {
             biased;
             _ = shutdown.changed() => break,
@@ -152,7 +159,7 @@ pub(super) async fn run<P: CanIo>(
                 }
             }
             () = stream_wake.notified() => {}
-            _ = tick.tick() => {}
+            () = tokio::time::sleep_until(wake) => {}
         }
 
         // Release and attach, as the node's set now says.
@@ -237,8 +244,11 @@ pub(super) async fn run<P: CanIo>(
                 job.finish(end.outcome);
             }
         }
-        if refresh || Instant::now() >= lease_refresh_at {
+        let periodic = Instant::now() >= lease_refresh_at;
+        if periodic {
             lease_refresh_at = Instant::now() + LEASE_REFRESH;
+        }
+        if ctx.leases_due(refresh, periodic) {
             let accepted: Vec<String> = ctx.accepted().cloned().collect();
             for name in accepted {
                 if let (Some(address), Some(leases)) =

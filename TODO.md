@@ -693,9 +693,12 @@ interfaces and risk. Slices, in dependency order:
       on every tick, which is now an in-place update made only on change. The link cost test
       gates idle allocations at 10 or fewer per second and prints wake-ups; release numbers are
       recorded in docs/performance-concurrency.md.
-- [ ] Idle wake-ups: 20 per second with one link session. 10 are the link task's fixed tick;
-      schedule it from the next deadline (device loss, lease refresh, rate limits, operator
-      recheck) for the unix, serial and CAN loops.
+- [x] Idle wake-ups: 20 per second to 1 to 4. The unix, serial and CAN link loops sleep until
+      their next deadline (`HostSession::next_poll_ms`, the lease check, reopen, operator
+      recheck); the lease check rebuilds only when the desired revision moved.
+- [ ] Stream batch relay costs about 92,000 instructions per 50-sample batch (status update:
+      5,000). Profile it for copies and re-encodes between the link session, the stream hub and
+      the subscriber.
 - [x] MCU proof on an STM32G4: `examples/stm32g4-device` (FDCAN or UART, one record, one
       stream, painted stack high-water as status). `scripts/device-size.sh` gates flash, static
       RAM and the static stack bound against a committed baseline. The README has the ranked

@@ -24,6 +24,8 @@ pub(super) struct LinkContext {
     pub(super) app: NodeApp,
     pub(super) name: String,
     started: Instant,
+    /// The desired-state revision the lease sets were last computed for.
+    leases_revision: Option<orion::Revision>,
     /// Devices whose current-session snapshot was accepted.
     accepted: BTreeSet<String>,
     pub(super) status: LinkStatusSnapshot,
@@ -83,6 +85,7 @@ impl LinkContext {
         Self {
             app,
             started: Instant::now(),
+            leases_revision: None,
             accepted: BTreeSet::new(),
             status,
             last_logged_error: None,
@@ -283,9 +286,29 @@ impl LinkContext {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
-    /// Tick period for `poll`: a quarter heartbeat, between 5 and 100 ms.
-    pub(super) fn tick_period(heartbeat_ms: u32) -> Duration {
+    /// While a firmware job runs, the loop wakes this often to drive it: a quarter heartbeat,
+    /// between 5 and 100 ms.
+    pub(super) fn job_period(heartbeat_ms: u32) -> Duration {
         Duration::from_millis(u64::from(heartbeat_ms / 4).clamp(5, 100))
+    }
+
+    /// When a link loop wakes at the latest if nothing happens on its I/O or channels: its
+    /// sessions' next poll (`poll_ms`, in [`LinkContext::now_ms`]'s clock) or the earliest of its
+    /// own `deadlines`. Everything else that needs the loop (frames, requests, desired-state and
+    /// stream changes) wakes it as it happens, so an idle link wakes only for these.
+    pub(super) fn wake_at(
+        &self,
+        poll_ms: Option<u64>,
+        deadlines: impl IntoIterator<Item = Instant>,
+    ) -> tokio::time::Instant {
+        let mut at = deadlines
+            .into_iter()
+            .min()
+            .unwrap_or_else(|| Instant::now() + LEASE_REFRESH);
+        if let Some(ms) = poll_ms {
+            at = at.min(self.started + Duration::from_millis(ms));
+        }
+        tokio::time::Instant::from_std(at)
     }
 
     /// Applies one host event; returns what to do with the affected device's lease set.
@@ -431,6 +454,20 @@ impl LinkContext {
     }
 
     /// Current lease set of an accepted device, if it is accepted.
+    /// Whether the lease sets need recomputing: after a desired-state notification (`notified`),
+    /// or at the periodic refresh only if the desired-state revision moved since the last one
+    /// (so an idle link does not rebuild them every second). A device's own resource changes
+    /// set its leases as its snapshot is handled.
+    pub(super) fn leases_due(&mut self, notified: bool, periodic: bool) -> bool {
+        if !notified && !periodic {
+            return false;
+        }
+        let revision = self.app.current_desired_revision();
+        let moved = self.leases_revision != Some(revision);
+        self.leases_revision = Some(revision);
+        notified || moved
+    }
+
     pub(super) fn refreshed_leases(&self, device_name: &str) -> Option<Vec<LeaseRecord>> {
         if !self.accepted.contains(device_name) {
             return None;

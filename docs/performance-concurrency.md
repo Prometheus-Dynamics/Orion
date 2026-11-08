@@ -308,23 +308,40 @@ allocator counts the node's threads only: the test's clients run on threads it i
 build, x86_64, 2026-11-07; the test fails only on a blow-up (ceilings 10 to 20 times these), so it
 is a record to compare against, not a tight gate.
 
-| Path | Allocations (debug / release) | Bytes allocated (release) | Wire in | Wire out |
-|---|---|---|---|---|
-| Provider status update, no watcher | 8.0 / 8.0 per update (was 12) | 588 B (was 1.4 KB) | 21 B | (acks batched) |
-| The same, fanned out to one status watch | 11.9 / 11.2 per update (was 16) | 1.5 KB (was 2.5 KB) | 21 B | coalesced |
-| Stream batch, 50 `f32` samples, one subscriber | 11.8 / 12.1 per batch | 2.2 KB | 326 B | 313 B |
-| Idle node, one quiet session | 0 per second (was 70) | 0 | | |
+| Path | Allocations (debug / release) | Bytes allocated (release) | Instructions (release) | Wire in | Wire out |
+|---|---|---|---|---|---|
+| Provider status update, no watcher | 8.0 / 8.0 per update (was 12) | 588 B (was 1.4 KB) | about 5,000 | 21 B | (acks batched) |
+| The same, fanned out to one status watch | 11.9 / 11.2 per update (was 16) | 1.5 KB (was 2.5 KB) | about 6,900 | 21 B | coalesced |
+| Stream batch, 50 `f32` samples, one subscriber | 11.8 / 12.1 per batch | 2.2 KB | about 92,000 | 326 B | 313 B |
+| Idle node, one quiet session | 0 per second (was 70) | 0 | | | |
 
-The release column is `cargo test --release` without LTO. Allocation counts barely change between
-the two builds, because they come from the code's data structures, not from debug checks.
+The release column is `cargo test --release`, the workspace release profile. Allocation counts
+barely change between the two builds, because they come from the code's data structures, not
+from debug checks.
 
-Idle, the node's runtime threads wake about 20 times per second (context switches of the
-`tokio-rt-worker` threads, printed by the same test). Ten of those are the link task's fixed
-tick (a quarter of the heartbeat, at most 100 ms), which drives loss detection, lease refresh and
-the rate limits; scheduling it from the next deadline instead is the next reduction. The idle
-allocations were the link task republishing its status snapshot on every tick: the snapshot is now
-updated in place, and only when it changed. The test fails if idle allocates more than 10 per
-second.
+**Instructions** are user-space instructions retired on the runtime's worker threads, from one
+`perf_event_open` counter per thread. The test leaves the column out where perf events are not
+allowed. The stream batch is the expensive path per message: about 1,800 instructions per sample
+relayed, against about 5,000 for a whole status update. That makes it the next place to look for
+copies and re-encodes.
+
+**Wake-ups when idle:** the node's runtime threads wake 1 to 4 times per second, counted as
+voluntary context switches of the `tokio-rt-worker` threads and printed by the same test. It
+was 20 per second with the old fixed link tick.
+- Each link loop (unix, serial, CAN) now sleeps until its next deadline:
+  - the session's device-loss timeout (`HostSession::next_poll_ms`);
+  - the once-a-second lease check;
+  - a reopen;
+  - an operator recheck on `tcp:` links.
+- Everything else (frames, requests, desired-state and stream changes) wakes it as it happens.
+- A firmware job still drives its transfer at a quarter heartbeat while it runs.
+
+**Allocations when idle:** the idle allocations were the link task republishing its status
+snapshot on every tick, and the lease sets being rebuilt every second. The snapshot is now
+updated in place, only when it changed. The once-a-second lease check rebuilds the lease sets
+only when the desired-state revision moved.
+
+The test fails if idle allocates more than 10 times or wakes more than 10 times per second.
 
 Under a burst the status lane coalesces: 2,000 updates reached the watch as about 15 answers, and
 200 stream batches as about 16 messages. Allocations per update, not bytes, are what the next

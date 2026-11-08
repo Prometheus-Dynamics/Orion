@@ -436,6 +436,15 @@ impl<T: Transport> HostSession<T> {
         self.core.poll(now_ms);
     }
 
+    /// The latest time (in the clock passed to [`poll`](Self::poll)) at which `poll` must run
+    /// again: the device-loss deadline while a session is up, `None` without one. Received
+    /// frames and queued requests need a poll as they happen anyway, so a loop that sleeps until
+    /// this deadline and wakes on its I/O never misses a timer.
+    #[must_use]
+    pub fn next_poll_ms(&self) -> Option<u64> {
+        self.core.poll_deadline()
+    }
+
     /// Counts the device as heard at the next [`poll`](Self::poll), as a received frame would.
     /// For a transport that holds the device's bytes back (a rate limit applying backpressure):
     /// the device is alive, its frames are only waiting, so it must not time out.

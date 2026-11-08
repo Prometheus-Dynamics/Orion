@@ -55,9 +55,10 @@ std = [
 ]
 # 256-entry CRC-32C table (1 KiB of flash) instead of the 16-entry nibble table (64 bytes).
 crc-table = []
-# The firmware supplies the CRC-32C routine (`orion_link_crc32c_update`), for example over a CRC
-# peripheral. Hosts need nothing: the ARMv8 CRC and x86-64 SSE4.2 instructions are used when the
-# target has them, or when detected at run time with `std`.
+# A bare-metal firmware supplies the CRC-32C routine (`orion_link_crc32c_update`), for example
+# over a CRC peripheral. Only on `target_os = "none"`; on hosted targets it does nothing, so
+# `--all-features` builds link. Hosts need nothing: the ARMv8 CRC and x86-64 SSE4.2 instructions
+# are used when the target has them, or when detected at run time with `std`.
 crc-extern = []
 # Blocking byte-stream adapters over `embedded_io::{Read, BufRead, Write}`.
 embedded-io = ["dep:embedded-io"]

@@ -10,6 +10,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `orion-link`'s CRC-32C uses the ARMv8 CRC and x86-64 SSE4.2 instructions when the target has
   them, or when detected at run time with `std`. That is about 24 times faster on a Cortex-A76.
+- `orion-node` link tasks sleep until their next deadline instead of ticking at a quarter
+  heartbeat: an idle node wakes 1 to 4 times per second instead of about 20. The periodic lease
+  check rebuilds lease sets only when the desired state moved.
 - `orion-node` link tasks allocate nothing while idle (70 allocations per second before): a
   link's status snapshot is updated in place, and only when it changed.
 
@@ -23,12 +26,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
+- `orion-link`: `HostSession::next_poll_ms` and `HostBus::next_poll_ms`, the latest time `poll`
+  must run again, so a host loop can sleep until it.
+
 - `examples/stm32g4-device`: a whole STM32G4 firmware (no HAL) that speaks the Orion link over
   FDCAN or UART, publishing one record and one stream. `scripts/device-size.sh` checks its flash,
   static RAM and static stack bound against a committed baseline in CI. Supporting scripts:
   `scripts/stack-depth.py` (stack bound) and `scripts/flash-by-source.py` (flash by component).
-- `orion-link` feature `crc-extern`: the firmware supplies the CRC-32C routine
-  (`orion_link_crc32c_update`), for example over a CRC peripheral.
+- `orion-link` feature `crc-extern`: a bare-metal firmware supplies the CRC-32C routine
+  (`orion_link_crc32c_update`), for example over a CRC peripheral. It does nothing on hosted
+  targets, so `--all-features` builds link.
 
 - `orion-node` serves the board identity document (contract 1, `GET /.well-known/pd-device`)
   when `ORION_NODE_IDENTITY_ADDR` is set. It passes the device package's document through

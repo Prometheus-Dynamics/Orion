@@ -230,6 +230,27 @@ fn device_loss_is_detected_by_the_host() {
 }
 
 #[test]
+fn the_host_reports_when_it_must_be_polled_again() {
+    let mut pair = StreamPair::new("imu-board", host_config(), 12);
+    assert_eq!(pair.host.next_poll_ms(), None, "no session, no timer");
+    assert!(pair.run_until(2_000, StreamPair::connected), "handshake");
+    pair.device_frozen = true;
+    // Let the last frame's `heard` be consumed, then nothing more arrives.
+    pair.step();
+    let deadline = pair
+        .host
+        .next_poll_ms()
+        .expect("a session has a loss deadline");
+    assert!(deadline > pair.now);
+    // Polled only at its deadline, the host loses the device exactly then, not before.
+    pair.host.poll(deadline - 1);
+    assert!(pair.host.is_connected());
+    pair.host.poll(deadline);
+    assert!(!pair.host.is_connected());
+    assert_eq!(pair.host.next_poll_ms(), None);
+}
+
+#[test]
 fn a_device_held_back_by_the_transport_is_not_lost() {
     // The device's bytes wait in the transport (frozen here); the transport tells the host.
     let mut pair = connected_pair(10);

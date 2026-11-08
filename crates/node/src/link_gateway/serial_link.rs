@@ -27,8 +27,7 @@ pub(super) async fn run(
     host: HostConfig,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut tick = tokio::time::interval(LinkContext::tick_period(host.heartbeat_ms));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let job_period = LinkContext::job_period(host.heartbeat_ms);
     let mut session = HostSession::stream(host.clone());
     let mut desired = ctx.app.link_desired_changes();
     let mut port: Option<SerialPort> = None;
@@ -68,6 +67,14 @@ pub(super) async fn run(
 
         let mut refresh = false;
         let mut failure: Option<(&str, std::io::Error)> = None;
+        let reopen = (port.is_none() && !held).then_some(reopen_at);
+        let driving = job.is_some().then(|| Instant::now() + job_period);
+        let wake = ctx.wake_at(
+            session.next_poll_ms(),
+            [Some(lease_refresh_at), reopen, driving]
+                .into_iter()
+                .flatten(),
+        );
         tokio::select! {
             biased;
             _ = shutdown.changed() => break,
@@ -117,7 +124,7 @@ pub(super) async fn run(
                 }
             }
             () = stream_wake.notified() => {}
-            _ = tick.tick() => {}
+            () = tokio::time::sleep_until(wake) => {}
         }
 
         // Release or attach, as the node's flag now says.
@@ -177,14 +184,16 @@ pub(super) async fn run(
                 }
             }
         }
-        if refresh || Instant::now() >= lease_refresh_at {
+        let periodic = Instant::now() >= lease_refresh_at;
+        if periodic {
             lease_refresh_at = Instant::now() + LEASE_REFRESH;
-            if let Some(leases) = session
+        }
+        if ctx.leases_due(refresh, periodic)
+            && let Some(leases) = session
                 .device_name()
                 .and_then(|name| ctx.refreshed_leases(name))
-            {
-                session.set_leases(leases);
-            }
+        {
+            session.set_leases(leases);
         }
 
         while tx.len() < TX_HIGH_WATER {

@@ -6,7 +6,10 @@
 //!
 //! The clients run on their own threads, which the counting allocator ignores; everything the
 //! node does (gateway tasks, the status lane, the stream hub) runs on the runtime's threads and
-//! is counted. Run with `--nocapture` to see the table.
+//! is counted. Instructions are user-space instructions retired on the runtime's worker threads,
+//! from one perf counter per thread; they are left out where perf events are not allowed
+//! (`kernel.perf_event_paranoid` above 2, most containers). Run with `--nocapture` to see the
+//! table.
 
 #![cfg(all(target_os = "linux", feature = "link-gateway"))]
 
@@ -15,6 +18,7 @@ use std::cell::Cell;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -106,10 +110,101 @@ fn read_worker_wakeups() -> u64 {
         .sum()
 }
 
-fn snapshot() -> (u64, u64) {
+/// The ids of the runtime's worker threads.
+fn worker_tids() -> Vec<i32> {
+    let Ok(tasks) = std::fs::read_dir("/proc/self/task") else {
+        return Vec::new();
+    };
+    tasks
+        .filter_map(Result::ok)
+        .filter(|task| {
+            std::fs::read_to_string(task.path().join("comm"))
+                .is_ok_and(|name| name.trim() == "tokio-rt-worker")
+        })
+        .filter_map(|task| task.file_name().to_str()?.parse().ok())
+        .collect()
+}
+
+/// `perf_event_attr`, first published layout (`PERF_ATTR_SIZE_VER0`, 64 bytes).
+#[repr(C)]
+struct PerfEventAttr {
+    kind: u32,
+    size: u32,
+    config: u64,
+    sample_period: u64,
+    sample_type: u64,
+    read_format: u64,
+    flags: u64,
+    wakeup_events: u32,
+    bp_type: u32,
+    bp_addr: u64,
+}
+
+/// One user-space instruction counter per worker thread, opened at the first call; `None` when
+/// perf events are not allowed here.
+fn instruction_counters() -> Option<&'static [i32]> {
+    static COUNTERS: OnceLock<Vec<i32>> = OnceLock::new();
+    let counters = COUNTERS.get_or_init(|| {
+        let was = IGNORED.with(|ignored| ignored.replace(true));
+        let mut fds = Vec::new();
+        for tid in worker_tids() {
+            let attr = PerfEventAttr {
+                kind: 0,   // PERF_TYPE_HARDWARE
+                size: 64,  // PERF_ATTR_SIZE_VER0
+                config: 1, // PERF_COUNT_HW_INSTRUCTIONS
+                sample_period: 0,
+                sample_type: 0,
+                read_format: 0,
+                flags: (1 << 5) | (1 << 6), // exclude_kernel, exclude_hv
+                wakeup_events: 0,
+                bp_type: 0,
+                bp_addr: 0,
+            };
+            // SAFETY: a valid attribute struct of the size it states; the other arguments select
+            // one thread on any CPU, no group, no flags.
+            let fd = unsafe {
+                libc::syscall(
+                    libc::SYS_perf_event_open,
+                    &raw const attr,
+                    tid,
+                    -1i32,
+                    -1i32,
+                    0u64,
+                )
+            };
+            match i32::try_from(fd) {
+                Ok(fd) if fd >= 0 => fds.push(fd),
+                _ => {
+                    fds.clear();
+                    break;
+                }
+            }
+        }
+        IGNORED.with(|ignored| ignored.set(was));
+        fds
+    });
+    (!counters.is_empty()).then_some(counters.as_slice())
+}
+
+/// User-space instructions retired so far on the worker threads (0 without counters).
+fn instructions() -> u64 {
+    instruction_counters().map_or(0, |fds| {
+        fds.iter()
+            .map(|&fd| {
+                let mut value = 0u64;
+                // SAFETY: reads one u64 counter value into `value`.
+                let n = unsafe { libc::read(fd, (&raw mut value).cast(), 8) };
+                if n == 8 { value } else { 0 }
+            })
+            .sum()
+    })
+}
+
+fn snapshot() -> (u64, u64, u64) {
     (
         ALLOCATIONS.load(Ordering::Relaxed),
         ALLOCATED_BYTES.load(Ordering::Relaxed),
+        instructions(),
     )
 }
 
@@ -241,23 +336,34 @@ fn status(value: u64) -> Message {
 struct Cost {
     allocations: f64,
     bytes: f64,
+    instructions: Option<f64>,
     wire_in: f64,
     wire_out: f64,
 }
 
-fn per(n: u64, before: (u64, u64), after: (u64, u64), wire_in: u64, wire_out: u64) -> Cost {
+fn per(
+    n: u64,
+    before: (u64, u64, u64),
+    after: (u64, u64, u64),
+    wire_in: u64,
+    wire_out: u64,
+) -> Cost {
     let n = n as f64;
     Cost {
         allocations: (after.0 - before.0) as f64 / n,
         bytes: (after.1 - before.1) as f64 / n,
+        instructions: instruction_counters().map(|_| (after.2 - before.2) as f64 / n),
         wire_in: wire_in as f64 / n,
         wire_out: wire_out as f64 / n,
     }
 }
 
 fn print(name: &str, cost: &Cost) {
+    let instructions = cost
+        .instructions
+        .map_or_else(|| "-".to_owned(), |i| format!("{i:.0}"));
     println!(
-        "{name:<34} {:>8.1} allocs {:>9.0} B allocated {:>6.0} B in {:>6.0} B out",
+        "{name:<34} {:>8.1} allocs {:>9.0} B allocated {instructions:>9} instr {:>6.0} B in {:>6.0} B out",
         cost.allocations, cost.bytes, cost.wire_in, cost.wire_out
     );
 }
@@ -490,6 +596,13 @@ fn what_a_message_costs_the_node_on_a_unix_link() {
     // Idle allocates nothing today (link status is updated in place, only when it changed); a
     // few allocations of slack keep the test calm on a busy machine.
     assert!(idle.0 <= 10, "idle: {} allocs in a second", idle.0);
+    // An idle link sleeps until its next deadline (the lease check once a second, the session's
+    // loss timeout): 1 to 4 wake-ups a second today, against 20 with the old fixed tick. Only
+    // voluntary switches are counted, so load does not raise it much; 10 keeps it calm.
+    assert!(
+        idle_wakeups <= 10,
+        "idle: {idle_wakeups} worker wake-ups in a second"
+    );
 
     drop((provider, watcher));
     runtime.block_on(gateway.shutdown());
