@@ -10,7 +10,7 @@ mod transport;
 
 use std::process::ExitCode;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     match handlers::run().await {
         Ok(()) => ExitCode::SUCCESS,

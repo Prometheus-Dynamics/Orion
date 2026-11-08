@@ -2,15 +2,21 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use orion_transport_common::{
     ConnectionTasks, DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES, DEFAULT_TRANSPORT_IO_TIMEOUT,
-    DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS, build_client_verifier,
-    install_rustls_crypto_provider, parse_cert_chain, parse_private_key, root_store_from_pem,
+    DEFAULT_TRANSPORT_MAX_CONCURRENT_CONNECTIONS,
 };
+#[cfg(feature = "tls")]
+use orion_transport_common::{
+    build_client_verifier, install_rustls_crypto_provider, parse_cert_chain, parse_private_key,
+    root_store_from_pem,
+};
+#[cfg(feature = "tls")]
 use rustls::{RootCertStore, ServerConfig};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::Semaphore,
 };
+#[cfg(feature = "tls")]
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 use crate::{TcpCodec, TcpCodecError, TcpFrame, TcpTransportError};
@@ -23,6 +29,7 @@ pub trait TcpFrameHandler: Send + Sync + 'static {
     fn handle_frame(&self, frame: TcpFrame) -> Result<TcpFrame, TcpTransportError>;
 }
 
+#[cfg(feature = "tls")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TcpClientTlsConfig {
     pub root_cert_pem: Vec<u8>,
@@ -31,6 +38,7 @@ pub struct TcpClientTlsConfig {
     pub server_name: String,
 }
 
+#[cfg(feature = "tls")]
 impl TcpClientTlsConfig {
     pub fn new(root_cert_pem: Vec<u8>, server_name: impl Into<String>) -> Self {
         Self {
@@ -52,6 +60,7 @@ impl TcpClientTlsConfig {
     }
 }
 
+#[cfg(feature = "tls")]
 #[derive(Clone)]
 pub enum TcpServerClientAuth {
     Disabled,
@@ -63,6 +72,7 @@ pub enum TcpServerClientAuth {
     },
 }
 
+#[cfg(feature = "tls")]
 #[derive(Clone)]
 pub struct TcpServerTlsConfig {
     pub cert_pem: Vec<u8>,
@@ -70,6 +80,7 @@ pub struct TcpServerTlsConfig {
     pub client_auth: TcpServerClientAuth,
 }
 
+#[cfg(feature = "tls")]
 impl TcpServerTlsConfig {
     pub fn new(cert_pem: Vec<u8>, key_pem: Vec<u8>) -> Self {
         Self {
@@ -178,6 +189,7 @@ impl TcpFrameServer {
         .await
     }
 
+    #[cfg(feature = "tls")]
     pub async fn serve_tls(
         self,
         listener: TcpListener,
@@ -210,6 +222,7 @@ impl TcpFrameServer {
         .await
     }
 
+    #[cfg(feature = "tls")]
     pub async fn serve_tls_with_shutdown<F>(
         self,
         listener: TcpListener,
@@ -322,6 +335,7 @@ where
 #[derive(Clone, Debug)]
 pub struct TcpFrameClient {
     addr: SocketAddr,
+    #[cfg(feature = "tls")]
     tls: Option<TcpClientTlsConfig>,
     max_payload_bytes: usize,
     io_timeout: Duration,
@@ -331,12 +345,14 @@ impl TcpFrameClient {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
+            #[cfg(feature = "tls")]
             tls: None,
             max_payload_bytes: DEFAULT_MAX_TRANSPORT_PAYLOAD_BYTES,
             io_timeout: DEFAULT_TRANSPORT_IO_TIMEOUT,
         }
     }
 
+    #[cfg(feature = "tls")]
     pub fn with_tls(addr: SocketAddr, tls: TcpClientTlsConfig) -> Self {
         Self {
             addr,
@@ -357,10 +373,11 @@ impl TcpFrameClient {
     }
 
     pub async fn send(&self, frame: TcpFrame) -> Result<TcpFrame, TcpTransportError> {
-        match &self.tls {
-            Some(tls) => self.send_tls(frame, tls).await,
-            None => self.send_plain(frame).await,
+        #[cfg(feature = "tls")]
+        if let Some(tls) = &self.tls {
+            return self.send_tls(frame, tls).await;
         }
+        self.send_plain(frame).await
     }
 
     async fn send_plain(&self, frame: TcpFrame) -> Result<TcpFrame, TcpTransportError> {
@@ -385,6 +402,7 @@ impl TcpFrameClient {
         codec.decode_frame(&response).map_err(Into::into)
     }
 
+    #[cfg(feature = "tls")]
     async fn send_tls(
         &self,
         frame: TcpFrame,
@@ -468,6 +486,7 @@ async fn handle_stream(
     Ok(())
 }
 
+#[cfg(feature = "tls")]
 async fn handle_tls_stream(
     mut stream: tokio_rustls::server::TlsStream<TcpStream>,
     handler: Arc<dyn TcpFrameHandler>,
@@ -504,6 +523,7 @@ async fn timed<T>(
     }
 }
 
+#[cfg(feature = "tls")]
 fn build_server_tls_config(tls: &TcpServerTlsConfig) -> Result<ServerConfig, TcpTransportError> {
     install_rustls_crypto_provider();
     let cert_chain = parse_cert_chain(&tls.cert_pem, "TCP TLS certificate PEM")
@@ -540,6 +560,7 @@ fn build_server_tls_config(tls: &TcpServerTlsConfig) -> Result<ServerConfig, Tcp
         .map_err(|err| TcpTransportError::Tls(err.to_string()))
 }
 
+#[cfg(feature = "tls")]
 fn build_client_tls_config(
     tls: &TcpClientTlsConfig,
 ) -> Result<rustls::ClientConfig, TcpTransportError> {

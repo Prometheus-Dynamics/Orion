@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- `orion-transport-tcp` links rustls only with its new `tls` feature; the TLS types and
+  `serve_tls*` / `with_tls` are `tls` items. The facade's `transport-tcp` is plaintext, and the
+  new `transport-tcp-tls` adds TLS (consumers of the TCP TLS types switch to it). `orion-client`
+  builds `orion-runtime` only with `ipc` and `tracing` only with `remote`. `orionctl` runs on a
+  current-thread runtime. See docs/design/feature-gating.md, "Second round".
+
 - Stream batches from link devices allocate less: decoded into the session's recycled chunk
   lists (data buffers reused), the stream id shared from the declaration
   (`HostEvent::StreamPublish::id` is now `Arc<str>`; hand chunk lists back with

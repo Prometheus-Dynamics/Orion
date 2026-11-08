@@ -224,10 +224,13 @@ pub mod transport {
 
     #[cfg(feature = "transport-tcp")]
     pub mod tcp {
+        #[cfg(feature = "transport-tcp-tls")]
         pub use orion_transport_tcp::{
-            TcpClientTlsConfig, TcpCodec, TcpCodecError, TcpEndpoint, TcpFrame, TcpFrameClient,
-            TcpFrameHandler, TcpFrameServer, TcpServerClientAuth, TcpServerTlsConfig,
-            TcpStreamTransport, TcpTransport, TcpTransportError,
+            TcpClientTlsConfig, TcpServerClientAuth, TcpServerTlsConfig,
+        };
+        pub use orion_transport_tcp::{
+            TcpCodec, TcpCodecError, TcpEndpoint, TcpFrame, TcpFrameClient, TcpFrameHandler,
+            TcpFrameServer, TcpStreamTransport, TcpTransport, TcpTransportError,
         };
     }
 }

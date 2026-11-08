@@ -7,7 +7,7 @@ The rule:
 - Links between workspace crates use `default-features = false` and enable only what they use.
 
 This note is the audit against that rule (2026-11-07): the state of every crate, the cuts made,
-the sizes before and after, and what is left.
+the sizes before and after, and a second round of cuts.
 
 ## Sizes
 
@@ -47,9 +47,9 @@ Sizes are in bytes. Two kinds of saving are in this table:
 | orion-transport-common | `[]` | `tls` (rustls with ring, rustls-pemfile) | changed |
 | orion-transport-http | `[]` (protocol types) | `client` (httparse, rustls, tokio-rustls, native roots), `server` (axum, hyper, tokio-rustls), `transport` (both) | changed |
 | orion-transport-ipc | — | — | tokio with what IPC needs |
-| orion-transport-tcp | — | — | always links rustls. See "Left" |
+| orion-transport-tcp | `[]` (plaintext) | `tls` (rustls, tokio-rustls, orion-transport-common/tls) | changed |
 | orion-transport-quic | — | `insecure-self-signed` (rcgen) | quinn and rustls are the transport itself |
-| orion-client | `ipc` | `remote` (ed25519, auth enrollment, HTTP protocol types), `discovery` (+mdns-sd) | see "Left" |
+| orion-client | `ipc` (+orion-runtime) | `remote` (ed25519, auth enrollment, HTTP protocol types, tracing), `discovery` (+mdns-sd) | changed |
 | orion-nt4 | `client`, `server` | — | linked by no workspace binary; both halves need the same dependencies |
 | orion (facade) | the model crates | every transport, `client`, `remote`, `service`, `macros`, `cluster` | compliant |
 | orion-node | `[]` (IPC only) | `transport-http`, `peer-tcp`, `transport-tcp`, `transport-quic`, `full`, `link-gateway`, `discovery-mdns`, `systemd-notify`, `alloc-mimalloc`, `alloc-jemalloc` | changed |
@@ -59,14 +59,22 @@ Sizes are in bytes. Two kinds of saving are in this table:
 No crate uses a feature in `cfg` that it does not declare. The declared features all have users,
 apart from umbrellas (`transport`, `full`).
 
-## Left, ranked by what they would save
+## Second round (2026-11-07)
 
-| Cut | Scope | Interfaces | Risk |
-| --- | --- | --- | --- |
-| `orion-transport-tcp`: rustls optional behind a `tls` feature (the plaintext path exists) | Cargo features; cfg on about 4 sites in `socket.rs` | a new feature; the node's `transport-tcp` asks for `tls` | low |
-| `orion-client`: `orion-runtime` optional under `ipc`, `tracing` under `remote`, tokio `fs` to dev-dependencies | Cargo features only | none for `orionctl` (it uses `ipc`); trims remote-only consumers | low |
-| `orionctl` on a current-thread runtime | one attribute, plus `rt-multi-thread` dropped from `orion-client` and `orion-transport-ipc` where they do not need it | none | low; feature unification keeps it on until all three change |
-| `default-features = false` on the workspace links to `orion-node`, `orion-nt4` and `liborion-rs` | 3 lines, plus explicit features on the dev-dependencies | none | low |
+The four cuts that were left are made:
+
+| Cut | Where | Who opts in |
+| --- | --- | --- |
+| `orion-transport-tcp`: rustls and tokio-rustls behind a new `tls` feature; without it the crate carries plaintext frames only (`TcpClientTlsConfig`, `TcpServerTlsConfig`, `TcpServerClientAuth`, `serve_tls*`, `with_tls` are `tls` items) | `crates/transport-tcp` | the facade's new `transport-tcp-tls` (`transport-tcp` alone is plaintext); `orion-node`, which asks for `transport-tcp-tls` and, with its `transport-tcp` feature, `orion-transport-tcp/tls` |
+| `orion-client`: `orion-runtime` only with `ipc`, `tracing` only with `remote`, tokio `fs` only in dev-dependencies | `crates/client/Cargo.toml` | nobody: the modules that use them are already behind those features |
+| `orionctl` on a current-thread runtime; `orion-client`, `orion-transport-ipc` and `orionctl` ask tokio for `rt`, not `rt-multi-thread` (the IPC benchmark asks for it as a dev-dependency) | `crates/orionctl/src/main.rs`, three `Cargo.toml` | nobody. `orionctl`, in its default and IPC-only builds, no longer links tokio's multi-thread scheduler |
+| `default-features = false` on the workspace links to `orion-node`, `orion-nt4` and `liborion-rs` | workspace `Cargo.toml` | `orion-node`'s tests ask for `liborion-rs/static`; `orion-node`'s defaults were already `[]` and nothing in the workspace links `orion-nt4` |
+
+Sizes after the second round, same build: `orionctl` default 2,145,776 (from 2,146,912),
+`orionctl --no-default-features` 2,069,808, `orion-node` default 3,336,264 (from 3,349,848). The
+binaries barely change because the linker already dropped the unused code. What the cuts remove
+is dependencies: a plaintext `orion-transport-tcp` consumer no longer builds or links rustls and
+ring, and a remote-only `orion-client` consumer no longer builds `orion-runtime`.
 
 The binaries of the hardware layer and the fleet tool depend on these crates from another
 repository, so their before and after sizes are measured there.

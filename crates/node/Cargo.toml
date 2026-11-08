@@ -34,7 +34,7 @@ transport-http = ["orion-transport-http/transport", "orion-transport-common/tls"
 # signed requests and responses. Needs only tokio, so `--no-default-features --features peer-tcp`
 # gives an IPC-only appliance build that can still cluster. See docs/peer-sync.md.
 peer-tcp = []
-transport-tcp = ["dep:orion-transport-tcp"]
+transport-tcp = ["dep:orion-transport-tcp", "orion-transport-tcp/tls"]
 transport-quic = ["dep:orion-transport-quic"]
 # Opt-in global allocators for the `orion-node` binary only (the library never sets one). Both are
 # off by default so the binary uses the platform allocator (glibc malloc on Linux). They are meant
@@ -88,7 +88,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "cargo_bench_support"] }
-orion = { workspace = true, features = ["auth", "client", "runtime", "macros", "transport-http", "transport-tcp", "transport-quic", "transport-ipc"] }
+orion = { workspace = true, features = ["auth", "client", "runtime", "macros", "transport-http", "transport-tcp-tls", "transport-quic", "transport-ipc"] }
 # Remote operator tests (src/tests/cluster/remote_operator*.rs) drive nodes with the real client.
 orion-client = { workspace = true, features = ["ipc", "remote"] }
 orion-macros.workspace = true
@@ -99,7 +99,7 @@ reqwest.workspace = true
 orion-link = { workspace = true, features = ["std", "actions", "streams"] }
 # liborion's client against a real link (src/link_gateway/tests/capi.rs).
 orion-capi.workspace = true
-liborion-rs.workspace = true
+liborion-rs = { workspace = true, features = ["static"] }
 abi.workspace = true
 
 [[example]]

@@ -42,7 +42,7 @@ orion-transport-http.workspace = true
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 serde_yaml = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
 toml = { workspace = true, optional = true }
 
 [dev-dependencies]

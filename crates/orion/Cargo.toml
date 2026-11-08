@@ -48,6 +48,8 @@ cluster = ["dep:orion-cluster", "control-plane", "core"]
 runtime = ["dep:orion-runtime", "control-plane", "core"]
 transport-http = ["dep:orion-transport-http", "orion-transport-http/transport", "control-plane", "std"]
 transport-tcp = ["dep:orion-transport-tcp", "data-plane", "std"]
+# TLS and mTLS for the TCP transport (rustls); `transport-tcp` alone carries plaintext frames.
+transport-tcp-tls = ["transport-tcp", "orion-transport-tcp/tls"]
 transport-quic = ["dep:orion-transport-quic", "data-plane", "std"]
 transport-ipc = ["dep:orion-transport-ipc", "control-plane", "data-plane", "std"]
 client = [

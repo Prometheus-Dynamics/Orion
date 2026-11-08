@@ -720,9 +720,11 @@ interfaces and risk. Slices, in dependency order:
       `[]` with a `full` feature (the old defaults), and the node's log filter is `Targets`
       (no regex). Default builds: orion-node 6,425,336 to 3,349,848 B, orionctl 4,372,032 to
       2,146,912 B; full builds 6,052,528 and 4,339,384 B.
-- [ ] Remaining gating cuts (docs/design/feature-gating.md, "Left"): rustls optional in
-      `orion-transport-tcp`, `orion-client` dependency trims, `orionctl` on a current-thread
-      runtime, `default-features = false` on three workspace links.
+- [x] Remaining gating cuts (docs/design/feature-gating.md, "Second round"): rustls behind
+      `tls` in `orion-transport-tcp` (facade `transport-tcp-tls`), `orion-client` dependency
+      trims, `orionctl` on a current-thread runtime, `default-features = false` on three
+      workspace links. Binaries barely move (the linker already dropped the code); consumers
+      drop rustls, ring and `orion-runtime` from their builds.
 - [ ] Per-message allocations to 0 on the link and gateway path. Status update, no watcher:
       8 to 0 (pooled read/write buffers, recycled decode batches, in-place store refresh; the
       cost test gates it below 1). Left, in the same table in docs/performance-concurrency.md:

@@ -41,7 +41,7 @@ authors = ["Mathias Petersen"]
 # The hardware repository's ABI crate 1.0 (frozen): the shared C-ABI vocabulary of liborion.
 abi = { package = "lemnos-abi", git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "abc9908b83065ba784f31c47996925afaf1ff6a2", default-features = false, features = ["std"] }
 orion-capi = { path = "crates/capi", version = "1.0.1-dev" }
-liborion-rs = { path = "crates/liborion-rs", version = "1.0.1-dev" }
+liborion-rs = { path = "crates/liborion-rs", version = "1.0.1-dev", default-features = false }
 # The model crates (core, data-plane, control-plane, auth, runtime, cluster) support `no_std` +
 # `alloc`; their default `std` feature is off here, so every std consumer opts in explicitly with
 # `features = ["std"]`.
@@ -54,8 +54,8 @@ orion-core = { path = "crates/core", version = "1.0.1-dev", default-features = f
 orion-data-plane = { path = "crates/data-plane", version = "1.0.1-dev", default-features = false }
 orion-link = { path = "crates/link", version = "1.0.1-dev", default-features = false }
 orion-macros = { path = "crates/macros", version = "1.0.1-dev" }
-orion-node = { path = "crates/node", version = "1.0.1-dev" }
-orion-nt4 = { path = "crates/nt4", version = "1.0.1-dev" }
+orion-node = { path = "crates/node", version = "1.0.1-dev", default-features = false }
+orion-nt4 = { path = "crates/nt4", version = "1.0.1-dev", default-features = false }
 orion = { path = "crates/orion", version = "1.0.1-dev", default-features = false }
 orion-runtime = { path = "crates/runtime", version = "1.0.1-dev", default-features = false }
 orion-service = { path = "crates/service", version = "1.0.1-dev" }

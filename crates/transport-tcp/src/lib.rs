@@ -11,10 +11,9 @@ pub use endpoint::TcpEndpoint;
 pub use error::TcpTransportError;
 pub use frame::TcpFrame;
 pub use memory::TcpTransport;
-pub use socket::{
-    TcpClientTlsConfig, TcpFrameClient, TcpFrameHandler, TcpFrameServer, TcpServerClientAuth,
-    TcpServerTlsConfig,
-};
+#[cfg(feature = "tls")]
+pub use socket::{TcpClientTlsConfig, TcpServerClientAuth, TcpServerTlsConfig};
+pub use socket::{TcpFrameClient, TcpFrameHandler, TcpFrameServer};
 pub use transport::TcpStreamTransport;
 
 #[cfg(test)]
@@ -414,6 +413,7 @@ mod tests {
         task.abort();
     }
 
+    #[cfg(feature = "tls")]
     #[tokio::test]
     async fn real_tcp_transport_roundtrips_frames_over_verified_mtls() {
         use rcgen::generate_simple_self_signed;
@@ -466,6 +466,7 @@ mod tests {
         task.abort();
     }
 
+    #[cfg(feature = "tls")]
     #[tokio::test]
     async fn real_tcp_transport_rejects_untrusted_tls_clients_when_mtls_is_required() {
         use rcgen::generate_simple_self_signed;

@@ -18,7 +18,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["ipc"]
-ipc = ["dep:orion-transport-ipc"]
+ipc = ["dep:orion-transport-ipc", "dep:orion-runtime"]
 # Remote operator client (`orion_client::remote`, docs/remote-operator.md): an ed25519 operator
 # identity, enrollment, and signed `orion+tcp` requests to nodes, without running orion-node.
 # Pulls in no HTTP stack (only the protocol layer of orion-transport-http) and no node internals.
@@ -30,6 +30,7 @@ remote = [
     "dep:orion-transport-http",
     "dep:orion-transport-ipc",
     "dep:getrandom",
+    "dep:tracing",
     "orion-auth/enrollment",
 ]
 # Browse `_orion._tcp` nodes with mDNS (`orion_client::remote::discovery`).
@@ -41,14 +42,17 @@ mdns-sd = { workspace = true, optional = true }
 orion-auth = { workspace = true, features = ["std"], optional = true }
 orion-core = { workspace = true, features = ["std"] }
 orion-control-plane = { workspace = true, features = ["std"] }
-orion-runtime = { workspace = true, features = ["std"] }
+orion-runtime = { workspace = true, features = ["std"], optional = true }
 orion-transport-http = { workspace = true, optional = true }
 orion-transport-ipc = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "fs", "sync", "time"] }
-tracing = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "net", "sync", "time"] }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["fs"] }
 
 # Only the local IPC examples (unix, feature `ipc`) use the HTTP transport. Keeping it off other
 # targets lets the `remote` example build on Windows without a C toolchain for ring.
