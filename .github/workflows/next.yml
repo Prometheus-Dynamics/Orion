@@ -1,0 +1,28 @@
+name: Next
+
+on:
+  push:
+    branches:
+      - next
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE-*"
+  pull_request:
+    branches:
+      - next
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # rust-toolchain.toml selects the toolchain and its components.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: ./scripts/gate.sh

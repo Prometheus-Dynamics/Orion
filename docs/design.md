@@ -82,22 +82,30 @@ unless someone off the board asked for them.
 ## Repository layout
 
 ```text
-wire/        kinds, frames, bodies, revision. no_std. Every carrier uses this
-device/      microcontroller side. no_std, size gated
-ring/        the shared-memory ring and doorbell
-check/       the one check and Checked<T>
-client/      one client, any address: local, network, link, WebSocket
-comm/        comm core: connections, topic broker, hello, discovery, time, access
-node/        records, peer sync, workloads, actions, files
-gateways/    nt4/
-daedalus/    plugin with topic source and sink nodes, loaded into daedalusd
-capi/        small C surface over client
-web/         TypeScript client for browsers
-orion/       the one binary: comm, node, ctl
-docs/  scripts/  testing/  examples/
+crates/
+  core/      types, wire, msg-*, check, supervise, measure, fdpass, config, values, ring, ring-*
+  device/    microcontroller side: core, topics, actions, firmware. no_std, size gated
+  client/    connect, topics, buffers, records, actions, files, executor, provider, orion, capi, ctl
+  comm/      server, unix, tcp, ws, link-*, broker*, topic-peers, outbound, keys, hello,
+             discovery, time, self-status, device-*, ssh*, recovery, app
+  node/      store, persist, workloads, workload-*, executors, sync, placement, actions*, files*,
+             resources, audit, app, assembly
+  gateways/  nt4, nt4-gateway, nt4-client-gateway
+  bridges/   daedalus
+  bins/      orion, orion-recovery
+  testing/   wire-vectors, ring-model, ring-bench, drills
+web/         TypeScript client and the browser video example
+examples/    mcu-template, stm32g4-device, sample-executor. Their own workspaces
+docs/  scripts/  packaging/  testing/board-runs/
 ```
 
-`comm` and `node` never import each other. They only share `wire`. Everything is behind features.
+The workspace is one glob, `crates/*/*`, so adding a crate never edits the root. Small crates are
+what let many sessions work at once without conflicts. Fat LTO means they cost nothing in the
+binary.
+
+- `crates/comm/*` and `crates/node/*` never depend on each other. They share `crates/core/*`.
+- `crates/core/*` and `crates/device/*` depend on nothing above them.
+- Everything is behind features.
 
 ## Two programs, five forms
 
@@ -186,10 +194,11 @@ A camera is a topic like any other. There is no second path.
 
 What a buffer topic adds to a value ring:
 
-- A per-buffer counter in shared memory, so a buffer stays held until every reader has dropped it.
-  This is the one new thing in the ring.
-- Limits on a subscription (frames held, how long), applied by the publisher, which sees the
-  counters.
+- Hold marks: each reader marks the buffers it holds in a page only that reader writes. A buffer is
+  free when no reader marks it, and a dead reader's marks go away with its page. This is the one
+  new thing in the ring.
+- Limits on a subscription (frames held, how long), applied by the publisher, which sees the marks.
+  The publisher never waits for buffers. It drops frames instead.
 - One entry can name several buffers (image pyramid levels).
 
 Measured on a CM5 at 120 Hz: passing fds on every frame 34.5 µs; a ring slot and wake 18.1 µs; a
@@ -275,6 +284,82 @@ today's heap is the first step.
 | Threads | 9 | About 4 |
 | Binary on disk | 3.8 MB, plus orionctl | About 5.5 MB, one file, with SSH replacing sshd and OpenSSL |
 
+## Shared interfaces
+
+Everyone builds against these. The named crates are the source of truth, and they change only
+through an A-series or B-series PR.
+
+The kind table, by range, with numbers assigned in `crates/core/wire` (A4):
+
+| Range | Concept |
+| --- | --- |
+| `0x00` to `0x0F` | Session: Hello, Welcome, Reject, Ping, Pong, Refusal |
+| `0x10` to `0x1F` | Records: Node, Resource, Lease; Put, Get, Watch, Changed |
+| `0x20` to `0x2F` | Files |
+| `0x30` to `0x3F` | Actions |
+| `0x40` to `0x4F` | Topics |
+| `0x50` to `0x5F` | Workloads and executors |
+| `0x60` to `0x6F` | Peers and trust |
+| `0x70` to `0x7F` | Time |
+
+Roles at hello: client, provider, executor, node, peer, device.
+
+```rust
+// crates/core/check. Only `Check` can make a Checked<T>.
+pub enum Principal { Anonymous, Local { uid: u32, gid: u32 }, Operator(KeyId), Peer(NodeId), Device(DeviceId) }
+pub struct Checked<T> { /* private */ }
+impl<T> Checked<T> { pub fn who(&self) -> &Principal; pub fn get(&self) -> &T; pub fn into_inner(self) -> T; }
+impl Check {
+    pub fn decide<T: Request>(&self, who: &Principal, request: T, policy: &Policy) -> Result<Checked<T>, Refused>;
+}
+
+// crates/comm/server. Handlers take Checked requests, so none can be reached around the check.
+pub trait Carrier { /* accept sessions; read and write frames; pass descriptors if it can */ }
+pub trait Service {
+    fn kinds(&self) -> KindRange;
+    async fn handle(&self, request: Checked<Incoming<'_>>, session: &mut Session) -> Result<(), Refused>;
+}
+
+// crates/core/ring. One writer, many readers. Neither call makes a system call.
+impl Writer {
+    pub fn publish(&mut self, field: FieldId, time: FrameTime, flags: Flags, payload: &[u8]);
+    pub fn subscribers(&self) -> u32;
+}
+impl Reader {
+    pub fn next(&mut self) -> Next<'_>;                     // Sample, Empty, or Skipped(count)
+    pub fn latest(&self, field: FieldId) -> Option<Sample<'_>>;
+}
+// crates/core/ring-time
+pub fn at_or_before(reader: &Reader, field: FieldId, time: FrameTime) -> Lookup<'_>;   // Hit, Lagged, Missing
+
+// crates/core/ring-buffers and ring-holds
+impl BufferWriter { pub fn publish(&mut self, buffers: &[BufferIndex], time: FrameTime, meta: &[u8]) -> Result<(), Dropped>; }
+impl BufferReader { pub fn next(&mut self) -> Option<Held<'_>>; }   // dropping Held clears the mark
+
+// crates/client/orion. The same calls on any address.
+impl Orion {
+    pub fn connect(address: &Address, name: &str) -> Result<Self, ClientError>;
+    pub fn declare(&mut self, topic: TopicDecl) -> Result<Publisher, ClientError>;
+    pub fn subscribe(&mut self, topic: &TopicRef) -> Result<Subscriber, ClientError>;
+    pub fn declare_buffers(&mut self, topic: TopicDecl, pool: BufferPool) -> Result<BufferPublisher, ClientError>;
+    pub fn subscribe_buffers(&mut self, topic: &TopicRef, request: &[u8]) -> Result<BufferSubscriber, ClientError>;
+    pub fn run(&mut self, action: ActionCall) -> Result<ActionHandle, ClientError>;
+    pub fn register_action(&mut self, decl: ActionDecl, policy: Policy) -> Result<ActionRegistration, ClientError>;
+}
+
+// crates/client/executor. What daedalusd implements.
+pub trait Executor {
+    fn kinds(&self) -> &[WorkloadKind];
+    fn start(&mut self, name: &WorkloadName, spec: &[u8]) -> Result<(), ExecError>;
+    fn stop(&mut self, name: &WorkloadName);
+    fn kill(&mut self, name: &WorkloadName);
+    fn inventory(&self) -> Vec<(WorkloadName, WorkloadState)>;
+}
+```
+
+Non-negotiable properties: 0 allocations on steady-state publish, read and request paths; bounded
+queues everywhere; no timer on a data path; nothing on the wire names a kind of device.
+
 ## What comes from dev
 
 | | What |
@@ -288,8 +373,7 @@ today's heap is the first step.
 
 - The ring is the riskiest part. Readers run against memory that can change underneath them. It gets
   fuzzing and a concurrency model check before anything uses it.
-- Buffer counters are new shared-memory code on the camera path. The 18 µs was measured without
-  them.
+- Hold marks are new shared-memory code on the camera path. The 18 µs was measured without them.
 - One async thread per process: a big SSH copy could delay a topic forward. Measure on a CM5.
   More threads are a plain knob.
 - Browser video on plain HTTP: WebCodecs needs a secure page. JPEG chunks or H.264 through Media
@@ -331,6 +415,22 @@ Orion's part is built regardless: the open action list, the check, progress and 
   topic or a timer all work.
 - **Pinning a graph to a core.** A workload's placement has room for a CPU set.
 
+## The PR list
+
+102 PRs in 9 groups, in [`TODO.md`](../TODO.md), with one brief each in [`docs/prs/`](prs/). Waves
+come from what each PR needs. A PR is ready when everything it needs has merged, and
+`scripts/pr-status.py` lists those.
+
+- **A. Foundation.** 18 PRs. Types, the wire, the check and the tools everyone builds on. A1 to A5 go one at a time, then the group fans out.
+- **B. Rings.** 9 PRs. The shared-memory ring that values and frames travel through. The riskiest code in the rebuild, so it is proven alone first.
+- **C. Comm core.** 15 PRs. The always-up program: connections, the broker, hello, discovery, time and links.
+- **D. Client.** 11 PRs. One client with the same calls on any address, plus the C surface and orionctl.
+- **E. Node logic.** 18 PRs. Records, peer sync, the workload tracker, actions and files.
+- **F. Leaving the board.** 8 PRs. Other boards, browsers and NT4.
+- **G. Access and recovery.** 6 PRs. SSH served by Orion, the recovery shell and the recovery build.
+- **H. Microcontrollers.** 8 PRs. The device side on the same wire, with its size gate.
+- **I. Finish.** 9 PRs. One binary, packaging, the Daedalus bridge, failure drills and the hardware proof.
+
 ## Proof on hardware
 
 All on a CM5.
@@ -338,7 +438,7 @@ All on a CM5.
 | Test | Passes when |
 | --- | --- |
 | Publish with a subscriber awake | No system call from the publisher |
-| Frame topic at 120 fps, hold counters included | About 18 µs per frame, Orion using no CPU per frame |
+| Frame topic at 120 fps, hold marks included | About 18 µs per frame, Orion using no CPU per frame |
 | Graph to graph, nobody remote | Orion idle |
 | Memory under the full robot setup | 2.5 MB data and 2 MB code, both parts together |
 | Kill each part while running | Behaves as in the table above |

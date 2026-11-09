@@ -1,3 +1,5 @@
+# Ignored until I9, so parallel PRs cannot conflict on it.
+Cargo.lock
 target/
 
 # Python cache artifacts

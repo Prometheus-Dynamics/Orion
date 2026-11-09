@@ -1,32 +1,163 @@
 # TODO
 
-Where the `next` rebuild stands. The design is [`docs/design.md`](docs/design.md).
+Every planned PR into `next`. `python3 scripts/pr-status.py` shows the live state: a merged PR is one whose `pr/<id>` branch merged. Briefs are in [`docs/prs/`](docs/prs/). The design is [`docs/design.md`](docs/design.md).
 
-## Now
+## A. Foundation
 
-- [ ] Assemble the PR list: briefs under `docs/prs/`, a gate script and a status script, in the form
-      the Lemnos `next` branch uses, sized so one session can take one.
+Types, the wire, the check and the tools everyone builds on. A1 to A5 go one at a time, then the group fans out.
 
-## Planned work, in groups
+- [x] [A1](docs/prs/A1.md) Clean slate and skeleton (wave 1; needs nothing)
+- [ ] [A2](docs/prs/A2.md) Boundary checks in the gate (wave 2; needs A1)
+- [ ] [A3](docs/prs/A3.md) orion-types: names, ids, time (wave 2; needs A1)
+- [ ] [A4](docs/prs/A4.md) Wire framing and the kind table (wave 3; needs A3)
+- [ ] [A5](docs/prs/A5.md) Session kinds: hello, roles, refusal (wave 4; needs A4)
+- [ ] [A6](docs/prs/A6.md) Bodies: records (wave 5; needs A5)
+- [ ] [A7](docs/prs/A7.md) Bodies: topics (wave 5; needs A5)
+- [ ] [A8](docs/prs/A8.md) Bodies: actions (wave 5; needs A5)
+- [ ] [A9](docs/prs/A9.md) Bodies: workloads and executors (wave 5; needs A5)
+- [ ] [A10](docs/prs/A10.md) Bodies: files (wave 5; needs A5)
+- [ ] [A11](docs/prs/A11.md) Bodies: peers, trust, time (wave 5; needs A5)
+- [ ] [A12](docs/prs/A12.md) Recorded bytes and fuzzing (wave 6; needs A6, A7, A8, A9, A10, A11)
+- [ ] [A13](docs/prs/A13.md) The one check (wave 3; needs A3)
+- [ ] [A14](docs/prs/A14.md) Failure rule helper (wave 3; needs A3)
+- [ ] [A15](docs/prs/A15.md) Allocation and cost counters (wave 2; needs A1)
+- [ ] [A16](docs/prs/A16.md) File-descriptor passing (wave 2; needs A1)
+- [ ] [A17](docs/prs/A17.md) Config and the security switch (wave 3; needs A3)
+- [ ] [A18](docs/prs/A18.md) Profile dev's memory (wave 1; needs nothing; board run)
 
-The PR list breaks these down.
+## B. Rings
 
-1. Wire and client.
-2. Comm core: connections, the one check, rings, buffer topics, hello, discovery, time.
-3. Node logic: records, peer sync, workloads, actions, files.
-4. Gateways and the browser path: WebSocket, NT4, the TypeScript client.
-5. Access and recovery: SSH, sftp, the recovery shell, the recovery build.
-6. Microcontroller side, alongside the others, with its size gate.
+The shared-memory ring that values and frames travel through. The riskiest code in the rebuild, so it is proven alone first.
+
+- [ ] [B1](docs/prs/B1.md) Ring format, writer and reader (wave 3; needs A3, A15)
+- [ ] [B2](docs/prs/B2.md) Ring concurrency proof (wave 4; needs B1)
+- [ ] [B3](docs/prs/B3.md) Doorbells (wave 4; needs B1, A16)
+- [ ] [B4](docs/prs/B4.md) Latest values and expiry (wave 4; needs B1)
+- [ ] [B5](docs/prs/B5.md) Lookup by frame time (wave 5; needs B1, B3)
+- [ ] [B6](docs/prs/B6.md) Typed and structured values (wave 6; needs A7)
+- [ ] [B7](docs/prs/B7.md) Buffer topics: pool and entries (wave 4; needs B1, A16)
+- [ ] [B8](docs/prs/B8.md) Hold marks and limits (wave 5; needs B7, B3)
+- [ ] [B9](docs/prs/B9.md) Ring costs on a CM5 (wave 6; needs B3, B5, B8, A15; board run)
+
+## C. Comm core
+
+The always-up program: connections, the broker, hello, discovery, time and links.
+
+- [ ] [C1](docs/prs/C1.md) Comm server: sessions and dispatch (wave 5; needs A5, A13, A14, A17)
+- [ ] [C2](docs/prs/C2.md) Same-board carrier (wave 6; needs C1, A16)
+- [ ] [C3](docs/prs/C3.md) Topic broker (wave 6; needs C1, A7, B3, B4)
+- [ ] [C4](docs/prs/C4.md) Publishing on behalf, and demand (wave 7; needs C3)
+- [ ] [C5](docs/prs/C5.md) Buffer topics in the broker (wave 7; needs C3, B8)
+- [ ] [C6](docs/prs/C6.md) Network carrier: orion+tcp (wave 7; needs C1, C7)
+- [ ] [C7](docs/prs/C7.md) Keys, enrollment, operators (wave 6; needs A11, A13)
+- [ ] [C8](docs/prs/C8.md) Hello document (wave 7; needs C1, C7)
+- [ ] [C9](docs/prs/C9.md) Discovery (wave 8; needs C6, C7)
+- [ ] [C10](docs/prs/C10.md) Time sync (wave 7; needs C1, C3)
+- [ ] [C11](docs/prs/C11.md) Serial link (wave 6; needs C1)
+- [ ] [C12](docs/prs/C12.md) CAN link (wave 7; needs C11)
+- [ ] [C13](docs/prs/C13.md) USB link (wave 7; needs C11; board run)
+- [ ] [C14](docs/prs/C14.md) Host facts and Orion's own state as topics (wave 7; needs C3)
+- [ ] [C15](docs/prs/C15.md) Comm assembly (wave 8; needs C2, C3, C4, C5, C6, C8, C10, C14)
+
+## D. Client
+
+One client with the same calls on any address, plus the C surface and orionctl.
+
+- [ ] [D1](docs/prs/D1.md) Client: connect to any address (wave 7; needs A5, C2)
+- [ ] [D2](docs/prs/D2.md) Client: topics (wave 8; needs D1, B3, B4, B5, B6, C3)
+- [ ] [D3](docs/prs/D3.md) Client: buffer topics (wave 9; needs D2, B8, C5)
+- [ ] [D4](docs/prs/D4.md) Client: records (wave 8; needs D1, A6)
+- [ ] [D5](docs/prs/D5.md) Client: actions (wave 8; needs D1, A8)
+- [ ] [D6](docs/prs/D6.md) Client: files (wave 8; needs D1, A10)
+- [ ] [D7](docs/prs/D7.md) Client: executor role (wave 8; needs D1, A9)
+- [ ] [D8](docs/prs/D8.md) Client: provider role (wave 9; needs D4, D5)
+- [ ] [D9](docs/prs/D9.md) The orion facade (wave 10; needs D2, D3, D4, D5, D6, D7, D8)
+- [ ] [D10](docs/prs/D10.md) C surface (wave 11; needs D9)
+- [ ] [D11](docs/prs/D11.md) orionctl (wave 11; needs D9)
+
+## E. Node logic
+
+Records, peer sync, the workload tracker, actions and files.
+
+- [ ] [E1](docs/prs/E1.md) Record store (wave 6; needs A6)
+- [ ] [E2](docs/prs/E2.md) Persistence (wave 7; needs E1)
+- [ ] [E3](docs/prs/E3.md) Node as the comm core's first client (wave 8; needs E2, D1)
+- [ ] [E4](docs/prs/E4.md) Workload tracker (wave 7; needs E1, A9)
+- [ ] [E5](docs/prs/E5.md) Executors: start, stop, adopt (wave 10; needs E4, D7, I3)
+- [ ] [E6](docs/prs/E6.md) Stopping and force remove (wave 11; needs E5)
+- [ ] [E7](docs/prs/E7.md) Files before start (wave 11; needs E5, E13)
+- [ ] [E8](docs/prs/E8.md) Peer sync (wave 8; needs E1, A11, C6)
+- [ ] [E9](docs/prs/E9.md) Placement and leases (wave 9; needs E8, E4)
+- [ ] [E10](docs/prs/E10.md) Actions: the open list (wave 9; needs E3, A8, A13)
+- [ ] [E11](docs/prs/E11.md) Forwarded actions (wave 10; needs E10, E8)
+- [ ] [E12](docs/prs/E12.md) Detached actions (wave 10; needs E10)
+- [ ] [E13](docs/prs/E13.md) Files: store and receive (wave 9; needs E3, A10)
+- [ ] [E14](docs/prs/E14.md) Files: pull by URL (wave 10; needs E13)
+- [ ] [E15](docs/prs/E15.md) Files: straight to the destination (wave 10; needs E13)
+- [ ] [E16](docs/prs/E16.md) Resources (wave 10; needs E1, D8)
+- [ ] [E17](docs/prs/E17.md) Audit log (wave 9; needs E3)
+- [ ] [E18](docs/prs/E18.md) Node assembly (wave 12; needs E5, E6, E7, E9, E11, E12, E14, E15, E16, E17)
+
+## F. Leaving the board
+
+Other boards, browsers and NT4.
+
+- [ ] [F1](docs/prs/F1.md) Topics across boards (wave 8; needs C3, C6)
+- [ ] [F2](docs/prs/F2.md) Outbound limits and the drop rule (wave 7; needs C3)
+- [ ] [F3](docs/prs/F3.md) WebSocket carrier (wave 8; needs C1, F2)
+- [ ] [F4](docs/prs/F4.md) TypeScript client (wave 9; needs F3)
+- [ ] [F5](docs/prs/F5.md) Browser video example (wave 10; needs F4)
+- [ ] [F6](docs/prs/F6.md) NT4 protocol crate (wave 2; needs A1)
+- [ ] [F7](docs/prs/F7.md) NT4 gateway (wave 9; needs F6, C3, F3)
+- [ ] [F8](docs/prs/F8.md) NT4 gateway: client form (wave 10; needs F7; board run)
+
+## G. Access and recovery
+
+SSH served by Orion, the recovery shell and the recovery build.
+
+- [ ] [G1](docs/prs/G1.md) SSH server (wave 7; needs C1, C7)
+- [ ] [G2](docs/prs/G2.md) sftp and scp (wave 8; needs G1)
+- [ ] [G3](docs/prs/G3.md) Port forwarding (wave 8; needs G1)
+- [ ] [G4](docs/prs/G4.md) Pre-auth sandbox (wave 8; needs G1)
+- [ ] [G5](docs/prs/G5.md) Recovery shell (wave 8; needs G1)
+- [ ] [G6](docs/prs/G6.md) Recovery build (wave 9; needs G5, C15, C13; board run)
+
+## H. Microcontrollers
+
+The device side on the same wire, with its size gate.
+
+- [ ] [H1](docs/prs/H1.md) Device core (wave 5; needs A5)
+- [ ] [H2](docs/prs/H2.md) Device topics (wave 6; needs H1, A7)
+- [ ] [H3](docs/prs/H3.md) Device actions (wave 6; needs H1, A8)
+- [ ] [H4](docs/prs/H4.md) Device firmware receive (wave 6; needs H1, A10)
+- [ ] [H5](docs/prs/H5.md) Host side of devices (wave 10; needs C11, C3, D8)
+- [ ] [H6](docs/prs/H6.md) Firmware send (wave 11; needs H5, H4, E13)
+- [ ] [H7](docs/prs/H7.md) MCU template (wave 7; needs H2, H3, H4)
+- [ ] [H8](docs/prs/H8.md) STM32G4 and the size gate (wave 11; needs H7, H5; board run)
+
+## I. Finish
+
+One binary, packaging, the Daedalus bridge, failure drills and the hardware proof.
+
+- [ ] [I1](docs/prs/I1.md) One binary (wave 13; needs C15, E18, D11)
+- [ ] [I2](docs/prs/I2.md) Daedalus bridge (wave 10; needs D2, D3)
+- [ ] [I3](docs/prs/I3.md) Sample executor (wave 9; needs D7)
+- [ ] [I4](docs/prs/I4.md) Packaging (wave 14; needs I1)
+- [ ] [I5](docs/prs/I5.md) Failure drills (wave 14; needs I1, I3)
+- [ ] [I6](docs/prs/I6.md) Memory and size gates (wave 14; needs I1; board run)
+- [ ] [I7](docs/prs/I7.md) End-to-end proof on a CM5 (wave 15; needs I1, I2, I4, F1, F5, F7, G6; board run)
+- [ ] [I8](docs/prs/I8.md) User documentation (wave 14; needs I1)
+- [ ] [I9](docs/prs/I9.md) Clean up the plan (wave 16; needs I5, I6, I7, I8)
 
 ## Pinned
 
-Direction is agreed. The detail comes back later.
+Direction is agreed. The detail comes back later, and no PR above builds it.
 
 - Board management (update, slots, reboot, identity, USB). It goes with Lemnos as drivers that add
-  their actions, and Orion only routes them. Orion's part is built regardless: the open action
-  list, the check, progress, and delivering files. See "Pinned" in the design.
+  their actions, and Orion only routes them. Orion's part is in the list: the open action list
+  (E10), detached actions (E12), and files written straight to a receiver (E15).
 
 ## Open
 
 - What wakes a graph. Every topic gives a subscriber something it can sleep on, so any answer works.
-- Pinning a graph to a core. A workload's placement has room for a CPU set.
+- Pinning a graph to a core. A workload's placement has room for a CPU set (A9).
