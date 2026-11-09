@@ -8,7 +8,7 @@ Types, the wire, the check and the tools everyone builds on. A1 to A5 go one at 
 
 - [x] [A1](docs/prs/A1.md) Clean slate and skeleton (wave 1; needs nothing)
 - [x] [A2](docs/prs/A2.md) Boundary checks in the gate (wave 2; needs A1)
-- [ ] [A3](docs/prs/A3.md) orion-types: names, ids, time (wave 2; needs A1)
+- [x] [A3](docs/prs/A3.md) orion-types: names, ids, time (wave 2; needs A1)
 - [ ] [A4](docs/prs/A4.md) Wire framing and the kind table (wave 3; needs A3)
 - [ ] [A5](docs/prs/A5.md) Session kinds: hello, roles, refusal (wave 4; needs A4)
 - [ ] [A6](docs/prs/A6.md) Bodies: records (wave 5; needs A5)

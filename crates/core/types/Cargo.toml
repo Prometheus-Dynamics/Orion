@@ -1,0 +1,20 @@
+[package]
+name = "orion-types"
+description = "Names, ids, time and the error type every Orion crate shares."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[package.metadata.orion]
+no_std = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+postcard.workspace = true
+
+[lints]
+workspace = true
