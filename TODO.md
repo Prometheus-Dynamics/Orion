@@ -14,7 +14,7 @@ Types, the wire, the check and the tools everyone builds on. A1 to A5 go one at 
 - [x] [A6](docs/prs/A6.md) Bodies: records (wave 5; needs A5)
 - [x] [A7](docs/prs/A7.md) Bodies: topics (wave 5; needs A5)
 - [x] [A8](docs/prs/A8.md) Bodies: actions (wave 5; needs A5)
-- [ ] [A9](docs/prs/A9.md) Bodies: workloads and executors (wave 5; needs A5)
+- [x] [A9](docs/prs/A9.md) Bodies: workloads and executors (wave 5; needs A5)
 - [ ] [A10](docs/prs/A10.md) Bodies: files (wave 5; needs A5)
 - [ ] [A11](docs/prs/A11.md) Bodies: peers, trust, time (wave 5; needs A5)
 - [ ] [A12](docs/prs/A12.md) Recorded bytes and fuzzing (wave 6; needs A6, A7, A8, A9, A10, A11)
