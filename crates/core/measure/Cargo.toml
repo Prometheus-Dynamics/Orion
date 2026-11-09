@@ -1,0 +1,19 @@
+[package]
+name = "orion-measure"
+description = "Counting allocator, per-message costs and the zero-allocation harness."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# The counting allocator and the harness built on it.
+alloc-counter = []
+# Per-message cost and wake-up counters. Without this they are empty and cost nothing.
+costs = []
+
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"

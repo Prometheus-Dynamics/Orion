@@ -1,0 +1,17 @@
+//! Measuring what the fast paths cost.
+//!
+//! The rule the rest of Orion is held to is zero allocations on steady-state paths. Feature
+//! `alloc-counter` gives a counting allocator and [`harness`], which later PRs use to gate that
+//! rule. Feature `costs` gives per-message cost and wake-up counters. With a feature off, its part
+//! is gone from the build.
+
+mod costs;
+
+#[cfg(feature = "alloc-counter")]
+mod alloc_counter;
+#[cfg(feature = "alloc-counter")]
+pub mod harness;
+
+#[cfg(feature = "alloc-counter")]
+pub use alloc_counter::{AllocCount, CountingAlloc, thread_counts};
+pub use costs::{CostSnapshot, Costs};
