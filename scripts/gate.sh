@@ -16,8 +16,8 @@ step() {
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   step format cargo fmt --all --check
-  step clippy cargo clippy --workspace --all-targets -- -D warnings
-  step tests cargo test --workspace
+  step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
+  step tests cargo test --workspace --all-features
 
   # A crate that must build without std says so in its manifest:
   # [package.metadata.orion]
@@ -34,6 +34,7 @@ fi
 
 if [ -x scripts/check-boundaries.sh ]; then
   step boundaries scripts/check-boundaries.sh
+  step boundaries-self-test scripts/check-boundaries.sh --self-test
 fi
 
 echo "gate passed"
