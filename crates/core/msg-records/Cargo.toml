@@ -1,0 +1,20 @@
+[package]
+name = "orion-msg-records"
+description = "Record bodies: put, get, watch, changed."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[package.metadata.orion]
+no_std = true
+
+[dependencies]
+orion-types = { path = "../types" }
+orion-wire = { path = "../wire", default-features = false }
+serde.workspace = true
+
+
+[lints]
+workspace = true

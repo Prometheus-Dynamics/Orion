@@ -11,7 +11,7 @@ Types, the wire, the check and the tools everyone builds on. A1 to A5 go one at 
 - [x] [A3](docs/prs/A3.md) orion-types: names, ids, time (wave 2; needs A1)
 - [x] [A4](docs/prs/A4.md) Wire framing and the kind table (wave 3; needs A3)
 - [x] [A5](docs/prs/A5.md) Session kinds: hello, roles, refusal (wave 4; needs A4)
-- [ ] [A6](docs/prs/A6.md) Bodies: records (wave 5; needs A5)
+- [x] [A6](docs/prs/A6.md) Bodies: records (wave 5; needs A5)
 - [ ] [A7](docs/prs/A7.md) Bodies: topics (wave 5; needs A5)
 - [ ] [A8](docs/prs/A8.md) Bodies: actions (wave 5; needs A5)
 - [ ] [A9](docs/prs/A9.md) Bodies: workloads and executors (wave 5; needs A5)
