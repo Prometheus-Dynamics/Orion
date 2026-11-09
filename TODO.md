@@ -23,7 +23,7 @@ Types, the wire, the check and the tools everyone builds on. A1 to A5 go one at 
 - [x] [A15](docs/prs/A15.md) Allocation and cost counters (wave 2; needs A1)
 - [x] [A16](docs/prs/A16.md) File-descriptor passing (wave 2; needs A1)
 - [x] [A17](docs/prs/A17.md) Config and the security switch (wave 3; needs A3)
-- [ ] [A18](docs/prs/A18.md) Profile dev's memory (wave 1; needs nothing; board run)
+- [x] [A18](docs/prs/A18.md) Profile dev's memory (wave 1; needs nothing; board run)
 
 ## B. Rings
 
