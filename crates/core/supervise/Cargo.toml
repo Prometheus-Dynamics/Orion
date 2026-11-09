@@ -1,0 +1,21 @@
+[package]
+name = "orion-supervise"
+description = "The failure rule: never give up, capped backoff, contained panics."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[package.metadata.orion]
+no_std = true
+
+[features]
+default = ["std"]
+# Panic containment.
+std = []
+
+[dependencies]
+
+[lints]
+workspace = true
