@@ -1,0 +1,26 @@
+[package]
+name = "orion-check"
+description = "The one check every request passes."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[package.metadata.orion]
+no_std = true
+
+[features]
+default = ["enforce"]
+# Without this the check is compiled out: `Checked<T>` is just a `T`.
+enforce = []
+
+[dependencies]
+orion-types = { path = "../types" }
+serde.workspace = true
+
+[dev-dependencies]
+trybuild = "1.0"
+
+[lints]
+workspace = true

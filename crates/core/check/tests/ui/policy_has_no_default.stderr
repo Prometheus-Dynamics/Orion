@@ -1,0 +1,5 @@
+error[E0277]: the trait bound `Policy: Default` is not satisfied
+  --> tests/ui/policy_has_no_default.rs:14:26
+   |
+14 |     let policy: Policy = Default::default();
+   |                          ^^^^^^^^^^^^^^^^^^ the trait `Default` is not implemented for `Policy`

@@ -1,0 +1,15 @@
+warning: unused import: `Policy`
+ --> tests/ui/registered_has_no_literal.rs:1:35
+  |
+1 | use orion_check::{Check, Checked, Policy, Registered, Request, Security, What};
+  |                                   ^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0451]: fields `declaration` and `policy` of struct `Registered` are private
+  --> tests/ui/registered_has_no_literal.rs:14:36
+   |
+14 |     let _registered = Registered { declaration: "reboot", policy: orion_check::Policy::new(orion_check::Admits::ANYONE) };
+   |                                    ^^^^^^^^^^^            ^^^^^^ private field
+   |                                    |
+   |                                    private field

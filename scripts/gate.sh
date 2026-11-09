@@ -18,6 +18,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   step format cargo fmt --all --check
   step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
   step tests cargo test --workspace --all-features
+  step "the check compiled out" cargo test -q -p orion-check --no-default-features --lib
 
   # A crate that must build without std says so in its manifest:
   # [package.metadata.orion]

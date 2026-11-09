@@ -1,0 +1,15 @@
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> tests/ui/register_needs_policy.rs:14:23
+   |
+14 |     let _registered = Registered::new("reboot");
+   |                       ^^^^^^^^^^^^^^^---------- argument #2 of type `Policy` is missing
+   |
+note: associated function defined here
+  --> src/policy.rs
+   |
+   |     pub const fn new(declaration: D, policy: Policy) -> Self {
+   |                  ^^^
+help: provide the argument
+   |
+14 |     let _registered = Registered::new("reboot", /* Policy */);
+   |                                               ++++++++++++++

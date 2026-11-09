@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/handler_needs_checked.rs:14:13
+   |
+14 |     handler(Ping);
+   |     ------- ^^^^ expected `Checked<Ping>`, found `Ping`
+   |     |
+   |     arguments to this function are incorrect
+   |
+   = note: expected struct `Checked<Ping>`
+              found struct `Ping`
+note: function defined here
+  --> tests/ui/handler_needs_checked.rs:11:4
+   |
+11 | fn handler(_request: Checked<Ping>) {}
+   |    ^^^^^^^ -----------------------

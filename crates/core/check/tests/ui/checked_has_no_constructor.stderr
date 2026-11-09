@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `new` found for struct `Checked<T>` in the current scope
+  --> tests/ui/checked_has_no_constructor.rs:14:30
+   |
+14 |     handler(Checked::<Ping>::new(Ping));
+   |                              ^^^ associated function or constant not found in `Checked<Ping>`
