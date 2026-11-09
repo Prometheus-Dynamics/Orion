@@ -1,0 +1,42 @@
+[package]
+name = "orion-wire"
+description = "The one wire: framing on every carrier, the kind table and the body rules."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[package.metadata.orion]
+no_std = true
+
+[features]
+default = ["std"]
+# Finds the CPU's CRC instructions at run time.
+std = []
+# 256-entry CRC-32C table (1 KiB of flash) instead of the 16-entry nibble table (64 bytes).
+crc-table = []
+# A bare-metal firmware supplies the CRC-32C routine (`orion_wire_crc32c_update`). Only on
+# `target_os = "none"`; on hosted targets it does nothing, so `--all-features` builds link.
+crc-extern = []
+
+[dependencies]
+orion-types = { path = "../types" }
+postcard.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+orion-measure = { path = "../measure", features = ["alloc-counter"] }
+
+# Only the CRC instructions use `unsafe`, in `src/crc.rs`.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_attributes = "deny"
+
+[lints.clippy]
+await_holding_lock = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
