@@ -1,3 +1,0 @@
-# Existing oversized Rust files to reduce over time.
-crates/client/src/tests.rs
-crates/node/src/app/observability.rs
