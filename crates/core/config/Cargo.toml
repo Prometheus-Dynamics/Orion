@@ -1,0 +1,15 @@
+[package]
+name = "orion-config"
+description = "One typed config from a file and the environment, and the security switch."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-check = { path = "../check" }
+orion-types = { path = "../types" }
+
+[lints]
+workspace = true
