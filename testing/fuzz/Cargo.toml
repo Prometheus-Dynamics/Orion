@@ -1,0 +1,99 @@
+[package]
+name = "orion-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+orion-wire = { path = "../../crates/core/wire" }
+orion-wire-vectors = { path = "../../crates/testing/wire-vectors" }
+
+[workspace]
+
+[[bin]]
+name = "frame"
+path = "fuzz_targets/frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stream"
+path = "fuzz_targets/stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "packet"
+path = "fuzz_targets/packet.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "socket"
+path = "fuzz_targets/socket.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session"
+path = "fuzz_targets/session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "records"
+path = "fuzz_targets/records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "files"
+path = "fuzz_targets/files.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "actions"
+path = "fuzz_targets/actions.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "topics"
+path = "fuzz_targets/topics.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "workloads"
+path = "fuzz_targets/workloads.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "peers"
+path = "fuzz_targets/peers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "time"
+path = "fuzz_targets/time.rs"
+test = false
+doc = false
+bench = false

@@ -306,7 +306,7 @@ Roles at hello: client, provider, executor, node, peer, device.
 
 ```rust
 // crates/core/check. Only `Check` can make a Checked<T>.
-pub enum Principal { Anonymous, Local { uid: u32, gid: u32 }, Operator(KeyId), Peer(NodeId), Device(DeviceId) }
+pub enum Principal { Anonymous, Local { uid: u32, gid: u32 }, Operator(KeyId), Peer(NodeName), Device(DeviceName) }
 pub struct Checked<T> { /* private */ }
 impl<T> Checked<T> { pub fn who(&self) -> &Principal; pub fn get(&self) -> &T; pub fn into_inner(self) -> T; }
 impl Check {
