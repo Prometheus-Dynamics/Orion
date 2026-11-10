@@ -139,3 +139,49 @@ marks holds nothing and is handed the pool at once.
 The broker maps no buffer and sees no frame. A comm core that restarts interrupts no frames: the
 ring, the pool and the marks belong to the publisher and its subscribers, who offer the same things
 again when they reconnect.
+
+## Keys, enrollment, operators
+
+`crates/comm/keys` (`orion-keys`). Who is trusted.
+
+| | What it is | Where it is kept |
+| --- | --- | --- |
+| The node's identity | An ed25519 key, made on the first start | `<state.dir>/node-identity.ed25519`, 32 bytes, owner only |
+| Peers | Other nodes, each pinned to one key | `<state.dir>/trust` |
+| Operators | People's tools: a key, and what it may do | `<state.dir>/trust` |
+| Revoked keys | Never trusted again | `<state.dir>/trust` |
+
+`trust` is text, one entry per line, written beside and renamed over. Lines this build does not
+know are kept, so an older node never destroys what a newer one stored. A key or store that is
+there but unreadable stops the start; it is never replaced, because that would change who the board
+is.
+
+**A connection is known by its key**, not by what it says: the peer pinned to that key, else an
+operator, and nobody at all if the key is revoked.
+
+**What an operator may do** is its grants: read, a list of actions (`name`, `prefix*`, `*`), or
+everything. The one check asks the trust store for every operator request. An operator trusted
+with everything may also write and log in.
+
+**How a key becomes trusted:**
+
+| How | Result |
+| --- | --- |
+| An administrator on the board enrolls it (`OperatorEnroll` from root on the local socket) | Enrolled, whatever it was before |
+| An operator proves it knows `enrollment.key` (a MAC over the node's name and its own key) | Enrolled |
+| An operator asks with no proof | Pending, for an administrator |
+| A node proves it knows `enrollment.key` (the three-step handshake) | Pinned as a peer |
+
+The handshake is dev's: each side proves it knows the key with a MAC and that it holds its identity
+with a signature, both bound to the role, both names, both keys and two fresh nonces. The key never
+crosses the wire. A handshake is used up by its first confirm, right or wrong.
+
+**A refused operator stays refused.** A revoked key, or a pending one that was turned down, is not
+enrolled again by asking or by proof. Only an administrator brings it back. A peer's name stays
+pinned to its first key: another key under the same name is refused.
+
+**With security off** none of this is consulted. The check admits everyone, a tool with no key is
+answered as an operator that may do everything, and nothing is recorded.
+
+Settings: `cluster` (`default`), `enrollment.key` (none: only an administrator enrolls),
+`operators.read` (`true`), `operators.actions` (none).
