@@ -30,7 +30,7 @@ Types, the wire, the check and the tools everyone builds on. A1 to A5 go one at 
 The shared-memory ring that values and frames travel through. The riskiest code in the rebuild, so it is proven alone first.
 
 - [x] [B1](docs/prs/B1.md) Ring format, writer and reader (wave 3; needs A3, A15)
-- [ ] [B2](docs/prs/B2.md) Ring concurrency proof (wave 4; needs B1)
+- [x] [B2](docs/prs/B2.md) Ring concurrency proof (wave 4; needs B1)
 - [ ] [B3](docs/prs/B3.md) Doorbells (wave 4; needs B1, A16)
 - [ ] [B4](docs/prs/B4.md) Latest values and expiry (wave 4; needs B1)
 - [ ] [B5](docs/prs/B5.md) Lookup by frame time (wave 5; needs B1, B3)

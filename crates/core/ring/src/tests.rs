@@ -249,8 +249,8 @@ fn a_sample_overwritten_during_the_copy_is_not_returned() {
         .expect("publish");
     let stamp_at = crate::Geometry::read(&mem).expect("shape").slot_at(0, 0);
     // Overwrite after every possible number of loads into the copy. The copy is the lane head,
-    // the stamp, time, meta, eight payload words and the stamp again.
-    for loads in 2..13 {
+    // the stamp, time, meta, lane sequence, eight payload words and the stamp again.
+    for loads in 2..14 {
         mem.store(stamp_at, 2, Ordering::Relaxed);
         let loads_left = std::cell::Cell::new(u32::MAX);
         let racing = Overwritten {
@@ -262,7 +262,7 @@ fn a_sample_overwritten_during_the_copy_is_not_returned() {
         loads_left.set(loads);
         assert_eq!(reader.at(FieldId(0), 0), None, "after {loads} loads");
     }
-    // Left alone for all thirteen loads, the same read succeeds.
+    // Left alone for all fourteen loads, the same read succeeds.
     mem.store(stamp_at, 2, Ordering::Relaxed);
     let loads_left = std::cell::Cell::new(u32::MAX);
     let quiet = Overwritten {
@@ -271,7 +271,7 @@ fn a_sample_overwritten_during_the_copy_is_not_returned() {
         loads_left: &loads_left,
     };
     let mut reader = Reader::over(quiet).expect("reader");
-    loads_left.set(13);
+    loads_left.set(14);
     assert!(reader.at(FieldId(0), 0).is_some());
 }
 

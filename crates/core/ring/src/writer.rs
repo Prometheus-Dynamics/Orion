@@ -96,6 +96,7 @@ impl<M: MemMut> Writer<M> {
         self.mem.store(at + 1, time.as_nanos(), Ordering::Relaxed);
         let meta = payload.len() as u64 | u64::from(field.0) << 32 | u64::from(flags.0) << 48;
         self.mem.store(at + 2, meta, Ordering::Relaxed);
+        self.mem.store(at + 3, lane_head, Ordering::Relaxed);
         let mut word_at = at + SLOT_HEADER_WORDS;
         let (words, rest) = payload.as_chunks::<8>();
         for word in words {

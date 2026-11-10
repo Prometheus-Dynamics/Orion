@@ -13,8 +13,8 @@ pub(crate) const MAGIC: u64 = u64::from_le_bytes(*b"ORIONRG1");
 pub(crate) const LAYOUT: u64 = 1;
 /// Words in the header.
 pub(crate) const HEADER_WORDS: usize = 16;
-/// Words in a slot before its payload: stamp, time, meta.
-pub(crate) const SLOT_HEADER_WORDS: usize = 3;
+/// Words in a slot before its payload: stamp, time, meta, lane sequence.
+pub(crate) const SLOT_HEADER_WORDS: usize = 4;
 
 pub(crate) const W_MAGIC: usize = 0;
 pub(crate) const W_LAYOUT: usize = 1;
@@ -243,18 +243,18 @@ mod tests {
     #[test]
     fn the_layout_is_pinned() {
         assert_eq!(MAGIC.to_le_bytes(), *b"ORIONRG1");
-        assert_eq!((LAYOUT, HEADER_WORDS, SLOT_HEADER_WORDS), (1, 16, 3));
+        assert_eq!((LAYOUT, HEADER_WORDS, SLOT_HEADER_WORDS), (1, 16, 4));
         assert_eq!(
             (W_MAGIC, W_LAYOUT, W_SHAPE, W_SIZES, W_TOTAL),
             (0, 1, 2, 3, 4)
         );
         assert_eq!((W_HEAD, W_SUBSCRIBERS), (8, 9));
         let g = Geometry::for_spec(&spec(3, 5, 20)).expect("shape");
-        // History 5 rounds to 8; 24 lane slots round to a 32-entry index; a slot is 3 + 3 words.
-        assert_eq!((g.history, g.index_slots, g.slot_words), (8, 32, 6));
+        // History 5 rounds to 8; 24 lane slots round to a 32-entry index; a slot is 4 + 3 words.
+        assert_eq!((g.history, g.index_slots, g.slot_words), (8, 32, 7));
         assert_eq!((g.lane_heads_at, g.index_at, g.slots_at), (16, 19, 51));
-        assert_eq!(g.total_words, 51 + 24 * 6);
-        assert_eq!(g.slot_at(2, 7), 51 + 23 * 6);
+        assert_eq!(g.total_words, 51 + 24 * 7);
+        assert_eq!(g.slot_at(2, 7), 51 + 23 * 7);
         assert_eq!((stamp(0), busy(0), stamp(41)), (2, 3, 84));
     }
 

@@ -1,0 +1,18 @@
+[package]
+name = "orion-ring-model"
+description = "The ring's concurrency proof: every interleaving of a writer against readers, and a hostile ring."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion-ring = { path = "../../core/ring" }
+
+[dev-dependencies]
+loom = "0.7.3"
+
+[lints]
+workspace = true

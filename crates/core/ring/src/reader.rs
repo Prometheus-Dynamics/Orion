@@ -152,6 +152,10 @@ impl<M: Mem> Reader<M> {
     }
 
     /// The newest sample of `field`, or `None` if it has none (or the field isn't declared).
+    ///
+    /// Successive calls never go backwards. A writer that overwrites the newest sample faster
+    /// than this reader can copy it, four times running, also gives `None`: a field published
+    /// that fast with large payloads wants a deeper history.
     pub fn latest(&mut self, field: FieldId) -> Option<Sample<'_>> {
         let mut found = None;
         for _ in 0..LATEST_TRIES {
@@ -210,7 +214,7 @@ impl<M: Mem> Reader<M> {
         if field >= u64::from(geometry.fields) || lane_slot >= u64::from(geometry.history) {
             return None;
         }
-        self.read_slot(field as u16, lane_slot as usize, Some(stamp(seq)))
+        self.read_slot(field as u16, lane_slot as usize, Some(stamp(seq)), None)
     }
 
     fn read_lane(&mut self, field: FieldId, lane_seq: u64) -> Option<Found> {
@@ -218,21 +222,34 @@ impl<M: Mem> Reader<M> {
             return None;
         }
         let lane_slot = lane_seq as usize & (self.geometry.history as usize - 1);
-        self.read_slot(field.0, lane_slot, None)
+        self.read_slot(field.0, lane_slot, None, Some(lane_seq))
     }
 
     /// Copies one slot out and checks the copy is whole. `field` and `lane_slot` must be in
     /// range; they come from this reader's shape, never from the ring unchecked.
-    fn read_slot(&mut self, field: u16, lane_slot: usize, expect: Option<u64>) -> Option<Found> {
+    ///
+    /// A slot is reused, so the caller says which sample it wants: by its stamp when following
+    /// the order, by its number within the field when reading a lane. A slot holding any other
+    /// sample, even a newer one, is not it.
+    fn read_slot(
+        &mut self,
+        field: u16,
+        lane_slot: usize,
+        stamp: Option<u64>,
+        lane_seq: Option<u64>,
+    ) -> Option<Found> {
         let at = self.geometry.slot_at(usize::from(field), lane_slot);
         let before = self.mem.load(at, Ordering::Acquire);
-        if before == 0 || before & 1 == 1 || expect.is_some_and(|stamp| stamp != before) {
+        if before == 0 || before & 1 == 1 || stamp.is_some_and(|stamp| stamp != before) {
             return None;
         }
         let time = self.mem.load(at + 1, Ordering::Relaxed);
         let meta = self.mem.load(at + 2, Ordering::Relaxed);
         let len = (meta & 0xffff_ffff) as usize;
         if len > self.geometry.max_payload as usize {
+            return None;
+        }
+        if lane_seq.is_some_and(|wanted| wanted != self.mem.load(at + 3, Ordering::Relaxed)) {
             return None;
         }
         let mut word_at = at + SLOT_HEADER_WORDS;

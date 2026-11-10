@@ -50,7 +50,7 @@ the same way by every party, so there is no stored offset to point somewhere els
 
 - `history` is the declaration's history rounded up to a power of two, at least 2.
 - `index_slots` is `fields × history` rounded up to a power of two.
-- `slot_words` is `3 + ceil(largest payload / 8)`.
+- `slot_words` is `4 + ceil(largest payload / 8)`.
 - Limits: 65,535 fields, a history of 2^24, a payload of 16 MiB, 4 GiB in all.
 
 **A slot** belongs to one field. Slot `n` of a field holds that field's sample number `n` modulo
@@ -61,7 +61,8 @@ the same way by every party, so there is no stored offset to point somewhere els
 | 0 | Stamp. 0: never written. `(seq + 1) << 1`: holds the sample with sequence `seq`. That plus 1: being written |
 | 1 | Frame time, nanoseconds |
 | 2 | Payload length in bytes (bits 0 to 31), field (32 to 47), flags (48 to 55) |
-| 3 on | Payload, packed little-endian, the last word zero-padded |
+| 3 | Lane sequence: which of its field's samples this is, counting from zero |
+| 4 on | Payload, packed little-endian, the last word zero-padded |
 
 `seq` counts every sample of the ring, across fields, from zero.
 
@@ -72,7 +73,7 @@ sequence of its own: the slot's stamp is what proves the sample is the one asked
 ## Publishing
 
 1. Store the busy stamp in the field's next slot. Release fence.
-2. Store time, meta and payload words.
+2. Store time, meta, lane sequence and payload words.
 3. Store the finished stamp.
 4. Store the index entry, then the lane head, then the head.
 
@@ -87,16 +88,22 @@ sequence of its own: the slot's stamp is what proves the sample is the one asked
    the wanted sequence's stamp. A slot that holds anything else was overwritten by its own field:
    that sample is counted as missed and the reader moves on, at most 64 steps per call.
 
-**Newest of a field (`latest`).** Load the lane head, read the slot before it. One memory read to
-find it, whatever the number of fields.
+**Newest of a field (`latest`).** Load the lane head, read the slot before it, expecting exactly
+that lane sequence. One memory read to find it, whatever the number of fields. If the writer has
+already reused the slot, look again with a fresh lane head, at most 4 times.
 
 **History (`at`).** A field's sample number `n` is in slot `n` modulo `history` until that field
-has published `history` more.
+has published `history` more. The slot's lane sequence must be exactly `n`.
+
+A slot is reused, so a read always says which sample it wants. A slot holding a newer sample is
+not an answer: returning it would let the next `latest` go backwards, to a sample published
+before it. The model check found exactly that, which is why the lane sequence is in the slot.
 
 **Reading a slot**, always the same way:
 
 1. Load the stamp. Zero, busy or not the expected one: not there.
-2. Load time and meta. A length over the largest payload: not there.
+2. Load time, meta and lane sequence. A length over the largest payload, or a lane sequence that
+   is not the wanted one: not there.
 3. Copy the payload words into the reader's own buffer.
 4. Acquire fence, then load the stamp again. Changed: not there.
 
@@ -114,7 +121,10 @@ repeats, so an old stamp can never come back.
 The head, lane heads and finished stamps are stored with release ordering and loaded with acquire,
 so a reader that sees a count also sees everything stored before it.
 
-B2 checks this under a model checker.
+`crates/testing/ring-model` checks this with `loom`, which explores the interleavings of a writer
+against readers and what a relaxed load may return, running the ring's own code. It also holds
+the hostile-ring check that the `ring` fuzz target drives. A deliberately broken reader, one that
+skips the second stamp load, is in the same file and must be caught.
 
 ## What a reader assumes about the writer: nothing
 
