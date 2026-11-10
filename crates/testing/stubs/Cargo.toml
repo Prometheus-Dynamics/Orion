@@ -1,0 +1,30 @@
+[package]
+name = "orion-stubs"
+description = "A comm core for tests, with small stand-ins for node logic: a record store, an action router, a file receiver and a workload tracker."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion-broker = { path = "../../comm/broker" }
+orion-broker-buffers = { path = "../../comm/broker-buffers" }
+orion-broker-proxy = { path = "../../comm/broker-proxy" }
+orion-hello = { path = "../../comm/hello" }
+orion-keys = { path = "../../comm/keys" }
+orion-msg-actions = { path = "../../core/msg-actions" }
+orion-msg-files = { path = "../../core/msg-files" }
+orion-msg-records = { path = "../../core/msg-records" }
+orion-msg-workloads = { path = "../../core/msg-workloads" }
+orion-server = { path = "../../comm/server" }
+orion-tcp = { path = "../../comm/tcp" }
+orion-types = { path = "../../core/types" }
+orion-unix = { path = "../../comm/unix" }
+orion-wire = { path = "../../core/wire" }
+sha2 = { version = "0.11.0", default-features = false }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+[lints]
+workspace = true

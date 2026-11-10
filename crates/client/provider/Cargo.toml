@@ -1,0 +1,25 @@
+[package]
+name = "orion-provider"
+description = "The client's provider role: say a thing exists, with its topics and its actions, so anything can find and use it."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-actions = { path = "../actions" }
+orion-connect = { path = "../connect" }
+orion-msg-records = { path = "../../core/msg-records" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-records = { path = "../records" }
+orion-topics = { path = "../topics" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+orion-ring = { path = "../../core/ring" }
+orion-stubs = { path = "../../testing/stubs" }
+
+[lints]
+workspace = true

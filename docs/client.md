@@ -166,3 +166,22 @@ executor never has to remember to report: what it says it has is compared with w
 last told. When the connection has been made again, `start` sends the whole inventory once
 more, which is how Orion takes back runs that carried on without it, by name.
 
+## The provider role
+
+`orion-provider`. A resource is a thing that exists: a camera, a fan. A provider is the
+program that speaks for it.
+
+```text
+provider.resource("fan.left", "fan")      the kind is the provider's own word
+    .label("mounted", "left intake")
+    .topic("speed", fields, ..)            declares fan.left.speed, returns its publisher
+    .action("set", description, policy)    registers fan.left.set
+    .publish(Ready)                        writes the record: now it can be found
+```
+
+What is written down is enough for a program that has never heard of the kind. The record
+names the resource's topics and actions; a topic's declaration names its fields, types and
+units; an action has a description and a policy. `resources(records, prefix)` is the reading
+side: a dashboard, a tool or another board lists what is there, reads it and drives it with no
+code for that kind of device.
+

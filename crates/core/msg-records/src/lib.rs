@@ -99,6 +99,28 @@ body! {
 }
 
 body! {
+    /// The name of one topic or action a resource offers.
+    pub struct Offered<'a> {
+        /// The full name: the resource's name, a dot, and the topic's or action's own.
+        pub name: &'a str,
+    }
+}
+
+body! {
+    /// What a resource offers, as providers write it in [`ResourceRecord::attributes`]. With
+    /// this a program that has never heard of the resource's kind can find its topics, read
+    /// their declarations, and run its actions.
+    pub struct ResourceDescription<'a> {
+        /// Its topics.
+        pub topics: List<'a, Offered<'a>>,
+        /// Its actions.
+        pub actions: List<'a, Offered<'a>>,
+        /// Whatever else its provider says about it.
+        pub labels: List<'a, Label<'a>>,
+    }
+}
+
+body! {
     /// Who holds a resource.
     pub struct LeaseRecord<'a> {
         /// The resource.

@@ -1,0 +1,183 @@
+//! A comm core for tests.
+//!
+//! The client is built before node logic is, and its tests need something to talk to.
+//! [`Board::start`] runs a real comm core in its own thread: the real server, the real topic
+//! broker with its add-ons, the real hello and keys, on a real socket and a real network
+//! port. What belongs to node logic is stood in for by the smallest thing that speaks the
+//! wire: a record [`store`], an action [`router`], a file [`receiver`] and a workload
+//! [`tracker`]. Each keeps to what the wire and the client's briefs say of the real one.
+
+#![cfg(target_os = "linux")]
+
+pub mod receiver;
+pub mod router;
+pub mod store;
+pub mod tracker;
+
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::{Arc, mpsc};
+use std::time::Duration;
+
+use orion_broker::{Broker, BrokerConfig};
+use orion_broker_buffers::BrokerBuffers;
+use orion_broker_proxy::BrokerProxy;
+use orion_keys::{Keys, KeysConfig, KeysService, SharedKeys};
+use orion_server::{Admits, Comm, Limits, Policy, Security};
+use orion_tcp::{TcpCarrier, TcpOptions};
+use orion_unix::UnixCarrier;
+
+pub use receiver::Shelf;
+
+/// A comm core running in its own thread until it is dropped.
+#[derive(Debug)]
+pub struct Board {
+    socket: PathBuf,
+    network: SocketAddr,
+    shelf: Arc<Shelf>,
+    keys: SharedKeys,
+    dir: PathBuf,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Board {
+    /// Starts a board named `board` in a directory of its own under the system's temporary
+    /// one, with security off. `name` keeps tests apart.
+    ///
+    /// # Panics
+    ///
+    /// If the board cannot start: a test has nothing to do then.
+    #[must_use]
+    pub fn start(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("orion-stubs-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("the board's directory");
+        Self::start_in(&dir, Security::Off, None)
+    }
+
+    /// Starts a board in `dir`, on `port` if it is to come back where it was.
+    ///
+    /// # Panics
+    ///
+    /// If the board cannot start.
+    #[must_use]
+    pub fn start_in(dir: &Path, security: Security, port: Option<u16>) -> Self {
+        let socket = dir.join("orion.sock");
+        let shelf = Arc::new(Shelf::default());
+        let keys =
+            SharedKeys::new(Keys::open(KeysConfig::in_memory("lab"), security).expect("keys"));
+        let (ready, started) = mpsc::channel();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let (path, on_shelf, board_keys) = (socket.clone(), shelf.clone(), keys.clone());
+        let thread = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            tokio::task::LocalSet::new().block_on(&runtime, async move {
+                let node: orion_types::NodeName = "board".parse().expect("name");
+                let limits = Limits {
+                    outbox_bytes: 8 << 20,
+                    ..Limits::default()
+                };
+                let comm = Comm::new(
+                    node.clone(),
+                    security,
+                    Some(Rc::new(board_keys.clone())),
+                    limits,
+                );
+                let anyone = Policy::new(Admits::ANYONE).without_grant();
+                let config = BrokerConfig {
+                    declare: anyone,
+                    subscribe: anyone,
+                    ..BrokerConfig::default()
+                };
+                let broker = Broker::new(node.clone(), config);
+                comm.add_service(BrokerProxy::new(&broker, anyone));
+                comm.add_service(BrokerBuffers::new(&broker, anyone));
+                comm.add_service(orion_hello::Hello::new(
+                    node.clone(),
+                    board_keys.clone(),
+                    Some(broker.topics()),
+                ));
+                comm.add_service(KeysService::new(node.clone(), board_keys.clone()));
+                comm.add_service(broker);
+                comm.add_service(store::Store::default());
+                comm.add_service(router::Router::default());
+                comm.add_service(receiver::Receiver::new(on_shelf));
+                comm.add_service(tracker::Tracker::new(node));
+                let unix = UnixCarrier::bind(&path, Some(0o600), &[]).expect("socket");
+                let options = TcpOptions {
+                    security,
+                    keys: board_keys,
+                    max_frame: 64 * 1024,
+                    handshake: Duration::from_secs(5),
+                };
+                let listen = SocketAddr::from(([127, 0, 0, 1], port.unwrap_or(0)));
+                let tcp = TcpCarrier::bind(listen, options).await.expect("listen");
+                ready.send(tcp.local_addr().expect("addr")).expect("ready");
+                let (on_socket, on_network) = (comm.clone(), comm);
+                tokio::task::spawn_local(async move { on_socket.serve(unix).await });
+                tokio::task::spawn_local(async move { on_network.serve(tcp).await });
+                let _ = stopped.await;
+            });
+        });
+        Self {
+            socket,
+            network: started.recv().expect("the board starts"),
+            shelf,
+            keys,
+            dir: dir.to_owned(),
+            stop: Some(stop),
+            thread: Some(thread),
+        }
+    }
+
+    /// The board's socket.
+    #[must_use]
+    pub fn socket(&self) -> &Path {
+        &self.socket
+    }
+
+    /// Where the board listens on the network.
+    #[must_use]
+    pub const fn network(&self) -> SocketAddr {
+        self.network
+    }
+
+    /// The board's directory.
+    #[must_use]
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// What the file receiver has in place and can fetch.
+    #[must_use]
+    pub fn shelf(&self) -> &Shelf {
+        &self.shelf
+    }
+
+    /// The board's identity and whom it trusts.
+    #[must_use]
+    pub const fn keys(&self) -> &SharedKeys {
+        &self.keys
+    }
+
+    /// Stops the comm core. Its directory stays, for a board started in it again.
+    pub fn stop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for Board {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}

@@ -104,6 +104,8 @@ fn decode_elements(concept: Concept, bytes: &[u8]) {
         Concept::Records => {
             exercise::<records::RecordEntry>(bytes);
             exercise::<records::NodeRecord>(bytes);
+            exercise::<records::ResourceDescription>(bytes);
+            exercise::<records::Offered>(bytes);
             exercise::<records::ResourceRecord>(bytes);
             exercise::<records::LeaseRecord>(bytes);
             exercise::<records::Label>(bytes);
