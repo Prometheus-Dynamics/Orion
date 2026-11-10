@@ -111,6 +111,14 @@ pub enum Request {
     },
 }
 
+/// An action this program registered.
+struct Listed {
+    name: String,
+    target: Target,
+    policy: Policy,
+    description: String,
+}
+
 /// One run this program started, as far as it has been told.
 struct Following {
     call: u64,
@@ -124,6 +132,8 @@ struct State {
     runs: Vec<Following>,
     /// The `seq` of each registration that has been confirmed.
     registered: Vec<u16>,
+    /// What this program registered, to register again after a reconnect.
+    listed: Vec<Listed>,
     requests: VecDeque<Request>,
     next_call: u64,
 }
@@ -295,10 +305,49 @@ impl Actions {
         })?;
         self.client
             .answered(seq, || self.state.borrow().registered.contains(&seq))?;
+        self.state.borrow_mut().listed.push(Listed {
+            name: action.name.to_owned(),
+            target: action.target.clone(),
+            policy,
+            description: action.description.to_owned(),
+        });
         Ok(Registration {
             client: self.client.clone(),
             state: self.state.clone(),
         })
+    }
+}
+
+impl Actions {
+    /// Registers every action again with a comm core that has no memory of this session.
+    /// Call it after [`orion_connect::Session::reconnect`]. Runs that were under way are not
+    /// brought back: whoever started one is told how it ended by whoever now holds it.
+    ///
+    /// # Errors
+    ///
+    /// If the comm core refuses an action it took before, or the connection broke again.
+    pub fn restore(&self) -> Result<(), ClientError> {
+        let count = self.state.borrow().listed.len();
+        for index in 0..count {
+            let seq = {
+                let state = self.state.borrow();
+                let listed = &state.listed[index];
+                self.client.send(&Register {
+                    name: listed
+                        .name
+                        .parse()
+                        .map_err(|_| ClientError::Protocol("an action name that is not one"))?,
+                    target: listed.target.clone(),
+                    policy: listed.policy,
+                    description: &listed.description,
+                })?
+            };
+            self.client
+                .answered(seq, || self.state.borrow().registered.contains(&seq))?;
+        }
+        // What was asked of this program before belongs to a session that is gone.
+        self.state.borrow_mut().requests.clear();
+        Ok(())
     }
 }
 

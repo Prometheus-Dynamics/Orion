@@ -1,0 +1,60 @@
+[package]
+name = "orion"
+description = "The Orion client: one crate, one handle, the same calls wherever the comm core is."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = ["topics", "records", "actions"]
+# Publish and subscribe.
+topics = ["dep:orion-topics", "dep:orion-msg-topics", "dep:orion-ring"]
+# Frames in shared buffers.
+buffers = ["topics", "dep:orion-buffers"]
+# Read, write and watch records.
+records = ["dep:orion-records"]
+# Run actions and register your own.
+actions = ["dep:orion-actions"]
+# Push files and ask the board to pull them.
+files = ["dep:orion-files"]
+# Say what should run, and hear where it is.
+workloads = ["dep:orion-msg-workloads", "dep:orion-wire"]
+# Run workloads for Orion.
+executor = ["dep:orion-executor"]
+# Speak for a resource: its topics and its actions.
+provider = ["topics", "records", "actions", "dep:orion-provider"]
+# Wait for the session inside a tokio runtime.
+tokio = ["orion-connect/tokio"]
+# Everything.
+full = ["buffers", "files", "workloads", "executor", "provider"]
+
+[dependencies]
+orion-actions = { path = "../actions", optional = true }
+orion-buffers = { path = "../buffers", optional = true }
+orion-connect = { path = "../connect" }
+orion-executor = { path = "../executor", optional = true }
+orion-files = { path = "../files", optional = true }
+orion-msg-topics = { path = "../../core/msg-topics", optional = true }
+orion-msg-workloads = { path = "../../core/msg-workloads", optional = true }
+orion-provider = { path = "../provider", optional = true }
+orion-records = { path = "../records", optional = true }
+orion-ring = { path = "../../core/ring", optional = true }
+orion-topics = { path = "../topics", optional = true }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire", optional = true }
+
+[dev-dependencies]
+orion-stubs = { path = "../../testing/stubs" }
+
+[[example]]
+name = "roles"
+required-features = ["full"]
+
+[[test]]
+name = "facade"
+required-features = ["full"]
+
+[lints]
+workspace = true

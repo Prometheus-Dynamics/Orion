@@ -1,5 +1,7 @@
 //! What the comm core has told this program about its topics.
 
+use std::os::fd::OwnedFd;
+
 use orion_connect::{ClientError, Cx, Handler, Incoming};
 use orion_msg_topics::{
     Bell as BellMessage, Declare, Demand, Opened, Sample, SampleBatch, TopicState, TopicStatus,
@@ -14,10 +16,13 @@ pub(crate) struct PublisherState {
     pub(crate) handle: u32,
     open: bool,
     /// The declaration as it was sent, to say it again after a reconnect.
-    #[allow(dead_code)]
     pub(crate) declaration: Vec<u8>,
+    /// The ring's write end, kept so a comm core that restarts can be handed the ring back.
+    pub(crate) ring: Option<OwnedFd>,
     /// The ring, when this program is on the board.
     pub(crate) writer: Option<Writer>,
+    /// The writer was taken out, for a publisher that writes the ring some other way.
+    pub(crate) taken: bool,
     /// The doorbells of the subscribers that have one, by subscriber.
     pub(crate) bells: Vec<(u32, Bell)>,
     /// How many subscribers the comm core last said there are.
@@ -26,11 +31,23 @@ pub(crate) struct PublisherState {
     pub(crate) request: Vec<u8>,
 }
 
+/// What a subscription was made with, to make it again after a reconnect.
+pub(crate) struct Asked {
+    pub(crate) topic: String,
+    pub(crate) request: Vec<u8>,
+    pub(crate) max_held: u32,
+    pub(crate) max_hold_ms: u32,
+    pub(crate) marks: Option<OwnedFd>,
+}
+
 pub(crate) struct SubscriberState {
     seq: u16,
     handle: Option<u32>,
+    pub(crate) asked: Asked,
     pub(crate) status: TopicStatus,
     pub(crate) declaration: Vec<u8>,
+    /// Which ring this subscriber reads, so one handed over again is known for the same.
+    ring: Option<(u64, u64)>,
     /// A ring that has arrived and the subscriber has not taken yet.
     pub(crate) arrived: Option<Reader>,
     /// Off the board: this program's own ring, and the writer that arriving samples go to.
@@ -41,6 +58,13 @@ impl SubscriberState {
     pub(crate) const fn handle(&self) -> Option<u32> {
         self.handle
     }
+}
+
+/// What tells one shared memory file from another.
+fn identity(fd: &OwnedFd) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::File::from(fd.try_clone().ok()?).metadata().ok()?;
+    Some((meta.dev(), meta.ino()))
 }
 
 #[derive(Default)]
@@ -59,6 +83,8 @@ impl State {
             handle: 0,
             open: false,
             declaration,
+            ring: None,
+            taken: false,
             writer: None,
             bells: Vec::new(),
             subscribers: 0,
@@ -89,16 +115,61 @@ impl State {
             .unwrap_or_else(|| unreachable!("a publisher outlives its handle"))
     }
 
-    pub(crate) fn add_subscriber(&mut self, seq: u16) -> usize {
+    pub(crate) fn add_subscriber(&mut self, seq: u16, asked: Asked) -> usize {
         self.subscribers.push(Some(SubscriberState {
             seq,
             handle: None,
+            asked,
             status: TopicStatus::Waiting,
             declaration: Vec::new(),
+            ring: None,
             arrived: None,
             mirror: None,
         }));
         self.subscribers.len() - 1
+    }
+
+    /// Every publisher there is: its index, its declaration and its ring's write end.
+    pub(crate) fn publishers_to_restore(&self) -> Vec<(usize, Vec<u8>, Option<OwnedFd>)> {
+        self.publishers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, publisher)| {
+                let publisher = publisher.as_ref()?;
+                let ring = publisher
+                    .ring
+                    .as_ref()
+                    .and_then(|ring| ring.try_clone().ok());
+                Some((index, publisher.declaration.clone(), ring))
+            })
+            .collect()
+    }
+
+    /// Marks a publisher as declared again under `seq`, waiting for its answer.
+    pub(crate) fn redeclared(&mut self, index: usize, seq: u16) {
+        if let Some(publisher) = self.publishers[index].as_mut() {
+            publisher.seq = seq;
+            publisher.open = false;
+            publisher.bells.clear();
+            publisher.subscribers = 0;
+        }
+    }
+
+    /// Every subscriber there is, by index.
+    pub(crate) fn subscribers_to_restore(&self) -> Vec<usize> {
+        self.subscribers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, subscriber)| subscriber.as_ref().map(|_| index))
+            .collect()
+    }
+
+    /// Marks a subscriber as subscribed again under `seq`, waiting for its answer.
+    pub(crate) fn resubscribed(&mut self, index: usize, seq: u16) {
+        if let Some(subscriber) = self.subscribers[index].as_mut() {
+            subscriber.seq = seq;
+            subscriber.handle = None;
+        }
     }
 
     pub(crate) fn drop_subscriber(&mut self, index: usize) {
@@ -148,10 +219,17 @@ impl State {
             publisher.handle = opened.handle;
             publisher.open = true;
             publisher.bells.clear();
-            publisher.writer = match cx.take_fd(0) {
-                Some(fd) if opened.shared_memory => Some(Writer::attach(fd).map_err(ring)?),
-                _ => None,
-            };
+            match cx.take_fd(0) {
+                Some(fd) if opened.shared_memory => {
+                    publisher.ring = fd.try_clone().ok();
+                    // A publisher that writes the ring itself already has its writer, on
+                    // this same memory if the comm core took the ring back.
+                    if !publisher.taken {
+                        publisher.writer = Some(Writer::attach(fd).map_err(ring)?);
+                    }
+                }
+                _ => publisher.writer = None,
+            }
             return Ok(());
         }
         let declaration = &self.declaration;
@@ -169,7 +247,14 @@ impl State {
         match cx.take_fd(0) {
             Some(fd) if opened.shared_memory => {
                 subscriber.mirror = None;
-                subscriber.arrived = Some(Reader::attach(fd).map_err(ring)?);
+                // The same ring again, after the comm core came back: the reader the
+                // subscriber has is still on it, where it was. A new one would start at the
+                // newest sample and pass over what was published meanwhile.
+                let which = identity(&fd);
+                if which.is_none() || which != subscriber.ring {
+                    subscriber.ring = which;
+                    subscriber.arrived = Some(Reader::attach(fd).map_err(ring)?);
+                }
             }
             _ => {
                 // No ring can be shared with this program: it keeps one of its own, shaped

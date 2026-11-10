@@ -178,6 +178,107 @@ impl Topics {
         })
     }
 
+    /// Sends a subscribe for `topic`, with this program's doorbell and its marks if it is on
+    /// the board, and returns the `seq` it went with.
+    fn send_subscribe(
+        &self,
+        topic: &str,
+        request: &[u8],
+        holding: &Holding<'_>,
+    ) -> Result<u16, TopicError> {
+        let topic = TopicRef::parse(topic)
+            .map_err(|error| TopicError::Invalid(format!("{topic:?}: {error}")))?;
+        let subscribe = Subscribe {
+            topic,
+            request: Bytes(request),
+            max_held: holding.max_held,
+            max_hold_ms: holding.max_hold_ms,
+        };
+        if !self.client.session(|session| session.passes_descriptors()) {
+            return Ok(self.client.send(&subscribe)?);
+        }
+        // One doorbell for everything this program subscribes to.
+        let (eventfd, page) = {
+            let mut state = self.state.borrow_mut();
+            if state.doorbell.is_none() {
+                state.doorbell = Some(Doorbell::create()?);
+            }
+            state
+                .doorbell
+                .as_ref()
+                .map(Doorbell::bell_fds)
+                .transpose()?
+                .ok_or(TopicError::Invalid("no doorbell".into()))?
+        };
+        Ok(match holding.marks {
+            Some(marks) => self
+                .client
+                .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd(), marks])?,
+            None => self
+                .client
+                .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd()])?,
+        })
+    }
+
+    /// Says everything again to a comm core that has no memory of this session: every
+    /// declaration, with its ring handed back, and every subscription. Call it after
+    /// [`orion_connect::Session::reconnect`].
+    ///
+    /// A publisher on the board kept its ring and kept writing it while the comm core was
+    /// away. The comm core takes that same ring back, so subscribers that kept their end of
+    /// it missed nothing, and nothing that was flowing stopped.
+    ///
+    /// # Errors
+    ///
+    /// If the comm core refuses something it took before, or the connection broke again.
+    pub fn restore(&self) -> Result<(), TopicError> {
+        let shares = self.client.session(|session| session.passes_descriptors());
+        // Publishers first: a ring is handed back before anyone asks to read it.
+        let publishers = self.state.borrow().publishers_to_restore();
+        for (index, declaration, ring) in publishers {
+            let seq = match ring.as_ref().filter(|_| shares) {
+                Some(ring) => {
+                    self.client
+                        .send_frame(kind::TOPIC_DECLARE, &declaration, &[ring.as_fd()])?
+                }
+                None => self
+                    .client
+                    .send_frame(kind::TOPIC_DECLARE, &declaration, &[])?,
+            };
+            self.state.borrow_mut().redeclared(index, seq);
+            self.client
+                .answered(seq, || self.state.borrow().publisher_open(index))?;
+        }
+        let subscribers = self.state.borrow().subscribers_to_restore();
+        for index in subscribers {
+            let (topic, request, max_held, max_hold_ms, marks) = {
+                let state = self.state.borrow();
+                let asked = &state.subscriber(index).asked;
+                let marks = asked
+                    .marks
+                    .as_ref()
+                    .and_then(|marks| marks.try_clone().ok());
+                (
+                    asked.topic.clone(),
+                    asked.request.clone(),
+                    asked.max_held,
+                    asked.max_hold_ms,
+                    marks,
+                )
+            };
+            let holding = Holding {
+                marks: marks.as_ref().map(AsFd::as_fd),
+                max_held,
+                max_hold_ms,
+            };
+            let seq = self.send_subscribe(&topic, &request, &holding)?;
+            self.state.borrow_mut().resubscribed(index, seq);
+            self.client
+                .answered(seq, || self.state.borrow().subscriber_answered(index))?;
+        }
+        Ok(())
+    }
+
     /// Subscribes to a topic on this board, by name. `request` goes to the publisher unread:
     /// what this subscriber would like of it.
     ///
@@ -201,41 +302,18 @@ impl Topics {
         request: &[u8],
         holding: &Holding<'_>,
     ) -> Result<Subscriber, TopicError> {
-        let topic = TopicRef::parse(topic)
-            .map_err(|error| TopicError::Invalid(format!("{topic:?}: {error}")))?;
-        let subscribe = Subscribe {
-            topic,
-            request: Bytes(request),
+        let seq = self.send_subscribe(topic, request, holding)?;
+        let topic_name = topic.to_owned();
+        let asked = state::Asked {
+            topic: topic_name,
+            request: request.to_vec(),
             max_held: holding.max_held,
             max_hold_ms: holding.max_hold_ms,
+            marks: holding
+                .marks
+                .and_then(|marks| marks.try_clone_to_owned().ok()),
         };
-        let shares = self.client.session(|session| session.passes_descriptors());
-        let seq = if shares {
-            // One doorbell for everything this program subscribes to.
-            let (eventfd, page) = {
-                let mut state = self.state.borrow_mut();
-                if state.doorbell.is_none() {
-                    state.doorbell = Some(Doorbell::create()?);
-                }
-                state
-                    .doorbell
-                    .as_ref()
-                    .map(Doorbell::bell_fds)
-                    .transpose()?
-                    .ok_or(TopicError::Invalid("no doorbell".into()))?
-            };
-            match holding.marks {
-                Some(marks) => self
-                    .client
-                    .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd(), marks])?,
-                None => self
-                    .client
-                    .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd()])?,
-            }
-        } else {
-            self.client.send(&subscribe)?
-        };
-        let index = self.state.borrow_mut().add_subscriber(seq);
+        let index = self.state.borrow_mut().add_subscriber(seq, asked);
         let answered = self
             .client
             .answered(seq, || self.state.borrow().subscriber_answered(index));
@@ -331,11 +409,10 @@ impl Publisher {
     /// [`Publisher::publish`]: a topic of shared buffers. `None` off the board, where there
     /// is no ring to write. Afterwards [`Publisher::wake`] is how subscribers are woken.
     pub fn take_writer(&mut self) -> Option<orion_ring::Writer> {
-        self.state
-            .borrow_mut()
-            .publisher_mut(self.index)
-            .writer
-            .take()
+        let mut state = self.state.borrow_mut();
+        let publisher = state.publisher_mut(self.index);
+        publisher.taken = true;
+        publisher.writer.take()
     }
 
     /// Rings every subscriber that is asleep. No system call for one that is awake.

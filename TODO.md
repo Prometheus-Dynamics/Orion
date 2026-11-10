@@ -71,7 +71,7 @@ One client with the same calls on any address, plus the C surface and orionctl.
 - [x] [D6](docs/prs/D6.md) Client: files (wave 8; needs D1, A10)
 - [x] [D7](docs/prs/D7.md) Client: executor role (wave 8; needs D1, A9)
 - [x] [D8](docs/prs/D8.md) Client: provider role (wave 9; needs D4, D5)
-- [ ] [D9](docs/prs/D9.md) The orion facade (wave 10; needs D2, D3, D4, D5, D6, D7, D8)
+- [x] [D9](docs/prs/D9.md) The orion facade (wave 10; needs D2, D3, D4, D5, D6, D7, D8)
 - [ ] [D10](docs/prs/D10.md) C surface (wave 11; needs D9)
 - [ ] [D11](docs/prs/D11.md) orionctl (wave 11; needs D9)
 

@@ -26,6 +26,7 @@ use orion_types::HlcTimestamp;
 use orion_wire::{List, kind};
 
 pub use orion_msg_records::{RecordClass, RecordEntry};
+pub use orion_wire::Bytes;
 
 /// How many changes wait for a slow watcher before the watch stops taking them and catches
 /// up afterwards.
@@ -66,6 +67,8 @@ struct Answer {
 }
 
 struct Watching {
+    /// The watch, whatever request it is now on.
+    id: u64,
     seq: u16,
     class: RecordClass,
     prefix: String,
@@ -81,6 +84,7 @@ struct Watching {
 struct State {
     answers: Vec<Answer>,
     watches: Vec<Watching>,
+    next_watch: u64,
 }
 
 impl Handler for State {
@@ -214,7 +218,11 @@ impl Records {
             prefix,
             after,
         })?;
-        self.state.borrow_mut().watches.push(Watching {
+        let mut state = self.state.borrow_mut();
+        state.next_watch += 1;
+        let id = state.next_watch;
+        state.watches.push(Watching {
+            id,
             seq,
             class,
             prefix: prefix.to_owned(),
@@ -226,8 +234,39 @@ impl Records {
         Ok(Watch {
             client: self.client.clone(),
             state: self.state.clone(),
-            seq,
+            id,
         })
+    }
+
+    /// Asks again for every watch, each from the newest change it was given, of a store that
+    /// has no memory of this session. Call it after
+    /// [`orion_connect::Session::reconnect`]: nothing is missed, and nothing is seen twice.
+    ///
+    /// # Errors
+    ///
+    /// If the connection broke again.
+    pub fn restore(&self) -> Result<(), ClientError> {
+        let watches: Vec<(u64, RecordClass, String, HlcTimestamp)> = {
+            let state = self.state.borrow();
+            state
+                .watches
+                .iter()
+                .map(|watch| (watch.id, watch.class, watch.prefix.clone(), watch.newest))
+                .collect()
+        };
+        for (id, class, prefix, after) in watches {
+            let seq = self.client.send(&WatchRequest {
+                class,
+                prefix: &prefix,
+                after,
+            })?;
+            let mut state = self.state.borrow_mut();
+            if let Some(watch) = state.watches.iter_mut().find(|watch| watch.id == id) {
+                watch.seq = seq;
+                watch.behind = false;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -235,12 +274,12 @@ impl Records {
 pub struct Watch {
     client: Client,
     state: Rc<RefCell<State>>,
-    seq: u16,
+    id: u64,
 }
 
 impl fmt::Debug for Watch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Watch({})", self.seq)
+        write!(f, "Watch({})", self.id)
     }
 }
 
@@ -253,7 +292,7 @@ impl Watch {
         state
             .watches
             .iter()
-            .find(|watch| watch.seq == self.seq)
+            .find(|watch| watch.id == self.id)
             .map_or(HlcTimestamp::ZERO, |watch| watch.newest)
     }
 
@@ -264,20 +303,20 @@ impl Watch {
     /// If the store refused the watch, or the connection broke.
     pub fn poll(&mut self) -> Result<Option<Record>, ClientError> {
         self.client.drain()?;
-        if let Some(error) = self.client.refusal(self.seq) {
-            return Err(ClientError::Refused(error));
-        }
-        let (record, catch_up) = {
+        let (record, seq, catch_up) = {
             let mut state = self.state.borrow_mut();
-            let Some(watch) = state.watches.iter_mut().find(|watch| watch.seq == self.seq) else {
+            let Some(watch) = state.watches.iter_mut().find(|watch| watch.id == self.id) else {
                 return Ok(None);
             };
             let record = watch.queue.pop_front();
             // Caught up with what was held, having turned changes away: ask for the rest.
             let catch_up = (watch.behind && watch.queue.is_empty())
                 .then(|| (watch.class, watch.prefix.clone(), watch.newest));
-            (record, catch_up)
+            (record, watch.seq, catch_up)
         };
+        if let Some(error) = self.client.refusal(seq) {
+            return Err(ClientError::Refused(error));
+        }
         if let Some((class, prefix, after)) = catch_up {
             let seq = self.client.send(&WatchRequest {
                 class,
@@ -285,13 +324,12 @@ impl Watch {
                 after,
             })?;
             let mut state = self.state.borrow_mut();
-            if let Some(watch) = state.watches.iter_mut().find(|watch| watch.seq == self.seq) {
+            if let Some(watch) = state.watches.iter_mut().find(|watch| watch.id == self.id) {
                 // The store's pushes now name the new request; the old one's are no longer
                 // this watch's.
                 watch.seq = seq;
                 watch.behind = false;
             }
-            self.seq = seq;
         }
         Ok(record)
     }
@@ -323,6 +361,6 @@ impl Drop for Watch {
         self.state
             .borrow_mut()
             .watches
-            .retain(|watch| watch.seq != self.seq);
+            .retain(|watch| watch.id != self.id);
     }
 }

@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use orion_fdpass::FdSet;
 use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, Welcome};
-use orion_supervise::{Decision, Path, Status, Supervisor};
+use orion_supervise::{Decision, Path, Supervisor};
 use orion_types::NodeName;
 use orion_wire::{Body, Decode, FrameView, INTERFACE_REVISION, encode_body, frame, kind};
 
@@ -40,6 +40,7 @@ pub use client::{Client, Handler};
 pub use error::ClientError;
 pub use orion_identity::Identity;
 pub use orion_msg_session::Roles;
+pub use orion_supervise::Status;
 
 use transport::{Step, Transport, readable};
 

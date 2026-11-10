@@ -24,10 +24,11 @@ use orion_broker::{Broker, BrokerConfig};
 use orion_broker_buffers::BrokerBuffers;
 use orion_broker_proxy::BrokerProxy;
 use orion_keys::{Keys, KeysConfig, KeysService, SharedKeys};
-use orion_server::{Admits, Comm, Limits, Policy, Security};
+use orion_server::{Admits, Comm, Limits, Policy};
 use orion_tcp::{TcpCarrier, TcpOptions};
 use orion_unix::UnixCarrier;
 
+pub use orion_server::Security;
 pub use receiver::Shelf;
 
 /// A comm core running in its own thread until it is dropped.

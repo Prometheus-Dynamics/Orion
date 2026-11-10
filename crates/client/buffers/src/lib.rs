@@ -331,6 +331,22 @@ impl BufferPublisher {
     /// If the connection broke.
     pub fn poll(&mut self) -> Result<(), TopicError> {
         self.client.drain()?;
+        let now = self.publisher.handle();
+        if now != self.handle {
+            // The topic was declared again, to a comm core that came back with no memory of
+            // it: it goes by a new number there, and has not been given the pool.
+            if let Some(side) = self
+                .state
+                .borrow_mut()
+                .publishers
+                .iter_mut()
+                .find(|side| side.handle == self.handle)
+            {
+                side.handle = now;
+            }
+            self.handle = now;
+            self.offer()?;
+        }
         let changes = {
             let mut state = self.state.borrow_mut();
             match state
@@ -453,7 +469,7 @@ impl fmt::Debug for BufferSubscriber {
 /// Takes in a pool the comm core has sent, if it sent one.
 fn refresh(
     state: &RefCell<State>,
-    handle: u32,
+    handle: &mut u32,
     marks: &Arc<Marks>,
     subscriber: &mut Subscriber,
     frames: &mut Option<BufferReader<orion_ring::ReadMap, Arc<Marks>>>,
@@ -462,10 +478,17 @@ fn refresh(
     let Some(side) = state
         .subscribers
         .iter_mut()
-        .find(|side| side.handle == handle)
+        .find(|side| side.handle == *handle)
     else {
         return;
     };
+    // Subscribed again, to a comm core that came back: the topic goes by a new number.
+    if let Some(now) = subscriber.handle()
+        && now != *handle
+    {
+        side.handle = now;
+        *handle = now;
+    }
     let Some(pool) = side.pool.take() else {
         return;
     };
@@ -500,7 +523,7 @@ impl BufferSubscriber {
     pub fn next(&mut self) -> NextFrame<'_, Arc<Marks>> {
         refresh(
             &self.state,
-            self.handle,
+            &mut self.handle,
             &self.marks,
             &mut self.subscriber,
             &mut self.frames,
@@ -519,7 +542,7 @@ impl BufferSubscriber {
     /// If the connection broke.
     pub fn wait(&mut self, wait: Duration) -> Result<bool, TopicError> {
         let (state, handle, marks, frames) =
-            (&self.state, self.handle, &self.marks, &mut self.frames);
+            (&self.state, &mut self.handle, &self.marks, &mut self.frames);
         self.subscriber.wait_until(wait, |subscriber| {
             refresh(state, handle, marks, subscriber, frames);
             frames.as_ref().is_some_and(|frames| frames.pending() > 0)

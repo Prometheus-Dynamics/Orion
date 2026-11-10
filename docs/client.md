@@ -3,6 +3,34 @@
 What a program uses to talk to a comm core. One client, with the same calls wherever the comm
 core is.
 
+## One crate
+
+A program depends on `orion` and nothing else of Orion's. `Orion::connect(address, name)` gives
+one handle; what it can do is behind cargo features so a program carries only what it uses.
+
+| Feature | What it gives |
+| --- | --- |
+| `topics` (default) | `declare`, `subscribe` |
+| `records` (default) | `records()`: put, get, watch |
+| `actions` (default) | `run`, `attach`, `register_action` |
+| `buffers` | `declare_buffers`, `subscribe_buffers` |
+| `files` | `files()`: push, pull |
+| `workloads` | `workloads()`: say what should run, hear where it is |
+| `executor` | `executor()`: run workloads for Orion |
+| `provider` | `provider()`, `resources(prefix)` |
+| `tokio` | wait inside a runtime |
+
+`examples/roles.rs` in that crate is every role in one file.
+
+**When the comm core goes away.** A call fails with an error for which `is_lost` is true.
+`orion.reconnect(..)` connects again and says everything again: topics are declared with their
+rings handed back, subscriptions and watches are asked for from where they were, actions are
+registered. On the board a ring belongs to its publisher and its subscribers, so values kept
+going from one to the other while the comm core was away, and it takes the same ring back when
+it returns. Nothing that was flowing stops.
+
+The sections below are the crates the handle is made of.
+
 ## Connecting
 
 `orion-connect` gives a `Session`.
@@ -184,4 +212,12 @@ names the resource's topics and actions; a topic's declaration names its fields,
 units; an action has a description and a policy. `resources(records, prefix)` is the reading
 side: a dashboard, a tool or another board lists what is there, reads it and drives it with no
 code for that kind of device.
+
+## Workloads
+
+`orion::workloads`. Orion holds what should be running and tracks every run. `put` says a
+workload should exist: a name, a kind (which picks the executor), a spec only the executor
+reads, and what to do when it ends. `remove` says it should stop existing; its record stays
+until the run is really gone, unless forced. `status` and `wait` give where it is: pending,
+starting, running, stopping, gone, or failed or lost.
 
