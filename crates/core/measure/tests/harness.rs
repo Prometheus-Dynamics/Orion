@@ -69,3 +69,50 @@ fn costs_add_up() {
     );
     assert_eq!(snapshot.nanos_per_message(), 1_500);
 }
+
+#[cfg(all(feature = "sched", target_os = "linux"))]
+mod sched {
+    use std::hint::black_box;
+
+    use orion_measure::sched::{
+        SystemCalls, pin_current_thread, thread_cpu_ns, without_system_calls,
+    };
+
+    #[test]
+    fn a_body_that_only_computes_makes_no_system_call() {
+        let outcome = without_system_calls(|| black_box((0..10_000_u64).sum::<u64>()) > 0);
+        assert_eq!(outcome, SystemCalls::None);
+    }
+
+    #[test]
+    fn a_system_call_is_caught() {
+        let outcome = without_system_calls(|| {
+            std::thread::current().id() == std::thread::current().id() && {
+                std::thread::yield_now();
+                true
+            }
+        });
+        assert_eq!(outcome, SystemCalls::Made);
+    }
+
+    #[test]
+    fn a_body_that_says_no_is_a_failure_not_a_pass() {
+        assert_eq!(
+            without_system_calls(|| black_box(false)),
+            SystemCalls::Failed
+        );
+    }
+
+    #[test]
+    fn a_thread_can_be_pinned_and_its_cpu_time_goes_up() {
+        // Whatever CPU this thread is allowed on, it can be pinned to one of them.
+        assert!((0..256).any(pin_current_thread));
+        assert!(!pin_current_thread(usize::MAX));
+        let before = thread_cpu_ns();
+        let mut total = 0_u64;
+        while thread_cpu_ns() - before < 2_000_000 {
+            total = black_box(total.wrapping_add(1));
+        }
+        assert!(total > 0);
+    }
+}

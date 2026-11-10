@@ -13,6 +13,11 @@ default = []
 alloc-counter = []
 # Per-message cost and wake-up counters. Without this they are empty and cost nothing.
 costs = []
+# Proving a path makes no system call, pinning a thread and reading its CPU time. Linux.
+sched = ["dep:libc"]
+
+[dependencies]
+libc = { workspace = true, optional = true }
 
 [lints.rust]
 unsafe_code = "allow"

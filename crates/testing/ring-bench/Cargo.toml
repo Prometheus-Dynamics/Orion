@@ -1,0 +1,20 @@
+[package]
+name = "orion-ring-bench"
+description = "What the ring costs: value publishes with an awake and a sleeping reader, and a frame topic with hold marks."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion-measure = { path = "../../core/measure", features = ["alloc-counter", "sched"] }
+orion-ring = { path = "../../core/ring" }
+orion-ring-buffers = { path = "../../core/ring-buffers" }
+orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+orion-ring-holds = { path = "../../core/ring-holds" }
+orion-ring-time = { path = "../../core/ring-time" }
+
+[lints]
+workspace = true

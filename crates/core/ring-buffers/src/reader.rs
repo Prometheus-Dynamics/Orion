@@ -22,8 +22,12 @@ struct Shared<K> {
 /// Reading them is reading the publisher's memory in place. Nothing was copied.
 ///
 /// A `Held` is independent of the reader it came from. Keep several, send them to other
-/// threads; each buffer is released when its `Held` is dropped. (With [`NoMarks`] nothing is
-/// actually held and the bytes can change underneath.)
+/// threads; each buffer is released when its `Held` is dropped.
+///
+/// With [`NoMarks`] nothing is actually held, and the publisher may write a buffer while a slice
+/// of it is in hand. The slice is a `&[u8]`, which the compiler may assume does not change, so
+/// such a reader can see a mix of old and new bytes or keep seeing old ones. That is for tests
+/// and tools that only pass descriptors on. Anything that reads frames holds them.
 #[derive(Debug)]
 pub struct Held<K: Marker = NoMarks> {
     shared: Arc<Shared<K>>,

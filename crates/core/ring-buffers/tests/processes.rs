@@ -93,8 +93,17 @@ fn subscriber_process() {
     // The publisher now writes over the frame where it lies. Seeing that through the same
     // slice is what "no copy" means: this process never received those bytes any other way.
     send(socket.as_fd(), &[b"read"], &[], false).expect("say read");
-    wait_for("the publisher's second write", || bytes[FRAME - 1] == 0xC3);
-    assert!(bytes.iter().all(|byte| *byte == 0xC3));
+    // The bytes are fetched again for every look. A slice already in hand is a `&[u8]`, which
+    // the compiler may assume does not change, and nothing holds this frame.
+    wait_for("the publisher's second write", || {
+        held.bytes(0).expect("bytes")[FRAME - 1] == 0xC3
+    });
+    assert!(
+        held.bytes(0)
+            .expect("bytes")
+            .iter()
+            .all(|byte| *byte == 0xC3)
+    );
     send(socket.as_fd(), &[b"same memory"], &[], false).expect("say done");
 }
 

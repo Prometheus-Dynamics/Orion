@@ -163,6 +163,17 @@ impl Bell {
         })
     }
 
+    /// Whether the subscriber is asleep right now. For tools and benches; a publisher just
+    /// calls [`Bell::ring`].
+    #[must_use]
+    pub fn asleep(&self) -> bool {
+        use orion_ring::Mem;
+        self.page
+            .load(protocol::STATE_WORD, std::sync::atomic::Ordering::Acquire)
+            & 1
+            == 1
+    }
+
     /// Call after publishing. Wakes the subscriber if it is asleep and hasn't been rung for this
     /// sleep yet, and says whether it did. With the subscriber awake this is a fence and one
     /// memory read: no system call.

@@ -204,7 +204,9 @@ What a buffer topic adds to a value ring:
 - One entry can name several buffers (image pyramid levels).
 
 Measured on a CM5 at 120 Hz: passing fds on every frame 34.5 µs; a ring slot and wake 18.1 µs; a
-full-frame copy 170 µs. Set-up costs a few system calls per buffer, once.
+full-frame copy 170 µs. Set-up costs a few system calls per buffer, once. As built, with hold
+marks: 10.5 µs from publish to the subscriber holding the frame
+([`B9.md`](../testing/board-runs/B9.md)).
 
 A buffer number means nothing on another board. Off the board, video is an ordinary bytes topic. One
 generic flag on a sample, "others depend on this one", lets Orion skip forward to the next
