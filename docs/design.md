@@ -167,6 +167,8 @@ pose is one sample. One declaration can hold several related fields.
 - Old entries are overwritten. A slow reader skips ahead and counts what it missed.
 - Latest value, history and the lookup by frame time all read the same entries. A latest-value topic
   is a ring two deep with an expiry.
+- Each field keeps its own history, so a busy field never erases a quiet one's newest value. An
+  index keeps the order across fields. [`ring.md`](ring.md) pins the layout.
 - Subscriber counts sit in the ring header, so a publisher can skip work with one memory read.
 - Readers bounds-check everything. A writer can only damage its own topic.
 - A program that can't write shared memory sends over its connection, and the comm core writes the
@@ -322,12 +324,13 @@ pub trait Service {
 
 // crates/core/ring. One writer, many readers. Neither call makes a system call.
 impl Writer {
-    pub fn publish(&mut self, field: FieldId, time: FrameTime, flags: Flags, payload: &[u8]);
+    pub fn publish(&mut self, field: FieldId, time: FrameTime, flags: Flags, payload: &[u8]) -> Result<u64, PublishError>;
     pub fn subscribers(&self) -> u32;
 }
 impl Reader {
     pub fn next(&mut self) -> Next<'_>;                     // Sample, Empty, or Skipped(count)
-    pub fn latest(&self, field: FieldId) -> Option<Sample<'_>>;
+    pub fn latest(&mut self, field: FieldId) -> Option<Sample<'_>>;
+    pub fn at(&mut self, field: FieldId, lane_seq: u64) -> Option<Sample<'_>>;   // a field's history
 }
 // crates/core/ring-time
 pub fn at_or_before(reader: &Reader, field: FieldId, time: FrameTime) -> Lookup<'_>;   // Hit, Lagged, Missing
