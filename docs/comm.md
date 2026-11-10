@@ -185,3 +185,45 @@ answered as an operator that may do everything, and nothing is recorded.
 
 Settings: `cluster` (`default`), `enrollment.key` (none: only an administrator enrolls),
 `operators.read` (`true`), `operators.actions` (none).
+
+## The network carrier
+
+`crates/comm/tcp` (`orion-tcp`). `orion+tcp`: how nodes reach each other and how people's tools
+reach a node. The same frames as every carrier, with a length in front.
+
+**A signed session**, with security on:
+
+```text
+C -> S  "ORTC" mode version                      mode 0: plain, 1: signed
+S -> C  status                                   0: go on, 1: this node needs a signed session
+C -> S  eph_C nonce_C key_C                      32 bytes each
+S -> C  eph_S nonce_S key_S sig_S
+C -> S  sig_C
+S -> C  status                                   0: accepted, 2: this key is not welcome
+```
+
+Each side signs both sides' fresh values with its identity key, so a handshake cannot be played
+back. The ephemeral exchange gives the two a secret, and every frame after carries a 16-byte MAC
+under it, over the frame and its place in the order. A frame changed, added, dropped or reordered
+in flight fails, and the session ends. The session is not encrypted: it can be read, and it cannot
+be forged.
+
+- The server knows the other end by the key it proved: the peer pinned to that key, else an
+  operator (granted whatever the trust store says, which for a new key is nothing). A revoked key
+  does not get past the handshake.
+- A client that knows which key to expect refuses any other, so a node cannot be impersonated to
+  its peers.
+- Each handshake is its own task with its own deadline (`comm.hello_ms`). A connection that says
+  nothing, or something else, holds up nobody.
+
+**With security off** a plain session is accepted: no keys, no MAC, and the other end is nobody in
+particular. A node with security on refuses a plain session and says so, so a tool can report "this
+node needs a key".
+
+**One connection each way.** A node dials each peer and keeps that connection for its own requests;
+the peer dials back for its own. The dialer connects, hands the connection over, and connects again
+when it ends: every 250 ms for as long as the program runs, never slower however long the peer has
+been gone. Its state (running, retrying, failures) is reported on every change.
+
+Descriptors do not cross a network. A subscriber over this carrier is answered
+`shared_memory: false`.
