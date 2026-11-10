@@ -543,11 +543,6 @@ impl SharedKeys {
 
 impl Grants for SharedKeys {
     fn operator_may(&self, key: &KeyId, what: What<'_>) -> bool {
-        // Asking to be enrolled is the one thing a key that has been granted nothing may do.
-        // The answer says where it stands, which for a revoked key is revoked.
-        if what == What::Open(crate::service::ENROLL) {
-            return true;
-        }
         self.lock()
             .operator(key)
             .is_some_and(|operator| operator.may(what))

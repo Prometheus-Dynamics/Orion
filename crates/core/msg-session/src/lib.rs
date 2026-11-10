@@ -3,7 +3,7 @@
 #![no_std]
 
 use orion_types::{Error, NodeName};
-use orion_wire::{body, kind, open_enum};
+use orion_wire::{Bytes, List, body, kind, open_enum};
 use serde::{Deserialize, Serialize};
 
 /// What a connection will act as. A program can be several at once.
@@ -115,6 +115,53 @@ body! {
         pub code: u16,
         /// A description for people.
         pub detail: &'a str,
+    }
+}
+
+body! {
+    /// Asks a node who it is. Answered with [`Identity`].
+    pub struct Identify<'a> = kind::IDENTIFY {
+        /// Fresh bytes of the asker's, up to 32, which the answer includes under its
+        /// signature. That is what makes an answer one that was made for this question.
+        pub nonce: Bytes<'a>,
+    }
+}
+
+body! {
+    /// One fact about the board, from whatever program published it.
+    pub struct IdentityField<'a> {
+        /// Its name.
+        pub name: &'a str,
+        /// The number of its field type.
+        pub ty: u8,
+        /// Its value, as that type's payload.
+        pub value: Bytes<'a>,
+    }
+}
+
+body! {
+    /// Who a node is: the hello document.
+    pub struct Identity<'a> = kind::IDENTITY {
+        /// The `seq` of the request.
+        pub request_seq: u16,
+        /// The node.
+        pub node: NodeName,
+        /// Its cluster.
+        pub cluster: &'a str,
+        /// Its public key.
+        pub public_key: Bytes<'a>,
+        /// Its clock: milliseconds since 1970.
+        pub time_ms: u64,
+        /// The highest interface revision it speaks.
+        pub revision: u16,
+        /// Facts about the board that other programs published.
+        pub fields: List<'a, IdentityField<'a>>,
+        /// The `nonce` of the request.
+        pub nonce: Bytes<'a>,
+        /// The node's signature over everything before this field. Always last, so it can be
+        /// cut off and the rest checked. Empty when the asker is on the board and gave no
+        /// nonce.
+        pub signature: Bytes<'a>,
     }
 }
 

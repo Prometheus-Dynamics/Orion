@@ -35,6 +35,9 @@ impl Admits {
     }
 }
 
+/// The bit of a policy's byte that says an operator needs no grant.
+const WITHOUT_GRANT: u8 = 0x80;
+
 /// Who may do something. Deliberately has no `Default`: whoever adds an action decides this.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Policy {
@@ -46,6 +49,22 @@ impl Policy {
     #[must_use]
     pub const fn new(admits: Admits) -> Self {
         Self { admits }
+    }
+
+    /// The same policy, for something an operator may do without having been granted it: the
+    /// few things that are how one becomes known at all, such as asking who a board is or asking
+    /// to be enrolled. Everything else an operator does needs a grant.
+    #[must_use]
+    pub const fn without_grant(self) -> Self {
+        Self {
+            admits: Admits(self.admits.0 | WITHOUT_GRANT),
+        }
+    }
+
+    /// Whether an operator must have been granted this.
+    #[must_use]
+    pub const fn needs_grant(&self) -> bool {
+        self.admits.0 & WITHOUT_GRANT == 0
     }
 
     /// Who it admits.

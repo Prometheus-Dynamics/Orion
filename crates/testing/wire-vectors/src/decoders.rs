@@ -39,6 +39,8 @@ decoders! {
     REJECT => session::Reject,
     PING => session::Ping,
     PONG => session::Pong,
+    IDENTIFY => session::Identify,
+    IDENTITY => session::Identity,
     REFUSAL => session::Refusal,
     PUT => records::Put,
     GET => records::Get,

@@ -11,7 +11,10 @@ use orion_msg_peers::{
     PeerRevoke, PeerSync, TimeReply, TimeRequest,
 };
 use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, RecordEntry, Watch};
-use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, RejectReason, Roles, Welcome};
+use orion_msg_session::{
+    Hello, Identify, Identity, IdentityField, Ping, Pong, Refusal, Reject, RejectReason, Roles,
+    Welcome,
+};
 use orion_msg_topics::{
     BatchSample, Bell, BufferInfo, BufferOffer, Declare, Demand, Field, FieldType, Holds, Open,
     Opened, Sample as TopicSample, SampleBatch, SampleFlags, Subscribe, TopicState, TopicStatus,
@@ -149,6 +152,31 @@ fn session(out: &mut Vec<Sample>) {
             request_seq: 9,
             code: Error::Denied.code(),
             detail: "no"
+        }
+    );
+    sample!(
+        out,
+        Identify {
+            nonce: Bytes(&[1, 2, 3])
+        }
+    );
+    let fields = [IdentityField {
+        name: "model",
+        ty: 4,
+        value: Bytes(b"x1"),
+    }];
+    sample!(
+        out,
+        Identity {
+            request_seq: 9,
+            node: node("left"),
+            cluster: "lab",
+            public_key: Bytes(&[7; 4]),
+            time_ms: 1_700_000_000_000,
+            revision: 1,
+            fields: List::new(&fields),
+            nonce: Bytes(&[1, 2, 3]),
+            signature: Bytes(&[9; 4])
         }
     );
 }

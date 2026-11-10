@@ -204,6 +204,7 @@ impl<'g> Check<'g> {
             return Err(Refused::NotAdmitted);
         }
         if let Principal::Operator(key) = who
+            && policy.needs_grant()
             && !self.grants.operator_may(key, request.what())
         {
             return Err(Refused::NotGranted);
@@ -278,6 +279,22 @@ mod tests {
             check.decide(&who, Ping, &policy).unwrap_err(),
             Refused::NotGranted
         );
+    }
+
+    #[test]
+    fn a_policy_can_let_an_operator_through_without_a_grant() {
+        let check = Check::with_grants(Security::On, &NoGrants);
+        let who = Principal::Operator(KEY);
+        let open = Policy::new(Admits::ANYONE).without_grant();
+        assert!(check.decide(&who, Ping, &open).is_ok());
+        assert!(!open.needs_grant() && Policy::new(Admits::ANYONE).needs_grant());
+        // It still has to be admitted: the grant is all that is waived.
+        let peers = Policy::new(Admits::PEER).without_grant();
+        assert_eq!(
+            check.decide(&who, Ping, &peers).unwrap_err(),
+            Refused::NotAdmitted
+        );
+        assert!(open.admits().contains(crate::PrincipalClass::Anonymous));
     }
 
     #[test]

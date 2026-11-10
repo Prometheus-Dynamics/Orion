@@ -15,9 +15,6 @@ use crate::enroll_impl::{NONCE_LEN, Side, Transcript, proof, verify_proof};
 use crate::identity::{random, verify};
 use crate::store::{Operator, SharedKeys};
 
-/// What an enrollment request asks to open, as the check is told.
-pub(crate) const ENROLL: &str = "enroll";
-
 /// A handshake this node has answered and is waiting to see confirmed.
 struct Waiting {
     session: SessionId,
@@ -91,11 +88,12 @@ impl Service for KeysService {
 
     fn asks<'a>(&self, frame: &FrameView<'a>) -> Result<(What<'a>, Policy), Error> {
         Ok(match frame.kind() {
-            // Asking to be trusted is open to anyone: what is asked proves itself, or waits
-            // for an administrator.
-            kind::ENROLL_HELLO | kind::ENROLL_CONFIRM | kind::OPERATOR_ENROLL => {
-                (What::Open(ENROLL), Policy::new(Admits::ANYONE))
-            }
+            // Asking to be trusted is open to anyone, a key granted nothing included: what is
+            // asked proves itself, or waits for an administrator.
+            kind::ENROLL_HELLO | kind::ENROLL_CONFIRM | kind::OPERATOR_ENROLL => (
+                What::Open("enroll"),
+                Policy::new(Admits::ANYONE).without_grant(),
+            ),
             kind::PEER_REVOKE => (What::Write("trust"), Policy::new(Admits::ROOT)),
             _ => (
                 What::Read("operators"),

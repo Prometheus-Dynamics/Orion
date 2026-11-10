@@ -1,0 +1,24 @@
+[package]
+name = "orion-hello"
+description = "The hello document: who a board is, served to anyone who connects and signed."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-broker = { path = "../broker" }
+orion-keys = { path = "../keys" }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-server = { path = "../server" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
+
+[lints]
+workspace = true

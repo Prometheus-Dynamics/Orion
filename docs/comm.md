@@ -227,3 +227,28 @@ been gone. Its state (running, retrying, failures) is reported on every change.
 
 Descriptors do not cross a network. A subscriber over this carrier is answered
 `shared_memory: false`.
+
+## The hello document
+
+`crates/comm/hello` (`orion-hello`). Anyone who connects may ask who the board is (`Identify`, with
+a nonce) and is answered (`Identity`):
+
+| Field | From |
+| --- | --- |
+| Node name, cluster, public key, interface revision | Orion |
+| Clock, milliseconds since 1970 | Orion |
+| Facts about the board: name, type, value | Other programs |
+| The asker's nonce | The question |
+| Signature | The node's key, over a fixed label and everything before this field |
+
+- **Signed.** `orion_hello::verify` checks that the document is signed by the key it names and answers the
+  nonce that was asked. Any byte changed fails it, and so does the same document offered for
+  another question. Whether that key is the board the asker meant to reach is the asker's to
+  decide: a tool that knows the board checks the key, one that does not learns it here.
+- **Orion invents no board facts.** A program that knows one publishes it as a topic named
+  `hello.<fact>`; the document carries the newest value of each, in name order, up to 64 facts of
+  256 bytes. When that program goes, its facts go.
+- **Anyone may ask**, a key that has been granted nothing included.
+- **Always answers.** It is in the comm core and needs nothing else running.
+- Someone on the board who gives no nonce is not checking a signature and gets the document
+  unsigned. Over the network it is always signed.

@@ -57,6 +57,8 @@ kinds! {
         PING = 0x04,
         PONG = 0x05,
         REFUSAL = 0x06,
+        IDENTIFY = 0x07,
+        IDENTITY = 0x08,
     }
     Records {
         PUT = 0x10,
