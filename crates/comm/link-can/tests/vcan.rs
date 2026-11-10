@@ -32,6 +32,7 @@ fn the_wire_crosses_a_virtual_can_bus() {
             );
             let bus = CanBus {
                 name: "vcan0".into(),
+                interface: "vcan0".into(),
                 base: BASE,
                 addresses: vec![3],
                 fd,

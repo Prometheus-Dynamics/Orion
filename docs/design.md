@@ -87,9 +87,9 @@ crates/
   device/    microcontroller side: core, topics, actions, firmware. no_std, size gated
   client/    connect, topics, buffers, records, actions, files, executor, provider, orion, capi, ctl
   comm/      server, unix, tcp, ws, link-*, broker*, topic-peers, outbound, keys, hello,
-             discovery, time, self-status, device-*, ssh*, recovery, app
+             discovery, time, self-status, device-*, ssh*, recovery, comm-app
   node/      store, persist, workloads, workload-*, executors, sync, placement, actions*, files*,
-             resources, audit, app, assembly
+             resources, audit, node-app, assembly
   gateways/  nt4, nt4-gateway, nt4-client-gateway
   bridges/   daedalus
   bins/      orion, orion-recovery

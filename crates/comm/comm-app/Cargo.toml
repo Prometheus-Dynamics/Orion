@@ -1,0 +1,69 @@
+[package]
+name = "orion-comm-app"
+description = "The comm core, assembled: the always-up program that owns every way into the board."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd"]
+# The network way in, `orion+tcp`.
+tcp = ["dep:orion-tcp"]
+# Time sync.
+time = ["dep:orion-time"]
+# The board's vital signs and Orion's own state as topics.
+self-status = ["dep:orion-self-status"]
+# Publishing for programs that cannot map shared memory.
+proxy = ["dep:orion-broker-proxy"]
+# Buffer topics: frames in shared memory.
+buffers = ["dep:orion-broker-buffers"]
+# Tells systemd when the comm core is ready and that it is alive.
+systemd = []
+# Finding the other nodes of the cluster.
+discovery = ["tcp", "dep:orion-discovery"]
+# Discovery over mDNS on the local network.
+mdns = ["discovery", "orion-discovery/mdns"]
+# Serial links.
+link-serial = ["dep:orion-link-serial"]
+# Links brought over the network in the sealed channel.
+link-sealed = ["link-serial", "orion-link-serial/sealed"]
+# CAN links.
+link-can = ["dep:orion-link-can", "orion-link-can/socketcan"]
+# USB links.
+link-usb = ["link-serial", "dep:orion-link-usb"]
+# Everything.
+full = ["mdns", "link-sealed", "link-can", "link-usb"]
+
+[dependencies]
+orion-broker = { path = "../broker" }
+orion-broker-buffers = { path = "../broker-buffers", optional = true }
+orion-broker-proxy = { path = "../broker-proxy", optional = true }
+orion-config = { path = "../../core/config" }
+orion-discovery = { path = "../discovery", optional = true }
+orion-hello = { path = "../hello" }
+orion-keys = { path = "../keys" }
+orion-link-can = { path = "../link-can", optional = true }
+orion-link-serial = { path = "../link-serial", optional = true }
+orion-link-usb = { path = "../link-usb", optional = true }
+orion-self-status = { path = "../self-status", optional = true }
+orion-server = { path = "../server" }
+orion-supervise = { path = "../../core/supervise" }
+orion-tcp = { path = "../tcp", optional = true }
+orion-time = { path = "../time", optional = true }
+orion-types = { path = "../../core/types" }
+orion-unix = { path = "../unix" }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-msg-session = { path = "../../core/msg-session" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["test-util", "net"] }
+
+[lints]
+workspace = true

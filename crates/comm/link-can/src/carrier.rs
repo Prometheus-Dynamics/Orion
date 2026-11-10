@@ -67,12 +67,72 @@ pub trait OpenCan {
 pub struct CanBus {
     /// The bus's name. A device on it is `<name>.<address>`.
     pub name: String,
+    /// The interface it is on, for example `can0`.
+    pub interface: String,
     /// The identifiers of address 0. A device's are these plus its address.
     pub base: CanLinkIds,
     /// The addresses that may be on this bus.
     pub addresses: Vec<u32>,
     /// CAN FD frames, up to 64 bytes, instead of classic CAN's 8.
     pub fd: bool,
+}
+
+fn number(text: &str) -> Result<u32, String> {
+    let parsed = match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        Some(hex) => u32::from_str_radix(hex, 16),
+        None => text.parse(),
+    };
+    parsed.map_err(|_| format!("{text:?} is not a number"))
+}
+
+/// A bus as it is written in the settings:
+/// `name=interface:device-to-host:host-to-device:addresses[:fd][:extended]`, for example
+/// `can0=can0:0x100:0x180:1-8:fd`. Addresses are numbers and ranges joined by `+`: `1-4+9`.
+impl std::str::FromStr for CanBus {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, String> {
+        const FORM: &str =
+            "expected name=interface:device-to-host:host-to-device:addresses[:fd][:extended]";
+        let (name, rest) = text.split_once('=').ok_or(FORM)?;
+        let mut parts = rest.split(':').map(str::trim);
+        let interface = parts
+            .next()
+            .filter(|interface| !interface.is_empty())
+            .ok_or(FORM)?;
+        let device_to_host = number(parts.next().ok_or(FORM)?)?;
+        let host_to_device = number(parts.next().ok_or(FORM)?)?;
+        let mut addresses = Vec::new();
+        for range in parts.next().ok_or(FORM)?.split('+') {
+            let (first, last) = match range.split_once('-') {
+                Some((first, last)) => (number(first.trim())?, number(last.trim())?),
+                None => (number(range.trim())?, number(range.trim())?),
+            };
+            if last < first || last - first > 1024 {
+                return Err(format!("{range:?} is not a range of addresses"));
+            }
+            addresses.extend(first..=last);
+        }
+        let (mut fd, mut extended) = (false, false);
+        for flag in parts {
+            match flag {
+                "fd" => fd = true,
+                "extended" => extended = true,
+                other => return Err(format!("{other:?} is neither `fd` nor `extended`")),
+            }
+        }
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(FORM.into());
+        }
+        Ok(Self {
+            name: name.to_owned(),
+            interface: interface.to_owned(),
+            base: CanLinkIds::new(device_to_host, host_to_device, extended),
+            addresses,
+            fd,
+        })
+    }
 }
 
 /// What a bus has seen.

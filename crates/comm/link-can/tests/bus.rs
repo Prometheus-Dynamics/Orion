@@ -193,6 +193,7 @@ const BASE: CanLinkIds = CanLinkIds::new(0x100, 0x180, false);
 fn bus(fd: bool) -> CanBus {
     CanBus {
         name: "can0".into(),
+        interface: "can0".into(),
         base: BASE,
         addresses: vec![1, 2, 5],
         fd,
@@ -391,4 +392,32 @@ fn a_bus_whose_identifiers_cannot_work_is_refused() {
         ..bus(true)
     };
     assert!(CanCarrier::new(&extended, Interface(wires.clone())).is_ok());
+}
+
+#[test]
+fn a_bus_is_written_as_one_setting() {
+    let bus: CanBus = "arm=can1:0x100:0x180:1-3+9:fd".parse().expect("bus");
+    assert_eq!(
+        (bus.name.as_str(), bus.interface.as_str(), bus.fd),
+        ("arm", "can1", true)
+    );
+    assert_eq!(
+        (bus.base, bus.addresses),
+        (CanLinkIds::new(0x100, 0x180, false), vec![1, 2, 3, 9])
+    );
+    let bus: CanBus = "can0=can0:256:384:5:extended".parse().expect("bus");
+    assert_eq!(
+        (bus.base, bus.addresses, bus.fd),
+        (CanLinkIds::new(256, 384, true), vec![5], false)
+    );
+    for wrong in [
+        "can0",
+        "can0=can0:0x100",
+        "can0=can0:0x100:0x180:9-1",
+        "can0=can0:x:0x180:1",
+        "=can0:1:2:3",
+        "can0=can0:1:2:3:fast",
+    ] {
+        assert!(wrong.parse::<CanBus>().is_err(), "{wrong}");
+    }
 }

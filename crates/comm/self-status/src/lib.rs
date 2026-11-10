@@ -309,3 +309,9 @@ impl Part {
         ]);
     }
 }
+
+impl orion_supervise::Report for Part {
+    fn report(&mut self, status: &Status) {
+        Self::report(self, status);
+    }
+}

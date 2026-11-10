@@ -404,3 +404,41 @@ polled), or, with feature `bulk`, a USB device with the interface and bulk endpo
 link with no handle opens nothing and waits. When a new handle is offered for a link that has
 one, the device was unplugged and is back: the old stream ends and the link goes on over the new.
 
+## The comm core as a program
+
+`orion-comm-app` puts the parts together. It needs nothing else on the board: no node logic, no
+other program. Settings come from one file of `key = value` lines and the environment
+(`peer.listen` is `ORION_PEER_LISTEN`); a key nobody read is logged, so a typo is seen.
+
+| Setting | Default | What it is |
+| --- | --- | --- |
+| `node.name` | `node.local` | this node's name |
+| `security` | `off` | the one switch |
+| `socket` | `/run/orion/orion.sock` | the board's socket |
+| `socket.mode` | `0660` | its permission bits: who on the board can connect at all |
+| `socket.node_uids` | none | users whose programs may be the node logic, besides root |
+| `state.dir` | `/var/lib/orion` | the identity, the trust store, the saved time |
+| `peer.listen` | off | where other nodes and people's tools connect (`tcp`) |
+| `comm.*`, `topics.*` | | the server's and the broker's limits |
+| `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
+| `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |
+| `time.*` | off | time sync (`time`) |
+| `discovery`, `discovery.ttl_ms`, `discovery.interfaces` | off | finding peers (`discovery`, `mdns`) |
+| `links.serial` | none | `name=path@baud`, comma separated (`link-serial`) |
+| `links.sealed` | none | `name=address:port` (`link-sealed`) |
+| `links.can` | none | `name=interface:device-to-host:host-to-device:addresses[:fd][:extended]` (`link-can`) |
+| `links.usb` | none | names; their handles are handed over at run time (`link-usb`) |
+
+The name in brackets is the cargo feature that carries the part. A setting for a part that is
+not built in is an unknown key.
+
+Under systemd (`Type=notify`) the comm core sends `READY=1` once every way in is up, with a
+status line saying what it serves, `WATCHDOG=1` every half of the watchdog timeout, and
+`STOPPING=1` when asked to stop. The "alive" message is sent from the comm core's own thread:
+one that no longer turns stops saying so, and is restarted.
+
+A part that cannot start stops the start, and the error names the part: the socket another
+comm core holds, an address that is taken, a bus whose identifiers cannot work. A link with
+nothing on it is not such a failure: it starts, keeps trying, and says so in
+`orion.state.link.<name>`.
+
