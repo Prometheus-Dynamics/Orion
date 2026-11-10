@@ -285,56 +285,64 @@ fn slots_and_pages_are_checked() {
 fn frames_held_across_threads_are_never_torn() {
     // The publisher runs flat out through a small pool. Readers hold each frame for a moment,
     // on another thread than the one that read it, and check every byte is still the frame's.
+    // Twenty rounds, because the failures this is here for showed about once in ten.
     const FRAMES: u64 = 30_000;
-    let mut topic = Topic::new(4);
-    let readers: Vec<Reader> = (0..2)
-        .map(|_| {
-            topic
-                .reader(Limits {
-                    max_held: 2,
-                    max_hold: None,
-                })
-                .1
-        })
-        .collect();
-    let done = AtomicBool::new(false);
-    let checked = AtomicU64::new(0);
-    std::thread::scope(|scope| {
-        for mut reader in readers {
-            let (done, checked) = (&done, &checked);
-            scope.spawn(move || {
-                let (send, receive) = std::sync::mpsc::sync_channel::<(u8, Held<Marks>)>(1);
-                let checker = scope.spawn(move || {
-                    for (fill, held) in receive {
-                        std::thread::yield_now();
-                        assert!(whole(&held, fill), "a held frame changed");
-                        checked.fetch_add(1, Ordering::Relaxed);
+    for round in 0..20 {
+        let mut topic = Topic::new(4);
+        let readers: Vec<Reader> = (0..2)
+            .map(|_| {
+                topic
+                    .reader(Limits {
+                        max_held: 2,
+                        max_hold: None,
+                    })
+                    .1
+            })
+            .collect();
+        let done = AtomicBool::new(false);
+        let checked = AtomicU64::new(0);
+        std::thread::scope(|scope| {
+            for mut reader in readers {
+                let (done, checked) = (&done, &checked);
+                scope.spawn(move || {
+                    let (send, receive) = std::sync::mpsc::sync_channel::<(u8, Held<Marks>)>(1);
+                    let checker = scope.spawn(move || {
+                        for (fill, held) in receive {
+                            std::thread::yield_now();
+                            assert!(whole(&held, fill), "a held frame changed");
+                            checked.fetch_add(1, Ordering::Relaxed);
+                        }
+                    });
+                    while !done.load(Ordering::Acquire) {
+                        if let NextFrame::Frame(frame) = reader.next() {
+                            let fill = frame.meta[0];
+                            assert!(whole(&frame.held, fill), "a frame was torn when read");
+                            send.send((fill, frame.held)).expect("checker");
+                        }
                     }
+                    drop(send);
+                    checker.join().expect("checker");
                 });
-                while !done.load(Ordering::Acquire) {
-                    if let NextFrame::Frame(frame) = reader.next() {
-                        let fill = frame.meta[0];
-                        assert!(whole(&frame.held, fill), "a frame was torn when read");
-                        send.send((fill, frame.held)).expect("checker");
-                    }
-                }
-                drop(send);
-                checker.join().expect("checker");
-            });
-        }
-        let mut dropped = 0_u64;
-        for frame in 0..FRAMES {
-            if topic.send(frame as u8, frame).is_err() {
-                dropped += 1;
             }
-        }
-        done.store(true, Ordering::Release);
-        assert!(dropped < FRAMES, "every frame was dropped");
-    });
-    assert!(
-        checked.into_inner() > 0,
-        "no frame was ever held and checked"
-    );
+            let mut dropped = 0_u64;
+            for frame in 0..FRAMES {
+                if topic.send(frame as u8, frame).is_err() {
+                    dropped += 1;
+                }
+            }
+            done.store(true, Ordering::Release);
+            assert!(dropped < FRAMES, "every frame was dropped");
+        });
+        assert!(
+            checked.into_inner() > 0,
+            "round {round}: no frame was ever held and checked"
+        );
+        // No reader was cut off: nothing they did was over a limit.
+        assert!(
+            !topic.table.is_cut_off(0) && !topic.table.is_cut_off(1),
+            "round {round}"
+        );
+    }
 }
 
 #[test]

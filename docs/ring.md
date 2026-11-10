@@ -225,9 +225,12 @@ frame only while each buffer's ticket is exactly the one in the entry.
 
 ## Hold marks
 
-`crates/core/ring-holds`. A reader's marks are a sealed page only that reader writes: word `b` is
-nonzero while it holds buffer `b`. The publisher maps each reader's page read-only. A buffer is
-free when no reader marks it.
+`crates/core/ring-holds`. A reader's marks are a sealed page only that reader writes: word 0 is a
+version, and word `1 + b` is nonzero while it holds buffer `b`. The publisher maps each reader's
+page read-only. A buffer is free when no reader marks it.
+
+The version is odd while the reader is changing a mark and different after every change. It is
+what lets the publisher count a reader's marks at one instant.
 
 - Reader: store the mark, sequentially consistent fence, load the ticket. Still the entry's: the
   frame is held. Changed: take the mark off; the frame is gone.
@@ -245,7 +248,15 @@ the newest frame, and when there is none it drops the frame.
 Limits, per reader, applied by the publisher from what it sees:
 
 - **Buffers held.** An honest reader stops taking frames at its limit. One that marks more is cut
-  off.
+  off. The count is taken at one instant: the version before and after must match, or the count is
+  taken again. Reading the marks one word at a time is not good enough. A reader holding two
+  buffers that lets one go and takes another during the read is seen holding three, and cutting it
+  off for that lets the publisher write over frames it holds. That happened, about once in ten
+  runs of the threaded test on a busy machine.
+- **Marks that cannot be counted.** A reader whose thread is stopped halfway through a change
+  leaves its version odd until it runs again. It is judged by time on the publisher's clock, never
+  by how often the publisher looked: after the hold time (ten seconds if it has none) it is cut off
+  as stuck.
 - **Hold time**, on the publisher's clock from when it first saw the mark on that use of the
   buffer. A reader past it is stuck, and is cut off.
 

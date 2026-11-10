@@ -50,7 +50,7 @@ const BUFFER: BufferIndex = BufferIndex(0);
 fn race(mark_first: bool) {
     let pool = Model::new(page::bytes(1) / 8);
     page::format(&pool, 1, 1).expect("pool page");
-    let marks_page = Model::new(1);
+    let marks_page = Model::new(2);
     let published_with = page::ticket(&pool, BUFFER) as u32;
 
     let mut table = HoldTable::new(1);
@@ -101,7 +101,7 @@ fn letting_go_frees_the_buffer_and_never_before() {
     loom::model(|| {
         let pool = Model::new(page::bytes(1) / 8);
         page::format(&pool, 1, 1).expect("pool page");
-        let marks_page = Model::new(1);
+        let marks_page = Model::new(2);
         let mut table = HoldTable::new(1);
         table
             .add_over(0, marks_page.clone(), Limits::default())
