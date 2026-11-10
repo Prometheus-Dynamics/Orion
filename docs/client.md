@@ -31,3 +31,40 @@ address as the same program, a short fixed time between tries, for as long as th
 says. A connection to the comm core is a way in, and those are not backed off. An answer of
 "no" (a rejected hello, a key that is not welcome) is returned at once: asking again does not
 change it.
+
+## One session, many parts
+
+A program has one session and several things going over it: topics, records, actions.
+`orion_connect::Client` shares the session. Each part registers a `Handler` for the kinds of
+frame that are its own, and whoever is waiting on the session pumps it: every frame that arrives
+goes to the part it belongs to, so a part waiting for its answer never loses another part's
+frame. A refusal is kept until whoever sent the request asks for it.
+
+A client is one thread's. A program that talks to the comm core from several threads opens a
+session in each; sessions are cheap.
+
+## Topics
+
+`orion-topics`. `Topics::declare` gives a `Publisher`, `Topics::subscribe` a `Subscriber`.
+
+| Call | What it does |
+| --- | --- |
+| `publisher.publish(field, time, payload)` | One sample of a field, belonging to a time |
+| `publisher.subscribers()` | How many are listening. With none, a publisher may as well not sample |
+| `publisher.with_request(..)` | What the newest subscriber asked for |
+| `subscriber.next()` | The next sample in the order published, or how many were lost |
+| `subscriber.latest(field)` | The newest sample of a field |
+| `subscriber.at_or_before(field, time)` | The sample that belongs to a time: hit, lagged or missing |
+| `subscriber.wait(for)` | Sleeps until there is something to read |
+| `subscriber.status()` | Waiting for a publisher, live, or the publisher is gone |
+
+The calls are the same wherever the comm core is. On the board a topic is a ring in shared
+memory: a publish writes it and wakes the subscribers that are asleep, a read reads it, and the
+comm core is not in the path. Neither allocates, and a subscriber that is awake costs the
+publisher no system call. Off the board the same publisher sends each sample as a message and
+the comm core writes it to the ring, and the same subscriber keeps a ring of its own for the
+samples that arrive as messages. The program reads a ring either way.
+
+`wait` sleeps on the subscriber's doorbell and on the session together, so nothing is polled on
+a timer and the session is kept up while the program sleeps.
+

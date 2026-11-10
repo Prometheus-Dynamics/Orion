@@ -101,6 +101,15 @@ impl<M: Mem> Reader<M> {
         self.missed
     }
 
+    /// How many samples have been published that [`Reader::next`] has not yet returned or
+    /// counted as lost. One memory read; nothing is consumed.
+    #[must_use]
+    pub fn pending(&self) -> u64 {
+        self.mem
+            .load(W_HEAD, Ordering::Acquire)
+            .saturating_sub(self.cursor)
+    }
+
     /// Moves back to the oldest sample whose place in the order is still known.
     pub fn rewind(&mut self) {
         let head = self.mem.load(W_HEAD, Ordering::Acquire);

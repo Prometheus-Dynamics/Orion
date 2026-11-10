@@ -335,8 +335,14 @@ impl Transport {
                             return Ok(Step::Frame(len));
                         }
                     }
+                    // Room for the largest frame and one read, made once: after that the
+                    // buffer never grows.
+                    let room = 4 + buf.len() + tag + 4096;
+                    if partial.capacity() < room {
+                        partial.reserve_exact(room - partial.len());
+                    }
                     let start = partial.len();
-                    partial.resize(start + 4096, 0);
+                    partial.resize((start + 4096).min(partial.capacity()), 0);
                     let read = stream.read(&mut partial[start..]);
                     partial.truncate(start + *read.as_ref().unwrap_or(&0));
                     match read {

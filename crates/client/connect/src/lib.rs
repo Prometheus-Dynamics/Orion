@@ -22,6 +22,7 @@
 #![cfg(target_os = "linux")]
 
 mod address;
+mod client;
 mod error;
 mod transport;
 
@@ -35,6 +36,7 @@ use orion_types::NodeName;
 use orion_wire::{Body, Decode, FrameView, INTERFACE_REVISION, encode_body, frame, kind};
 
 pub use address::{Address, DEFAULT_PORT, DEFAULT_SOCKET};
+pub use client::{Client, Handler};
 pub use error::ClientError;
 pub use orion_identity::Identity;
 pub use orion_msg_session::Roles;
@@ -116,6 +118,62 @@ impl<'a> Incoming<'a> {
     pub fn body<B: Body + Decode<'a>>(&self) -> Result<B, ClientError> {
         orion_wire::decode_body(&self.view)
             .map_err(|_| ClientError::Protocol("a body that does not decode"))
+    }
+}
+
+/// What a handler may do with the session while it holds a frame: answer, and take the
+/// frame's descriptors.
+pub struct Cx<'a> {
+    transport: &'a mut Transport,
+    outbox: &'a mut Vec<u8>,
+    seq: &'a mut u16,
+    fds: &'a mut FdSet,
+    limit: usize,
+}
+
+impl std::fmt::Debug for Cx<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Cx")
+    }
+}
+
+impl Cx<'_> {
+    /// Sends `body`. As [`Session::send`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::send`].
+    pub fn send<B: Body>(&mut self, body: &B) -> Result<u16, ClientError> {
+        self.send_with_fds(body, &[])
+    }
+
+    /// Sends `body` with descriptors attached. As [`Session::send_with_fds`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::send_with_fds`].
+    pub fn send_with_fds<B: Body>(
+        &mut self,
+        body: &B,
+        fds: &[BorrowedFd<'_>],
+    ) -> Result<u16, ClientError> {
+        *self.seq = self.seq.wrapping_add(1);
+        let limit = self.limit.min(self.outbox.len());
+        let len = encode_body(body, *self.seq, &mut self.outbox[..limit])
+            .map_err(|_| ClientError::TooLarge)?;
+        self.transport.send(&self.outbox[..len], fds)?;
+        Ok(*self.seq)
+    }
+
+    /// Takes descriptor `index` of those that came with the frame.
+    pub fn take_fd(&mut self, index: usize) -> Option<OwnedFd> {
+        self.fds.take(index)
+    }
+
+    /// How many descriptors came with the frame.
+    #[must_use]
+    pub const fn fds(&self) -> usize {
+        self.fds.len()
     }
 }
 
@@ -288,6 +346,26 @@ impl Session {
         Ok(self.seq)
     }
 
+    /// Sends a frame of `kind` whose payload is already encoded, with descriptors attached.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::send_with_fds`].
+    pub fn send_frame(
+        &mut self,
+        kind: u8,
+        payload: &[u8],
+        fds: &[BorrowedFd<'_>],
+    ) -> Result<u16, ClientError> {
+        self.seq = self.seq.wrapping_add(1);
+        let limit = (self.welcomed.max_frame as usize).min(self.outbox.len());
+        let header = frame::FrameHeader::new(kind, self.seq);
+        let len = frame::encode(header, payload, &mut self.outbox[..limit])
+            .map_err(|_| ClientError::TooLarge)?;
+        self.transport.send(&self.outbox[..len], fds)?;
+        Ok(self.seq)
+    }
+
     /// Waits up to `wait` for the next frame that is the program's to look at. `None` when
     /// the time passed without one. Pings are answered and sent here and never returned.
     ///
@@ -310,6 +388,48 @@ impl Session {
             }
             readable(self.transport.fd(), until.saturating_duration_since(now))?;
         }
+    }
+
+    /// As [`Session::next`], with the means to answer the frame while it is held.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::next`].
+    pub fn next_with(
+        &mut self,
+        wait: Duration,
+    ) -> Result<Option<(Incoming<'_>, Cx<'_>)>, ClientError> {
+        if self.next(wait)?.is_none() {
+            return Ok(None);
+        }
+        let Self {
+            transport,
+            welcomed,
+            seq,
+            inbox,
+            inbox_len,
+            fds,
+            outbox,
+            ..
+        } = self;
+        let view = frame::decode(&inbox[..*inbox_len])
+            .map_err(|_| ClientError::Protocol("a damaged frame"))?;
+        Ok(Some((
+            Incoming { view },
+            Cx {
+                transport,
+                outbox,
+                seq,
+                fds,
+                limit: welcomed.max_frame as usize,
+            },
+        )))
+    }
+
+    /// How long a request waits for its answer, and connecting for its hello.
+    #[must_use]
+    pub const fn timeout(&self) -> Duration {
+        self.options.timeout
     }
 
     /// Takes descriptor `index` of those that came with the last frame.

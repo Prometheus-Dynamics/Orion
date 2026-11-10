@@ -1,0 +1,31 @@
+[package]
+name = "orion-topics"
+description = "The client's topics: publish and subscribe with the same calls wherever the comm core is."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-connect = { path = "../connect" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+orion-ring-time = { path = "../../core/ring-time" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std", "event"] }
+
+[dev-dependencies]
+orion-broker = { path = "../../comm/broker" }
+orion-broker-proxy = { path = "../../comm/broker-proxy" }
+orion-keys = { path = "../../comm/keys" }
+orion-measure = { path = "../../core/measure", features = ["alloc-counter", "sched"] }
+orion-server = { path = "../../comm/server" }
+orion-tcp = { path = "../../comm/tcp" }
+orion-unix = { path = "../../comm/unix" }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+[lints]
+workspace = true
