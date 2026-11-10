@@ -21,42 +21,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use orion_broker::{Broker, Topic, TopicId, Topics};
+use orion_broker::{Broker, TopicId, Topics, Writing};
 use orion_msg_topics::{Sample, SampleBatch};
-use orion_ring::{FieldId, Flags, Writer};
-use orion_ring_doorbell::Bell;
+use orion_ring::{FieldId, Flags};
 use orion_server::{Checked, Cx, Error, Incoming, Policy, Service, SessionId, Sessions, What};
 use orion_wire::{FrameView, kind};
-
-/// What the proxy keeps for a topic it writes: the ring's writer and its subscribers'
-/// doorbells, as of one `epoch` of the topic.
-struct Writing {
-    topic: TopicId,
-    epoch: u64,
-    writer: Writer,
-    bells: Vec<Bell>,
-}
-
-impl Writing {
-    fn new(topic: &Topic) -> Result<Self, Error> {
-        let ring = topic.ring.as_ref().ok_or(Error::NotFound)?;
-        let writer = ring.writer().map_err(|_| Error::Internal)?;
-        let bells = topic
-            .subscribers
-            .iter()
-            .filter_map(|subscription| {
-                let (eventfd, page) = subscription.bell.as_ref()?;
-                Bell::attach(eventfd.try_clone().ok()?, page.try_clone().ok()?).ok()
-            })
-            .collect();
-        Ok(Self {
-            topic: topic.id,
-            epoch: topic.epoch,
-            writer,
-            bells,
-        })
-    }
-}
 
 /// The service. Add it to the server next to the [`Broker`] it was made from.
 pub struct BrokerProxy {
@@ -111,16 +80,12 @@ impl BrokerProxy {
 }
 
 fn publish(writing: &mut Writing, sample: &Sample<'_>) -> Result<(), Error> {
-    writing
-        .writer
-        .publish(
-            FieldId(sample.field),
-            sample.time,
-            Flags(sample.flags.0),
-            sample.payload.0,
-        )
-        .map(|_| ())
-        .map_err(|_| Error::Malformed)
+    writing.publish(
+        FieldId(sample.field),
+        sample.time,
+        Flags(sample.flags.0),
+        sample.payload.0,
+    )
 }
 
 impl Service for BrokerProxy {
@@ -161,16 +126,12 @@ impl Service for BrokerProxy {
             }
             if bad {
                 // The samples that could be written were. The publisher is told one could not.
-                for bell in &mut writing.bells {
-                    bell.ring();
-                }
+                writing.wake();
                 return Err(Error::Malformed);
             }
             writing
         };
-        for bell in &mut writing.bells {
-            bell.ring();
-        }
+        writing.wake();
         Ok(())
     }
 

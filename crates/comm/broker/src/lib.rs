@@ -27,8 +27,10 @@
 
 #![cfg(target_os = "linux")]
 
+mod local;
 mod service;
 mod topics;
 
+pub use local::{LocalPublisher, Writing};
 pub use service::Broker;
 pub use topics::{BrokerConfig, Subscription, Topic, TopicId, TopicWatch, Topics};

@@ -212,7 +212,7 @@ fn declare(
     let shared = shares(cx);
     let id = topics.find_or_add(&declare.topic)?;
     let topic = topics.get(id).ok_or(Error::NotFound)?;
-    if topic.publisher.is_some_and(|publisher| publisher != from) {
+    if topic.internal || topic.publisher.is_some_and(|publisher| publisher != from) {
         return Err(Error::AlreadyExists);
     }
     // The same declaration again carries on in the ring that is there. That is a publisher
@@ -318,6 +318,8 @@ fn subscribe(
             let shared = topic.publisher_shared;
             tell_publisher(sessions, publisher, shared, id, count, subscription);
         }
+        // The comm core publishes this one itself: there is no session, and nobody is gone.
+        None if topic.internal => {}
         None => sessions.send(
             from,
             &TopicState {

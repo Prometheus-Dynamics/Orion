@@ -1,0 +1,28 @@
+[package]
+name = "orion-self-status"
+description = "The board's vital signs and Orion's own state, as topics: sampled only while someone watches."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-broker = { path = "../broker" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-server = { path = "../server" }
+orion-supervise = { path = "../../core/supervise" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+
+[dev-dependencies]
+orion-msg-session = { path = "../../core/msg-session" }
+orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+orion-unix = { path = "../unix" }
+orion-values = { path = "../../core/values" }
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

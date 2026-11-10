@@ -101,6 +101,9 @@ pub struct Topic {
     pub publisher_shared: bool,
     /// Its subscribers.
     pub subscribers: Vec<Subscription>,
+    /// Whether the comm core itself publishes it: its own state. Such a topic has no publisher
+    /// session, is never removed, and cannot be declared by anyone else.
+    pub internal: bool,
     /// Goes up whenever the ring, the publisher or the subscribers change. What builds on the
     /// broker keeps its own state per topic and rebuilds it when this moves.
     pub epoch: u64,
@@ -255,6 +258,7 @@ impl Topics {
             publisher: None,
             publisher_shared: false,
             subscribers: Vec::new(),
+            internal: false,
             epoch: 0,
         });
         Ok(id)
@@ -301,11 +305,42 @@ impl Topics {
         Ok(())
     }
 
+    /// Declares a topic that the comm core itself publishes. `declare` is its declaration as it
+    /// would come off the wire, which subscribers are sent.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AlreadyExists`] if someone has declared the name, [`Error::Busy`] if there is no
+    /// room for the topic or its ring.
+    pub fn declare_internal(
+        &mut self,
+        name: &TopicName,
+        declare: &[u8],
+        spec: &Spec,
+    ) -> Result<TopicId, Error> {
+        let id = self.find_or_add(name)?;
+        let taken = self
+            .get(id)
+            .is_some_and(|topic| topic.ring.is_some() || topic.publisher.is_some());
+        if taken {
+            return Err(Error::AlreadyExists);
+        }
+        if let Err(error) = self.set_ring(id, spec, None) {
+            self.remove_if_unused(id);
+            return Err(error);
+        }
+        let topic = self.get_mut(id).ok_or(Error::NotFound)?;
+        topic.declare = declare.to_vec();
+        topic.internal = true;
+        topic.epoch += 1;
+        Ok(id)
+    }
+
     /// Removes `id` if nobody publishes it and nobody subscribes to it.
     pub(crate) fn remove_if_unused(&mut self, id: TopicId) {
-        let unused = self
-            .get(id)
-            .is_some_and(|topic| topic.publisher.is_none() && topic.subscribers.is_empty());
+        let unused = self.get(id).is_some_and(|topic| {
+            topic.publisher.is_none() && topic.subscribers.is_empty() && !topic.internal
+        });
         if unused && let Some(topic) = self.slots[id.slot()].take() {
             self.bytes -= topic.bytes();
         }

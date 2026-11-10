@@ -252,3 +252,26 @@ a nonce) and is answered (`Identity`):
 - **Always answers.** It is in the comm core and needs nothing else running.
 - Someone on the board who gives no nonce is not checking a signature and gets the document
   unsigned. Over the network it is always signed.
+
+## The board's vital signs and Orion's own state
+
+There is no metrics endpoint. What a dashboard or a tool wants to know about the board is a topic
+(`orion-self-status`), subscribed to like any other:
+
+| Topic | Fields |
+| --- | --- |
+| `orion.host` | `uptime_s`, `mem_total_kb`, `mem_available_kb`, `cpu_percent`, `temperature_c` |
+| `orion.comm` | `sessions`, `opened`, `rejected`, `requests`, `refused`, `unknown`, `dropped`, `panics`, `topics`, `ring_bytes` |
+| `orion.state.<part>` | `state` (0 starting, 1 running, 2 retrying, 3 off), `failures`, `restarts`, `retry_at_ms` |
+
+Every field is eight bytes, an integer or a float, little-endian.
+
+Nothing is sampled while nobody watches. `orion.host` and `orion.comm` are read only while they
+have a subscriber: the first gets a reading at once, then one every interval, and only the fields
+that changed are published. When the last subscriber leaves, the reading stops and no timer is
+left running. A part's state is published by the part when it changes, which costs nothing while
+nothing does; that is how a link's backoff is visible.
+
+These are topics the comm core publishes itself. The broker keeps them when nobody subscribes,
+and refuses a client that declares over one or opens one to write.
+
