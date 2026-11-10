@@ -106,6 +106,9 @@ pub mod provider {
     };
 }
 
+/// Who a board is, and what time it has.
+pub mod node;
+
 /// Saying what should run, and hearing where it is.
 #[cfg(feature = "workloads")]
 pub mod workloads;
@@ -190,6 +193,7 @@ macro_rules! fields {
 #[derive(Clone)]
 pub struct Orion {
     client: Client,
+    node: std::rc::Rc<std::cell::RefCell<node::State>>,
     #[cfg(feature = "topics")]
     topics: orion_topics::Topics,
     #[cfg(feature = "buffers")]
@@ -234,6 +238,8 @@ impl Orion {
     #[must_use]
     pub fn over(session: Session) -> Self {
         let client = Client::new(session);
+        let node = std::rc::Rc::new(std::cell::RefCell::new(node::State::default()));
+        client.add(node.clone());
         #[cfg(feature = "topics")]
         let topics = orion_topics::Topics::new(&client);
         Self {
@@ -250,6 +256,7 @@ impl Orion {
             #[cfg(feature = "workloads")]
             workloads: workloads::Workloads::new(&client),
             client,
+            node,
         }
     }
 
@@ -257,6 +264,27 @@ impl Orion {
     #[must_use]
     pub fn welcomed(&self) -> Welcomed {
         self.client.session(|session| session.welcomed().clone())
+    }
+
+    /// Who the board is: its name, its cluster and its key, with the facts programs on it
+    /// have published about it. The answer is signed by the key it names and made for this
+    /// question, and is checked here. Whether that key is the board the caller meant is the
+    /// caller's to decide: compare the fingerprint.
+    ///
+    /// # Errors
+    ///
+    /// If the answer does not check, or the connection broke.
+    pub fn node(&self) -> Result<node::Node, Error> {
+        Ok(node::node(&self.client, &self.node)?)
+    }
+
+    /// How the board's clock compares with this program's.
+    ///
+    /// # Errors
+    ///
+    /// If the board does not answer, or the connection broke.
+    pub fn clock(&self) -> Result<node::Clock, Error> {
+        Ok(node::clock(&self.client, &self.node)?)
     }
 
     /// The session itself, for what this handle does not cover.

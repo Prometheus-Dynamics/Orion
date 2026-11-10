@@ -1,0 +1,20 @@
+[package]
+name = "orion-ctl"
+description = "The Orion command line: the six concepts as verbs, on the one client."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion = { path = "../orion", features = ["full"] }
+orion-msg-records = { path = "../../core/msg-records" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+orion-stubs = { path = "../../testing/stubs" }
+
+[lints]
+workspace = true

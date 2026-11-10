@@ -105,6 +105,14 @@ impl Board {
                 ));
                 comm.add_service(KeysService::new(node.clone(), board_keys.clone()));
                 comm.add_service(broker);
+                // The clock is answered for, and nothing more: no sync, nothing served.
+                let _time = orion_time::TimeSync::start(
+                    &comm,
+                    None,
+                    orion_time::TimeConfig::default(),
+                    None,
+                )
+                .expect("time");
                 comm.add_service(store::Store::default());
                 comm.add_service(router::Router::default());
                 comm.add_service(receiver::Receiver::new(on_shelf));

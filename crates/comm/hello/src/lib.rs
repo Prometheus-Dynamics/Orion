@@ -42,42 +42,8 @@ pub const FACT_PREFIX: &str = "hello.";
 pub const MAX_FACTS: usize = 64;
 /// The longest fact value, in bytes. Longer ones are left out.
 pub const MAX_FACT_BYTES: usize = 256;
-/// The longest nonce, in bytes.
-pub const MAX_NONCE: usize = 32;
-
-const DOMAIN: &[u8] = b"orion-hello-v1";
-const SIGNATURE_LEN: usize = 64;
-
-/// The bytes a hello document's signature is over: a fixed label, then the document up to its
-/// signature.
-fn signed_bytes(unsigned: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(DOMAIN.len() + unsigned.len());
-    out.extend_from_slice(DOMAIN);
-    out.extend_from_slice(unsigned);
-    out
-}
-
-/// Checks a hello document as it came off the wire: that it is signed by the key it names, and
-/// that it answers `nonce`. Returns the document if so.
-///
-/// The caller still decides whether that key is the board it meant to reach.
-#[must_use]
-pub fn verify<'a>(payload: &'a [u8], nonce: &[u8]) -> Option<Identity<'a>> {
-    let identity = Identity::decode(payload).ok()?;
-    let key: [u8; 32] = identity.public_key.0.try_into().ok()?;
-    // The signature is the last field: its length, then its 64 bytes.
-    let unsigned = payload.len().checked_sub(SIGNATURE_LEN + 1)?;
-    let signature_is_last =
-        identity.signature.len() == SIGNATURE_LEN && payload[unsigned] == SIGNATURE_LEN as u8;
-    let genuine = signature_is_last
-        && identity.nonce.0 == nonce
-        && orion_keys::verify(
-            &key,
-            &signed_bytes(&payload[..unsigned]),
-            &identity.signature,
-        );
-    genuine.then_some(identity)
-}
+use orion_keys::hello::signed_bytes;
+pub use orion_keys::hello::{MAX_NONCE, verify};
 
 /// One fact, read from its topic.
 struct Fact {

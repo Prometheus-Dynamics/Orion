@@ -20,6 +20,7 @@ orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-workloads = { path = "../../core/msg-workloads" }
 orion-server = { path = "../../comm/server" }
 orion-tcp = { path = "../../comm/tcp" }
+orion-time = { path = "../../comm/time" }
 orion-types = { path = "../../core/types" }
 orion-unix = { path = "../../comm/unix" }
 orion-wire = { path = "../../core/wire" }

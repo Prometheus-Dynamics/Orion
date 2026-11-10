@@ -20,7 +20,7 @@ actions = ["dep:orion-actions"]
 # Push files and ask the board to pull them.
 files = ["dep:orion-files"]
 # Say what should run, and hear where it is.
-workloads = ["dep:orion-msg-workloads", "dep:orion-wire"]
+workloads = ["dep:orion-msg-workloads"]
 # Run workloads for Orion.
 executor = ["dep:orion-executor"]
 # Speak for a resource: its topics and its actions.
@@ -36,6 +36,9 @@ orion-buffers = { path = "../buffers", optional = true }
 orion-connect = { path = "../connect" }
 orion-executor = { path = "../executor", optional = true }
 orion-files = { path = "../files", optional = true }
+orion-identity = { path = "../../core/identity" }
+orion-msg-peers = { path = "../../core/msg-peers" }
+orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics", optional = true }
 orion-msg-workloads = { path = "../../core/msg-workloads", optional = true }
 orion-provider = { path = "../provider", optional = true }
@@ -43,7 +46,7 @@ orion-records = { path = "../records", optional = true }
 orion-ring = { path = "../../core/ring", optional = true }
 orion-topics = { path = "../topics", optional = true }
 orion-types = { path = "../../core/types" }
-orion-wire = { path = "../../core/wire", optional = true }
+orion-wire = { path = "../../core/wire" }
 
 [dev-dependencies]
 orion-stubs = { path = "../../testing/stubs" }

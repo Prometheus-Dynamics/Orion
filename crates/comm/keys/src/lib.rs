@@ -28,7 +28,7 @@ mod enroll_impl;
 mod service;
 mod store;
 
-pub use orion_identity::{Identity, fingerprint, random, verify};
+pub use orion_identity::{Identity, fingerprint, hello, random, verify};
 pub use orion_msg_peers::OperatorState;
 pub use service::KeysService;
 pub use store::{Keys, KeysConfig, KeysError, Operator, SharedKeys};

@@ -134,3 +134,46 @@ pub fn fingerprint(key: &[u8; 32]) -> String {
     }
     out
 }
+
+/// The hello document: who a board says it is, signed so it can be believed.
+pub mod hello {
+    use orion_msg_session::Identity as Document;
+    use orion_wire::Decode;
+
+    /// The longest nonce a question may carry, in bytes.
+    pub const MAX_NONCE: usize = 32;
+    const DOMAIN: &[u8] = b"orion-hello-v1";
+    const SIGNATURE_LEN: usize = 64;
+
+    /// The bytes a hello document's signature is over: a fixed label, then the document up to
+    /// its signature.
+    #[must_use]
+    pub fn signed_bytes(unsigned: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(DOMAIN.len() + unsigned.len());
+        out.extend_from_slice(DOMAIN);
+        out.extend_from_slice(unsigned);
+        out
+    }
+
+    /// Checks a hello document as it came off the wire: that it is signed by the key it
+    /// names, and that it answers `nonce`. Returns the document if so.
+    ///
+    /// The caller still decides whether that key is the board it meant to reach.
+    #[must_use]
+    pub fn verify<'a>(payload: &'a [u8], nonce: &[u8]) -> Option<Document<'a>> {
+        let document = Document::decode(payload).ok()?;
+        let key: [u8; 32] = document.public_key.0.try_into().ok()?;
+        // The signature is the last field: its length, then its 64 bytes.
+        let unsigned = payload.len().checked_sub(SIGNATURE_LEN + 1)?;
+        let signature_is_last =
+            document.signature.len() == SIGNATURE_LEN && payload[unsigned] == SIGNATURE_LEN as u8;
+        let genuine = signature_is_last
+            && document.nonce.0 == nonce
+            && crate::verify(
+                &key,
+                &signed_bytes(&payload[..unsigned]),
+                &document.signature,
+            );
+        genuine.then_some(document)
+    }
+}

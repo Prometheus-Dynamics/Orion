@@ -246,3 +246,35 @@ must not be used after it is closed.
 The version is a major and a minor. Something added raises the minor; anything that would
 break a caller raises the major, and with it the library's name.
 
+## The command line
+
+`orion-ctl` is the client as a tool for a person. Its verbs follow the six things Orion is
+made of, and `--address` takes any address the client does, so what it does to a board on the
+bench it does to one across the network.
+
+```text
+orion [--address A] [--name N] [--timeout MS] <concept> <verb> ...
+
+node      show                      who the board is, checked against its signature
+node      peers                     the nodes it knows
+node      time                      how its clock compares with this computer's
+resource  list [PREFIX]             the things that exist
+resource  show NAME                 one of them: its topics, its actions, its labels
+topic     read TOPIC                the newest value of each field
+topic     watch TOPIC [--count N] [--for MS]
+topic     publish TOPIC NAME:TYPE=VALUE... [--hold MS]
+action    run NAME [--node N | --resource R] [--args TEXT] [--detached] [--for MS]
+action    attach CALL [--for MS]
+workload  put NAME --kind K [--spec TEXT | --spec-file PATH] [--node N]
+                   [--restart always|on-failure|never] [--for MS]
+workload  remove NAME [--force] [--for MS]
+file      push DESTINATION PATH
+file      pull DESTINATION URL --size BYTES --sha256 HEX [--for MS]
+```
+
+It exits 0 when the thing was done, 1 when it was not (the board refused, the action failed,
+the time ran out), and 2 when the command was not understood, which it finds out before it
+asks any board. A value is shown by its field's declared type and unit, so the tool reads
+topics it has never heard of. The whole tool is one function, `orion_ctl::run`, so it can be a
+mode of the one binary.
+
