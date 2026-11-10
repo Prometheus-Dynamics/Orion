@@ -65,6 +65,8 @@ decoders! {
     TOPIC_SAMPLE_BATCH => topics::SampleBatch,
     TOPIC_DEMAND => topics::Demand,
     TOPIC_BUFFER_OFFER => topics::BufferOffer,
+    TOPIC_BELL => topics::Bell,
+    TOPIC_STATE => topics::TopicState,
     WORKLOAD_PUT => workloads::WorkloadPut,
     WORKLOAD_REMOVE => workloads::WorkloadRemove,
     WORKLOAD_STATUS => workloads::WorkloadStatus,

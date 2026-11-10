@@ -90,6 +90,8 @@ kinds! {
         TOPIC_SAMPLE_BATCH = 0x46,
         TOPIC_DEMAND = 0x47,
         TOPIC_BUFFER_OFFER = 0x48,
+        TOPIC_BELL = 0x49,
+        TOPIC_STATE = 0x4A,
     }
     Workloads {
         WORKLOAD_PUT = 0x50,

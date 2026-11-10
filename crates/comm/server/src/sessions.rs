@@ -6,7 +6,9 @@ use std::rc::Rc;
 use orion_check::Principal;
 use orion_msg_session::Roles;
 use orion_types::Error;
-use orion_wire::{Body, encode_body};
+use orion_wire::Body;
+use orion_wire::body::encode_fields;
+use orion_wire::frame::{self, FrameHeader};
 use tokio::sync::Notify;
 
 use crate::Limits;
@@ -89,6 +91,7 @@ pub struct Sessions {
     live: u32,
     pub(crate) limits: Limits,
     scratch: Vec<u8>,
+    payload: Vec<u8>,
 }
 
 impl Sessions {
@@ -98,7 +101,8 @@ impl Sessions {
             generations: Vec::new(),
             live: 0,
             limits,
-            scratch: vec![0; limits.max_frame as usize],
+            scratch: vec![0; limits.max_frame as usize + 8],
+            payload: Vec::new(),
         }
     }
 
@@ -225,6 +229,27 @@ impl Sessions {
         fds: impl IntoIterator<Item = OwnedFd>,
         delivery: Delivery,
     ) -> Result<(), Error> {
+        let mut payload = std::mem::take(&mut self.payload);
+        payload.resize(self.limits.max_frame as usize, 0);
+        let sent = encode_fields(body, &mut payload)
+            .and_then(|len| self.send_frame(session, B::KIND, &payload[..len], fds, delivery));
+        self.payload = payload;
+        sent
+    }
+
+    /// Sends a frame of `kind` whose payload is already encoded: a body passed on as it came.
+    ///
+    /// # Errors
+    ///
+    /// As [`Sessions::send_with_fds`].
+    pub fn send_frame(
+        &mut self,
+        session: SessionId,
+        kind: u8,
+        payload: &[u8],
+        fds: impl IntoIterator<Item = OwnedFd>,
+        delivery: Delivery,
+    ) -> Result<(), Error> {
         let limit = self.limits.outbox_bytes as usize;
         let Some(entry) = self
             .slots
@@ -238,7 +263,9 @@ impl Sessions {
         if fds.peek().is_some() && !entry.info.passes_descriptors {
             return Err(Error::Unsupported);
         }
-        let len = encode_body(body, entry.out_seq, &mut self.scratch)?;
+        let header = FrameHeader::new(kind, entry.out_seq);
+        let len =
+            frame::encode(header, payload, &mut self.scratch).map_err(|_| Error::BufferTooSmall)?;
         if len > entry.info.max_frame as usize {
             return Err(Error::BufferTooSmall);
         }

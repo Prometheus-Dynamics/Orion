@@ -204,3 +204,41 @@ body! {
         pub buffers: List<'a, BufferInfo>,
     }
 }
+
+body! {
+    /// Hands a publisher one subscriber's doorbell, or takes it back. The doorbell's eventfd
+    /// and its page, read-only, travel with the frame when `present` is set.
+    pub struct Bell = kind::TOPIC_BELL {
+        /// The handle from the publisher's [`Opened`].
+        pub handle: u32,
+        /// Which subscriber: a number that names it for as long as it subscribes.
+        pub subscriber: u32,
+        /// Whether the subscriber is there. `false` takes its doorbell back.
+        pub present: bool,
+    }
+}
+
+open_enum! {
+    /// Where a topic is, as its subscribers are told.
+    pub enum TopicStatus: u8 {
+        /// A publisher is there and the subscriber has the ring.
+        Live = 1,
+        /// The publisher is gone. The ring stays, and a publisher that comes back carries on
+        /// in it.
+        PublisherGone = 2,
+        /// Nobody has declared the topic yet. An [`Opened`] follows when someone does.
+        Waiting = 3,
+    }
+}
+
+body! {
+    /// Tells a subscriber where its topic is.
+    pub struct TopicState = kind::TOPIC_STATE {
+        /// The `seq` of the subscribe this answers, when it is the first answer to one.
+        pub request_seq: u16,
+        /// The subscription's handle.
+        pub handle: u32,
+        /// Where the topic is.
+        pub status: TopicStatus,
+    }
+}

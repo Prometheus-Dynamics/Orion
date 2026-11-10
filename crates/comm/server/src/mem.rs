@@ -147,6 +147,7 @@ pub struct MemConnection {
     write: MemWrite,
     principal: Principal,
     offers: Roles,
+    descriptors: bool,
 }
 
 impl MemConnection {
@@ -182,7 +183,7 @@ impl Connection for MemConnection {
     }
 
     fn passes_descriptors(&self) -> bool {
-        true
+        self.descriptors
     }
 
     fn split(self) -> (MemRead, MemWrite) {
@@ -205,12 +206,14 @@ pub fn pair(
         write: MemWrite(to_client.clone()),
         principal,
         offers,
+        descriptors: true,
     };
     let client = MemConnection {
         read: MemRead(to_client),
         write: MemWrite(to_server),
         principal: Principal::Anonymous,
         offers: Roles(0),
+        descriptors: true,
     };
     (server, client)
 }
@@ -246,6 +249,17 @@ pub fn carrier(offers: Roles, capacity: usize) -> (MemCarrier, MemConnector) {
 }
 
 impl MemConnector {
+    /// Connects as `principal` over a connection that cannot carry descriptors, as a network
+    /// or a link cannot, and returns the client's end.
+    #[must_use]
+    pub fn connect_without_descriptors(&self, principal: Principal) -> MemConnection {
+        let (mut server, client) = pair(principal, self.offers, self.capacity);
+        server.descriptors = false;
+        self.waiting.connections.borrow_mut().push_back(server);
+        self.waiting.arrived.notify_one();
+        client
+    }
+
     /// Connects as `principal` and returns the client's end.
     #[must_use]
     pub fn connect(&self, principal: Principal) -> MemConnection {

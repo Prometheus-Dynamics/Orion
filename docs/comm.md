@@ -63,3 +63,34 @@ program on the board connects once and keeps the connection.
   touched.
 - A send the socket takes only part of is finished as plain bytes, so a reader that is a little
   behind still gets every frame whole.
+
+## The topic broker
+
+`crates/comm/broker` (`orion-broker`). A topic is a ring in shared memory (`docs/ring.md`). The
+broker does set-up and nothing else: after it, a publish is a memory write and a wake between two
+programs, and the broker handles no request until someone connects, subscribes or leaves.
+
+| Request | What the broker does |
+| --- | --- |
+| `Declare` | Makes the ring from the declaration. Answers `Opened` with the write end |
+| `Subscribe`, with the subscriber's doorbell attached | Sends the topic's declaration, then `Opened` with a read end. Passes the doorbell (`Bell`) and the subscriber's request (`Demand`) to the publisher. Sets the count in the ring |
+| `Subscribe` before the topic exists | Answers `TopicState: Waiting`. The declaration and `Opened` follow when someone declares it |
+| `Unsubscribe`, or the subscriber's connection closing | Tells the publisher to drop that doorbell, and the new count |
+| `Open` | A read end without subscribing, for a look. The write end again, for the publisher only |
+
+- **Start order does not matter.** A subscriber that comes first waits and is given the ring when
+  the topic is declared.
+- **A publisher that goes away** leaves its ring. Subscribers are told `PublisherGone`. The same
+  declaration again carries on in the same ring (`Live`), so subscribers do nothing. A different
+  declaration under the same name replaces the ring, and subscribers are sent the new one under
+  the same handle. A second program may not declare a topic that has a publisher.
+- **A comm core that restarts** has no rings, but its publishers kept theirs and kept publishing. A
+  publisher declares again with its ring's write end attached and the broker adopts it, checking it
+  against the declaration. Nothing that was flowing stops.
+- **One cap** (`topics.max_bytes`, 16 MiB) bounds all ring memory, and `topics.max` (1024) the
+  number of topics. A declaration over either is refused. A topic nobody publishes or subscribes
+  to is removed, and its memory with it.
+- **Who may**: by default programs on the board, other nodes and devices declare; programs on the
+  board, other nodes and operators subscribe.
+- **A program that cannot map shared memory** is answered `shared_memory: false` and still counts
+  as a subscriber. `orion-broker-proxy` carries its samples.

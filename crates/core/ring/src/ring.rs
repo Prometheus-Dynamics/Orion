@@ -30,6 +30,18 @@ impl Ring {
         Ok(Self { map, geometry })
     }
 
+    /// Takes over a ring that already exists, from its write end: what a comm core that has
+    /// just started does with the rings its publishers kept running without it.
+    ///
+    /// # Errors
+    ///
+    /// [`RingError`] if `fd` isn't sealed, can't be mapped for writing or doesn't hold a ring.
+    pub fn adopt(fd: OwnedFd) -> Result<Self, RingError> {
+        let map = WriteMap::new(fd)?;
+        let geometry = Geometry::read(&map)?;
+        Ok(Self { map, geometry })
+    }
+
     /// The ring's shape.
     #[must_use]
     pub const fn geometry(&self) -> &Geometry {

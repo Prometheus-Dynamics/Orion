@@ -13,8 +13,9 @@ use orion_msg_peers::{
 use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, RecordEntry, Watch};
 use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, RejectReason, Roles, Welcome};
 use orion_msg_topics::{
-    BatchSample, BufferInfo, BufferOffer, Declare, Demand, Field, FieldType, Open, Opened,
-    Sample as TopicSample, SampleBatch, SampleFlags, Subscribe, Unsubscribe,
+    BatchSample, Bell, BufferInfo, BufferOffer, Declare, Demand, Field, FieldType, Open, Opened,
+    Sample as TopicSample, SampleBatch, SampleFlags, Subscribe, TopicState, TopicStatus,
+    Unsubscribe,
 };
 use orion_msg_workloads::{
     ExecutorInventory, ExecutorKill, ExecutorOffer, ExecutorReport, ExecutorStart, ExecutorStop,
@@ -407,6 +408,22 @@ fn topics(out: &mut Vec<Sample>) {
             handle: 2,
             generation: 1,
             buffers: List::new(&buffers)
+        }
+    );
+    sample!(
+        out,
+        Bell {
+            handle: 2,
+            subscriber: 7,
+            present: true
+        }
+    );
+    sample!(
+        out,
+        TopicState {
+            request_seq: 9,
+            handle: 2,
+            status: TopicStatus::PublisherGone
         }
     );
 }

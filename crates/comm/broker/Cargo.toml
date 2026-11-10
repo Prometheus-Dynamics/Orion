@@ -1,0 +1,27 @@
+[package]
+name = "orion-broker"
+description = "The topic broker: makes rings, hands their ends out once, and then stays out of the way."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-config = { path = "../../core/config" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-server = { path = "../server" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+tracing.workspace = true
+
+[dev-dependencies]
+libc.workspace = true
+orion-msg-session = { path = "../../core/msg-session" }
+orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+orion-unix = { path = "../unix" }
+tokio = { workspace = true, features = ["rt", "time", "macros", "net", "test-util"] }
+
+[lints]
+workspace = true
