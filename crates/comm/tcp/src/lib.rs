@@ -28,8 +28,6 @@
 
 #![cfg(target_os = "linux")]
 
-mod handshake;
-
 use std::io;
 use std::net::SocketAddr;
 use std::os::fd::OwnedFd;
@@ -44,7 +42,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep, timeout};
 
-use handshake::{
+use orion_net_handshake::{
     CLIENT_HELLO_LEN, Fresh, MODE_PLAIN, MODE_SIGNED, PREAMBLE_LEN, SERVER_HELLO_LEN,
     SIGNATURE_LEN, STATUS_NEEDS_SIGNED, STATUS_OK, STATUS_REFUSED, Seal, TAG_LEN, Transcript,
     hello, preamble,
@@ -85,12 +83,6 @@ pub struct TcpRead {
 pub struct TcpWrite {
     stream: OwnedWriteHalf,
     seal: Option<Seal>,
-}
-
-impl std::fmt::Debug for Seal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Seal")
-    }
 }
 
 impl FrameRead for TcpRead {
@@ -241,7 +233,7 @@ fn connection(
 async fn welcome(mut stream: TcpStream, options: &TcpOptions) -> io::Result<TcpConnection> {
     let mut start = [0_u8; PREAMBLE_LEN];
     stream.read_exact(&mut start).await?;
-    if start[..4] != handshake::MAGIC || start[5] != handshake::VERSION {
+    if start[..4] != orion_net_handshake::MAGIC || start[5] != orion_net_handshake::VERSION {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "not an orion+tcp connection",

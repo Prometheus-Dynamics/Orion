@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 hmac = "0.13.0"
 orion-keys = { path = "../keys" }
+orion-net-handshake = { path = "../../core/net-handshake" }
 orion-server = { path = "../server" }
 orion-supervise = { path = "../../core/supervise" }
 sha2 = { version = "0.11.0", default-features = false }

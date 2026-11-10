@@ -22,41 +22,41 @@
 //! encrypted, as on `dev`: what goes over it can be read, and cannot be forged.
 
 use hmac::{Hmac, KeyInit, Mac};
-use orion_keys::{Identity, random, verify};
+use orion_identity::{Identity, random, verify};
 use sha2::Sha256;
 use x25519_dalek::{X25519_BASEPOINT_BYTES, x25519};
 
-pub(crate) const MAGIC: [u8; 4] = *b"ORTC";
-pub(crate) const VERSION: u8 = 1;
-pub(crate) const PREAMBLE_LEN: usize = 6;
-pub(crate) const MODE_PLAIN: u8 = 0;
-pub(crate) const MODE_SIGNED: u8 = 1;
+pub const MAGIC: [u8; 4] = *b"ORTC";
+pub const VERSION: u8 = 1;
+pub const PREAMBLE_LEN: usize = 6;
+pub const MODE_PLAIN: u8 = 0;
+pub const MODE_SIGNED: u8 = 1;
 
-pub(crate) const STATUS_OK: u8 = 0;
-pub(crate) const STATUS_NEEDS_SIGNED: u8 = 1;
-pub(crate) const STATUS_REFUSED: u8 = 2;
+pub const STATUS_OK: u8 = 0;
+pub const STATUS_NEEDS_SIGNED: u8 = 1;
+pub const STATUS_REFUSED: u8 = 2;
 
-pub(crate) const CLIENT_HELLO_LEN: usize = 96;
-pub(crate) const SERVER_HELLO_LEN: usize = 160;
-pub(crate) const SIGNATURE_LEN: usize = 64;
+pub const CLIENT_HELLO_LEN: usize = 96;
+pub const SERVER_HELLO_LEN: usize = 160;
+pub const SIGNATURE_LEN: usize = 64;
 /// Bytes of the MAC on every frame of a signed session.
-pub(crate) const TAG_LEN: usize = 16;
+pub const TAG_LEN: usize = 16;
 
 const DOMAIN: &[u8] = b"orion+tcp-v1";
 
-pub(crate) fn preamble(mode: u8) -> [u8; PREAMBLE_LEN] {
+pub fn preamble(mode: u8) -> [u8; PREAMBLE_LEN] {
     [MAGIC[0], MAGIC[1], MAGIC[2], MAGIC[3], mode, VERSION]
 }
 
 /// One side's fresh values: an ephemeral secret, its public half and a nonce.
-pub(crate) struct Fresh {
+pub struct Fresh {
     secret: [u8; 32],
-    pub(crate) public: [u8; 32],
-    pub(crate) nonce: [u8; 32],
+    pub public: [u8; 32],
+    pub nonce: [u8; 32],
 }
 
 impl Fresh {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let secret: [u8; 32] = random();
         Self {
             public: x25519(secret, X25519_BASEPOINT_BYTES),
@@ -68,9 +68,9 @@ impl Fresh {
 
 /// The values both sides sign: the client's three, then the server's three.
 #[derive(Clone, Copy)]
-pub(crate) struct Transcript {
-    pub(crate) client: [u8; CLIENT_HELLO_LEN],
-    pub(crate) server: [u8; 96],
+pub struct Transcript {
+    pub client: [u8; CLIENT_HELLO_LEN],
+    pub server: [u8; 96],
 }
 
 impl Transcript {
@@ -83,34 +83,34 @@ impl Transcript {
         out
     }
 
-    pub(crate) fn client_key(&self) -> [u8; 32] {
+    pub fn client_key(&self) -> [u8; 32] {
         self.client[64..].try_into().expect("32 bytes")
     }
 
-    pub(crate) fn server_key(&self) -> [u8; 32] {
+    pub fn server_key(&self) -> [u8; 32] {
         self.server[64..].try_into().expect("32 bytes")
     }
 
-    pub(crate) fn sign_server(&self, identity: &Identity) -> [u8; 64] {
+    pub fn sign_server(&self, identity: &Identity) -> [u8; 64] {
         identity.sign(&self.message(b"server\0"))
     }
 
-    pub(crate) fn sign_client(&self, identity: &Identity) -> [u8; 64] {
+    pub fn sign_client(&self, identity: &Identity) -> [u8; 64] {
         identity.sign(&self.message(b"client\0"))
     }
 
-    pub(crate) fn server_signed(&self, signature: &[u8]) -> bool {
+    pub fn server_signed(&self, signature: &[u8]) -> bool {
         verify(&self.server_key(), &self.message(b"server\0"), signature)
     }
 
-    pub(crate) fn client_signed(&self, signature: &[u8]) -> bool {
+    pub fn client_signed(&self, signature: &[u8]) -> bool {
         verify(&self.client_key(), &self.message(b"client\0"), signature)
     }
 
     /// The two frame keys, client-to-server then server-to-client, from this side's secret
     /// and the other side's ephemeral public key. `None` if the other side sent a point that
     /// gives no secret at all.
-    pub(crate) fn keys(&self, own: &Fresh, client: bool) -> Option<([u8; 32], [u8; 32])> {
+    pub fn keys(&self, own: &Fresh, client: bool) -> Option<([u8; 32], [u8; 32])> {
         let theirs: [u8; 32] = if client {
             self.server[..32].try_into().expect("32 bytes")
         } else {
@@ -133,7 +133,7 @@ impl Transcript {
     }
 }
 
-pub(crate) fn hello(fresh: &Fresh, key: &[u8; 32]) -> [u8; 96] {
+pub fn hello(fresh: &Fresh, key: &[u8; 32]) -> [u8; 96] {
     let mut out = [0_u8; 96];
     out[..32].copy_from_slice(&fresh.public);
     out[32..64].copy_from_slice(&fresh.nonce);
@@ -143,13 +143,13 @@ pub(crate) fn hello(fresh: &Fresh, key: &[u8; 32]) -> [u8; 96] {
 
 /// One direction's frame MAC: a key and a count of frames, so a frame only verifies in its
 /// place in the order.
-pub(crate) struct Seal {
+pub struct Seal {
     key: [u8; 32],
     count: u64,
 }
 
 impl Seal {
-    pub(crate) const fn new(key: [u8; 32]) -> Self {
+    pub const fn new(key: [u8; 32]) -> Self {
         Self { key, count: 0 }
     }
 
@@ -163,14 +163,14 @@ impl Seal {
     }
 
     /// The MAC of the next frame to send.
-    pub(crate) fn seal(&mut self, frame: &[u8]) -> [u8; TAG_LEN] {
+    pub fn seal(&mut self, frame: &[u8]) -> [u8; TAG_LEN] {
         let tag = self.tag(frame);
         self.count += 1;
         tag
     }
 
     /// Whether `tag` is the MAC of the next frame expected. Compared in constant time.
-    pub(crate) fn open(&mut self, frame: &[u8], tag: &[u8]) -> bool {
+    pub fn open(&mut self, frame: &[u8], tag: &[u8]) -> bool {
         let expected = self.tag(frame);
         let same = tag.len() == TAG_LEN
             && expected
@@ -182,6 +182,24 @@ impl Seal {
             self.count += 1;
         }
         same
+    }
+}
+
+impl std::fmt::Debug for Seal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Seal")
+    }
+}
+
+impl Default for Fresh {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for Fresh {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Fresh")
     }
 }
 

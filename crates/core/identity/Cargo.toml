@@ -1,0 +1,17 @@
+[package]
+name = "orion-identity"
+description = "An ed25519 identity: the key a node or a person's tool is known by, signing and checking."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast", "zeroize"] }
+getrandom = "0.4"
+orion-types = { path = "../types" }
+sha2 = { version = "0.11.0", default-features = false }
+
+[lints]
+workspace = true

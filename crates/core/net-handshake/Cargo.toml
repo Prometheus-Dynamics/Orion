@@ -1,0 +1,17 @@
+[package]
+name = "orion-net-handshake"
+description = "The signed handshake of orion+tcp and the check on every frame after it, as bytes: no I/O."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+hmac = "0.13.0"
+orion-identity = { path = "../identity" }
+sha2 = { version = "0.11.0", default-features = false }
+x25519-dalek = { version = "3.0.0", default-features = false }
+
+[lints]
+workspace = true

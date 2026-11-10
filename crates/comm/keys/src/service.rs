@@ -12,8 +12,8 @@ use orion_types::NodeName;
 use orion_wire::{Bytes, FrameView, List, kind};
 
 use crate::enroll_impl::{NONCE_LEN, Side, Transcript, proof, verify_proof};
-use crate::identity::{random, verify};
 use crate::store::{Operator, SharedKeys};
+use orion_identity::{random, verify};
 
 /// A handshake this node has answered and is waiting to see confirmed.
 struct Waiting {

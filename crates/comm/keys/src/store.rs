@@ -12,7 +12,7 @@ use orion_server::{Grants, Principal, What};
 use orion_types::{KeyId, NodeName};
 
 use crate::enroll_impl::{operator_proof, verify_proof};
-use crate::identity::Identity;
+use orion_identity::Identity;
 
 const IDENTITY_FILE: &str = "node-identity.ed25519";
 const TRUST_FILE: &str = "trust";

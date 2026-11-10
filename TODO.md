@@ -63,7 +63,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 
 One client with the same calls on any address, plus the C surface and orionctl.
 
-- [ ] [D1](docs/prs/D1.md) Client: connect to any address (wave 7; needs A5, C2)
+- [x] [D1](docs/prs/D1.md) Client: connect to any address (wave 7; needs A5, C2)
 - [ ] [D2](docs/prs/D2.md) Client: topics (wave 8; needs D1, B3, B4, B5, B6, C3)
 - [ ] [D3](docs/prs/D3.md) Client: buffer topics (wave 9; needs D2, B8, C5)
 - [ ] [D4](docs/prs/D4.md) Client: records (wave 8; needs D1, A6)

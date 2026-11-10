@@ -25,11 +25,10 @@
 //! That is how a board on a closed network works today.
 
 mod enroll_impl;
-mod identity;
 mod service;
 mod store;
 
-pub use identity::{Identity, fingerprint, random, verify};
+pub use orion_identity::{Identity, fingerprint, random, verify};
 pub use orion_msg_peers::OperatorState;
 pub use service::KeysService;
 pub use store::{Keys, KeysConfig, KeysError, Operator, SharedKeys};
