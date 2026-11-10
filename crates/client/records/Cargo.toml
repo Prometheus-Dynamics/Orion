@@ -1,0 +1,22 @@
+[package]
+name = "orion-records"
+description = "The client's records: read, write and watch named pieces of state. Watches are pushed."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-connect = { path = "../connect" }
+orion-msg-records = { path = "../../core/msg-records" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+orion-server = { path = "../../comm/server" }
+orion-unix = { path = "../../comm/unix" }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+[lints]
+workspace = true

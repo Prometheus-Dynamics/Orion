@@ -89,3 +89,21 @@ frame was held, or after it was dropped, is memory the publisher may be writing.
 Buffer topics are between programs on one board: there is no memory to share across a network,
 and the calls say so there. The comm core sets the two sides up and then sees no frame.
 
+## Records
+
+`orion-records`. A record is a named piece of state with a stamp from the cluster's clock.
+
+| Call | What it does |
+| --- | --- |
+| `records.put(entries)` | Writes records, and returns them as stored, each with its stamp. An entry with `deleted` set says the record is gone |
+| `records.get(class, prefix)` | Reads once: the records of a class whose keys start with a prefix |
+| `records.watch(class, prefix, after)` | Everything newer than a stamp, then each change as it is made |
+| `watch.poll()`, `watch.wait(for)` | The next change |
+| `watch.newest()` | The stamp to watch from next time |
+
+Watches are pushed. A watcher is sent each change in the order it was made and asks for nothing
+again. A program that reads too slowly for too long does not grow without bound: its watch
+holds 1,024 changes, then stops taking them, and once the program has read what it holds the
+watch asks for everything newer than the last change it was given. No record is missed; one
+that changed several times in between is seen at its latest.
+
