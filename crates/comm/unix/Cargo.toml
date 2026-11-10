@@ -1,0 +1,21 @@
+[package]
+name = "orion-unix"
+description = "The same-board carrier: one Unix socket, one kept-open connection per client, descriptors passed with frames."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-fdpass = { path = "../../core/fdpass" }
+orion-server = { path = "../server" }
+tokio = { workspace = true, features = ["net"] }
+
+[dev-dependencies]
+orion-msg-session = { path = "../../core/msg-session" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["rt", "time", "macros"] }
+
+[lints]
+workspace = true

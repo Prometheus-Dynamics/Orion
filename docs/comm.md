@@ -46,3 +46,20 @@ Everything is on one thread. Nothing allocates per request once a session is ope
 buffer, the outbox and the timers belong to the session.
 
 `orion_server::mem` is a carrier in memory, for tests of every service.
+
+## The same-board carrier
+
+`crates/comm/unix` (`orion-unix`). One Unix socket (`socket`, `/run/orion/orion.sock`). Every
+program on the board connects once and keeps the connection.
+
+- A frame is `[u32 length][frame]` in one `sendmsg`, with descriptors attached to it. A frame must
+  fit the socket's buffer, which the default 64 KiB limit does.
+- Who is connecting comes from the kernel (`SO_PEERCRED`): a user id and a group id. The socket's
+  permission bits decide who can connect at all.
+- Any program may be a client, a provider or an executor. Only root and the configured node users
+  may be the node logic.
+- Binding looks at what is at the path first. A socket nobody answers is replaced. A socket
+  somebody answers is another comm core, and is left to it. Anything that is not a socket is never
+  touched.
+- A send the socket takes only part of is finished as plain bytes, so a reader that is a little
+  behind still gets every frame whole.
