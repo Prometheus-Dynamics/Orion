@@ -347,3 +347,11 @@ direction, counter nonces, key rotation every 2^20 records or 10 minutes), so no
 two can read the device's traffic or put a frame into it. The board takes one such device at a
 time; handshakes run side by side, so a caller that says nothing holds nobody up.
 
+**A CAN bus** (`orion-link-can`) carries the same frames cut into segments, one per CAN frame: 7
+bytes each on classic CAN, up to 63 on CAN FD. A bus has many devices. Each has an address, and
+its two identifiers are the bus's base pair plus that address, so lower addresses win
+arbitration. Each device is its own session, known as `<bus>.<address>`; one that stops talking
+loses its session and the others are not touched. A whole frame that a session is not reading
+is dropped and counted: one slow session does not hold the bus. The socket receives only the
+identifiers of the bus's devices, and is opened again every 250 ms after it fails.
+

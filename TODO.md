@@ -54,7 +54,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [ ] [C9](docs/prs/C9.md) Discovery (wave 8; needs C6, C7)
 - [x] [C10](docs/prs/C10.md) Time sync (wave 7; needs C1, C3)
 - [x] [C11](docs/prs/C11.md) Serial link (wave 6; needs C1)
-- [ ] [C12](docs/prs/C12.md) CAN link (wave 7; needs C11)
+- [x] [C12](docs/prs/C12.md) CAN link (wave 7; needs C11)
 - [ ] [C13](docs/prs/C13.md) USB link (wave 7; needs C11; board run)
 - [x] [C14](docs/prs/C14.md) Host facts and Orion's own state as topics (wave 7; needs C3)
 - [ ] [C15](docs/prs/C15.md) Comm assembly (wave 8; needs C2, C3, C4, C5, C6, C8, C10, C14)

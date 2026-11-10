@@ -1,0 +1,30 @@
+[package]
+name = "orion-link-can"
+description = "Links over a CAN bus: the one wire in segments, many devices on one bus, classic CAN and CAN FD."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# The kernel's CAN sockets, through the `socketcan` crate. Linux.
+socketcan = ["dep:socketcan"]
+
+[dependencies]
+orion-server = { path = "../server" }
+orion-supervise = { path = "../../core/supervise" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire", features = ["std"] }
+socketcan = { version = "4.0.0", default-features = false, features = ["tokio"], optional = true }
+tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-msg-session = { path = "../../core/msg-session" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["macros", "test-util"] }
+
+[lints]
+workspace = true
