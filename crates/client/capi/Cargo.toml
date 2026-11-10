@@ -1,0 +1,22 @@
+[package]
+name = "orion-capi"
+description = "A small versioned C surface over the Orion client: connect, publish, subscribe."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lib]
+name = "orion_c"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+orion = { path = "../orion", default-features = false, features = ["topics"] }
+
+[dev-dependencies]
+orion-stubs = { path = "../../testing/stubs" }
+
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"

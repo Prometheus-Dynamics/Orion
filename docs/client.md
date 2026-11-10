@@ -221,3 +221,28 @@ reads, and what to do when it ends. `remove` says it should stop existing; its r
 until the run is really gone, unless forced. `status` and `wait` give where it is: pending,
 starting, running, stopping, gone, or failed or lost.
 
+## From C
+
+`orion-capi` builds `liborion_c.a` and `liborion_c.so` (SONAME `liborion_c.so.1`), and
+`crates/client/capi/include/orion.h` is the header. It covers topics: connect, declare and
+publish, subscribe, wait and read.
+
+```c
+orion_check_version(ORION_ABI_MAJOR, ORION_ABI_MINOR);
+Orion *orion;
+orion_connect(NULL, "my-tool", 2000, &orion);          /* NULL: the board's own socket */
+OrionSubscriber *level;
+orion_subscribe(orion, "tank.level", &level);
+OrionSample sample; uint8_t bytes[8];
+while (orion_wait(level, 1000) >= 0)
+    while (orion_next(level, &sample, bytes, sizeof bytes) == 1) { /* one sample */ }
+```
+
+Every call returns `ORION_OK`, a positive count where the header says so, or a negative
+status; `orion_last_error()` says why in words. Nothing allocates memory the caller frees but
+the handles. No thread is started. A handle belongs to the thread that made its session, and
+must not be used after it is closed.
+
+The version is a major and a minor. Something added raises the minor; anything that would
+break a caller raises the major, and with it the library's name.
+
