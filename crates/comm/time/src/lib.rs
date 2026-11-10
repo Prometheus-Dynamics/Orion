@@ -200,17 +200,33 @@ impl TimeSync {
         let mut tasks = Vec::new();
         let mut serving = None;
         if let Some(addr) = config.serve {
-            let udp = std::net::UdpSocket::bind(addr)
-                .and_then(|socket| socket.set_nonblocking(true).map(|()| socket))
-                .and_then(UdpSocket::from_std)
-                .map_err(|error| context("udp", addr, &error))?;
-            // The port the datagram socket got, so `:0` serves both on one port.
-            let addr = udp.local_addr().unwrap_or(addr);
+            // Both sockets are on one port. Asked for any port, the datagram socket gets
+            // one, and the listener needs the same number, which something else may hold:
+            // then another is tried.
+            let tries = if addr.port() == 0 { 16 } else { 1 };
+            let mut bound = None;
+            let mut last = None;
+            for _ in 0..tries {
+                let udp = std::net::UdpSocket::bind(addr)
+                    .and_then(|socket| socket.set_nonblocking(true).map(|()| socket))
+                    .map_err(|error| context("udp", addr, &error))?;
+                let on = udp.local_addr().unwrap_or(addr);
+                match std::net::TcpListener::bind(on)
+                    .and_then(|listener| listener.set_nonblocking(true).map(|()| listener))
+                {
+                    Ok(tcp) => {
+                        bound = Some((udp, tcp, on));
+                        break;
+                    }
+                    Err(error) => last = Some(context("tcp", on, &error)),
+                }
+            }
+            let Some((udp, tcp, addr)) = bound else {
+                return Err(last.unwrap_or_else(|| std::io::Error::other("time.serve: no port")));
+            };
+            let udp = UdpSocket::from_std(udp).map_err(|error| context("udp", addr, &error))?;
+            let tcp = TcpListener::from_std(tcp).map_err(|error| context("tcp", addr, &error))?;
             serving = Some(addr);
-            let tcp = std::net::TcpListener::bind(addr)
-                .and_then(|listener| listener.set_nonblocking(true).map(|()| listener))
-                .and_then(TcpListener::from_std)
-                .map_err(|error| context("tcp", addr, &error))?;
             let authority = config.serve_authority;
             info!(%addr, authority, "serving the clock over SNTP");
             let (for_udp, for_tcp) = (served.clone(), served.clone());

@@ -145,3 +145,24 @@ way at once, so a push neither fills the connection nor waits for an answer to e
 `files.pull(..)` asks the board to fetch the file itself from a URL, check it and put it in
 place. Only the request and the board's reports cross the connection.
 
+## The executor role
+
+`orion-executor`. An executor is any program that connects and says "I run this kind of
+workload". Orion decides what should run; the executor starts and stops what it is told and
+reports what is true. It keeps no record of its own of what should be running.
+
+A program implements `Executor`:
+
+| Method | What it does |
+| --- | --- |
+| `kinds()` | The kinds of workload it runs |
+| `start(name, spec)` | Starts one. `start_on` also gives the kind and the CPUs it may use |
+| `stop(name)`, `kill(name)` | Asks one to stop; ends one now |
+| `inventory()` | Everything it has and where each is. A workload not here is gone |
+
+and gives it to `Serving`. `start` says what it runs and everything it has; `turn` does what
+Orion asked since the last turn and then reports every workload whose state changed. The
+executor never has to remember to report: what it says it has is compared with what Orion was
+last told. When the connection has been made again, `start` sends the whole inventory once
+more, which is how Orion takes back runs that carried on without it, by name.
+

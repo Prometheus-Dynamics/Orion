@@ -1,0 +1,22 @@
+[package]
+name = "orion-executor"
+description = "The client's executor role: say which kinds of workload you run, start and stop what you are told, report what is true."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-connect = { path = "../connect" }
+orion-msg-workloads = { path = "../../core/msg-workloads" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+orion-server = { path = "../../comm/server" }
+orion-unix = { path = "../../comm/unix" }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+[lints]
+workspace = true
