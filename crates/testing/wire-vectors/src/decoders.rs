@@ -40,6 +40,8 @@ decoders! {
     PING => session::Ping,
     PONG => session::Pong,
     IDENTIFY => session::Identify,
+    LINK_OFFER => session::LinkOffer,
+    LINK_TAKEN => session::LinkTaken,
     IDENTITY => session::Identity,
     REFUSAL => session::Refusal,
     PUT => records::Put,

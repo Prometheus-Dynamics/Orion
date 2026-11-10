@@ -395,3 +395,12 @@ time-to-live (120 s). That only drops it from the list: its key stays held. The 
 core is told when an enrolled peer is present, has moved to other addresses, or has gone, which
 is what keeping a connection to it needs.
 
+**A USB link** (`orion-link-usb`) is the same byte stream over handles the comm core is given.
+The comm core never opens hardware: the program that owns the board's hardware finds the device
+or sets up the gadget function, opens it, and sends `LinkOffer` on the board's socket with the
+open descriptors attached. Only a program on the board may. A handle is a stream (one descriptor
+that can be waited on), a pair of blocking endpoints (a thread sits in each, so nothing is
+polled), or, with feature `bulk`, a USB device with the interface and bulk endpoints to use. A
+link with no handle opens nothing and waits. When a new handle is offered for a link that has
+one, the device was unplugged and is back: the old stream ends and the link goes on over the new.
+

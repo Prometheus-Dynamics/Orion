@@ -232,3 +232,42 @@ mod tests {
         assert!(!roles.has(Roles::NODE));
     }
 }
+
+open_enum! {
+    /// What kind of handle a [`LinkOffer`] carries.
+    pub enum LinkTransport: u8 {
+        /// One descriptor that can be waited on and carries bytes both ways: a serial port
+        /// that is already open, a gadget's serial function, a socket.
+        Stream = 1,
+        /// Two descriptors, one to read and one to write, that block: a gadget function's
+        /// bulk endpoints.
+        Endpoints = 2,
+        /// One descriptor of a USB device, with the interface and bulk endpoints to use.
+        Bulk = 3,
+    }
+}
+
+body! {
+    /// Hands the comm core an open device for one of its links. The descriptors travel with
+    /// the frame. The comm core never opens hardware itself.
+    pub struct LinkOffer<'a> = kind::LINK_OFFER {
+        /// The link the device is for.
+        pub link: &'a str,
+        /// What the descriptors are.
+        pub transport: LinkTransport,
+        /// For [`LinkTransport::Bulk`]: the interface to claim.
+        pub interface: u8,
+        /// For [`LinkTransport::Bulk`]: the endpoint to read from.
+        pub endpoint_in: u8,
+        /// For [`LinkTransport::Bulk`]: the endpoint to write to.
+        pub endpoint_out: u8,
+    }
+}
+
+body! {
+    /// Takes a [`LinkOffer`]: the link now runs over the device that was handed over.
+    pub struct LinkTaken = kind::LINK_TAKEN {
+        /// The `seq` of the offer.
+        pub request_seq: u16,
+    }
+}

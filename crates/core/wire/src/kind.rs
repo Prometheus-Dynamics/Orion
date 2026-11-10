@@ -59,6 +59,8 @@ kinds! {
         REFUSAL = 0x06,
         IDENTIFY = 0x07,
         IDENTITY = 0x08,
+        LINK_OFFER = 0x09,
+        LINK_TAKEN = 0x0A,
     }
     Records {
         PUT = 0x10,

@@ -1,0 +1,32 @@
+[package]
+name = "orion-link-usb"
+description = "Links over USB: a gadget's or a device's handles, handed to the comm core by the program that owns the hardware."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# A USB device's bulk endpoints, through the `nusb` crate. Linux.
+bulk = ["dep:nusb", "tokio/io-util"]
+
+[dependencies]
+nusb = { version = "0.2.9", default-features = false, features = ["tokio"], optional = true }
+orion-link-serial = { path = "../link-serial" }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-server = { path = "../server" }
+orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std"] }
+tokio = { workspace = true, features = ["net", "sync", "rt", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
+orion-types = { path = "../../core/types" }
+rustix = { version = "1", default-features = false, features = ["std", "pipe"] }
+tokio = { workspace = true, features = ["macros", "test-util", "time"] }
+
+[lints]
+workspace = true
