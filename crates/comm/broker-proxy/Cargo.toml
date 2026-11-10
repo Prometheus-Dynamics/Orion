@@ -1,0 +1,25 @@
+[package]
+name = "orion-broker-proxy"
+description = "Publishing on behalf: samples sent as messages are written to the topic's ring by the comm core."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-broker = { path = "../broker" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+orion-server = { path = "../server" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-types = { path = "../../core/types" }
+tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
+
+[lints]
+workspace = true

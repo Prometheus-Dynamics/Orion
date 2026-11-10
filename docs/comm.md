@@ -94,3 +94,20 @@ programs, and the broker handles no request until someone connects, subscribes o
   board, other nodes and operators subscribe.
 - **A program that cannot map shared memory** is answered `shared_memory: false` and still counts
   as a subscriber. `orion-broker-proxy` carries its samples.
+
+## Publishing on behalf
+
+`crates/comm/broker-proxy` (`orion-broker-proxy`). A program on another board, in a browser or on a
+microcontroller cannot map a ring. It declares like anyone else, is answered
+`shared_memory: false`, and sends `Sample` or `SampleBatch` messages. The comm core writes them to
+the topic's ring and rings the subscribers that are asleep, as a local publisher would. Every
+subscriber on the board reads a ring, whoever the publisher is.
+
+- Only a topic's own publisher may send its samples, and only one that was not given the ring. A
+  ring has one writer.
+- A sample takes no answer. One that cannot be written (a field or size outside the declaration)
+  is refused, so a mistake is heard.
+- What such a publisher gets back is `Demand`: the subscriber count and the newest subscriber's
+  request, on every change. It can stop sampling when nobody listens.
+- Nothing allocates per sample. The writer and the doorbells for a topic are rebuilt only when its
+  ring, publisher or subscribers change.

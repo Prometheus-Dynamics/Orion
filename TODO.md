@@ -46,7 +46,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C1](docs/prs/C1.md) Comm server: sessions and dispatch (wave 5; needs A5, A13, A14, A17)
 - [x] [C2](docs/prs/C2.md) Same-board carrier (wave 6; needs C1, A16)
 - [x] [C3](docs/prs/C3.md) Topic broker (wave 6; needs C1, A7, B3, B4)
-- [ ] [C4](docs/prs/C4.md) Publishing on behalf, and demand (wave 7; needs C3)
+- [x] [C4](docs/prs/C4.md) Publishing on behalf, and demand (wave 7; needs C3)
 - [ ] [C5](docs/prs/C5.md) Buffer topics in the broker (wave 7; needs C3, B8)
 - [ ] [C6](docs/prs/C6.md) Network carrier: orion+tcp (wave 7; needs C1, C7)
 - [ ] [C7](docs/prs/C7.md) Keys, enrollment, operators (wave 6; needs A11, A13)

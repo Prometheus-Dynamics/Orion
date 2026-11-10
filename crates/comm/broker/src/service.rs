@@ -111,6 +111,7 @@ impl Service for Broker {
             };
             if topic.publisher == Some(session) {
                 topic.publisher = None;
+                topic.epoch += 1;
                 for subscription in &topic.subscribers {
                     let state = TopicState {
                         request_seq: 0,
@@ -225,6 +226,7 @@ fn declare(
     topic.declare.extend_from_slice(raw);
     topic.publisher = Some(from);
     topic.publisher_shared = shared;
+    topic.epoch += 1;
     let ring = topic.ring.as_ref().ok_or(Error::Internal)?;
     let count = topic.subscriber_count();
     ring.set_subscribers(count);
@@ -290,6 +292,7 @@ fn subscribe(
         max_hold_ms: subscribe.max_hold_ms,
         shared: shares(cx),
     });
+    topic.epoch += 1;
     let count = topic.subscriber_count();
     let subscription = topic.subscribers.last().ok_or(Error::Internal)?;
     let sessions = cx.sessions();
@@ -345,6 +348,7 @@ fn leave(
     if topic.subscribers.len() == before {
         return Err(Error::NotFound);
     }
+    topic.epoch += 1;
     let count = topic.subscriber_count();
     if let Some(ring) = &topic.ring {
         ring.set_subscribers(count);

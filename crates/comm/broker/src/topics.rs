@@ -99,6 +99,9 @@ pub struct Topic {
     pub publisher_shared: bool,
     /// Its subscribers.
     pub subscribers: Vec<Subscription>,
+    /// Goes up whenever the ring, the publisher or the subscribers change. What builds on the
+    /// broker keeps its own state per topic and rebuilds it when this moves.
+    pub epoch: u64,
 }
 
 impl Topic {
@@ -215,6 +218,7 @@ impl Topics {
             publisher: None,
             publisher_shared: false,
             subscribers: Vec::new(),
+            epoch: 0,
         });
         Ok(id)
     }
@@ -255,6 +259,7 @@ impl Topics {
         self.bytes = self.bytes - had + ring.mapped_bytes();
         if let Some(topic) = self.get_mut(id) {
             topic.ring = Some(ring);
+            topic.epoch += 1;
         }
         Ok(())
     }
