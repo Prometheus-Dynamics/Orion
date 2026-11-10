@@ -195,6 +195,29 @@ impl<M: Mem> Reader<M> {
             .map(|found| self.sample(found))
     }
 
+    /// The time of sample number `lane_seq` of `field`, without copying its payload: for
+    /// searching a field's history by time. `None` as for [`Reader::at`].
+    #[must_use]
+    pub fn time_at(&self, field: FieldId, lane_seq: u64) -> Option<FrameTime> {
+        let head = self.lane_head(field);
+        if lane_seq >= head || head - lane_seq > u64::from(self.geometry.history) {
+            return None;
+        }
+        let lane_slot = lane_seq as usize & (self.geometry.history as usize - 1);
+        let at = self.geometry.slot_at(usize::from(field.0), lane_slot);
+        let before = self.mem.load(at, Ordering::Acquire);
+        if before == 0 || before & 1 == 1 {
+            return None;
+        }
+        let time = self.mem.load(at + 1, Ordering::Relaxed);
+        let holds = self.mem.load(at + 3, Ordering::Relaxed);
+        M::fence(Ordering::Acquire);
+        if holds != lane_seq || self.mem.load(at, Ordering::Relaxed) != before {
+            return None;
+        }
+        Some(FrameTime::from_nanos(time))
+    }
+
     fn sample(&self, found: Found) -> Sample<'_> {
         Sample {
             seq: found.seq,

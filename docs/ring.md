@@ -174,6 +174,16 @@ reading it does not depend on how many fields there are. A value is expired when
 clock is more than the declaration's expiry past the sample's time; it is still returned, marked
 expired.
 
+## Lookup by frame time
+
+`crates/core/ring-time`. The value of a field at or before a frame time is a search of the field's
+lane, on the samples' times alone (`time_at` reads a slot's time without copying its payload): the
+newest four one by one, then a binary search of the rest. The reply is a hit (a sample for exactly
+that time), lagged (the newest earlier one, with how far behind), or missing.
+
+A bounded wait sleeps on the reader's doorbell while the publisher's newest sample is for an
+earlier frame, and returns as soon as the publisher reaches the frame or passes it.
+
 ## Buffer topics
 
 `crates/core/ring-buffers`. A frame is too large for a ring, so a buffer topic's entries say which

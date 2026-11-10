@@ -172,6 +172,13 @@ fn latest_and_history_read_the_same_slots() {
     assert_eq!(reader.at(FieldId(1), 1), None);
     assert_eq!(reader.at(FieldId(1), 6), None);
     assert_eq!(reader.at(FieldId(7), 0), None);
+    // The time alone, for the same samples and the same refusals.
+    for lane_seq in 2..6_u64 {
+        assert_eq!(reader.time_at(FieldId(1), lane_seq), Some(time(lane_seq)));
+    }
+    for (field, lane_seq) in [(1, 1), (1, 6), (7, 0), (0, 0)] {
+        assert_eq!(reader.time_at(FieldId(field), lane_seq), None);
+    }
 }
 
 #[test]
