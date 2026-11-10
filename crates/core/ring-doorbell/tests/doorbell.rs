@@ -181,5 +181,9 @@ fn no_wake_up_is_lost() {
         rings > 0 && sleeps > 0,
         "the subscriber never slept: {rings} rings, {sleeps} sleeps"
     );
-    assert!(rings < SAMPLES / 2, "rang on almost every publish: {rings}");
+    // How often it rang is the machine's business, not the protocol's: when both threads share
+    // a processor the subscriber is asleep again before the next publish, and every publish
+    // rings. That a publish rings only a sleeping subscriber, and once per sleep, is
+    // `only_a_sleeping_subscriber_is_rung_and_only_once_per_sleep`.
+    assert!(rings <= SAMPLES, "{rings} rings for {SAMPLES} publishes");
 }

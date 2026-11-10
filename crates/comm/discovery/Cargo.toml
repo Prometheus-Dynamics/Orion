@@ -1,0 +1,31 @@
+[package]
+name = "orion-discovery"
+description = "Finding the other nodes of a cluster on the local network, and enrolling them with a shared key."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# mDNS/DNS-SD on the local network, through the `mdns-sd` crate.
+mdns = ["dep:mdns-sd"]
+
+[dependencies]
+mdns-sd = { version = "0.21.5", default-features = false, optional = true }
+orion-keys = { path = "../keys" }
+orion-msg-peers = { path = "../../core/msg-peers" }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-server = { path = "../server" }
+orion-tcp = { path = "../tcp" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "test-util", "net"] }
+
+[lints]
+workspace = true

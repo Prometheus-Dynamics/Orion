@@ -355,3 +355,43 @@ loses its session and the others are not touched. A whole frame that a session i
 is dropped and counted: one slow session does not hold the bus. The socket receives only the
 identifiers of the bus's devices, and is opened again every 250 ms after it fails.
 
+## Discovery
+
+A node can find the others of its cluster on the local network (`orion-discovery`, mDNS/DNS-SD
+behind feature `mdns`). It announces the service `_orion._tcp` with this TXT record:
+
+| Key | Value |
+| --- | --- |
+| `v` | TXT layout version, `2` |
+| `id` | the node's name (the instance name is only a label) |
+| `pk` | its ed25519 public key, 64 hex characters |
+| `wv` | wire protocol version |
+| `rev` | highest interface revision |
+| `cl` | cluster name |
+| `tcp` | where it takes `orion+tcp` connections |
+
+Addresses come from the announcement; IPv4 is tried before IPv6, and link-local IPv6 addresses
+are left out because they need a scope.
+
+**Discovery only finds peers. It never makes one trusted.** Anyone on the network can announce
+anything. Announcements from other clusters, malformed ones and the node's own are ignored. A
+peer of this cluster is listed with one of these states, asked of the keys each time:
+
+| State | Meaning |
+| --- | --- |
+| `discovered` | Seen. Not trusted, not connected to. |
+| `enrolled` | The key it announces is the key held for its name. |
+| `revoked` | Its key was revoked here. Never enrolled again by itself. |
+| `key mismatch` | It announces another key than the one held for its name. Not followed. |
+| `incompatible` | It speaks another wire version. |
+
+A peer becomes enrolled when a person pins its key after comparing the fingerprint, or, when the
+cluster has a shared enrollment key, when both nodes prove they hold it. With that key set, a
+node enrolls with every discovered peer by itself over `orion+tcp`, requiring the peer to hold
+the key it announced, and tries again from 5 s doubling to 5 minutes when it fails.
+
+A peer stays listed until it says goodbye or its announcement is not refreshed within the
+time-to-live (120 s). That only drops it from the list: its key stays held. The rest of the comm
+core is told when an enrolled peer is present, has moved to other addresses, or has gone, which
+is what keeping a connection to it needs.
+
