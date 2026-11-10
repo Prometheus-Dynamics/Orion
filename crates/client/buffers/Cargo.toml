@@ -1,0 +1,29 @@
+[package]
+name = "orion-buffers"
+description = "The client's buffer topics: frames in shared memory, published without a copy and held by whoever reads them."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-connect = { path = "../connect" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-ring-buffers = { path = "../../core/ring-buffers" }
+orion-ring-holds = { path = "../../core/ring-holds" }
+orion-topics = { path = "../topics" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+orion-broker = { path = "../../comm/broker" }
+orion-broker-buffers = { path = "../../comm/broker-buffers" }
+orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-server = { path = "../../comm/server" }
+orion-unix = { path = "../../comm/unix" }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+[lints]
+workspace = true

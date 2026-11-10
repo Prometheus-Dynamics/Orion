@@ -68,3 +68,24 @@ samples that arrive as messages. The program reads a ring either way.
 `wait` sleeps on the subscriber's doorbell and on the session together, so nothing is polled on
 a timer and the session is kept up while the program sleeps.
 
+## Buffer topics
+
+`orion-buffers`, for frames. A frame is too large to copy into a ring, so a buffer topic's
+samples only name buffers, and the buffers are shared memory the publisher hands over once.
+
+A publisher declares the topic over a pool of buffers. For each frame it calls `poll` (to take
+in subscribers that came or went), `take` (a free buffer, or `Dropped` when there is none: then
+that frame is the one to lose), fills it, and `publish`es its number with a time and its own
+metadata. Nothing is copied, by it or by anyone after.
+
+A subscriber calls `next`. A frame's `held` is its buffers: take it out to keep the frame, and
+drop it to give the buffers back. The publisher sees who holds what and never reuses a held
+buffer. A subscriber that holds more than it asked to be allowed, or for longer, is cut off, so
+a stuck reader cannot stop a camera.
+
+Read a held frame's bytes through `held.bytes(..)` each time. A slice kept from before the
+frame was held, or after it was dropped, is memory the publisher may be writing.
+
+Buffer topics are between programs on one board: there is no memory to share across a network,
+and the calls say so there. The comm core sets the two sides up and then sees no frame.
+

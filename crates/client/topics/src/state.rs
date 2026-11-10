@@ -37,6 +37,12 @@ pub(crate) struct SubscriberState {
     mirror: Option<(Ring, Writer)>,
 }
 
+impl SubscriberState {
+    pub(crate) const fn handle(&self) -> Option<u32> {
+        self.handle
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct State {
     publishers: Vec<Option<PublisherState>>,

@@ -94,6 +94,17 @@ pub struct TopicDecl<'a> {
     pub max_payload: u32,
 }
 
+/// What a subscriber to a topic of shared buffers brings with it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Holding<'a> {
+    /// Its page of hold marks, which the publisher reads.
+    pub marks: Option<std::os::fd::BorrowedFd<'a>>,
+    /// How many buffers it asks to be allowed to hold. Zero for no limit.
+    pub max_held: u32,
+    /// For how long, in milliseconds. Zero for no limit.
+    pub max_hold_ms: u32,
+}
+
 /// Where a subscribed topic is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -175,13 +186,28 @@ impl Topics {
     /// If the comm core refuses. A topic nobody has declared is not an error: the subscriber
     /// waits for it.
     pub fn subscribe(&self, topic: &str, request: &[u8]) -> Result<Subscriber, TopicError> {
+        self.subscribe_holding(topic, request, &Holding::default())
+    }
+
+    /// As [`Topics::subscribe`], for a topic whose samples name shared buffers: with the
+    /// subscriber's page of hold marks and the limits it asks to be held to.
+    ///
+    /// # Errors
+    ///
+    /// As [`Topics::subscribe`].
+    pub fn subscribe_holding(
+        &self,
+        topic: &str,
+        request: &[u8],
+        holding: &Holding<'_>,
+    ) -> Result<Subscriber, TopicError> {
         let topic = TopicRef::parse(topic)
             .map_err(|error| TopicError::Invalid(format!("{topic:?}: {error}")))?;
         let subscribe = Subscribe {
             topic,
             request: Bytes(request),
-            max_held: 0,
-            max_hold_ms: 0,
+            max_held: holding.max_held,
+            max_hold_ms: holding.max_hold_ms,
         };
         let shares = self.client.session(|session| session.passes_descriptors());
         let seq = if shares {
@@ -198,8 +224,14 @@ impl Topics {
                     .transpose()?
                     .ok_or(TopicError::Invalid("no doorbell".into()))?
             };
-            self.client
-                .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd()])?
+            match holding.marks {
+                Some(marks) => self
+                    .client
+                    .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd(), marks])?,
+                None => self
+                    .client
+                    .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd()])?,
+            }
         } else {
             self.client.send(&subscribe)?
         };
@@ -289,6 +321,30 @@ impl Publisher {
         Ok(())
     }
 
+    /// The topic's number on this session.
+    #[must_use]
+    pub fn handle(&self) -> u32 {
+        self.state.borrow().publisher(self.index).handle
+    }
+
+    /// Takes the ring's writer out, for a publisher that writes the ring some other way than
+    /// [`Publisher::publish`]: a topic of shared buffers. `None` off the board, where there
+    /// is no ring to write. Afterwards [`Publisher::wake`] is how subscribers are woken.
+    pub fn take_writer(&mut self) -> Option<orion_ring::Writer> {
+        self.state
+            .borrow_mut()
+            .publisher_mut(self.index)
+            .writer
+            .take()
+    }
+
+    /// Rings every subscriber that is asleep. No system call for one that is awake.
+    pub fn wake(&mut self) {
+        for (_, bell) in &mut self.state.borrow_mut().publisher_mut(self.index).bells {
+            bell.ring();
+        }
+    }
+
     /// How many subscribers the topic has. A publisher with none may as well not sample.
     #[must_use]
     pub fn subscribers(&self) -> u32 {
@@ -343,6 +399,21 @@ impl Subscriber {
         {
             self.reader = Some(reader);
         }
+    }
+
+    /// The topic's number on this session, once the comm core has given it one.
+    #[must_use]
+    pub fn handle(&self) -> Option<u32> {
+        self.state.borrow().subscriber(self.index).handle()
+    }
+
+    /// Takes the ring's reader out, for a subscriber that reads the ring some other way than
+    /// [`Subscriber::next`]: a topic of shared buffers. `None` until the topic exists. A
+    /// reader that can be taken again later is a new ring: the topic was declared
+    /// differently.
+    pub fn take_reader(&mut self) -> Option<Reader> {
+        self.refresh();
+        self.reader.take()
     }
 
     /// Where the topic is.
@@ -413,10 +484,24 @@ impl Subscriber {
     ///
     /// If the connection broke.
     pub fn wait(&mut self, wait: Duration) -> Result<bool, TopicError> {
+        self.wait_until(wait, Self::pending)
+    }
+
+    /// As [`Subscriber::wait`], for a caller that reads the ring itself: sleeps until `ready`
+    /// says there is something, asking it again after the doorbell is armed.
+    ///
+    /// # Errors
+    ///
+    /// If the connection broke.
+    pub fn wait_until(
+        &mut self,
+        wait: Duration,
+        mut ready: impl FnMut(&mut Self) -> bool,
+    ) -> Result<bool, TopicError> {
         let deadline = Instant::now() + wait;
         loop {
             self.client.drain()?;
-            if self.pending() {
+            if ready(self) {
                 return Ok(true);
             }
             // Say "about to sleep", then look once more: a sample published in between is
@@ -424,7 +509,7 @@ impl Subscriber {
             if let Some(doorbell) = &mut self.state.borrow_mut().doorbell {
                 doorbell.arm();
             }
-            let found = self.pending();
+            let found = ready(self);
             let now = Instant::now();
             if !found && now < deadline {
                 let heartbeat = self.client.session(|session| session.welcomed().heartbeat);

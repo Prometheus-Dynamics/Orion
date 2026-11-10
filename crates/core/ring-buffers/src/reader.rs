@@ -157,6 +157,13 @@ impl<M: Mem, K: Marker> BufferReader<M, K> {
         }
     }
 
+    /// How many entries have been published that [`BufferReader::next`] has not looked at
+    /// yet. One memory read.
+    #[must_use]
+    pub fn pending(&self) -> u64 {
+        self.reader.pending() + u64::from(self.pending.is_some())
+    }
+
     /// The pool this reader has.
     #[must_use]
     pub fn pool(&self) -> &PoolView {
