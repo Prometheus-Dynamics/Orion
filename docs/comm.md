@@ -320,3 +320,30 @@ session ends, the next source in rank is used.
 `offset_ms`, `delay_ms`, `stratum`, `last_action`, `error`. `time.synced_file`
 (`/run/orion/time-synced`) exists while the board disciplines the clock and it is synchronized.
 
+## Links
+
+A link is one more carrier of the one wire (`orion-link-serial`). Frames are COBS-encoded and
+end in `0x00`, so a receiver finds the next frame after any noise. What is on the other end says
+hello like any client, with the role `device`, and the server knows it as the device named after
+the link.
+
+A serial link is written `name=path@baud` (`uart0=/dev/ttyAMA0@115200`): 8 data bits, no parity,
+one stop bit, no flow control.
+
+**A link never gives up.** A port that can't be opened, or that fails, is opened again 250 ms
+later, for as long as the program runs. A link is a way into the machine, and ways in are not
+backed off. Its state (running, or retrying and when) is reported as it changes.
+
+**A silent link costs nothing.** The server gets a connection only when a whole valid frame has
+arrived. Until then one task waits for the port to become readable: no session, no timer, no
+allocation. A device that stops talking loses its session to the heartbeat deadline, not the
+port.
+
+**A link that crosses a network** (feature `sealed`). A person's computer with the device on one
+of its ports can carry the port's bytes to the board over TCP. The handshake is signed by the
+board's key and the operator's; the operator must be enrolled and granted the action
+`link.attach`. After it, every byte is in a sealed record (ChaCha20-Poly1305, a key per
+direction, counter nonces, key rotation every 2^20 records or 10 minutes), so nobody between the
+two can read the device's traffic or put a frame into it. The board takes one such device at a
+time; handshakes run side by side, so a caller that says nothing holds nobody up.
+

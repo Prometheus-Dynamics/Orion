@@ -1,0 +1,38 @@
+[package]
+name = "orion-link-serial"
+description = "Links over byte streams: a serial port carrying the one wire, COBS framed, reopened forever."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# Links that cross a network: the same byte stream inside the sealed channel.
+sealed = ["dep:chacha20poly1305", "dep:hmac", "dep:orion-keys", "dep:sha2", "dep:x25519-dalek", "dep:zeroize", "tokio/io-util"]
+
+[dependencies]
+chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["alloc"], optional = true }
+hmac = { version = "0.13.0", optional = true }
+orion-keys = { path = "../keys", optional = true }
+sha2 = { version = "0.11.0", default-features = false, optional = true }
+x25519-dalek = { version = "3.0.0", default-features = false, optional = true }
+zeroize = { version = "1", optional = true }
+orion-server = { path = "../server" }
+orion-supervise = { path = "../../core/supervise" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire", features = ["std"] }
+rustix = { version = "1", default-features = false, features = ["std", "termios", "fs"] }
+tokio = { workspace = true, features = ["net", "time", "sync", "rt"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-measure = { path = "../../core/measure", features = ["alloc-counter", "sched"] }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std", "pty"] }
+tokio = { workspace = true, features = ["macros", "test-util"] }
+
+[lints]
+workspace = true
