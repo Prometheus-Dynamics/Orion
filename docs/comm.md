@@ -275,3 +275,48 @@ nothing does; that is how a link's backoff is visible.
 These are topics the comm core publishes itself. The broker keeps them when nobody subscribes,
 and refuses a client that declares over one or opens one to write.
 
+## Time sync
+
+The comm core can keep the board's clock right by itself (`orion-time`), so an image needs no NTP
+daemon.
+
+**Sources**, in rank order, in `time.servers`:
+
+| Written | Is |
+| --- | --- |
+| `host[:port]` | an NTP server (SNTP, RFC 4330) |
+| `peer://host[:port]` | another Orion node serving its clock |
+| `tcp://host:port` | the same, asked over TCP, so time crosses TCP-only paths |
+| `operator` | the clock of a connected operator who offers it |
+
+**Modes**, in `time.sync`: `report` measures the offset and publishes it, never touching the
+clock, so it is safe next to another daemon. `discipline` also adjusts the clock; it needs
+`CAP_SYS_TIME`, and only reports while `systemd-timesyncd` runs.
+
+**Rules.** Offsets up to 0.4 s are slewed through the kernel, which also marks the clock
+synchronized. A larger offset is stepped, but only once two samples agree within 0.1 s. After the
+first synchronization the clock is never stepped backwards. Answers that took over 1 s are not
+used. Polling starts at 2 s, then runs from `time.poll_min_ms` (64 s) doubling to
+`time.poll_max_ms` (1024 s) while the offset stays under 50 ms. The last synchronized time is
+saved in the state directory; at start a clock behind it is stepped forward to it.
+
+**Wrong sources** are passed over for the next in rank: any source whose time is before this
+build existed, and a fleet peer over a day behind or over 400 days past the last synchronized
+time.
+
+**Serving.** `time.serve = addr:port` serves the clock as SNTP over UDP and TCP. The answer says
+how good the clock is: its source's stratum plus one when this board synchronized it, stratum 3
+when another daemon did, stratum 10 with `time.serve_authority`, and "unsynchronized" otherwise,
+which clients ignore. Over a session anyone may send `TimeRequest` and gets the board's clock
+back in `TimeReply`.
+
+**An operator's clock.** The operator sends `TimeOffer` with its stratum. Offering the time is
+the same power as setting it, so this needs the grant `clock.set`. The board answers `TimeTurn`
+and from then on sends `TimeRequest` on that session when it polls; the operator answers
+`TimeReply`. The board measures the round trip on its own monotonic clock. When the operator's
+session ends, the next source in rank is used.
+
+**State** is the topic `orion.time`, published when it changes: `mode`, `synced`, `source`,
+`offset_ms`, `delay_ms`, `stratum`, `last_action`, `error`. `time.synced_file`
+(`/run/orion/time-synced`) exists while the board disciplines the clock and it is synchronized.
+

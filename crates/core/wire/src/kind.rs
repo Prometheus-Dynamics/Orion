@@ -122,6 +122,8 @@ kinds! {
     Time {
         TIME_REQUEST = 0x70,
         TIME_REPLY = 0x71,
+        TIME_OFFER = 0x72,
+        TIME_TURN = 0x73,
     }
 }
 

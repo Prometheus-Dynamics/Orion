@@ -91,6 +91,8 @@ decoders! {
     OPERATORS => peers::Operators,
     TIME_REQUEST => peers::TimeRequest,
     TIME_REPLY => peers::TimeReply,
+    TIME_OFFER => peers::TimeOffer,
+    TIME_TURN => peers::TimeTurn,
 }
 
 /// List elements decode separately from their bodies, so they get their own turn.

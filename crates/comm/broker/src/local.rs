@@ -4,9 +4,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use orion_ring::{FieldId, Flags, FrameTime, Writer};
+use orion_msg_topics::{Declare, Field, FieldType};
+use orion_ring::{FieldId, Flags, FrameTime, Spec, Writer};
 use orion_ring_doorbell::Bell;
 use orion_server::Error;
+use orion_types::TopicName;
+use orion_wire::List;
+use orion_wire::body::encode_fields;
 
 use crate::topics::{Topic, TopicId, Topics};
 
@@ -90,6 +94,50 @@ impl LocalPublisher {
             id,
             writing: None,
         }
+    }
+
+    /// Declares a topic the comm core publishes itself and returns its publisher. `fields` are
+    /// name, type and unit; every field keeps `history` values of up to `max_payload` bytes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Topics::declare_internal`], and [`Error::Malformed`] for a name that is not one.
+    pub fn declare(
+        topics: &Rc<RefCell<Topics>>,
+        name: &str,
+        fields: &[(&str, FieldType, &str)],
+        history: u32,
+        max_payload: u32,
+    ) -> Result<Self, Error> {
+        let name: TopicName = name.parse()?;
+        let fields: Vec<Field<'_>> = fields
+            .iter()
+            .map(|(name, ty, unit)| Field {
+                name,
+                ty: *ty,
+                unit,
+                type_name: "",
+            })
+            .collect();
+        let declare = Declare {
+            topic: name.clone(),
+            fields: List::new(&fields),
+            history,
+            expiry_ms: 0,
+            max_payload,
+        };
+        let mut bytes = vec![0_u8; 64 + fields.len() * 96];
+        let len = encode_fields(&declare, &mut bytes)?;
+        let spec = Spec {
+            fields: fields.len() as u32,
+            history,
+            max_payload,
+            expiry_ms: 0,
+        };
+        let id = topics
+            .borrow_mut()
+            .declare_internal(&name, &bytes[..len], &spec)?;
+        Ok(Self::new(topics.clone(), id))
     }
 
     /// The topic.

@@ -27,13 +27,10 @@ use std::rc::Rc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use orion_broker::{Broker, LocalPublisher, Topic, TopicId, TopicWatch, Topics};
-use orion_msg_topics::{Declare, Field, FieldType};
-use orion_ring::{FieldId, FrameTime, Spec};
+use orion_msg_topics::FieldType;
+use orion_ring::{FieldId, FrameTime};
 use orion_server::{Comm, Error, SessionId, Sessions};
 use orion_supervise::{State, Status};
-use orion_types::TopicName;
-use orion_wire::List;
-use orion_wire::body::encode_fields;
 use tokio::sync::Notify;
 
 pub use host::{HostSample, HostSource, ProcSource};
@@ -79,35 +76,7 @@ fn declare(
     name: &str,
     fields: &[(&str, FieldType, &str)],
 ) -> Result<LocalPublisher, Error> {
-    let name: TopicName = name.parse()?;
-    let fields: Vec<Field<'_>> = fields
-        .iter()
-        .map(|(name, ty, unit)| Field {
-            name,
-            ty: *ty,
-            unit,
-            type_name: "",
-        })
-        .collect();
-    let declare = Declare {
-        topic: name.clone(),
-        fields: List::new(&fields),
-        history: 2,
-        expiry_ms: 0,
-        max_payload: 8,
-    };
-    let mut bytes = vec![0_u8; 64 + fields.len() * 64];
-    let len = encode_fields(&declare, &mut bytes)?;
-    let spec = Spec {
-        fields: fields.len() as u32,
-        history: 2,
-        max_payload: 8,
-        expiry_ms: 0,
-    };
-    let id = topics
-        .borrow_mut()
-        .declare_internal(&name, &bytes[..len], &spec)?;
-    Ok(LocalPublisher::new(topics.clone(), id))
+    LocalPublisher::declare(topics, name, fields, 2, 8)
 }
 
 /// A topic of eight-byte values that publishes only what changed.

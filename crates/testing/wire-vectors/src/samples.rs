@@ -8,7 +8,7 @@ use orion_msg_files::{FileBegin, FileChunk, FileCommit, FilePull, FileState, Fil
 use orion_msg_peers::{
     EnrollChallenge, EnrollConfirm, EnrollHello, EnrollRole, GrantedAction, OperatorEnroll,
     OperatorEntry, OperatorList, OperatorState, OperatorWelcome, Operators, PeerObserved,
-    PeerRevoke, PeerSync, TimeReply, TimeRequest,
+    PeerRevoke, PeerSync, TimeOffer, TimeReply, TimeRequest, TimeTurn,
 };
 use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, RecordEntry, Watch};
 use orion_msg_session::{
@@ -649,6 +649,14 @@ fn peers(out: &mut Vec<Sample>) {
             sent_ns: 1,
             received_ns: 2,
             replied_ns: 3
+        }
+    );
+    sample!(out, TimeOffer { stratum: 3 });
+    sample!(
+        out,
+        TimeTurn {
+            request_seq: 7,
+            poll_ms: 64_000
         }
     );
 }

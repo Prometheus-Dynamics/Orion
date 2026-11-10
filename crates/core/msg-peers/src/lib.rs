@@ -195,3 +195,21 @@ body! {
         pub replied_ns: u64,
     }
 }
+
+body! {
+    /// Offers the sender's clock as a time source. Whoever may send this may set the clock.
+    pub struct TimeOffer = kind::TIME_OFFER {
+        /// How good the sender's clock is: its NTP stratum, 1 to 15.
+        pub stratum: u8,
+    }
+}
+
+body! {
+    /// Takes a [`TimeOffer`]: the receiver will ask with [`TimeRequest`] when it wants the time.
+    pub struct TimeTurn = kind::TIME_TURN {
+        /// The `seq` of the offer.
+        pub request_seq: u16,
+        /// How often it expects to ask, in milliseconds.
+        pub poll_ms: u32,
+    }
+}
