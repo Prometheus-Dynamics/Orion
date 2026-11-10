@@ -136,7 +136,9 @@ impl WriteMap {
         Mapping::new(fd, true).map(Self)
     }
 
-    pub(crate) fn fd(&self) -> BorrowedFd<'_> {
+    /// The descriptor behind the mapping.
+    #[must_use]
+    pub fn fd(&self) -> BorrowedFd<'_> {
         self.0.fd.as_fd()
     }
 }
@@ -160,7 +162,12 @@ impl MemMut for WriteMap {
 }
 
 /// A zeroed memfd of at least `bytes` bytes, rounded up to pages and sealed against resizing.
-pub(crate) fn sealed_memfd(bytes: usize) -> Result<OwnedFd, RingError> {
+/// What a ring lives in, and the other shared pages built on the same words.
+///
+/// # Errors
+///
+/// [`RingError::Io`] if the memory can't be made.
+pub fn sealed_memfd(bytes: usize) -> Result<OwnedFd, RingError> {
     // SAFETY: the name is a NUL-terminated literal and the flags are valid.
     let raw = unsafe {
         libc::memfd_create(
@@ -192,6 +199,10 @@ pub(crate) fn sealed_memfd(bytes: usize) -> Result<OwnedFd, RingError> {
 }
 
 /// A second descriptor for the same memory that can only be read and only be mapped read-only.
-pub(crate) fn reopen_read_only(fd: BorrowedFd<'_>) -> io::Result<OwnedFd> {
+///
+/// # Errors
+///
+/// If the descriptor can't be reopened, which needs `/proc`.
+pub fn read_only(fd: BorrowedFd<'_>) -> io::Result<OwnedFd> {
     File::open(format!("/proc/self/fd/{}", fd.as_raw_fd())).map(OwnedFd::from)
 }

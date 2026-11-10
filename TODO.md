@@ -31,7 +31,7 @@ The shared-memory ring that values and frames travel through. The riskiest code 
 
 - [x] [B1](docs/prs/B1.md) Ring format, writer and reader (wave 3; needs A3, A15)
 - [x] [B2](docs/prs/B2.md) Ring concurrency proof (wave 4; needs B1)
-- [ ] [B3](docs/prs/B3.md) Doorbells (wave 4; needs B1, A16)
+- [x] [B3](docs/prs/B3.md) Doorbells (wave 4; needs B1, A16)
 - [ ] [B4](docs/prs/B4.md) Latest values and expiry (wave 4; needs B1)
 - [ ] [B5](docs/prs/B5.md) Lookup by frame time (wave 5; needs B1, B3)
 - [x] [B6](docs/prs/B6.md) Typed and structured values (wave 6; needs A7)

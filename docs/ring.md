@@ -146,10 +146,39 @@ There must be one writer per ring. The owner hands the write end to one publishe
 attaching to an existing ring (a publisher that restarted) carries on from the stored head; a slot
 the old writer died in is busy until its field's lane comes round to it.
 
+## Doorbells
+
+`crates/core/ring-doorbell`. A subscriber has one doorbell for everything it subscribes to: an
+eventfd it polls, and a sealed page that only it writes. A publisher holds the eventfd and the page
+read-only.
+
+Word 0 of the page is `sleeps << 1 | asleep`.
+
+- Subscriber, before sleeping: store asleep, sequentially consistent fence, look for samples once
+  more, and sleep only if there are none.
+- Publisher, after publishing: sequentially consistent fence, load the word. Asleep, and not the
+  sleep it last rang for: one `write` to the eventfd.
+
+One of the two fences comes first. Either the subscriber's second look sees the sample, or the
+publisher sees it asleep. A subscriber that is awake costs the publisher a fence and a memory read,
+no system call. One sleep gets one ring however many samples follow. Ringing a full or orphaned
+eventfd does nothing and never blocks.
+
+Checked with `loom` in the crate's tests, with two broken variants that must be caught: a
+subscriber that does not look again, and a publisher that does not fence.
+
+## Latest values
+
+`crates/core/ring-latest`. The newest sample of a field is the slot before its lane head, so
+reading it does not depend on how many fields there are. A value is expired when the reader's
+clock is more than the declaration's expiry past the sample's time; it is still returned, marked
+expired.
+
 ## Unsafe code
 
-All of it is in `src/map.rs`: `memfd_create`, the seals, `mmap`, `munmap`, and turning a checked
-word index into an `&AtomicU64`. The rest of the crate denies `unsafe`. The writer and reader are
+In the ring, all of it is in `src/map.rs`: `memfd_create`, the seals, `mmap`, `munmap`, and
+turning a checked word index into an `&AtomicU64`. The rest of the crate denies `unsafe`. The
+doorbell's is in `src/eventfd.rs`: `eventfd`, `read`, `write` and `poll` on it. The writer and reader are
 safe code over the `Mem` trait, an array of atomic words, which is what lets the same code run on
 heap memory in tests and under the model checker.
 

@@ -57,7 +57,7 @@ impl Ring {
     ///
     /// If the descriptor can't be reopened, which needs `/proc`.
     pub fn read_fd(&self) -> Result<OwnedFd, RingError> {
-        Ok(map::reopen_read_only(self.map.fd())?)
+        Ok(map::read_only(self.map.fd())?)
     }
 
     /// A writer in this process.

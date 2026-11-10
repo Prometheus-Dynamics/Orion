@@ -32,7 +32,7 @@ use core::fmt;
 use std::io;
 
 pub use layout::{Geometry, MAX_FIELDS, MAX_HISTORY, MAX_PAYLOAD, Spec, format};
-pub use map::{ReadMap, WriteMap};
+pub use map::{ReadMap, WriteMap, read_only, sealed_memfd};
 pub use mem::{Heap, Mem, MemMut};
 pub use orion_types::FrameTime;
 pub use reader::{Next, Reader, Sample};
