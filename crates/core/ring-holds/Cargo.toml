@@ -1,0 +1,31 @@
+[package]
+name = "orion-ring-holds"
+description = "Hold marks: what keeps a frame's buffers from being reused while a reader looks, and the limits on it."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-ring = { path = "../ring" }
+orion-ring-buffers = { path = "../ring-buffers" }
+
+[dev-dependencies]
+libc.workspace = true
+orion-fdpass = { path = "../fdpass" }
+loom = "0.7.3"
+orion-measure = { path = "../measure", features = ["alloc-counter"] }
+
+# The library has no `unsafe` and forbids it. One test passes descriptors to a child process.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_attributes = "deny"
+
+[lints.clippy]
+await_holding_lock = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
