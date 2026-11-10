@@ -336,8 +336,12 @@ impl Reader {
 pub fn at_or_before(reader: &Reader, field: FieldId, time: FrameTime) -> Lookup<'_>;   // Hit, Lagged, Missing
 
 // crates/core/ring-buffers and ring-holds
-impl BufferWriter { pub fn publish(&mut self, buffers: &[BufferIndex], time: FrameTime, meta: &[u8]) -> Result<(), Dropped>; }
-impl BufferReader { pub fn next(&mut self) -> Option<Held<'_>>; }   // dropping Held clears the mark
+impl BufferWriter {
+    pub fn take(&mut self, holders: &impl Holders) -> Result<BufferIndex, Dropped>;   // a free buffer, or drop the frame
+    pub fn publish(&mut self, buffers: &[BufferIndex], time: FrameTime, meta: &[u8]) -> Result<u64, BufferError>;
+}
+impl BufferReader { pub fn next(&mut self) -> NextFrame<'_>; }   // Frame { time, meta, held }; dropping Held clears the mark
+impl HoldTable { pub fn enforce(&mut self, now_ns: u64, pool_page: &impl MemMut) -> u32; }   // cuts off readers over a limit
 
 // crates/client/orion. The same calls on any address.
 impl Orion {

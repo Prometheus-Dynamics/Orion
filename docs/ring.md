@@ -174,11 +174,87 @@ reading it does not depend on how many fields there are. A value is expired when
 clock is more than the declaration's expiry past the sample's time; it is still returned, marked
 expired.
 
+## Buffer topics
+
+`crates/core/ring-buffers`. A frame is too large for a ring, so a buffer topic's entries say which
+buffers hold the frame, and the buffers are shared memory handed over once.
+
+**The pool.** The publisher's buffers are slices of a few descriptors: a camera's dma-bufs, or a
+memfd. A subscriber gets those descriptors, the list of slices and the pool page, once, and maps
+them read-only. It checks every slice against its descriptor and refuses a regular or
+shared-memory file that is not sealed against shrinking.
+
+**The pool page** is a sealed page the publisher writes and readers map read-only.
+
+| Word | Holds |
+| --- | --- |
+| 0 | Magic: `ORIONPL1` |
+| 1 | Generation (low 32 bits), buffers (high 32) |
+| 2 to 7 | Reserved, zero |
+| 8 | Tickets: one word per buffer, `uses << 1 | taken back` |
+| 8 + buffers | Cut-off: one word per reader slot (64), nonzero once that reader is cut off |
+
+**An entry** is the payload of the topic's field:
+
+| Bytes | Holds |
+| --- | --- |
+| 0 to 3 | The pool's generation |
+| 4 | How many buffers, 1 to 8 |
+| 5 to 7 | Reserved, zero |
+| 8 on | For each buffer: its index (4 bytes), its ticket when published (4 bytes) |
+| then | Metadata, opaque, to the end |
+
+One entry can name several buffers, so an image and its pyramid levels travel and come back
+together. The generation goes up when the publisher replaces its pool (a camera changing mode); a
+reader that sees a newer generation is told to fetch the new pool, and frames of the old pool it
+still holds stay mapped until it lets go.
+
+**Tickets** are what make a reused buffer safe to name. A buffer's ticket is even while a frame is
+published in it and odd from the moment the publisher starts taking it back. A reader may hold a
+frame only while each buffer's ticket is exactly the one in the entry.
+
+## Hold marks
+
+`crates/core/ring-holds`. A reader's marks are a sealed page only that reader writes: word `b` is
+nonzero while it holds buffer `b`. The publisher maps each reader's page read-only. A buffer is
+free when no reader marks it.
+
+- Reader: store the mark, sequentially consistent fence, load the ticket. Still the entry's: the
+  frame is held. Changed: take the mark off; the frame is gone.
+- Publisher, taking a buffer back: store the odd ticket, sequentially consistent fence, load every
+  reader's mark. None: the buffer is free. Some: leave it, and use another buffer or drop the
+  frame.
+
+One fence comes first, so either the publisher sees the mark or the reader sees the ticket. A held
+buffer is never reused; checked with `loom`, with a reader that checks before marking as the
+variant that must be caught.
+
+The publisher never waits. It takes back the buffer published longest ago that nobody holds, never
+the newest frame, and when there is none it drops the frame.
+
+Limits, per reader, applied by the publisher from what it sees:
+
+- **Buffers held.** An honest reader stops taking frames at its limit. One that marks more is cut
+  off.
+- **Hold time**, on the publisher's clock from when it first saw the mark on that use of the
+  buffer. A reader past it is stuck, and is cut off.
+
+A reader that is cut off no longer counts: its marks are ignored and its buffers come back. It is
+told through its cut-off word in the pool page. A reader that dies leaves its marks in its page;
+they go when the publisher drops that page, on the comm core's word that the connection closed, and
+the hold time covers the gap.
+
 ## Unsafe code
 
 In the ring, all of it is in `src/map.rs`: `memfd_create`, the seals, `mmap`, `munmap`, and
 turning a checked word index into an `&AtomicU64`. The rest of the crate denies `unsafe`. The
-doorbell's is in `src/eventfd.rs`: `eventfd`, `read`, `write` and `poll` on it. The writer and reader are
+doorbell's is in `src/eventfd.rs`: `eventfd`, `read`, `write` and `poll` on it. The buffer
+topics' is in `ring-buffers/src/map.rs`: mapping a pool's descriptors and making slices of the
+mapping. Hold marks have none.
+
+A frame's bytes are handed out as a plain slice of memory the publisher owns. While the frame is
+held an honest publisher does not write there. A publisher that does gives its own subscribers a
+torn picture, and nothing else: the memory stays mapped and in bounds. The writer and reader are
 safe code over the `Mem` trait, an array of atomic words, which is what lets the same code run on
 heap memory in tests and under the model checker.
 

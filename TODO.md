@@ -35,7 +35,7 @@ The shared-memory ring that values and frames travel through. The riskiest code 
 - [x] [B4](docs/prs/B4.md) Latest values and expiry (wave 4; needs B1)
 - [ ] [B5](docs/prs/B5.md) Lookup by frame time (wave 5; needs B1, B3)
 - [x] [B6](docs/prs/B6.md) Typed and structured values (wave 6; needs A7)
-- [ ] [B7](docs/prs/B7.md) Buffer topics: pool and entries (wave 4; needs B1, A16)
+- [x] [B7](docs/prs/B7.md) Buffer topics: pool and entries (wave 4; needs B1, A16)
 - [ ] [B8](docs/prs/B8.md) Hold marks and limits (wave 5; needs B7, B3)
 - [ ] [B9](docs/prs/B9.md) Ring costs on a CM5 (wave 6; needs B3, B5, B8, A15; board run)
 
