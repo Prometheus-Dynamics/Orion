@@ -120,7 +120,9 @@ impl FdSet {
         self.fds.get_mut(index)?.take()
     }
 
-    fn push(&mut self, fd: OwnedFd) -> bool {
+    /// Adds a descriptor, for a carrier that receives them some other way than [`recv`].
+    /// `false`, with `fd` closed, if the set is full.
+    pub fn push(&mut self, fd: OwnedFd) -> bool {
         match self.fds.get_mut(self.len) {
             Some(slot) => {
                 *slot = Some(fd);

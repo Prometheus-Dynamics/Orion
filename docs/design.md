@@ -318,10 +318,12 @@ impl Check {
 }
 
 // crates/comm/server. Handlers take Checked requests, so none can be reached around the check.
-pub trait Carrier { /* accept sessions; read and write frames; pass descriptors if it can */ }
+pub trait Carrier { /* accept connections that say who is there, move whole frames, pass descriptors if they can */ }
 pub trait Service {
-    fn kinds(&self) -> KindRange;
-    async fn handle(&self, request: Checked<Incoming<'_>>, session: &mut Session) -> Result<(), Refused>;
+    fn kinds(&self) -> &'static [u8];
+    fn asks<'a>(&self, frame: &FrameView<'a>) -> Result<(What<'a>, Policy), Error>;   // all the check is told
+    fn handle(&mut self, request: Checked<Incoming<'_>>, cx: &mut Cx<'_>) -> Result<(), Error>;   // returns at once
+    fn closed(&mut self, session: SessionId, sessions: &mut Sessions);
 }
 
 // crates/core/ring. One writer, many readers. Neither call makes a system call.

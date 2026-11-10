@@ -43,7 +43,7 @@ The shared-memory ring that values and frames travel through. The riskiest code 
 
 The always-up program: connections, the broker, hello, discovery, time and links.
 
-- [ ] [C1](docs/prs/C1.md) Comm server: sessions and dispatch (wave 5; needs A5, A13, A14, A17)
+- [x] [C1](docs/prs/C1.md) Comm server: sessions and dispatch (wave 5; needs A5, A13, A14, A17)
 - [ ] [C2](docs/prs/C2.md) Same-board carrier (wave 6; needs C1, A16)
 - [ ] [C3](docs/prs/C3.md) Topic broker (wave 6; needs C1, A7, B3, B4)
 - [ ] [C4](docs/prs/C4.md) Publishing on behalf, and demand (wave 7; needs C3)
