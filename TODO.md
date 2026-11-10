@@ -67,7 +67,7 @@ One client with the same calls on any address, plus the C surface and orionctl.
 - [x] [D2](docs/prs/D2.md) Client: topics (wave 8; needs D1, B3, B4, B5, B6, C3)
 - [x] [D3](docs/prs/D3.md) Client: buffer topics (wave 9; needs D2, B8, C5)
 - [x] [D4](docs/prs/D4.md) Client: records (wave 8; needs D1, A6)
-- [ ] [D5](docs/prs/D5.md) Client: actions (wave 8; needs D1, A8)
+- [x] [D5](docs/prs/D5.md) Client: actions (wave 8; needs D1, A8)
 - [ ] [D6](docs/prs/D6.md) Client: files (wave 8; needs D1, A10)
 - [ ] [D7](docs/prs/D7.md) Client: executor role (wave 8; needs D1, A9)
 - [ ] [D8](docs/prs/D8.md) Client: provider role (wave 9; needs D4, D5)

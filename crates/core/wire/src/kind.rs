@@ -83,6 +83,7 @@ kinds! {
         ACTION_RESULT = 0x34,
         ACTION_CANCEL = 0x35,
         ACTION_ATTACH = 0x36,
+        ACTION_REGISTERED = 0x37,
     }
     Topics {
         TOPIC_DECLARE = 0x40,

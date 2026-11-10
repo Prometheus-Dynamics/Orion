@@ -107,3 +107,26 @@ holds 1,024 changes, then stops taking them, and once the program has read what 
 watch asks for everything newer than the last change it was given. No record is missed; one
 that changed several times in between is seen at its latest.
 
+## Actions
+
+`orion-actions`. An action does one thing once. Orion ships almost none: the list is open, and
+any program that connects adds its own.
+
+| Call | What it does |
+| --- | --- |
+| `actions.run(call)` | Starts an action and returns at once with a `Run` |
+| `run.poll()`, `run.wait(for)` | News of the run: how it is doing (the newest only), or how it ended |
+| `run.finish(for)` | Waits for how it ended |
+| `run.cancel()` | Asks for it to stop. How it ended still comes |
+| `actions.attach(number)` | Comes back to a run that was started detached |
+| `actions.register(decl, policy)` | Adds an action. The policy is required |
+| `registration.poll()`, `.wait(for)` | The next run handed to this program, or a request to stop one |
+| `registration.progress(..)`, `.finish(..)` | Says how a run is doing, and how it ended |
+
+Registering an action needs a policy, and that policy is what the one check decides every run
+by. A run the check refuses never reaches the program that owns the action: the caller is told
+`Denied` and the owner hears nothing.
+
+A program that is not taking its runs does not have them pile up: 64 wait, and the next is
+answered as rejected, busy, at once.
+

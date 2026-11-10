@@ -124,3 +124,11 @@ body! {
         pub call: u64,
     }
 }
+
+body! {
+    /// Answers a [`Register`]: the action is on the list, and its runs will come as [`Claim`].
+    pub struct Registered = kind::ACTION_REGISTERED {
+        /// The `seq` of the [`Register`].
+        pub request_seq: u16,
+    }
+}

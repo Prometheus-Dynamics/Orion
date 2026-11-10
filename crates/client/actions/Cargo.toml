@@ -1,0 +1,23 @@
+[package]
+name = "orion-actions"
+description = "The client's actions: run one, follow it, cancel it, come back to it; and add one of your own with its policy."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-check = { path = "../../core/check" }
+orion-connect = { path = "../connect" }
+orion-msg-actions = { path = "../../core/msg-actions" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+orion-server = { path = "../../comm/server" }
+orion-unix = { path = "../../comm/unix" }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+[lints]
+workspace = true
