@@ -1,0 +1,26 @@
+[package]
+name = "orion-files"
+description = "The client's files: push one in chunks that resume where they stopped, or ask the board to fetch it."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-connect = { path = "../connect" }
+orion-msg-files = { path = "../../core/msg-files" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+sha2 = { version = "0.11.0", default-features = false }
+
+[dev-dependencies]
+orion-keys = { path = "../../comm/keys" }
+orion-server = { path = "../../comm/server" }
+orion-tcp = { path = "../../comm/tcp" }
+orion-unix = { path = "../../comm/unix" }
+sha2 = { version = "0.11.0", default-features = false }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+[lints]
+workspace = true

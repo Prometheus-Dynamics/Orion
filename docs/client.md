@@ -130,3 +130,18 @@ by. A run the check refuses never reaches the program that owns the action: the 
 A program that is not taking its runs does not have them pile up: 64 wait, and the next is
 answered as rejected, busy, at once.
 
+## Files
+
+`orion-files`. A file goes to a board in chunks, is checked against its SHA-256 when all of it
+is there, and only then is put where it belongs. The wire names a destination, not a path.
+
+`files.push(destination, source, progress)` sends it and returns how it ended: committed, or
+rejected with why. A push resumes: the transfer's number comes from the file's digest and its
+destination, so the same file to the same place is the same transfer, and beginning it again is
+answered with how many bytes the board already has. After a broken connection, reconnect and
+push again; nothing the board has is sent twice. At most eight chunks of 32 KiB are on their
+way at once, so a push neither fills the connection nor waits for an answer to each chunk.
+
+`files.pull(..)` asks the board to fetch the file itself from a URL, check it and put it in
+place. Only the request and the board's reports cross the connection.
+
