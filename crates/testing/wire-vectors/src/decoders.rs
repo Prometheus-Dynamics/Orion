@@ -67,6 +67,7 @@ decoders! {
     TOPIC_BUFFER_OFFER => topics::BufferOffer,
     TOPIC_BELL => topics::Bell,
     TOPIC_STATE => topics::TopicState,
+    TOPIC_HOLDS => topics::Holds,
     WORKLOAD_PUT => workloads::WorkloadPut,
     WORKLOAD_REMOVE => workloads::WorkloadRemove,
     WORKLOAD_STATUS => workloads::WorkloadStatus,

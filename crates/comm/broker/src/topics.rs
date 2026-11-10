@@ -4,7 +4,7 @@ use std::os::fd::OwnedFd;
 
 use orion_config::{ConfigError, Source};
 use orion_ring::{Ring, Spec};
-use orion_server::{Admits, Policy, SessionId};
+use orion_server::{Admits, Policy, SessionId, Sessions};
 use orion_types::{Error, NodeName, TopicName};
 
 /// A topic's number: the handle its publisher and subscribers know it by.
@@ -72,6 +72,8 @@ pub struct Subscription {
     /// Its doorbell: the eventfd and the page, read-only. Kept so a publisher that comes back
     /// can be given it again.
     pub bell: Option<(OwnedFd, OwnedFd)>,
+    /// For a frame topic: its page of hold marks, read-only. Kept for the same reason.
+    pub marks: Option<OwnedFd>,
     /// What it asked of the publisher, passed on unread.
     pub request: Vec<u8>,
     /// For a frame topic: how many buffers it may hold. Zero for no limit.
@@ -116,27 +118,62 @@ impl Topic {
     }
 }
 
+/// Something that is told when a topic changes hands, for what builds on the broker and has
+/// its own things to hand over: a frame topic's buffers.
+pub trait TopicWatch {
+    /// `topic` has a publisher and a ring: it was declared, declared again, or its publisher
+    /// came back. Every subscriber it has was just sent the ring or told the topic is live.
+    fn declared(&mut self, topic: &Topic, sessions: &mut Sessions);
+    /// `session` subscribed to `topic` and was just sent its ring.
+    fn subscribed(&mut self, topic: &Topic, session: SessionId, sessions: &mut Sessions);
+    /// `session` no longer subscribes to `topic`.
+    fn left(&mut self, topic: &Topic, session: SessionId, sessions: &mut Sessions);
+}
+
 /// Every topic on the board. The broker's services share one of these.
-#[derive(Debug)]
 pub struct Topics {
     pub(crate) node: NodeName,
     pub(crate) config: BrokerConfig,
     slots: Vec<Option<Topic>>,
     generations: Vec<u16>,
     bytes: usize,
+    pub(crate) watchers: Vec<Box<dyn TopicWatch>>,
+}
+
+impl std::fmt::Debug for Topics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Topics({} topics, {} bytes)", self.len(), self.bytes)
+    }
 }
 
 impl Topics {
     /// An empty table for the board `node`.
     #[must_use]
-    pub const fn new(node: NodeName, config: BrokerConfig) -> Self {
+    pub fn new(node: NodeName, config: BrokerConfig) -> Self {
         Self {
             node,
             config,
             slots: Vec::new(),
             generations: Vec::new(),
             bytes: 0,
+            watchers: Vec::new(),
         }
+    }
+
+    /// Adds something to be told when topics change hands.
+    pub fn watch(&mut self, watcher: impl TopicWatch + 'static) {
+        self.watchers.push(Box::new(watcher));
+    }
+
+    /// Tells every watcher about `id`.
+    pub(crate) fn tell(&mut self, id: TopicId, mut tell: impl FnMut(&mut dyn TopicWatch, &Topic)) {
+        let mut watchers = std::mem::take(&mut self.watchers);
+        if let Some(topic) = self.get(id) {
+            for watcher in &mut watchers {
+                tell(&mut **watcher, topic);
+            }
+        }
+        self.watchers = watchers;
     }
 
     /// How many topics there are, declared or waited for.

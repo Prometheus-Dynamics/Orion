@@ -87,7 +87,8 @@ impl Service for Broker {
                     (Some(eventfd), Some(page)) => Some((eventfd, page)),
                     _ => None,
                 };
-                self::subscribe(topics, cx, &subscribe, bell)
+                let marks = incoming.take_fd(2);
+                self::subscribe(topics, cx, &subscribe, bell, marks)
             }
             kind::TOPIC_UNSUBSCRIBE => {
                 let unsubscribe: Unsubscribe = incoming.body()?;
@@ -258,6 +259,7 @@ fn declare(
         }
         tell_publisher(sessions, from, shared, id, count, subscription);
     }
+    topics.tell(id, |watcher, topic| watcher.declared(topic, sessions));
     Ok(())
 }
 
@@ -266,6 +268,7 @@ fn subscribe(
     cx: &mut Cx<'_>,
     subscribe: &Subscribe<'_>,
     bell: Option<(OwnedFd, OwnedFd)>,
+    marks: Option<OwnedFd>,
 ) -> Result<(), Error> {
     if subscribe
         .topic
@@ -287,6 +290,7 @@ fn subscribe(
         session: from,
         request_seq: cx.request_seq(),
         bell,
+        marks,
         request: subscribe.request.to_vec(),
         max_held: subscribe.max_held,
         max_hold_ms: subscribe.max_hold_ms,
@@ -311,15 +315,8 @@ fn subscribe(
     hand_ring(sessions, id, &topic.declare, ring, subscription)?;
     match topic.publisher {
         Some(publisher) => {
-            tell_publisher(
-                sessions,
-                publisher,
-                topic.publisher_shared,
-                id,
-                count,
-                subscription,
-            );
-            Ok(())
+            let shared = topic.publisher_shared;
+            tell_publisher(sessions, publisher, shared, id, count, subscription);
         }
         None => sessions.send(
             from,
@@ -329,8 +326,12 @@ fn subscribe(
                 status: TopicStatus::PublisherGone,
             },
             Delivery::Must,
-        ),
+        )?,
     }
+    topics.tell(id, |watcher, topic| {
+        watcher.subscribed(topic, from, sessions)
+    });
+    Ok(())
 }
 
 /// Ends `session`'s subscription to `id`.
@@ -369,6 +370,7 @@ fn leave(
         };
         let _ = sessions.send(publisher, &demand, Delivery::Must);
     }
+    topics.tell(id, |watcher, topic| watcher.left(topic, session, sessions));
     topics.remove_if_unused(id);
     Ok(())
 }

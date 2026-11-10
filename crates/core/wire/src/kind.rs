@@ -92,6 +92,7 @@ kinds! {
         TOPIC_BUFFER_OFFER = 0x48,
         TOPIC_BELL = 0x49,
         TOPIC_STATE = 0x4A,
+        TOPIC_HOLDS = 0x4B,
     }
     Workloads {
         WORKLOAD_PUT = 0x50,

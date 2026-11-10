@@ -109,6 +109,20 @@ impl<K: Marker> Marker for &K {
     }
 }
 
+impl<K: Marker> Marker for std::sync::Arc<K> {
+    fn mark(&self, buffer: BufferIndex) -> bool {
+        (**self).mark(buffer)
+    }
+
+    fn unmark(&self, buffer: BufferIndex) {
+        (**self).unmark(buffer);
+    }
+
+    fn slot(&self) -> Option<u32> {
+        (**self).slot()
+    }
+}
+
 /// Why a buffer operation was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BufferError {

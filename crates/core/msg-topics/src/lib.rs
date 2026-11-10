@@ -242,3 +242,26 @@ body! {
         pub status: TopicStatus,
     }
 }
+
+body! {
+    /// One subscriber's hold marks on a frame topic, between the broker and the two ends.
+    ///
+    /// - Broker to publisher, with the subscriber's page of marks attached, read-only: honour
+    ///   this subscriber's marks, in reader slot `subscriber`, within these limits. With
+    ///   `present` unset: the subscriber is gone, forget its marks.
+    /// - Publisher to broker, nothing attached: done. Only then is the subscriber given the
+    ///   buffers, so it never reads a frame the publisher is not yet protecting.
+    /// - Broker to subscriber: this is your reader slot.
+    pub struct Holds = kind::TOPIC_HOLDS {
+        /// The topic's handle.
+        pub handle: u32,
+        /// The subscriber's reader slot in the publisher's pool.
+        pub subscriber: u32,
+        /// How many buffers it may hold. Zero for no limit.
+        pub max_held: u32,
+        /// How long it may hold one, in milliseconds. Zero for no limit.
+        pub max_hold_ms: u32,
+        /// Whether the subscriber is there.
+        pub present: bool,
+    }
+}

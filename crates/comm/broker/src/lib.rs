@@ -31,4 +31,4 @@ mod service;
 mod topics;
 
 pub use service::Broker;
-pub use topics::{BrokerConfig, Subscription, Topic, TopicId, Topics};
+pub use topics::{BrokerConfig, Subscription, Topic, TopicId, TopicWatch, Topics};

@@ -111,3 +111,31 @@ subscriber on the board reads a ring, whoever the publisher is.
   request, on every change. It can stop sampling when nobody listens.
 - Nothing allocates per sample. The writer and the doorbells for a topic are rebuilt only when its
   ring, publisher or subscribers change.
+
+## Buffer topics in the broker
+
+`crates/comm/broker-buffers` (`orion-broker-buffers`). A frame topic is an ordinary topic whose
+entries name buffers (`docs/ring.md`). Set-up adds the buffers and the hold marks:
+
+1. The publisher declares the topic and offers its pool once (`BufferOffer`: the pool page and the
+   buffers' descriptors). The broker keeps the offer.
+2. A subscriber subscribes with its doorbell and its page of hold marks attached. It is sent the
+   ring as for any topic.
+3. The broker gives the subscriber a reader slot and sends its marks page to the publisher
+   (`Holds`).
+4. The publisher adds the page to its table and answers `Holds`.
+5. Only then is the subscriber told its slot and handed the pool.
+
+So a subscriber never reads a frame the publisher is not yet protecting. A subscriber that sends no
+marks holds nothing and is handed the pool at once.
+
+- A subscriber that comes late gets the current pool. One that comes before the camera gets it
+  when it is offered.
+- A replaced pool is a new offer with a higher generation, handed to every subscriber. An older
+  generation is refused.
+- A subscriber that leaves is taken out of the publisher's table (`Holds`, not present).
+- Only a topic's publisher may offer its pool.
+
+The broker maps no buffer and sees no frame. A comm core that restarts interrupts no frames: the
+ring, the pool and the marks belong to the publisher and its subscribers, who offer the same things
+again when they reconnect.
