@@ -1,0 +1,21 @@
+[package]
+name = "orion-values"
+description = "What a topic's payload holds: numbers at fixed offsets, text, bytes, arrays and structured values."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[package.metadata.orion]
+no_std = true
+
+[dependencies]
+orion-msg-topics = { path = "../msg-topics" }
+orion-types = { path = "../types" }
+
+[dev-dependencies]
+orion-measure = { path = "../measure", features = ["alloc-counter"] }
+
+[lints]
+workspace = true
