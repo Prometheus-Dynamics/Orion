@@ -194,7 +194,20 @@ impl CommSettings {
                     program,
                     args: Vec::new(),
                 };
-                orion_ssh::SshConfig::from_source(source, &config.state_dir, helper)?
+                #[allow(unused_mut)]
+                let mut ssh = orion_ssh::SshConfig::from_source(source, &config.state_dir, helper)?;
+                // sftp and scp: the same program, started as the sftp helper.
+                #[cfg(feature = "ssh-sftp")]
+                if let Some(ssh) = &mut ssh {
+                    ssh.subsystems.push(orion_ssh::Subsystem {
+                        name: "sftp".to_owned(),
+                        program: vec![
+                            ssh.helper.program.clone().into(),
+                            orion_ssh_sftp::MODE.into(),
+                        ],
+                    });
+                }
+                ssh
             },
             #[cfg(feature = "nt4")]
             nt4: orion_nt4_gateway::Nt4Config::from_source(source)?,

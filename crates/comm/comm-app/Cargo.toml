@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -29,6 +29,8 @@ topic-peers = ["tcp", "dep:orion-topic-peers"]
 ws = ["dep:orion-ws"]
 # The SSH way in: logins through the check, a shell as the user.
 ssh = ["dep:orion-ssh"]
+# The sftp subsystem, for sftp and scp.
+ssh-sftp = ["ssh", "dep:orion-ssh-sftp"]
 # The NT4 gateway: mapped topics as an NT4 server.
 nt4 = ["dep:orion-nt4-gateway"]
 # The NT4 gateway as a client of an NT4 server somewhere else.
@@ -69,6 +71,7 @@ orion-self-status = { path = "../self-status", optional = true }
 orion-server = { path = "../server" }
 orion-supervise = { path = "../../core/supervise" }
 orion-ssh = { path = "../ssh", optional = true }
+orion-ssh-sftp = { path = "../ssh-sftp", optional = true }
 orion-tcp = { path = "../tcp", optional = true }
 orion-time = { path = "../time", optional = true }
 orion-topic-peers = { path = "../topic-peers", optional = true }

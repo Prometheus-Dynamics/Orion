@@ -36,6 +36,9 @@ pub struct Launch {
     pub shell: PathBuf,
     /// The command for the shell to run, or `None` for a login shell.
     pub command: Option<OsString>,
+    /// A program and its arguments to become instead of the shell: a subsystem. Empty for
+    /// the shell.
+    pub program: Vec<OsString>,
 }
 
 impl Launch {
@@ -69,6 +72,10 @@ impl Launch {
         if let Some(command) = &self.command {
             args.push("--command".into());
             args.push(command.clone());
+        }
+        for part in &self.program {
+            args.push("--program".into());
+            args.push(part.clone());
         }
         args
     }
@@ -113,6 +120,11 @@ impl Launch {
                 Some("--shell") => shell = Some(args.next().ok_or("--shell needs a value")?),
                 Some("--command") => {
                     launch.command = Some(args.next().ok_or("--command needs a value")?);
+                }
+                Some("--program") => {
+                    launch
+                        .program
+                        .push(args.next().ok_or("--program needs a value")?);
                 }
                 _ => return Err(format!("unknown argument {}", flag.to_string_lossy())),
             }
@@ -184,7 +196,15 @@ pub fn run(launch: &Launch) -> String {
     if let Err(error) = become_user(launch) {
         return error;
     }
-    let mut command = std::process::Command::new(&launch.shell);
+    let subsystem = launch.program.split_first();
+    let mut command = match subsystem {
+        Some((program, args)) => {
+            let mut command = std::process::Command::new(program);
+            command.args(args);
+            command
+        }
+        None => std::process::Command::new(&launch.shell),
+    };
     command
         .env_clear()
         .envs(launch.env.iter().map(|(name, value)| (name, value)));
@@ -195,6 +215,7 @@ pub fn run(launch: &Launch) -> String {
         "/".as_ref()
     });
     match &launch.command {
+        _ if subsystem.is_some() => {}
         Some(wanted) => {
             command.arg("-c").arg(wanted);
         }
@@ -206,7 +227,8 @@ pub fn run(launch: &Launch) -> String {
             command.arg0(dashed);
         }
     }
-    format!("{}: {}", launch.shell.display(), command.exec())
+    let what = command.get_program().to_string_lossy().into_owned();
+    format!("{what}: {}", command.exec())
 }
 
 /// The helper's whole program, for a binary to call when its first argument is [`MODE`]:
@@ -240,11 +262,13 @@ mod tests {
             ],
             shell: "/bin/zsh".into(),
             command: Some("echo 'a b' --uid 0".into()),
+            program: vec!["/usr/bin/orion".into(), "ssh-sftp".into()],
         };
         assert_eq!(Launch::from_args(launch.to_args()), Ok(launch.clone()));
         let plain = Launch {
             tty: false,
             command: None,
+            program: Vec::new(),
             groups: Vec::new(),
             env: Vec::new(),
             ..launch

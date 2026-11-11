@@ -77,6 +77,23 @@ pub struct Helper {
     pub args: Vec<OsString>,
 }
 
+/// A subsystem: a program a client asks for by name, run as the user in place of a shell.
+/// `sftp` is one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Subsystem {
+    /// The name a client asks for.
+    pub name: String,
+    /// The program and its arguments.
+    pub program: Vec<OsString>,
+}
+
+/// What a client asked a channel to run.
+enum Wanted<'a> {
+    Shell,
+    Command(&'a [u8]),
+    Program(Vec<OsString>),
+}
+
 /// What the SSH server is told.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SshConfig {
@@ -86,6 +103,8 @@ pub struct SshConfig {
     pub host_key: PathBuf,
     /// The program sessions run in.
     pub helper: Helper,
+    /// The subsystems there are.
+    pub subsystems: Vec<Subsystem>,
     /// Where the board's `passwd` and `group` are.
     pub etc: PathBuf,
     /// `ssh.max_connections`: the most connections at once.
@@ -114,6 +133,7 @@ impl SshConfig {
                 .optional("ssh.host_key")?
                 .unwrap_or_else(|| state_dir.join("ssh_host_ed25519_key")),
             helper,
+            subsystems: Vec::new(),
             etc: "/etc".into(),
             max_connections: source.get("ssh.max_connections", 64_usize)?.max(1),
             max_unauthenticated: source.get("ssh.max_unauthenticated", 10_usize)?.max(1),
@@ -232,8 +252,8 @@ impl Client {
         }
     }
 
-    /// Starts a shell, or `command`, on `channel` as the account that logged in.
-    fn start(&mut self, channel: ChannelId, command: Option<&[u8]>, session: &Session) -> bool {
+    /// Starts what the client wanted on `channel`, as the account that logged in.
+    fn start(&mut self, channel: ChannelId, wanted: Wanted<'_>, session: &Session) -> bool {
         let Some((_checked, user)) = &self.admitted else {
             return false;
         };
@@ -275,10 +295,17 @@ impl Client {
             tty: chan.terminal.is_some(),
             env,
             shell: user.shell.clone(),
-            command: command.map(|command| {
-                use std::os::unix::ffi::OsStringExt;
-                OsString::from_vec(command.to_vec())
-            }),
+            command: match &wanted {
+                Wanted::Command(command) => {
+                    use std::os::unix::ffi::OsStringExt;
+                    Some(OsString::from_vec(command.to_vec()))
+                }
+                _ => None,
+            },
+            program: match wanted {
+                Wanted::Program(program) => program,
+                _ => Vec::new(),
+            },
         };
         let started = session::start(
             &self.shared.config.helper,
@@ -376,7 +403,7 @@ impl Handler for Client {
         channel: ChannelId,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        if self.start(channel, None, session) {
+        if self.start(channel, Wanted::Shell, session) {
             session.channel_success(channel)
         } else {
             session.channel_failure(channel)
@@ -389,7 +416,35 @@ impl Handler for Client {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        if self.start(channel, Some(data), session) {
+        if self.start(channel, Wanted::Command(data), session) {
+            session.channel_success(channel)
+        } else {
+            session.channel_failure(channel)
+        }
+    }
+
+    async fn subsystem_request(
+        &mut self,
+        channel: ChannelId,
+        name: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let program = self
+            .shared
+            .config
+            .subsystems
+            .iter()
+            .find(|subsystem| subsystem.name == name)
+            .map(|subsystem| subsystem.program.clone());
+        // A subsystem speaks bytes: never on a terminal.
+        if let Some(chan) = self.channels.get_mut(&channel) {
+            chan.terminal = None;
+        }
+        let started = match program {
+            Some(program) => self.start(channel, Wanted::Program(program), session),
+            None => false,
+        };
+        if started {
             session.channel_success(channel)
         } else {
             session.channel_failure(channel)

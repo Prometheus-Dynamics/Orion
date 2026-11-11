@@ -354,6 +354,12 @@ ordinary `ssh` connects to it. It is off unless `ssh.listen` is set.
   ended it as a shell would report it. Its environment is `HOME`, `USER`, `LOGNAME`, `SHELL`,
   `PATH`, `TERM` and `SSH_CONNECTION` and nothing the client sends. When the client goes,
   the session is ended.
+- **sftp and scp.** `crates/comm/ssh-sftp` (`orion-ssh-sftp`) is the `sftp` subsystem, which
+  both `sftp` and `scp` speak. It is a helper process too: the session helper becomes the
+  user and then starts the comm core's program with `ssh-sftp`, which serves that one client
+  on its input and output. Every file is opened, made, renamed and removed by a process that
+  is the user, so what the user may not do the kernel refuses, and a fault ends one transfer.
+  A board built without feature `ssh-sftp` refuses the subsystem.
 - **Small before the login.** One family of key exchange (`mlkem768x25519-sha256`,
   `curve25519-sha256`), two ciphers (`chacha20-poly1305`, `aes256-gcm`), public keys only.
   At most `ssh.max_unauthenticated` connections may be waiting to log in, and each has

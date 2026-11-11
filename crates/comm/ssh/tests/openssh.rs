@@ -79,6 +79,7 @@ impl Server {
                 program: env!("CARGO_BIN_EXE_orion-ssh-helper").into(),
                 args: Vec::new(),
             },
+            subsystems: Vec::new(),
             etc: "/etc".into(),
             max_connections: 64,
             max_unauthenticated: 10,
