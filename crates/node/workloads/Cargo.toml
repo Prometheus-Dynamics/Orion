@@ -1,0 +1,18 @@
+[package]
+name = "orion-workloads"
+description = "The workload tracker: what should run, where each run is, and when to start it again."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-workloads = { path = "../../core/msg-workloads" }
+orion-types = { path = "../../core/types" }
+
+[dev-dependencies]
+orion-wire = { path = "../../core/wire" }
+
+[lints]
+workspace = true

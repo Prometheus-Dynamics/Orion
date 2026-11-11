@@ -82,7 +82,7 @@ Records, peer sync, the workload tracker, actions and files.
 - [x] [E1](docs/prs/E1.md) Record store (wave 6; needs A6)
 - [x] [E2](docs/prs/E2.md) Persistence (wave 7; needs E1)
 - [x] [E3](docs/prs/E3.md) Node as the comm core's first client (wave 8; needs E2, D1)
-- [ ] [E4](docs/prs/E4.md) Workload tracker (wave 7; needs E1, A9)
+- [x] [E4](docs/prs/E4.md) Workload tracker (wave 7; needs E1, A9)
 - [ ] [E5](docs/prs/E5.md) Executors: start, stop, adopt (wave 10; needs E4, D7, I3)
 - [ ] [E6](docs/prs/E6.md) Stopping and force remove (wave 11; needs E5)
 - [ ] [E7](docs/prs/E7.md) Files before start (wave 11; needs E5, E13)

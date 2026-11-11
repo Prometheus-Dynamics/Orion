@@ -80,3 +80,39 @@ those requests by the comm core, already checked (see "Passing requests to node 
   ended with the comm core, and their programs ask again when they reconnect.
 
 One thread, with the store as plain data owned by it.
+
+## The workload tracker
+
+`orion-workloads` holds what should be running and where each run is. It is plain data with no
+clock, socket or executor: it is told what happened and when, and hands back commands for
+executors (`Start`, `Stop`, `Kill`) and changes of state for whoever is told.
+
+| State | Meaning |
+| --- | --- |
+| Pending | should run and nothing runs it: no executor offers its kind, or it ended well and waits to be started again |
+| Starting | an executor was told to start it |
+| Running | the executor says it runs |
+| Stopping | the executor was asked to stop it, or says it is stopping |
+| Gone | it ended and is not started again; the record stays until it is removed |
+| Failed | it failed; with a restart due it is started again then, otherwise it stays |
+| Lost | its executor went away, so nobody knows |
+
+- **A record stays until its run is reported gone.** Removing a workload that runs asks for a
+  stop and keeps the record, Stopping, however long that takes. If its executor is away the
+  record waits, Lost, for the executor to come back and say. Removing with force drops the
+  record at once and has the run killed; nothing else drops a record early. A workload with no
+  run is dropped as soon as it is removed.
+- **Restart.** A run that ends is started again by its policy: always, only if it failed, or
+  never. The wait is 1 s, then doubles each time to 60 s, and it never gives up unless
+  `max_attempts` is set. A run that stayed up 10 s starts the count again. A clean end under
+  "always" waits too, so a program that exits at once does not spin.
+- **Executors.** A workload is started when an executor for its kind is here. When one comes,
+  its inventory is taken first: a run it has is adopted by name and not started twice; a run
+  Orion thought it had and it does not is started again at once, whatever the policy, and
+  that is not counted as a failure; a run it has that Orion does not want is returned to be
+  stopped. When an executor goes, its runs are Lost. A wait for a restart is not cut short by
+  an executor coming.
+- **Put again.** The same content changes nothing, also for a run that ended: to run it again,
+  remove it and put it. Other content stops the run and starts it with the new when it is
+  gone. A put for a workload that is being removed keeps it: it is started again when the old
+  run is gone.
