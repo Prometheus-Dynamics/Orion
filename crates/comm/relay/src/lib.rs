@@ -84,6 +84,9 @@ pub struct Route {
 /// Programs on this board, operators and peers.
 const KNOWN: Admits = Admits::LOCAL.and(Admits::OPERATOR).and(Admits::PEER);
 
+/// Programs on this board and devices wired to it: who may offer actions and take files.
+const ON_BOARD: Admits = Admits::LOCAL.and(Admits::DEVICE);
+
 /// The record kinds.
 pub const RECORDS: &[Route] = &[
     Route {
@@ -114,7 +117,7 @@ pub const ACTIONS: &[Route] = &[
     Route {
         kind: kind::ACTION_REGISTER,
         access: Access::Write("actions"),
-        who: Who::Granted(Admits::LOCAL),
+        who: Who::Granted(ON_BOARD),
         standing: true,
         ends: Ends::Nothing,
     },
@@ -128,14 +131,14 @@ pub const ACTIONS: &[Route] = &[
     Route {
         kind: kind::ACTION_PROGRESS,
         access: Access::Write("actions"),
-        who: Who::Any(Admits::LOCAL),
+        who: Who::Any(ON_BOARD),
         standing: false,
         ends: Ends::Nothing,
     },
     Route {
         kind: kind::ACTION_RESULT,
         access: Access::Write("actions"),
-        who: Who::Any(Admits::LOCAL),
+        who: Who::Any(ON_BOARD),
         standing: false,
         ends: Ends::Nothing,
     },
@@ -192,7 +195,7 @@ pub const FILES: &[Route] = &[
     Route {
         kind: kind::FILE_SINK,
         access: Access::Write("files"),
-        who: Who::Granted(Admits::LOCAL),
+        who: Who::Granted(ON_BOARD),
         standing: true,
         ends: Ends::Nothing,
     },
@@ -200,7 +203,7 @@ pub const FILES: &[Route] = &[
     Route {
         kind: kind::FILE_STATUS,
         access: Access::Write("files"),
-        who: Who::Any(Admits::LOCAL),
+        who: Who::Any(ON_BOARD),
         standing: false,
         ends: Ends::Nothing,
     },

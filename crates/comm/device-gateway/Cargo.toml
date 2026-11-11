@@ -1,0 +1,26 @@
+[package]
+name = "orion-device-gateway"
+description = "Makes each microcontroller on a link a resource, with the topics it declared and the actions it registered."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-actions = { path = "../../core/msg-actions" }
+orion-msg-records = { path = "../../core/msg-records" }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-server = { path = "../server" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-broker = { path = "../broker" }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "test-util"] }
+
+[lints]
+workspace = true

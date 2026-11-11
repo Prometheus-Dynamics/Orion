@@ -303,6 +303,9 @@ starts. The boot record is kept twice and written to the older copy, so a power 
 one before. The port supplies the flash; nothing names a chip. It adds 6.8 KB on thumbv7em,
 SHA-256 written small rather than unrolled.
 
+On the board, a device is a resource like any other: the device gateway in the comm core writes
+its record from what it declared and registered (see `docs/comm.md`, "Devices as resources").
+
 ## Size and memory
 
 Measured on a CM5 today, against the targets. The targets are unbuilt, and an allocation profile of

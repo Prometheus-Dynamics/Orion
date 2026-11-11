@@ -23,7 +23,9 @@ use std::time::Duration;
 use orion_broker::{Broker, BrokerConfig};
 use orion_broker_buffers::BrokerBuffers;
 use orion_broker_proxy::BrokerProxy;
+use orion_device_gateway::DeviceGateway;
 use orion_keys::{Keys, KeysConfig, KeysService, SharedKeys};
+use orion_link_serial::{Serial, StreamCarrier};
 use orion_server::{Admits, Comm, Limits, Policy};
 use orion_tcp::{TcpCarrier, TcpOptions};
 use orion_unix::UnixCarrier;
@@ -99,11 +101,22 @@ impl Board {
     /// If the board cannot start.
     #[must_use]
     pub fn start_named(dir: &Path, security: Security, name: &str, port: Option<u16>) -> Self {
-        Self::start_all(dir, security, port, true, name)
+        Self::start_all(dir, security, port, true, name, Vec::new())
+    }
+
+    /// As [`Board::start_for_node`], with a serial link on each of `links`: a device on the
+    /// other end of one is a resource of the board.
+    ///
+    /// # Panics
+    ///
+    /// If the board cannot start.
+    #[must_use]
+    pub fn start_for_node_with_links(dir: &Path, links: &[PathBuf]) -> Self {
+        Self::start_all(dir, Security::Off, None, true, "board", links.to_vec())
     }
 
     fn start_as(dir: &Path, security: Security, port: Option<u16>, for_node: bool) -> Self {
-        Self::start_all(dir, security, port, for_node, "board")
+        Self::start_all(dir, security, port, for_node, "board", Vec::new())
     }
 
     fn start_all(
@@ -112,6 +125,7 @@ impl Board {
         port: Option<u16>,
         for_node: bool,
         name: &str,
+        links: Vec<PathBuf>,
     ) -> Self {
         let name = name.to_owned();
         use std::os::unix::fs::MetadataExt;
@@ -146,6 +160,8 @@ impl Board {
                     Some(Rc::new(board_keys.clone())),
                     limits,
                 );
+                // Devices on links, as resources.
+                let devices = DeviceGateway::start(&comm, node.clone());
                 let anyone = Policy::new(Admits::ANYONE).without_grant();
                 let config = BrokerConfig {
                     declare: anyone,
@@ -168,7 +184,7 @@ impl Board {
                     Some(broker.topics()),
                 ));
                 comm.add_service(KeysService::new(node.clone(), board_keys.clone()));
-                comm.add_service(broker);
+                comm.add_service(devices.watch(broker));
                 // The clock is answered for, and nothing more: no sync, nothing served.
                 let _time = orion_time::TimeSync::start(
                     &comm,
@@ -178,10 +194,12 @@ impl Board {
                 )
                 .expect("time");
                 if for_node {
-                    comm.add_service(orion_relay::Relay::new(&orion_relay::routes()));
+                    comm.add_service(
+                        devices.watch(orion_relay::Relay::new(&orion_relay::routes())),
+                    );
                 } else {
                     comm.add_service(store::Store::default());
-                    comm.add_service(router::Router::default());
+                    comm.add_service(devices.watch(router::Router::default()));
                 }
                 if !for_node {
                     comm.add_service(receiver::Receiver::new(on_shelf));
@@ -214,6 +232,18 @@ impl Board {
                     .expect("ready");
                 tokio::task::spawn_local(pages.run());
                 let (on_socket, on_network, on_pages) = (comm.clone(), comm.clone(), comm);
+                for (n, path) in links.into_iter().enumerate() {
+                    let name = format!("link{n}").parse().expect("a link's name");
+                    let carrier = StreamCarrier::new(
+                        name,
+                        Serial {
+                            path,
+                            baud: 115_200,
+                        },
+                    );
+                    let serving = on_socket.clone();
+                    tokio::task::spawn_local(async move { serving.serve(carrier).await });
+                }
                 tokio::task::spawn_local(async move { on_socket.serve(unix).await });
                 tokio::task::spawn_local(async move { on_network.serve(tcp).await });
                 tokio::task::spawn_local(async move { on_pages.serve(ws).await });

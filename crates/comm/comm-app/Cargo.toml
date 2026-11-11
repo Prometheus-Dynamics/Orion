@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery", "devices"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -21,6 +21,8 @@ proxy = ["dep:orion-broker-proxy"]
 buffers = ["dep:orion-broker-buffers"]
 # Passing records and the rest of what is node logic's to node logic.
 node = ["dep:orion-relay"]
+# Each device on a link as a resource, with its topics and actions.
+devices = ["node", "dep:orion-device-gateway"]
 # Samples for subscribers that cannot map a ring: other boards, browsers.
 outbound = ["dep:orion-outbound"]
 # Other nodes' topics, carried into local copies of their rings.
@@ -64,6 +66,7 @@ orion-broker-buffers = { path = "../broker-buffers", optional = true }
 orion-broker-proxy = { path = "../broker-proxy", optional = true }
 orion-check = { path = "../../core/check", optional = true }
 orion-config = { path = "../../core/config" }
+orion-device-gateway = { path = "../device-gateway", optional = true }
 orion-discovery = { path = "../discovery", optional = true }
 orion-hello = { path = "../hello" }
 orion-keys = { path = "../keys" }

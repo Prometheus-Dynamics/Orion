@@ -1,0 +1,24 @@
+[package]
+name = "orion-device-tests"
+description = "Microcontrollers end to end: a device built from the device crates, on a link, seen and driven by an ordinary client."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dev-dependencies]
+orion = { path = "../../client/orion", features = ["provider"] }
+orion-audit = { path = "../../node/audit" }
+orion-config = { path = "../../core/config" }
+orion-device-actions = { path = "../../device/actions" }
+orion-device-core = { path = "../../device/core" }
+orion-device-topics = { path = "../../device/topics" }
+orion-node-app = { path = "../../node/node-app" }
+orion-stubs = { path = "../stubs" }
+rustix = { version = "1", default-features = false, features = ["std", "pty"] }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
+
+[lints]
+workspace = true

@@ -181,13 +181,26 @@ impl CommCore {
             &broker,
             settings.broker.declare,
         ));
+        // Devices on links, each a resource with what it declared and registered.
+        #[cfg(feature = "devices")]
+        let devices = {
+            parts.push("devices");
+            orion_device_gateway::DeviceGateway::start(&comm, node.clone())
+        };
         #[cfg(feature = "node")]
         {
             parts.push("node");
-            comm.add_service(orion_relay::Relay::new(&orion_relay::routes()));
+            let relay = orion_relay::Relay::new(&orion_relay::routes());
+            #[cfg(feature = "devices")]
+            comm.add_service(devices.watch(relay));
+            #[cfg(not(feature = "devices"))]
+            comm.add_service(relay);
         }
         comm.add_service(Hello::new(node.clone(), keys.clone(), Some(topics.clone())));
         comm.add_service(KeysService::new(node.clone(), keys.clone()));
+        #[cfg(feature = "devices")]
+        comm.add_service(devices.watch(broker));
+        #[cfg(not(feature = "devices"))]
         comm.add_service(broker);
 
         // Where a link says how it is doing: a topic when there are status topics.

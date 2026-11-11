@@ -617,6 +617,23 @@ loses its session and the others are not touched. A whole frame that a session i
 is dropped and counted: one slow session does not hold the bus. The socket receives only the
 identifiers of the bus's devices, and is opened again every 250 ms after it fails.
 
+## Devices as resources
+
+A device on a link declares topics with the broker and registers actions with node logic, as any
+program does. What it cannot afford is to be a provider as well, so the device gateway
+(`orion-device-gateway`, feature `devices`) is one for it. It wraps the broker and the relay and
+notes what a session with the role `device` declared or registered once the service took it.
+Then, from a session of its own in memory, started with the first device, it writes one resource per device: named after the
+device's hello, of kind `device`, listing its topics and its actions (`<resource>.<action>`).
+A client finds it, reads it and drives it like any other resource.
+
+- **A device that goes is `Lost`, not gone.** Its record stays; when it comes back and declares
+  again it is `Ready`, with what it declares now.
+- A record is written when it changed, never on a timer. One node logic did not take (it is
+  restarting) is written again a second later, until it is.
+- Devices may register actions, answer runs and take files: the relay's routes for those admit
+  devices as well as programs on the board.
+
 ## Discovery
 
 A node can find the others of its cluster on the local network (`orion-discovery`, mDNS/DNS-SD
