@@ -48,6 +48,10 @@ pub struct CommSettings {
     /// `ws.origins`: the pages that may connect, by origin. Empty for any.
     #[cfg(feature = "ws")]
     pub ws_origins: Vec<String>,
+    /// `ws.send_buffer`: the most bytes the kernel may hold for one browser that has not
+    /// taken them yet. Zero leaves it to the kernel.
+    #[cfg(feature = "ws")]
+    pub ws_send_buffer: usize,
     /// `peer.nodes`: where the other nodes are, each `name=address:port`. A topic of one of
     /// them can be subscribed to here.
     #[cfg(feature = "topic-peers")]
@@ -164,6 +168,8 @@ impl CommSettings {
             ws_listen: source.optional("ws.listen")?,
             #[cfg(feature = "ws")]
             ws_origins: source.list("ws.origins")?,
+            #[cfg(feature = "ws")]
+            ws_send_buffer: source.get("ws.send_buffer", 256 * 1024_usize)?,
             #[cfg(feature = "topic-peers")]
             peer_nodes: source.list("peer.nodes")?,
             #[cfg(feature = "link-serial")]

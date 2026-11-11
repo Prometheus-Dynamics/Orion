@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 orion-server = { path = "../server" }
+socket2 = "0.6"
 tokio = { workspace = true, features = ["rt", "net", "io-util", "time", "sync", "macros"] }
 tracing.workspace = true
 

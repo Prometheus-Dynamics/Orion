@@ -259,6 +259,7 @@ fn the_upgrade_takes_a_websocket_and_nothing_else() {
         let options = WsOptions {
             origins: vec!["https://panel.example".to_owned()],
             handshake: Duration::from_millis(300),
+            ..WsOptions::default()
         };
         let (addr, _echo) = board(options).await;
 

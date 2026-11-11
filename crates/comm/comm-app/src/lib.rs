@@ -277,6 +277,7 @@ impl CommCore {
             let options = orion_ws::WsOptions {
                 origins: settings.ws_origins.clone(),
                 handshake: Duration::from_millis(u64::from(settings.limits.hello_ms)),
+                send_buffer: settings.ws_send_buffer,
             };
             let mut listener = orion_ws::WsListener::bind(listen, options)
                 .await

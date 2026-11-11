@@ -153,6 +153,11 @@ publisher on behalf, like a program on another board.
   anyone do. With `ws.origins` set, a page from another origin is `403`, so that a page on
   another site cannot use a visitor's browser to reach the board. A connection that names no
   origin is not from a browser and is taken.
+- **A short queue in the kernel.** `ws.send_buffer` caps what the kernel holds for a
+  connection. Left alone the kernel grows that to megabytes, which the board can no longer
+  drop: `outbound.max_bytes` would only begin to count after seconds of video were already
+  waiting. With the cap, a page on a slow link is behind by the cap and the outbound limit
+  and no more.
 - **Bounded.** The request must come within the hello time and fit 8 KiB. A message longer
   than the largest frame is refused by its length and not read. A client that does not mask,
   sends text where a frame belongs, or sends frames out of order is dropped.
@@ -551,6 +556,7 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `outbound.max_bytes` | 131072 | what may wait to be sent to one subscriber without a ring (`outbound`) |
 | `ws.listen` | off | where browsers connect (`ws`) |
 | `ws.origins` | any | the pages that may connect, by origin |
+| `ws.send_buffer` | 262144 | the most bytes the kernel may hold for one browser that has not taken them; 0 leaves it to the kernel |
 | `peer.nodes` | none | where other nodes are, `name=address:port`, for subscribing to their topics (`topic-peers`) |
 | `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
 | `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |

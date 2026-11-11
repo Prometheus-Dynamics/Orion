@@ -274,6 +274,13 @@ A request the board refuses throws `Refused`, with the board's code in `code`. R
 and workloads are not in the web client. After changing `src/orion.ts`, run
 `web/client/build.sh`; a test fails if `dist/` is not the build of the source.
 
+### Video in a page
+
+`web/video-example` shows two video topics on plain `http://`: JPEG pictures in an `<img>`,
+and H.264 as fragmented MP4 through Media Source. Orion carries the bytes and one bit,
+"others depend on this one", which the publisher sets on a key frame; on a slow link the
+board drops for that page alone and next sends a key frame. See its README.
+
 ## From C
 
 `orion-capi` builds `liborion_c.a` and `liborion_c.so` (SONAME `liborion_c.so.1`), and

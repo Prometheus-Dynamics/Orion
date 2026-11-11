@@ -1,6 +1,6 @@
 [package]
 name = "orion-web-tests"
-description = "The web client run in a real browser against a comm core."
+description = "The web client and the video example run in a real browser against a comm core."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -8,10 +8,13 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
-[dev-dependencies]
+[dependencies]
 orion = { path = "../../client/orion" }
+
+[dev-dependencies]
 orion-stubs = { path = "../stubs" }
 sha2 = { version = "0.11.0", default-features = false }
+socket2 = "0.6"
 
 [lints]
 workspace = true

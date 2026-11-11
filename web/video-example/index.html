@@ -1,0 +1,81 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Orion video example</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; }
+  figure { display: inline-block; margin: 0 16px 16px 0; vertical-align: top; }
+  img, video { width: 320px; height: 240px; background: #222; display: block; }
+  figcaption, #note { margin-top: 4px; }
+</style>
+<figure><img id="jpeg" alt="JPEG"><figcaption id="jpeg-note">JPEG</figcaption></figure>
+<figure><video id="h264" muted playsinline></video><figcaption id="h264-note">H.264</figcaption></figure>
+<p id="note"></p>
+<script type="module">
+// Open as, for example:
+//   index.html?board=ws://board.local:8080/orion&jpeg=camera.jpeg&h264=camera.h264
+// `client` is where the web client is, if not beside this example. `mime` is what the
+// publisher's encoder makes. `report` is a path told how it went, for a test.
+import { showJpeg, playH264 } from "./video.js";
+const asked = new URLSearchParams(location.search);
+const note = (id, text) => (document.getElementById(id).textContent = text);
+try {
+  const { Orion } = await import(asked.get("client") ?? "../client/dist/orion.js");
+  const board = asked.get("board") ?? `ws://${location.hostname}:8080/orion`;
+  const orion = await Orion.connect(board, "video-example");
+  const video = document.getElementById("h264");
+  const img = document.getElementById("jpeg");
+  const jpeg = await showJpeg(orion, asked.get("jpeg") ?? "camera.jpeg", img);
+  const mime = asked.get("mime") ?? 'video/mp4; codecs="avc1.42E01E"';
+  let h264 = null;
+  let cannot = "";
+  try {
+    h264 = await playH264(orion, asked.get("h264") ?? "camera.h264", video, mime);
+  } catch (error) {
+    cannot = String(error.message ?? error);
+    note("h264-note", cannot);
+  }
+  const began = performance.now();
+  let told = false;
+  let framesAtLoss = -1;
+  setInterval(() => {
+    note("jpeg-note", `JPEG: ${jpeg.shown} shown of ${jpeg.samples}, ${jpeg.missed} not sent`);
+    const frames = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality().totalVideoFrames : 0;
+    if (h264 !== null) {
+      note("h264-note", `H.264: ${frames} frames of ${h264.samples} fragments, ${h264.missed} not sent`);
+    }
+    const report = asked.get("report");
+    const enough = Number(asked.get("enough") ?? 40);
+    const seconds = (performance.now() - began) / 1000;
+    // A browser without the decoder says so on the element, not when asked.
+    const broken = video.error !== null;
+    const played = h264 === null || broken || (frames >= enough && video.currentTime > 1);
+    // With `losses`, wait until both topics have lost samples to the link, and H.264 has
+    // played on past its loss.
+    if (h264 !== null && h264.missed > 0n && framesAtLoss < 0) framesAtLoss = frames;
+    const lost = asked.get("losses") === null ||
+      (jpeg.missed > 0n && (h264 === null || broken || (framesAtLoss >= 0 && frames >= framesAtLoss + 24)));
+    if (report !== null && !told && ((jpeg.shown >= enough && played && lost) || seconds > 90)) {
+      told = true;
+      fetch(report + "?" + new URLSearchParams({
+        jpegShown: jpeg.shown,
+        jpegWidth: img.naturalWidth,
+        jpegMissed: jpeg.missed,
+        h264: h264 === null || broken ? "cannot" : "plays",
+        why: broken ? video.error.message : cannot,
+        h264Frames: frames,
+        h264Width: video.videoWidth,
+        h264Time: video.currentTime.toFixed(1),
+        h264Missed: h264 === null ? 0 : h264.missed,
+        h264FramesAtLoss: framesAtLoss,
+        secure: window.isSecureContext,
+        protocol: location.protocol,
+        codecs: "VideoDecoder" in window,
+      }));
+    }
+  }, 100);
+} catch (error) {
+  note("note", String(error && error.stack ? error.stack : error));
+  const report = asked.get("report");
+  if (report !== null) fetch(report + "?error=" + encodeURIComponent(String(error)));
+}
+</script>

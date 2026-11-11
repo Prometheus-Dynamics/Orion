@@ -5,7 +5,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -14,6 +13,7 @@ use orion::actions::{ActionDecl, Admits, Outcome, Policy, Request, Target};
 use orion::topics::{FieldId, FrameTime, Next, TopicDecl};
 use orion::{Address, Orion, fields};
 use orion_stubs::Board;
+use orion_web_tests::browser::browse;
 use sha2::{Digest, Sha256};
 
 fn client_dir() -> PathBuf {
@@ -132,39 +132,6 @@ fn serve(listener: TcpListener, page: String, client: String, report: mpsc::Send
             );
         }
     });
-}
-
-/// A headless browser on `url`, if one is installed.
-fn browse(url: &str, profile: &Path) -> Option<Child> {
-    let firefox = |program: &str| {
-        Command::new(program)
-            .args(["--headless", "--no-remote", "--new-instance", "--profile"])
-            .arg(profile)
-            .arg(url)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()
-    };
-    let chrome = |program: &str| {
-        Command::new(program)
-            .args([
-                "--headless=new",
-                "--disable-gpu",
-                "--no-first-run",
-                "--no-sandbox",
-            ])
-            .arg(format!("--user-data-dir={}", profile.display()))
-            .arg(url)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()
-    };
-    firefox("firefox")
-        .or_else(|| chrome("chromium"))
-        .or_else(|| chrome("chromium-browser"))
-        .or_else(|| chrome("google-chrome"))
 }
 
 /// A program on the board, in a thread, until dropped.

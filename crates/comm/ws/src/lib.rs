@@ -52,6 +52,11 @@ pub struct WsOptions {
     pub origins: Vec<String>,
     /// How long the upgrade may take.
     pub handshake: Duration,
+    /// The most bytes the kernel may hold for one connection that the other end has not
+    /// taken yet. Left to itself the kernel grows this to megabytes on a link that was fast a
+    /// moment ago, and a page on a link that has since slowed is then shown video seconds
+    /// old: the board cannot drop what the kernel already has. Zero leaves it to the kernel.
+    pub send_buffer: usize,
 }
 
 impl Default for WsOptions {
@@ -59,6 +64,7 @@ impl Default for WsOptions {
         Self {
             origins: Vec::new(),
             handshake: Duration::from_secs(5),
+            send_buffer: 256 * 1024,
         }
     }
 }
@@ -230,6 +236,10 @@ async fn upgrade(
     protocols: &BTreeMap<String, mpsc::Sender<WsSocket>>,
 ) -> io::Result<Option<(WsSocket, mpsc::Sender<WsSocket>)>> {
     stream.set_nodelay(true)?;
+    if options.send_buffer != 0 {
+        // The kernel keeps twice what it is asked for, half of it for its own bookkeeping.
+        socket2::SockRef::from(&stream).set_send_buffer_size(options.send_buffer)?;
+    }
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
     let Ok(request) = read_request(&mut read).await else {
