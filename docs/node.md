@@ -31,3 +31,23 @@ whole of it; a peer's slice replaces its last, nothing is merged across nodes, a
 when its node does.
 
 The store is plain data with no lock and no I/O. Node logic owns it from one task.
+
+## Keeping records across a restart
+
+`orion-persist`. The desired records are kept in one snapshot file in the state directory,
+`records.v1.snap`, with the snapshot before it as `records.v1.snap.prev`.
+
+**A save replaces the snapshot in one step.** The new one is written beside the old and synced,
+and only then renamed into place, the old becoming `.prev`; then the directory is synced. Power
+can go at any moment: what is found afterwards is the old snapshot whole or the new one whole.
+A save that reported success is what is found.
+
+**A file that cannot be read never stops start-up.** A snapshot that is cut short, fails its
+checksum or is not a snapshot is renamed out of the way (`…unreadable-N`, kept for whoever
+wants to look) and the one before it is used. If that is no good either, the node starts with
+nothing and its peers send it what it is missing.
+
+Each record in the file is a wire record with its length in front, so the wire's append-only
+rule holds here too. A snapshot of another format has another name and is neither read nor
+touched. Observed records are not kept: a node that has just started sees nothing yet.
+
