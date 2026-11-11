@@ -1,0 +1,15 @@
+[package]
+name = "orion-placement"
+description = "Leaderless placement: every node works out the same node for a workload, and only that node takes it."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-types = { path = "../../core/types" }
+orion-workloads = { path = "../workloads" }
+
+[lints]
+workspace = true

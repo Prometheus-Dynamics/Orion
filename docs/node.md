@@ -298,3 +298,41 @@ its topics and runs its actions. The records are the store's and reach every nod
 
 After node logic restarts it no longer knows which session provides what, until each provider
 writes its resource again. A provider that dies in that time is not noticed.
+
+## Placement
+
+`orion-placement` decides which node runs a workload, without a leader. Every node holds the
+same records and works out the same answer; only the node the answer names acts, by saying
+"this one is mine". It is handed a view of the cluster and what a workload needs, and says what
+the local node should do. It talks to nothing.
+
+- **Eligible.** A node can run a workload if it is live, takes new work, has an executor for the
+  workload's kind, has every label the workload asks for (a label with no value asks only that
+  it is there), and, if the workload is to sit beside a resource, is the node that resource is
+  on. A node's labels are what it reports of itself with what its record says over it, key by
+  key.
+- **The choice** among eligible nodes is rendezvous hashing: the highest score of (workload,
+  node), where the score is FNV-1a over the workload's name, `0xff` and the node's name,
+  finished with the SplitMix64 mixer; equal scores go to the smaller name. Nodes that see the
+  same view choose the same node. Removing a node only moves the workloads it had; adding one
+  only moves the workloads it wins. The hash is the one `dev` used and is pinned by a test.
+- **Only the chosen node writes**, and only for itself. A node never assigns work to another,
+  which it may not be able to reach.
+- **A workload that runs stays.** While its node is eligible it does not move, whoever would
+  win it now. When its node stops being eligible, the node that would take it waits a grace
+  period (10 s) first. If the old node is back within it, nothing moves and the wait starts
+  over next time.
+- **A workload told a node** (`node` in `WorkloadPut`) runs there and nowhere else, eligible or
+  not, gone or not.
+- **What a workload needs of resources** is written in its labels: `orion.resource=<name>` for
+  a resource it must hold, wherever that is, and `orion.colocate=<name>` for one whose node it
+  must run on. These two keys are not node labels.
+- **Resources across nodes.** A workload holds a resource under the name `<node>/<workload>`.
+  Among equal resources it is given one it already holds, or else the ready, free one on a
+  live node with the highest score of (workload, resource), so workloads spread and every
+  node agrees. The node a resource is on arbitrates it: a lease whose workload is no longer
+  assigned to the node the lease names is dropped.
+
+Liveness is each node's own judgement and is not shared. Two nodes may disagree for a moment;
+that is safe because a node only ever takes work for itself, after the grace period, and two
+"mine" for one workload are one record that the store's merge settles.

@@ -93,6 +93,7 @@ async fn subscriber() {
         }
     };
     let (mut last, mut seen, mut woken) = (0_u64, 0_u64, 0_u64);
+    let first = std::cell::Cell::new(0_u64);
     while last < VALUES {
         let mut take = |last: &mut u64, seen: &mut u64| loop {
             match reader.next() {
@@ -100,6 +101,9 @@ async fn subscriber() {
                     let value = u64::from_le_bytes(sample.payload.try_into().expect("eight bytes"));
                     assert!(value > *last, "values arrive in order");
                     assert_eq!(sample.time.as_nanos(), value);
+                    if first.get() == 0 {
+                        first.set(value);
+                    }
                     *last = value;
                     *seen += 1;
                 }
@@ -121,12 +125,13 @@ async fn subscriber() {
         assert_ne!(wake, Wake::TimedOut, "slept through a value after {last}");
         woken += u64::from(wake == Wake::Rung);
     }
-    // Values published before this reader attached are not its to read. Every one after is
+    // Values published before this reader attached are not its to read, and how many that
+    // is depends on when this process got to run. Every value from the first one it read is
     // read or counted as missed.
-    let before = reader.geometry().window().min(VALUES);
+    let first = first.get();
     let accounted = seen + reader.missed();
     assert!(
-        accounted <= VALUES && accounted >= VALUES - before,
+        first >= 1 && accounted <= VALUES && accounted > VALUES - first,
         "{seen} read, {} missed",
         reader.missed()
     );
