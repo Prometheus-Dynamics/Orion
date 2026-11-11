@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use orion_audit::{Audit, AuditConfig};
 use orion_config::{Config, ConfigError, Source};
 use orion_connect::{Address, Client, ClientError, Options, Roles, Session};
 use orion_file_store::{Files, FilesConfig};
@@ -62,6 +63,9 @@ pub struct NodeSettings {
     pub files_dir: PathBuf,
     /// `files.max_size`: the largest file taken, in bytes.
     pub files_max_size: u64,
+    /// `audit.file`: the audit log. `audit.log` in the state directory unless it is said;
+    /// `off` for none.
+    pub audit: Option<AuditConfig>,
 }
 
 impl NodeSettings {
@@ -76,8 +80,25 @@ impl NodeSettings {
         let files_dir = source
             .optional("files.dir")?
             .unwrap_or_else(|| config.state_dir.join("files"));
+        let audit_file = match source.text("audit.file") {
+            Some("off") => None,
+            Some(path) => Some(PathBuf::from(path)),
+            None => Some(config.state_dir.join("audit.log")),
+        };
+        let audit = match audit_file {
+            Some(path) => {
+                let defaults = AuditConfig::new(&path);
+                Some(AuditConfig {
+                    max_bytes: source.get("audit.max_bytes", defaults.max_bytes)?,
+                    keep: source.get("audit.keep", defaults.keep)?,
+                    ..defaults
+                })
+            }
+            None => None,
+        };
         Ok(Self {
             config,
+            audit,
             files_dir,
             files_max_size: source.get("files.max_size", 16_u64 << 30)?,
             save_after: Duration::from_millis(source.get("records.save_after_ms", 500_u64)?),
@@ -157,9 +178,18 @@ impl Node {
             what: "files directory",
             error,
         })?;
+        let audit = match &settings.audit {
+            Some(config) => Some(
+                Audit::start(name.as_str(), config.clone()).map_err(|error| StartError {
+                    what: "audit log",
+                    error,
+                })?,
+            ),
+            None => None,
+        };
         Ok(Self {
             settings,
-            logic: Rc::new(RefCell::new(Logic::new(store, name, files))),
+            logic: Rc::new(RefCell::new(Logic::new(store, name, files, audit))),
             persist: Some(persist),
             saving: None,
             unsaved_since: None,

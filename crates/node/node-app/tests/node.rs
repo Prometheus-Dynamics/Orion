@@ -26,6 +26,7 @@ fn settings(dir: &Path, save_after: Duration) -> NodeSettings {
     settings.config.socket = dir.join("orion.sock");
     settings.config.state_dir = dir.join("state");
     settings.files_dir = dir.join("files");
+    settings.audit = Some(orion_audit::AuditConfig::new(&dir.join("state/audit.log")));
     settings.config.node_name = "board".parse().expect("name");
     settings.save_after = save_after;
     settings
@@ -287,4 +288,46 @@ fn a_read_larger_than_one_message_comes_in_several() {
     assert_eq!(found.len(), 200);
     assert!(found.iter().all(|record| record.value == value));
     assert!(found.windows(2).all(|pair| pair[0].key < pair[1].key));
+}
+
+#[test]
+fn what_was_done_is_in_the_audit_log() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = dir("audit");
+    let board = Board::start_for_node(&dir);
+    let address = Address::Local(board.socket().to_owned());
+    let logic = Logic::start(settings(&dir, Duration::from_secs(3600)));
+    let program = Orion::connect(&address, "program").expect("connect");
+    let records = program.records();
+    assert!(answered(records, RecordClass::Resource, "").is_empty());
+    records
+        .put(&[entry("fan.left", b"one"), entry("fan.right", b"two")])
+        .expect("put");
+    records
+        .put(&[RecordEntry {
+            deleted: true,
+            ..entry("fan.left", b"")
+        }])
+        .expect("delete");
+    // Reads are not what the log is for.
+    records.get(RecordClass::Resource, "").expect("get");
+    logic.stop();
+
+    let uid = std::fs::metadata(&dir).expect("dir").uid();
+    let log = std::fs::read_to_string(dir.join("state/audit.log")).expect("the audit log");
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines.len(), 2, "{log}");
+    let who = format!("\"who\":\"local:{uid}\"");
+    assert!(lines.iter().all(|line| line.contains(&who)), "{log}");
+    assert!(lines.iter().all(|line| line.contains("\"node\":\"board\"")));
+    assert!(
+        lines[0].contains(
+            "\"did\":\"put\",\"what\":\"Resource/fan.left Resource/fan.right\",\"result\":\"ok\""
+        ),
+        "{log}"
+    );
+    assert!(
+        lines[1].contains("\"did\":\"put\",\"what\":\"-Resource/fan.left\",\"result\":\"ok\""),
+        "{log}"
+    );
 }

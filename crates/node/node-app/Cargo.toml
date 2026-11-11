@@ -9,10 +9,12 @@ repository.workspace = true
 
 [dependencies]
 orion-action-list = { path = "../action-list" }
+orion-audit = { path = "../audit" }
 orion-config = { path = "../../core/config" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
 orion-file-store = { path = "../file-store" }
 orion-msg-actions = { path = "../../core/msg-actions" }
+orion-msg-files = { path = "../../core/msg-files" }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }

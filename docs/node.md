@@ -66,6 +66,9 @@ Being a client like any other, it publishes what it has to show as topics.
 | `records.max_drift_ms` | 300000 | a stamp from a peer further ahead than this is refused |
 | `files.dir` | `files` in `state.dir` | where files sent to this node go |
 | `files.max_size` | 16 GiB | the largest file taken |
+| `audit.file` | `audit.log` in `state.dir` | the audit log; `off` for none |
+| `audit.max_bytes` | 1 MiB | the most the file holds before it is rotated |
+| `audit.keep` | 3 | how many files from before are kept |
 
 - **Records.** `Put` writes each entry with a stamp from this node's clock (an entry with
   `deleted` set deletes, and is skipped if there is nothing to delete) and is answered with
@@ -237,3 +240,30 @@ files.
 
 Not here yet: pulling by URL (E14), and writing straight to a destination outside the store
 such as a boot slot (E15).
+
+## The audit log
+
+`orion-audit` writes who did what. Node logic records every request it is passed that changes
+something, and so passed the check: a record written or deleted, an action registered, run or
+cancelled, a file begun or committed. Reads, chunks and words of progress are not recorded.
+
+A line is one JSON object:
+
+```json
+{"time_ms":1710000000000,"node":"left","who":"operator:9f3c…","did":"run","what":"reboot node:left","result":"ok"}
+```
+
+`who` is `local:<uid>`, `operator:<key>`, `peer:<node>`, `device:<name>` or `anonymous`, as the
+comm core named the caller. `result` is `ok`, or why node logic refused.
+
+- **Capped.** When the next line would take the file past `audit.max_bytes`, the file becomes
+  `audit.log.1`, `.1` becomes `.2`, up to `audit.keep`, and the oldest is deleted. A file is
+  rotated between lines, never in one.
+- **Its own helper.** Recording formats the line and puts it in a queue of 1024. It never
+  touches the disk and never waits. One thread writes, everything that is waiting in one
+  write. If more is asked than the disk takes, entries are dropped and counted, and the log
+  says so itself in a line `"who":"orion","did":"dropped"` when there is room again.
+- What is waiting is written when node logic stops.
+
+Not in the log: a request the check refused at the door. It never reaches node logic; the comm
+core counts it.

@@ -30,6 +30,7 @@ fn settings(dir: &Path) -> NodeSettings {
     settings.config.socket = dir.join("orion.sock");
     settings.config.state_dir = dir.join("state");
     settings.files_dir = dir.join("files");
+    settings.audit = Some(orion_audit::AuditConfig::new(&dir.join("state/audit.log")));
     settings.config.node_name = "board".parse().expect("name");
     settings
 }
@@ -276,6 +277,27 @@ fn an_action_from_another_process_runs_and_is_refused_by_its_policy() {
         .expect("run");
     let ended = slow.finish(Duration::from_secs(5)).expect("it ends");
     assert_eq!(ended.outcome, Outcome::TimedOut);
+
+    // What was done is in the audit log: the registrations, and the runs that passed the
+    // check. The refused run never reached node logic.
+    let log = std::fs::read_to_string(dir.join("state/audit.log")).unwrap_or_default();
+    let did = |what: &str| log.lines().filter(|line| line.contains(what)).count();
+    assert_eq!(
+        did("\"did\":\"register\",\"what\":\"open resource:fan.left\",\"result\":\"ok\""),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        did("\"did\":\"register\",\"what\":\"wipe resource:fan.left\""),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        did("\"did\":\"run\",\"what\":\"open resource:fan.left\",\"result\":\"ok\""),
+        2,
+        "{log}"
+    );
+    assert_eq!(did("\"did\":\"run\",\"what\":\"wipe"), 0, "{log}");
 
     // The other process goes away: its actions leave the list.
     drop(provider.0.kill());

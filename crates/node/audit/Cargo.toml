@@ -1,0 +1,14 @@
+[package]
+name = "orion-audit"
+description = "The audit log: who did what, as lines in a file that never grows past its cap."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+tracing.workspace = true
+
+[lints]
+workspace = true

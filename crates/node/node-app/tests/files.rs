@@ -26,6 +26,7 @@ fn settings(dir: &Path) -> NodeSettings {
     settings.config.socket = dir.join("orion.sock");
     settings.config.state_dir = dir.join("state");
     settings.files_dir = dir.join("files");
+    settings.audit = Some(orion_audit::AuditConfig::new(&dir.join("state/audit.log")));
     settings.config.node_name = "board".parse().expect("name");
     settings
 }
@@ -174,6 +175,30 @@ fn a_push_that_is_interrupted_goes_on_from_where_it_was() {
     assert!(!place.exists(), "nothing is in place until it is whole");
     drop(sender);
 
+    // What was sent before the cable was pulled reaches node logic, and is on disk.
+    let kept = || -> u64 {
+        std::fs::read_dir(dir.join("files/.incoming"))
+            .expect("incoming")
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "part"))
+            .filter_map(|entry| entry.metadata().ok())
+            .map(|metadata| metadata.len())
+            .sum()
+    };
+    // Whatever the sender's last frames came to (a session that vanishes may take its
+    // last frame with it), wait until what is kept has stopped growing.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut on_disk = kept();
+    loop {
+        std::thread::sleep(Duration::from_millis(150));
+        let now = kept();
+        if now == on_disk && now >= 131_072 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "only {now} bytes were kept");
+        on_disk = now;
+    }
+
     // Node logic is killed and started again: what it had is on disk.
     drop(logic);
     let _logic = Logic::start(settings(&dir));
@@ -191,10 +216,9 @@ fn a_push_that_is_interrupted_goes_on_from_where_it_was() {
     assert_eq!(done.state, FileState::Committed, "{}", done.detail);
     assert_eq!(done.received, data.len() as u64);
     let resumed_at = seen[0];
-    assert!(
-        (300_000..=400_000).contains(&resumed_at),
-        "it went on from {resumed_at}"
-    );
+    // It went on from exactly what was kept, which is most of what was sent.
+    assert_eq!(resumed_at, on_disk);
+    assert!((131_072..=425_984).contains(&resumed_at), "{resumed_at}");
     assert_eq!(std::fs::read(&place).expect("in place"), data);
 
     // The same file again is sent again and is the same file.

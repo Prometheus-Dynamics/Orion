@@ -4,9 +4,12 @@ use std::fmt::Write as _;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use orion_action_list::{Actions, Event};
+use orion_audit::{Audit, Entry, Who};
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_file_store::Files;
-use orion_msg_actions::Target;
+use orion_msg_actions::{Cancel, Register, Run, Target};
+use orion_msg_files::{FileBegin, FileCommit};
+use orion_msg_records::Put;
 use orion_msg_session::{NodeAnswer, NodeGone, NodeRequest};
 use orion_msg_topics::{Field, FieldType};
 use orion_reply::{Asked, Out};
@@ -86,6 +89,7 @@ pub(crate) struct Logic {
     pub(crate) records: Records,
     pub(crate) actions: Actions,
     pub(crate) files: Files,
+    audit: Option<Audit>,
     started: Instant,
     scratch: Vec<u8>,
 }
@@ -107,11 +111,12 @@ impl Logic {
         kind::FILE_COMMIT,
     ];
 
-    pub(crate) fn new(store: Store, node: NodeName, files: Files) -> Self {
+    pub(crate) fn new(store: Store, node: NodeName, files: Files, audit: Option<Audit>) -> Self {
         Self {
             records: Records::new(store),
             actions: Actions::new(node),
             files,
+            audit,
             started: Instant::now(),
             scratch: vec![0; 64 * 1024],
         }
@@ -143,9 +148,90 @@ impl Logic {
             let now = self.now_ms();
             self.actions.request(asked, now, out)
         };
+        if let Some(audit) = &self.audit
+            && let Some((did, what)) = done(asked)
+        {
+            let result = answered.map_or_else(|error| error.to_string(), |()| "ok".to_owned());
+            audit.record(&Entry {
+                time_ms: wall().as_millis() as u64,
+                who: who(asked),
+                did,
+                what: &what,
+                result: &result,
+            });
+        }
         if let Err(error) = answered {
             out.refuse(asked, error);
         }
+    }
+}
+
+/// Who asked, as the comm core named them.
+fn who<'a>(asked: &Asked<'a>) -> Who<'a> {
+    // The bits of `orion_check::PrincipalClass`.
+    match asked.class {
+        2 | 4 => Who::Local(asked.uid),
+        8 => Who::Operator(asked.caller),
+        16 => Who::Peer(asked.caller),
+        32 => Who::Device(asked.caller),
+        _ => Who::Anonymous,
+    }
+}
+
+fn target(target: &Target) -> String {
+    match target {
+        Target::Node(node) => format!("node:{node}"),
+        Target::Resource(resource) => format!("resource:{resource}"),
+    }
+}
+
+/// What a request does and to what, for the audit log. `None` for what changes nothing, and
+/// for what is said many times in the course of one thing: a chunk, a word of progress.
+fn done(asked: &Asked<'_>) -> Option<(&'static str, String)> {
+    match asked.kind {
+        kind::PUT => {
+            let put: Put<'_> = asked.body().ok()?;
+            let mut what = String::new();
+            for (index, entry) in put.records.iter().flatten().enumerate() {
+                if index == 4 {
+                    let _ = write!(what, " and {} more", put.records.len() - 4);
+                    break;
+                }
+                if index != 0 {
+                    what.push(' ');
+                }
+                let verb = if entry.deleted { "-" } else { "" };
+                let _ = write!(what, "{verb}{:?}/{}", entry.class, entry.key);
+            }
+            Some(("put", what))
+        }
+        kind::ACTION_REGISTER => {
+            let register: Register<'_> = asked.body().ok()?;
+            Some((
+                "register",
+                format!("{} {}", register.name, target(&register.target)),
+            ))
+        }
+        kind::ACTION_RUN => {
+            let run: Run<'_> = asked.body().ok()?;
+            Some(("run", format!("{} {}", run.name, target(&run.target))))
+        }
+        kind::ACTION_CANCEL => {
+            let cancel: Cancel = asked.body().ok()?;
+            Some(("cancel", format!("run {}", cancel.call)))
+        }
+        kind::FILE_BEGIN => {
+            let begin: FileBegin = asked.body().ok()?;
+            Some((
+                "file",
+                format!("{} ({} bytes)", begin.destination, begin.size),
+            ))
+        }
+        kind::FILE_COMMIT => {
+            let commit: FileCommit = asked.body().ok()?;
+            Some(("commit", format!("transfer {:016x}", commit.transfer)))
+        }
+        _ => None,
     }
 }
 
