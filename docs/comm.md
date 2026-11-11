@@ -112,6 +112,29 @@ subscriber on the board reads a ring, whoever the publisher is.
 - Nothing allocates per sample. The writer and the doorbells for a topic are rebuilt only when its
   ring, publisher or subscribers change.
 
+## Samples for subscribers without a ring
+
+A subscriber on another board, or in a browser, cannot map a ring. It subscribes like anyone
+else, is told `shared_memory: false`, and is sent each sample as a `Sample` message.
+`orion-outbound` sends them. For each such subscription it keeps a reader on the topic's ring,
+inside the comm core, from the moment the subscription is made. The publisher writes its ring
+and does nothing different.
+
+- **Each subscriber has its own byte limit**, `outbound.max_bytes` (128 KiB). A sample is sent
+  only if what already waits to be sent to that session, plus the sample, fits. Otherwise it
+  is dropped for that subscriber and counted.
+- **After a drop, skip forward to the next independent sample.** A publisher marks a sample
+  "others depend on this one": a key frame. Once a subscriber has lost a sample of a field
+  that uses the mark, nothing of that field is sent to it until the next marked sample. A
+  field that never uses the mark has only independent samples, and the next one is sent.
+- **A slow reader hurts nobody else.** Nothing waits: the publisher is never held up, the
+  ring is never held, and each other subscriber is sent everything it has room for. A
+  subscriber is never closed for being slow at taking samples. One that falls so far behind
+  that the ring overwrites what it had not been sent has lost those, like any reader.
+- **Woken, not polled.** Publishers ring one doorbell for all such subscribers, as they would
+  ring a subscriber's own, and only when the sender is asleep.
+- Subscriptions take turns of 256 samples, so one busy topic does not starve another.
+
 ## Buffer topics in the broker
 
 `crates/comm/broker-buffers` (`orion-broker-buffers`). A frame topic is an ordinary topic whose
@@ -470,6 +493,7 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `state.dir` | `/var/lib/orion` | the identity, the trust store, the saved time |
 | `peer.listen` | off | where other nodes and people's tools connect (`tcp`) |
 | `comm.*`, `topics.*` | | the server's and the broker's limits |
+| `outbound.max_bytes` | 131072 | what may wait to be sent to one subscriber without a ring (`outbound`) |
 | `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
 | `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |
 | `time.*` | off | time sync (`time`) |

@@ -152,6 +152,13 @@ impl Board {
                     ..BrokerConfig::default()
                 };
                 let broker = Broker::new(node.clone(), config);
+                // Samples for subscribers on the network, which cannot map a ring.
+                let _outbound = orion_outbound::Outbound::start(
+                    &comm,
+                    &broker,
+                    orion_outbound::OutboundLimits::default(),
+                )
+                .expect("outbound");
                 comm.add_service(BrokerProxy::new(&broker, anyone));
                 comm.add_service(BrokerBuffers::new(&broker, anyone));
                 comm.add_service(orion_hello::Hello::new(

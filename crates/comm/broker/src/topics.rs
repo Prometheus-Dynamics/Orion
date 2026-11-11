@@ -141,6 +141,9 @@ pub struct Topics {
     generations: Vec<u16>,
     bytes: usize,
     pub(crate) watchers: Vec<Box<dyn TopicWatch>>,
+    /// The doorbell of whatever carries samples to subscribers that were not given the
+    /// ring: its eventfd and its page, read-only.
+    offboard_bell: Option<(OwnedFd, OwnedFd)>,
 }
 
 impl std::fmt::Debug for Topics {
@@ -160,7 +163,21 @@ impl Topics {
             generations: Vec::new(),
             bytes: 0,
             watchers: Vec::new(),
+            offboard_bell: None,
         }
+    }
+
+    /// Sets the doorbell that stands in for every subscriber that was not given the ring. A
+    /// program on another board cannot be rung; what carries its samples to it can, and
+    /// publishers ring this one as they would the subscriber's own.
+    pub fn set_offboard_bell(&mut self, eventfd: OwnedFd, page: OwnedFd) {
+        self.offboard_bell = Some((eventfd, page));
+    }
+
+    /// A copy of the doorbell for a subscriber that was not given the ring, if one is set.
+    pub(crate) fn offboard_bell(&self) -> Option<(OwnedFd, OwnedFd)> {
+        let (eventfd, page) = self.offboard_bell.as_ref()?;
+        Some((eventfd.try_clone().ok()?, page.try_clone().ok()?))
     }
 
     /// Adds something to be told when topics change hands.

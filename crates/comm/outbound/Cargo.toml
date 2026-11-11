@@ -1,0 +1,30 @@
+[package]
+name = "orion-outbound"
+description = "Carries a topic's samples to subscribers that cannot map its ring, each within its own limit."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-broker = { path = "../broker" }
+orion-config = { path = "../../core/config" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+orion-server = { path = "../server" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["rt", "time", "net"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion = { path = "../../client/orion" }
+orion-stubs = { path = "../../testing/stubs" }
+orion-broker-proxy = { path = "../broker-proxy" }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-types = { path = "../../core/types" }
+tokio = { workspace = true, features = ["rt", "time", "macros", "sync", "net"] }
+
+[lints]
+workspace = true

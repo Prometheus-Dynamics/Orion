@@ -280,6 +280,13 @@ fn subscribe(
         return Err(Error::Unsupported);
     }
     let from = cx.from();
+    // A subscriber that cannot be handed the ring cannot be rung either. What carries its
+    // samples to it is rung in its place.
+    let bell = if shares(cx) {
+        bell
+    } else {
+        topics.offboard_bell()
+    };
     let id = topics.find_or_add(&subscribe.topic.topic)?;
     let topic = topics.get_mut(id).ok_or(Error::NotFound)?;
     // Subscribing again replaces the subscription: a client that reconnected its doorbell.

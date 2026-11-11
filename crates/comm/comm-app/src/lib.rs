@@ -61,6 +61,9 @@ pub struct CommCore {
     peer_addr: Option<SocketAddr>,
     tasks: Vec<JoinHandle<()>>,
     parts: Vec<&'static str>,
+    /// Kept so that it runs for as long as the comm core does.
+    #[cfg(feature = "outbound")]
+    _outbound: orion_outbound::Outbound,
     #[cfg(feature = "self-status")]
     status: orion_self_status::SelfStatus,
     #[cfg(feature = "time")]
@@ -131,6 +134,12 @@ impl CommCore {
             Some(started.map_err(|error| failed("time sync", error))?)
         } else {
             None
+        };
+        #[cfg(feature = "outbound")]
+        let outbound = {
+            parts.push("outbound");
+            orion_outbound::Outbound::start(&comm, &broker, settings.outbound)
+                .map_err(|error| failed("outbound samples", error))?
         };
         #[cfg(feature = "proxy")]
         comm.add_service(orion_broker_proxy::BrokerProxy::new(
@@ -285,6 +294,8 @@ impl CommCore {
             peer_addr,
             tasks,
             parts,
+            #[cfg(feature = "outbound")]
+            _outbound: outbound,
             #[cfg(feature = "self-status")]
             status,
             #[cfg(feature = "time")]

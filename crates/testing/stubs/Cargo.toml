@@ -18,6 +18,7 @@ orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-files = { path = "../../core/msg-files" }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-workloads = { path = "../../core/msg-workloads" }
+orion-outbound = { path = "../../comm/outbound" }
 orion-relay = { path = "../../comm/relay" }
 orion-server = { path = "../../comm/server" }
 orion-tcp = { path = "../../comm/tcp" }

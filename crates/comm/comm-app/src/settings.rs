@@ -17,6 +17,9 @@ pub struct CommSettings {
     pub limits: Limits,
     /// `topics.*`: the broker's limits.
     pub broker: BrokerConfig,
+    /// `outbound.max_bytes`: what may wait to be sent to one subscriber without a ring.
+    #[cfg(feature = "outbound")]
+    pub outbound: orion_outbound::OutboundLimits,
     /// `cluster`, `enrollment.key`, `operators.*`: whom the node trusts.
     pub keys: KeysConfig,
     /// `socket.mode`: the socket's permission bits, in octal. They decide who on the board can
@@ -133,6 +136,8 @@ impl CommSettings {
         Ok(Self {
             limits: Limits::from_source(source)?,
             broker: BrokerConfig::from_source(source)?,
+            #[cfg(feature = "outbound")]
+            outbound: orion_outbound::OutboundLimits::from_source(source)?,
             keys: KeysConfig::from_source(source, &config.state_dir)?,
             socket_mode,
             node_uids: source.list("socket.node_uids")?,
