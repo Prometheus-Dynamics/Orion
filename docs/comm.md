@@ -387,6 +387,43 @@ ordinary `ssh` connects to it. It is off unless `ssh.listen` is set.
   see the key change. A key that cannot be written is used for the run. Nothing about the
   disk closes the way in.
 
+## Recovery
+
+`crates/comm/recovery` (`orion-recovery`). A board is repaired by logging in to it, so a comm
+core that cannot start as it was told to does not end: it opens the recovery way in and stays
+up (`run_or_recover`). That happens when the settings cannot be read, and when the comm core
+cannot start as they say: a state directory that is broken or cannot be written, a trust store
+or identity that cannot be read, an address that cannot be listened on.
+
+- **Nothing from the state directory.** Who may log in is `recovery.keys`
+  (`/etc/orion/recovery_keys`): OpenSSH public keys, one a line, in the image. It is read
+  again every couple of seconds, so a key written from the console works without a restart.
+  A line that is not a plain ed25519 key lets nobody in. The trust store is not opened.
+- **Nothing from a config that could not be read.** Then nothing in it is believed: security
+  is on, the addresses are port 22 and then 2222, the keys file is the usual one. If the
+  settings were read, their SSH address is tried first and their security switch holds: a
+  board that says security is off is as open in recovery as it always is.
+- **Never wider.** With security on and no recovery keys, nobody gets in, and that is logged.
+- **Nothing written.** The host key is the board's if it can be read, and one for the run if
+  not. A session needs no home directory, and an account whose shell is gone gets `/bin/sh`.
+  If the account files themselves are gone and the comm core is root, `root` is still let in.
+- **Never backed off.** If no address can be listened on, each is tried again every second,
+  for ever, at the same pace.
+- **To the service manager** recovery is a comm core that is up, with `recovery: <why>` as
+  its status: it is not restarted into the same failure and it is not given up on.
+
+sftp and scp work in recovery, so a log can be copied off a broken board and a fixed file
+copied on.
+
+## The helper programs
+
+The comm core starts helper programs: a session that becomes the user (`ssh-session`), the
+sftp subsystem (`ssh-sftp`), the child that reads an SSH connection (`ssh-connection`). Each
+is the comm core's own program started again with that word. `orion_comm_app::helper` is where
+those words are known: a binary that holds the comm core calls it first thing and exits with
+what it returns, if it returns anything. `orion-comm-helper` is a program that is only that,
+for images that keep the helpers apart (`ssh.helper`).
+
 ## The network carrier
 
 `crates/comm/tcp` (`orion-tcp`). `orion+tcp`: how nodes reach each other and how people's tools
@@ -684,6 +721,7 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `ssh.max_connections` | 64 | the most SSH connections at once |
 | `ssh.max_unauthenticated` | 10 | the most that have not logged in |
 | `ssh.login_ms` | 60000 | how long a connection has to log in |
+| `recovery.keys` | `/etc/orion/recovery_keys` | the public keys that may log in when the comm core is in recovery (`recovery`) |
 | `nt4.listen` | off | where NT4 clients connect (`nt4`) |
 | `nt4.server` | off | the NT4 server to join as a client, `host` or `host:port` (`nt4-client`) |
 | `nt4.name` | `orion` | what the board calls itself on that server |

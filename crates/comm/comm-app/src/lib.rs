@@ -12,6 +12,10 @@
 
 #![cfg(target_os = "linux")]
 
+#[cfg(feature = "ssh")]
+mod helper;
+#[cfg(feature = "recovery")]
+mod recover;
 mod settings;
 #[cfg(feature = "systemd")]
 pub mod systemd;
@@ -32,6 +36,10 @@ use orion_unix::UnixCarrier;
 use tokio::task::JoinHandle;
 use tracing::info;
 
+#[cfg(feature = "ssh")]
+pub use helper::helper;
+#[cfg(feature = "recovery")]
+pub use recover::{RecoverWith, Started, recover, run_or_recover, start_or_recover};
 pub use settings::CommSettings;
 #[cfg(feature = "link-sealed")]
 pub use settings::SealedLink;

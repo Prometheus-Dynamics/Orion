@@ -55,6 +55,9 @@ pub struct CommSettings {
     /// `ssh.*`: the SSH way in. `None` unless `ssh.listen` is said.
     #[cfg(feature = "ssh")]
     pub ssh: Option<orion_ssh::SshConfig>,
+    /// `recovery.keys`: the public keys that may log in when the comm core is in recovery.
+    #[cfg(feature = "recovery")]
+    pub recovery_keys: std::path::PathBuf,
     /// `ssh.sandbox`, `ssh.sandbox_user`: whether what SSH clients send is read in a child
     /// process with no rights, and the account that child becomes. `None` for no sandbox.
     #[cfg(feature = "ssh-sandbox")]
@@ -184,6 +187,10 @@ impl CommSettings {
             ws_origins: source.list("ws.origins")?,
             #[cfg(feature = "ws")]
             ws_send_buffer: source.get("ws.send_buffer", 256 * 1024_usize)?,
+            #[cfg(feature = "recovery")]
+            recovery_keys: source
+                .optional("recovery.keys")?
+                .unwrap_or_else(|| orion_recovery::KEYS_FILE.into()),
             #[cfg(feature = "ssh-sandbox")]
             ssh_sandbox: if source.get("ssh.sandbox", true)? {
                 Some(orion_ssh_sandbox::SandboxConfig {

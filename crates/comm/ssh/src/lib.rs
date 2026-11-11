@@ -103,6 +103,10 @@ pub struct SshConfig {
     pub forward: bool,
     /// Where the board's `passwd` and `group` are.
     pub etc: PathBuf,
+    /// For the recovery way in, where the board itself may be broken: if there is no
+    /// account file, or none with `root` in it, root is still an account when the comm
+    /// core is root; and an account whose shell is not there gets `/bin/sh`.
+    pub recovery: bool,
     /// `ssh.max_connections`: the most connections at once.
     pub max_connections: usize,
     /// `ssh.max_unauthenticated`: the most connections at once that have not logged in.
@@ -132,6 +136,7 @@ impl SshConfig {
             subsystems: Vec::new(),
             forward: source.get("ssh.forward", true)?,
             etc: "/etc".into(),
+            recovery: false,
             max_connections: source.get("ssh.max_connections", 64_usize)?.max(1),
             max_unauthenticated: source.get("ssh.max_unauthenticated", 10_usize)?.max(1),
             login: Duration::from_millis(source.get("ssh.login_ms", 60_000_u64)?.max(1000)),

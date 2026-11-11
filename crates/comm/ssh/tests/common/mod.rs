@@ -82,6 +82,7 @@ impl Server {
             subsystems: Vec::new(),
             forward: true,
             etc: "/etc".into(),
+            recovery: false,
             max_connections: 64,
             max_unauthenticated: 10,
             login: Duration::from_secs(60),

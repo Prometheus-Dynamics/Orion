@@ -239,7 +239,8 @@ impl Keeper {
                 return None;
             }
         };
-        let Some(user) = users::lookup(&self.config.etc, name) else {
+        let Some(user) = users::lookup(&self.config.etc, name).or_else(|| self.root_anyway(name))
+        else {
             info!("ssh: {from} asked for {name}, which is not an account here");
             return None;
         };
@@ -256,6 +257,21 @@ impl Keeper {
         Some(Admitted {
             _checked: checked,
             user,
+        })
+    }
+
+    /// For the recovery way in: root, when the board's account files do not say who root
+    /// is and this process is root.
+    fn root_anyway(&self, name: &str) -> Option<User> {
+        (self.config.recovery && name == "root" && rustix::process::getuid().is_root()).then(|| {
+            User {
+                name: "root".to_owned(),
+                uid: 0,
+                gid: 0,
+                groups: vec![0],
+                home: "/".into(),
+                shell: "/bin/sh".into(),
+            }
         })
     }
 
@@ -325,7 +341,13 @@ impl Keeper {
             home: user.home.clone(),
             tty: terminal.is_some(),
             env,
-            shell: user.shell.clone(),
+            // For the recovery way in, a shell that is not there is not a reason to keep
+            // someone out of a board they came to repair.
+            shell: if self.config.recovery && !user.shell.exists() {
+                "/bin/sh".into()
+            } else {
+                user.shell.clone()
+            },
             command,
             program,
         };

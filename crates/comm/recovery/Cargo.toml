@@ -1,0 +1,25 @@
+[package]
+name = "orion-recovery"
+description = "The way in that is left when the board is broken: a shell with a full disk, a broken config or a broken state directory."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion-check = { path = "../../core/check" }
+orion-keys = { path = "../keys" }
+orion-ssh = { path = "../ssh", features = ["forward"] }
+orion-types = { path = "../../core/types" }
+russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
+tokio = { workspace = true, features = ["rt", "time", "sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+tokio = { workspace = true, features = ["rt", "macros", "time", "net", "sync"] }
+
+[lints]
+workspace = true

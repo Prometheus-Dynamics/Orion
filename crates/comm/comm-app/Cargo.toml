@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -35,6 +35,8 @@ ssh-sftp = ["ssh", "dep:orion-ssh-sftp"]
 ssh-forward = ["ssh", "orion-ssh/forward", "orion-ssh-sandbox?/forward"]
 # What an SSH client sends, read in a child process with no rights.
 ssh-sandbox = ["ssh", "dep:orion-ssh-sandbox"]
+# The recovery way in: what is started when the comm core cannot be.
+recovery = ["ssh", "dep:orion-recovery", "dep:orion-check"]
 # The NT4 gateway: mapped topics as an NT4 server.
 nt4 = ["dep:orion-nt4-gateway"]
 # The NT4 gateway as a client of an NT4 server somewhere else.
@@ -60,6 +62,7 @@ full = ["mdns", "link-sealed", "link-can", "link-usb"]
 orion-broker = { path = "../broker" }
 orion-broker-buffers = { path = "../broker-buffers", optional = true }
 orion-broker-proxy = { path = "../broker-proxy", optional = true }
+orion-check = { path = "../../core/check", optional = true }
 orion-config = { path = "../../core/config" }
 orion-discovery = { path = "../discovery", optional = true }
 orion-hello = { path = "../hello" }
@@ -74,6 +77,7 @@ orion-relay = { path = "../relay", optional = true }
 orion-self-status = { path = "../self-status", optional = true }
 orion-server = { path = "../server" }
 orion-supervise = { path = "../../core/supervise" }
+orion-recovery = { path = "../recovery", optional = true }
 orion-ssh = { path = "../ssh", optional = true }
 orion-ssh-sandbox = { path = "../ssh-sandbox", optional = true }
 orion-ssh-sftp = { path = "../ssh-sftp", optional = true }
@@ -92,7 +96,16 @@ orion-msg-topics = { path = "../../core/msg-topics" }
 orion-ring = { path = "../../core/ring" }
 orion-ring-doorbell = { path = "../../core/ring-doorbell" }
 orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
 tokio = { workspace = true, features = ["test-util", "net"] }
+
+[[bin]]
+name = "orion-comm-helper"
+required-features = ["ssh"]
+
+[[test]]
+name = "recovery"
+required-features = ["recovery", "ssh-sftp", "ssh-sandbox"]
 
 [lints]
 workspace = true
