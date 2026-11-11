@@ -309,9 +309,10 @@ fn running_removed_stays_until_the_executor_says_gone() {
     assert_eq!(bench.remove("a"), Ok(Removed::Stopping));
     assert_eq!(bench.commands(), [stop("a")]);
     assert_eq!(bench.state("a"), Some(Stopping));
-    // Time alone never drops it.
+    // Time alone never drops it: it is told to end, once, and stays.
     bench.pass(100_000_000);
     assert_eq!(bench.state("a"), Some(Stopping));
+    assert_eq!(bench.commands(), [Command::Kill(name("a"))]);
     // Asked again, it is asked nothing new.
     assert_eq!(bench.remove("a"), Ok(Removed::Stopping));
     assert!(bench.commands().is_empty());

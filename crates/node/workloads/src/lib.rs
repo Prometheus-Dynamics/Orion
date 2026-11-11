@@ -52,6 +52,8 @@ pub struct RestartConfig {
     pub reset_after_ms: u64,
     /// How many restarts in a row before giving up. `None` never gives up.
     pub max_attempts: Option<u32>,
+    /// How long a run that was asked to stop is given before it is told to end now.
+    pub stop_grace_ms: u64,
 }
 
 impl Default for RestartConfig {
@@ -61,6 +63,7 @@ impl Default for RestartConfig {
             max_ms: 60_000,
             reset_after_ms: 10_000,
             max_attempts: None,
+            stop_grace_ms: 10_000,
         }
     }
 }
@@ -157,6 +160,10 @@ pub struct Tracked {
     pub retry_at: Option<u64>,
     /// Since when it has been running, on the caller's clock.
     pub running_since: Option<u64>,
+    /// Since when it has been asked to stop, on the caller's clock.
+    pub stopping_since: Option<u64>,
+    /// Whether it was told to end now, having not stopped when asked.
+    pub killed: bool,
 }
 
 /// The tracker.
@@ -229,9 +236,19 @@ impl Tracker {
     /// The earliest time a restart is due: when to call [`Tracker::tick`] next.
     #[must_use]
     pub fn next_deadline(&self) -> Option<u64> {
+        let grace = self.config.stop_grace_ms;
         self.workloads
             .values()
-            .filter_map(|tracked| tracked.retry_at)
+            .filter_map(|tracked| {
+                let kill_at = tracked
+                    .stopping_since
+                    .filter(|_| !tracked.killed && tracked.state == WorkloadState::Stopping)
+                    .map(|since| since.saturating_add(grace));
+                match (tracked.retry_at, kill_at) {
+                    (Some(retry), Some(kill)) => Some(retry.min(kill)),
+                    (retry, kill) => retry.or(kill),
+                }
+            })
             .min()
     }
 
@@ -268,6 +285,8 @@ impl Tracker {
     fn settle(&mut self, name: &WorkloadName, tracked: &mut Tracked) {
         tracked.retry_at = None;
         tracked.running_since = None;
+        tracked.stopping_since = None;
+        tracked.killed = false;
         if self.executors.contains(&tracked.workload.kind) {
             tracked.run = true;
             self.set(name, tracked, WorkloadState::Starting, "");
@@ -282,10 +301,12 @@ impl Tracker {
         }
     }
 
-    /// Asks for the run to stop, once.
-    fn stop(&mut self, name: &WorkloadName, tracked: &mut Tracked, detail: &str) {
-        if tracked.state != WorkloadState::Stopping {
+    /// Asks for the run to stop, once. If it has not by the grace time, it is told to end.
+    fn stop(&mut self, name: &WorkloadName, tracked: &mut Tracked, detail: &str, now: u64) {
+        if tracked.state != WorkloadState::Stopping || tracked.stopping_since.is_none() {
             self.commands.push(Command::Stop(name.clone()));
+            tracked.stopping_since = Some(now);
+            tracked.killed = false;
         }
         self.set(name, tracked, WorkloadState::Stopping, detail);
     }
@@ -300,6 +321,8 @@ impl Tracker {
         now: u64,
     ) -> bool {
         tracked.run = false;
+        tracked.stopping_since = None;
+        tracked.killed = false;
         let ran_for = tracked
             .running_since
             .take()
@@ -376,9 +399,9 @@ impl Tracker {
             // whatever it says on the way.
             self.set(name, tracked, WorkloadState::Stopping, detail);
         } else if !tracked.wanted {
-            self.stop(name, tracked, "removed");
+            self.stop(name, tracked, "removed", now);
         } else if tracked.replace {
-            self.stop(name, tracked, "stopping to start with new content");
+            self.stop(name, tracked, "stopping to start with new content", now);
         } else {
             self.set(name, tracked, state, detail);
         }
@@ -386,7 +409,6 @@ impl Tracker {
 
     /// Says a workload should exist.
     pub fn put(&mut self, workload: Workload, now: u64) -> Put {
-        let _ = now;
         let name = workload.name.clone();
         let Some(mut tracked) = self.workloads.remove(&name) else {
             let mut tracked = Tracked {
@@ -399,6 +421,8 @@ impl Tracker {
                 attempts: 0,
                 retry_at: None,
                 running_since: None,
+                stopping_since: None,
+                killed: false,
             };
             self.settle(&name, &mut tracked);
             self.workloads.insert(name, tracked);
@@ -425,7 +449,12 @@ impl Tracker {
                 // again when it is gone.
                 tracked.replace = true;
                 if tracked.state != WorkloadState::Lost {
-                    self.stop(&name, &mut tracked, "stopping to start with new content");
+                    self.stop(
+                        &name,
+                        &mut tracked,
+                        "stopping to start with new content",
+                        now,
+                    );
                 }
             }
         }
@@ -439,13 +468,25 @@ impl Tracker {
     ///
     /// [`Error::NotFound`] if there is no such workload.
     pub fn remove(&mut self, name: &WorkloadName, force: bool, now: u64) -> Result<Removed, Error> {
-        let _ = now;
         let mut tracked = self.workloads.remove(name).ok_or(Error::NotFound)?;
         if force {
-            if tracked.run && self.executors.contains(&tracked.workload.kind) {
+            let reachable = self.executors.contains(&tracked.workload.kind);
+            if tracked.run && reachable {
                 self.commands.push(Command::Kill(name.clone()));
             }
-            self.dropped(name, "removed by force");
+            // The record goes whatever is true of the run. What may be left is said.
+            let left = match (tracked.run, reachable) {
+                (false, _) => "removed by force: nothing was running".to_owned(),
+                (true, true) => format!(
+                    "removed by force: a run was left {:?}; its executor was told to end it",
+                    tracked.state
+                ),
+                (true, false) => format!(
+                    "removed by force: a run was left {:?} with no executor to end it",
+                    tracked.state
+                ),
+            };
+            self.dropped(name, &left);
             return Ok(Removed::Dropped);
         }
         if !tracked.run {
@@ -457,7 +498,7 @@ impl Tracker {
         let outcome = if tracked.state == WorkloadState::Lost {
             Removed::Waiting
         } else {
-            self.stop(name, &mut tracked, "removed");
+            self.stop(name, &mut tracked, "removed", now);
             Removed::Stopping
         };
         self.workloads.insert(name.clone(), tracked);
@@ -596,8 +637,37 @@ impl Tracker {
         }
     }
 
-    /// Starts again what is due at `now`.
+    /// Starts again what is due at `now`, and tells a run that was asked to stop and has
+    /// not, for longer than the grace time, to end now. That is said once: a run that
+    /// survives it stays `Stopping`, with its record, until it is reported gone or removed
+    /// by force.
     pub fn tick(&mut self, now: u64) {
+        let grace = self.config.stop_grace_ms;
+        let overdue: Vec<WorkloadName> = self
+            .workloads
+            .iter()
+            .filter(|(_, tracked)| {
+                tracked.state == WorkloadState::Stopping
+                    && !tracked.killed
+                    && tracked
+                        .stopping_since
+                        .is_some_and(|since| now.saturating_sub(since) >= grace)
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in overdue {
+            if let Some(mut tracked) = self.workloads.remove(&name) {
+                tracked.killed = true;
+                self.commands.push(Command::Kill(name.clone()));
+                self.set(
+                    &name,
+                    &mut tracked,
+                    WorkloadState::Stopping,
+                    "it did not stop when asked and was told to end",
+                );
+                self.workloads.insert(name, tracked);
+            }
+        }
         let due: Vec<WorkloadName> = self
             .workloads
             .iter()

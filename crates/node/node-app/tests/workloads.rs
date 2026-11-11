@@ -300,3 +300,160 @@ fn a_workload_that_fails_is_started_again_and_one_that_must_not_is_left() {
             .is_empty()
     });
 }
+
+/// An executor whose workload will not die: it is asked to stop, told to end, and goes on.
+struct Undying {
+    kinds: Vec<orion::executor::WorkloadKind>,
+    running: Vec<orion::executor::WorkloadName>,
+    stops: Arc<std::sync::atomic::AtomicU32>,
+    kills: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl orion::executor::Executor for Undying {
+    fn kinds(&self) -> &[orion::executor::WorkloadKind] {
+        &self.kinds
+    }
+
+    fn start(
+        &mut self,
+        name: &orion::executor::WorkloadName,
+        _spec: &[u8],
+    ) -> Result<(), orion::executor::ExecError> {
+        self.running.push(name.clone());
+        Ok(())
+    }
+
+    fn stop(&mut self, _name: &orion::executor::WorkloadName) {
+        self.stops.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn kill(&mut self, _name: &orion::executor::WorkloadName) {
+        self.kills.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn inventory(&self) -> Vec<(orion::executor::WorkloadName, WorkloadState)> {
+        self.running
+            .iter()
+            .map(|name| (name.clone(), WorkloadState::Running))
+            .collect()
+    }
+}
+
+#[test]
+fn a_process_that_will_not_die_stays_stopping_until_it_is_removed_by_force() {
+    use std::sync::atomic::AtomicU32;
+    let dir = dir("workloads-undying");
+    let board = Board::start_for_node(&dir);
+    let address = Address::Local(board.socket().to_owned());
+    let mut quick = settings(&dir);
+    quick.stop_grace = Duration::from_millis(300);
+    let _logic = Logic::start(quick);
+
+    let (stops, kills) = (Arc::new(AtomicU32::new(0)), Arc::new(AtomicU32::new(0)));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (socket, stopping, counted) = (
+        board.socket().to_owned(),
+        stop.clone(),
+        (stops.clone(), kills.clone()),
+    );
+    let executor = std::thread::spawn(move || {
+        let orion = Orion::connect_with(
+            &Address::Local(socket),
+            "undying",
+            orion::Options {
+                roles: orion::Roles::CLIENT.and(orion::Roles::EXECUTOR),
+                ..orion::Options::default()
+            },
+        )
+        .expect("connect");
+        let mut undying = Undying {
+            kinds: vec!["process".parse().expect("kind")],
+            running: Vec::new(),
+            stops: counted.0,
+            kills: counted.1,
+        };
+        let mut serving = orion.executor();
+        // Node logic may not be there yet: offer until it is.
+        while serving.start(&undying).is_err() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        while !stopping.load(Ordering::Relaxed) {
+            if serving
+                .turn(&mut undying, Duration::from_millis(20))
+                .is_err()
+            {
+                return;
+            }
+        }
+    });
+
+    let operator = Orion::connect(&address, "operator").expect("connect");
+    let zombie = workload("zombie", "anything", RestartPolicy::Always);
+    reaches(&operator, &zombie, WorkloadState::Running);
+
+    // Asked to stop: stopping. Not obeyed: told to end, once. Still there: still stopping,
+    // and its record with it.
+    operator
+        .workloads()
+        .remove("zombie", false)
+        .expect("remove");
+    let stopping_now = operator
+        .workloads()
+        .wait("zombie", Duration::from_secs(10), |tracked| {
+            tracked.state == WorkloadState::Stopping
+        })
+        .expect("connected");
+    assert!(stopping_now.is_some());
+    until("it is told to end", || kills.load(Ordering::Relaxed) == 1);
+    assert_eq!(stops.load(Ordering::Relaxed), 1);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(kills.load(Ordering::Relaxed), 1, "told once");
+    let still = operator.workloads().status("zombie").expect("connected");
+    assert_eq!(
+        still.map(|tracked| tracked.state),
+        Some(WorkloadState::Stopping)
+    );
+    let kept = operator
+        .records()
+        .get(RecordClass::Workload, "")
+        .expect("records");
+    assert_eq!(kept.len(), 1, "the record stays through stopping");
+
+    // Removed by force: the record goes, and what was left behind is said.
+    operator.workloads().remove("zombie", true).expect("force");
+    let gone = operator
+        .workloads()
+        .wait("zombie", Duration::from_secs(10), |tracked| {
+            tracked.state == WorkloadState::Gone
+        })
+        .expect("connected")
+        .expect("it is gone");
+    assert_eq!(
+        gone.detail,
+        "removed by force: a run was left Stopping; its executor was told to end it"
+    );
+    until("the record is gone", || {
+        operator
+            .records()
+            .get(RecordClass::Workload, "")
+            .expect("records")
+            .is_empty()
+    });
+    until("it is told to end again", || {
+        kills.load(Ordering::Relaxed) == 2
+    });
+
+    // And it is in the audit log, with what was left.
+    stop.store(true, Ordering::Relaxed);
+    executor.join().expect("the executor ends");
+    drop(_logic);
+    let log = std::fs::read_to_string(dir.join("state/audit.log")).expect("audit log");
+    assert!(
+        log.contains("\"did\":\"remove\",\"what\":\"zombie by force\",\"result\":\"ok: a run was left Stopping\""),
+        "{log}"
+    );
+    assert!(
+        log.contains("\"did\":\"remove\",\"what\":\"zombie\",\"result\":\"ok\""),
+        "{log}"
+    );
+}

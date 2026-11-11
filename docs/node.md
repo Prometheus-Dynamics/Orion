@@ -66,6 +66,7 @@ Being a client like any other, it publishes what it has to show as topics.
 | `records.max_drift_ms` | 300000 | a stamp from a peer further ahead than this is refused |
 | `files.dir` | `files` in `state.dir` | where files sent to this node go |
 | `files.max_size` | 16 GiB | the largest file taken |
+| `workloads.stop_grace_ms` | 10000 | how long a run asked to stop is given before it is told to end |
 | `audit.file` | `audit.log` in `state.dir` | the audit log; `off` for none |
 | `audit.max_bytes` | 1 MiB | the most the file holds before it is rotated |
 | `audit.keep` | 3 | how many files from before are kept |
@@ -110,6 +111,12 @@ executors (`Start`, `Stop`, `Kill`) and changes of state for whoever is told.
 | Failed | it failed; with a restart due it is started again then, otherwise it stays |
 | Lost | its executor went away, so nobody knows |
 
+- **Stop, then kill.** A run that was asked to stop and has not after the grace time
+  (10 s) is told to end, once. If it survives that too it stays `Stopping`, with its record,
+  for as long as its executor does not report it gone. Orion does not pretend.
+- **Force remove says what it left behind.** The last status of a workload removed by force
+  says whether a run was left, in which state, and whether there was an executor to tell to
+  end it; the audit log has the same.
 - **A record stays until its run is reported gone.** Removing a workload that runs asks for a
   stop and keeps the record, Stopping, however long that takes. If its executor is away the
   record waits, Lost, for the executor to come back and say. Removing with force drops the

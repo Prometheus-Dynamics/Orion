@@ -65,6 +65,9 @@ pub struct NodeSettings {
     pub files_dir: PathBuf,
     /// `files.max_size`: the largest file taken, in bytes.
     pub files_max_size: u64,
+    /// `workloads.stop_grace_ms`: how long a run that was asked to stop is given before
+    /// it is told to end.
+    pub stop_grace: Duration,
     /// `audit.file`: the audit log. `audit.log` in the state directory unless it is said;
     /// `off` for none.
     pub audit: Option<AuditConfig>,
@@ -103,6 +106,7 @@ impl NodeSettings {
             audit,
             files_dir,
             files_max_size: source.get("files.max_size", 16_u64 << 30)?,
+            stop_grace: Duration::from_millis(source.get("workloads.stop_grace_ms", 10_000_u64)?),
             save_after: Duration::from_millis(source.get("records.save_after_ms", 500_u64)?),
             max_drift_ms: source.get("records.max_drift_ms", defaults.max_drift_ms)?,
         })
@@ -191,10 +195,11 @@ impl Node {
             ),
             None => None,
         };
+        let stop_grace = settings.stop_grace;
         Ok(Self {
             settings,
             logic: Rc::new(RefCell::new(Logic::new(
-                store, name, files, audit, identity,
+                store, name, files, audit, identity, stop_grace,
             ))),
             persist: Some(persist),
             saving: None,

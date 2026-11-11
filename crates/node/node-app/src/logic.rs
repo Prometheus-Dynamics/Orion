@@ -160,12 +160,16 @@ impl Logic {
         files: Files,
         audit: Option<Audit>,
         identity: PathBuf,
+        stop_grace: Duration,
     ) -> Self {
         // What should run here is in the store. It is adopted from the executors that are
         // still connected, or started, once they have said what they have.
         let workloads = Workloads::restored(
             node.clone(),
-            orion_executors::RestartConfig::default(),
+            orion_executors::RestartConfig {
+                stop_grace_ms: stop_grace.as_millis() as u64,
+                ..orion_executors::RestartConfig::default()
+            },
             &store,
             0,
         );
@@ -272,6 +276,20 @@ impl Logic {
     }
 
     fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) {
+        // A forced remove drops a record whatever is true of the run: what it leaves behind
+        // is looked at before it is gone, for the audit log.
+        let mut left = (asked.kind == kind::WORKLOAD_REMOVE)
+            .then(|| asked.body::<WorkloadRemove>().ok())
+            .flatten()
+            .filter(|remove| remove.force)
+            .and_then(|remove| {
+                let tracked = self.workloads.tracker().get(&remove.name)?;
+                Some(if tracked.run {
+                    format!("ok: a run was left {:?}", tracked.state)
+                } else {
+                    "ok: nothing was running".to_owned()
+                })
+            });
         let answered = if Records::KINDS.contains(&asked.kind) {
             self.records.request(asked, wall().as_millis() as u64, out)
         } else if Workloads::KINDS.contains(&asked.kind) {
@@ -310,7 +328,10 @@ impl Logic {
         if let Some(audit) = &self.audit
             && let Some((did, what)) = done(asked)
         {
-            let result = answered.map_or_else(|error| error.to_string(), |()| "ok".to_owned());
+            let result = answered.map_or_else(
+                |error| error.to_string(),
+                |()| left.take().unwrap_or_else(|| "ok".to_owned()),
+            );
             audit.record(&Entry {
                 time_ms: wall().as_millis() as u64,
                 who: who(asked),
