@@ -330,19 +330,20 @@ its record from what it declared and registered (see `docs/comm.md`, "Devices as
 
 ## Size and memory
 
-Measured on a CM5 today, against the targets. The targets are unbuilt, and an allocation profile of
-today's heap is the first step.
+Measured on a CM5 under the full robot setup (`testing/board-runs/I6.md`), the comm core and
+node logic together, against the targets. Before is dev, as it was when the rebuild started.
 
-| Where | Today | Target |
-| --- | --- | --- |
-| Heap | 3.36 MB | 1.4 MB, both processes |
-| Other anonymous memory | 1.35 MB | 0.3 MB |
-| Static data and main stack | 0.22 MB | 0.3 MB |
-| Topic rings (shared) | in the heap | 0.5 MB |
-| **Data total** | **4.98 MB** | **2.5 MB** |
-| Code resident | 2.84 MB | 2.0 MB |
-| Threads | 9 | About 4 |
-| Binary on disk | 3.8 MB, plus orionctl | About 5.5 MB, one file, with SSH replacing sshd and OpenSSL |
+| Where | Before | Now | Target |
+| --- | --- | --- | --- |
+| Data (heap, other anonymous memory, static data, stacks) | 4.98 MB | 1.66 MB | 2.5 MB |
+| Topic rings (shared) | in the heap | 42 KiB | 0.5 MB |
+| Code in use | | 1.35 MB | 2.0 MB |
+| Code mapped | 2.84 MB | 2.87 MB | |
+| Threads | 9 | 3 | About 4 |
+| Binary on disk | 3.8 MB, plus orionctl | 5.0 MB, one file, with SSH replacing sshd and OpenSSL | About 5.5 MB |
+
+Code mapped is nearly all the text: the kernel maps 64 KiB around each fault. `scripts/size-gate.sh`
+holds each form's size in the gate.
 
 ## Shared interfaces
 
