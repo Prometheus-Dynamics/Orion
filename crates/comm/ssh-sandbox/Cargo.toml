@@ -1,0 +1,32 @@
+[package]
+name = "orion-ssh-sandbox"
+description = "The SSH way in with everything a client sends read in a child process that has no rights."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# Local forwarding, as in orion-ssh.
+forward = ["orion-ssh/forward"]
+
+[dependencies]
+orion-check = { path = "../../core/check" }
+orion-fdpass = { path = "../../core/fdpass" }
+orion-keys = { path = "../keys" }
+orion-ssh = { path = "../ssh" }
+postcard = { workspace = true, features = ["alloc"] }
+russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "thread", "stdio", "net"] }
+serde = { workspace = true, features = ["alloc"] }
+tokio = { workspace = true, features = ["rt", "net", "time", "sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-types = { path = "../../core/types" }
+tokio = { workspace = true, features = ["rt", "macros", "time", "net", "sync"] }
+
+[lints]
+workspace = true

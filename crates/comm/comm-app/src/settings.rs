@@ -55,6 +55,10 @@ pub struct CommSettings {
     /// `ssh.*`: the SSH way in. `None` unless `ssh.listen` is said.
     #[cfg(feature = "ssh")]
     pub ssh: Option<orion_ssh::SshConfig>,
+    /// `ssh.sandbox`, `ssh.sandbox_user`: whether what SSH clients send is read in a child
+    /// process with no rights, and the account that child becomes. `None` for no sandbox.
+    #[cfg(feature = "ssh-sandbox")]
+    pub ssh_sandbox: Option<orion_ssh_sandbox::SandboxConfig>,
     /// `nt4.*`: the NT4 gateway and its mapping. `None` unless `nt4.listen` is said.
     #[cfg(feature = "nt4")]
     pub nt4: Option<orion_nt4_gateway::Nt4Config>,
@@ -180,6 +184,14 @@ impl CommSettings {
             ws_origins: source.list("ws.origins")?,
             #[cfg(feature = "ws")]
             ws_send_buffer: source.get("ws.send_buffer", 256 * 1024_usize)?,
+            #[cfg(feature = "ssh-sandbox")]
+            ssh_sandbox: if source.get("ssh.sandbox", true)? {
+                Some(orion_ssh_sandbox::SandboxConfig {
+                    user: source.get("ssh.sandbox_user", "nobody".to_owned())?,
+                })
+            } else {
+                None
+            },
             #[cfg(feature = "ssh")]
             ssh: {
                 // Sessions run in this program, started again as the helper, unless

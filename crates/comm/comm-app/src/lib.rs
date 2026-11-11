@@ -66,7 +66,7 @@ pub struct CommCore {
     _outbound: orion_outbound::Outbound,
     /// The SSH way in, if it is open.
     #[cfg(feature = "ssh")]
-    ssh: Option<orion_ssh::Ssh>,
+    ssh: Option<SshServer>,
     /// The NT4 gateway, if it runs.
     #[cfg(feature = "nt4")]
     nt4: Option<orion_nt4_gateway::Gateway>,
@@ -82,6 +82,16 @@ pub struct CommCore {
     time: Option<orion_time::TimeSync>,
     #[cfg(feature = "discovery")]
     discovery: Option<orion_discovery::Discovery>,
+}
+
+/// The SSH way in, as it was asked for.
+#[cfg(feature = "ssh")]
+enum SshServer {
+    /// In the comm core's own process.
+    Plain(orion_ssh::Ssh),
+    /// With a child for each connection.
+    #[cfg(feature = "ssh-sandbox")]
+    Sandboxed(orion_ssh_sandbox::SandboxedSsh),
 }
 
 impl fmt::Debug for CommCore {
@@ -302,11 +312,26 @@ impl CommCore {
             Some(config) => {
                 parts.push("ssh");
                 let listen = config.listen;
-                Some(
-                    orion_ssh::Ssh::start(config, security, keys.clone())
+                // In a child for each connection, unless that is turned off.
+                #[cfg(feature = "ssh-sandbox")]
+                let server = match settings.ssh_sandbox.clone() {
+                    Some(sandbox) => orion_ssh_sandbox::SandboxedSsh::start(
+                        config,
+                        sandbox,
+                        security,
+                        keys.clone(),
+                    )
+                    .await
+                    .map(SshServer::Sandboxed),
+                    None => orion_ssh::Ssh::start(config, security, keys.clone())
                         .await
-                        .map_err(|error| failed(format!("ssh.listen {listen}"), error))?,
-                )
+                        .map(SshServer::Plain),
+                };
+                #[cfg(not(feature = "ssh-sandbox"))]
+                let server = orion_ssh::Ssh::start(config, security, keys.clone())
+                    .await
+                    .map(SshServer::Plain);
+                Some(server.map_err(|error| failed(format!("ssh.listen {listen}"), error))?)
             }
             None => None,
         };
@@ -432,8 +457,12 @@ impl CommCore {
     /// The SSH way in, if it is open.
     #[cfg(feature = "ssh")]
     #[must_use]
-    pub const fn ssh(&self) -> Option<&orion_ssh::Ssh> {
-        self.ssh.as_ref()
+    pub fn ssh_addr(&self) -> Option<SocketAddr> {
+        self.ssh.as_ref().map(|server| match server {
+            SshServer::Plain(server) => server.local_addr(),
+            #[cfg(feature = "ssh-sandbox")]
+            SshServer::Sandboxed(server) => server.local_addr(),
+        })
     }
 
     /// The NT4 gateway, if it runs.

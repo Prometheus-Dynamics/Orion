@@ -118,7 +118,7 @@ SSH served by Orion, the recovery shell and the recovery build.
 - [x] [G1](docs/prs/G1.md) SSH server (wave 7; needs C1, C7)
 - [x] [G2](docs/prs/G2.md) sftp and scp (wave 8; needs G1)
 - [x] [G3](docs/prs/G3.md) Port forwarding (wave 8; needs G1)
-- [ ] [G4](docs/prs/G4.md) Pre-auth sandbox (wave 8; needs G1)
+- [x] [G4](docs/prs/G4.md) Pre-auth sandbox (wave 8; needs G1)
 - [ ] [G5](docs/prs/G5.md) Recovery shell (wave 8; needs G1)
 - [ ] [G6](docs/prs/G6.md) Recovery build (wave 9; needs G5, C15, C13; board run)
 

@@ -79,6 +79,35 @@ pub async fn connect(host: &str, port: u32) -> Result<TcpStream, Refused> {
     }
 }
 
+/// As [`connect`], for a caller that may block: the same order, the same time allowed.
+///
+/// # Errors
+///
+/// [`Refused`], within [`CONNECT`].
+pub fn connect_blocking(host: &str, port: u32) -> Result<std::net::TcpStream, Refused> {
+    use std::net::ToSocketAddrs;
+    let port = u16::try_from(port)
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or(Refused::Port(port))?;
+    let began = std::time::Instant::now();
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|_| Refused::Unknown(host.to_owned()))?;
+    let mut last = None;
+    for address in addresses {
+        let left = CONNECT.saturating_sub(began.elapsed());
+        if left.is_zero() {
+            return Err(Refused::Connect(std::io::ErrorKind::TimedOut.into()));
+        }
+        match std::net::TcpStream::connect_timeout(&address, left) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last = Some(error),
+        }
+    }
+    Err(last.map_or_else(|| Refused::Unknown(host.to_owned()), Refused::Connect))
+}
+
 /// Carries `stream` on `channel`, both ways, until either end closes. The task ends with
 /// how many bytes went to the stream and how many came from it.
 pub fn carry(
@@ -121,6 +150,25 @@ mod tests {
         ));
         assert!(matches!(
             connect("no-such-host.invalid", 80).await,
+            Err(Refused::Unknown(_))
+        ));
+        // The same for a caller that blocks.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listen");
+        let port = u32::from(listener.local_addr().expect("addr").port());
+        assert!(connect_blocking("localhost", port).is_ok());
+        drop(listener);
+        assert!(matches!(
+            connect_blocking("127.0.0.1", port),
+            Err(Refused::Connect(_))
+        ));
+        assert!(matches!(
+            connect_blocking("127.0.0.1", 0),
+            Err(Refused::Port(0))
+        ));
+        assert!(matches!(
+            connect_blocking("no-such-host.invalid", 80),
             Err(Refused::Unknown(_))
         ));
     }

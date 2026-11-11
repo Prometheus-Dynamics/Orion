@@ -366,6 +366,17 @@ ordinary `ssh` connects to it. It is off unless `ssh.listen` is set.
   giving up after ten seconds, and carries the bytes on a channel until either end closes.
   Whoever may log in may reach what the board reaches, as from a shell. `ssh.forward = false`
   refuses them. Nothing listens on the board for anyone: there is no `-R`.
+- **Read without rights.** `crates/comm/ssh-sandbox` (`orion-ssh-sandbox`), on unless
+  `ssh.sandbox = false`. Each connection gets a child process, the comm core's program
+  started with `ssh-connection`, and the child reads everything the client sends. Before it
+  reads a byte it becomes `ssh.sandbox_user` (`nobody`) with no groups, checks it cannot go
+  back, and gives up gaining rights by any means. It has no trust store. What needs rights
+  it asks the comm core for on a socket: whether a key may log in, a session, a connection
+  from the board. The comm core decides with the check, answers a session or a connection
+  only after it has itself let that connection log in, lets a connection log in once, and
+  holds it to the login time. A child that crashes or is taken over ends one connection:
+  its sessions are ended with it and nothing else notices. The child does hold the host
+  key; taking one over lets someone pretend to be the board to a client, not get in.
 - **Small before the login.** One family of key exchange (`mlkem768x25519-sha256`,
   `curve25519-sha256`), two ciphers (`chacha20-poly1305`, `aes256-gcm`), public keys only.
   At most `ssh.max_unauthenticated` connections may be waiting to log in, and each has
@@ -668,6 +679,8 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `ssh.host_key` | `<state.dir>/ssh_host_ed25519_key` | the host key, made if it is not there |
 | `ssh.helper` | this program | the program sessions run in |
 | `ssh.forward` | `true` | whether someone logged in may ask for connections from the board (`ssh-forward`) |
+| `ssh.sandbox` | `true` | whether what SSH clients send is read in a child with no rights (`ssh-sandbox`) |
+| `ssh.sandbox_user` | `nobody` | the account that child becomes |
 | `ssh.max_connections` | 64 | the most SSH connections at once |
 | `ssh.max_unauthenticated` | 10 | the most that have not logged in |
 | `ssh.login_ms` | 60000 | how long a connection has to log in |

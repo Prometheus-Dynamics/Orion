@@ -113,7 +113,7 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
         let dir = temp("alone");
         // No node logic, no other program, nothing on the links it is told about.
         let extra = format!(
-            "peer.listen = 127.0.0.1:0\nssh.listen = 127.0.0.1:0\nlinks.serial = uart0={}/no-such-port\nlinks.usb = usb0\nlinks.can = can9=no-such-can:0x100:0x180:1-2\n",
+            "peer.listen = 127.0.0.1:0\nssh.listen = 127.0.0.1:0\nssh.sandbox = false\nlinks.serial = uart0={}/no-such-port\nlinks.usb = usb0\nlinks.can = can9=no-such-can:0x100:0x180:1-2\n",
             dir.display()
         );
         let core = CommCore::start(settings(&dir, &extra))
@@ -235,7 +235,7 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
         );
 
         // And the SSH way in says which SSH it speaks, and has made its host key.
-        let ssh = core.ssh().expect("ssh").local_addr();
+        let ssh = core.ssh_addr().expect("ssh");
         let mut greeting = [0_u8; 8];
         tokio::net::TcpStream::connect(ssh)
             .await

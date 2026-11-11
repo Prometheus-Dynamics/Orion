@@ -19,7 +19,7 @@ orion-keys = { path = "../keys" }
 orion-ssh-forward = { path = "../ssh-forward", optional = true }
 orion-types = { path = "../../core/types" }
 russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
-rustix = { version = "1", default-features = false, features = ["std", "pty", "process", "thread", "termios", "fs", "stdio"] }
+rustix = { version = "1", default-features = false, features = ["std", "pty", "process", "thread", "termios", "fs", "stdio", "event", "net", "pipe"] }
 tokio = { workspace = true, features = ["rt", "net", "io-util", "time", "sync", "macros", "process", "fs"] }
 tracing.workspace = true
 
