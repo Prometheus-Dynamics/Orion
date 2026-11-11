@@ -196,10 +196,17 @@ fn an_operator_trusted_with_everything_logs_in_and_runs_commands_as_the_user() {
     let server = Server::start(&dir, Security::On, keys, |_| {});
     let me = me();
 
+    // No command and no terminal: a login shell that reads its commands from its input.
+    // What the account's own start-up files print or leave as a status is theirs.
+    let ran = server.ssh(&me.name, Some(&admin), &[], "echo from-input\nexit 4\n");
+    assert_eq!(ran.status.code(), Some(4), "{}", text(&ran.stderr));
+    assert!(
+        text(&ran.stdout).contains("from-input"),
+        "{}",
+        text(&ran.stdout)
+    );
+
     // A command: its output, its errors apart, its exit code, and who it ran as.
-    let ran = server.ssh(&me.name, Some(&admin), &[], "");
-    // No command and no terminal: a shell that reads its input, which is empty.
-    assert!(ran.status.success(), "{}", text(&ran.stderr));
     let ran = server.ssh(
         &me.name,
         Some(&admin),
