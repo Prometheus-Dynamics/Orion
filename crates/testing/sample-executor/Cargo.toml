@@ -1,0 +1,20 @@
+[package]
+name = "orion-sample-executor"
+description = "The smallest working executor: each workload is a shell command it runs as a child process."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion = { path = "../../client/orion", features = ["executor"] }
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+
+[dev-dependencies]
+orion = { path = "../../client/orion", features = ["executor", "workloads"] }
+orion-stubs = { path = "../stubs" }
+
+[lints]
+workspace = true

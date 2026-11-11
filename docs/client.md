@@ -204,6 +204,14 @@ executor never has to remember to report: what it says it has is compared with w
 last told. When the connection has been made again, `start` sends the whole inventory once
 more, which is how Orion takes back runs that carried on without it, by name.
 
+**An example to read.** `crates/testing/sample-executor` is the smallest working executor: a
+workload's spec is a shell command, which it runs as a child process. `stop` is `SIGTERM`,
+`kill` is `SIGKILL`, and the inventory is what is true of the children: running, stopping,
+failed if one exited with an error, and no longer listed once one has ended. Its `run` is the
+program around an executor: connect, offer, take turns, and when the connection breaks connect
+again and offer what is still running. It is also a program,
+`orion-sample-executor [--socket PATH] [--kind KIND]...`.
+
 ## The provider role
 
 `orion-provider`. A resource is a thing that exists: a camera, a fan. A provider is the
