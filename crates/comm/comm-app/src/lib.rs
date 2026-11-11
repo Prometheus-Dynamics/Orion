@@ -323,14 +323,32 @@ impl CommCore {
                 // In a child for each connection, unless that is turned off.
                 #[cfg(feature = "ssh-sandbox")]
                 let server = match settings.ssh_sandbox.clone() {
-                    Some(sandbox) => orion_ssh_sandbox::SandboxedSsh::start(
-                        config,
-                        sandbox,
-                        security,
-                        keys.clone(),
-                    )
-                    .await
-                    .map(SshServer::Sandboxed),
+                    Some(sandbox) => {
+                        let sandboxed = orion_ssh_sandbox::SandboxedSsh::start(
+                            config.clone(),
+                            sandbox,
+                            security,
+                            keys.clone(),
+                        )
+                        .await;
+                        match sandboxed {
+                            Ok(server) => Ok(SshServer::Sandboxed(server)),
+                            // An image with no account for the children to become.
+                            // Reading in this process lets in nobody it would not have:
+                            // a way in is worth more than none. An address that cannot
+                            // be listened on is not helped by trying again without.
+                            Err(error) if error.kind() == std::io::ErrorKind::Other => {
+                                tracing::warn!(
+                                    "ssh: no child processes for connections ({error}): they \
+                                     are read in the comm core itself"
+                                );
+                                orion_ssh::Ssh::start(config, security, keys.clone())
+                                    .await
+                                    .map(SshServer::Plain)
+                            }
+                            Err(error) => Err(error),
+                        }
+                    }
                     None => orion_ssh::Ssh::start(config, security, keys.clone())
                         .await
                         .map(SshServer::Plain),

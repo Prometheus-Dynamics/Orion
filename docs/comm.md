@@ -424,6 +424,30 @@ those words are known: a binary that holds the comm core calls it first thing an
 what it returns, if it returns anything. `orion-comm-helper` is a program that is only that,
 for images that keep the helpers apart (`ssh.helper`).
 
+## The comm core alone: `orion-recovery`
+
+`crates/bins/orion-recovery` builds `orion-recovery`: the comm core as one file, for an
+initramfs, a flasher image, or any board that needs only the way in. It is the comm core with
+the network carrier, SSH with sftp, forwarding and the sandbox, and recovery; nothing of node
+logic. Built for a board (`aarch64-unknown-linux-musl`, profile `service`) it is linked
+statically: the image needs this file and a shell.
+
+```
+orion-recovery [settings file]
+```
+
+- Settings come from the file (`/etc/orion/orion.conf`) and the environment. With no file
+  there it listens for SSH on port 22 and is otherwise a comm core with nothing set.
+- It ends in recovery instead of ending, as above. `ORION_RECOVERY_KEYS` and
+  `ORION_RECOVERY_LISTEN` name the keys file and the addresses for that, and hold even when
+  the file is what is broken.
+- It is its own helper programs.
+- It logs to standard error, one line an event; `ORION_LOG` says how much (`info`).
+
+**Size gate.** `scripts/size-gate.sh`, part of the gate, builds it as it ships and fails if
+it has grown past a limit set a tenth above its last measured size: 2,634,088 bytes for a
+board, static. A change that needs the bytes raises the limit in the same commit and says why.
+
 ## The network carrier
 
 `crates/comm/tcp` (`orion-tcp`). `orion+tcp`: how nodes reach each other and how people's tools

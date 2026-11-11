@@ -620,9 +620,12 @@ impl Ssh {
         security: Security,
         keys: SharedKeys,
     ) -> std::io::Result<Self> {
-        let protocol = protocol(hostkey::load_or_make(&config.host_key)?);
+        let host_key = hostkey::load_or_make(&config.host_key)
+            .map_err(|error| std::io::Error::new(error.kind(), format!("no host key: {error}")))?;
+        let protocol = protocol(host_key);
         let listener = TcpListener::bind(config.listen).await?;
         let local_addr = listener.local_addr()?;
+        tracing::info!("ssh: open on {local_addr}");
         let places = Places::new(&config);
         let login = config.login;
         let keeper = Arc::new(Keeper::new(config, security, keys, local_addr));

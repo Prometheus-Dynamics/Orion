@@ -8,9 +8,22 @@ use russh::keys::ssh_key::LineEnding;
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use tracing::{info, warn};
 
+/// Thirty-two random bytes from the kernel. Asked for by the call, which needs nothing in
+/// `/dev`: early in an initramfs there may be nothing there yet. The device is the way for
+/// a kernel too old to have the call.
 fn random_seed() -> std::io::Result<[u8; 32]> {
     let mut seed = [0_u8; 32];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut seed)?;
+    let mut filled = 0;
+    while filled < seed.len() {
+        match rustix::rand::getrandom(&mut seed[filled..], rustix::rand::GetRandomFlags::empty()) {
+            Ok(count) => filled += count,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(_) => {
+                std::fs::File::open("/dev/urandom")?.read_exact(&mut seed)?;
+                break;
+            }
+        }
+    }
     Ok(seed)
 }
 

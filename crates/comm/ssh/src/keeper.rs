@@ -234,6 +234,11 @@ impl Keeper {
         let check = Check::with_grants(self.security, &self.keys);
         let checked = match check.decide(&self.who(key), Login, &LOGIN) {
             Ok(checked) => checked,
+            // Every client first asks with no key, to learn what is taken: not news.
+            Err(refused) if key.is_none() => {
+                tracing::debug!("ssh: {from} was not let in as {name} with {how}: {refused}");
+                return None;
+            }
             Err(refused) => {
                 info!("ssh: {from} was not let in as {name} with {how}: {refused}");
                 return None;

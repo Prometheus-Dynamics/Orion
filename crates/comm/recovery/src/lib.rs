@@ -90,8 +90,9 @@ fn trust(keys: &[([u8; 32], String)]) -> Option<Keys> {
 struct Shared {
     config: RecoveryConfig,
     keys: SharedKeys,
-    /// The keys file as it was last read.
-    read: Mutex<Option<String>>,
+    /// The keys file as it was last read: `None` before the first time, and `Some(None)`
+    /// if it could not be read.
+    read: Mutex<Option<Option<String>>>,
     local_addr: Mutex<Option<SocketAddr>>,
     attempts: AtomicU64,
 }
@@ -101,29 +102,27 @@ impl Shared {
     fn reload(&self) {
         let text = std::fs::read_to_string(&self.config.keys_file).ok();
         let mut read = self.read.lock().unwrap_or_else(PoisonError::into_inner);
-        if *read == text && read.is_some() {
+        // As it was last time, readable or not: nothing to do and nothing to say.
+        if read.as_ref() == Some(&text) {
             return;
         }
         let keys = keys_in(text.as_deref().unwrap_or_default());
         if let Some(store) = trust(&keys) {
             *self.keys.lock() = store;
         }
-        if *read != text || read.is_none() {
-            match (&text, keys.len(), self.config.security) {
-                (_, _, Security::Off) => {}
-                (None, _, _) => warn!(
-                    "recovery: {} cannot be read, so nobody can log in",
-                    self.config.keys_file.display()
-                ),
-                (Some(_), 0, _) => warn!(
-                    "recovery: {} has no key in it, so nobody can log in",
-                    self.config.keys_file.display()
-                ),
-                (Some(_), count, _) => info!("recovery: {count} keys may log in"),
-            }
+        match (&text, keys.len(), self.config.security) {
+            (_, _, Security::Off) => {}
+            (None, _, _) => warn!(
+                "recovery: {} cannot be read, so nobody can log in",
+                self.config.keys_file.display()
+            ),
+            (Some(_), 0, _) => warn!(
+                "recovery: {} has no key in it, so nobody can log in",
+                self.config.keys_file.display()
+            ),
+            (Some(_), count, _) => info!("recovery: {count} keys may log in"),
         }
-        // An unreadable file is read again next time, in case it is back.
-        *read = text.or(Some(String::new()));
+        *read = Some(text);
     }
 }
 
@@ -215,7 +214,9 @@ impl Recovery {
                 if let Some((listen, error)) = last
                     && tries.is_multiple_of(60)
                 {
-                    warn!("recovery: cannot listen on {listen}: {error}; trying again, and again");
+                    warn!(
+                        "recovery: cannot open the way in on {listen}: {error}; trying again, and again"
+                    );
                 }
                 // The same wait every time.
                 tokio::time::sleep(config.retry).await;

@@ -58,6 +58,10 @@ pub struct CommSettings {
     /// `recovery.keys`: the public keys that may log in when the comm core is in recovery.
     #[cfg(feature = "recovery")]
     pub recovery_keys: std::path::PathBuf,
+    /// `recovery.listen`: where recovery listens, after `ssh.listen`. Empty for the usual
+    /// addresses.
+    #[cfg(feature = "recovery")]
+    pub recovery_listen: Vec<std::net::SocketAddr>,
     /// `ssh.sandbox`, `ssh.sandbox_user`: whether what SSH clients send is read in a child
     /// process with no rights, and the account that child becomes. `None` for no sandbox.
     #[cfg(feature = "ssh-sandbox")]
@@ -191,6 +195,8 @@ impl CommSettings {
             recovery_keys: source
                 .optional("recovery.keys")?
                 .unwrap_or_else(|| orion_recovery::KEYS_FILE.into()),
+            #[cfg(feature = "recovery")]
+            recovery_listen: source.list("recovery.listen")?,
             #[cfg(feature = "ssh-sandbox")]
             ssh_sandbox: if source.get("ssh.sandbox", true)? {
                 Some(orion_ssh_sandbox::SandboxConfig {

@@ -38,6 +38,10 @@ if [ -x scripts/check-boundaries.sh ]; then
   step boundaries-self-test scripts/check-boundaries.sh --self-test
 fi
 
+if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
+  step "size gate" scripts/size-gate.sh
+fi
+
 # The stable-toolchain garbage test always runs. These go deeper where the tools are installed.
 if [ -d testing/fuzz ] && command -v cargo-fuzz > /dev/null && rustup toolchain list | grep -q '^nightly'; then
   step "fuzz, short budget" scripts/fuzz-short.sh

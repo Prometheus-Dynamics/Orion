@@ -1,0 +1,29 @@
+[package]
+name = "orion-recovery-bin"
+description = "The comm core alone, as one static file: for an initramfs, a flasher image, or any board that needs only the way in."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "orion-recovery"
+path = "src/main.rs"
+
+[dependencies]
+orion-comm-app = { path = "../../comm/comm-app", default-features = false, features = [
+    "tcp",
+    "ssh",
+    "ssh-sftp",
+    "ssh-forward",
+    "ssh-sandbox",
+    "recovery",
+    "systemd",
+] }
+orion-config = { path = "../../core/config" }
+tracing.workspace = true
+
+[lints]
+workspace = true

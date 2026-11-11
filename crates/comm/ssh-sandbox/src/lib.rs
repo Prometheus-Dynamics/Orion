@@ -143,12 +143,14 @@ impl SandboxedSsh {
         security: Security,
         keys: SharedKeys,
     ) -> std::io::Result<Self> {
-        let host_key = orion_ssh::hostkey::load_or_make(&config.host_key)?
+        let host_key = orion_ssh::hostkey::load_or_make(&config.host_key)
+            .map_err(|error| std::io::Error::new(error.kind(), format!("no host key: {error}")))?
             .to_openssh(LineEnding::LF)
             .map_err(std::io::Error::other)?
             .to_string();
         let listener = TcpListener::bind(config.listen).await?;
         let local_addr = listener.local_addr()?;
+        tracing::info!("ssh: each connection is read by a child; open on {local_addr}");
         // Who a child becomes, if this process may make it anyone.
         let become_ids = if rustix::process::getuid().is_root() {
             let user = users::lookup(&config.etc, &sandbox.user)

@@ -74,12 +74,17 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
             program: vec![helper.program.clone().into(), orion_ssh_sftp::MODE.into()],
         });
     }
+    // The address the board's SSH has, then the ones recovery is told, then the usual.
     let mut listen: Vec<SocketAddr> = ssh.map(|ssh| ssh.listen).into_iter().collect();
-    listen.extend(
-        with.listen
-            .iter()
-            .filter(|addr| Some(**addr) != ssh.map(|ssh| ssh.listen)),
-    );
+    let told = settings
+        .map(|settings| settings.recovery_listen.as_slice())
+        .filter(|told| !told.is_empty())
+        .unwrap_or(&with.listen);
+    for addr in told {
+        if !listen.contains(addr) {
+            listen.push(*addr);
+        }
+    }
     let state_dir = settings.map_or_else(
         || PathBuf::from("/var/lib/orion"),
         |settings| settings.config.state_dir.clone(),
