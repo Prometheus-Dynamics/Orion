@@ -6,6 +6,7 @@ use orion_types::{Error, HlcTimestamp};
 use orion_wire::{List, kind};
 
 use orion_reply::{Asked, Out};
+use orion_resources::Resources;
 
 /// About how many bytes of records go in one message. A record larger than this goes alone.
 const PAGE_BYTES: usize = 24 * 1024;
@@ -22,6 +23,7 @@ struct Watcher {
 #[derive(Debug)]
 pub struct Records {
     store: Store,
+    resources: Resources,
     watchers: Vec<Watcher>,
     dirty: bool,
 }
@@ -75,8 +77,9 @@ fn send(
 impl Records {
     /// The service over `store`.
     #[must_use]
-    pub const fn new(store: Store) -> Self {
+    pub fn new(store: Store) -> Self {
         Self {
+            resources: Resources::new(store.node().clone()),
             store,
             watchers: Vec::new(),
             dirty: false,
@@ -108,14 +111,23 @@ impl Records {
         self.watchers.len()
     }
 
-    /// Forgets every watch: the comm core they came through is gone, and so are they.
-    pub fn forget_sessions(&mut self) {
+    /// Forgets every watch: the comm core they came through is gone, and so are they. What
+    /// those sessions provided is lost until its provider is back.
+    pub fn forget_sessions(&mut self, wall_ms: u64) {
         self.watchers.clear();
+        if self.resources.forget_sessions(&mut self.store, wall_ms) != 0 {
+            self.dirty = true;
+            // Nobody is watching: the changes are only to be saved.
+            let _ = self.store.take_changes();
+        }
     }
 
-    /// A session is gone.
-    pub fn gone(&mut self, session: u32) {
+    /// A session is gone: its watches end, and what it provided is lost.
+    pub fn gone(&mut self, session: u32, wall_ms: u64, out: &mut dyn Out) {
         self.watchers.retain(|watcher| watcher.session != session);
+        if self.resources.gone(&mut self.store, session, wall_ms) != 0 {
+            self.publish(out);
+        }
     }
 
     /// Answers one request.
@@ -133,6 +145,11 @@ impl Records {
         match asked.kind {
             kind::PUT => {
                 let put: Put<'_> = asked.body()?;
+                // All of a write or none of it: every entry is looked at before any is made.
+                for entry in put.records.iter() {
+                    self.resources
+                        .check(&self.store, session, &entry?, wall_ms)?;
+                }
                 let mut stored = Vec::new();
                 for entry in put.records.iter() {
                     let entry = entry?;
@@ -144,6 +161,8 @@ impl Records {
                         self.store
                             .put(entry.class, entry.key, entry.value.0, wall_ms);
                     }
+                    self.resources
+                        .wrote(&mut self.store, session, &entry, wall_ms);
                     // As stored: with the stamp the store gave it.
                     if let Some(version) = self.store.version(entry.class, entry.key) {
                         stored.push(Record {

@@ -135,7 +135,7 @@ impl Logic {
     }
 
     pub(crate) fn forget_sessions(&mut self) {
-        self.records.forget_sessions();
+        self.records.forget_sessions(wall().as_millis() as u64);
         self.actions.forget_sessions();
     }
 
@@ -252,7 +252,8 @@ impl Handler for Logic {
             self.request(&Asked::new(&passed), &mut through);
         } else {
             let gone: NodeGone = frame.body()?;
-            self.records.gone(gone.session);
+            self.records
+                .gone(gone.session, wall().as_millis() as u64, &mut through);
             self.files.gone(gone.session);
             let now = self.now_ms();
             self.actions.gone(gone.session, now, &mut through);

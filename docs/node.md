@@ -85,6 +85,9 @@ Being a client like any other, it publishes what it has to show as topics.
   apart at first and at most a second. Watches are forgotten: they belonged to sessions that
   ended with the comm core, and their programs ask again when they reconnect.
 
+- **Resources.** A write of a resource or a lease is held to the rules of resources (below)
+  before the store takes it, and a write is all or nothing: one entry refused refuses them
+  all.
 - **Files.** Node logic takes the files sent to this node (below).
 - **Actions.** Node logic keeps the open list (below) and publishes what happens to runs on
   the topic `orion.actions`.
@@ -267,3 +270,31 @@ comm core named the caller. `result` is `ok`, or why node logic refused.
 
 Not in the log: a request the check refused at the door. It never reaches node logic; the comm
 core counts it.
+
+## Resources
+
+A resource is a thing that exists: a camera, a fan, a motor controller. Orion does not know
+what kinds there are. A provider, any program on the board, writes a record for each thing it
+offers: name, kind, node, state, and what it offers, which is its labels (tags), its topics and
+its actions by full name. With that a program that has never heard of the kind lists it, reads
+its topics and runs its actions. The records are the store's and reach every node by peer sync.
+`orion-resources` is the rules.
+
+- **One provider.** The session that wrote a resource is the one that may write it again or
+  take it away. Anyone else is `denied`.
+- **Where its provider is.** A program writes resources for its own node. A record that is not
+  a resource record, or sits under another name than its own, is `malformed`.
+- **Lost, not gone.** When its provider's session ends, a resource stays listed with state
+  `Lost` and everything else as its provider said. When the provider is back and writes it
+  again, it is what the provider says. If the comm core goes, every resource provided
+  through it is lost the same way.
+- **Bindings are leases.** Whoever is to use a resource alone holds it: a lease record under
+  the resource's name, with the holder and when the lease ends (zero for "until released").
+  A resource has one holder at a time; another is `busy`. Only a resource that is `Ready` can
+  be taken; one that is not is `unavailable`. A holder keeps what it holds while the resource
+  is lost, and may renew. A lease that has ended holds nothing. A resource that is taken away
+  takes its lease with it. Node logic binds with `bind` and `release`; a program binds by
+  writing the lease record, under the same rules.
+
+After node logic restarts it no longer knows which session provides what, until each provider
+writes its resource again. A provider that dies in that time is not noticed.

@@ -20,6 +20,7 @@ orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
 orion-persist = { path = "../persist" }
 orion-reply = { path = "../reply" }
+orion-resources = { path = "../resources" }
 orion-ring = { path = "../../core/ring" }
 orion-store = { path = "../store" }
 orion-topics = { path = "../../client/topics" }
@@ -29,7 +30,7 @@ tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"
 tracing.workspace = true
 
 [dev-dependencies]
-orion = { path = "../../client/orion", features = ["files"] }
+orion = { path = "../../client/orion", features = ["files", "provider"] }
 orion-stubs = { path = "../../testing/stubs" }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 

@@ -1,0 +1,17 @@
+[package]
+name = "orion-resources"
+description = "Resources: the things that exist on a board, who offers them, and who holds them."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-records = { path = "../../core/msg-records" }
+orion-store = { path = "../store" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[lints]
+workspace = true

@@ -106,7 +106,7 @@ fn answered(records: &Records, class: RecordClass, prefix: &str) -> Vec<Record> 
 
 fn entry<'a>(key: &'a str, value: &'a [u8]) -> RecordEntry<'a> {
     RecordEntry {
-        class: RecordClass::Resource,
+        class: RecordClass::Node,
         key,
         stamp: HlcTimestamp::ZERO,
         deleted: false,
@@ -156,10 +156,10 @@ fn node_logic_can_die_and_links_stay_up_and_it_resumes() {
 
     // Node logic answers for the records.
     let records = sensor.records();
-    assert!(answered(records, RecordClass::Resource, "").is_empty());
+    assert!(answered(records, RecordClass::Node, "").is_empty());
     let mut watch = dashboard
         .records()
-        .watch(RecordClass::Resource, "fan.", HlcTimestamp::ZERO)
+        .watch(RecordClass::Node, "fan.", HlcTimestamp::ZERO)
         .expect("watch");
     let stored = records.put(&[entry("fan.left", b"one")]).expect("put");
     assert_eq!(stored.len(), 1);
@@ -174,7 +174,7 @@ fn node_logic_can_die_and_links_stay_up_and_it_resumes() {
     // Node logic is killed. Topics flow, sessions stay, and records say "restarting".
     logic.kill();
     publish_and_read(2);
-    assert!(unavailable(records.get(RecordClass::Resource, "")));
+    assert!(unavailable(records.get(RecordClass::Node, "")));
     assert!(unavailable(records.put(&[entry("fan.right", b"two")])));
     publish_and_read(3);
     dashboard
@@ -183,9 +183,9 @@ fn node_logic_can_die_and_links_stay_up_and_it_resumes() {
 
     // It comes back with what it had, stamps and all.
     let logic = Logic::start(settings(&dir, quick));
-    let found = answered(records, RecordClass::Resource, "fan.");
+    let found = answered(records, RecordClass::Node, "fan.");
     assert_eq!(found, stored);
-    assert_eq!(answered(records, RecordClass::Resource, "").len(), 2);
+    assert_eq!(answered(records, RecordClass::Node, "").len(), 2);
 
     // The watch made before it died is still told, though the program never asked again.
     let right = records.put(&[entry("fan.right", b"two")]).expect("put");
@@ -218,7 +218,7 @@ fn node_logic_can_die_and_links_stay_up_and_it_resumes() {
         .expect("watch")
         .expect("a change");
     assert_eq!(seen, gone[0]);
-    assert_eq!(answered(records, RecordClass::Resource, "fan.").len(), 1);
+    assert_eq!(answered(records, RecordClass::Node, "fan.").len(), 1);
     publish_and_read(4);
     drop(logic);
 }
@@ -255,7 +255,7 @@ fn asked_to_stop_it_saves_what_it_has_not_yet() {
     let never = Duration::from_secs(3600);
     let logic = Logic::start(settings(&dir, never));
     let program = Orion::connect(&address, "program").expect("connect");
-    assert!(answered(program.records(), RecordClass::Resource, "").is_empty());
+    assert!(answered(program.records(), RecordClass::Node, "").is_empty());
     let stored = program
         .records()
         .put(&[entry("valve", b"open")])
@@ -263,10 +263,7 @@ fn asked_to_stop_it_saves_what_it_has_not_yet() {
     logic.stop();
 
     let logic = Logic::start(settings(&dir, never));
-    assert_eq!(
-        answered(program.records(), RecordClass::Resource, ""),
-        stored
-    );
+    assert_eq!(answered(program.records(), RecordClass::Node, ""), stored);
     drop(logic);
 }
 
@@ -278,13 +275,13 @@ fn a_read_larger_than_one_message_comes_in_several() {
     let _logic = Logic::start(settings(&dir, Duration::from_secs(3600)));
     let program = Orion::connect(&address, "program").expect("connect");
     let records = program.records();
-    assert!(answered(records, RecordClass::Resource, "").is_empty());
+    assert!(answered(records, RecordClass::Node, "").is_empty());
     let value = vec![7_u8; 1000];
     for index in 0..200 {
         let key = format!("part.{index:03}");
         records.put(&[entry(&key, &value)]).expect("put");
     }
-    let found = records.get(RecordClass::Resource, "part.").expect("get");
+    let found = records.get(RecordClass::Node, "part.").expect("get");
     assert_eq!(found.len(), 200);
     assert!(found.iter().all(|record| record.value == value));
     assert!(found.windows(2).all(|pair| pair[0].key < pair[1].key));
@@ -299,7 +296,7 @@ fn what_was_done_is_in_the_audit_log() {
     let logic = Logic::start(settings(&dir, Duration::from_secs(3600)));
     let program = Orion::connect(&address, "program").expect("connect");
     let records = program.records();
-    assert!(answered(records, RecordClass::Resource, "").is_empty());
+    assert!(answered(records, RecordClass::Node, "").is_empty());
     records
         .put(&[entry("fan.left", b"one"), entry("fan.right", b"two")])
         .expect("put");
@@ -310,7 +307,7 @@ fn what_was_done_is_in_the_audit_log() {
         }])
         .expect("delete");
     // Reads are not what the log is for.
-    records.get(RecordClass::Resource, "").expect("get");
+    records.get(RecordClass::Node, "").expect("get");
     logic.stop();
 
     let uid = std::fs::metadata(&dir).expect("dir").uid();
@@ -322,12 +319,12 @@ fn what_was_done_is_in_the_audit_log() {
     assert!(lines.iter().all(|line| line.contains("\"node\":\"board\"")));
     assert!(
         lines[0].contains(
-            "\"did\":\"put\",\"what\":\"Resource/fan.left Resource/fan.right\",\"result\":\"ok\""
+            "\"did\":\"put\",\"what\":\"Node/fan.left Node/fan.right\",\"result\":\"ok\""
         ),
         "{log}"
     );
     assert!(
-        lines[1].contains("\"did\":\"put\",\"what\":\"-Resource/fan.left\",\"result\":\"ok\""),
+        lines[1].contains("\"did\":\"put\",\"what\":\"-Node/fan.left\",\"result\":\"ok\""),
         "{log}"
     );
 }
