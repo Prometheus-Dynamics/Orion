@@ -20,6 +20,19 @@ use orion_wire::{
 pub struct Sent(Vec<u8>);
 
 impl Sent {
+    /// A copy of a frame that arrived.
+    ///
+    /// # Panics
+    ///
+    /// Never: it was a frame.
+    #[must_use]
+    pub fn of(view: &FrameView<'_>) -> Self {
+        let mut whole = vec![0_u8; frame::frame_len(view.payload().len())];
+        let len = frame::encode(view.header(), view.payload(), &mut whole).expect("a frame");
+        whole.truncate(len);
+        Self(whole)
+    }
+
     /// The frame.
     ///
     /// # Panics
@@ -83,7 +96,8 @@ impl Host {
         self.seq
     }
 
-    fn welcome(&mut self) -> Vec<u8> {
+    /// A welcome into a new session, as the bytes on the stream.
+    pub fn welcome(&mut self) -> Vec<u8> {
         self.session += 1;
         self.frame(&Welcome {
             node: "board".parse().expect("name"),
@@ -105,16 +119,20 @@ impl Host {
             if n == 0 {
                 return frames;
             }
-            for byte in &out[..n] {
-                if let Ok(Some(view)) = self.rx.push(*byte) {
-                    let mut whole = vec![0_u8; frame::frame_len(view.payload().len())];
-                    let len =
-                        frame::encode(view.header(), view.payload(), &mut whole).expect("a frame");
-                    whole.truncate(len);
-                    frames.push(Sent(whole));
-                }
+            frames.extend(self.read(&out[..n]));
+        }
+    }
+
+    /// The frames whole in `bytes` from the device's end of the stream, with what came
+    /// before: a frame may arrive over several calls.
+    pub fn read(&mut self, bytes: &[u8]) -> Vec<Sent> {
+        let mut frames = Vec::new();
+        for byte in bytes {
+            if let Ok(Some(view)) = self.rx.push(*byte) {
+                frames.push(Sent::of(&view));
             }
         }
+        frames
     }
 }
 

@@ -134,7 +134,7 @@ pub enum Heard<'a> {
 /// The actions of a device, `N` of them.
 #[derive(Debug)]
 pub struct Actions<const N: usize> {
-    specs: &'static [ActionSpec; N],
+    specs: &'static [ActionSpec],
     registered: Requests<N>,
 }
 
@@ -142,6 +142,13 @@ impl<const N: usize> Actions<N> {
     /// Actions that are not registered yet.
     #[must_use]
     pub const fn new(specs: &'static [ActionSpec; N]) -> Self {
+        Self::from_slice(specs)
+    }
+
+    /// Actions from a table filled in at run time, as a C API does: up to `N` of them, and
+    /// any after the `N`th are left out.
+    #[must_use]
+    pub const fn from_slice(specs: &'static [ActionSpec]) -> Self {
         Self {
             specs,
             registered: Requests::new(),

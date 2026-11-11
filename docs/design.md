@@ -309,6 +309,10 @@ the largest chunk its receive buffer holds when it asks for its prefix, and the 
 chunks to fit and sends one frame at a time, so a device with a 512-byte buffer takes an image
 from any sender. A lost frame is sent again after two quiet seconds.
 
+`examples/mcu-template` is where a firmware starts: ports for an `embedded-io` stream and an
+`embedded-can` controller, and a C API over one static (`include/orion_mcu.h`) for firmware
+written against a vendor SDK, with firmware slots over flash hooks the port defines.
+
 On the board, a device is a resource like any other: the device gateway in the comm core writes
 its record from what it declared and registered (see `docs/comm.md`, "Devices as resources").
 

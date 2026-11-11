@@ -113,7 +113,7 @@ pub enum PublishError {
 /// The topics of a device, `N` of them.
 #[derive(Debug)]
 pub struct Topics<const N: usize> {
-    specs: &'static [TopicSpec; N],
+    specs: &'static [TopicSpec],
     declared: Requests<N>,
     /// For each open topic: its handle and how many listen.
     open: [Option<(u32, u32)>; N],
@@ -123,6 +123,13 @@ impl<const N: usize> Topics<N> {
     /// Topics that are not declared yet.
     #[must_use]
     pub const fn new(specs: &'static [TopicSpec; N]) -> Self {
+        Self::from_slice(specs)
+    }
+
+    /// Topics from a table filled in at run time, as a C API does: up to `N` of them, and
+    /// any after the `N`th are left out.
+    #[must_use]
+    pub const fn from_slice(specs: &'static [TopicSpec]) -> Self {
         Self {
             specs,
             declared: Requests::new(),

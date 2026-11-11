@@ -1,0 +1,66 @@
+[package]
+name = "orion-mcu-template"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "A starting point for a microcontroller on Orion's wire: Rust ports for a UART and a CAN controller, and a C API."
+
+# Standalone: not a member of the Orion workspace, so the directory can be copied out as the
+# start of a firmware's own crate.
+[workspace]
+
+[lib]
+# `staticlib` for C firmware linked with any vendor SDK; `rlib` for Rust firmware.
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = ["standalone", "ffi-uart"]
+# A `#[panic_handler]` on bare-metal targets, which a staticlib needs. Rust firmware with its
+# own depends on this crate with `default-features = false`.
+standalone = []
+# The C API over a byte stream: a UART, RS-485, USB serial.
+ffi-uart = []
+# The C API over a CAN bus instead.
+ffi-can = []
+# The C API also takes new firmware into two slots, over flash hooks the C port defines
+# (`orion_port_*`), and adds `orion_boot` for the bootloader.
+ffi-slots = []
+
+[dependencies]
+embedded-can = "0.4"
+embedded-io = "0.7"
+nb = "1"
+orion-device-actions = { path = "../../crates/device/actions" }
+orion-device-core = { path = "../../crates/device/core" }
+orion-device-firmware = { path = "../../crates/device/firmware" }
+orion-device-topics = { path = "../../crates/device/topics" }
+
+[dev-dependencies]
+orion-device-host = { path = "../../crates/testing/device-host" }
+orion-msg-actions = { path = "../../crates/core/msg-actions" }
+orion-msg-files = { path = "../../crates/core/msg-files" }
+orion-msg-session = { path = "../../crates/core/msg-session" }
+orion-msg-topics = { path = "../../crates/core/msg-topics" }
+orion-wire = { path = "../../crates/core/wire" }
+sha2 = { version = "0.11.0", default-features = false }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = false
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
