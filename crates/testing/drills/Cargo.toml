@@ -16,6 +16,7 @@ path = "src/main.rs"
 orion = { path = "../../client/orion", features = ["topics", "buffers", "actions", "workloads", "executor"] }
 orion-bin = { path = "../../bins/orion" }
 orion-sample-executor = { path = "../sample-executor" }
+rustix = { version = "1", default-features = false, features = ["std", "net"] }
 
 [lints]
 workspace = true

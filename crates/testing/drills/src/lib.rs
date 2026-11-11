@@ -20,6 +20,8 @@
 //! - `executor`: the sample executor, offering `process`.
 //! - `provider`: the actions `drill.echo` (answers with its arguments), `drill.stuck` (never
 //!   answers) and `drill.crash` (the provider exits while running it).
+//! - `throttle LISTEN TARGET RATE`: not a program of the board's but a slow link to it, for a
+//!   page watching from far away (`testing/board-runs/I7.md`).
 //!
 //! Every role that loses the comm core keeps doing its work and connects again, one try at a
 //! time between pieces of work, and says `reconnected` when it is back.
@@ -37,6 +39,8 @@ use orion::{Address, Error, Options, Orion, Roles, fields};
 
 /// Why a role stopped.
 type Failed = Box<dyn std::error::Error>;
+
+mod throttle;
 use orion_sample_executor::{Sample, run};
 
 /// The topic of counts.
@@ -64,6 +68,10 @@ pub fn role(args: &[String]) -> Option<ExitCode> {
         "viewer" => viewer(&socket),
         "executor" => executor(&socket),
         "provider" => provider(&socket),
+        "throttle" => match (args.get(2), args.get(3).and_then(|rate| rate.parse().ok())) {
+            (Some(target), Some(rate)) => throttle::throttle(&args[1], target, rate),
+            _ => Err("usage: throttle <listen> <target> <bytes a second>".into()),
+        },
         _ => return None,
     };
     Some(match result {

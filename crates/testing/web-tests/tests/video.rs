@@ -104,13 +104,45 @@ fn video_plays_in_a_browser_on_plain_http_over_a_throttled_link() {
         let orion = Orion::connect(&Address::Local(socket), "camera").expect("connect");
         publish(&orion, &clip, RATE, &stopping).expect("publish");
     });
+    let result = play(board.websocket(), true);
+    stop.store(true, Ordering::Relaxed);
+    camera.join().expect("camera");
+    if let Some(result) = result {
+        check(&result);
+    }
+}
 
+/// The same against a real board: `ORION_WEB_BOARD` is a slow link to its `ws.listen`, made on
+/// the board (`orion-drill throttle <listen> <ws.listen> 49152`) so that nothing deep sits
+/// between the board and the slow link, and the board publishes the clip itself
+/// (`publish-video <socket> <media> 30`). Not run by default: it needs the board.
+#[test]
+#[ignore = "needs a board: ORION_WEB_BOARD=host:port"]
+fn video_from_a_board_plays_over_a_throttled_link() {
+    let board: SocketAddr = std::env::var("ORION_WEB_BOARD")
+        .expect("ORION_WEB_BOARD")
+        .parse()
+        .expect("host:port");
+    if let Some(result) = play(board, false) {
+        check(&result);
+    }
+}
+
+/// Opens the video page in a browser, to the board's WebSocket at `websocket` (over a link
+/// this throttles, if `throttle`), and returns what the page reported; `None` if no browser
+/// is installed.
+fn play(websocket: SocketAddr, throttle: bool) -> Option<String> {
     // The page comes from an address that is not the loopback when the machine has one: a
     // browser counts a page from the loopback as secure even on `http://`.
     let host = outside_address().unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
-    let link = TcpListener::bind((host, 0)).expect("listen");
-    let link_at = link.local_addr().expect("addr");
-    throttled(link, board.websocket());
+    let link_at = if throttle {
+        let link = TcpListener::bind((host, 0)).expect("listen");
+        let at = link.local_addr().expect("addr");
+        throttled(link, websocket);
+        at
+    } else {
+        websocket
+    };
     let http = TcpListener::bind((host, 0)).expect("listen");
     let site = http.local_addr().expect("addr");
     let (report, reported) = mpsc::channel();
@@ -125,18 +157,20 @@ fn video_plays_in_a_browser_on_plain_http_over_a_throttled_link() {
     std::fs::create_dir_all(&profile).expect("profile");
     let Some(mut browser) = browse(&url, &profile) else {
         println!("no browser is installed: the video example was not run");
-        stop.store(true, Ordering::Relaxed);
-        camera.join().expect("camera");
-        return;
+        return None;
     };
     let result = reported.recv_timeout(Duration::from_secs(120));
     let _ = browser.kill();
     let _ = browser.wait();
     let _ = std::fs::remove_dir_all(&profile);
-    stop.store(true, Ordering::Relaxed);
-    camera.join().expect("camera");
     let result = result.expect("the page reported within two minutes");
     println!("the page reported: {result}");
+    Some(result)
+}
+
+/// What the page must have seen: pictures and video shown, and less sent than published.
+fn check(result: &str) {
+    let host = outside_address().unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
 
     let said: HashMap<&str, &str> = result
         .split('&')

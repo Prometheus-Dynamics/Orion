@@ -123,7 +123,7 @@ everyone else. They ship as one binary with modes `comm`, `node` and `ctl`, and 
 
 | If this dies | What keeps working | How it comes back |
 | --- | --- | --- |
-| Node logic | Links, SSH, topics, gateways. Requests for records answer "restarting" | Reconnects as a client |
+| Node logic | Links, SSH, topics, gateways. Requests for records are refused "unavailable" | Reconnects as a client |
 | Comm core | Graphs and every same-board topic, frames included, because those hold their rings. No new connections | Restarts. Publishers re-offer their rings. Peers and browsers reconnect, access paths with no backoff |
 | An executor | Everything else. Its records stay, marked lost | Orion restarts its workloads |
 | Orion, both parts | Graphs keep running | Orion finds them by name and takes them back |
