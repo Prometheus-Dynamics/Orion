@@ -1,23 +1,25 @@
 //! What node logic keeps, and how a frame from the comm core reaches the part it is for.
 
 use std::fmt::Write as _;
+use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use orion_action_forward::Forwards;
 use orion_action_list::{Actions, Event};
 use orion_audit::{Audit, Entry, Who};
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_file_store::Files;
 use orion_msg_actions::{Cancel, Register, Run, Target};
 use orion_msg_files::{FileBegin, FileCommit};
-use orion_msg_records::Put;
+use orion_msg_records::{NodeRecord, Put, RecordClass, ResourceRecord};
 use orion_msg_session::{NodeAnswer, NodeGone, NodeRequest};
 use orion_msg_topics::{Field, FieldType};
 use orion_reply::{Asked, Out};
 use orion_ring::FieldId;
 use orion_store::Store;
 use orion_topics::Publisher;
-use orion_types::{FrameTime, NodeName};
-use orion_wire::{Bytes, kind};
+use orion_types::{Error, FrameTime, NodeName};
+use orion_wire::{Bytes, Decode, kind};
 
 use crate::records::Records;
 
@@ -89,6 +91,7 @@ pub(crate) struct Logic {
     pub(crate) records: Records,
     pub(crate) actions: Actions,
     pub(crate) files: Files,
+    pub(crate) forwards: Forwards,
     audit: Option<Audit>,
     started: Instant,
     scratch: Vec<u8>,
@@ -111,9 +114,16 @@ impl Logic {
         kind::FILE_COMMIT,
     ];
 
-    pub(crate) fn new(store: Store, node: NodeName, files: Files, audit: Option<Audit>) -> Self {
+    pub(crate) fn new(
+        store: Store,
+        node: NodeName,
+        files: Files,
+        audit: Option<Audit>,
+        identity: PathBuf,
+    ) -> Self {
         Self {
             records: Records::new(store),
+            forwards: Forwards::new(node.clone(), identity),
             actions: Actions::new(node),
             files,
             audit,
@@ -137,6 +147,35 @@ impl Logic {
     pub(crate) fn forget_sessions(&mut self) {
         self.records.forget_sessions(wall().as_millis() as u64);
         self.actions.forget_sessions();
+        self.forwards.forget_sessions();
+    }
+
+    /// Carries a run to the node that has the action: the node the run names, or the node
+    /// the resource it names is on.
+    fn forward(&mut self, asked: &Asked<'_>) -> Result<(), Error> {
+        let run: Run<'_> = asked.body()?;
+        let store = self.records.store();
+        let node = match &run.target {
+            Target::Node(node) => node.clone(),
+            Target::Resource(resource) => {
+                let record = store
+                    .get(RecordClass::Resource, resource.as_str())
+                    .ok_or(Error::NotFound)?;
+                ResourceRecord::decode(&record.value)?.node
+            }
+        };
+        if node == *store.node() {
+            // It would be here, and it is not.
+            return Err(Error::NotFound);
+        }
+        let record = store
+            .get(RecordClass::Node, node.as_str())
+            .ok_or(Error::NotFound)?;
+        let address = NodeRecord::decode(&record.value)?.address;
+        if address.is_empty() {
+            return Err(Error::NotFound);
+        }
+        self.forwards.run(asked, &node, address)
     }
 
     fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) {
@@ -146,7 +185,17 @@ impl Logic {
             self.files.request(asked, out)
         } else {
             let now = self.now_ms();
-            self.actions.request(asked, now, out)
+            match self.actions.request(asked, now, out) {
+                // Not an action of this node's: another node's, perhaps.
+                Err(Error::NotFound) if asked.kind == kind::ACTION_RUN => self.forward(asked),
+                Err(Error::NotFound) if asked.kind == kind::ACTION_CANCEL => asked
+                    .body::<Cancel>()
+                    .ok()
+                    .filter(|cancel| self.forwards.cancel(asked.session, cancel.call))
+                    .map(|_| ())
+                    .ok_or(Error::NotFound),
+                answered => answered,
+            }
         };
         if let Some(audit) = &self.audit
             && let Some((did, what)) = done(asked)
@@ -255,6 +304,7 @@ impl Handler for Logic {
             self.records
                 .gone(gone.session, wall().as_millis() as u64, &mut through);
             self.files.gone(gone.session);
+            self.forwards.gone(gone.session);
             let now = self.now_ms();
             self.actions.gone(gone.session, now, &mut through);
         }

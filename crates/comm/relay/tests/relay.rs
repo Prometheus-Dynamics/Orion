@@ -349,9 +349,11 @@ fn run_test_secure(security: Security, refused: bool) {
         let mut provider = Client::open(board.connect(USER), Roles::CLIENT).await;
         let mut caller = Client::open(board.connect(USER), Roles::CLIENT).await;
 
-        // Nothing is registered: there is no such action, whoever asks.
+        // Nothing is registered here: the action may be another node's. The run is let
+        // through to node logic, which carries it there or says there is no such action.
         let seq = caller.send(&run_of("open", fan())).await;
-        assert_eq!(caller.refused(seq).await, Error::NotFound);
+        let (_, passed, passed_kind, _) = node.passed().await;
+        assert_eq!((passed, passed_kind), (seq, kind::ACTION_RUN));
 
         // One action for programs on the board, one for operators alone.
         provider.send(&register("open", Admits::LOCAL)).await;
@@ -375,16 +377,19 @@ fn run_test_secure(security: Security, refused: bool) {
             assert_eq!(seq, wipe);
         }
 
-        // The same name for another target is another action, and is not registered.
+        // The same name for another target is another action, and is not registered here.
         let other = Target::Resource("fan.right".parse().expect("name"));
         let seq = caller.send(&run_of("open", other)).await;
-        assert_eq!(caller.refused(seq).await, Error::NotFound);
+        let (_, passed, passed_kind, _) = node.passed().await;
+        assert_eq!((passed, passed_kind), (seq, kind::ACTION_RUN));
 
-        // The program goes, and its actions with it.
+        // The program goes, and its actions with it: node logic is told, and a run of what
+        // it had is again a run of nothing registered here.
         drop(provider);
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert_eq!(node.next().await, kind::NODE_GONE);
         let seq = caller.send(&run_of("open", fan())).await;
-        assert_eq!(caller.refused(seq).await, Error::NotFound);
+        let (_, passed, passed_kind, _) = node.passed().await;
+        assert_eq!((passed, passed_kind), (seq, kind::ACTION_RUN));
     });
 }
 
@@ -420,9 +425,11 @@ fn a_registration_node_logic_refuses_does_not_stand() {
             .await;
         assert_eq!(provider.refused(registered).await, Error::AlreadyExists);
 
-        // So a run of it is of nothing, and a node logic that comes back is not passed it.
+        // So a run of it is not decided by its policy: it is as any run of an action that is
+        // not registered here. And a node logic that comes back is not passed it.
         let seq = caller.send(&run_of("open", fan())).await;
-        assert_eq!(caller.refused(seq).await, Error::NotFound);
+        let (_, passed, passed_kind, _) = first.passed().await;
+        assert_eq!((passed, passed_kind), (seq, kind::ACTION_RUN));
         drop(first);
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         let mut second = node(&board).await;

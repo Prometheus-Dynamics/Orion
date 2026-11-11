@@ -48,7 +48,8 @@ pub enum Who {
     /// session that asks, like a word about a run it started.
     Any(Admits),
     /// Whoever the action being run was registered for: the policy in the standing
-    /// `Register` with the same name and target. With none, the action is not found.
+    /// `Register` with the same name and target. With none here, anyone this node knows: the
+    /// action may be another node's, and that node's door decides.
     ActionPolicy,
 }
 
@@ -334,18 +335,22 @@ impl Relay {
         Ok(())
     }
 
-    /// The policy the action a `Run` names was registered with.
+    /// The policy the action a `Run` names was registered with here. An action that is not
+    /// registered here may live on another node: such a run is let through for anyone this
+    /// node knows, and node logic carries it to the node that has the action, whose door
+    /// decides by the policy it was registered with there, or says there is none.
     fn action_policy<'a>(&self, run: &'a [u8]) -> Result<(&'a str, Policy), Error> {
         let (_call, rest) = body::take::<u64>(run)?;
         let (name, rest) = body::take::<&str>(rest)?;
         let (target, _) = body::take::<Target>(rest)?;
-        self.standing
+        let policy = self
+            .standing
             .iter()
             .filter(|standing| standing.kind == kind::ACTION_REGISTER)
             .filter_map(|standing| Register::decode(&standing.payload).ok())
             .find(|register| register.name.as_str() == name && register.target == target)
-            .map(|register| (name, register.policy))
-            .ok_or(Error::NotFound)
+            .map_or(Policy::new(KNOWN), |register| register.policy);
+        Ok((name, policy))
     }
 
     /// Notes that an answer ends a request that was waiting.

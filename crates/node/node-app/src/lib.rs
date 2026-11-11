@@ -178,6 +178,8 @@ impl Node {
             what: "files directory",
             error,
         })?;
+        // The node's key, which the comm core makes and keeps here.
+        let identity = settings.config.state_dir.join("node-identity.ed25519");
         let audit = match &settings.audit {
             Some(config) => Some(
                 Audit::start(name.as_str(), config.clone()).map_err(|error| StartError {
@@ -189,7 +191,9 @@ impl Node {
         };
         Ok(Self {
             settings,
-            logic: Rc::new(RefCell::new(Logic::new(store, name, files, audit))),
+            logic: Rc::new(RefCell::new(Logic::new(
+                store, name, files, audit, identity,
+            ))),
             persist: Some(persist),
             saving: None,
             unsaved_since: None,
@@ -273,6 +277,7 @@ impl Node {
             let now = logic.now_ms();
             logic.actions.tick(now, &mut direct);
             logic.files.poll(&mut direct);
+            logic.forwards.poll(&mut direct);
             logic.actions.take_events()
         };
         direct.result()?;
@@ -331,6 +336,10 @@ impl Node {
             }
             if let Some(due) = self.logic.borrow().next_deadline() {
                 wait = wait.min(due);
+            }
+            if self.logic.borrow().forwards.active() {
+                // A run is under way on another node: what its helper heard is asked for.
+                wait = wait.min(Duration::from_millis(5));
             }
             if self.logic.borrow().files.verifying() {
                 // A helper is checking a digest: what it found is asked for soon.

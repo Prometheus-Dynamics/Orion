@@ -485,7 +485,12 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
     bench.result(id, Outcome::Succeeded);
     let result: ActionResult<'_> = bench.take(BACK);
     assert_eq!((result.call, result.outcome), (7, Outcome::Succeeded));
-    assert_eq!(bench.actions.ended(), 0, "it was told: nothing is kept");
+    // It is kept all the same, in case the session it was sent to had just ended.
+    assert_eq!(bench.actions.ended(), 1);
+    bench.ask(BACK, &Attach { call: 7 }).expect("attach");
+    let again: ActionResult<'_> = bench.take(BACK);
+    assert_eq!(again.outcome, Outcome::Succeeded);
+    assert_eq!(bench.actions.ended(), 0);
 }
 
 #[test]
@@ -510,6 +515,26 @@ fn a_detached_run_that_ended_with_nobody_there_is_kept_for_its_starter() {
     bench.now += ENDED_FOR_MS + 1;
     assert_eq!(bench.ask(BACK, &Attach { call: 7 }), Err(Error::NotFound));
     assert_eq!(bench.actions.ended(), 0);
+}
+
+#[test]
+fn a_new_run_under_a_number_replaces_what_was_kept_under_it() {
+    // A caller's numbers start over with each session: its second session's run 7 is not
+    // its first session's.
+    let (mut bench, id) = Bench::running(true);
+    bench.result(id, Outcome::Failed);
+    let _: ActionResult<'_> = bench.take(CALLER);
+    assert_eq!(bench.actions.ended(), 1);
+    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.run(BACK, 7, 0, true).expect("run");
+    let claim: Claim<'_> = bench.take(OWNER);
+    assert_eq!(bench.actions.ended(), 0);
+    bench.actions.gone(BACK, bench.now, &mut bench.sent);
+    bench.result(claim.call, Outcome::Succeeded);
+    bench.ask(30, &Attach { call: 7 }).expect("attach");
+    let result: ActionResult<'_> = bench.take(30);
+    assert_eq!(result.outcome, Outcome::Succeeded, "the newer run's end");
+    assert_eq!(bench.ask(30, &Attach { call: 7 }), Err(Error::NotFound));
 }
 
 #[test]

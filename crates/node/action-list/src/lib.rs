@@ -219,8 +219,11 @@ impl Actions {
                     detail,
                 },
             );
-        } else if run.detached {
-            // Nobody is attached: how it ended is kept for whoever started it.
+        }
+        if run.detached {
+            // How a detached run ended is kept for whoever started it, also when a caller
+            // seems to be there: its session may have ended a moment ago without this node
+            // having heard, and then the result just sent went nowhere.
             self.forget_old(now_ms);
             if self.ended.len() >= MAX_ENDED {
                 self.ended.pop_front();
@@ -347,6 +350,11 @@ impl Actions {
                 if self.running.len() >= MAX_RUNS {
                     return Err(Error::Busy);
                 }
+                // The caller's numbers start over with each of its sessions. What was kept of
+                // an earlier run under this number is not this run's.
+                let starter = Starter::of(asked);
+                self.ended
+                    .retain(|ended| !(ended.call == run.call && ended.starter == starter));
                 self.next += 1;
                 let id = self.next;
                 out.send(
@@ -366,7 +374,7 @@ impl Actions {
                     owner,
                     caller: Some(from),
                     call: run.call,
-                    starter: Starter::of(asked),
+                    starter,
                     last: None,
                     deadline: (run.deadline_ms != 0)
                         .then(|| now_ms.saturating_add(run.deadline_ms)),

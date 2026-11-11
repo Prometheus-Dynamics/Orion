@@ -199,11 +199,14 @@ actions; any program on the board adds its own.
 - **Detached runs.** A run started detached carries on when its caller's session ends, with
   its deadline and under its program as before. Whoever started it comes back with `Attach`
   and the run's number, from any session: it is sent the latest progress at once and then
-  what follows, and can cancel. If the run ended while nobody was attached, how it ended is
-  kept for ten minutes (256 runs at most, the oldest goes first) and given once. "Whoever
+  what follows, and can cancel. How a detached run ended is kept for ten minutes (256 runs
+  at most, the oldest goes first) and given to its starter when it asks, once; that is so
+  even if a caller seemed to be attached when it ended, because a session can end a moment
+  before node logic hears of it. "Whoever
   started it" is the same user on the board, the same operator key or the same peer, as the
-  comm core says; for anyone else the run is `not found`. Of two such runs with the same
-  number, the newer is the one come back to.
+  comm core says; for anyone else the run is `not found`. A caller's numbers start over with each
+  of its sessions, so a new run under a number replaces what was kept under it, and of two
+  such runs under way the newer is the one come back to.
 - **Deadlines.** A run with a deadline that passes ends as `TimedOut` and the program is told
   to stop. What the program says of it afterwards is ignored.
 - **Only the program that has a run speaks for it.** A result from anyone else is `denied`.
@@ -212,7 +215,36 @@ actions; any program on the board adds its own.
   with 255 for a percent that is not known. `running` is how many runs are under way.
 - There is room for 4096 runs at once; one more is refused as `busy`.
 
-Not here yet: a run for another node or for a resource another node has (E11).
+A run for another node, or for a resource another node has, is carried there (below).
+
+## Actions on other nodes
+
+An action lives where the program that registered it is connected. `orion-action-forward`
+carries a run to the node that has it.
+
+- **Where to.** A run that names another node goes to that node. A run that names a resource
+  goes to the node in the resource's record. The node is reached at the address in its node
+  record. With no such record the action is `not found`.
+- **How.** Node logic connects to the other node's comm core over the network, with this
+  node's key, and runs the action the way any caller would. No kind was added for it.
+- **The check runs where the action runs.** This node's door lets a run of an action it does
+  not have through to node logic for anyone it knows; it has no policy for it. The other
+  node's door sees a peer and decides by the policy the action was registered with there. An
+  action that is to be run from other nodes admits peers. A refusal there, `denied` or
+  `not found`, is the caller's answer here.
+- **To the caller it is one run.** Progress and the result come back under its own number.
+  Cancel reaches the program. A caller that goes has the run cancelled there, unless it was
+  detached.
+- **When the other node goes** with a run under way, the run ends as `Failed`, "the node that
+  runs it went away". While it cannot be reached a run is refused as `unavailable` within
+  three seconds. When it is back, runs go there again with nothing to be done here.
+- **A helper a node.** Connecting and waiting on a network session would hold node logic up,
+  so each other node has a thread, started with the first run for it. Its session is dropped
+  after 30 seconds with nothing running. At most 1024 runs are carried at once.
+
+This node does not check the other node's key against its trust store, which is the comm
+core's; the session is signed with this node's key and the other node checks that.
+
 
 ## Files a node receives
 

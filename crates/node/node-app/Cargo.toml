@@ -8,6 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+orion-action-forward = { path = "../action-forward" }
 orion-action-list = { path = "../action-list" }
 orion-audit = { path = "../audit" }
 orion-config = { path = "../../core/config" }

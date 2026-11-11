@@ -89,7 +89,29 @@ impl Board {
         Self::start_as(dir, security, None, true)
     }
 
+    /// As [`Board::start_for_node_with`], for a board with another name than `board`, on
+    /// `port` if it is to come back where it was: one of several in a test.
+    ///
+    /// # Panics
+    ///
+    /// If the board cannot start.
+    #[must_use]
+    pub fn start_named(dir: &Path, security: Security, name: &str, port: Option<u16>) -> Self {
+        Self::start_all(dir, security, port, true, name)
+    }
+
     fn start_as(dir: &Path, security: Security, port: Option<u16>, for_node: bool) -> Self {
+        Self::start_all(dir, security, port, for_node, "board")
+    }
+
+    fn start_all(
+        dir: &Path,
+        security: Security,
+        port: Option<u16>,
+        for_node: bool,
+        name: &str,
+    ) -> Self {
+        let name = name.to_owned();
         use std::os::unix::fs::MetadataExt;
         // Whoever owns the directory runs the test, and may be the node logic.
         let node_uids: Vec<u32> = std::fs::metadata(dir)
@@ -111,7 +133,7 @@ impl Board {
                 .build()
                 .expect("runtime");
             tokio::task::LocalSet::new().block_on(&runtime, async move {
-                let node: orion_types::NodeName = "board".parse().expect("name");
+                let node: orion_types::NodeName = name.parse().expect("name");
                 let limits = Limits {
                     outbox_bytes: 8 << 20,
                     ..Limits::default()
