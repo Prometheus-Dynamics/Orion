@@ -461,3 +461,24 @@ asked about a workload where it is.
 - **A workload that names another node** is kept as a record and not run here; if it ran here
   it is stopped. Choosing a node for one that names none is placement's, wired in E18; until
   then such a workload runs on the node it was put on.
+
+## Node logic, assembled
+
+`orion-assembly` is the entry point: `run_node(path)` reads the settings file, if there is one,
+and the environment, puts every part above together, and runs until `SIGTERM` or `SIGINT`,
+saving what it has not yet when it is told to stop. It is what the `node` mode of the binary
+calls. The parts are records, resources, actions (with detached runs and runs on other nodes),
+files (received, handed to receivers, fetched), workloads and the audit log, in one process
+with one thread.
+
+The settings file is the comm core's too, so each program meets keys that are the other's.
+Node logic reports only a key under one of its own names (`records.`, `files.`, `audit.`,
+`workloads.`) that nobody read: that one is a typo.
+
+Cargo feature `pull`, on by default, is fetching files from a URL. A build without it has no
+HTTP client and no rustls.
+
+Not assembled yet, because they need connections between nodes that the comm core does not
+make yet: peer sync (`orion-sync`) and placement (`orion-placement`). Both are built and
+proved on their own. Until they are wired, a node's records stay on that node and a workload
+runs on the node it was put on, or the one it names.

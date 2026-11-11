@@ -1,0 +1,29 @@
+[package]
+name = "orion-assembly"
+description = "Node logic as one entry point: every part of it, from one file of settings."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = ["pull"]
+# Fetching files from a URL: the one HTTP client, and rustls.
+pull = ["orion-node-app/pull"]
+
+[dependencies]
+orion-config = { path = "../../core/config" }
+orion-node-app = { path = "../node-app", default-features = false }
+tracing.workspace = true
+
+[dev-dependencies]
+orion = { path = "../../client/orion", features = ["full"] }
+orion-msg-records = { path = "../../core/msg-records" }
+orion-sample-executor = { path = "../../testing/sample-executor" }
+orion-stubs = { path = "../../testing/stubs" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
+
+[lints]
+workspace = true
