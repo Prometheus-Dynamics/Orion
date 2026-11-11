@@ -108,6 +108,7 @@ fn provider_process() {
     // For operators alone: no program on the board may run it, whoever it runs as.
     let _wipe = register("wipe", Admits::OPERATOR);
     println!("provider ready");
+    let mut long = None;
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         match open.wait(Duration::from_millis(100)).expect("connected") {
@@ -119,6 +120,21 @@ fn provider_process() {
                 }
                 if args == b"slow" {
                     // Left running: it ends when it is cancelled.
+                    continue;
+                }
+                if args == b"long" {
+                    // Says where it is and goes on until it is released.
+                    open.progress(call, 30, "working", b"").expect("progress");
+                    long = Some(call);
+                    continue;
+                }
+                if args == b"release" {
+                    if let Some(long) = long.take() {
+                        open.finish(long, Outcome::Succeeded, b"long done", "")
+                            .expect("finish");
+                    }
+                    open.finish(call, Outcome::Succeeded, b"", "")
+                        .expect("finish");
                     continue;
                 }
                 open.progress(call, 50, "halfway", b"").expect("progress");
@@ -312,5 +328,89 @@ fn actions_are_still_there_after_node_logic_restarts() {
             }
             Err(error) => panic!("the run after the restart: {error}"),
         }
+    }
+}
+
+#[test]
+fn a_caller_disconnects_mid_action_and_reattaches_to_the_progress() {
+    let dir = dir("actions-detached");
+    let board = Board::start_for_node_with(&dir, Security::On);
+    let address = Address::Local(board.socket().to_owned());
+    let _logic = Logic::start(settings(&dir));
+    let _provider = Provider::start(board.socket());
+    let detached = |args: &'static [u8]| ActionCall {
+        detached: true,
+        ..call("open", args)
+    };
+
+    // Started detached, seen under way, and then the caller is gone.
+    let number = {
+        let caller = Orion::connect(&address, "dashboard").expect("connect");
+        let mut run = caller.run(&detached(b"long")).expect("run");
+        match run.wait(Duration::from_secs(5)).expect("run") {
+            Some(Update::Doing(step)) => {
+                assert_eq!((step.percent, step.message.as_str()), (30, "working"))
+            }
+            other => panic!("expected progress, got {other:?}"),
+        }
+        run.call()
+    };
+
+    // Back in a new session: the progress it left at, then the end.
+    let caller = Orion::connect(&address, "dashboard").expect("connect");
+    let mut back = caller.attach(number).expect("attach");
+    match back.wait(Duration::from_secs(5)).expect("attached") {
+        Some(Update::Doing(step)) => {
+            assert_eq!((step.percent, step.message.as_str()), (30, "working"))
+        }
+        other => panic!("expected the progress it left at, got {other:?}"),
+    }
+    let releaser = Orion::connect(&address, "releaser").expect("connect");
+    let mut release = releaser.run(&call("open", b"release")).expect("run");
+    release.finish(Duration::from_secs(5)).expect("released");
+    let ended = back
+        .finish(Duration::from_secs(5))
+        .expect("the long run ends");
+    assert_eq!(
+        (ended.outcome, ended.output.as_slice()),
+        (Outcome::Succeeded, &b"long done"[..])
+    );
+
+    // One that ends while its caller is away is still there to come back to, once.
+    let number = {
+        let caller = Orion::connect(&address, "dashboard").expect("connect");
+        let mut run = caller.run(&detached(b"long")).expect("run");
+        assert!(matches!(
+            run.wait(Duration::from_secs(5)).expect("run"),
+            Some(Update::Doing(_))
+        ));
+        run.call()
+    };
+    let mut release = releaser.run(&call("open", b"release")).expect("run");
+    release.finish(Duration::from_secs(5)).expect("released");
+    let caller = Orion::connect(&address, "dashboard").expect("connect");
+    let mut back = caller.attach(number).expect("attach");
+    let ended = back.finish(Duration::from_secs(5)).expect("how it ended");
+    assert_eq!(ended.output, b"long done");
+    let mut again = caller.attach(number).expect("sent");
+    match again.wait(Duration::from_secs(5)) {
+        Err(ClientError::Refused(Error::NotFound)) => {}
+        other => panic!("expected not found, got {other:?}"),
+    }
+
+    // A run that was not detached is cancelled when its caller goes: nothing to come back to.
+    let number = {
+        let caller = Orion::connect(&address, "dashboard").expect("connect");
+        let mut run = caller.run(&call("open", b"long")).expect("run");
+        assert!(matches!(
+            run.wait(Duration::from_secs(5)).expect("run"),
+            Some(Update::Doing(_))
+        ));
+        run.call()
+    };
+    let mut none = caller.attach(number).expect("sent");
+    match none.wait(Duration::from_secs(5)) {
+        Err(ClientError::Refused(Error::NotFound)) => {}
+        other => panic!("expected not found, got {other:?}"),
     }
 }

@@ -99,6 +99,7 @@ impl Logic {
         kind::ACTION_PROGRESS,
         kind::ACTION_RESULT,
         kind::ACTION_CANCEL,
+        kind::ACTION_ATTACH,
     ];
 
     pub(crate) fn new(store: Store, node: NodeName) -> Self {
@@ -158,7 +159,8 @@ impl Handler for Logic {
         } else {
             let gone: NodeGone = frame.body()?;
             self.records.gone(gone.session);
-            self.actions.gone(gone.session, &mut through);
+            let now = self.now_ms();
+            self.actions.gone(gone.session, now, &mut through);
         }
         let failed = through.failed.take();
         self.scratch = scratch;

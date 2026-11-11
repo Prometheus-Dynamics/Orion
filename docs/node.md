@@ -187,6 +187,14 @@ actions; any program on the board adds its own.
 - **When an end goes away.** A caller that goes has its run cancelled, unless the run is
   detached: that one carries on. A program that goes takes its actions off the list and its
   runs end as `Failed`.
+- **Detached runs.** A run started detached carries on when its caller's session ends, with
+  its deadline and under its program as before. Whoever started it comes back with `Attach`
+  and the run's number, from any session: it is sent the latest progress at once and then
+  what follows, and can cancel. If the run ended while nobody was attached, how it ended is
+  kept for ten minutes (256 runs at most, the oldest goes first) and given once. "Whoever
+  started it" is the same user on the board, the same operator key or the same peer, as the
+  comm core says; for anyone else the run is `not found`. Of two such runs with the same
+  number, the newer is the one come back to.
 - **Deadlines.** A run with a deadline that passes ends as `TimedOut` and the program is told
   to stop. What the program says of it afterwards is ignored.
 - **Only the program that has a run speaks for it.** A result from anyone else is `denied`.
@@ -195,5 +203,4 @@ actions; any program on the board adds its own.
   with 255 for a percent that is not known. `running` is how many runs are under way.
 - There is room for 4096 runs at once; one more is refused as `busy`.
 
-Not here yet: reattaching to a detached run (E12), and a run for another node or for a resource
-another node has (E11).
+Not here yet: a run for another node or for a resource another node has (E11).

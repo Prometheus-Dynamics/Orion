@@ -425,6 +425,8 @@ others.
   added an action still has it, without asking again. A watcher may be told a version it
   already has: the same record again. A session may have 1024 standing; one more is refused
   as `busy`. One that node logic refuses does not stand.
+- When node logic dies with requests it was passed and had not answered, a read, a write, a
+  run under way, each caller is refused with `unavailable` then, and does not wait for ever.
 - One node logic at a time: when another attaches, the one before is closed.
 
 Which kind asks for what, and who may ask, is a table of routes in the relay.
@@ -435,7 +437,7 @@ Which kind asks for what, and who may ask, is a table of routes in the relay.
 | `Register` (an action) | programs on the board |
 | `Run` (an action) | whoever the action was registered for |
 | `Progress`, `ActionResult` | programs on the board; node logic takes them only from the program that has the run |
-| `Cancel` | programs on the board, operators, peers; node logic takes it only from the run's caller |
+| `Cancel`, `Attach` | programs on the board, operators, peers; node logic takes them only from the run's caller, or whoever started it |
 
 **Actions and the one check.** The list of actions is node logic's, but who may run one is
 decided here. A `Register` stands, so the relay holds it, and it carries the action's policy.

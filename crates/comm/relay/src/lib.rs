@@ -16,7 +16,7 @@
 //! the policy in it. That keeps the one check at the door for actions too, though the list of
 //! actions is node logic's.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Write as _;
 
 use orion_msg_actions::{Register, Target};
@@ -52,6 +52,18 @@ pub enum Who {
     ActionPolicy,
 }
 
+/// What ends a request that was passed on, so that the relay knows which callers are still
+/// waiting if node logic dies: they are told `unavailable` instead of waiting for ever.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ends {
+    /// Nothing is waited for: a word about a run, which has no answer.
+    Nothing,
+    /// An answer that names the request's `seq` first: `Changed`, `Registered`, a refusal.
+    Answer,
+    /// The `ActionResult` of the run the request names, or a refusal.
+    ActionResult,
+}
+
 /// One kind that is node logic's to answer.
 #[derive(Clone, Copy, Debug)]
 pub struct Route {
@@ -64,6 +76,8 @@ pub struct Route {
     /// Whether the request stands until its session ends, and is passed again to a node
     /// logic that comes back: a watch.
     pub standing: bool,
+    /// What ends it, if it does not stand.
+    pub ends: Ends,
 }
 
 /// Programs on this board, operators and peers.
@@ -76,18 +90,21 @@ pub const RECORDS: &[Route] = &[
         access: Access::Write("records"),
         who: Who::Granted(KNOWN),
         standing: false,
+        ends: Ends::Answer,
     },
     Route {
         kind: kind::GET,
         access: Access::Read("records"),
         who: Who::Granted(KNOWN),
         standing: false,
+        ends: Ends::Answer,
     },
     Route {
         kind: kind::WATCH,
         access: Access::Read("records"),
         who: Who::Granted(KNOWN),
         standing: true,
+        ends: Ends::Nothing,
     },
 ];
 
@@ -98,30 +115,42 @@ pub const ACTIONS: &[Route] = &[
         access: Access::Write("actions"),
         who: Who::Granted(Admits::LOCAL),
         standing: true,
+        ends: Ends::Nothing,
     },
     Route {
         kind: kind::ACTION_RUN,
         access: Access::Read("actions"),
         who: Who::ActionPolicy,
         standing: false,
+        ends: Ends::ActionResult,
     },
     Route {
         kind: kind::ACTION_PROGRESS,
         access: Access::Write("actions"),
         who: Who::Any(Admits::LOCAL),
         standing: false,
+        ends: Ends::Nothing,
     },
     Route {
         kind: kind::ACTION_RESULT,
         access: Access::Write("actions"),
         who: Who::Any(Admits::LOCAL),
         standing: false,
+        ends: Ends::Nothing,
     },
     Route {
         kind: kind::ACTION_CANCEL,
         access: Access::Read("actions"),
         who: Who::Any(KNOWN),
         standing: false,
+        ends: Ends::Nothing,
+    },
+    Route {
+        kind: kind::ACTION_ATTACH,
+        access: Access::Read("actions"),
+        who: Who::Any(KNOWN),
+        standing: false,
+        ends: Ends::ActionResult,
     },
 ];
 
@@ -129,6 +158,18 @@ pub const ACTIONS: &[Route] = &[
 #[must_use]
 pub fn routes() -> Vec<Route> {
     [RECORDS, ACTIONS].concat()
+}
+
+/// How many requests are remembered as waiting on node logic. The oldest goes first.
+pub const MAX_WAITING: usize = 8192;
+
+/// A request that was passed on and has not been seen to end.
+#[derive(Debug)]
+struct Waiting {
+    session: SessionId,
+    seq: u16,
+    /// The run it names, for one that ends with an `ActionResult`.
+    call: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -151,6 +192,7 @@ pub struct Relay {
     /// Sessions node logic has been passed a request from, to tell it when they end.
     passed: HashSet<SessionId>,
     standing: Vec<Standing>,
+    waiting: VecDeque<Waiting>,
     caller: String,
 }
 
@@ -175,6 +217,7 @@ impl Relay {
             answers: [0; 4],
             passed: HashSet::new(),
             standing: Vec::new(),
+            waiting: VecDeque::new(),
             caller: String::new(),
         }
     }
@@ -279,11 +322,47 @@ impl Relay {
             .ok_or(Error::NotFound)
     }
 
+    /// Notes that an answer ends a request that was waiting.
+    fn ended(&mut self, answer: &NodeAnswer<'_>) {
+        if self.waiting.is_empty() {
+            return;
+        }
+        let to = answer.session;
+        match answer.kind {
+            kind::REFUSAL | kind::CHANGED | kind::ACTION_REGISTERED => {
+                if let Ok((seq, _)) = body::take::<u16>(answer.payload.0) {
+                    self.waiting
+                        .retain(|waiting| !(waiting.session.0 == to && waiting.seq == seq));
+                }
+            }
+            kind::ACTION_RESULT => {
+                if let Ok((call, _)) = body::take::<u64>(answer.payload.0) {
+                    self.waiting
+                        .retain(|waiting| !(waiting.session.0 == to && waiting.call == Some(call)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Node logic is gone: whoever was waiting on it is told, instead of waiting for ever.
+    fn fail_waiting(&mut self, sessions: &mut Sessions) {
+        for waiting in self.waiting.drain(..) {
+            let refusal = Refusal {
+                request_seq: waiting.seq,
+                code: Error::Unavailable.code(),
+                detail: "node logic went away",
+            };
+            let _ = sessions.send(waiting.session, &refusal, Delivery::Must);
+        }
+    }
+
     fn attach(&mut self, attach: &NodeAttach<'_>, cx: &mut Cx<'_>) -> Result<(), Error> {
         let node = cx.from();
         if let Some(old) = self.node.filter(|old| *old != node) {
             // One node logic at a time. The one that just came is the one that is alive.
             cx.sessions().close(old);
+            self.fail_waiting(cx.sessions());
         }
         self.answers = [0; 4];
         for kind in attach.kinds.0 {
@@ -355,6 +434,7 @@ impl Service for Relay {
                 return Err(Error::Denied);
             }
             let answer: NodeAnswer<'_> = incoming.body()?;
+            self.ended(&answer);
             if answer.kind == kind::REFUSAL
                 && let Ok(refusal) = Refusal::decode(answer.payload.0)
             {
@@ -393,6 +473,19 @@ impl Service for Relay {
             };
         };
         if self.pass(cx.sessions(), node, from, seq, kind, payload) {
+            let ends = self.route(kind).map_or(Ends::Nothing, |route| route.ends);
+            if ends != Ends::Nothing && !standing {
+                if self.waiting.len() >= MAX_WAITING {
+                    self.waiting.pop_front();
+                }
+                self.waiting.push_back(Waiting {
+                    session: from,
+                    seq,
+                    call: (ends == Ends::ActionResult)
+                        .then(|| body::take::<u64>(payload).ok().map(|(call, _)| call))
+                        .flatten(),
+                });
+            }
             Ok(())
         } else {
             self.node = None;
@@ -409,8 +502,10 @@ impl Service for Relay {
             self.node = None;
             self.answers = [0; 4];
             self.passed.clear();
+            self.fail_waiting(sessions);
             return;
         }
+        self.waiting.retain(|waiting| waiting.session != session);
         self.standing.retain(|standing| standing.session != session);
         if self.passed.remove(&session)
             && let Some(node) = self.node

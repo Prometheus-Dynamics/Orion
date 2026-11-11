@@ -471,3 +471,50 @@ fn a_session_stands_for_so_much_and_no_more() {
         assert_eq!(provider.refused(over).await, Error::Busy);
     });
 }
+
+#[test]
+fn whoever_was_waiting_on_node_logic_is_told_when_it_dies() {
+    run(async {
+        let board = board();
+        let mut node = node(&board).await;
+        let mut provider = Client::open(board.connect(USER), Roles::CLIENT).await;
+        let mut caller = Client::open(board.connect(USER), Roles::CLIENT).await;
+        provider.send(&register("open", Admits::LOCAL)).await;
+        let _ = node.passed().await;
+
+        // Answered: nothing is owed for it.
+        let answered = caller.send(&GET).await;
+        let (session, seq, ..) = node.passed().await;
+        let mut answer = [0_u8; 64];
+        let len = encode_fields(
+            &Changed {
+                request_seq: seq,
+                records: List::new(&[]),
+                more: false,
+            },
+            &mut answer,
+        )
+        .expect("encode");
+        node.send(&NodeAnswer {
+            session,
+            kind: kind::CHANGED,
+            may_drop: false,
+            payload: Bytes(&answer[..len]),
+        })
+        .await;
+        assert_eq!(caller.next().await, kind::CHANGED);
+        let _ = answered;
+
+        // A read and a run that node logic took and never answered.
+        let get = caller.send(&GET).await;
+        let _ = node.passed().await;
+        let started = caller.send(&run_of("open", fan())).await;
+        let _ = node.passed().await;
+        drop(node);
+        assert_eq!(caller.refused(get).await, Error::Unavailable);
+        assert_eq!(caller.refused(started).await, Error::Unavailable);
+        // And nothing more: the answered read is not refused after the fact.
+        let next = caller.send(&GET).await;
+        assert_eq!(caller.refused(next).await, Error::Unavailable);
+    });
+}
