@@ -102,6 +102,8 @@ enum Asked {
 #[derive(Default)]
 struct State {
     asked: VecDeque<Asked>,
+    /// Orion asked for everything this executor has, again.
+    inventory_wanted: bool,
 }
 
 impl Handler for State {
@@ -110,11 +112,16 @@ impl Handler for State {
             kind::EXECUTOR_START,
             kind::EXECUTOR_STOP,
             kind::EXECUTOR_KILL,
+            kind::EXECUTOR_ASK,
         ]
     }
 
     fn handle(&mut self, frame: &Incoming<'_>, cx: &mut Cx<'_>) -> Result<(), ClientError> {
         let asked = match frame.kind() {
+            kind::EXECUTOR_ASK => {
+                self.inventory_wanted = true;
+                return Ok(());
+            }
             kind::EXECUTOR_START => {
                 let start: ExecutorStart<'_> = frame.body()?;
                 if self.asked.len() >= REQUEST_QUEUE {
@@ -187,6 +194,14 @@ impl Serving {
             kinds: List::new(&kinds),
         })?;
         let has = executor.inventory();
+        self.inventory(&has)?;
+        // Requests from before belong to a session that is gone.
+        self.state.borrow_mut().asked.clear();
+        self.told = has;
+        Ok(())
+    }
+
+    fn inventory(&self, has: &[(WorkloadName, WorkloadState)]) -> Result<(), ClientError> {
         let items: Vec<InventoryItem<'_>> = has
             .iter()
             .map(|(name, state)| InventoryItem {
@@ -198,9 +213,6 @@ impl Serving {
         self.client.send(&ExecutorInventory {
             workloads: List::new(&items),
         })?;
-        // Requests from before belong to a session that is gone.
-        self.state.borrow_mut().asked.clear();
-        self.told = has;
         Ok(())
     }
 
@@ -258,6 +270,13 @@ impl Serving {
             }
         }
         let has = executor.inventory();
+        if std::mem::take(&mut self.state.borrow_mut().inventory_wanted) {
+            // Orion started anew and knows nothing this executor said before: everything
+            // again, after which it knows what this executor has.
+            self.inventory(&has)?;
+            self.told = has;
+            return Ok(());
+        }
         for (name, state) in &has {
             if !self
                 .told

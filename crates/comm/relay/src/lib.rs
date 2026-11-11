@@ -206,10 +206,51 @@ pub const FILES: &[Route] = &[
     },
 ];
 
+/// The kinds of workloads and of the executors that run them.
+pub const WORKLOADS: &[Route] = &[
+    Route {
+        kind: kind::WORKLOAD_PUT,
+        access: Access::Write("workloads"),
+        who: Who::Granted(KNOWN),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+    Route {
+        kind: kind::WORKLOAD_REMOVE,
+        access: Access::Write("workloads"),
+        who: Who::Granted(KNOWN),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+    // A program on the board says which kinds it runs. It stands: a node logic that starts
+    // again finds its executors, and asks each what it has.
+    Route {
+        kind: kind::EXECUTOR_OFFER,
+        access: Access::Write("workloads"),
+        who: Who::Granted(Admits::LOCAL),
+        standing: true,
+        ends: Ends::Nothing,
+    },
+    Route {
+        kind: kind::EXECUTOR_REPORT,
+        access: Access::Write("workloads"),
+        who: Who::Any(Admits::LOCAL),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+    Route {
+        kind: kind::EXECUTOR_INVENTORY,
+        access: Access::Write("workloads"),
+        who: Who::Any(Admits::LOCAL),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+];
+
 /// Every kind that is node logic's.
 #[must_use]
 pub fn routes() -> Vec<Route> {
-    [RECORDS, ACTIONS, FILES].concat()
+    [RECORDS, ACTIONS, FILES, WORKLOADS].concat()
 }
 
 /// How many requests are remembered as waiting on node logic. The oldest goes first.

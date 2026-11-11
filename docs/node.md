@@ -417,3 +417,30 @@ crosses the connection that asked.
 Fetching is the cargo feature `pull` of `orion-node-app`, on by default. It brings in the one
 HTTP client in Orion (`ureq`) and, for `https`, the one use of rustls; a build without the
 feature has neither, and refuses `FilePull` as `unavailable`.
+
+## Workloads and executors
+
+`orion-executors` is the tracker on the wire. It takes `WorkloadPut` and `WorkloadRemove` from
+programs, tells executors to start, stop and kill, takes what they report, and tells whoever
+asked about a workload where it is.
+
+- **What should run is a record**, of class `Workload`, under the workload's name, holding the
+  put as it came. So it is saved, reaches the other nodes, and is known when node logic starts
+  again. It goes when the workload is really gone. A workload is not written with a plain
+  `Put`; that is `denied`.
+- **Pending until an executor offers the kind.** An executor sends `ExecutorOffer` and then
+  `ExecutorInventory`. Only after the inventory is anything started on it; what it already
+  has is adopted by name, and what it has that Orion does not want is stopped.
+- **If Orion restarts, runs carry on.** The offer stands in the comm core, so a node logic that
+  starts again is passed it, and answers every offer with `ExecutorAsk`: say everything you
+  have. The runs are adopted from the answer and nothing is started twice.
+- **If an executor goes** its runs are `Lost`. When one for the kind is back with nothing, they
+  are started again at once.
+- **A kind has one executor.** A second program offering it is refused, `already exists`. Only
+  the executor of a workload's kind may report on it.
+- **Who is told.** Every session that put or removed a workload is sent each `WorkloadStatus`
+  of it until the workload or the session is gone (16 sessions a workload). Putting a workload
+  again as it is changes nothing and is answered with where it is.
+- **A workload that names another node** is kept as a record and not run here; if it ran here
+  it is stopped. Choosing a node for one that names none is placement's, wired in E18; until
+  then such a workload runs on the node it was put on.

@@ -1,0 +1,21 @@
+[package]
+name = "orion-executors"
+description = "Workloads on the wire: what programs ask for, what executors are told, and what everyone hears."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-records = { path = "../../core/msg-records" }
+orion-msg-workloads = { path = "../../core/msg-workloads" }
+orion-reply = { path = "../reply" }
+orion-store = { path = "../store" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+orion-workloads = { path = "../workloads" }
+tracing.workspace = true
+
+[lints]
+workspace = true

@@ -280,6 +280,7 @@ impl Node {
             logic.actions.tick(now, &mut direct);
             logic.files.poll(&mut direct);
             logic.forwards.poll(&mut direct);
+            logic.restarts(&mut direct);
             logic.fetches(&mut direct);
             logic.actions.take_events()
         };

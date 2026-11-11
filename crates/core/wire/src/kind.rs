@@ -115,6 +115,7 @@ kinds! {
         EXECUTOR_KILL = 0x5B,
         EXECUTOR_REPORT = 0x5C,
         EXECUTOR_INVENTORY = 0x5D,
+        EXECUTOR_ASK = 0x5E,
     }
     Peers {
         PEER_SYNC = 0x60,

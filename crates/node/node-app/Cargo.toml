@@ -18,6 +18,7 @@ orion-action-list = { path = "../action-list" }
 orion-audit = { path = "../audit" }
 orion-config = { path = "../../core/config" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
+orion-executors = { path = "../executors" }
 orion-file-store = { path = "../file-store" }
 orion-files-pull = { path = "../files-pull", optional = true }
 orion-files-sink = { path = "../files-sink" }
@@ -26,6 +27,7 @@ orion-msg-files = { path = "../../core/msg-files" }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
+orion-msg-workloads = { path = "../../core/msg-workloads" }
 orion-persist = { path = "../persist" }
 orion-reply = { path = "../reply" }
 orion-resources = { path = "../resources" }
@@ -38,7 +40,8 @@ tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"
 tracing.workspace = true
 
 [dev-dependencies]
-orion = { path = "../../client/orion", features = ["files", "provider"] }
+orion = { path = "../../client/orion", features = ["files", "provider", "workloads", "executor"] }
+orion-sample-executor = { path = "../../testing/sample-executor" }
 orion-stubs = { path = "../../testing/stubs" }
 sha2 = { version = "0.11.0", default-features = false }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }

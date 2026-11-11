@@ -147,8 +147,13 @@ impl Records {
                 let put: Put<'_> = asked.body()?;
                 // All of a write or none of it: every entry is looked at before any is made.
                 for entry in put.records.iter() {
+                    let entry = entry?;
+                    if entry.class == RecordClass::Workload {
+                        // What should run is said with `WorkloadPut`, which also starts it.
+                        return Err(Error::Denied);
+                    }
                     self.resources
-                        .check(&self.store, session, &entry?, wall_ms)?;
+                        .check(&self.store, session, &entry, wall_ms)?;
                 }
                 let mut stored = Vec::new();
                 for entry in put.records.iter() {

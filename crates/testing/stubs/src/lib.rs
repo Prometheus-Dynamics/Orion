@@ -68,7 +68,8 @@ impl Board {
         Self::start_as(dir, security, port, false)
     }
 
-    /// Starts a board with no stand-in for the record store, the action router or the file receiver: those are passed to node
+    /// Starts a board with no stand-in for the record store, the action router, the file receiver or the workload
+    /// tracker: those are passed to node
     /// logic, which the user running the test may be. Without node logic they are refused.
     ///
     /// # Panics
@@ -177,7 +178,9 @@ impl Board {
                 if !for_node {
                     comm.add_service(receiver::Receiver::new(on_shelf));
                 }
-                comm.add_service(tracker::Tracker::new(node));
+                if !for_node {
+                    comm.add_service(tracker::Tracker::new(node));
+                }
                 let unix = UnixCarrier::bind(&path, Some(0o600), &node_uids).expect("socket");
                 let options = TcpOptions {
                     security,

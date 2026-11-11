@@ -15,6 +15,8 @@ open_enum! {
         Resource = 2,
         /// A [`LeaseRecord`].
         Lease = 3,
+        /// A workload that should run: the body of the `WorkloadPut` that asked for it.
+        Workload = 4,
     }
 }
 

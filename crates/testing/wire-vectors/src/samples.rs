@@ -23,9 +23,9 @@ use orion_msg_topics::{
     Unsubscribe,
 };
 use orion_msg_workloads::{
-    ExecutorInventory, ExecutorKill, ExecutorOffer, ExecutorReport, ExecutorStart, ExecutorStop,
-    InventoryItem, NeededFile, OfferedKind, RequiredLabel, RestartPolicy, WorkloadPut,
-    WorkloadRemove, WorkloadState, WorkloadStatus,
+    ExecutorAsk, ExecutorInventory, ExecutorKill, ExecutorOffer, ExecutorReport, ExecutorStart,
+    ExecutorStop, InventoryItem, NeededFile, OfferedKind, RequiredLabel, RestartPolicy,
+    WorkloadPut, WorkloadRemove, WorkloadState, WorkloadStatus,
 };
 use orion_types::{
     ActionName, Error, FileName, FrameTime, HlcTimestamp, KeyId, NodeName, ResourceName, TopicName,
@@ -600,6 +600,7 @@ fn workloads(out: &mut Vec<Sample>) {
             workloads: List::new(&items)
         }
     );
+    sample!(out, ExecutorAsk { kinds: 1 });
 }
 
 fn peers(out: &mut Vec<Sample>) {

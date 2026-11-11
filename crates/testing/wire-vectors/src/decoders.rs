@@ -88,6 +88,7 @@ decoders! {
     EXECUTOR_KILL => workloads::ExecutorKill,
     EXECUTOR_REPORT => workloads::ExecutorReport,
     EXECUTOR_INVENTORY => workloads::ExecutorInventory,
+    EXECUTOR_ASK => workloads::ExecutorAsk,
     PEER_SYNC => peers::PeerSync,
     PEER_OBSERVED => peers::PeerObserved,
     ENROLL_HELLO => peers::EnrollHello,

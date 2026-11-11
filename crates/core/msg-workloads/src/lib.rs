@@ -182,3 +182,13 @@ body! {
         pub workloads: List<'a, InventoryItem<'a>>,
     }
 }
+
+body! {
+    /// Orion asks an executor to say everything it has again, with [`ExecutorInventory`]. It
+    /// does when it has just started and found the executor already connected: whatever the
+    /// executor reported before was said to an Orion that is gone.
+    pub struct ExecutorAsk = kind::EXECUTOR_ASK {
+        /// The kinds Orion takes this executor to run, as many as it offered.
+        pub kinds: u8,
+    }
+}

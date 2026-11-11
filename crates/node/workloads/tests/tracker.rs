@@ -650,6 +650,23 @@ fn lost_that_ended_while_nobody_looked_is_treated_as_its_end() {
 // --- An executor's inventory ---
 
 #[test]
+fn an_executor_that_says_what_it_has_again_starts_nothing_twice() {
+    // Told to start, and the executor's next word is everything it has, taken before it
+    // heard: the workload is not started a second time.
+    let mut bench = Bench::with_executor();
+    bench.put("a", RestartPolicy::Always);
+    assert_eq!(bench.commands(), [start("a")]);
+    assert!(bench.up(&[]).is_empty());
+    assert_eq!(bench.state("a"), Some(Starting));
+    assert!(bench.commands().is_empty());
+    // And again once it runs.
+    bench.report("a", Running);
+    assert!(bench.up(&[("a", Running)]).is_empty());
+    assert_eq!(bench.state("a"), Some(Running));
+    assert!(bench.commands().is_empty());
+}
+
+#[test]
 fn what_an_executor_has_that_orion_does_not_want_is_returned_to_be_stopped() {
     let mut bench = Bench::new();
     bench.put("wanted", RestartPolicy::Always);

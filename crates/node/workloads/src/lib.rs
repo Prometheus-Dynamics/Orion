@@ -539,9 +539,12 @@ impl Tracker {
                 Some(WorkloadState::Gone) if tracked.run => {
                     keep = self.ended(&name, &mut tracked, false, "", now);
                 }
-                _ if tracked.run => {
-                    // It had a run and the executor knows nothing of it: the run went with
-                    // the executor. That is not the workload failing.
+                _ if tracked.run && tracked.state == WorkloadState::Lost => {
+                    // Its executor went away with it running, and the executor that is here
+                    // now knows nothing of it: the run went with the executor. That is not
+                    // the workload failing. (For an executor that never went away, a run
+                    // that is not in what it has is one it was just told to start, or one
+                    // whose end it reports itself.)
                     tracked.run = false;
                     tracked.replace = false;
                     if tracked.wanted {

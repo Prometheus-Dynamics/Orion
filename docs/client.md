@@ -202,7 +202,8 @@ and gives it to `Serving`. `start` says what it runs and everything it has; `tur
 Orion asked since the last turn and then reports every workload whose state changed. The
 executor never has to remember to report: what it says it has is compared with what Orion was
 last told. When the connection has been made again, `start` sends the whole inventory once
-more, which is how Orion takes back runs that carried on without it, by name.
+more, which is how Orion takes back runs that carried on without it, by name. When Orion itself
+has started again it asks (`ExecutorAsk`), and the next turn answers with the whole inventory.
 
 **An example to read.** `crates/testing/sample-executor` is the smallest working executor: a
 workload's spec is a shell command, which it runs as a child process. `stop` is `SIGTERM`,

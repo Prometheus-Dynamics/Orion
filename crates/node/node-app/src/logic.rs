@@ -8,6 +8,7 @@ use orion_action_forward::Forwards;
 use orion_action_list::{Actions, Event};
 use orion_audit::{Audit, Entry, Who};
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
+use orion_executors::Workloads;
 use orion_file_store::Files;
 use orion_files_sink::Sinks;
 use orion_msg_actions::{Cancel, Register, Run, Target};
@@ -15,6 +16,7 @@ use orion_msg_files::{FileBegin, FileCommit};
 use orion_msg_records::{NodeRecord, Put, RecordClass, ResourceRecord};
 use orion_msg_session::{NodeAnswer, NodeGone, NodeRequest};
 use orion_msg_topics::{Field, FieldType};
+use orion_msg_workloads::{WorkloadPut, WorkloadRemove};
 use orion_reply::{Asked, Out};
 use orion_ring::FieldId;
 use orion_store::Store;
@@ -93,6 +95,7 @@ pub(crate) struct Logic {
     pub(crate) actions: Actions,
     pub(crate) files: Files,
     pub(crate) sinks: Sinks,
+    pub(crate) workloads: Workloads,
     #[cfg(feature = "pull")]
     pulling: crate::pull::Pulling,
     pub(crate) forwards: Forwards,
@@ -119,6 +122,11 @@ impl Logic {
         kind::FILE_COMMIT,
         kind::FILE_SINK,
         kind::FILE_STATUS,
+        kind::WORKLOAD_PUT,
+        kind::WORKLOAD_REMOVE,
+        kind::EXECUTOR_OFFER,
+        kind::EXECUTOR_REPORT,
+        kind::EXECUTOR_INVENTORY,
         kind::FILE_PULL,
     ];
 
@@ -139,6 +147,11 @@ impl Logic {
         kind::FILE_COMMIT,
         kind::FILE_SINK,
         kind::FILE_STATUS,
+        kind::WORKLOAD_PUT,
+        kind::WORKLOAD_REMOVE,
+        kind::EXECUTOR_OFFER,
+        kind::EXECUTOR_REPORT,
+        kind::EXECUTOR_INVENTORY,
     ];
 
     pub(crate) fn new(
@@ -148,7 +161,16 @@ impl Logic {
         audit: Option<Audit>,
         identity: PathBuf,
     ) -> Self {
+        // What should run here is in the store. It is adopted from the executors that are
+        // still connected, or started, once they have said what they have.
+        let workloads = Workloads::restored(
+            node.clone(),
+            orion_executors::RestartConfig::default(),
+            &store,
+            0,
+        );
         Self {
+            workloads,
             records: Records::new(store),
             forwards: Forwards::new(node.clone(), identity),
             actions: Actions::new(node),
@@ -167,11 +189,21 @@ impl Logic {
         self.started.elapsed().as_millis() as u64
     }
 
-    /// How long until the next deadline.
+    /// How long until the next deadline: a run that times out, a workload to start again.
     pub(crate) fn next_deadline(&self) -> Option<Duration> {
-        self.actions
-            .next_deadline()
+        [self.actions.next_deadline(), self.workloads.next_deadline()]
+            .into_iter()
+            .flatten()
+            .min()
             .map(|due| Duration::from_millis(due.saturating_sub(self.now_ms())))
+    }
+
+    /// Starts again the workloads that are due.
+    pub(crate) fn restarts(&mut self, out: &mut dyn Out) {
+        let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
+        self.workloads
+            .tick(self.records.store_mut(), now, wall_ms, out);
+        self.records.publish(out);
     }
 
     pub(crate) fn forget_sessions(&mut self) {
@@ -179,6 +211,8 @@ impl Logic {
         self.actions.forget_sessions();
         self.forwards.forget_sessions();
         self.sinks.forget_sessions();
+        let now = self.now_ms();
+        self.workloads.forget_sessions(now);
         #[cfg(feature = "pull")]
         self.pulling.forget_sessions();
     }
@@ -240,6 +274,14 @@ impl Logic {
     fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) {
         let answered = if Records::KINDS.contains(&asked.kind) {
             self.records.request(asked, wall().as_millis() as u64, out)
+        } else if Workloads::KINDS.contains(&asked.kind) {
+            let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
+            let answered =
+                self.workloads
+                    .request(asked, self.records.store_mut(), now, wall_ms, out);
+            // What should run is a record: watchers are told and it is saved.
+            self.records.publish(out);
+            answered
         } else if asked.kind == kind::FILE_PULL {
             self.pull(asked, out)
         } else if Sinks::KINDS.contains(&asked.kind) {
@@ -348,6 +390,15 @@ fn done(asked: &Asked<'_>) -> Option<(&'static str, String)> {
             let commit: FileCommit = asked.body().ok()?;
             Some(("commit", format!("transfer {:016x}", commit.transfer)))
         }
+        kind::WORKLOAD_PUT => {
+            let put: WorkloadPut<'_> = asked.body().ok()?;
+            Some(("workload", format!("{} ({})", put.name, put.kind)))
+        }
+        kind::WORKLOAD_REMOVE => {
+            let remove: WorkloadRemove = asked.body().ok()?;
+            let how = if remove.force { " by force" } else { "" };
+            Some(("remove", format!("{}{how}", remove.name)))
+        }
         _ => None,
     }
 }
@@ -374,6 +425,15 @@ impl Handler for Logic {
             self.files.gone(gone.session);
             self.forwards.gone(gone.session);
             self.sinks.gone(gone.session, &mut through);
+            let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
+            self.workloads.gone(
+                gone.session,
+                self.records.store_mut(),
+                now,
+                wall_ms,
+                &mut through,
+            );
+            self.records.publish(&mut through);
             #[cfg(feature = "pull")]
             self.pulling.gone(gone.session);
             let now = self.now_ms();
