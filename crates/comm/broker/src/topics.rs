@@ -91,6 +91,10 @@ pub struct Topic {
     pub id: TopicId,
     /// Its name.
     pub name: TopicName,
+    /// The node it is published on, for another node's topic that is asked for here. Such a
+    /// topic has no publisher on this board: what carries it across declares it and writes
+    /// its ring. `None` for a topic of this board.
+    pub node: Option<NodeName>,
     /// Its declaration, as the publisher sent it. Empty until someone declares it.
     pub declare: Vec<u8>,
     /// Its ring. `None` while subscribers wait for a publisher.
@@ -104,6 +108,8 @@ pub struct Topic {
     /// Whether the comm core itself publishes it: its own state. Such a topic has no publisher
     /// session, is never removed, and cannot be declared by anyone else.
     pub internal: bool,
+    /// For another node's topic: whether what carries it across has it now.
+    pub mirror_live: bool,
     /// Goes up whenever the ring, the publisher or the subscribers change. What builds on the
     /// broker keeps its own state per topic and rebuilds it when this moves.
     pub epoch: u64,
@@ -131,6 +137,11 @@ pub trait TopicWatch {
     fn subscribed(&mut self, topic: &Topic, session: SessionId, sessions: &mut Sessions);
     /// `session` no longer subscribes to `topic`.
     fn left(&mut self, topic: &Topic, session: SessionId, sessions: &mut Sessions);
+    /// `session` subscribed to `topic`, which nobody has declared: it waits. For what can
+    /// do something about that, as what carries another node's topics across can.
+    fn waiting(&mut self, topic: &Topic, session: SessionId, sessions: &mut Sessions) {
+        let _ = (topic, session, sessions);
+    }
 }
 
 /// Every topic on the board. The broker's services share one of these.
@@ -144,6 +155,9 @@ pub struct Topics {
     /// The doorbell of whatever carries samples to subscribers that were not given the
     /// ring: its eventfd and its page, read-only.
     offboard_bell: Option<(OwnedFd, OwnedFd)>,
+    /// Whether something here carries other nodes' topics across. Without it, a subscription
+    /// to one is refused.
+    carries_remote: bool,
 }
 
 impl std::fmt::Debug for Topics {
@@ -164,6 +178,7 @@ impl Topics {
             bytes: 0,
             watchers: Vec::new(),
             offboard_bell: None,
+            carries_remote: false,
         }
     }
 
@@ -241,17 +256,50 @@ impl Topics {
             .filter(|topic| topic.id == id)
     }
 
-    /// The topic with this name.
+    /// This board's topic with this name.
     #[must_use]
     pub fn find(&self, name: &TopicName) -> Option<TopicId> {
+        self.find_on(None, name)
+    }
+
+    /// The topic `name` of `node`, or of this board for `None`.
+    #[must_use]
+    pub fn find_on(&self, node: Option<&NodeName>, name: &TopicName) -> Option<TopicId> {
         self.iter()
-            .find(|topic| topic.name == *name)
+            .find(|topic| topic.name == *name && topic.node.as_ref() == node)
             .map(|topic| topic.id)
     }
 
-    /// The topic with this name, made if it isn't there.
+    /// Says that something here carries other nodes' topics across: a subscription to
+    /// `<node>/<topic>` is then taken, and waits for that to declare it.
+    pub fn carry_remote(&mut self) {
+        self.carries_remote = true;
+    }
+
+    /// Whether another node's topics can be subscribed to here.
+    #[must_use]
+    pub const fn carries_remote(&self) -> bool {
+        self.carries_remote
+    }
+
+    /// This board's name.
+    #[must_use]
+    pub const fn node(&self) -> &NodeName {
+        &self.node
+    }
+
+    /// This board's topic with this name, made if it isn't there.
     pub(crate) fn find_or_add(&mut self, name: &TopicName) -> Result<TopicId, Error> {
-        if let Some(id) = self.find(name) {
+        self.find_or_add_on(None, name)
+    }
+
+    /// The topic `name` of `node`, made if it isn't there.
+    pub(crate) fn find_or_add_on(
+        &mut self,
+        node: Option<&NodeName>,
+        name: &TopicName,
+    ) -> Result<TopicId, Error> {
+        if let Some(id) = self.find_on(node, name) {
             return Ok(id);
         }
         if self.len() >= self.config.max_topics as usize {
@@ -270,12 +318,14 @@ impl Topics {
         self.slots[slot] = Some(Topic {
             id,
             name: name.clone(),
+            node: node.cloned(),
             declare: Vec::new(),
             ring: None,
             publisher: None,
             publisher_shared: false,
             subscribers: Vec::new(),
             internal: false,
+            mirror_live: false,
             epoch: 0,
         });
         Ok(id)
@@ -351,6 +401,54 @@ impl Topics {
         topic.internal = true;
         topic.epoch += 1;
         Ok(id)
+    }
+
+    /// Declares the local copy of another node's topic: gives it a ring of the shape the
+    /// declaration says, and hands that ring to everyone here who was waiting for it. Called
+    /// by what carries the topic across, with the declaration as the other node sent it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFound`] if nobody asked for the topic, [`Error::Busy`] if there is no room
+    /// for its ring.
+    pub fn declare_mirror(
+        &mut self,
+        id: TopicId,
+        declare: &[u8],
+        spec: &Spec,
+        sessions: &mut Sessions,
+    ) -> Result<(), Error> {
+        let topic = self.get(id).ok_or(Error::NotFound)?;
+        if topic.node.is_none() {
+            return Err(Error::Denied);
+        }
+        // The same declaration again carries on in the ring that is there: the link to the
+        // other node came back.
+        let resumed = topic.ring.is_some() && topic.declare == declare;
+        if !resumed {
+            self.set_ring(id, spec, None)?;
+        }
+        let topic = self.get_mut(id).ok_or(Error::NotFound)?;
+        topic.declare.clear();
+        topic.declare.extend_from_slice(declare);
+        topic.mirror_live = true;
+        topic.epoch += 1;
+        crate::service::mirror_declared(topic, resumed, sessions);
+        self.tell(id, |watcher, topic| watcher.declared(topic, sessions));
+        Ok(())
+    }
+
+    /// The other node, or the way to it, is gone: everyone here who subscribes to its topic
+    /// is told its publisher is gone. The ring stays, with what it has.
+    pub fn mirror_lost(&mut self, id: TopicId, sessions: &mut Sessions) {
+        let Some(topic) = self.get_mut(id) else {
+            return;
+        };
+        if !std::mem::take(&mut topic.mirror_live) {
+            return;
+        }
+        topic.epoch += 1;
+        crate::service::mirror_lost(topic, sessions);
     }
 
     /// Removes `id` if nobody publishes it and nobody subscribes to it.

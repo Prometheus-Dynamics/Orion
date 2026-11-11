@@ -102,7 +102,7 @@ Records, peer sync, the workload tracker, actions and files.
 
 Other boards, browsers and NT4.
 
-- [ ] [F1](docs/prs/F1.md) Topics across boards (wave 8; needs C3, C6)
+- [x] [F1](docs/prs/F1.md) Topics across boards (wave 8; needs C3, C6)
 - [x] [F2](docs/prs/F2.md) Outbound limits and the drop rule (wave 7; needs C3)
 - [ ] [F3](docs/prs/F3.md) WebSocket carrier (wave 8; needs C1, F2)
 - [ ] [F4](docs/prs/F4.md) TypeScript client (wave 9; needs F3)

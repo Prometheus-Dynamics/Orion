@@ -42,6 +42,10 @@ pub struct CommSettings {
     /// `discovery.interfaces`: the interfaces or addresses to run mDNS on. Empty for all.
     #[cfg(feature = "discovery")]
     pub discovery_interfaces: Vec<String>,
+    /// `peer.nodes`: where the other nodes are, each `name=address:port`. A topic of one of
+    /// them can be subscribed to here.
+    #[cfg(feature = "topic-peers")]
+    pub peer_nodes: Vec<orion_topic_peers::PeerNode>,
     /// `links.serial`: serial links, each `name=path@baud`.
     #[cfg(feature = "link-serial")]
     pub serial_links: Vec<orion_link_serial::SerialLink>,
@@ -150,6 +154,8 @@ impl CommSettings {
             discovery_ttl: Duration::from_millis(source.get("discovery.ttl_ms", 120_000_u64)?),
             #[cfg(feature = "discovery")]
             discovery_interfaces: source.list("discovery.interfaces")?,
+            #[cfg(feature = "topic-peers")]
+            peer_nodes: source.list("peer.nodes")?,
             #[cfg(feature = "link-serial")]
             serial_links: source.list("links.serial")?,
             #[cfg(feature = "link-sealed")]

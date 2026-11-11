@@ -14,7 +14,7 @@ use orion_server::{
 use orion_types::NodeName;
 use orion_wire::{Bytes, FrameView, body, kind};
 
-use crate::topics::{BrokerConfig, Subscription, TopicId, Topics};
+use crate::topics::{BrokerConfig, Subscription, Topic, TopicId, Topics};
 
 /// The broker. Add it to the server; share [`Broker::topics`] with what builds on it.
 #[derive(Debug)]
@@ -195,6 +195,39 @@ fn tell_publisher(
     let _ = sessions.send(publisher, &demand, Delivery::Must);
 }
 
+/// Hands the ring of another node's topic to everyone here who subscribes to it, or, if it
+/// is the ring they already have, tells them it is live again.
+pub(crate) fn mirror_declared(topic: &Topic, resumed: bool, sessions: &mut Sessions) {
+    let Some(ring) = &topic.ring else {
+        return;
+    };
+    ring.set_subscribers(topic.subscriber_count());
+    for subscription in &topic.subscribers {
+        if resumed {
+            let state = TopicState {
+                request_seq: 0,
+                handle: topic.id.0,
+                status: TopicStatus::Live,
+            };
+            let _ = sessions.send(subscription.session, &state, Delivery::Must);
+        } else {
+            let _ = hand_ring(sessions, topic.id, &topic.declare, ring, subscription);
+        }
+    }
+}
+
+/// Tells everyone who subscribes to another node's topic that its publisher is gone.
+pub(crate) fn mirror_lost(topic: &Topic, sessions: &mut Sessions) {
+    for subscription in &topic.subscribers {
+        let state = TopicState {
+            request_seq: 0,
+            handle: topic.id.0,
+            status: TopicStatus::PublisherGone,
+        };
+        let _ = sessions.send(subscription.session, &state, Delivery::Must);
+    }
+}
+
 fn declare(
     topics: &mut Topics,
     cx: &mut Cx<'_>,
@@ -270,13 +303,14 @@ fn subscribe(
     bell: Option<(OwnedFd, OwnedFd)>,
     marks: Option<OwnedFd>,
 ) -> Result<(), Error> {
-    if subscribe
+    // Another board's topic is subscribed to like any other, if something here carries
+    // those across. It then waits, as a topic nobody has declared yet does.
+    let remote = subscribe
         .topic
         .node
         .as_ref()
-        .is_some_and(|node| *node != topics.node)
-    {
-        // Another board's topic. What carries those is not this crate.
+        .filter(|node| **node != topics.node);
+    if remote.is_some() && !topics.carries_remote() {
         return Err(Error::Unsupported);
     }
     let from = cx.from();
@@ -287,7 +321,7 @@ fn subscribe(
     } else {
         topics.offboard_bell()
     };
-    let id = topics.find_or_add(&subscribe.topic.topic)?;
+    let id = topics.find_or_add_on(remote, &subscribe.topic.topic)?;
     let topic = topics.get_mut(id).ok_or(Error::NotFound)?;
     // Subscribing again replaces the subscription: a client that reconnected its doorbell.
     topic
@@ -308,7 +342,7 @@ fn subscribe(
     let subscription = topic.subscribers.last().ok_or(Error::Internal)?;
     let sessions = cx.sessions();
     let Some(ring) = &topic.ring else {
-        return sessions.send(
+        sessions.send(
             from,
             &TopicState {
                 request_seq: subscription.request_seq,
@@ -316,7 +350,9 @@ fn subscribe(
                 status: TopicStatus::Waiting,
             },
             Delivery::Must,
-        );
+        )?;
+        topics.tell(id, |watcher, topic| watcher.waiting(topic, from, sessions));
+        return Ok(());
     };
     ring.set_subscribers(count);
     hand_ring(sessions, id, &topic.declare, ring, subscription)?;
@@ -327,6 +363,8 @@ fn subscribe(
         }
         // The comm core publishes this one itself: there is no session, and nobody is gone.
         None if topic.internal => {}
+        // Another node's topic, which what carries it across has now.
+        None if topic.mirror_live => {}
         None => sessions.send(
             from,
             &TopicState {

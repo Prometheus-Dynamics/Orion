@@ -64,6 +64,9 @@ pub struct CommCore {
     /// Kept so that it runs for as long as the comm core does.
     #[cfg(feature = "outbound")]
     _outbound: orion_outbound::Outbound,
+    /// Kept for the same reason.
+    #[cfg(feature = "topic-peers")]
+    _topic_peers: orion_topic_peers::TopicPeers,
     #[cfg(feature = "self-status")]
     status: orion_self_status::SelfStatus,
     #[cfg(feature = "time")]
@@ -242,6 +245,16 @@ impl CommCore {
             max_frame: settings.limits.max_frame,
             handshake: Duration::from_millis(u64::from(settings.limits.hello_ms)),
         };
+        // Other nodes' topics, for programs here that ask for them.
+        #[cfg(feature = "topic-peers")]
+        let topic_peers = {
+            parts.push("topics of other nodes");
+            let pinned = keys.clone();
+            let table = orion_topic_peers::Table::new(settings.peer_nodes.clone(), move |node| {
+                pinned.lock().peer_key(node).copied()
+            });
+            orion_topic_peers::TopicPeers::start(&comm, &topics, tcp_options.clone(), table)
+        };
         #[cfg(feature = "tcp")]
         if let Some(listen) = settings.config.peer_listen {
             parts.push("network");
@@ -296,6 +309,8 @@ impl CommCore {
             parts,
             #[cfg(feature = "outbound")]
             _outbound: outbound,
+            #[cfg(feature = "topic-peers")]
+            _topic_peers: topic_peers,
             #[cfg(feature = "self-status")]
             status,
             #[cfg(feature = "time")]

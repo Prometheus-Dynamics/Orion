@@ -1,0 +1,33 @@
+[package]
+name = "orion-topic-peers"
+description = "Another node's topics, carried into a local copy of the ring while someone here asks for them."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-broker = { path = "../broker" }
+orion-msg-peers = { path = "../../core/msg-peers" }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-ring = { path = "../../core/ring" }
+orion-server = { path = "../server" }
+orion-tcp = { path = "../tcp" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion = { path = "../../client/orion" }
+orion-broker-proxy = { path = "../broker-proxy" }
+orion-keys = { path = "../keys" }
+orion-outbound = { path = "../outbound" }
+orion-time = { path = "../time" }
+orion-unix = { path = "../unix" }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "net"] }
+
+[lints]
+workspace = true

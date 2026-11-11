@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -23,6 +23,8 @@ buffers = ["dep:orion-broker-buffers"]
 node = ["dep:orion-relay"]
 # Samples for subscribers that cannot map a ring: other boards, browsers.
 outbound = ["dep:orion-outbound"]
+# Other nodes' topics, carried into local copies of their rings.
+topic-peers = ["tcp", "dep:orion-topic-peers"]
 # Tells systemd when the comm core is ready and that it is alive.
 systemd = []
 # Finding the other nodes of the cluster.
@@ -58,6 +60,7 @@ orion-server = { path = "../server" }
 orion-supervise = { path = "../../core/supervise" }
 orion-tcp = { path = "../tcp", optional = true }
 orion-time = { path = "../time", optional = true }
+orion-topic-peers = { path = "../topic-peers", optional = true }
 orion-types = { path = "../../core/types" }
 orion-unix = { path = "../unix" }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"] }

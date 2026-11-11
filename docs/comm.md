@@ -135,6 +135,38 @@ and does nothing different.
   ring a subscriber's own, and only when the sender is asleep.
 - Subscriptions take turns of 256 samples, so one busy topic does not starve another.
 
+## Topics of other nodes
+
+A program subscribes to `<node>/<topic>` exactly as to a topic of its own board: it is handed
+a ring and reads it. The ring is a local copy, and `orion-topic-peers` fills it.
+
+- **Only while someone asks.** When the first program here subscribes to a topic of another
+  node, this comm core connects to that node's comm core and subscribes there, as any
+  subscriber without a ring does. More programs asking for the same topic share that one
+  subscription. When the last one leaves, it unsubscribes; when nothing of a node is asked
+  for, the connection to it is closed.
+- **A local copy of the ring.** The other node sends the topic's declaration, then each
+  sample. The declaration makes a ring of the same shape here and the waiting subscribers
+  are handed it. Each sample is written into it and sleeping subscribers are rung. From there
+  on they are same-board subscribers, with history and "the value at or before".
+- **Before the topic exists** a subscriber waits, as it would on its own board, and is handed
+  the ring when someone on the other node declares the topic.
+- **Frame times in this board's time.** A sample's time is on its publisher's clock. The link
+  compares the two clocks with the request the time service answers, when it connects and
+  every ten seconds, and adds this clock less that one to each sample's time. A difference
+  smaller than half the round trip, or than a fifth of a millisecond, is not one the
+  comparison can see, and times are left as they are: that is the case for boards kept
+  together by time sync.
+- **A link that breaks** tells the subscribers here that the publisher is gone and keeps
+  their rings, then tries again every 200 ms for as long as someone asks. When it is back and
+  the declaration is the same, they are told the topic is live again and go on in the ring
+  they have. The same happens when only the publisher on the other node goes and comes back.
+- **What is sent, and what is dropped for a slow link**, is the other node's outbound part's
+  business. To it, this comm core is one more subscriber without a ring.
+- **Where a node is** comes from `peer.nodes`, `name=address:port` for each; the key it must
+  hold is the one it is pinned to in the trust store, if it is. A node nobody knows the place
+  of leaves its subscribers waiting.
+
 ## Buffer topics in the broker
 
 `crates/comm/broker-buffers` (`orion-broker-buffers`). A frame topic is an ordinary topic whose
@@ -494,6 +526,7 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `peer.listen` | off | where other nodes and people's tools connect (`tcp`) |
 | `comm.*`, `topics.*` | | the server's and the broker's limits |
 | `outbound.max_bytes` | 131072 | what may wait to be sent to one subscriber without a ring (`outbound`) |
+| `peer.nodes` | none | where other nodes are, `name=address:port`, for subscribing to their topics (`topic-peers`) |
 | `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
 | `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |
 | `time.*` | off | time sync (`time`) |
