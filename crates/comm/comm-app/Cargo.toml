@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -19,6 +19,8 @@ self-status = ["dep:orion-self-status"]
 proxy = ["dep:orion-broker-proxy"]
 # Buffer topics: frames in shared memory.
 buffers = ["dep:orion-broker-buffers"]
+# Passing records and the rest of what is node logic's to node logic.
+node = ["dep:orion-relay"]
 # Tells systemd when the comm core is ready and that it is alive.
 systemd = []
 # Finding the other nodes of the cluster.
@@ -47,6 +49,7 @@ orion-keys = { path = "../keys" }
 orion-link-can = { path = "../link-can", optional = true }
 orion-link-serial = { path = "../link-serial", optional = true }
 orion-link-usb = { path = "../link-usb", optional = true }
+orion-relay = { path = "../relay", optional = true }
 orion-self-status = { path = "../self-status", optional = true }
 orion-server = { path = "../server" }
 orion-supervise = { path = "../../core/supervise" }

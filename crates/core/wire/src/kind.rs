@@ -61,6 +61,10 @@ kinds! {
         IDENTITY = 0x08,
         LINK_OFFER = 0x09,
         LINK_TAKEN = 0x0A,
+        NODE_ATTACH = 0x0B,
+        NODE_REQUEST = 0x0C,
+        NODE_ANSWER = 0x0D,
+        NODE_GONE = 0x0E,
     }
     Records {
         PUT = 0x10,

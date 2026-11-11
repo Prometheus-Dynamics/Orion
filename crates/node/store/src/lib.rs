@@ -350,6 +350,12 @@ impl Store {
             .filter(|version| !version.deleted)
     }
 
+    /// The newest version of a desired record, a delete included.
+    #[must_use]
+    pub fn version(&self, class: RecordClass, key: &str) -> Option<&Version> {
+        self.desired.get(&(class.code(), key.to_owned()))
+    }
+
     /// The desired records of `class` whose keys start with `prefix`, by key. Deleted ones
     /// are left out.
     pub fn list<'a>(

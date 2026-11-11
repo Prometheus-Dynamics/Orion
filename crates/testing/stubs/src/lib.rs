@@ -65,6 +65,29 @@ impl Board {
     /// If the board cannot start.
     #[must_use]
     pub fn start_in(dir: &Path, security: Security, port: Option<u16>) -> Self {
+        Self::start_as(dir, security, port, false)
+    }
+
+    /// Starts a board with no stand-in for the record store: records are passed to node
+    /// logic, which the user running the test may be. Without node logic they are refused.
+    ///
+    /// # Panics
+    ///
+    /// If the board cannot start.
+    #[must_use]
+    pub fn start_for_node(dir: &Path) -> Self {
+        Self::start_as(dir, Security::Off, None, true)
+    }
+
+    fn start_as(dir: &Path, security: Security, port: Option<u16>, for_node: bool) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        // Whoever owns the directory runs the test, and may be the node logic.
+        let node_uids: Vec<u32> = std::fs::metadata(dir)
+            .ok()
+            .filter(|_| for_node)
+            .map(|metadata| metadata.uid())
+            .into_iter()
+            .collect();
         let socket = dir.join("orion.sock");
         let shelf = Arc::new(Shelf::default());
         let keys =
@@ -113,11 +136,15 @@ impl Board {
                     None,
                 )
                 .expect("time");
-                comm.add_service(store::Store::default());
+                if for_node {
+                    comm.add_service(orion_relay::Relay::new(orion_relay::RECORDS));
+                } else {
+                    comm.add_service(store::Store::default());
+                }
                 comm.add_service(router::Router::default());
                 comm.add_service(receiver::Receiver::new(on_shelf));
                 comm.add_service(tracker::Tracker::new(node));
-                let unix = UnixCarrier::bind(&path, Some(0o600), &[]).expect("socket");
+                let unix = UnixCarrier::bind(&path, Some(0o600), &node_uids).expect("socket");
                 let options = TcpOptions {
                     security,
                     keys: board_keys,

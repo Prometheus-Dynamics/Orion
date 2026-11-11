@@ -404,6 +404,30 @@ polled), or, with feature `bulk`, a USB device with the interface and bulk endpo
 link with no handle opens nothing and waits. When a new handle is offered for a link that has
 one, the device was unplugged and is back: the old stream ends and the link goes on over the new.
 
+## Passing requests to node logic
+
+Records, and later workloads, actions and files, are node logic's to answer, and node logic is
+another process. There is no second protocol for it: `orion-relay` is a service like the
+others.
+
+- Node logic connects on the board's socket with the node role, which the socket offers to
+  root and to `socket.node_uids`, and sends `NodeAttach` with the kinds it answers.
+- A request of one of those kinds goes through the one check here, at the door, like every
+  other. If it passes it is sent to node logic inside `NodeRequest`, which names the session,
+  the request's `seq` and the caller. Node logic never sees a request that was refused.
+- Node logic answers with `NodeAnswer`: a session, a kind and a payload. The relay sends that
+  frame to that session as it is. A session that is gone is not node logic's failure.
+- When a session ends that node logic was passed a request from, it is told with `NodeGone`.
+- With no node logic attached, or for a kind it did not name, the request is refused with
+  `unavailable`. Nothing else in the comm core notices that node logic is away.
+- A request that stands, a watch, is kept (64 a session, the oldest goes first) and passed
+  again to the node logic that comes back. So a program that was watching goes on being told
+  without asking again. It may be told a version it already has: the same record again.
+- One node logic at a time: when another attaches, the one before is closed.
+
+Which kind asks for what, and who may ask, is a table of routes in the relay. Programs on the
+board, operators and peers may read and write records; an operator needs the grant.
+
 ## The comm core as a program
 
 `orion-comm-app` puts the parts together. It needs nothing else on the board: no node logic, no
@@ -428,6 +452,7 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `links.sealed` | none | `name=address:port` (`link-sealed`) |
 | `links.can` | none | `name=interface:device-to-host:host-to-device:addresses[:fd][:extended]` (`link-can`) |
 | `links.usb` | none | names; their handles are handed over at run time (`link-usb`) |
+| | | passing records to node logic, no setting (`node`) |
 
 The name in brackets is the cargo feature that carries the part. A setting for a part that is
 not built in is an unknown key.

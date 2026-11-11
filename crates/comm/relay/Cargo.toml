@@ -1,0 +1,21 @@
+[package]
+name = "orion-relay"
+description = "Passes the requests that are node logic's to the session that holds the node role, and its answers back."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-session = { path = "../../core/msg-session" }
+orion-server = { path = "../server" }
+orion-wire = { path = "../../core/wire" }
+
+[dev-dependencies]
+orion-msg-records = { path = "../../core/msg-records" }
+orion-types = { path = "../../core/types" }
+tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
+
+[lints]
+workspace = true

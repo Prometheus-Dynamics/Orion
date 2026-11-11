@@ -12,8 +12,8 @@ use orion_msg_peers::{
 };
 use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, RecordEntry, Watch};
 use orion_msg_session::{
-    Hello, Identify, Identity, IdentityField, LinkOffer, LinkTaken, LinkTransport, Ping, Pong,
-    Refusal, Reject, RejectReason, Roles, Welcome,
+    Hello, Identify, Identity, IdentityField, LinkOffer, LinkTaken, LinkTransport, NodeAnswer,
+    NodeAttach, NodeGone, NodeRequest, Ping, Pong, Refusal, Reject, RejectReason, Roles, Welcome,
 };
 use orion_msg_topics::{
     BatchSample, Bell, BufferInfo, BufferOffer, Declare, Demand, Field, FieldType, Holds, Open,
@@ -171,6 +171,39 @@ fn session(out: &mut Vec<Sample>) {
         }
     );
     sample!(out, LinkTaken { request_seq: 9 });
+    sample!(
+        out,
+        NodeAttach {
+            kinds: Bytes(&[0x10, 0x11, 0x12])
+        }
+    );
+    sample!(
+        out,
+        NodeRequest {
+            session: 0x0001_0002,
+            seq: 9,
+            kind: 0x11,
+            class: 8,
+            uid: 0,
+            caller: "key1",
+            payload: Bytes(&[1, 2, 3])
+        }
+    );
+    sample!(
+        out,
+        NodeAnswer {
+            session: 0x0001_0002,
+            kind: 0x13,
+            may_drop: false,
+            payload: Bytes(&[4, 5])
+        }
+    );
+    sample!(
+        out,
+        NodeGone {
+            session: 0x0001_0002
+        }
+    );
     let fields = [IdentityField {
         name: "model",
         ty: 4,

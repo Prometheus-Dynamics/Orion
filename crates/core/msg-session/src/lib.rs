@@ -271,3 +271,58 @@ body! {
         pub request_seq: u16,
     }
 }
+
+body! {
+    /// Node logic tells the comm core it is ready, and which kinds it answers. From then on
+    /// the comm core passes those requests to it as [`NodeRequest`]. Until then, and whenever
+    /// node logic is away, they are refused with [`Error::Unavailable`].
+    pub struct NodeAttach<'a> = kind::NODE_ATTACH {
+        /// The kinds node logic answers, one byte each.
+        pub kinds: Bytes<'a>,
+    }
+}
+
+body! {
+    /// A request the comm core passes to node logic, after the check. Node logic never sees
+    /// one that was refused at the door.
+    pub struct NodeRequest<'a> = kind::NODE_REQUEST {
+        /// The session that asked, to name in the answer.
+        pub session: u32,
+        /// The `seq` of the request, which an answer to the caller names.
+        pub seq: u16,
+        /// The kind of the request.
+        pub kind: u8,
+        /// The caller's class: the bit of `orion_check::PrincipalClass`.
+        pub class: u8,
+        /// The caller's user id, for a program on this board. Zero otherwise.
+        pub uid: u32,
+        /// The caller's key, node or device name. Empty for a program on this board.
+        pub caller: &'a str,
+        /// The request's payload, as it came.
+        pub payload: Bytes<'a>,
+    }
+}
+
+body! {
+    /// A frame from node logic for one session: an answer, a push, a refusal. The comm core
+    /// sends it on as it is.
+    pub struct NodeAnswer<'a> = kind::NODE_ANSWER {
+        /// The session it is for.
+        pub session: u32,
+        /// The kind of the frame.
+        pub kind: u8,
+        /// Whether the frame is one of a stream that the next one supersedes, and may be
+        /// dropped when the session is not reading. Otherwise the session is closed.
+        pub may_drop: bool,
+        /// The frame's payload.
+        pub payload: Bytes<'a>,
+    }
+}
+
+body! {
+    /// A session that node logic was passed requests from is gone.
+    pub struct NodeGone = kind::NODE_GONE {
+        /// The session.
+        pub session: u32,
+    }
+}

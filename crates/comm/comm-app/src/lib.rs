@@ -142,6 +142,11 @@ impl CommCore {
             &broker,
             settings.broker.declare,
         ));
+        #[cfg(feature = "node")]
+        {
+            parts.push("node");
+            comm.add_service(orion_relay::Relay::new(orion_relay::RECORDS));
+        }
         comm.add_service(Hello::new(node.clone(), keys.clone(), Some(topics.clone())));
         comm.add_service(KeysService::new(node.clone(), keys.clone()));
         comm.add_service(broker);

@@ -51,3 +51,32 @@ Each record in the file is a wire record with its length in front, so the wire's
 rule holds here too. A snapshot of another format has another name and is neither read nor
 touched. Observed records are not kept: a node that has just started sees nothing yet.
 
+## Node logic as a program
+
+`orion-node-app` is node logic assembled. It is the comm core's first client: it connects to
+the board's socket with the node role, says which kinds it answers, and from then on is passed
+those requests by the comm core, already checked (see "Passing requests to node logic" in
+`docs/comm.md`). It answers through the comm core. It has no socket of its own and no door.
+
+| Setting | Default | What it is |
+| --- | --- | --- |
+| `node.name`, `socket`, `state.dir` | as the comm core | the same file is read by both |
+| `records.save_after_ms` | 500 | how long after a change the records are saved |
+| `records.max_drift_ms` | 300000 | a stamp from a peer further ahead than this is refused |
+
+- **Records.** `Put` writes each entry with a stamp from this node's clock (an entry with
+  `deleted` set deletes, and is skipped if there is nothing to delete) and is answered with
+  the records as stored. `Get` is answered with the live records under the prefix, in as many
+  messages as it takes, about 24 KiB each. `Watch` is sent what is newer than `after` and then
+  every change; a second watch of the same class and prefix from a session replaces the first.
+- **Saving.** A change is saved `records.save_after_ms` later, with whatever else changed
+  meanwhile. The write is done by a helper thread that exists only while it writes; node logic
+  goes on answering. Asked to stop, it saves what it has not yet and returns.
+- **When it dies** nothing else does: the comm core refuses record requests with `unavailable`
+  and serves everything else. Started again, node logic loads the snapshot, so stamps go on
+  from where they were, connects, and is passed the watches programs still have.
+- **When the comm core goes** node logic keeps its store and tries the socket again, 20 ms
+  apart at first and at most a second. Watches are forgotten: they belonged to sessions that
+  ended with the comm core, and their programs ask again when they reconnect.
+
+One thread, with the store as plain data owned by it.
