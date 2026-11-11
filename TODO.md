@@ -37,7 +37,7 @@ The shared-memory ring that values and frames travel through. The riskiest code 
 - [x] [B6](docs/prs/B6.md) Typed and structured values (wave 6; needs A7)
 - [x] [B7](docs/prs/B7.md) Buffer topics: pool and entries (wave 4; needs B1, A16)
 - [x] [B8](docs/prs/B8.md) Hold marks and limits (wave 5; needs B7, B3)
-- [x] [B9](docs/prs/B9.md) Ring costs on a CM5 (wave 6; needs B3, B5, B8, A15; board run)
+- [x] [B9](docs/prs/B9.md) Ring costs on the test board (wave 6; needs B3, B5, B8, A15; board run)
 
 ## C. Comm core
 
@@ -145,15 +145,15 @@ One binary, packaging, the Daedalus bridge, failure drills and the hardware proo
 - [x] [I4](docs/prs/I4.md) Packaging (wave 14; needs I1)
 - [x] [I5](docs/prs/I5.md) Failure drills (wave 14; needs I1, I3)
 - [x] [I6](docs/prs/I6.md) Memory and size gates (wave 14; needs I1; board run)
-- [x] [I7](docs/prs/I7.md) End-to-end proof on a CM5 (wave 15; needs I1, I2, I4, F1, F5, F7, G6; board run)
+- [x] [I7](docs/prs/I7.md) End-to-end proof on the test board (wave 15; needs I1, I2, I4, F1, F5, F7, G6; board run)
 - [x] [I8](docs/prs/I8.md) User documentation (wave 14; needs I1)
-- [ ] [I9](docs/prs/I9.md) Clean up the plan (wave 16; needs I5, I6, I7, I8)
+- [x] [I9](docs/prs/I9.md) Clean up the plan (wave 16; needs I5, I6, I7, I8)
 
 ## Pinned
 
 Direction is agreed. The detail comes back later, and no PR above builds it.
 
-- Board management (update, slots, reboot, identity, USB). It goes with Lemnos as drivers that add
+- Board management (update, slots, reboot, identity, USB). It goes with the device library as drivers that add
   their actions, and Orion only routes them. Orion's part is in the list: the open action list
   (E10), detached actions (E12), and files written straight to a receiver (E15).
 

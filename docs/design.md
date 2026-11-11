@@ -27,20 +27,20 @@ Orion is orchestration and interconnect, inside a board and out of it.
 - What a camera, a pose or a graph is.
 - What is inside a topic beyond its type.
 - How to encode video. A publisher gives it bytes.
-- What FRC is. NT4 topic names come from the product as configuration.
+- Which competition it runs in. NT4 topic names come from the product as configuration.
 - How to talk to hardware or update a board.
 
 ## Where it sits
 
 | Library | Job |
 | --- | --- |
-| Styx | Cameras and media |
+| A camera library | Cameras and media |
 | Daedalus | Runs graphs |
-| Eidos | Vision |
-| Lemnos | Devices and drivers |
+| A vision library | Vision |
+| A device library | Devices and drivers |
 | Orion | Orchestration and interconnect |
 
-A product such as HeliOS wires these together. **No library needs another one in order to work.**
+A product wires these together. **No library needs another one in order to work.**
 Where two meet, the bridge is an optional feature owned by one of them, and the product turns it on.
 
 ## Six things
@@ -60,15 +60,15 @@ the whole protocol is made of them.
 ## The system
 
 ```text
- browser   tools   robot code   other boards   microcontrollers   a person (SSH)
+ browser   tools   programs     other boards   microcontrollers   a person (SSH)
     |        |         |             |                |                 |
  ===+========+=========+=============+================+=================+=====
  | comm core: connections, the one check, topic broker, gateways,           |
  |            access (SSH, recovery shell), hello, discovery, time          |
  ===+==========+==============+==============+================+=============
     |          |              |              |                |
-  node logic  helios-api    lemnosd        daedalusd       camera service
-  (records,   (web API,     (devices,      (runs graphs,   (owns sensors)
+  node logic  web API       device daemon  daedalusd       camera service
+  (records,   (the product, (devices,      (runs graphs,   (owns sensors)
   workloads,   a client)     actions)       an executor)
   actions)                       \              |              /
     |                             \             |             /
@@ -119,7 +119,7 @@ everyone else. They ship as one binary with modes `comm`, `node` and `ctl`, and 
 | Recovery (initramfs, flasher) | Wire, comm core, SSH and recovery shell |
 | Board Orion manages | Wire, client, comm core, SSH and recovery shell, node logic |
 | Guest (SystemCore, a PC) | Wire, client, comm core, node logic |
-| PC tool (Atlas, orionctl) | Wire, client |
+| PC tool (orionctl) | Wire, client |
 
 | If this dies | What keeps working | How it comes back |
 | --- | --- | --- |
@@ -207,7 +207,7 @@ What a buffer topic adds to a value ring:
   The publisher never waits for buffers. It drops frames instead.
 - One entry can name several buffers (image pyramid levels).
 
-Measured on a CM5 at 120 Hz: passing fds on every frame 34.5 µs; a ring slot and wake 18.1 µs; a
+Measured on the test board at 120 Hz: passing fds on every frame 34.5 µs; a ring slot and wake 18.1 µs; a
 full-frame copy 170 µs. Set-up costs a few system calls per buffer, once. As built, with hold
 marks: 10.5 µs from publish to the subscriber holding the frame
 ([`B9.md`](../testing/board-runs/B9.md)).
@@ -222,7 +222,7 @@ independent sample for a slow reader.
 | --- | --- |
 | Browser | The page comes from the product's web server. It opens a WebSocket straight to the comm core and subscribes. Per-subscriber byte limits |
 | Another board | `orion+tcp` into a local copy of the ring |
-| Robot code | NT4 gateway: topics to NT4 and back, server or client. A topic reader in the comm core. Name mappings come from the product |
+| Control programs | NT4 gateway: topics to NT4 and back, server or client. A topic reader in the comm core. Name mappings come from the product |
 | Tools | The same client, locally, over the network or over USB |
 
 ## Workloads
@@ -330,7 +330,7 @@ its record from what it declared and registered (see `docs/comm.md`, "Devices as
 
 ## Size and memory
 
-Measured on a CM5 under the full robot setup (`testing/board-runs/I6.md`), the comm core and
+Measured on the test board under the full setup (`testing/board-runs/I6.md`), the comm core and
 node logic together, against the targets. Before is dev, as it was when the rebuild started.
 
 | Where | Before | Now | Target |
@@ -442,7 +442,7 @@ queues everywhere; no timer on a data path; nothing on the wire names a kind of 
 - The ring is the riskiest part. Readers run against memory that can change underneath them. It gets
   fuzzing and a concurrency model check before anything uses it.
 - Hold marks are new shared-memory code on the camera path. The 18 µs was measured without them.
-- One async thread per process: a big SSH copy could delay a topic forward. Measure on a CM5.
+- One async thread per process: a big SSH copy could delay a topic forward. Measure on the test board.
   More threads are a plain knob.
 - Browser video on plain HTTP: WebCodecs needs a secure page. JPEG chunks or H.264 through Media
   Source both work without one, and the publisher chooses.
@@ -455,7 +455,7 @@ queues everywhere; no timer on a data path; nothing on the wire names a kind of 
 - Clean-slate `next`; `dev` frozen as the reference.
 - Six concepts, one wire, rkyv gone.
 - Two processes, one binary, node logic as the comm core's first client.
-- Frames are topics. Styx keeps its own way to pass frames for anyone not using Orion.
+- Frames are topics. The camera library keeps its own way to pass frames for anyone not using Orion.
 - Orion is the only authority on what runs. Executors keep no journal.
 - NT4 is a gateway.
 - Compile-time single check.
@@ -465,13 +465,14 @@ queues everywhere; no timer on a data path; nothing on the wire names a kind of 
 ## Pinned
 
 **Board management.** Update, slots, confirm, rollback, reboot, USB and board identity go with
-Lemnos, as drivers that add their actions to Orion's open list, so Orion has no board knowledge. The
-details come back later. Open when they do:
+the device library, as drivers that add their actions to Orion's open list, so Orion has no board
+knowledge. The details come back later. Open when they do:
 
-- An update needs lemnosd alive. A slot should only be confirmed if the update action answers, so a
-  build with a broken update path rolls itself back. SSH and the USB flasher remain for a broken
-  running slot.
-- Storage is outside Lemnos today, so a driver would need to work with files and boot config.
+- An update needs the device daemon alive. A slot should only be confirmed if the update action
+  answers, so a build with a broken update path rolls itself back. SSH and the USB flasher remain
+  for a broken running slot.
+- Storage is outside the device library today, so a driver would need to work with files and boot
+  config.
 - An update is far longer than a normal driver call, so drivers need a long-job form with progress
   and cancel.
 
@@ -501,14 +502,14 @@ come from what each PR needs. A PR is ready when everything it needs has merged,
 
 ## Proof on hardware
 
-All on a CM5.
+All on the test board.
 
 | Test | Passes when |
 | --- | --- |
 | Publish with a subscriber awake | No system call from the publisher |
 | Frame topic at 120 fps, hold marks included | About 18 µs per frame, Orion using no CPU per frame |
 | Graph to graph, nobody remote | Orion idle |
-| Memory under the full robot setup | 2.5 MB data and 2 MB code, both parts together |
+| Memory under the full setup | 2.5 MB data and 2 MB code, both parts together |
 | Kill each part while running | Behaves as in the table above |
 | Browser | Live values and video, a slow reader hurting nobody else |
 | NT4 | Works against the SystemCore as server and as client |

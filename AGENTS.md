@@ -21,11 +21,10 @@ The work is a pre-planned list of PRs into `next`.
 - Base branch `next`, working branch `pr/<id>` (for example `pr/A3`), one PR into `next`.
 - Read `dev` as a reference: `git fetch origin dev`, then `git show origin/dev:<path>`. Bring in only
   what the brief lists, and rework it to fit. Never check out another agent's checkout.
-- A reading list naming another repository means exactly that: `Styx` is
-  `Prometheus-Dynamics/Styx`, `Daedalus` is `Prometheus-Dynamics/Daedalus`, `HeliOS` is its own
-  repository. Those are references to read and are not added as dependencies unless the brief says.
+- A reading list naming another repository means that repository, under the same organization.
+  Those are references to read and are not added as dependencies unless the brief says.
 - Stay inside the paths your PR creates. Don't edit the root `Cargo.toml`, `TODO.md`, or a changelog.
-  `Cargo.lock` is ignored. Keeping to this is what lets many sessions run at once without conflicts.
+  Keeping to this is what lets many sessions run at once without conflicts.
 - Add a crate by creating its directory under `crates/<folder>/`. Name it `orion-<directory>`.
   Inherit shared dependencies with `workspace = true`, and declare any others in your own crate.
 - If your PR needs a shared interface changed, stop and say so in the PR description. The interfaces
@@ -37,7 +36,7 @@ The work is a pre-planned list of PRs into `next`.
 
 - Orion is orchestration and interconnect. It does not know what a camera, a pose or a graph is,
   how to speak to hardware, or how to install anything on a particular board.
-- No library needs another one in order to work. A bridge to Styx, Daedalus or Lemnos is an optional
+- No library needs another one in order to work. A bridge to another library is an optional
   feature, and Orion's core builds without them.
 - One wire. Every carrier uses `crates/core/wire`: stable kind numbers, append-only bodies, one revision agreed
   at hello, recorded bytes in tests. The protocol is version 1.
@@ -57,15 +56,16 @@ The work is a pre-planned list of PRs into `next`.
 - Everything is behind features. Lean is the default. A recovery build has no node logic.
 - Breaking other repositories is fine. They are not built here and they catch up afterward.
 - Hardware you can't reach is marked `untested on board`. Don't hold work back for a board run.
-- Timings count only when measured on the CM5.
+- Timings count only when measured on the test board.
 - Never claim something works without having run it. Report failures with their output.
 - Never push tags. Never force-push `next` or `dev`. Don't change `dev`.
 - Don't estimate how long anything will take. Describe size by scope and risk.
-- Product names appear only in the planning files (this file, `TODO.md`, `docs/design.md`,
-  `docs/architecture.html`, `docs/prs/`). I9 removes them.
+- No product names: other libraries and products go by their role (the camera library, the
+  device library, the product). The NT4 crates keep the protocol's own vocabulary, and
+  `scripts/check-boundaries.sh` holds the list.
 - Builds and scratch go on NVMe or SSD, never the Github HDD.
 
 ## Board runs
 
 These need a real board, so they run in a local session on the user's machine after a PR merges.
-That session takes `/run/lock/board-gpu.lock`, uses the CM5, and reports CM5 timings only.
+That session takes `/run/lock/board-gpu.lock`, uses the test board, and reports board timings only.
