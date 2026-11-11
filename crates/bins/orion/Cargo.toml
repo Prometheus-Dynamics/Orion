@@ -1,0 +1,24 @@
+[package]
+name = "orion-bin"
+description = "Orion as one file: the comm core, node logic and the command line are modes of the same binary."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "orion"
+path = "src/main.rs"
+
+[dependencies]
+orion-comm-app = { path = "../../comm/comm-app" }
+orion-config = { path = "../../core/config" }
+orion-ctl = { path = "../../client/ctl" }
+orion-log = { path = "../../core/log" }
+orion-node-app = { path = "../../node/node-app" }
+tracing.workspace = true
+
+[lints]
+workspace = true

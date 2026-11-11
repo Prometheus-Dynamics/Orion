@@ -20,8 +20,6 @@
 //! `ORION_RECOVERY_KEYS` and `ORION_RECOVERY_LISTEN` hold even when the file is broken.
 //! `ORION_LOG` names how much is logged, to standard error.
 
-mod log;
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -76,27 +74,12 @@ fn main() -> ExitCode {
         Some(path) => PathBuf::from(path),
         None => PathBuf::from(SETTINGS),
     };
-    log::install();
+    orion_log::install();
     let (settings, unknown) = match settings(&path) {
         Ok((settings, unknown)) => (Ok(settings), unknown),
         Err(error) => (Err(error), Vec::new()),
     };
-    // What recovery falls back on comes from the environment, which is still there when
-    // the settings file is what is broken.
-    let mut with = RecoverWith::default();
-    if let Some(keys) = std::env::var_os("ORION_RECOVERY_KEYS") {
-        with.keys_file = keys.into();
-    }
-    if let Ok(listen) = std::env::var("ORION_RECOVERY_LISTEN") {
-        let told: Vec<_> = listen
-            .split(',')
-            .filter_map(|addr| addr.trim().parse().ok())
-            .collect();
-        if !told.is_empty() {
-            with.listen = told;
-        }
-    }
-    match run_or_recover(settings, &unknown, with) {
+    match run_or_recover(settings, &unknown, RecoverWith::from_env()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("{error}");

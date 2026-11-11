@@ -23,6 +23,7 @@ orion-comm-app = { path = "../../comm/comm-app", default-features = false, featu
     "systemd",
 ] }
 orion-config = { path = "../../core/config" }
+orion-log = { path = "../../core/log" }
 tracing.workspace = true
 
 [lints]

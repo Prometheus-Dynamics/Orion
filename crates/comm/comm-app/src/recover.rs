@@ -40,6 +40,29 @@ impl Default for RecoverWith {
     }
 }
 
+impl RecoverWith {
+    /// The defaults, with what the environment says: `ORION_RECOVERY_KEYS` (the keys file)
+    /// and `ORION_RECOVERY_LISTEN` (addresses joined by `,`). The environment is still there
+    /// when the settings file is what is broken.
+    #[must_use]
+    pub fn from_env() -> Self {
+        let mut with = Self::default();
+        if let Some(keys) = std::env::var_os("ORION_RECOVERY_KEYS") {
+            with.keys_file = keys.into();
+        }
+        if let Ok(listen) = std::env::var("ORION_RECOVERY_LISTEN") {
+            let told: Vec<_> = listen
+                .split(',')
+                .filter_map(|addr| addr.trim().parse().ok())
+                .collect();
+            if !told.is_empty() {
+                with.listen = told;
+            }
+        }
+        with
+    }
+}
+
 /// What was started.
 #[derive(Debug)]
 pub enum Started {

@@ -83,7 +83,7 @@ unless someone off the board asked for them.
 
 ```text
 crates/
-  core/      types, wire, msg-*, check, supervise, measure, fdpass, config, values, ring, ring-*
+  core/      types, wire, msg-*, check, supervise, measure, fdpass, config, log, values, ring, ring-*
   device/    microcontroller side: core, topics, actions, firmware. no_std, size gated
   client/    connect, topics, buffers, records, actions, files, executor, provider, orion, capi, ctl
   comm/      server, unix, tcp, ws, link-*, broker*, topic-peers, outbound, keys, hello,
