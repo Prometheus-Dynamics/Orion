@@ -105,6 +105,9 @@ pub struct SshConfig {
     pub helper: Helper,
     /// The subsystems there are.
     pub subsystems: Vec<Subsystem>,
+    /// `ssh.forward`: whether someone who is logged in may ask for connections from the
+    /// board (`ssh -L`, `ssh -W`). Only in a build with feature `forward`.
+    pub forward: bool,
     /// Where the board's `passwd` and `group` are.
     pub etc: PathBuf,
     /// `ssh.max_connections`: the most connections at once.
@@ -134,6 +137,7 @@ impl SshConfig {
                 .unwrap_or_else(|| state_dir.join("ssh_host_ed25519_key")),
             helper,
             subsystems: Vec::new(),
+            forward: source.get("ssh.forward", true)?,
             etc: "/etc".into(),
             max_connections: source.get("ssh.max_connections", 64_usize)?.max(1),
             max_unauthenticated: source.get("ssh.max_unauthenticated", 10_usize)?.max(1),
@@ -366,6 +370,51 @@ impl Handler for Client {
     ) -> Result<(), Self::Error> {
         self.channels.insert(channel.id(), Chan::default());
         reply.accept().await;
+        Ok(())
+    }
+
+    #[cfg(feature = "forward")]
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let Some((_checked, user)) = &self.admitted else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+        if !self.shared.config.forward {
+            info!(
+                "ssh: {} asked for a connection to {host_to_connect}:{port_to_connect}: forwarding is off",
+                user.name
+            );
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        }
+        let (who, host) = (user.name.clone(), host_to_connect.to_owned());
+        // Connecting can take a while: the rest of this client's connection goes on.
+        tokio::spawn(async move {
+            match orion_ssh_forward::connect(&host, port_to_connect).await {
+                Ok(stream) => {
+                    info!("ssh: {who} is connected to {host}:{port_to_connect} from the board");
+                    reply.accept().await;
+                    let _ = orion_ssh_forward::carry(channel, stream).await;
+                }
+                Err(refused) => {
+                    info!("ssh: {who} was not connected to {host}:{port_to_connect}: {refused}");
+                    reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+                }
+            }
+        });
         Ok(())
     }
 

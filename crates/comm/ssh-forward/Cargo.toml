@@ -1,0 +1,19 @@
+[package]
+name = "orion-ssh-forward"
+description = "Local forwarding for the SSH way in: a connection from the board, carried on a channel."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
+tokio = { workspace = true, features = ["rt", "net", "io-util", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "net", "io-util", "time"] }
+
+[lints]
+workspace = true

@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -31,6 +31,8 @@ ws = ["dep:orion-ws"]
 ssh = ["dep:orion-ssh"]
 # The sftp subsystem, for sftp and scp.
 ssh-sftp = ["ssh", "dep:orion-ssh-sftp"]
+# Local forwarding over SSH: connections from the board for someone who is logged in.
+ssh-forward = ["ssh", "orion-ssh/forward"]
 # The NT4 gateway: mapped topics as an NT4 server.
 nt4 = ["dep:orion-nt4-gateway"]
 # The NT4 gateway as a client of an NT4 server somewhere else.

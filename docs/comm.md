@@ -360,6 +360,12 @@ ordinary `ssh` connects to it. It is off unless `ssh.listen` is set.
   on its input and output. Every file is opened, made, renamed and removed by a process that
   is the user, so what the user may not do the kernel refuses, and a fault ends one transfer.
   A board built without feature `ssh-sftp` refuses the subsystem.
+- **Connections from the board.** `crates/comm/ssh-forward` (`orion-ssh-forward`). Someone
+  who is logged in may ask for a connection from the board to a service the board reaches,
+  on the board or on a network only it is on: `ssh -L` and `ssh -W`. The board connects,
+  giving up after ten seconds, and carries the bytes on a channel until either end closes.
+  Whoever may log in may reach what the board reaches, as from a shell. `ssh.forward = false`
+  refuses them. Nothing listens on the board for anyone: there is no `-R`.
 - **Small before the login.** One family of key exchange (`mlkem768x25519-sha256`,
   `curve25519-sha256`), two ciphers (`chacha20-poly1305`, `aes256-gcm`), public keys only.
   At most `ssh.max_unauthenticated` connections may be waiting to log in, and each has
@@ -661,6 +667,7 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `ssh.listen` | off | where SSH clients connect (`ssh`) |
 | `ssh.host_key` | `<state.dir>/ssh_host_ed25519_key` | the host key, made if it is not there |
 | `ssh.helper` | this program | the program sessions run in |
+| `ssh.forward` | `true` | whether someone logged in may ask for connections from the board (`ssh-forward`) |
 | `ssh.max_connections` | 64 | the most SSH connections at once |
 | `ssh.max_unauthenticated` | 10 | the most that have not logged in |
 | `ssh.login_ms` | 60000 | how long a connection has to log in |

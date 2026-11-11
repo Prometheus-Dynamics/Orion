@@ -86,6 +86,7 @@ impl Server {
             } else {
                 Vec::new()
             },
+            forward: true,
             etc: "/etc".into(),
             max_connections: 64,
             max_unauthenticated: 10,
