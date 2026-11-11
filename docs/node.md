@@ -116,3 +116,49 @@ executors (`Start`, `Stop`, `Kill`) and changes of state for whoever is told.
   remove it and put it. Other content stops the run and starts it with the new when it is
   gone. A put for a workload that is being removed keeps it: it is started again when the old
   run is gone.
+
+## Peer sync
+
+`orion-sync` carries desired records between nodes until they agree, and tells each node what
+the others see. There is no leader. Any two nodes that can talk exchange what the other lacks,
+and the store's merge gives the same result whatever arrives, in whatever order, however often.
+Like the store it is plain data: it is handed messages and a place to put its own.
+
+Two kinds, both already on the wire:
+
+| Message | Meaning |
+| --- | --- |
+| `PeerSync` with records | data: versions to merge. Asks for nothing |
+| `PeerSync` with no records | a summary: the sender's newest stamp and a digest of all it has. Data is always followed by one |
+| `PeerObserved` | the sender's whole observed slice, replacing the one before |
+
+What a node does with a peer's summary:
+
+1. The digests are equal: they agree. It answers with its own summary if the peer has not
+   heard this digest from it.
+2. It has versions newer than the peer's newest stamp, which the peer cannot have: it sends
+   them.
+3. The peer's newest stamp is newer than its own: it sends its summary, once for this pair of
+   digests, and the peer answers by rule 2.
+4. Otherwise the difference is in the past, as after a partition: it sends everything, once
+   for this pair of digests and at most every `full_interval_ms` (10 s). Held back, it is
+   sent when due if they still differ.
+
+- **Event-driven.** Nothing is sent on a timer. A change is sent to every connected peer as it
+  is made. A version taken from one peer is passed on to the others and not back, so a node
+  between two that never meet carries everything across.
+- **At rest nothing is said.** Two nodes that reconnect unchanged exchange a summary each and
+  what they observe.
+- **Observed.** A node tells each peer its whole observed slice when they connect and whenever
+  it changes. Slices are not passed on: each is told by its own node. When the connection
+  goes, the peer's slice is forgotten, since nobody knows what it sees now. A slice is one
+  message; one that does not fit is not sent, and that is logged.
+- **Clock skew.** A version stamped further ahead than the store allows is refused and counted.
+  The two then differ until time catches up; everything is sent once for it and not again.
+- **Stale peers.** A peer last agreed with longer ago than deletes are remembered (seven days)
+  would bring back what was deleted while it was away. It is not synced with in either
+  direction, and shows as `Stale`, until `forgive` is called for it. Two nodes that stayed
+  connected and in agreement are never stale. When peers last agreed is given back by
+  `agreed_at` to be kept across a restart.
+- **Whose message.** The connection says who the peer is. A message that names another node is
+  refused.

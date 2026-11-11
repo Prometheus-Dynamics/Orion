@@ -525,6 +525,15 @@ impl Store {
         self.observed_from(node, &[]);
     }
 
+    /// Everything `node` observes, by class and key: its whole slice.
+    pub fn observed_slice(&self, node: &NodeName) -> impl Iterator<Item = Record> + '_ {
+        self.observed
+            .get(node)
+            .into_iter()
+            .flat_map(|slice| slice.iter())
+            .map(|(key, version)| record(key, version))
+    }
+
     /// What `node` observes of `class` under `prefix`, by key.
     pub fn observed<'a>(
         &'a self,

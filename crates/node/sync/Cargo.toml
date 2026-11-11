@@ -1,0 +1,22 @@
+[package]
+name = "orion-sync"
+description = "Peer sync: nodes exchange desired records until they agree, and tell each other what they see."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-peers = { path = "../../core/msg-peers" }
+orion-msg-records = { path = "../../core/msg-records" }
+orion-store = { path = "../store" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-wire = { path = "../../core/wire" }
+
+[lints]
+workspace = true
