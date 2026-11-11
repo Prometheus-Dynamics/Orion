@@ -1,0 +1,16 @@
+[package]
+name = "orion-store"
+description = "The record store: named state with hybrid-clock stamps, merged so every node that has seen the same writes agrees."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-records = { path = "../../core/msg-records" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[lints]
+workspace = true

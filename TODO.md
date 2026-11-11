@@ -79,7 +79,7 @@ One client with the same calls on any address, plus the C surface and orionctl.
 
 Records, peer sync, the workload tracker, actions and files.
 
-- [ ] [E1](docs/prs/E1.md) Record store (wave 6; needs A6)
+- [x] [E1](docs/prs/E1.md) Record store (wave 6; needs A6)
 - [ ] [E2](docs/prs/E2.md) Persistence (wave 7; needs E1)
 - [ ] [E3](docs/prs/E3.md) Node as the comm core's first client (wave 8; needs E2, D1)
 - [ ] [E4](docs/prs/E4.md) Workload tracker (wave 7; needs E1, A9)
