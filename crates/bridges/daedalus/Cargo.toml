@@ -1,0 +1,41 @@
+[package]
+name = "orion-daedalus"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Orion's topics as Daedalus nodes: a plugin library for daedalusd."
+
+# Standalone: not a member of the Orion workspace (it is in the workspace's `exclude`), so the
+# workspace does not build Daedalus. `scripts/daedalus-bridge.sh` builds and tests it.
+[workspace]
+
+[lib]
+# `cdylib` is the plugin `daedalusd` loads; `rlib` is for the tests that call its nodes.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Daedalus `next`, pinned: a plugin is checked against the host's step layout at load, so the
+# plugin and the daemon are built from the same commit.
+daedalus-abi = { git = "https://github.com/Prometheus-Dynamics/Daedalus", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-loader = { git = "https://github.com/Prometheus-Dynamics/Daedalus", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+orion = { path = "../../client/orion", features = ["topics", "buffers"] }
+
+[dev-dependencies]
+daedalus-client = { git = "https://github.com/Prometheus-Dynamics/Daedalus", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-graph = { git = "https://github.com/Prometheus-Dynamics/Daedalus", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-wire = { git = "https://github.com/Prometheus-Dynamics/Daedalus", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+orion-comm-app = { path = "../../comm/comm-app", default-features = false, features = ["buffers"] }
+orion-config = { path = "../../core/config" }
+tokio = { version = "1", features = ["rt", "sync"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

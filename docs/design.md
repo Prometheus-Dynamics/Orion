@@ -309,6 +309,11 @@ the largest chunk its receive buffer holds when it asks for its prefix, and the 
 chunks to fit and sends one frame at a time, so a device with a 512-byte buffer takes an image
 from any sender. A lost frame is sent again after two quiet seconds.
 
+`crates/bridges/daedalus` is a plugin library for `daedalusd`: nodes that read a topic, write
+one, and take frames from a buffer topic. A frame goes to the graph where it is, in the
+publisher's shared memory, and its buffer is held until Daedalus lets the last value of it go.
+It builds against a pinned Daedalus commit, outside the workspace, with its own `check.sh`.
+
 `examples/mcu-template` is where a firmware starts: ports for an `embedded-io` stream and an
 `embedded-can` controller, and a C API over one static (`include/orion_mcu.h`) for firmware
 written against a vendor SDK, with firmware slots over flash hooks the port defines.

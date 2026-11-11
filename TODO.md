@@ -140,7 +140,7 @@ The device side on the same wire, with its size gate.
 One binary, packaging, the Daedalus bridge, failure drills and the hardware proof.
 
 - [x] [I1](docs/prs/I1.md) One binary (wave 13; needs C15, E18, D11)
-- [ ] [I2](docs/prs/I2.md) Daedalus bridge (wave 10; needs D2, D3)
+- [x] [I2](docs/prs/I2.md) Daedalus bridge (wave 10; needs D2, D3)
 - [x] [I3](docs/prs/I3.md) Sample executor (wave 9; needs D7)
 - [ ] [I4](docs/prs/I4.md) Packaging (wave 14; needs I1)
 - [ ] [I5](docs/prs/I5.md) Failure drills (wave 14; needs I1, I3)

@@ -50,6 +50,13 @@ if [ -x scripts/mcu-template.sh ] && [ -d examples/mcu-template ]; then
   step "mcu template" scripts/mcu-template.sh
 fi
 
+# Bridges build against other projects' workspaces, each with its own check.
+for check in crates/bridges/*/check.sh; do
+  if [ -x "$check" ]; then
+    step "bridge $(basename "$(dirname "$check")")" "$check"
+  fi
+done
+
 # The stable-toolchain garbage test always runs. These go deeper where the tools are installed.
 if [ -d testing/fuzz ] && command -v cargo-fuzz > /dev/null && rustup toolchain list | grep -q '^nightly'; then
   step "fuzz, short budget" scripts/fuzz-short.sh
