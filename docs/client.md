@@ -240,6 +240,10 @@ reads, and what to do when it ends. `remove` says it should stop existing; its r
 until the run is really gone, unless forced. `status` and `wait` give where it is: pending,
 starting, running, stopping, gone, or failed or lost.
 
+`put_needing(workload, files)` is `put` for a workload that needs files: each a destination on
+the board and the SHA-256 of what must be there. Orion starts it only when every one is in
+place, and until then says which it waits for.
+
 ## From C
 
 `orion-capi` builds `liborion_c.a` and `liborion_c.so` (SONAME `liborion_c.so.1`), and

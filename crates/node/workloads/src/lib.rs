@@ -175,6 +175,8 @@ pub struct Tracker {
     executors: BTreeSet<WorkloadKind>,
     commands: Vec<Command>,
     changes: Vec<Change>,
+    /// Workloads that may not be started yet, and why.
+    held: BTreeMap<WorkloadName, String>,
 }
 
 const fn alive(state: WorkloadState) -> bool {
@@ -273,6 +275,7 @@ impl Tracker {
     }
 
     fn dropped(&mut self, name: &WorkloadName, detail: &str) {
+        self.held.remove(name);
         self.changes.push(Change {
             name: name.clone(),
             state: WorkloadState::Gone,
@@ -287,7 +290,10 @@ impl Tracker {
         tracked.running_since = None;
         tracked.stopping_since = None;
         tracked.killed = false;
-        if self.executors.contains(&tracked.workload.kind) {
+        if let Some(why) = self.held.get(name).cloned() {
+            // Something it needs is not there yet. It waits, and says for what.
+            self.set(name, tracked, WorkloadState::Pending, &why);
+        } else if self.executors.contains(&tracked.workload.kind) {
             tracked.run = true;
             self.set(name, tracked, WorkloadState::Starting, "");
             self.commands.push(Command::Start(name.clone()));
@@ -405,6 +411,44 @@ impl Tracker {
         } else {
             self.set(name, tracked, state, detail);
         }
+    }
+
+    /// Holds a workload back from being started, with the reason, or with `None` lets it
+    /// go. A workload that runs is not touched: the hold is looked at the next time it would
+    /// be started. One that is waiting and is let go is started at once. A hold can be set
+    /// before the workload is put.
+    pub fn hold(&mut self, name: &WorkloadName, why: Option<&str>) {
+        match why {
+            Some(why) => {
+                if self.held.get(name).map(String::as_str) == Some(why) {
+                    return;
+                }
+                self.held.insert(name.clone(), why.to_owned());
+            }
+            None => {
+                if self.held.remove(name).is_none() {
+                    return;
+                }
+            }
+        }
+        // If it is waiting to be started, it now waits for another reason, or not at all.
+        let Some(mut tracked) = self.workloads.remove(name) else {
+            return;
+        };
+        if tracked.wanted
+            && !tracked.run
+            && tracked.state == WorkloadState::Pending
+            && tracked.retry_at.is_none()
+        {
+            self.settle(name, &mut tracked);
+        }
+        self.workloads.insert(name.clone(), tracked);
+    }
+
+    /// Why a workload is held back, if it is.
+    #[must_use]
+    pub fn held(&self, name: &WorkloadName) -> Option<&str> {
+        self.held.get(name).map(String::as_str)
     }
 
     /// Says a workload should exist.

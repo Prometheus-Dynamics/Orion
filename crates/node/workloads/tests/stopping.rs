@@ -209,3 +209,53 @@ fn a_forced_remove_says_what_it_left_behind() {
     bench.force("a").expect("force");
     assert_eq!(dropped(&mut bench), "removed by force: nothing was running");
 }
+
+// --- Held back ---
+
+#[test]
+fn a_workload_that_is_held_is_not_started_and_says_why() {
+    let mut bench = Bench::with_executor();
+    // Held before it is put: it is never started without what it waits for.
+    bench.tracker.hold(&name("a"), Some("waiting for file x"));
+    bench.put("a", RestartPolicy::Always);
+    assert_eq!(bench.state("a"), Some(WorkloadState::Pending));
+    assert_eq!(
+        bench.tracker.get(&name("a")).expect("a").detail,
+        "waiting for file x"
+    );
+    assert_eq!(bench.tracker.held(&name("a")), Some("waiting for file x"));
+    assert!(bench.commands().is_empty());
+    // The reason changes: so does what it says.
+    bench.tracker.hold(&name("a"), Some("waiting for file y"));
+    assert_eq!(
+        bench.tracker.get(&name("a")).expect("a").detail,
+        "waiting for file y"
+    );
+    // The same reason again says nothing.
+    bench.states();
+    bench.tracker.hold(&name("a"), Some("waiting for file y"));
+    assert!(bench.states().is_empty());
+    // Let go: it starts at once.
+    bench.tracker.hold(&name("a"), None);
+    assert_eq!(bench.commands(), [start("a")]);
+    assert_eq!(bench.tracker.held(&name("a")), None);
+}
+
+#[test]
+fn a_hold_does_not_touch_what_runs_and_holds_the_next_start() {
+    let mut bench = Bench::running("a", RestartPolicy::Always);
+    bench.tracker.hold(&name("a"), Some("waiting for file x"));
+    assert_eq!(bench.state("a"), Some(Running));
+    assert!(bench.commands().is_empty());
+    // It fails and is due again: held, it waits instead of starting.
+    bench.report("a", WorkloadState::Failed);
+    bench.pass(1_000);
+    assert_eq!(bench.state("a"), Some(WorkloadState::Pending));
+    assert!(bench.commands().is_empty());
+    bench.tracker.hold(&name("a"), None);
+    assert_eq!(bench.commands(), [start("a")]);
+    // A hold on a workload that is removed goes with it.
+    bench.tracker.hold(&name("a"), Some("again"));
+    bench.force("a").expect("force");
+    assert_eq!(bench.tracker.held(&name("a")), None);
+}

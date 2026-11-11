@@ -277,6 +277,10 @@ files.
 - **Where.** A destination is a path under `files.dir`, never with `..`. One that a link on the
   way would take out of the store, one that is a directory, and the store's own `.incoming`
   are rejected.
+- **What is in place is known.** The store notes the digest and size of each file it puts in
+  place, in `.placed` beside the files, so it can say whether a destination holds a given
+  file without reading it, also after a restart. A file that got to a destination another
+  way is not known to be anything.
 - At most 64 transfers are under way at once; one more is `busy`. A file larger than
   `files.max_size` is rejected at `FileBegin`.
 
@@ -448,6 +452,12 @@ asked about a workload where it is.
 - **Who is told.** Every session that put or removed a workload is sent each `WorkloadStatus`
   of it until the workload or the session is gone (16 sessions a workload). Putting a workload
   again as it is changes nothing and is answered with where it is.
+- **Files before start.** A workload may name files it needs, each a destination and the
+  SHA-256 of what must be there. It is started only when every one is in the node's store
+  with that digest. Until then it is `Pending` and says which it waits for, "waiting for file
+  models/detector.bin", or the first and how many more. When the last one is put in place
+  the workload starts by itself. A file under the right name with other contents is not the
+  file. A file that goes away does not stop what runs; it holds the next start.
 - **A workload that names another node** is kept as a record and not run here; if it ran here
   it is stopped. Choosing a node for one that names none is placement's, wired in E18; until
   then such a workload runs on the node it was put on.

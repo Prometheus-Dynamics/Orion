@@ -457,3 +457,103 @@ fn a_process_that_will_not_die_stays_stopping_until_it_is_removed_by_force() {
         "{log}"
     );
 }
+
+#[test]
+fn a_missing_file_holds_a_workload_pending_and_says_why() {
+    use std::io::Cursor;
+    let dir = dir("workloads-files");
+    let board = Board::start_for_node(&dir);
+    let address = Address::Local(board.socket().to_owned());
+    let logic = Logic::start(settings(&dir));
+    let _executor = Executor::start(board.socket());
+    let operator = Orion::connect(&address, "operator").expect("connect");
+
+    let model = b"the weights the detector was trained to".to_vec();
+    let (digest, _) = orion::files::digest(&mut Cursor::new(model.clone())).expect("digest");
+    let file = dir.join("pids");
+    let spec = sleeper(&file);
+    let detector = workload("detector", &spec, RestartPolicy::Always);
+    let needs = [("models/detector.bin", digest)];
+
+    // Waits until the workload is in `state` with `detail`, putting it again meanwhile so
+    // that node logic not being there yet does not matter.
+    let reaches_with = |state: WorkloadState, detail: &str| {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            operator
+                .workloads()
+                .put_needing(&detector, &needs)
+                .expect("put");
+            let reached = operator
+                .workloads()
+                .wait("detector", Duration::from_millis(200), |tracked| {
+                    tracked.state == state && tracked.detail == detail
+                })
+                .expect("connected");
+            if reached.is_some() {
+                return;
+            }
+            let now = operator.workloads().status("detector").expect("connected");
+            assert!(
+                Instant::now() < deadline,
+                "never {state:?} {detail:?}: {now:?}"
+            );
+        }
+    };
+
+    // The executor is there, the file is not: pending, and it says for what.
+    reaches_with(
+        WorkloadState::Pending,
+        "waiting for file models/detector.bin",
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        starts(&file).is_empty(),
+        "it was not started without its file"
+    );
+
+    // Another file under that name is not the one it needs.
+    let wrong = operator
+        .files()
+        .push(
+            "models/detector.bin",
+            &mut Cursor::new(b"something else".to_vec()),
+            |_, _| {},
+        )
+        .expect("push");
+    assert_eq!(wrong.state, orion::files::FileState::Committed);
+    std::thread::sleep(Duration::from_millis(1300));
+    assert!(starts(&file).is_empty());
+    reaches_with(
+        WorkloadState::Pending,
+        "waiting for file models/detector.bin",
+    );
+
+    // The file arrives: the workload starts by itself.
+    let right = operator
+        .files()
+        .push("models/detector.bin", &mut Cursor::new(model), |_, _| {})
+        .expect("push");
+    assert_eq!(right.state, orion::files::FileState::Committed);
+    let running = operator
+        .workloads()
+        .wait("detector", Duration::from_secs(10), |tracked| {
+            tracked.state == WorkloadState::Running
+        })
+        .expect("connected");
+    assert!(running.is_some(), "it starts when its file is in place");
+    until("the command has started", || starts(&file).len() == 1);
+
+    // After node logic restarts, the file is still known to be the one: the run is adopted
+    // and nothing waits.
+    std::thread::sleep(Duration::from_millis(200));
+    drop(logic);
+    let _logic = Logic::start(settings(&dir));
+    reaches_with(WorkloadState::Running, "");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(starts(&file).len(), 1);
+    operator
+        .workloads()
+        .remove("detector", true)
+        .expect("remove");
+}

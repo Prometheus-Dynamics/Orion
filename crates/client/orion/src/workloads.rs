@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
-use orion_msg_workloads::{WorkloadPut, WorkloadRemove, WorkloadStatus};
+use orion_msg_workloads::{NeededFile, WorkloadPut, WorkloadRemove, WorkloadStatus};
 use orion_wire::{Bytes, List, kind};
 
 pub use orion_msg_workloads::{RestartPolicy, WorkloadState};
@@ -103,13 +103,35 @@ impl Workloads {
     /// If a name is not one, or the connection broke. A refusal is found by
     /// [`Workloads::wait`].
     pub fn put(&self, workload: &Workload<'_>) -> Result<(), ClientError> {
+        self.put_needing(workload, &[])
+    }
+
+    /// As [`Workloads::put`], for a workload that needs files: each a destination on the
+    /// board and the SHA-256 of what must be there. Orion starts the workload only when
+    /// every one of them is in place, and says which it is waiting for until then.
+    ///
+    /// # Errors
+    ///
+    /// As [`Workloads::put`].
+    pub fn put_needing(
+        &self,
+        workload: &Workload<'_>,
+        files: &[(&str, [u8; 32])],
+    ) -> Result<(), ClientError> {
         let name = |_| ClientError::Protocol("a name that is not one");
+        let mut needed = Vec::with_capacity(files.len());
+        for (file, digest) in files {
+            needed.push(NeededFile {
+                name: file.parse().map_err(name)?,
+                digest: *digest,
+            });
+        }
         self.forget(workload.name);
         self.client.send(&WorkloadPut {
             name: workload.name.parse().map_err(name)?,
             kind: workload.kind.parse().map_err(name)?,
             spec: Bytes(workload.spec),
-            files: List::new(&[]),
+            files: List::new(&needed),
             node: workload.node.map(str::parse).transpose().map_err(name)?,
             labels: List::new(&[]),
             cpus: Bytes(&[]),

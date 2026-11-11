@@ -85,7 +85,7 @@ Records, peer sync, the workload tracker, actions and files.
 - [x] [E4](docs/prs/E4.md) Workload tracker (wave 7; needs E1, A9)
 - [x] [E5](docs/prs/E5.md) Executors: start, stop, adopt (wave 10; needs E4, D7, I3)
 - [x] [E6](docs/prs/E6.md) Stopping and force remove (wave 11; needs E5)
-- [ ] [E7](docs/prs/E7.md) Files before start (wave 11; needs E5, E13)
+- [x] [E7](docs/prs/E7.md) Files before start (wave 11; needs E5, E13)
 - [x] [E8](docs/prs/E8.md) Peer sync (wave 8; needs E1, A11, C6)
 - [x] [E9](docs/prs/E9.md) Placement and leases (wave 9; needs E8, E4)
 - [x] [E10](docs/prs/E10.md) Actions: the open list (wave 9; needs E3, A8, A13)

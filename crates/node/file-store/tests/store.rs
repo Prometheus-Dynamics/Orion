@@ -333,3 +333,45 @@ fn whoever_committed_is_told_unless_it_is_gone() {
         DATA
     );
 }
+
+#[test]
+fn what_the_store_put_in_place_is_known_by_its_digest_and_after_it_is_reopened() {
+    let root = root("has");
+    let mut bench = Bench::at(&root);
+    let name = "models/a.bin".parse().expect("name");
+    assert!(!bench.files.has(&name, &digest(DATA)));
+    bench.begin(1, "models/a.bin", DATA).expect("begin");
+    bench.chunk(1, 0, DATA).expect("chunk");
+    assert!(
+        !bench.files.has(&name, &digest(DATA)),
+        "not until it is in place"
+    );
+    assert_eq!(bench.files.commits(), 0);
+    assert_eq!(bench.commit(1).2, FileState::Committed);
+    assert_eq!(bench.files.commits(), 1);
+    assert!(bench.files.has(&name, &digest(DATA)));
+    assert!(!bench.files.has(&name, &digest(b"other")), "another digest");
+    assert!(
+        !bench
+            .files
+            .has(&"models/b.bin".parse().expect("name"), &digest(DATA))
+    );
+
+    // Closed and opened: still known.
+    drop(bench);
+    let mut bench = Bench::at(&root);
+    assert!(bench.files.has(&name, &digest(DATA)));
+    // Another file is put there: the first is no longer what is there.
+    let other = b"another file of another length";
+    bench.begin(2, "models/a.bin", other).expect("begin");
+    bench.chunk(2, 0, other).expect("chunk");
+    assert_eq!(bench.commit(2).2, FileState::Committed);
+    assert!(!bench.files.has(&name, &digest(DATA)));
+    assert!(bench.files.has(&name, &digest(other)));
+    // It is deleted, or changed in size, behind the store's back: not there.
+    std::fs::remove_file(root.join("models/a.bin")).expect("remove");
+    assert!(!bench.files.has(&name, &digest(other)));
+    // The store's own note is not a place for files.
+    let own = bench.begin(3, ".placed", DATA).expect("begin");
+    assert_eq!(own.2, FileState::Rejected);
+}

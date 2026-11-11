@@ -1,6 +1,6 @@
 //! Workloads on the wire, without a wire: what each message does, to whom.
 
-use orion_executors::{RestartConfig, Workloads};
+use orion_executors::{Board, Everything, RestartConfig, Workloads};
 use orion_msg_records::RecordClass;
 use orion_msg_workloads::{
     ExecutorAsk, ExecutorInventory, ExecutorKill, ExecutorOffer, ExecutorReport, ExecutorStart,
@@ -56,7 +56,7 @@ impl Bench {
     fn new() -> Self {
         let store = Store::new(me(), StoreConfig::default());
         Self {
-            workloads: Workloads::restored(me(), RestartConfig::default(), &store, 0),
+            workloads: Workloads::restored(me(), RestartConfig::default(), &store, &Everything, 0),
             store,
             sent: Sent::default(),
             now: 0,
@@ -75,8 +75,14 @@ impl Bench {
             caller: "",
             payload: &payload[..len],
         };
-        self.workloads
-            .request(&asked, &mut self.store, self.now, WALL, &mut self.sent)
+        self.workloads.request(
+            &asked,
+            &mut self.store,
+            &Everything,
+            self.now,
+            WALL,
+            &mut self.sent,
+        )
     }
 
     fn put(&mut self, from: u32, workload: &str, node: Option<&str>) -> Result<(), Error> {
@@ -378,7 +384,8 @@ fn what_should_run_is_known_again_after_a_restart() {
         .put(OPERATOR, "elsewhere", Some("other"))
         .expect("put");
     // Node logic starts again over the same store.
-    let mut again = Workloads::restored(me(), RestartConfig::default(), &bench.store, 0);
+    let mut again =
+        Workloads::restored(me(), RestartConfig::default(), &bench.store, &Everything, 0);
     assert_eq!(again.tracker().len(), 1);
     assert_eq!(
         again.tracker().get(&name("a")).expect("a").state,
@@ -396,7 +403,7 @@ fn what_should_run_is_known_again_after_a_restart() {
             caller: "",
             payload,
         };
-        workloads.request(&asked, store, 0, WALL, &mut sent)
+        workloads.request(&asked, store, &Everything, 0, WALL, &mut sent)
     };
     let kinds = [OfferedKind {
         kind: "graph".parse().expect("kind"),
@@ -449,5 +456,115 @@ fn what_should_run_is_known_again_after_a_restart() {
     assert_eq!(
         again.tracker().get(&name("a")).expect("a").state,
         WorkloadState::Lost
+    );
+}
+
+/// A board with the files it is given.
+struct Shelf(Vec<(&'static str, [u8; 32])>);
+
+impl Board for Shelf {
+    fn has(&self, name: &orion_types::FileName, digest: &[u8; 32]) -> bool {
+        self.0
+            .iter()
+            .any(|(has, sum)| *has == name.as_str() && sum == digest)
+    }
+}
+
+#[test]
+fn a_workload_waits_for_its_files_and_says_which() {
+    use orion_msg_workloads::NeededFile;
+    let mut bench = Bench::new();
+    bench.executor(EXECUTOR, &[]).expect("executor");
+    bench.sent.frames.clear();
+    let files = [
+        NeededFile {
+            name: "models/detector.bin".parse().expect("file"),
+            digest: [1; 32],
+        },
+        NeededFile {
+            name: "models/labels.txt".parse().expect("file"),
+            digest: [2; 32],
+        },
+    ];
+    let put = WorkloadPut {
+        name: name("detector"),
+        kind: "graph".parse().expect("kind"),
+        spec: Bytes(b"spec"),
+        files: List::new(&files),
+        node: None,
+        labels: List::new(&[]),
+        cpus: Bytes(&[]),
+        restart: RestartPolicy::Always,
+    };
+    let mut payload = vec![0_u8; 1024];
+    let len = encode_fields(&put, &mut payload).expect("encode");
+    let asked = Asked {
+        session: OPERATOR,
+        seq: 1,
+        kind: kind::WORKLOAD_PUT,
+        class: 4,
+        uid: 0,
+        caller: "",
+        payload: &payload[..len],
+    };
+    // Neither file is there: it is not started, and says what it waits for.
+    let empty = Shelf(Vec::new());
+    bench
+        .workloads
+        .request(&asked, &mut bench.store, &empty, 0, WALL, &mut bench.sent)
+        .expect("put");
+    assert!(bench.took(kind::EXECUTOR_START).is_empty());
+    let told = bench.took(kind::WORKLOAD_STATUS);
+    let status = WorkloadStatus::decode(&told.last().expect("told").1).expect("status");
+    assert_eq!(status.state, WorkloadState::Pending);
+    assert_eq!(
+        status.detail,
+        "waiting for file models/detector.bin and 1 more"
+    );
+
+    // One arrives, and one with the right name and the wrong contents: still waiting.
+    let partly = Shelf(vec![
+        ("models/detector.bin", [1; 32]),
+        ("models/labels.txt", [9; 32]),
+    ]);
+    bench
+        .workloads
+        .review(&partly, &mut bench.store, WALL, &mut bench.sent);
+    assert!(bench.took(kind::EXECUTOR_START).is_empty());
+    let told = bench.took(kind::WORKLOAD_STATUS);
+    let status = WorkloadStatus::decode(&told.last().expect("told").1).expect("status");
+    assert_eq!(status.detail, "waiting for file models/labels.txt");
+
+    // Both are there: it starts, without being asked again.
+    let whole = Shelf(vec![
+        ("models/detector.bin", [1; 32]),
+        ("models/labels.txt", [2; 32]),
+    ]);
+    bench
+        .workloads
+        .review(&whole, &mut bench.store, WALL, &mut bench.sent);
+    assert_eq!(bench.took(kind::EXECUTOR_START).len(), 1);
+    assert_eq!(bench.told(OPERATOR), [WorkloadState::Starting]);
+    // Looked at again, nothing more happens.
+    bench
+        .workloads
+        .review(&whole, &mut bench.store, WALL, &mut bench.sent);
+    assert!(bench.sent.frames.is_empty());
+
+    // A file that goes away does not stop what runs; it holds the next start.
+    bench
+        .report(EXECUTOR, "detector", WorkloadState::Running)
+        .expect("report");
+    bench
+        .workloads
+        .review(&empty, &mut bench.store, WALL, &mut bench.sent);
+    assert!(bench.took(kind::EXECUTOR_STOP).is_empty());
+    bench.sent.frames.clear();
+
+    // After a restart of node logic it is held again until its files are looked at.
+    let again = Workloads::restored(me(), RestartConfig::default(), &bench.store, &empty, 0);
+    assert_eq!(
+        again.tracker().held(&name("detector")),
+        Some("waiting for file models/detector.bin and 1 more")
     );
 }

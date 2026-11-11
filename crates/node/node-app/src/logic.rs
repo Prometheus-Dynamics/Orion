@@ -89,6 +89,15 @@ pub(crate) fn publish(topic: &mut Publisher, events: &[Event], running: usize) {
     let _ = topic.publish(FieldId(1), time, &(running as i64).to_le_bytes());
 }
 
+/// The files a workload may need, as the node's store has them.
+struct OnBoard<'a>(&'a Files);
+
+impl orion_executors::Board for OnBoard<'_> {
+    fn has(&self, name: &orion_types::FileName, digest: &[u8; 32]) -> bool {
+        self.0.has(name, digest)
+    }
+}
+
 /// Everything node logic keeps.
 pub(crate) struct Logic {
     pub(crate) records: Records,
@@ -96,6 +105,9 @@ pub(crate) struct Logic {
     pub(crate) files: Files,
     pub(crate) sinks: Sinks,
     pub(crate) workloads: Workloads,
+    /// When the workloads' files were last looked at: at how many commits, and when.
+    reviewed_commits: u64,
+    reviewed_ms: u64,
     #[cfg(feature = "pull")]
     pulling: crate::pull::Pulling,
     pub(crate) forwards: Forwards,
@@ -171,10 +183,13 @@ impl Logic {
                 ..orion_executors::RestartConfig::default()
             },
             &store,
+            &OnBoard(&files),
             0,
         );
         Self {
             workloads,
+            reviewed_commits: 0,
+            reviewed_ms: 0,
             records: Records::new(store),
             forwards: Forwards::new(node.clone(), identity),
             actions: Actions::new(node),
@@ -207,6 +222,18 @@ impl Logic {
         let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
         self.workloads
             .tick(self.records.store_mut(), now, wall_ms, out);
+        // A workload starts only when its files are here. Looked at when a file has been
+        // put in place, and every second besides, since a file can also go away.
+        let commits = self.files.commits();
+        if commits != self.reviewed_commits || now.saturating_sub(self.reviewed_ms) >= 1_000 {
+            (self.reviewed_commits, self.reviewed_ms) = (commits, now);
+            self.workloads.review(
+                &OnBoard(&self.files),
+                self.records.store_mut(),
+                wall_ms,
+                out,
+            );
+        }
         self.records.publish(out);
     }
 
@@ -294,9 +321,14 @@ impl Logic {
             self.records.request(asked, wall().as_millis() as u64, out)
         } else if Workloads::KINDS.contains(&asked.kind) {
             let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
-            let answered =
-                self.workloads
-                    .request(asked, self.records.store_mut(), now, wall_ms, out);
+            let answered = self.workloads.request(
+                asked,
+                self.records.store_mut(),
+                &OnBoard(&self.files),
+                now,
+                wall_ms,
+                out,
+            );
             // What should run is a record: watchers are told and it is saved.
             self.records.publish(out);
             answered

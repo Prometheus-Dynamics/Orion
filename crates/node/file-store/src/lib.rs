@@ -110,6 +110,48 @@ pub struct Files {
     found: Receiver<verify::Found>,
     finder: Sender<verify::Found>,
     verifying: usize,
+    /// What this store put in place: destination to digest and size. Kept in a file, so it
+    /// is known after a restart.
+    placed: BTreeMap<String, ([u8; 32], u64)>,
+    /// How many files have been put in place since this store was opened.
+    commits: u64,
+}
+
+/// The store's note of what it put in place, beside the files.
+const PLACED: &str = ".placed";
+
+/// Whether a destination is one of the store's own names, which no file may take.
+fn own(destination: &FileName) -> bool {
+    matches!(
+        destination.as_str().split('/').next(),
+        Some(".incoming" | PLACED)
+    )
+}
+
+/// Reads the note of what is in place: `<digest in hex> <size> <destination>` a line.
+fn read_placed(path: &Path) -> BTreeMap<String, ([u8; 32], u64)> {
+    let mut placed = BTreeMap::new();
+    let Ok(text) = fs::read_to_string(path) else {
+        return placed;
+    };
+    for line in text.lines() {
+        let mut parts = line.splitn(3, ' ');
+        let (Some(hex), Some(size), Some(name)) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+        let mut digest = [0_u8; 32];
+        let whole = hex.len() == 64
+            && digest.iter_mut().enumerate().all(|(index, byte)| {
+                hex.get(index * 2..index * 2 + 2)
+                    .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                    .map(|value| *byte = value)
+                    .is_some()
+            });
+        if let (true, Ok(size)) = (whole, size.parse()) {
+            placed.insert(name.to_owned(), (digest, size));
+        }
+    }
+    placed
 }
 
 const fn status(transfer: u64, received: u64, state: FileState, detail: &str) -> FileStatus<'_> {
@@ -134,6 +176,7 @@ impl Files {
         let incoming = config.root.join(".incoming");
         fs::create_dir_all(&incoming)?;
         let (finder, found) = mpsc::channel();
+        let placed = read_placed(&config.root.join(PLACED));
         Ok(Self {
             config,
             incoming,
@@ -141,6 +184,8 @@ impl Files {
             found,
             finder,
             verifying: 0,
+            placed,
+            commits: 0,
         })
     }
 
@@ -154,6 +199,47 @@ impl Files {
     #[must_use]
     pub fn path(&self, destination: &FileName) -> PathBuf {
         self.config.root.join(destination.as_str())
+    }
+
+    /// Whether the file at `destination` is one this store put there with that digest, and is
+    /// still there at its size. A file that got there another way is not known to be it.
+    #[must_use]
+    pub fn has(&self, destination: &FileName, digest: &[u8; 32]) -> bool {
+        self.placed
+            .get(destination.as_str())
+            .is_some_and(|(placed, size)| {
+                placed == digest
+                    && fs::metadata(self.path(destination))
+                        .is_ok_and(|metadata| metadata.is_file() && metadata.len() == *size)
+            })
+    }
+
+    /// How many files have been put in place since this store was opened: when it changes,
+    /// something that was waiting for a file may have it.
+    #[must_use]
+    pub const fn commits(&self) -> u64 {
+        self.commits
+    }
+
+    fn note_placed(&mut self, destination: &FileName, digest: [u8; 32], size: u64) {
+        self.placed
+            .insert(destination.as_str().to_owned(), (digest, size));
+        self.commits += 1;
+        let mut text = String::new();
+        for (name, (digest, size)) in &self.placed {
+            for byte in digest {
+                text.push_str(&format!("{byte:02x}"));
+            }
+            text.push_str(&format!(" {size} {name}\n"));
+        }
+        // Written beside and renamed, so it is whole or the one before.
+        let (path, next) = (
+            self.config.root.join(PLACED),
+            self.incoming.join("placed.next"),
+        );
+        if let Err(error) = fs::write(&next, text).and_then(|()| fs::rename(&next, &path)) {
+            warn!("what is in place could not be noted: {error}");
+        }
     }
 
     /// How many transfers are under way.
@@ -212,7 +298,7 @@ impl Files {
             size: begin.size,
             digest: begin.digest,
         };
-        if meta.destination.as_str().split('/').next() == Some(".incoming") {
+        if own(&meta.destination) {
             // The store's own directory, where parts are kept.
             return out.send(
                 asked.session,
@@ -382,7 +468,7 @@ impl Files {
             size,
             digest,
         };
-        if meta.destination.as_str().split('/').next() == Some(".incoming") {
+        if own(&meta.destination) {
             return Err("not a place for files".to_owned());
         }
         if size > self.config.max_size {
@@ -496,6 +582,13 @@ impl Files {
                 continue;
             };
             let _ = fs::remove_file(self.meta_path(found.transfer));
+            if found.result.is_ok() {
+                self.note_placed(
+                    &receiving.meta.destination,
+                    receiving.meta.digest,
+                    receiving.meta.size,
+                );
+            }
             let (state, detail) = match &found.result {
                 Ok(()) => (FileState::Committed, ""),
                 Err(why) => {

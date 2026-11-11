@@ -31,7 +31,7 @@ use orion_msg_workloads::{
 };
 use orion_reply::{Asked, Out};
 use orion_store::Store;
-use orion_types::{Error, NodeName, WorkloadKind, WorkloadName};
+use orion_types::{Error, FileName, NodeName, WorkloadKind, WorkloadName};
 use orion_wire::{Bytes, Decode, kind};
 use orion_workloads::{Command, Put, Reported, Tracker, Workload};
 
@@ -41,11 +41,42 @@ use tracing::{info, warn};
 /// The most sessions told about one workload. The oldest goes first.
 pub const MAX_ASKERS: usize = 16;
 
+/// What is on the board, as far as starting a workload goes.
+pub trait Board {
+    /// Whether the file `name` is in place with that digest.
+    fn has(&self, name: &FileName, digest: &[u8; 32]) -> bool;
+}
+
+/// A board on which every file is there: for a node that keeps no files.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Everything;
+
+impl Board for Everything {
+    fn has(&self, _name: &FileName, _digest: &[u8; 32]) -> bool {
+        true
+    }
+}
+
 /// An executor: the kinds it offered, and whether it has said what it has.
 #[derive(Debug)]
 struct Offering {
     kinds: Vec<WorkloadKind>,
     up: bool,
+}
+
+/// Which of the files a workload needs is not on the board, as a reason to wait.
+fn missing(workload: &Workload, board: &dyn Board) -> Option<String> {
+    let absent: Vec<&str> = workload
+        .files
+        .iter()
+        .filter(|(name, digest)| !board.has(name, digest))
+        .map(|(name, _)| name.as_str())
+        .collect();
+    match absent.as_slice() {
+        [] => None,
+        [one] => Some(format!("waiting for file {one}")),
+        [first, rest @ ..] => Some(format!("waiting for file {first} and {} more", rest.len())),
+    }
 }
 
 /// The workloads of one node.
@@ -72,7 +103,13 @@ impl Workloads {
     /// The workloads of the node `me`, with every workload the store has for it waiting to
     /// be adopted or started. Call it once the store is loaded.
     #[must_use]
-    pub fn restored(me: NodeName, config: RestartConfig, store: &Store, now_ms: u64) -> Self {
+    pub fn restored(
+        me: NodeName,
+        config: RestartConfig,
+        store: &Store,
+        board: &dyn Board,
+        now_ms: u64,
+    ) -> Self {
         let mut workloads = Self {
             me,
             tracker: Tracker::new(config),
@@ -85,6 +122,8 @@ impl Workloads {
                 WorkloadPut::decode(&record.version.value).and_then(|put| Workload::from_put(&put));
             match workload {
                 Ok(workload) if workloads.mine(&workload) => {
+                    let why = missing(&workload, board);
+                    workloads.tracker.hold(&workload.name, why.as_deref());
                     workloads.tracker.put(workload, now_ms);
                     known += 1;
                 }
@@ -117,6 +156,29 @@ impl Workloads {
     #[must_use]
     pub fn next_deadline(&self) -> Option<u64> {
         self.tracker.next_deadline()
+    }
+
+    /// Holds back every workload that needs a file the board does not have, saying which,
+    /// and lets go those whose files are all there. A workload starts only when every file
+    /// it needs is on the board. Call it when a file has been put in place, and now and
+    /// then: a file can also go away.
+    pub fn review(
+        &mut self,
+        board: &dyn Board,
+        store: &mut Store,
+        wall_ms: u64,
+        out: &mut dyn Out,
+    ) {
+        let needing: Vec<(WorkloadName, Option<String>)> = self
+            .tracker
+            .iter()
+            .filter(|(_, tracked)| !tracked.workload.files.is_empty())
+            .map(|(name, tracked)| (name.clone(), missing(&tracked.workload, board)))
+            .collect();
+        for (name, why) in needing {
+            self.tracker.hold(&name, why.as_deref());
+        }
+        self.carry(store, wall_ms, out);
     }
 
     /// Whether a workload runs on this node: it names this node, or none.
@@ -222,6 +284,7 @@ impl Workloads {
         &mut self,
         asked: &Asked<'_>,
         store: &mut Store,
+        board: &dyn Board,
         now_ms: u64,
         wall_ms: u64,
         out: &mut dyn Out,
@@ -258,6 +321,9 @@ impl Workloads {
                         },
                     );
                 }
+                // Held before it is put, so that it is not started without its files.
+                let why = missing(&workload, board);
+                self.tracker.hold(&name, why.as_deref());
                 if self.tracker.put(workload, now_ms) == Put::Unchanged {
                     // Nothing changed, so nothing is said by the tracker: the asker is told
                     // where it is.
