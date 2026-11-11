@@ -1,0 +1,18 @@
+[package]
+name = "orion-device-host"
+description = "A host played by a test, for the device crates: it speaks every body with the general codec."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion-device-core = { path = "../../device/core" }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-wire = { path = "../../core/wire" }
+serde.workspace = true
+
+[lints]
+workspace = true

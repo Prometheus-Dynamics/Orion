@@ -14,9 +14,12 @@ crate-type = ["staticlib", "rlib"]
 [features]
 # The same device on a CAN bus instead of a byte stream.
 can = []
+# A device that also declares a topic and publishes it.
+topics = ["dep:orion-device-topics"]
 
 [dependencies]
 orion-device-core = { path = "../core" }
+orion-device-topics = { path = "../topics", optional = true }
 
 # C entry points and one static need `unsafe`.
 [lints.rust]

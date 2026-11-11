@@ -39,10 +39,12 @@
 
 pub mod codec;
 mod link;
+mod requests;
 
 pub use link::{DeviceConfig, Event, Link, NAME_MAX, SendError, State};
 pub use orion_msg_session::{RejectReason, Roles};
 pub use orion_wire::{FrameView, SegmentMtu};
+pub use requests::{RETRY_MS, Request, Requests};
 
 use orion_wire::{Reassembler, StreamDecoder};
 

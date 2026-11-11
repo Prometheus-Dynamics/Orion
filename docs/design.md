@@ -280,6 +280,13 @@ postcard format, so neither serde nor postcard nor `core::fmt` reaches a firmwar
 with only what its entry points reach. Today the session costs 5.8 KB flash and 512 B RAM on
 thumbv7em, 6.3 KB on thumbv6m and 6.7 KB on riscv32imc, about 1.4 KB of it memmove.
 
+`crates/device/topics` declares a firmware's topics, kept as constants in flash, when a session
+starts, and publishes samples as `TopicSample` frames once the host has answered with `Opened`.
+Whether anyone listens comes back as `Demand`. One topic adds 1.75 KB on thumbv7em. What a
+device asks of the host once a session (a topic, an action, a file prefix) is asked again after a
+second without an answer and never again once answered or refused, until the next session:
+`Requests` in the device core.
+
 ## Size and memory
 
 Measured on a CM5 today, against the targets. The targets are unbuilt, and an allocation profile of

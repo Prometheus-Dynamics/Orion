@@ -1,0 +1,25 @@
+[package]
+name = "orion-device-topics"
+description = "Topics from a microcontroller: declare them, publish samples, hear whether anyone listens."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.orion]
+no_std = true
+
+[dependencies]
+orion-device-core = { path = "../core" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-wire = { path = "../../core/wire", default-features = false }
+
+[dev-dependencies]
+orion-device-host = { path = "../../testing/device-host" }
+orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
+orion-msg-session = { path = "../../core/msg-session" }
+
+[lints]
+workspace = true
