@@ -126,12 +126,11 @@ impl Source {
                 });
             };
             let key = key.trim().to_ascii_lowercase();
-            source.set(key.clone(), unquote(value.trim()), Origin::File, key);
+            source.set(canonical(&key), unquote(value.trim()), Origin::File, key);
         }
         for (name, value) in env {
             if let Some(rest) = name.strip_prefix(ENV_PREFIX) {
-                let key = rest.to_ascii_lowercase().replace('_', ".");
-                source.set(key, value, Origin::Environment, name);
+                source.set(canonical(rest), value, Origin::Environment, name);
             }
         }
         Ok(source)
@@ -151,7 +150,7 @@ impl Source {
 
     /// The text of `key`, marking it as read.
     pub fn text(&mut self, key: &str) -> Option<&str> {
-        let entry = self.entries.get_mut(key)?;
+        let entry = self.entries.get_mut(&canonical(key))?;
         entry.read = true;
         Some(entry.value.as_str())
     }
@@ -232,6 +231,12 @@ impl Source {
             })
             .collect()
     }
+}
+
+/// A key as it is kept: `.` and `_` are one, so the environment, which has only `_`, names
+/// every key, `socket.node_uids` (`ORION_SOCKET_NODE_UIDS`) as well as `peer.listen`.
+fn canonical(key: &str) -> String {
+    key.to_ascii_lowercase().replace('.', "_")
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -431,5 +436,17 @@ mod tests {
     fn a_missing_file_is_fine() {
         let source = Source::load(Some(Path::new("/nonexistent/orion.conf")), env(&[]));
         assert!(source.is_ok());
+    }
+
+    #[test]
+    fn the_environment_names_keys_that_have_an_underscore() {
+        let env = [
+            ("ORION_SOCKET_NODE_UIDS".to_owned(), "901".to_owned()),
+            ("ORION_RECORDS_SAVE_AFTER_MS".to_owned(), "10".to_owned()),
+        ];
+        let mut source = Source::parse("socket.node_uids = 5\n", env).unwrap();
+        assert_eq!(source.list::<u32>("socket.node_uids").unwrap(), [901]);
+        assert_eq!(source.get("records.save_after_ms", 500_u64).unwrap(), 10);
+        assert!(source.warnings().is_empty(), "{:?}", source.warnings());
     }
 }

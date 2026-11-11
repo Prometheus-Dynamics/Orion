@@ -59,17 +59,8 @@ those requests by the comm core, already checked (see "Passing requests to node 
 `docs/comm.md`). It answers through the comm core. It has no socket of its own and no door.
 Being a client like any other, it publishes what it has to show as topics.
 
-| Setting | Default | What it is |
-| --- | --- | --- |
-| `node.name`, `socket`, `state.dir` | as the comm core | the same file is read by both |
-| `records.save_after_ms` | 500 | how long after a change the records are saved |
-| `records.max_drift_ms` | 300000 | a stamp from a peer further ahead than this is refused |
-| `files.dir` | `files` in `state.dir` | where files sent to this node go |
-| `files.max_size` | 16 GiB | the largest file taken |
-| `workloads.stop_grace_ms` | 10000 | how long a run asked to stop is given before it is told to end |
-| `audit.file` | `audit.log` in `state.dir` | the audit log; `off` for none |
-| `audit.max_bytes` | 1 MiB | the most the file holds before it is rotated |
-| `audit.keep` | 3 | how many files from before are kept |
+Its settings are in [`docs/settings.md`](settings.md).
+
 
 - **Records.** `Put` writes each entry with a stamp from this node's clock (an entry with
   `deleted` set deletes, and is skipped if there is nothing to delete) and is answered with

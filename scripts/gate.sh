@@ -38,6 +38,10 @@ if [ -x scripts/check-boundaries.sh ]; then
   step boundaries-self-test scripts/check-boundaries.sh --self-test
 fi
 
+if [ -x scripts/check-links.sh ]; then
+  step links scripts/check-links.sh
+fi
+
 if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
   step "size gate" scripts/size-gate.sh
 fi

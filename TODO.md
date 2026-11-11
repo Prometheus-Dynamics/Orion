@@ -146,7 +146,7 @@ One binary, packaging, the Daedalus bridge, failure drills and the hardware proo
 - [x] [I5](docs/prs/I5.md) Failure drills (wave 14; needs I1, I3)
 - [ ] [I6](docs/prs/I6.md) Memory and size gates (wave 14; needs I1; board run)
 - [ ] [I7](docs/prs/I7.md) End-to-end proof on a CM5 (wave 15; needs I1, I2, I4, F1, F5, F7, G6; board run)
-- [ ] [I8](docs/prs/I8.md) User documentation (wave 14; needs I1)
+- [x] [I8](docs/prs/I8.md) User documentation (wave 14; needs I1)
 - [ ] [I9](docs/prs/I9.md) Clean up the plan (wave 16; needs I5, I6, I7, I8)
 
 ## Pinned
