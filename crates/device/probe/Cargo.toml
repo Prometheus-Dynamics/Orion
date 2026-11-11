@@ -16,8 +16,11 @@ crate-type = ["staticlib", "rlib"]
 can = []
 # A device that also declares a topic and publishes it.
 topics = ["dep:orion-device-topics"]
+# A device that also registers an action and answers it.
+actions = ["dep:orion-device-actions"]
 
 [dependencies]
+orion-device-actions = { path = "../actions", optional = true }
 orion-device-core = { path = "../core" }
 orion-device-topics = { path = "../topics", optional = true }
 

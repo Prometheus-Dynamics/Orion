@@ -25,7 +25,20 @@ struct Probe {
     device: Device,
     #[cfg(feature = "topics")]
     topics: orion_device_topics::Topics<1>,
+    #[cfg(feature = "actions")]
+    actions: orion_device_actions::Actions<1>,
+    /// The run to answer, if one came.
+    #[cfg(feature = "actions")]
+    run: Option<u64>,
 }
+
+#[cfg(feature = "actions")]
+static ACTIONS: [orion_device_actions::ActionSpec; 1] =
+    [orion_device_actions::ActionSpec::on_resource(
+        "zero",
+        "probe",
+        "Sets yaw to zero",
+    )];
 
 #[cfg(feature = "topics")]
 static TOPICS: [orion_device_topics::TopicSpec; 1] = [orion_device_topics::TopicSpec::latest(
@@ -52,6 +65,10 @@ static PROBE: Shared = Shared(UnsafeCell::new(Probe {
     device: DEVICE,
     #[cfg(feature = "topics")]
     topics: orion_device_topics::Topics::new(&TOPICS),
+    #[cfg(feature = "actions")]
+    actions: orion_device_actions::Actions::new(&ACTIONS),
+    #[cfg(feature = "actions")]
+    run: None,
 }));
 
 /// The firmware. The port must not call two entry points at once.
@@ -68,6 +85,24 @@ pub extern "C" fn orion_probe_poll(now_ms: u32) -> u32 {
     while probe.device.link.next_event().is_some() {}
     #[cfg(feature = "topics")]
     probe.topics.poll(&mut probe.device.link, now_ms);
+    #[cfg(feature = "actions")]
+    {
+        probe.actions.poll(&mut probe.device.link, now_ms);
+        if let Some(call) = probe.run
+            && probe
+                .actions
+                .finish(
+                    &mut probe.device.link,
+                    call,
+                    orion_device_actions::Outcome::Succeeded,
+                    &[],
+                    "",
+                )
+                .is_ok()
+        {
+            probe.run = None;
+        }
+    }
     probe.device.link.state() as u32
 }
 
@@ -83,9 +118,15 @@ pub unsafe extern "C" fn orion_probe_receive(bytes: *const u8, len: usize) {
     let probe = probe();
     #[cfg(feature = "topics")]
     let topics = &mut probe.topics;
+    #[cfg(feature = "actions")]
+    let (actions, run) = (&mut probe.actions, &mut probe.run);
     let up = |_: &mut _, _frame: &orion_device_core::FrameView<'_>| {
         #[cfg(feature = "topics")]
         let _ = topics.handle(_frame);
+        #[cfg(feature = "actions")]
+        if let orion_device_actions::Heard::Run { call, .. } = actions.handle(_frame) {
+            *run = Some(call);
+        }
     };
     #[cfg(not(feature = "can"))]
     probe.device.receive(bytes, up);

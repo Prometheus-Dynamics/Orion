@@ -1,0 +1,27 @@
+[package]
+name = "orion-device-actions"
+description = "Actions on a microcontroller: register them, take runs, report progress and results."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.orion]
+no_std = true
+
+[dependencies]
+orion-check = { path = "../../core/check" }
+orion-device-core = { path = "../core" }
+orion-msg-actions = { path = "../../core/msg-actions" }
+orion-wire = { path = "../../core/wire", default-features = false }
+
+[dev-dependencies]
+orion-device-host = { path = "../../testing/device-host" }
+orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-types = { path = "../../core/types" }
+
+[lints]
+workspace = true

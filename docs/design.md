@@ -287,6 +287,12 @@ device asks of the host once a session (a topic, an action, a file prefix) is as
 second without an answer and never again once answered or refused, until the next session:
 `Requests` in the device core.
 
+`crates/device/actions` registers a firmware's actions the same way and hands it every
+`ActionClaim` for one of them; the firmware answers with `ActionProgress` and `ActionResult` when
+it likes. Nothing about a run is kept on the device: a result the link has no room for is sent
+again by the firmware, and one that never comes is ended by the run's deadline on the host. One
+action adds 1.7 KB on thumbv7em.
+
 ## Size and memory
 
 Measured on a CM5 today, against the targets. The targets are unbuilt, and an allocation profile of

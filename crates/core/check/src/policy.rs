@@ -72,11 +72,17 @@ impl Policy {
     pub const fn admits(&self) -> Admits {
         self.admits
     }
+
+    /// The byte it is on the wire, for a writer without serde: a microcontroller's.
+    #[must_use]
+    pub const fn to_bits(&self) -> u8 {
+        self.admits.0
+    }
 }
 
 impl Serialize for Policy {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u8(self.admits.0)
+        serializer.serialize_u8(self.to_bits())
     }
 }
 
