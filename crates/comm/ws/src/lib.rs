@@ -33,7 +33,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tracing::debug;
 
-pub use socket::{Message, WsRead, WsSocket, WsWrite};
+pub use socket::{Heard, Message, WsRead, WsSocket, WsWrite};
 
 /// The subprotocol that carries Orion's frames.
 pub const ORION: &str = "orion.v1";
@@ -203,15 +203,24 @@ impl WsListener {
             };
             let (options, protocols) = (options.clone(), protocols.clone());
             tokio::task::spawn_local(async move {
+                // The first subprotocol the other end offers that someone here takes.
+                let choose = |offered: &[String]| {
+                    offered
+                        .iter()
+                        .find(|protocol| protocols.contains_key(*protocol))
+                        .cloned()
+                };
                 let upgraded = tokio::time::timeout(
                     options.handshake,
-                    upgrade(stream, from, &options, &protocols),
+                    upgrade(stream, from, &options, choose),
                 )
                 .await;
                 match upgraded {
-                    Ok(Ok(Some((socket, taker)))) => {
+                    Ok(Ok(Some(socket))) => {
                         // A taker that is not taking is a connection that is dropped.
-                        let _ = taker.send(socket).await;
+                        if let Some(taker) = protocols.get(&socket.protocol) {
+                            let _ = taker.send(socket).await;
+                        }
                     }
                     Ok(Ok(None)) => {}
                     Ok(Err(error)) => debug!(%from, %error, "not a WebSocket upgrade"),
@@ -227,14 +236,38 @@ async fn refuse(mut stream: tokio::net::tcp::OwnedWriteHalf, status: &str) -> io
     stream.write_all(answer.as_bytes()).await
 }
 
+/// Upgrades one connection that the caller accepted itself: for a server that has a port of
+/// its own and does not share a [`WsListener`]. `protocols` are the subprotocols taken, the
+/// one preferred first. `None` if the connection was turned away, which it has been told.
+///
+/// # Errors
+///
+/// If the connection breaks, or the upgrade takes longer than `options.handshake`.
+pub async fn accept(
+    stream: TcpStream,
+    from: SocketAddr,
+    options: &WsOptions,
+    protocols: &[&str],
+) -> io::Result<Option<WsSocket>> {
+    let choose = |offered: &[String]| {
+        protocols
+            .iter()
+            .find(|taken| offered.iter().any(|offer| offer == *taken))
+            .map(|taken| (*taken).to_owned())
+    };
+    tokio::time::timeout(options.handshake, upgrade(stream, from, options, choose))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "the upgrade took too long"))?
+}
+
 /// Reads one request and, if it asks for a subprotocol someone takes from a page that may
 /// ask, answers the upgrade. `None` if it was turned away.
 async fn upgrade(
     stream: TcpStream,
     from: SocketAddr,
     options: &WsOptions,
-    protocols: &BTreeMap<String, mpsc::Sender<WsSocket>>,
-) -> io::Result<Option<(WsSocket, mpsc::Sender<WsSocket>)>> {
+    choose: impl Fn(&[String]) -> Option<String>,
+) -> io::Result<Option<WsSocket>> {
     stream.set_nodelay(true)?;
     if options.send_buffer != 0 {
         // The kernel keeps twice what it is asked for, half of it for its own bookkeeping.
@@ -262,12 +295,7 @@ async fn upgrade(
         refuse(write, "403 Forbidden").await?;
         return Ok(None);
     }
-    // The first subprotocol the other end offers that someone here takes.
-    let Some((protocol, taker)) = request
-        .protocols
-        .iter()
-        .find_map(|offered| protocols.get_key_value(offered))
-    else {
+    let Some(protocol) = choose(&request.protocols) else {
         refuse(write, "404 Not Found").await?;
         return Ok(None);
     };
@@ -284,9 +312,9 @@ async fn upgrade(
         from,
         request.path,
         request.origin,
-        protocol.clone(),
+        protocol,
     );
-    Ok(Some((socket, taker.clone())))
+    Ok(Some(socket))
 }
 
 /// Connects to a WebSocket server at `addr` and asks for `protocol`: the other end of
@@ -302,16 +330,34 @@ pub async fn connect(
     origin: Option<&str>,
 ) -> io::Result<WsSocket> {
     let stream = TcpStream::connect(addr).await?;
+    connect_on(stream, &addr.to_string(), path, &[protocol], origin).await
+}
+
+/// As [`connect`], on a connection the caller made itself, offering several subprotocols,
+/// the one preferred first. The socket's `protocol` is the one the server chose.
+///
+/// # Errors
+///
+/// If the server does not take the upgrade, or chooses a subprotocol that was not offered.
+pub async fn connect_on(
+    stream: TcpStream,
+    host: &str,
+    path: &str,
+    protocols: &[&str],
+    origin: Option<&str>,
+) -> io::Result<WsSocket> {
     stream.set_nodelay(true)?;
+    let addr = stream.peer_addr()?;
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
     // The key only has to be sixteen bytes in base64. Nothing is kept secret by it.
     let key = sha1::base64(&sha1::sha1(addr.to_string().as_bytes())[..16]);
     let origin = origin.map_or(String::new(), |origin| format!("Origin: {origin}\r\n"));
+    let offered = protocols.join(", ");
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
          Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\
-         Sec-WebSocket-Protocol: {protocol}\r\n{origin}\r\n"
+         Sec-WebSocket-Protocol: {offered}\r\n{origin}\r\n"
     );
     write.write_all(request.as_bytes()).await?;
     let mut line = String::new();
@@ -323,6 +369,7 @@ pub async fn connect(
         ));
     }
     let mut accepted = false;
+    let mut chosen = None;
     loop {
         line.clear();
         if read.read_line(&mut line).await? == 0 {
@@ -335,12 +382,20 @@ pub async fn connect(
         if text.is_empty() {
             break;
         }
-        if let Some((name, value)) = text.split_once(':')
-            && name.eq_ignore_ascii_case("sec-websocket-accept")
-        {
-            accepted = value.trim() == sha1::accept_key(&key);
+        if let Some((name, value)) = text.split_once(':') {
+            if name.eq_ignore_ascii_case("sec-websocket-accept") {
+                accepted = value.trim() == sha1::accept_key(&key);
+            } else if name.eq_ignore_ascii_case("sec-websocket-protocol") {
+                chosen = Some(value.trim().to_owned());
+            }
         }
     }
+    let Some(protocol) = chosen.filter(|chosen| protocols.contains(&chosen.as_str())) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the server chose no subprotocol that was offered",
+        ));
+    };
     if !accepted {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -354,7 +409,7 @@ pub async fn connect(
         addr,
         path.to_owned(),
         None,
-        protocol.to_owned(),
+        protocol,
     ))
 }
 

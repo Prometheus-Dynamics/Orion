@@ -1,0 +1,39 @@
+[package]
+name = "orion-nt4"
+description = "NetworkTables 4.1 client and server: topics over WebSocket with MessagePack values and a clock estimate."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# Both halves are on by default. A program that needs one side builds with
+# `default-features = false, features = ["client"]` (or `"server"`).
+default = ["client", "server"]
+client = []
+server = []
+
+[[example]]
+name = "nt4-dump"
+required-features = ["client"]
+
+[[example]]
+name = "nt4-server"
+required-features = ["server"]
+
+[dependencies]
+orion-ws = { path = "../../comm/ws" }
+serde = { workspace = true, features = ["std"] }
+serde_json = { version = "1.0", features = ["std"] }
+socket2 = "0.6"
+thiserror = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+
+[dev-dependencies]
+orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
+tokio = { workspace = true, features = ["macros", "rt", "time", "io-std", "io-util"] }
+
+[lints]
+workspace = true

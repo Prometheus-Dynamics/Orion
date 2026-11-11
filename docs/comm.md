@@ -153,6 +153,11 @@ publisher on behalf, like a program on another board.
   anyone do. With `ws.origins` set, a page from another origin is `403`, so that a page on
   another site cannot use a visitor's browser to reach the board. A connection that names no
   origin is not from a browser and is taken.
+- **For a server with a port of its own.** `accept` upgrades a connection the caller
+  accepted, with the server's order of subprotocols deciding; `connect_on` is the client's
+  side, offering several. `WsRead::next` is a read that may be dropped half way and carries
+  on, for a loop that also waits on timers and a queue; it holds the message itself, up to a
+  length the caller gives. The NT4 crate (`crates/gateways/nt4`) is built on these.
 - **A short queue in the kernel.** `ws.send_buffer` caps what the kernel holds for a
   connection. Left alone the kernel grows that to megabytes, which the board can no longer
   drop: `outbound.max_bytes` would only begin to count after seconds of video were already
