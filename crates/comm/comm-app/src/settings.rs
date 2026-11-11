@@ -52,6 +52,9 @@ pub struct CommSettings {
     /// taken them yet. Zero leaves it to the kernel.
     #[cfg(feature = "ws")]
     pub ws_send_buffer: usize,
+    /// `ssh.*`: the SSH way in. `None` unless `ssh.listen` is said.
+    #[cfg(feature = "ssh")]
+    pub ssh: Option<orion_ssh::SshConfig>,
     /// `nt4.*`: the NT4 gateway and its mapping. `None` unless `nt4.listen` is said.
     #[cfg(feature = "nt4")]
     pub nt4: Option<orion_nt4_gateway::Nt4Config>,
@@ -177,6 +180,22 @@ impl CommSettings {
             ws_origins: source.list("ws.origins")?,
             #[cfg(feature = "ws")]
             ws_send_buffer: source.get("ws.send_buffer", 256 * 1024_usize)?,
+            #[cfg(feature = "ssh")]
+            ssh: {
+                // Sessions run in this program, started again as the helper, unless
+                // another is named.
+                let program = match source.optional::<std::path::PathBuf>("ssh.helper")? {
+                    Some(program) => program,
+                    None => std::env::current_exe().map_err(|err| {
+                        error("ssh.helper", format!("this program has no path: {err}"))
+                    })?,
+                };
+                let helper = orion_ssh::Helper {
+                    program,
+                    args: Vec::new(),
+                };
+                orion_ssh::SshConfig::from_source(source, &config.state_dir, helper)?
+            },
             #[cfg(feature = "nt4")]
             nt4: orion_nt4_gateway::Nt4Config::from_source(source)?,
             #[cfg(feature = "nt4-client")]

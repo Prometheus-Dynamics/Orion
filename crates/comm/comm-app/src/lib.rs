@@ -64,6 +64,9 @@ pub struct CommCore {
     /// Kept so that it runs for as long as the comm core does.
     #[cfg(feature = "outbound")]
     _outbound: orion_outbound::Outbound,
+    /// The SSH way in, if it is open.
+    #[cfg(feature = "ssh")]
+    ssh: Option<orion_ssh::Ssh>,
     /// The NT4 gateway, if it runs.
     #[cfg(feature = "nt4")]
     nt4: Option<orion_nt4_gateway::Gateway>,
@@ -293,6 +296,21 @@ impl CommCore {
             serve(&mut tasks, Carriers::Ws(carrier));
         }
 
+        // The SSH way in: logins decided by the same check, with the same trust store.
+        #[cfg(feature = "ssh")]
+        let ssh = match settings.ssh.clone() {
+            Some(config) => {
+                parts.push("ssh");
+                let listen = config.listen;
+                Some(
+                    orion_ssh::Ssh::start(config, security, keys.clone())
+                        .await
+                        .map_err(|error| failed(format!("ssh.listen {listen}"), error))?,
+                )
+            }
+            None => None,
+        };
+
         // The NT4 gateway: its own port, and a reader of the topics its mapping names.
         #[cfg(feature = "nt4")]
         let nt4 = match settings.nt4.clone() {
@@ -362,6 +380,8 @@ impl CommCore {
             parts,
             #[cfg(feature = "outbound")]
             _outbound: outbound,
+            #[cfg(feature = "ssh")]
+            ssh,
             #[cfg(feature = "nt4")]
             nt4,
             #[cfg(feature = "nt4-client")]
@@ -407,6 +427,13 @@ impl CommCore {
     #[must_use]
     pub const fn peer_addr(&self) -> Option<SocketAddr> {
         self.peer_addr
+    }
+
+    /// The SSH way in, if it is open.
+    #[cfg(feature = "ssh")]
+    #[must_use]
+    pub const fn ssh(&self) -> Option<&orion_ssh::Ssh> {
+        self.ssh.as_ref()
     }
 
     /// The NT4 gateway, if it runs.

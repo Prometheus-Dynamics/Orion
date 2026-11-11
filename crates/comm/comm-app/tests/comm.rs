@@ -17,6 +17,7 @@ use orion_ring::{FieldId, Flags, FrameTime, Reader};
 use orion_server::{FdSet, Roles};
 use orion_unix::UnixConnection;
 use orion_wire::{Body, Bytes, encode_body, frame, kind};
+use tokio::io::AsyncReadExt;
 
 fn run(test: impl Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -112,7 +113,7 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
         let dir = temp("alone");
         // No node logic, no other program, nothing on the links it is told about.
         let extra = format!(
-            "peer.listen = 127.0.0.1:0\nlinks.serial = uart0={}/no-such-port\nlinks.usb = usb0\nlinks.can = can9=no-such-can:0x100:0x180:1-2\n",
+            "peer.listen = 127.0.0.1:0\nssh.listen = 127.0.0.1:0\nlinks.serial = uart0={}/no-such-port\nlinks.usb = usb0\nlinks.can = can9=no-such-can:0x100:0x180:1-2\n",
             dir.display()
         );
         let core = CommCore::start(settings(&dir, &extra))
@@ -233,12 +234,25 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
             kind::WELCOME
         );
 
+        // And the SSH way in says which SSH it speaks, and has made its host key.
+        let ssh = core.ssh().expect("ssh").local_addr();
+        let mut greeting = [0_u8; 8];
+        tokio::net::TcpStream::connect(ssh)
+            .await
+            .expect("connect")
+            .read_exact(&mut greeting)
+            .await
+            .expect("a greeting");
+        assert_eq!(&greeting, b"SSH-2.0-");
+        assert!(dir.join("state/ssh_host_ed25519_key").exists());
+
         // Stopping it closes every way in.
         let socket = core.socket().to_owned();
         drop(core);
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(UnixConnection::connect(&socket).await.is_err());
         assert!(tokio::net::TcpStream::connect(addr).await.is_err());
+        assert!(tokio::net::TcpStream::connect(ssh).await.is_err());
         let _ = std::fs::remove_dir_all(dir);
     });
 }

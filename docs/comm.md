@@ -333,6 +333,37 @@ answered as an operator that may do everything, and nothing is recorded.
 Settings: `cluster` (`default`), `enrollment.key` (none: only an administrator enrolls),
 `operators.read` (`true`), `operators.actions` (none).
 
+## The SSH way in
+
+`crates/comm/ssh` (`orion-ssh`). The comm core answers SSH itself, on `ssh.listen`; a person's
+ordinary `ssh` connects to it. It is off unless `ssh.listen` is set.
+
+- **Logins go through the one check.** The client proves it holds a key. The trust store says
+  whose key it is, and the check decides whether that operator may log in: an operator
+  trusted with everything may. With security off anyone is let in, with a key or without, as
+  everywhere else. There are no passwords and no `authorized_keys`: an operator's key is its
+  SSH key, and the trust store is the one place that says who may do what.
+- **A shell as the user who logged in.** The name the client gives is an account of the
+  board's, read from `/etc/passwd` and `/etc/group`. Each session runs in a helper process:
+  the comm core's own program started again with `ssh-session` (or `ssh.helper`). The helper
+  takes the terminal as its own, becomes the account with all its groups, checks that it has
+  and that it cannot go back, and then becomes the account's shell. A comm core that runs as
+  root can let in any account; one that does not can only let in the account it runs as.
+- **What a session is.** A login shell or a command, on a terminal if the client asks for
+  one, with its window size, input, output, errors apart, exit code, and the signal that
+  ended it as a shell would report it. Its environment is `HOME`, `USER`, `LOGNAME`, `SHELL`,
+  `PATH`, `TERM` and `SSH_CONNECTION` and nothing the client sends. When the client goes,
+  the session is ended.
+- **Small before the login.** One family of key exchange (`mlkem768x25519-sha256`,
+  `curve25519-sha256`), two ciphers (`chacha20-poly1305`, `aes256-gcm`), public keys only.
+  At most `ssh.max_unauthenticated` connections may be waiting to log in, and each has
+  `ssh.login_ms`. A refusal takes half a second.
+- **Always a key.** The host key is ed25519, in OpenSSH's format, at `ssh.host_key`
+  (`<state.dir>/ssh_host_ed25519_key`), made on the first start. A file there that is not a
+  key is moved aside (`.corrupt-<time>`) and another made, and that is logged: clients will
+  see the key change. A key that cannot be written is used for the run. Nothing about the
+  disk closes the way in.
+
 ## The network carrier
 
 `crates/comm/tcp` (`orion-tcp`). `orion+tcp`: how nodes reach each other and how people's tools
@@ -621,6 +652,12 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `ws.listen` | off | where browsers connect (`ws`) |
 | `ws.origins` | any | the pages that may connect, by origin |
 | `ws.send_buffer` | 262144 | the most bytes the kernel may hold for one browser that has not taken them; 0 leaves it to the kernel |
+| `ssh.listen` | off | where SSH clients connect (`ssh`) |
+| `ssh.host_key` | `<state.dir>/ssh_host_ed25519_key` | the host key, made if it is not there |
+| `ssh.helper` | this program | the program sessions run in |
+| `ssh.max_connections` | 64 | the most SSH connections at once |
+| `ssh.max_unauthenticated` | 10 | the most that have not logged in |
+| `ssh.login_ms` | 60000 | how long a connection has to log in |
 | `nt4.listen` | off | where NT4 clients connect (`nt4`) |
 | `nt4.server` | off | the NT4 server to join as a client, `host` or `host:port` (`nt4-client`) |
 | `nt4.name` | `orion` | what the board calls itself on that server |

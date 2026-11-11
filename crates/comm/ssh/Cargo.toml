@@ -1,0 +1,25 @@
+[package]
+name = "orion-ssh"
+description = "The SSH way in: logins through the one check, and a shell as the user who logged in."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion-check = { path = "../../core/check" }
+orion-config = { path = "../../core/config" }
+orion-keys = { path = "../keys" }
+orion-types = { path = "../../core/types" }
+russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
+rustix = { version = "1", default-features = false, features = ["std", "pty", "process", "thread", "termios", "fs", "stdio"] }
+tokio = { workspace = true, features = ["rt", "net", "io-util", "time", "sync", "macros", "process", "fs"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time", "net", "io-util"] }
+
+[lints]
+workspace = true
