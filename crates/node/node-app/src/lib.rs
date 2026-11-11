@@ -22,11 +22,13 @@ pub mod records;
 
 use std::cell::RefCell;
 use std::io;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use orion_config::{Config, ConfigError, Source};
 use orion_connect::{Address, Client, ClientError, Options, Roles, Session};
+use orion_file_store::{Files, FilesConfig};
 use orion_msg_session::NodeAttach;
 use orion_persist::{Persist, Source as Loaded};
 use orion_store::{Record, Store, StoreConfig};
@@ -55,6 +57,11 @@ pub struct NodeSettings {
     /// `records.max_drift_ms`: a stamp from a peer further ahead of this node's clock than
     /// this is refused.
     pub max_drift_ms: u64,
+    /// `files.dir`: where files sent to this node go. `files` in the state directory unless
+    /// it is said.
+    pub files_dir: PathBuf,
+    /// `files.max_size`: the largest file taken, in bytes.
+    pub files_max_size: u64,
 }
 
 impl NodeSettings {
@@ -65,8 +72,14 @@ impl NodeSettings {
     /// A value that doesn't parse.
     pub fn from_source(source: &mut Source) -> Result<Self, ConfigError> {
         let defaults = StoreConfig::default();
+        let config = Config::from_source(source)?;
+        let files_dir = source
+            .optional("files.dir")?
+            .unwrap_or_else(|| config.state_dir.join("files"));
         Ok(Self {
-            config: Config::from_source(source)?,
+            config,
+            files_dir,
+            files_max_size: source.get("files.max_size", 16_u64 << 30)?,
             save_after: Duration::from_millis(source.get("records.save_after_ms", 500_u64)?),
             max_drift_ms: source.get("records.max_drift_ms", defaults.max_drift_ms)?,
         })
@@ -136,9 +149,17 @@ impl Node {
         };
         let name = settings.config.node_name.clone();
         let store = Store::restored(name.clone(), config, loaded.records);
+        let files = Files::open(FilesConfig {
+            root: settings.files_dir.clone(),
+            max_size: settings.files_max_size,
+        })
+        .map_err(|error| StartError {
+            what: "files directory",
+            error,
+        })?;
         Ok(Self {
             settings,
-            logic: Rc::new(RefCell::new(Logic::new(store, name))),
+            logic: Rc::new(RefCell::new(Logic::new(store, name, files))),
             persist: Some(persist),
             saving: None,
             unsaved_since: None,
@@ -221,6 +242,7 @@ impl Node {
             let mut logic = self.logic.borrow_mut();
             let now = logic.now_ms();
             logic.actions.tick(now, &mut direct);
+            logic.files.poll(&mut direct);
             logic.actions.take_events()
         };
         direct.result()?;
@@ -279,6 +301,10 @@ impl Node {
             }
             if let Some(due) = self.logic.borrow().next_deadline() {
                 wait = wait.min(due);
+            }
+            if self.logic.borrow().files.verifying() {
+                // A helper is checking a digest: what it found is asked for soon.
+                wait = wait.min(Duration::from_millis(5));
             }
             let wait = wait.max(Duration::from_millis(1));
             let readable = async {

@@ -11,6 +11,7 @@ repository.workspace = true
 orion-action-list = { path = "../action-list" }
 orion-config = { path = "../../core/config" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
+orion-file-store = { path = "../file-store" }
 orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-session = { path = "../../core/msg-session" }
@@ -26,7 +27,7 @@ tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"
 tracing.workspace = true
 
 [dev-dependencies]
-orion = { path = "../../client/orion" }
+orion = { path = "../../client/orion", features = ["files"] }
 orion-stubs = { path = "../../testing/stubs" }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 

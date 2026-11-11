@@ -1,0 +1,22 @@
+[package]
+name = "orion-file-store"
+description = "Files received by a node: in chunks, resumable, checked against their digest, then put where they belong."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-files = { path = "../../core/msg-files" }
+orion-reply = { path = "../reply" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+sha2 = { version = "0.11.0", default-features = false }
+tracing.workspace = true
+
+[dev-dependencies]
+sha2 = { version = "0.11.0", default-features = false }
+
+[lints]
+workspace = true

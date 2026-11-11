@@ -29,6 +29,7 @@ fn settings(dir: &Path) -> NodeSettings {
     let mut settings = NodeSettings::from_source(&mut source).expect("defaults");
     settings.config.socket = dir.join("orion.sock");
     settings.config.state_dir = dir.join("state");
+    settings.files_dir = dir.join("files");
     settings.config.node_name = "board".parse().expect("name");
     settings
 }

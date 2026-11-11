@@ -64,6 +64,8 @@ Being a client like any other, it publishes what it has to show as topics.
 | `node.name`, `socket`, `state.dir` | as the comm core | the same file is read by both |
 | `records.save_after_ms` | 500 | how long after a change the records are saved |
 | `records.max_drift_ms` | 300000 | a stamp from a peer further ahead than this is refused |
+| `files.dir` | `files` in `state.dir` | where files sent to this node go |
+| `files.max_size` | 16 GiB | the largest file taken |
 
 - **Records.** `Put` writes each entry with a stamp from this node's clock (an entry with
   `deleted` set deletes, and is skipped if there is nothing to delete) and is answered with
@@ -80,6 +82,7 @@ Being a client like any other, it publishes what it has to show as topics.
   apart at first and at most a second. Watches are forgotten: they belonged to sessions that
   ended with the comm core, and their programs ask again when they reconnect.
 
+- **Files.** Node logic takes the files sent to this node (below).
 - **Actions.** Node logic keeps the open list (below) and publishes what happens to runs on
   the topic `orion.actions`.
 
@@ -204,3 +207,33 @@ actions; any program on the board adds its own.
 - There is room for 4096 runs at once; one more is refused as `busy`.
 
 Not here yet: a run for another node or for a resource another node has (E11).
+
+## Files a node receives
+
+`orion-file-store` takes files sent to the node, from any connection the check lets write
+files.
+
+- **In chunks.** `FileBegin` names the transfer, the destination, the size and the SHA-256
+  digest. `FileChunk` carries bytes at an offset. Each is answered with `FileStatus` saying how
+  many bytes are here in order; that answer is what paces the sender. Only the next bytes are
+  taken: a chunk ahead of or behind where the file is changes nothing.
+- **Resumable.** Bytes are appended to a part file in `.incoming` under `files.dir`, with a
+  note of what the transfer is. A sender that was interrupted begins again with the same
+  number, destination, size and digest, from any session, and is told where to go on. That
+  holds across a restart of node logic and of the board. The same number for another file
+  starts over.
+- **Checked.** `FileCommit` with every byte here is answered with `Verifying`. The file is read
+  back and hashed; if the digest matches it is synced and renamed to its destination, and the
+  committer is sent `Committed`. If not, the part is deleted and the answer is `Rejected`.
+  Nothing is ever at a destination that did not match its digest, and what was there before
+  stays until the rename.
+- **A helper on demand.** Appending a chunk is done at once. Hashing may take seconds, so each
+  commit has a thread of its own that ends with it; node logic goes on answering.
+- **Where.** A destination is a path under `files.dir`, never with `..`. One that a link on the
+  way would take out of the store, one that is a directory, and the store's own `.incoming`
+  are rejected.
+- At most 64 transfers are under way at once; one more is `busy`. A file larger than
+  `files.max_size` is rejected at `FileBegin`.
+
+Not here yet: pulling by URL (E14), and writing straight to a destination outside the store
+such as a boot slot (E15).

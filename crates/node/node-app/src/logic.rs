@@ -5,6 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use orion_action_list::{Actions, Event};
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
+use orion_file_store::Files;
 use orion_msg_actions::Target;
 use orion_msg_session::{NodeAnswer, NodeGone, NodeRequest};
 use orion_msg_topics::{Field, FieldType};
@@ -84,6 +85,7 @@ pub(crate) fn publish(topic: &mut Publisher, events: &[Event], running: usize) {
 pub(crate) struct Logic {
     pub(crate) records: Records,
     pub(crate) actions: Actions,
+    pub(crate) files: Files,
     started: Instant,
     scratch: Vec<u8>,
 }
@@ -100,12 +102,16 @@ impl Logic {
         kind::ACTION_RESULT,
         kind::ACTION_CANCEL,
         kind::ACTION_ATTACH,
+        kind::FILE_BEGIN,
+        kind::FILE_CHUNK,
+        kind::FILE_COMMIT,
     ];
 
-    pub(crate) fn new(store: Store, node: NodeName) -> Self {
+    pub(crate) fn new(store: Store, node: NodeName, files: Files) -> Self {
         Self {
             records: Records::new(store),
             actions: Actions::new(node),
+            files,
             started: Instant::now(),
             scratch: vec![0; 64 * 1024],
         }
@@ -131,6 +137,8 @@ impl Logic {
     fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) {
         let answered = if Records::KINDS.contains(&asked.kind) {
             self.records.request(asked, wall().as_millis() as u64, out)
+        } else if Files::KINDS.contains(&asked.kind) {
+            self.files.request(asked, out)
         } else {
             let now = self.now_ms();
             self.actions.request(asked, now, out)
@@ -159,6 +167,7 @@ impl Handler for Logic {
         } else {
             let gone: NodeGone = frame.body()?;
             self.records.gone(gone.session);
+            self.files.gone(gone.session);
             let now = self.now_ms();
             self.actions.gone(gone.session, now, &mut through);
         }

@@ -154,10 +154,36 @@ pub const ACTIONS: &[Route] = &[
     },
 ];
 
+/// The kinds of a file being sent to this node. Their answers name the transfer, not the
+/// request, and a sender that hears nothing begins again where it was.
+pub const FILES: &[Route] = &[
+    Route {
+        kind: kind::FILE_BEGIN,
+        access: Access::Write("files"),
+        who: Who::Granted(KNOWN),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+    Route {
+        kind: kind::FILE_CHUNK,
+        access: Access::Write("files"),
+        who: Who::Granted(KNOWN),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+    Route {
+        kind: kind::FILE_COMMIT,
+        access: Access::Write("files"),
+        who: Who::Granted(KNOWN),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+];
+
 /// Every kind that is node logic's.
 #[must_use]
 pub fn routes() -> Vec<Route> {
-    [RECORDS, ACTIONS].concat()
+    [RECORDS, ACTIONS, FILES].concat()
 }
 
 /// How many requests are remembered as waiting on node logic. The oldest goes first.
