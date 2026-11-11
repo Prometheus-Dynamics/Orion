@@ -199,6 +199,13 @@ impl<const TX: usize> Link<TX> {
         }
     }
 
+    /// The longest frame this device takes, as it said in hello: what its receive buffer
+    /// holds.
+    #[must_use]
+    pub const fn rx_max(&self) -> usize {
+        self.rx_max as usize
+    }
+
     /// Whether [`Link::send_with`] would take a frame now.
     #[must_use]
     pub const fn is_free(&self) -> bool {

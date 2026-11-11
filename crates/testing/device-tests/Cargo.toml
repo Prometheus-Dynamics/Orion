@@ -9,14 +9,17 @@ repository.workspace = true
 publish = false
 
 [dev-dependencies]
-orion = { path = "../../client/orion", features = ["provider"] }
+orion = { path = "../../client/orion", features = ["provider", "files"] }
 orion-audit = { path = "../../node/audit" }
 orion-config = { path = "../../core/config" }
 orion-device-actions = { path = "../../device/actions" }
 orion-device-core = { path = "../../device/core" }
+orion-device-firmware = { path = "../../device/firmware" }
 orion-device-topics = { path = "../../device/topics" }
+orion-msg-files = { path = "../../core/msg-files" }
 orion-node-app = { path = "../../node/node-app" }
 orion-stubs = { path = "../stubs" }
+orion-wire = { path = "../../core/wire" }
 rustix = { version = "1", default-features = false, features = ["std", "pty"] }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 

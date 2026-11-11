@@ -131,7 +131,7 @@ The device side on the same wire, with its size gate.
 - [x] [H3](docs/prs/H3.md) Device actions (wave 6; needs H1, A8)
 - [x] [H4](docs/prs/H4.md) Device firmware receive (wave 6; needs H1, A10)
 - [x] [H5](docs/prs/H5.md) Host side of devices (wave 10; needs C11, C3, D8)
-- [ ] [H6](docs/prs/H6.md) Firmware send (wave 11; needs H5, H4, E13)
+- [x] [H6](docs/prs/H6.md) Firmware send (wave 11; needs H5, H4, E13)
 - [ ] [H7](docs/prs/H7.md) MCU template (wave 7; needs H2, H3, H4)
 - [ ] [H8](docs/prs/H8.md) STM32G4 and the size gate (wave 11; needs H7, H5; board run)
 

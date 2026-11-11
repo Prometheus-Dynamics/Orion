@@ -12,6 +12,9 @@
 //! then loads what it had saved, connects, and the requests that stand, watches and
 //! registered actions, are passed to it again.
 //!
+//! Node logic has one action of its own, `files.send`, which sends a file it keeps on to a
+//! program that receives such files, a device's firmware slot among them (see `send`).
+//!
 //! One thread. The store and the lists are plain data owned by it. The one slow thing,
 //! writing the snapshot, is done by a helper thread that exists only while it writes.
 
@@ -21,6 +24,7 @@ mod logic;
 #[cfg(feature = "pull")]
 mod pull;
 pub mod records;
+mod send;
 
 use std::cell::RefCell;
 use std::io;
@@ -290,6 +294,11 @@ impl Node {
             logic.actions.take_events()
         };
         direct.result()?;
+        {
+            let mut logic = self.logic.borrow_mut();
+            let now = logic.now_ms();
+            logic.sends.tick(now, &mut send::Via::Client(client))?;
+        }
         if let Some(progress) = progress {
             logic::publish(progress, &events, self.logic.borrow().actions.running());
         }
@@ -314,6 +323,13 @@ impl Node {
         if let Err(error) = client.send(&NodeAttach {
             kinds: Bytes(Logic::KINDS),
         }) {
+            return error;
+        }
+        // Node logic's own action, registered as any program's is: the relay then checks
+        // each run against its policy.
+        if let Some(register) = send::register(&self.settings.config.node_name)
+            && let Err(error) = client.send(&register)
+        {
             return error;
         }
         let mut progress = match Topics::new(&client).declare(&TopicDecl {
@@ -349,6 +365,10 @@ impl Node {
             if self.logic.borrow().fetching() {
                 // The node is fetching a file: how far it is is asked for now and then.
                 wait = wait.min(Duration::from_millis(50));
+            }
+            if self.logic.borrow().sends.active() {
+                // A file is being sent: a receiver that went quiet is begun again.
+                wait = wait.min(Duration::from_millis(100));
             }
             if self.logic.borrow().forwards.active() {
                 // A run is under way on another node: what its helper heard is asked for.

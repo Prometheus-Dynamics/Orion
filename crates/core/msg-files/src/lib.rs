@@ -94,6 +94,11 @@ body! {
     pub struct FileSink<'a> = kind::FILE_SINK {
         /// What the destinations start with. Not empty.
         pub prefix: &'a str,
+        ;
+        /// The most bytes of a chunk this program takes, or 0 for any. A program that names
+        /// a limit is also sent one frame at a time: each is sent once the one before is
+        /// answered, so a receiver with room for one frame is never sent two.
+        pub max_chunk: u32,
     }
 }
 
@@ -102,5 +107,17 @@ body! {
     pub struct FileSinkReady = kind::FILE_SINK_READY {
         /// The `seq` of the [`FileSink`].
         pub request_seq: u16,
+    }
+}
+
+body! {
+    /// The arguments of the node's `files.send` action: a file the node keeps is sent on to
+    /// a destination that a receiver asked for with [`FileSink`], such as a device's
+    /// firmware slot. The run succeeds when the receiver says committed.
+    pub struct FileSend {
+        /// The file in the node's store.
+        pub file: FileName,
+        /// Where it goes.
+        pub to: FileName,
     }
 }

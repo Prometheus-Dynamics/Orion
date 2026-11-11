@@ -12,15 +12,23 @@
 //! Nothing of the file stays here. A chunk is handed on in the call that brought it, so the
 //! memory this takes is one chunk at a time, whatever the size of the file. The sender is
 //! paced by the receiver's answers, as it would be by the node's.
+//!
+//! A receiver with little room, a microcontroller on a serial line, says how large a chunk
+//! it takes (`max_chunk`). It is then sent one frame at a time: a frame waits here until the
+//! one before is answered, and a chunk larger than it takes is cut into pieces that each wait
+//! their turn. What waits is what the sender has in flight, a few chunks, and no more than
+//! [`MAX_WAITING`] bytes of a transfer. A sender that begins again, because it heard nothing,
+//! is passed on at once: whatever waited is dropped, and the receiver says where to go on.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use orion_msg_files::{
     FileBegin, FileChunk, FileCommit, FileSink, FileSinkReady, FileState, FileStatus,
 };
 use orion_reply::{Asked, Out};
 use orion_types::Error;
-use orion_wire::{body, kind};
+use orion_wire::body::encode_fields;
+use orion_wire::{Bytes, Decode, body, kind};
 
 /// The most prefixes that can be asked for. One more is refused as busy.
 pub const MAX_SINKS: usize = 64;
@@ -28,18 +36,80 @@ pub const MAX_SINKS: usize = 64;
 /// The most transfers passing through at once. One more is refused as busy.
 pub const MAX_TRANSFERS: usize = 256;
 
+/// The most bytes of one transfer that wait for a receiver that takes a frame at a time.
+/// More is refused as busy, and the sender tries again.
+pub const MAX_WAITING: usize = 1 << 20;
+
+/// Room for what a chunk carries besides its bytes.
+const CHUNK_FIELDS: usize = 32;
+
 #[derive(Debug)]
 struct Sink {
     prefix: String,
     session: u32,
+    /// The most bytes of a chunk it takes; 0 for any, and then frames are not held back.
+    max_chunk: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct Passing {
     /// The program the file goes to.
     sink: u32,
     /// The session that last sent something of it, which the answers go to.
     sender: u32,
+    /// The receiver's limit, as it was when the transfer began.
+    max_chunk: u32,
+    /// Whether a frame was sent to a receiver that takes one at a time and is not answered.
+    answer_owed: bool,
+    /// The frames that wait for it, as kind and body.
+    waiting: VecDeque<(u8, Vec<u8>)>,
+    waiting_bytes: usize,
+}
+
+impl Passing {
+    /// Sends the next frame that waits, if the receiver is not still on one.
+    fn feed(&mut self, out: &mut dyn Out) {
+        if self.answer_owed {
+            return;
+        }
+        if let Some((kind, payload)) = self.waiting.pop_front() {
+            self.waiting_bytes -= payload.len();
+            out.frame(self.sink, kind, &payload, false);
+            self.answer_owed = true;
+        }
+    }
+
+    /// Holds a frame for a receiver that takes one at a time, cutting a chunk that is too
+    /// large for it.
+    fn hold(&mut self, kind: u8, payload: &[u8]) -> Result<(), Error> {
+        let limit = self.max_chunk as usize;
+        if kind != kind::FILE_CHUNK {
+            self.waiting.push_back((kind, payload.to_vec()));
+            self.waiting_bytes += payload.len();
+            return Ok(());
+        }
+        let chunk = FileChunk::decode(payload)?;
+        if self.waiting_bytes + chunk.data.0.len() > MAX_WAITING {
+            return Err(Error::Busy);
+        }
+        let mut offset = chunk.offset;
+        for piece in chunk.data.0.chunks(limit.max(1)) {
+            let mut body = vec![0_u8; piece.len() + CHUNK_FIELDS];
+            let used = encode_fields(
+                &FileChunk {
+                    transfer: chunk.transfer,
+                    offset,
+                    data: Bytes(piece),
+                },
+                &mut body,
+            )?;
+            body.truncate(used);
+            self.waiting_bytes += body.len();
+            self.waiting.push_back((kind, body));
+            offset += piece.len() as u64;
+        }
+        Ok(())
+    }
 }
 
 /// The receivers of one node, and the transfers passing through to them.
@@ -79,12 +149,18 @@ impl Sinks {
     }
 
     /// The receiver for `destination`: the one with the longest prefix it starts with.
-    fn sink_for(&self, destination: &str) -> Option<u32> {
+    fn sink_for(&self, destination: &str) -> Option<&Sink> {
         self.sinks
             .iter()
             .filter(|sink| destination.starts_with(&sink.prefix))
             .max_by_key(|sink| sink.prefix.len())
-            .map(|sink| sink.session)
+    }
+
+    /// The largest chunk the receiver of `destination` takes, 0 for any. `None` if no
+    /// receiver asked for it: it would be the node's own store's.
+    #[must_use]
+    pub fn max_chunk(&self, destination: &str) -> Option<u32> {
+        self.sink_for(destination).map(|sink| sink.max_chunk)
     }
 
     /// Answers `FileSink` and `FileStatus`.
@@ -99,8 +175,14 @@ impl Sinks {
                 if sink.prefix.is_empty() || sink.prefix.split('/').any(|part| part == "..") {
                     return Err(Error::InvalidName);
                 }
-                match self.sinks.iter().find(|known| known.prefix == sink.prefix) {
-                    Some(known) if known.session == asked.session => {}
+                match self
+                    .sinks
+                    .iter_mut()
+                    .find(|known| known.prefix == sink.prefix)
+                {
+                    Some(known) if known.session == asked.session => {
+                        known.max_chunk = sink.max_chunk;
+                    }
                     Some(_) => return Err(Error::AlreadyExists),
                     None => {
                         if self.sinks.len() >= MAX_SINKS {
@@ -109,6 +191,7 @@ impl Sinks {
                         self.sinks.push(Sink {
                             prefix: sink.prefix.to_owned(),
                             session: asked.session,
+                            max_chunk: sink.max_chunk,
                         });
                     }
                 }
@@ -124,14 +207,17 @@ impl Sinks {
                 let status: FileStatus<'_> = asked.body()?;
                 let passing = self
                     .passing
-                    .get(&status.transfer)
-                    .copied()
+                    .get_mut(&status.transfer)
                     .filter(|passing| passing.sink == asked.session)
                     .ok_or(Error::NotFound)?;
+                let sender = passing.sender;
                 if matches!(status.state, FileState::Committed | FileState::Rejected) {
                     self.passing.remove(&status.transfer);
+                } else {
+                    passing.answer_owed = false;
+                    passing.feed(out);
                 }
-                out.frame(passing.sender, kind::FILE_STATUS, asked.payload, false);
+                out.frame(sender, kind::FILE_STATUS, asked.payload, false);
                 Ok(())
             }
             _ => Err(Error::Unsupported),
@@ -148,7 +234,12 @@ impl Sinks {
         let transfer = match asked.kind {
             kind::FILE_BEGIN => {
                 let begin: FileBegin = asked.body()?;
-                let Some(sink) = self.sink_for(begin.destination.as_str()) else {
+                let Some(&Sink {
+                    session: sink,
+                    max_chunk,
+                    ..
+                }) = self.sink_for(begin.destination.as_str())
+                else {
                     // Not a receiver's. If it was passing through one that has since gone,
                     // it starts over in the store.
                     self.passing.remove(&begin.transfer);
@@ -159,11 +250,16 @@ impl Sinks {
                 {
                     return Err(Error::Busy);
                 }
+                // Begun again: what waited is dropped, and the receiver says where to go on.
                 self.passing.insert(
                     begin.transfer,
                     Passing {
                         sink,
                         sender: asked.session,
+                        max_chunk,
+                        answer_owed: false,
+                        waiting: VecDeque::new(),
+                        waiting_bytes: 0,
                     },
                 );
                 begin.transfer
@@ -177,7 +273,12 @@ impl Sinks {
         };
         // Whoever sent this is who is told next: a sender that came back in a new session.
         passing.sender = asked.session;
-        out.frame(passing.sink, asked.kind, asked.payload, false);
+        if passing.max_chunk == 0 {
+            out.frame(passing.sink, asked.kind, asked.payload, false);
+        } else {
+            passing.hold(asked.kind, asked.payload)?;
+            passing.feed(out);
+        }
         Ok(true)
     }
 

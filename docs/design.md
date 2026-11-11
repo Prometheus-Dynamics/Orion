@@ -303,6 +303,12 @@ starts. The boot record is kept twice and written to the older copy, so a power 
 one before. The port supplies the flash; nothing names a chip. It adds 6.8 KB on thumbv7em,
 SHA-256 written small rather than unrolled.
 
+An image reaches a device through the board's `files.send` action (`docs/node.md`): put on the
+board once as any file, then sent to the destination under the device's prefix. A device names
+the largest chunk its receive buffer holds when it asks for its prefix, and the board cuts
+chunks to fit and sends one frame at a time, so a device with a 512-byte buffer takes an image
+from any sender. A lost frame is sent again after two quiet seconds.
+
 On the board, a device is a resource like any other: the device gateway in the comm core writes
 its record from what it declared and registered (see `docs/comm.md`, "Devices as resources").
 

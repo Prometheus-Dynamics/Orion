@@ -91,7 +91,13 @@ impl Bench {
     }
 
     fn sink(&mut self, from: u32, prefix: &str) -> Result<(), Error> {
-        self.request(from, &FileSink { prefix })
+        self.request(
+            from,
+            &FileSink {
+                prefix,
+                max_chunk: 0,
+            },
+        )
     }
 
     fn begin(&mut self, from: u32, transfer: u64, destination: &str) -> Result<bool, Error> {
@@ -302,4 +308,88 @@ fn a_rejection_ends_the_transfer_too() {
         .status(MANAGER, 1, 0, FileState::Rejected)
         .expect("status");
     assert_eq!(bench.sinks.passing(), 0);
+}
+
+#[test]
+fn a_receiver_that_names_a_chunk_size_is_sent_pieces_one_at_a_time() {
+    let mut bench = Bench::new();
+    bench
+        .request(
+            MANAGER,
+            &FileSink {
+                prefix: "devices/imu/",
+                max_chunk: 100,
+            },
+        )
+        .expect("sink");
+    assert_eq!(bench.sinks.max_chunk("devices/imu/fw.bin"), Some(100));
+    assert_eq!(bench.sinks.max_chunk("other/fw.bin"), None);
+    bench.sent.frames.clear();
+
+    assert_eq!(bench.begin(SENDER, 7, "devices/imu/fw.bin"), Ok(true));
+    let (to, kind, _) = bench.took();
+    assert_eq!((to, kind), (MANAGER, kind::FILE_BEGIN));
+    // Two chunks in flight, one larger than the receiver takes: nothing goes until the
+    // begin is answered.
+    let data: Vec<u8> = (0..250_u32).map(|at| at as u8).collect();
+    for (offset, bytes) in [(0, &data[..]), (250, &data[..10])] {
+        assert_eq!(
+            bench.pass(
+                SENDER,
+                &FileChunk {
+                    transfer: 7,
+                    offset,
+                    data: Bytes(bytes),
+                },
+            ),
+            Ok(true)
+        );
+    }
+    assert!(bench.sent.frames.is_empty(), "sent before the answer");
+
+    // Each answer lets the next piece go, and is passed back to the sender.
+    let mut pieces = Vec::new();
+    for received in [0, 100, 200, 250] {
+        bench
+            .status(MANAGER, 7, received, FileState::Receiving)
+            .expect("status");
+        let (to, kind, payload) = bench.took();
+        assert_eq!((to, kind), (MANAGER, kind::FILE_CHUNK));
+        let chunk = FileChunk::decode(&payload).expect("chunk");
+        pieces.push((chunk.offset, chunk.data.0.to_vec()));
+        let (to, kind, _) = bench.took();
+        assert_eq!((to, kind), (SENDER, kind::FILE_STATUS));
+        assert!(bench.sent.frames.is_empty(), "two frames at once");
+    }
+    assert_eq!(
+        pieces,
+        [
+            (0, data[..100].to_vec()),
+            (100, data[100..200].to_vec()),
+            (200, data[200..].to_vec()),
+            (250, data[..10].to_vec()),
+        ]
+    );
+
+    // A sender that begins again is passed on at once, and what waited is dropped.
+    bench
+        .pass(
+            SENDER,
+            &FileChunk {
+                transfer: 7,
+                offset: 260,
+                data: Bytes(&data[..10]),
+            },
+        )
+        .expect("chunk");
+    assert!(bench.sent.frames.is_empty(), "sent before the answer");
+    assert_eq!(bench.begin(SENDER, 7, "devices/imu/fw.bin"), Ok(true));
+    let (to, kind, _) = bench.took();
+    assert_eq!((to, kind), (MANAGER, kind::FILE_BEGIN));
+    bench
+        .status(MANAGER, 7, 260, FileState::Receiving)
+        .expect("status");
+    let (to, kind, _) = bench.took();
+    assert_eq!((to, kind), (SENDER, kind::FILE_STATUS));
+    assert!(bench.sent.frames.is_empty(), "the dropped chunk was sent");
 }

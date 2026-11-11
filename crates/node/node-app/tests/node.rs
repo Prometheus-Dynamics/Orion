@@ -312,10 +312,13 @@ fn what_was_done_is_in_the_audit_log() {
 
     let uid = std::fs::metadata(&dir).expect("dir").uid();
     let log = std::fs::read_to_string(dir.join("state/audit.log")).expect("the audit log");
-    let lines: Vec<&str> = log.lines().collect();
+    // Node logic registers its own action as any program does, and that is in the log too.
+    let own = "\"did\":\"register\",\"what\":\"files.send node:board\",\"result\":\"ok\"";
+    assert_eq!(log.matches(own).count(), 1, "{log}");
+    let lines: Vec<&str> = log.lines().filter(|line| !line.contains(own)).collect();
     assert_eq!(lines.len(), 2, "{log}");
     let who = format!("\"who\":\"local:{uid}\"");
-    assert!(lines.iter().all(|line| line.contains(&who)), "{log}");
+    assert!(log.lines().all(|line| line.contains(&who)), "{log}");
     assert!(lines.iter().all(|line| line.contains("\"node\":\"board\"")));
     assert!(
         lines[0].contains(

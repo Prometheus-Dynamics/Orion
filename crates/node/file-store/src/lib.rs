@@ -214,6 +214,16 @@ impl Files {
             })
     }
 
+    /// The digest and size of the file at `destination`, if this store put it there and it is
+    /// still there at that size.
+    #[must_use]
+    pub fn placed(&self, destination: &FileName) -> Option<([u8; 32], u64)> {
+        let (digest, size) = *self.placed.get(destination.as_str())?;
+        fs::metadata(self.path(destination))
+            .is_ok_and(|metadata| metadata.is_file() && metadata.len() == size)
+            .then_some((digest, size))
+    }
+
     /// How many files have been put in place since this store was opened: when it changes,
     /// something that was waiting for a file may have it.
     #[must_use]

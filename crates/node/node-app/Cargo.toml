@@ -16,6 +16,7 @@ pull = ["dep:orion-files-pull"]
 orion-action-forward = { path = "../action-forward" }
 orion-action-list = { path = "../action-list" }
 orion-audit = { path = "../audit" }
+orion-check = { path = "../../core/check" }
 orion-config = { path = "../../core/config" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
 orion-executors = { path = "../executors" }
@@ -36,6 +37,7 @@ orion-store = { path = "../store" }
 orion-topics = { path = "../../client/topics" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire", features = ["std"] }
+sha2 = { version = "0.11.0", default-features = false }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal", "net"] }
 tracing.workspace = true
 

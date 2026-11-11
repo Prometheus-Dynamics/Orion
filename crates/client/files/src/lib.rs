@@ -309,7 +309,10 @@ impl Files {
     pub fn sink(&self, prefix: &str) -> Result<Sink, ClientError> {
         let state = Rc::new(RefCell::new(SinkState::default()));
         self.client.add(state.clone());
-        let seq = self.client.send(&FileSink { prefix })?;
+        let seq = self.client.send(&FileSink {
+            prefix,
+            max_chunk: 0,
+        })?;
         self.client
             .answered(seq, || state.borrow().ready.contains(&seq))?;
         Ok(Sink {

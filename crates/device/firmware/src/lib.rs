@@ -2,7 +2,8 @@
 //!
 //! The device asks the host for every file under a prefix of its own (`FileSink`), and from
 //! then on is sent `FileBegin`, `FileChunk` and `FileCommit` for an image and answers each
-//! with `FileStatus`, as any receiver does. The image goes into the slot that is not running
+//! with `FileStatus`, as any receiver does. It names the largest chunk its receive buffer
+//! holds, so the host cuts chunks to fit and sends one frame at a time. The image goes into the slot that is not running
 //! ([`Slots`]); a commit reads it back and checks its SHA-256, and only an image that checks
 //! out is put on trial. The bootloader ([`boot`]) starts a trial once; the application
 //! confirms it ([`Firmware::confirm`]) or the next reset goes back to the slot before.
@@ -34,6 +35,10 @@ pub use slots::{Refused, Slots};
 use orion_device_core::codec::{Reader, Writer};
 use orion_device_core::{Link, Requests};
 use orion_wire::{FrameView, kind};
+
+/// What a chunk's frame carries besides its bytes: the frame's own eight, the transfer and
+/// the offset as varints of up to ten bytes each, and the length of the bytes.
+const CHUNK_FIELDS: usize = 8 + 10 + 10 + 3;
 
 /// `FileState` on the wire.
 mod state {
@@ -152,8 +157,14 @@ impl<F: SlotFlash> Firmware<F> {
             self.owed = None;
         }
         let prefix = self.prefix;
+        // The largest chunk whose frame fits what this device receives. Naming it also has
+        // the host send one frame at a time.
+        let max_chunk = link.rx_max().saturating_sub(CHUNK_FIELDS).max(1);
         self.sink.poll(link, now_ms, kind::FILE_SINK, |_, out| {
-            Writer::new(out).bytes(prefix.as_bytes()).finish()
+            Writer::new(out)
+                .bytes(prefix.as_bytes())
+                .varint(max_chunk as u64)
+                .finish()
         });
     }
 

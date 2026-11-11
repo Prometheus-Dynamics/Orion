@@ -11,8 +11,8 @@ use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_executors::Workloads;
 use orion_file_store::Files;
 use orion_files_sink::Sinks;
-use orion_msg_actions::{Cancel, Register, Run, Target};
-use orion_msg_files::{FileBegin, FileCommit};
+use orion_msg_actions::{Cancel, Claim, Register, Run, Target};
+use orion_msg_files::{FileBegin, FileCommit, FileStatus};
 use orion_msg_records::{NodeRecord, Put, RecordClass, ResourceRecord};
 use orion_msg_session::{NodeAnswer, NodeGone, NodeRequest};
 use orion_msg_topics::{Field, FieldType};
@@ -25,6 +25,7 @@ use orion_types::{Error, FrameTime, NodeName};
 use orion_wire::{Bytes, Decode, kind};
 
 use crate::records::Records;
+use crate::send::{Sends, Via};
 
 /// The fields of the topic of action runs.
 ///
@@ -104,6 +105,8 @@ pub(crate) struct Logic {
     pub(crate) actions: Actions,
     pub(crate) files: Files,
     pub(crate) sinks: Sinks,
+    /// The runs of `files.send`.
+    pub(crate) sends: Sends,
     pub(crate) workloads: Workloads,
     /// When the workloads' files were last looked at: at how many commits, and when.
     reviewed_commits: u64,
@@ -195,6 +198,7 @@ impl Logic {
             actions: Actions::new(node),
             files,
             sinks: Sinks::new(),
+            sends: Sends::default(),
             #[cfg(feature = "pull")]
             pulling: crate::pull::Pulling::default(),
             audit,
@@ -242,6 +246,7 @@ impl Logic {
         self.actions.forget_sessions();
         self.forwards.forget_sessions();
         self.sinks.forget_sessions();
+        self.sends.forget();
         let now = self.now_ms();
         self.workloads.forget_sessions(now);
         #[cfg(feature = "pull")]
@@ -458,10 +463,36 @@ fn done(asked: &Asked<'_>) -> Option<(&'static str, String)> {
 
 impl Handler for Logic {
     fn kinds(&self) -> &'static [u8] {
-        &[kind::NODE_REQUEST, kind::NODE_GONE]
+        // Besides what the comm core passes on: what node logic is told as a client, as the
+        // program behind `files.send`.
+        &[
+            kind::NODE_REQUEST,
+            kind::NODE_GONE,
+            kind::ACTION_CLAIM,
+            kind::ACTION_CANCEL,
+            kind::FILE_STATUS,
+        ]
     }
 
     fn handle(&mut self, frame: &Incoming<'_>, cx: &mut Cx<'_>) -> Result<(), ClientError> {
+        let now = self.now_ms();
+        match frame.kind() {
+            kind::ACTION_CLAIM => {
+                let claim: Claim<'_> = frame.body()?;
+                return self
+                    .sends
+                    .claim(&claim, &self.files, &self.sinks, now, &mut Via::Cx(cx));
+            }
+            kind::ACTION_CANCEL => {
+                let cancel: Cancel = frame.body()?;
+                return self.sends.cancel(cancel.call, &mut Via::Cx(cx));
+            }
+            kind::FILE_STATUS => {
+                let status: FileStatus<'_> = frame.body()?;
+                return self.sends.status(&status, now, &mut Via::Cx(cx));
+            }
+            _ => {}
+        }
         let mut scratch = std::mem::take(&mut self.scratch);
         let mut through = Through {
             cx,

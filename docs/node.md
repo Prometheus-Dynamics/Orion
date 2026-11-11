@@ -310,6 +310,34 @@ again in the slot. `orion-files-sink` is how such a program takes them.
   transfer is rejected, "the program that receives it went away". The destination is then a
   place in the node's own store again.
 - At most 64 prefixes and 256 transfers passing through at once; one more is `busy`.
+- **A receiver with little room**, a microcontroller on a serial line, names the largest
+  chunk it takes in `FileSink` (`max_chunk`; 0 for any). It is then sent one frame at a
+  time: each waits here until the one before is answered, and a chunk larger than it takes
+  is cut into pieces that wait their turn. What waits is what the sender has in flight, at
+  most 1 MiB of a transfer; more is `busy`. A sender that begins again, having heard nothing,
+  is passed on at once and what waited is dropped: the receiver says where to go on from.
+
+## Sending a kept file to a receiver: `files.send`
+
+Node logic has one action of its own. `files.send` on the node, with `FileSend { file, to }`
+as its arguments, sends the file the node keeps at `file` to the destination `to`, which a
+receiver asked for. It is how an image put on the board once reaches a device's firmware
+slot, and as many devices as it is run for.
+
+- **As a client.** Node logic registers the action like any program, so the relay checks
+  each run against its policy at the door: programs on the board, and operators with a
+  grant. It is handed the claim, and sends the file's `FileBegin`, chunks and `FileCommit`
+  through the receivers' path above, as any sender's. Its own chunks are no larger than the
+  receiver takes, and it sends the next once the last is answered, so nothing waits.
+- **Ends** when the receiver says committed (succeeded) or rejected (failed, with the
+  receiver's reason). Rejected at once: a file the node does not keep, a destination no
+  receiver asked for, a file already being sent there.
+- **Resumes.** The transfer's number comes from the digest and the destination, as a client's
+  push numbers it, so a run tried again, or a push of the same file, goes on where the
+  receiver is. Sent again once it is there, the receiver says so and the run succeeds.
+- **Retries.** With no answer for 2 seconds the transfer is begun again, and the receiver says
+  where it is. After 5 such tries the run fails, "the receiver stopped answering".
+- **Cancelled** runs stop sending; the receiver keeps what it has, to resume.
 
 ## The audit log
 

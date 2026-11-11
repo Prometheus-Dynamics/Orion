@@ -315,7 +315,13 @@ fn files(out: &mut Vec<Sample>) {
             digest: DIGEST
         }
     );
-    sample!(out, FileSink { prefix: "slots/" });
+    sample!(
+        out,
+        FileSink {
+            prefix: "slots/",
+            max_chunk: 480,
+        }
+    );
     sample!(out, FileSinkReady { request_seq: 9 });
 }
 
