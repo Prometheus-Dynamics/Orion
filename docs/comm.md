@@ -443,6 +443,7 @@ orion [ctl] <concept> <verb>   the command line (docs/client.md)
   is the command line too, so `orion topic read imu` needs no `ctl`.
 - Linked as `orionctl`, `orion-comm` or `orion-node`, it is that mode.
 - The comm core here is the whole one, recovery included, and the file is its helper programs.
+  It serves serial and CAN links (`links.serial`, `links.can`) as well as its default features.
 - Node logic needs to be let in: run it as root, or name its user in `socket.node_uids`.
 
 ## The comm core alone: `orion-recovery`

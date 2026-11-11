@@ -1,0 +1,27 @@
+[package]
+name = "orion-drills"
+description = "Failure drills: the board's programs as processes, each killed while the others run, and checked against the design's table."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "orion-drill"
+path = "src/main.rs"
+
+[dependencies]
+orion = { path = "../../client/orion", features = ["topics", "buffers", "actions", "workloads", "executor"] }
+orion-bin = { path = "../../bins/orion" }
+orion-sample-executor = { path = "../sample-executor" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+orion = { path = "../../client/orion", features = ["topics", "buffers", "actions", "workloads", "executor"] }
+orion-device-core = { path = "../../device/core" }
+orion-device-topics = { path = "../../device/topics" }
+rustix = { version = "1", default-features = false, features = ["std", "pty"] }

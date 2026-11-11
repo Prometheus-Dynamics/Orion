@@ -143,3 +143,66 @@ fn a_comm_core_that_restarts_stops_nothing_that_was_flowing() {
 fn orion_wire_bytes(bytes: &[u8]) -> orion::records::Bytes<'_> {
     orion::records::Bytes(bytes)
 }
+
+#[cfg(feature = "buffers")]
+#[test]
+fn a_camera_offers_its_pool_again_to_a_comm_core_that_restarts() {
+    use orion::buffers::{HoldLimits, NextFrame, Pool};
+
+    let mut board = Board::start("facade-pool");
+    let (dir, port) = (board.dir().to_owned(), board.network().port());
+    let address = Address::Local(board.socket().to_owned());
+    let camera = Orion::connect(&address, "camera").expect("connect");
+    let pool = Pool::in_memory(1, 4, 64).expect("pool");
+    let mut frames = camera
+        .declare_buffers("camera.front", 4, 0, pool)
+        .expect("declare");
+
+    // The comm core starts again. The camera's topic is the only one there, so it goes by
+    // the same number as before: that must not be taken for "nothing changed".
+    board.stop();
+    board = Board::start_in(&dir, orion_stubs::Security::Off, Some(port));
+    camera.reconnect(|_| true).expect("the camera is back");
+    frames.poll().expect("poll");
+
+    // A viewer new to this comm core is handed the pool and sees the camera's frames.
+    let viewer = Orion::connect(&address, "viewer").expect("connect");
+    let limits = HoldLimits {
+        max_held: 1,
+        max_hold_ms: 0,
+    };
+    let mut reading = viewer
+        .subscribe_buffers("camera.front", &[], limits)
+        .expect("subscribe");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut fill = 0_u8;
+    loop {
+        frames.poll().expect("poll");
+        fill = fill.wrapping_add(1);
+        if let Ok(buffer) = frames.take() {
+            frames.buffer_mut(buffer).expect("memory").fill(fill);
+            frames
+                .publish(&[buffer], FrameTime::from_nanos(u64::from(fill)), &[])
+                .expect("publish");
+        }
+        let _ = viewer.pump(Duration::from_millis(5));
+        if let NextFrame::Frame(frame) = reading.next() {
+            let filled = frame.time.as_nanos() as u8;
+            assert!(
+                frame
+                    .held
+                    .bytes(0)
+                    .expect("bytes")
+                    .iter()
+                    .all(|&b| b == filled)
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the viewer was never given the pool"
+        );
+    }
+    drop(board);
+    let _ = std::fs::remove_dir_all(dir);
+}

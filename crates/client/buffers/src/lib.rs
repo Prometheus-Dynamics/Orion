@@ -223,6 +223,7 @@ impl Buffers {
             state: self.state.clone(),
             publisher,
             handle,
+            offered_on: 0,
             writer: BufferWriter::new(writer, FRAMES, pool),
             table,
             readers: Vec::new(),
@@ -281,6 +282,8 @@ pub struct BufferPublisher {
     state: Rc<RefCell<State>>,
     publisher: Publisher,
     handle: u32,
+    /// The connection the pool was last offered on: the session's count of reconnects then.
+    offered_on: u64,
     writer: BufferWriter,
     table: HoldTable,
     /// Every reader's marks, kept so a new pool's table can be told of them again.
@@ -319,6 +322,7 @@ impl BufferPublisher {
             buffers: List::new(&buffers),
         };
         self.client.send_with_fds(&offer, &fds)?;
+        self.offered_on = self.client.session(|session| session.reconnects());
         Ok(())
     }
 
@@ -332,9 +336,11 @@ impl BufferPublisher {
     pub fn poll(&mut self) -> Result<(), TopicError> {
         self.client.drain()?;
         let now = self.publisher.handle();
-        if now != self.handle {
+        let connection = self.client.session(|session| session.reconnects());
+        if now != self.handle || connection != self.offered_on {
             // The topic was declared again, to a comm core that came back with no memory of
-            // it: it goes by a new number there, and has not been given the pool.
+            // it, and has not been given the pool. It may go by a new number there, or by the
+            // same one: a comm core that starts again numbers from the start again.
             if let Some(side) = self
                 .state
                 .borrow_mut()

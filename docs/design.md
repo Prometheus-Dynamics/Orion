@@ -128,6 +128,10 @@ everyone else. They ship as one binary with modes `comm`, `node` and `ctl`, and 
 | An executor | Everything else. Its records stay, marked lost | Orion restarts its workloads |
 | Orion, both parts | Graphs keep running | Orion finds them by name and takes them back |
 
+`crates/testing/drills` holds every row of the table with real processes: each part is
+killed with `SIGKILL` while the others run, and a misbehaving client, peer, provider and link
+are each shown to be contained.
+
 ## The wire
 
 One wire on every carrier, using the rules the link protocol already has:

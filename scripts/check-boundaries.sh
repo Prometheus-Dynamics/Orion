@@ -85,7 +85,7 @@ errors = []
 
 # Crates allowed to use `unsafe`. Everywhere else the workspace lint forbids it.
 UNSAFE_OK = ("crates/core/ring", "crates/core/fdpass", "crates/core/measure", "crates/client/capi", "crates/device/", "crates/bridges/")
-UNSAFE_FILES = ("crates/core/wire/src/crc.rs",)
+UNSAFE_FILES = ("crates/core/wire/src/crc.rs", "crates/testing/sample-executor/src/spawn.rs")
 # Network stacks the design names, and the only crates that may hold them.
 NET_DEPS = {"hyper", "axum", "reqwest", "ureq", "http", "h2", "h3", "quinn", "quiche", "rustls", "tokio-rustls", "tonic", "actix-web"}
 NET_OK = ("crates/node/files-pull",)

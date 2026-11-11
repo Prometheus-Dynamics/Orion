@@ -8,12 +8,15 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "orion"
 path = "src/main.rs"
 
 [dependencies]
-orion-comm-app = { path = "../../comm/comm-app" }
+orion-comm-app = { path = "../../comm/comm-app", features = ["link-serial", "link-can"] }
 orion-config = { path = "../../core/config" }
 orion-ctl = { path = "../../client/ctl" }
 orion-log = { path = "../../core/log" }

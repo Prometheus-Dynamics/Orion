@@ -19,10 +19,15 @@
 //!   it is started again or stopped; one that ended well, or was stopped, is no longer
 //!   listed, which is how Orion knows it is gone.
 //!
+//! A command dies with the executor that started it (`PR_SET_PDEATHSIG`): an executor that is
+//! killed leaves nothing running that a new one would not know of, and start again.
+//!
 //! [`run`] is the program around it: connect, offer, take turns, and connect again with the
 //! same inventory when the connection breaks, so that Orion takes back what kept running.
 
 #![cfg(target_os = "linux")]
+
+mod spawn;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -105,10 +110,10 @@ impl Executor for Sample {
             signal(&old.child, Signal::KILL);
             let _ = old.child.wait();
         }
-        let child = Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .stdin(Stdio::null())
+        let mut sh = Command::new("sh");
+        sh.arg("-c").arg(command).stdin(Stdio::null());
+        spawn::dies_with_this_process(&mut sh);
+        let child = sh
             .spawn()
             .map_err(|error| ExecError(format!("the command could not be started: {error}")))?;
         runs.insert(

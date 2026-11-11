@@ -16,5 +16,15 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 orion = { path = "../../client/orion", features = ["executor", "workloads"] }
 orion-stubs = { path = "../stubs" }
 
-[lints]
-workspace = true
+# Only `src/spawn.rs` uses `unsafe`: a command is made to die with its executor.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_attributes = "deny"
+
+[lints.clippy]
+await_holding_lock = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
