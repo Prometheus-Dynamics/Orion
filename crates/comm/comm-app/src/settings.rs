@@ -42,6 +42,12 @@ pub struct CommSettings {
     /// `discovery.interfaces`: the interfaces or addresses to run mDNS on. Empty for all.
     #[cfg(feature = "discovery")]
     pub discovery_interfaces: Vec<String>,
+    /// `ws.listen`: where browsers connect. Off unless it is said.
+    #[cfg(feature = "ws")]
+    pub ws_listen: Option<std::net::SocketAddr>,
+    /// `ws.origins`: the pages that may connect, by origin. Empty for any.
+    #[cfg(feature = "ws")]
+    pub ws_origins: Vec<String>,
     /// `peer.nodes`: where the other nodes are, each `name=address:port`. A topic of one of
     /// them can be subscribed to here.
     #[cfg(feature = "topic-peers")]
@@ -154,6 +160,10 @@ impl CommSettings {
             discovery_ttl: Duration::from_millis(source.get("discovery.ttl_ms", 120_000_u64)?),
             #[cfg(feature = "discovery")]
             discovery_interfaces: source.list("discovery.interfaces")?,
+            #[cfg(feature = "ws")]
+            ws_listen: source.optional("ws.listen")?,
+            #[cfg(feature = "ws")]
+            ws_origins: source.list("ws.origins")?,
             #[cfg(feature = "topic-peers")]
             peer_nodes: source.list("peer.nodes")?,
             #[cfg(feature = "link-serial")]

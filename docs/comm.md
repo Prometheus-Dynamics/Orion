@@ -135,6 +135,29 @@ and does nothing different.
   ring a subscriber's own, and only when the sender is asleep.
 - Subscriptions take turns of 256 samples, so one busy topic does not starve another.
 
+## The WebSocket carrier
+
+A browser cannot open a socket of its own. `orion-ws` lets it reach the comm core over a
+WebSocket and speak the same frames as everyone else: each Orion frame is one binary message.
+Nothing above the carrier knows the difference. A browser is a subscriber without a ring and a
+publisher on behalf, like a program on another board.
+
+- **No HTTP framework.** A WebSocket starts as one HTTP request. It is read and answered here:
+  the upgrade and nothing else. An ordinary page request is answered `426`, anything that is
+  not a request `400`.
+- **One listener, several protocols.** A connection names the subprotocol it speaks; the comm
+  core's is `orion.v1`. The listener hands each connection to whoever asked for its
+  subprotocol, so another WebSocket protocol, as NT4 is, shares the port. A subprotocol nobody
+  takes is `404`.
+- **Who a browser is.** Nobody the comm core knows: anonymous. It may do what the policies let
+  anyone do. With `ws.origins` set, a page from another origin is `403`, so that a page on
+  another site cannot use a visitor's browser to reach the board. A connection that names no
+  origin is not from a browser and is taken.
+- **Bounded.** The request must come within the hello time and fit 8 KiB. A message longer
+  than the largest frame is refused by its length and not read. A client that does not mask,
+  sends text where a frame belongs, or sends frames out of order is dropped.
+- A message may come in pieces; pings are answered between them; a goodbye is answered.
+
 ## Topics of other nodes
 
 A program subscribes to `<node>/<topic>` exactly as to a topic of its own board: it is handed
@@ -526,6 +549,8 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `peer.listen` | off | where other nodes and people's tools connect (`tcp`) |
 | `comm.*`, `topics.*` | | the server's and the broker's limits |
 | `outbound.max_bytes` | 131072 | what may wait to be sent to one subscriber without a ring (`outbound`) |
+| `ws.listen` | off | where browsers connect (`ws`) |
+| `ws.origins` | any | the pages that may connect, by origin |
 | `peer.nodes` | none | where other nodes are, `name=address:port`, for subscribing to their topics (`topic-peers`) |
 | `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
 | `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |

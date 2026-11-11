@@ -269,6 +269,23 @@ impl CommCore {
             return Err(failed("peer.listen", "this build has no network way in"));
         }
 
+        // The WebSocket way in, for browsers. Its listener is one other WebSocket protocols
+        // can share.
+        #[cfg(feature = "ws")]
+        if let Some(listen) = settings.ws_listen {
+            parts.push("websocket");
+            let options = orion_ws::WsOptions {
+                origins: settings.ws_origins.clone(),
+                handshake: Duration::from_millis(u64::from(settings.limits.hello_ms)),
+            };
+            let mut listener = orion_ws::WsListener::bind(listen, options)
+                .await
+                .map_err(|error| failed(format!("ws.listen {listen}"), error))?;
+            let carrier = orion_ws::WsCarrier::on(&mut listener);
+            tasks.push(tokio::task::spawn_local(listener.run()));
+            serve(&mut tasks, Carriers::Ws(carrier));
+        }
+
         #[cfg(feature = "discovery")]
         let discovery = match (settings.discovery, peer_addr) {
             (true, Some(addr)) => {
@@ -496,6 +513,8 @@ carriers! {
     Unix(UnixCarrier, orion_unix::UnixConnection),
     #[cfg(feature = "tcp")]
     Tcp(orion_tcp::TcpCarrier, orion_tcp::TcpConnection),
+    #[cfg(feature = "ws")]
+    Ws(orion_ws::WsCarrier, orion_ws::WsConnection),
     #[cfg(feature = "link-serial")]
     Serial(
         orion_link_serial::StreamCarrier<orion_link_serial::Serial>,

@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -25,6 +25,8 @@ node = ["dep:orion-relay"]
 outbound = ["dep:orion-outbound"]
 # Other nodes' topics, carried into local copies of their rings.
 topic-peers = ["tcp", "dep:orion-topic-peers"]
+# The WebSocket way in, for browsers.
+ws = ["dep:orion-ws"]
 # Tells systemd when the comm core is ready and that it is alive.
 systemd = []
 # Finding the other nodes of the cluster.
@@ -63,6 +65,7 @@ orion-time = { path = "../time", optional = true }
 orion-topic-peers = { path = "../topic-peers", optional = true }
 orion-types = { path = "../../core/types" }
 orion-unix = { path = "../unix" }
+orion-ws = { path = "../ws", optional = true }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"] }
 tracing.workspace = true
 

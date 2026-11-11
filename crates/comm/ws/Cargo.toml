@@ -1,0 +1,24 @@
+[package]
+name = "orion-ws"
+description = "The WebSocket carrier: the same frames for a browser, on a listener other WebSocket protocols share."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-server = { path = "../server" }
+tokio = { workspace = true, features = ["rt", "net", "io-util", "time", "sync", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-broker = { path = "../broker" }
+orion-hello = { path = "../hello" }
+orion-keys = { path = "../keys" }
+orion-msg-session = { path = "../../core/msg-session" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[lints]
+workspace = true
