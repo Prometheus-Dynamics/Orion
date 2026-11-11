@@ -179,6 +179,14 @@ pub const FILES: &[Route] = &[
         standing: false,
         ends: Ends::Nothing,
     },
+    // The node is asked to fetch a file itself.
+    Route {
+        kind: kind::FILE_PULL,
+        access: Access::Write("files"),
+        who: Who::Granted(KNOWN),
+        standing: false,
+        ends: Ends::Nothing,
+    },
     // A program on the board asks to be the receiver of files under a prefix. It stands, so
     // it is still the receiver after node logic restarts.
     Route {

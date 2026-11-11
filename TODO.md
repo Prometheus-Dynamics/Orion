@@ -92,7 +92,7 @@ Records, peer sync, the workload tracker, actions and files.
 - [x] [E11](docs/prs/E11.md) Forwarded actions (wave 10; needs E10, E8)
 - [x] [E12](docs/prs/E12.md) Detached actions (wave 10; needs E10)
 - [x] [E13](docs/prs/E13.md) Files: store and receive (wave 9; needs E3, A10)
-- [ ] [E14](docs/prs/E14.md) Files: pull by URL (wave 10; needs E13)
+- [x] [E14](docs/prs/E14.md) Files: pull by URL (wave 10; needs E13)
 - [x] [E15](docs/prs/E15.md) Files: straight to the destination (wave 10; needs E13)
 - [x] [E16](docs/prs/E16.md) Resources (wave 10; needs E1, D8)
 - [x] [E17](docs/prs/E17.md) Audit log (wave 9; needs E3)

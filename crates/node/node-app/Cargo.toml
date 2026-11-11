@@ -7,6 +7,11 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[features]
+default = ["pull"]
+# Fetching a file from a URL. This brings in the one HTTP client, and rustls.
+pull = ["dep:orion-files-pull"]
+
 [dependencies]
 orion-action-forward = { path = "../action-forward" }
 orion-action-list = { path = "../action-list" }
@@ -14,6 +19,7 @@ orion-audit = { path = "../audit" }
 orion-config = { path = "../../core/config" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
 orion-file-store = { path = "../file-store" }
+orion-files-pull = { path = "../files-pull", optional = true }
 orion-files-sink = { path = "../files-sink" }
 orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-files = { path = "../../core/msg-files" }

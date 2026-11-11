@@ -18,6 +18,8 @@
 #![cfg(target_os = "linux")]
 
 mod logic;
+#[cfg(feature = "pull")]
+mod pull;
 pub mod records;
 
 use std::cell::RefCell;
@@ -278,6 +280,7 @@ impl Node {
             logic.actions.tick(now, &mut direct);
             logic.files.poll(&mut direct);
             logic.forwards.poll(&mut direct);
+            logic.fetches(&mut direct);
             logic.actions.take_events()
         };
         direct.result()?;
@@ -336,6 +339,10 @@ impl Node {
             }
             if let Some(due) = self.logic.borrow().next_deadline() {
                 wait = wait.min(due);
+            }
+            if self.logic.borrow().fetching() {
+                // The node is fetching a file: how far it is is asked for now and then.
+                wait = wait.min(Duration::from_millis(50));
             }
             if self.logic.borrow().forwards.active() {
                 // A run is under way on another node: what its helper heard is asked for.

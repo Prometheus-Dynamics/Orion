@@ -95,6 +95,8 @@ struct Receiving {
     received: u64,
     /// Whether a helper is checking it.
     verifying: bool,
+    /// Whether the node is fetching it itself: its bytes come from there, not in chunks.
+    fetching: bool,
     /// The session that committed it, to tell how that ended.
     committer: Option<u32>,
 }
@@ -247,6 +249,7 @@ impl Files {
                             part,
                             received,
                             verifying: false,
+                            fetching: false,
                             committer: None,
                         },
                     );
@@ -281,8 +284,9 @@ impl Files {
             );
         }
         // Only the next bytes are taken. Anything else is a chunk sent before the sender
-        // heard where to go on from: the answer says where that is.
-        if chunk.offset == receiving.received {
+        // heard where to go on from: the answer says where that is. A file the node is
+        // fetching itself takes no chunks.
+        if chunk.offset == receiving.received && !receiving.fetching {
             let end = receiving.received + chunk.data.len() as u64;
             if end > receiving.meta.size {
                 self.discard(transfer);
@@ -331,7 +335,7 @@ impl Files {
                 &status(transfer, received, FileState::Verifying, ""),
             );
         }
-        if received != receiving.meta.size {
+        if received != receiving.meta.size || receiving.fetching {
             return out.send(
                 asked.session,
                 &status(
@@ -357,6 +361,116 @@ impl Files {
             asked.session,
             &status(transfer, received, FileState::Verifying, ""),
         )
+    }
+
+    /// Sets a transfer up for the node to fetch itself: the part file to fetch into, and how
+    /// many bytes of it are already there. The same transfer as before goes on; another
+    /// file under the same number starts over.
+    ///
+    /// # Errors
+    ///
+    /// What the transfer is refused with, for the caller's `FileStatus`.
+    pub fn reserve(
+        &mut self,
+        transfer: u64,
+        destination: FileName,
+        size: u64,
+        digest: [u8; 32],
+    ) -> Result<(PathBuf, u64), String> {
+        let meta = Meta {
+            destination,
+            size,
+            digest,
+        };
+        if meta.destination.as_str().split('/').next() == Some(".incoming") {
+            return Err("not a place for files".to_owned());
+        }
+        if size > self.config.max_size {
+            return Err("larger than this node takes".to_owned());
+        }
+        match self.transfers.get(&transfer) {
+            Some(known) if known.verifying => return Err("it is being checked".to_owned()),
+            Some(known) if known.meta == meta => {}
+            Some(_) => self.discard(transfer),
+            None => {}
+        }
+        if !self.transfers.contains_key(&transfer) {
+            if self.transfers.len() >= MAX_TRANSFERS {
+                return Err("too many transfers are under way".to_owned());
+            }
+            let (part, received) = self
+                .open_part(transfer, &meta)
+                .map_err(|error| format!("the file cannot be kept: {error}"))?;
+            self.transfers.insert(
+                transfer,
+                Receiving {
+                    meta,
+                    part,
+                    received,
+                    verifying: false,
+                    fetching: false,
+                    committer: None,
+                },
+            );
+        }
+        let path = self.part_path(transfer);
+        let known = self
+            .transfers
+            .get_mut(&transfer)
+            .ok_or_else(|| "no such transfer".to_owned())?;
+        known.fetching = true;
+        Ok((path, known.received))
+    }
+
+    /// Notes how many bytes of a transfer the node has fetched. `done` when the fetch is
+    /// over, whole or not: the transfer then takes chunks and a commit again.
+    pub fn fetched(&mut self, transfer: u64, received: u64, done: bool) {
+        if let Some(receiving) = self.transfers.get_mut(&transfer) {
+            receiving.received = received.min(receiving.meta.size);
+            if done {
+                receiving.fetching = false;
+            }
+        }
+    }
+
+    /// How many bytes of `transfer` are here, if it is under way.
+    #[must_use]
+    pub fn received(&self, transfer: u64) -> Option<u64> {
+        self.transfers
+            .get(&transfer)
+            .map(|receiving| receiving.received)
+    }
+
+    /// Checks a transfer whose every byte is here and puts it in place, telling `session`
+    /// how that ended through [`Files::poll`]. `false` if it is not whole or not there.
+    pub fn commit_fetched(&mut self, transfer: u64, session: Option<u32>) -> bool {
+        let part = self.part_path(transfer);
+        let Some(destination) = self
+            .transfers
+            .get(&transfer)
+            .map(|receiving| self.path(&receiving.meta.destination))
+        else {
+            return false;
+        };
+        let Some(receiving) = self.transfers.get_mut(&transfer) else {
+            return false;
+        };
+        if receiving.verifying || receiving.received != receiving.meta.size {
+            return false;
+        }
+        receiving.fetching = false;
+        receiving.verifying = true;
+        receiving.committer = session;
+        self.verifying += 1;
+        verify::start(verify::Job {
+            transfer,
+            part,
+            destination,
+            root: self.config.root.clone(),
+            digest: receiving.meta.digest,
+            found: self.finder.clone(),
+        });
+        true
     }
 
     /// Answers one request.

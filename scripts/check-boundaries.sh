@@ -88,7 +88,7 @@ UNSAFE_OK = ("crates/core/ring", "crates/core/fdpass", "crates/core/measure", "c
 UNSAFE_FILES = ("crates/core/wire/src/crc.rs",)
 # Network stacks the design names, and the only crates that may hold them.
 NET_DEPS = {"hyper", "axum", "reqwest", "ureq", "http", "h2", "h3", "quinn", "quiche", "rustls", "tokio-rustls", "tonic", "actix-web"}
-NET_OK = ("crates/node/files",)
+NET_OK = ("crates/node/files-pull",)
 PRODUCT = re.compile(
     r"\b(photon|photonvision|helios|atlas|lemnos|lemnosd|styx|eidos|raze|daedalus|cm5|raspberry|bcm2712|roborio|wpilib|frc|robots?|apriltag|opencv|libcamera)\b",
     re.I,

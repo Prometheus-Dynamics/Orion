@@ -273,7 +273,7 @@ files.
 - At most 64 transfers are under way at once; one more is `busy`. A file larger than
   `files.max_size` is rejected at `FileBegin`.
 
-Not here yet: pulling by URL (E14).
+A file can also be fetched by the node itself (below).
 
 ## Files that go straight to a receiver
 
@@ -392,3 +392,28 @@ the local node should do. It talks to nothing.
 Liveness is each node's own judgement and is not shared. Two nodes may disagree for a moment;
 that is safe because a node only ever takes work for itself, after the grace period, and two
 "mine" for one workload are one record that the store's merge settles.
+
+## Files a node fetches itself
+
+Instead of being sent a file, a node can be told where to get it: `FilePull` with a URL, the
+destination, the size and the digest. `orion-files-pull` fetches it. Nothing of the file
+crosses the connection that asked.
+
+- **Into the same part file** a pushed file would use, so what is fetched is checked against
+  its digest and put in place exactly as a pushed file is, and never before.
+- **It goes on where it was.** If part of the file is already here the server is asked for the
+  rest with `Range`. A server that honours it answers `206` and the bytes are appended. One
+  that does not answers `200` with the whole file, and the part is started over. A fetch that
+  breaks off answers `Rejected` with why and how many bytes are here, and keeps them: asking
+  again with the same number goes on from there.
+- **Reports.** Whoever asked is sent `Receiving` with the byte count about four times a
+  second, then `Verifying`, then `Committed` or `Rejected`. Asking again while it runs makes
+  the asker the one who is told.
+- **A helper for each fetch**, which ends with it. At most four at once.
+- **Bounded.** A server that sends more than the file's size is cut off there. Connecting may
+  take 10 s, and the server may be silent for 30 s in the middle of a file.
+- **URLs** are `http://` and `https://`. Anything else is rejected.
+
+Fetching is the cargo feature `pull` of `orion-node-app`, on by default. It brings in the one
+HTTP client in Orion (`ureq`) and, for `https`, the one use of rustls; a build without the
+feature has neither, and refuses `FilePull` as `unavailable`.

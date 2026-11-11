@@ -1,0 +1,20 @@
+[package]
+name = "orion-files-pull"
+description = "A node fetches a file itself from a URL, going on where it was if the server allows."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+default = ["https"]
+# Fetching over TLS. This is the one place in Orion that uses rustls.
+https = ["ureq/rustls"]
+
+[dependencies]
+tracing.workspace = true
+ureq = { version = "3", default-features = false }
+
+[lints]
+workspace = true

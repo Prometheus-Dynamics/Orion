@@ -434,7 +434,7 @@ Which kind asks for what, and who may ask, is a table of routes in the relay.
 | Kinds | Who may ask |
 | --- | --- |
 | `Put`, `Get`, `Watch` | programs on the board, operators with the grant, peers |
-| `FileBegin`, `FileChunk`, `FileCommit` | programs on the board, operators with the grant, peers |
+| `FileBegin`, `FileChunk`, `FileCommit`, `FilePull` | programs on the board, operators with the grant, peers |
 | `FileSink` | programs on the board. It stands |
 | `FileStatus` | programs on the board; node logic takes it only from the receiver of that transfer |
 | `Register` (an action) | programs on the board |

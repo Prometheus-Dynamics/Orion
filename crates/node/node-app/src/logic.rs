@@ -93,6 +93,8 @@ pub(crate) struct Logic {
     pub(crate) actions: Actions,
     pub(crate) files: Files,
     pub(crate) sinks: Sinks,
+    #[cfg(feature = "pull")]
+    pulling: crate::pull::Pulling,
     pub(crate) forwards: Forwards,
     audit: Option<Audit>,
     started: Instant,
@@ -101,6 +103,27 @@ pub(crate) struct Logic {
 
 impl Logic {
     /// The kinds node logic answers.
+    #[cfg(feature = "pull")]
+    pub(crate) const KINDS: &'static [u8] = &[
+        kind::PUT,
+        kind::GET,
+        kind::WATCH,
+        kind::ACTION_REGISTER,
+        kind::ACTION_RUN,
+        kind::ACTION_PROGRESS,
+        kind::ACTION_RESULT,
+        kind::ACTION_CANCEL,
+        kind::ACTION_ATTACH,
+        kind::FILE_BEGIN,
+        kind::FILE_CHUNK,
+        kind::FILE_COMMIT,
+        kind::FILE_SINK,
+        kind::FILE_STATUS,
+        kind::FILE_PULL,
+    ];
+
+    /// The kinds node logic answers.
+    #[cfg(not(feature = "pull"))]
     pub(crate) const KINDS: &'static [u8] = &[
         kind::PUT,
         kind::GET,
@@ -131,6 +154,8 @@ impl Logic {
             actions: Actions::new(node),
             files,
             sinks: Sinks::new(),
+            #[cfg(feature = "pull")]
+            pulling: crate::pull::Pulling::default(),
             audit,
             started: Instant::now(),
             scratch: vec![0; 64 * 1024],
@@ -154,6 +179,34 @@ impl Logic {
         self.actions.forget_sessions();
         self.forwards.forget_sessions();
         self.sinks.forget_sessions();
+        #[cfg(feature = "pull")]
+        self.pulling.forget_sessions();
+    }
+
+    #[cfg(feature = "pull")]
+    fn pull(&mut self, asked: &Asked<'_>, out: &mut dyn Out) -> Result<(), Error> {
+        self.pulling.request(asked, &mut self.files, out)
+    }
+
+    #[cfg(not(feature = "pull"))]
+    fn pull(&mut self, _asked: &Asked<'_>, _out: &mut dyn Out) -> Result<(), Error> {
+        Err(Error::Unsupported)
+    }
+
+    /// Takes what the fetches under way reported.
+    pub(crate) fn fetches(&mut self, out: &mut dyn Out) {
+        #[cfg(feature = "pull")]
+        self.pulling.poll(&mut self.files, out);
+        #[cfg(not(feature = "pull"))]
+        let _ = out;
+    }
+
+    /// Whether the node is fetching a file.
+    pub(crate) fn fetching(&self) -> bool {
+        #[cfg(feature = "pull")]
+        return self.pulling.active();
+        #[cfg(not(feature = "pull"))]
+        false
     }
 
     /// Carries a run to the node that has the action: the node the run names, or the node
@@ -187,6 +240,8 @@ impl Logic {
     fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) {
         let answered = if Records::KINDS.contains(&asked.kind) {
             self.records.request(asked, wall().as_millis() as u64, out)
+        } else if asked.kind == kind::FILE_PULL {
+            self.pull(asked, out)
         } else if Sinks::KINDS.contains(&asked.kind) {
             self.sinks.request(asked, out)
         } else if Files::KINDS.contains(&asked.kind) {
@@ -319,6 +374,8 @@ impl Handler for Logic {
             self.files.gone(gone.session);
             self.forwards.gone(gone.session);
             self.sinks.gone(gone.session, &mut through);
+            #[cfg(feature = "pull")]
+            self.pulling.gone(gone.session);
             let now = self.now_ms();
             self.actions.gone(gone.session, now, &mut through);
         }
