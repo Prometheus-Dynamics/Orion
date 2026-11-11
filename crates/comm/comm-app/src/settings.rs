@@ -52,6 +52,9 @@ pub struct CommSettings {
     /// taken them yet. Zero leaves it to the kernel.
     #[cfg(feature = "ws")]
     pub ws_send_buffer: usize,
+    /// `nt4.*`: the NT4 gateway and its mapping. `None` unless `nt4.listen` is said.
+    #[cfg(feature = "nt4")]
+    pub nt4: Option<orion_nt4_gateway::Nt4Config>,
     /// `peer.nodes`: where the other nodes are, each `name=address:port`. A topic of one of
     /// them can be subscribed to here.
     #[cfg(feature = "topic-peers")]
@@ -170,6 +173,8 @@ impl CommSettings {
             ws_origins: source.list("ws.origins")?,
             #[cfg(feature = "ws")]
             ws_send_buffer: source.get("ws.send_buffer", 256 * 1024_usize)?,
+            #[cfg(feature = "nt4")]
+            nt4: orion_nt4_gateway::Nt4Config::from_source(source)?,
             #[cfg(feature = "topic-peers")]
             peer_nodes: source.list("peer.nodes")?,
             #[cfg(feature = "link-serial")]

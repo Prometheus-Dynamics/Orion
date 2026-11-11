@@ -64,6 +64,9 @@ pub struct CommCore {
     /// Kept so that it runs for as long as the comm core does.
     #[cfg(feature = "outbound")]
     _outbound: orion_outbound::Outbound,
+    /// The NT4 gateway, if it runs.
+    #[cfg(feature = "nt4")]
+    nt4: Option<orion_nt4_gateway::Gateway>,
     /// Kept for the same reason.
     #[cfg(feature = "topic-peers")]
     _topic_peers: orion_topic_peers::TopicPeers,
@@ -287,6 +290,21 @@ impl CommCore {
             serve(&mut tasks, Carriers::Ws(carrier));
         }
 
+        // The NT4 gateway: its own port, and a reader of the topics its mapping names.
+        #[cfg(feature = "nt4")]
+        let nt4 = match settings.nt4.clone() {
+            Some(config) => {
+                parts.push("nt4");
+                let listen = config.listen;
+                Some(
+                    orion_nt4_gateway::Gateway::start(&topics, config)
+                        .await
+                        .map_err(|error| failed(format!("nt4.listen {listen}"), error))?,
+                )
+            }
+            None => None,
+        };
+
         #[cfg(feature = "discovery")]
         let discovery = match (settings.discovery, peer_addr) {
             (true, Some(addr)) => {
@@ -327,6 +345,8 @@ impl CommCore {
             parts,
             #[cfg(feature = "outbound")]
             _outbound: outbound,
+            #[cfg(feature = "nt4")]
+            nt4,
             #[cfg(feature = "topic-peers")]
             _topic_peers: topic_peers,
             #[cfg(feature = "self-status")]
@@ -368,6 +388,13 @@ impl CommCore {
     #[must_use]
     pub const fn peer_addr(&self) -> Option<SocketAddr> {
         self.peer_addr
+    }
+
+    /// The NT4 gateway, if it runs.
+    #[cfg(feature = "nt4")]
+    #[must_use]
+    pub const fn nt4(&self) -> Option<&orion_nt4_gateway::Gateway> {
+        self.nt4.as_ref()
     }
 
     /// The board's status topics.

@@ -168,6 +168,43 @@ publisher on behalf, like a program on another board.
   sends text where a frame belongs, or sends frames out of order is dropped.
 - A message may come in pieces; pings are answered between them; a goodbye is answered.
 
+## The NT4 gateway
+
+Programs that speak NetworkTables 4 reach topics through `orion-nt4-gateway`, an NT4 server
+inside the comm core (`crates/gateways/nt4-gateway`, on the NT4 crate `crates/gateways/nt4`).
+It is off unless `nt4.listen` is set.
+
+- **The mapping is configuration.** Each entry is `topic:field=type@name`: one field of one
+  topic here, the NT4 type string that is announced, and the NT4 topic's name, which runs to
+  the end of the entry. Nothing in the code knows what a name means.
+
+  ```
+  nt4.listen  = 0.0.0.0:5810
+  nt4.publish = tank.level:litres=double@/Tank/level, drive.pose:pose=struct:Pose2d@/Drive/pose
+  nt4.accept  = panel.setpoint:value=double@/Panel/setpoint
+  ```
+
+- **To NT4: latest value, at a period.** Every `nt4.period_ms` the gateway looks at each
+  field in `nt4.publish` and, if it has a newer sample, sets the NT4 topic to it. NT4
+  carries the latest value, so a sample replaced within a period is never sent. The gateway
+  reads the ring like any other reader; a publisher pays nothing for it. The NT4 topic is
+  announced with the field's first sample.
+- **Types.** `Bool` is `boolean`; `Int` is `int` (or `double`, `float`); `Float` is `double`
+  or `float`; `Text` is `string` or `json`; `Bytes` and `Structured` are `raw` and every NT4
+  type that is bytes (`struct:…`, `proto:…`); `FloatArray` is `double[]` or `float[]`;
+  `IntArray` is `int[]`. A field mapped to a type it is not is never announced, and that is
+  logged once. `boolean[]` and `string[]` have no like here.
+- **A value that expires is withdrawn.** For a topic declared with an expiry, the NT4 topic
+  is deleted once its newest sample has stood longer than the expiry, and announced again
+  with the next sample: NT4 clients do not go on reading a value nobody stands behind. Age
+  is counted from when the gateway read the sample. A topic without an expiry keeps its
+  last value in NT4.
+- **From NT4.** For each topic named in `nt4.accept` the comm core declares a topic of its
+  own, with one field for each mapped name, and publishes what NT4 clients write to those
+  names. Programs here subscribe to it like any other topic. A value of another type than
+  the mapping says, or longer than `nt4.max_payload`, is dropped and that is logged once.
+  A topic cannot both go to NT4 and come from it, and an NT4 name is mapped once.
+
 ## Topics of other nodes
 
 A program subscribes to `<node>/<topic>` exactly as to a topic of its own board: it is handed
@@ -562,6 +599,11 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `ws.listen` | off | where browsers connect (`ws`) |
 | `ws.origins` | any | the pages that may connect, by origin |
 | `ws.send_buffer` | 262144 | the most bytes the kernel may hold for one browser that has not taken them; 0 leaves it to the kernel |
+| `nt4.listen` | off | where NT4 clients connect (`nt4`) |
+| `nt4.period_ms` | 20 | how often mapped topics are read for NT4 |
+| `nt4.publish` | none | the fields that go to NT4, each `topic:field=type@name` |
+| `nt4.accept` | none | the NT4 topics whose values are published here, in the same form |
+| `nt4.max_payload` | 1024 | the longest text, bytes or array taken from NT4 |
 | `peer.nodes` | none | where other nodes are, `name=address:port`, for subscribing to their topics (`topic-peers`) |
 | `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
 | `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |

@@ -1,0 +1,31 @@
+[package]
+name = "orion-nt4-gateway"
+description = "Topics to NetworkTables 4 and back, as an NT4 server inside the comm core."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion-broker = { path = "../../comm/broker" }
+orion-config = { path = "../../core/config" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+orion-nt4 = { path = "../nt4", default-features = false, features = ["server"] }
+orion-ring = { path = "../../core/ring" }
+orion-types = { path = "../../core/types" }
+orion-values = { path = "../../core/values" }
+orion-wire = { path = "../../core/wire" }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion = { path = "../../client/orion" }
+orion-comm-app = { path = "../../comm/comm-app" }
+orion-config = { path = "../../core/config" }
+orion-nt4 = { path = "../nt4" }
+tokio = { workspace = true, features = ["rt", "time", "macros", "sync", "net"] }
+
+[lints]
+workspace = true
