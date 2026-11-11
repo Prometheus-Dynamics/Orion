@@ -214,7 +214,9 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
                     &(step as f64 * 0.5).to_le_bytes(),
                 )
                 .expect("publish");
-            std::thread::sleep(Duration::from_millis(20));
+            // Not a sleep: a program that goes quiet on its session is taken for dead, and
+            // a browser can take longer than that to start.
+            orion.pump(Duration::from_millis(20)).expect("pump");
         }
     });
 
