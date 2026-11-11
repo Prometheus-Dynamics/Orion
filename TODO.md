@@ -142,7 +142,7 @@ One binary, packaging, the Daedalus bridge, failure drills and the hardware proo
 - [x] [I1](docs/prs/I1.md) One binary (wave 13; needs C15, E18, D11)
 - [x] [I2](docs/prs/I2.md) Daedalus bridge (wave 10; needs D2, D3)
 - [x] [I3](docs/prs/I3.md) Sample executor (wave 9; needs D7)
-- [ ] [I4](docs/prs/I4.md) Packaging (wave 14; needs I1)
+- [x] [I4](docs/prs/I4.md) Packaging (wave 14; needs I1)
 - [ ] [I5](docs/prs/I5.md) Failure drills (wave 14; needs I1, I3)
 - [ ] [I6](docs/prs/I6.md) Memory and size gates (wave 14; needs I1; board run)
 - [ ] [I7](docs/prs/I7.md) End-to-end proof on a CM5 (wave 15; needs I1, I2, I4, F1, F5, F7, G6; board run)

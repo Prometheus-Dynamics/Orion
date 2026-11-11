@@ -1,0 +1,4 @@
+# systemd.preset(5): enables both services on images that apply presets (`systemctl preset-all`).
+# Install as /usr/lib/systemd/system-preset/80-orion.preset.
+enable orion-comm.service
+enable orion-node.service

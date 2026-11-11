@@ -1,0 +1,57 @@
+# The comm core: every way into the board. Installed as /usr/lib/systemd/system/orion-comm.service.
+#
+# It runs as root, because it lets SSH logins in as the users they name, and with the orion group,
+# so its socket (mode 0660) is node logic's and every program's in that group. Settings are in
+# /etc/orion/orion.conf. Change this unit with drop-ins, not an edited copy. See
+# packaging/README.md.
+
+[Unit]
+Description=Orion comm core
+Documentation=https://github.com/Prometheus-Dynamics/Orion/blob/main/packaging/README.md
+After=network.target
+# No start limit: a unit that has failed too often would stay down, and the way into the board
+# is never switched off. A crash loop keeps retrying with the backoff below.
+StartLimitIntervalSec=0
+
+[Service]
+# READY=1 once every listener is up; "alive" every half watchdog from the comm core's own thread,
+# so a comm core that no longer turns is restarted.
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/orion comm
+WatchdogSec=30s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+
+Restart=always
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=30s
+
+User=root
+Group=orion
+# /run/orion holds the socket and the rings; it is kept across a restart, so a program that
+# reconnects finds what it shared. /var/lib/orion holds the comm core's keys, root's alone.
+RuntimeDirectory=orion
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=restart
+StateDirectory=orion
+StateDirectoryMode=0755
+UMask=0007
+
+# Hardening that leaves logins working: a session is the user's own shell, so nothing here may
+# take away what that user could do. Not set on purpose: NoNewPrivileges= (it would follow every
+# login into its shell), ProtectHome= and ProtectSystem=strict (sftp and scp write where the user
+# may), PrivateTmp=, PrivateDevices=.
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+# AF_NETLINK: interfaces for discovery. AF_CAN: CAN links. AF_PACKET is not needed.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_CAN
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target

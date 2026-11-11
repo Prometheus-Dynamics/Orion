@@ -1,0 +1,5 @@
+# systemd-sysusers(8): the orion user and group. Install as /usr/lib/sysusers.d/orion.conf.
+# Node logic runs as this user; the comm core runs as root with this group, so its socket is the
+# group's. The fixed uid and gid 901 match `socket.node_uids` in the settings.
+u orion 901 "Orion node logic" /var/lib/orion
+m orion dialout

@@ -46,6 +46,10 @@ if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
   step "device size" scripts/device-size.sh
 fi
 
+if [ -x scripts/packaging-check.sh ] && [ -d packaging ]; then
+  step packaging scripts/packaging-check.sh
+fi
+
 if [ -x scripts/mcu-template.sh ] && [ -d examples/mcu-template ]; then
   step "mcu template" scripts/mcu-template.sh
 fi

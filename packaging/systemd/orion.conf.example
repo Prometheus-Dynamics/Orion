@@ -1,0 +1,18 @@
+# /etc/orion/orion.conf: the settings both services read. The environment overrides a key:
+# `node.name` is ORION_NODE_NAME. A key neither service reads is logged by both at start.
+
+# This board's name.
+node.name = board
+
+# Node logic runs as the orion user (uid 901, from orion.sysusers): let it in as node logic.
+socket.node_uids = 901
+
+# The way in over SSH, with logins as the board's own users.
+# ssh.listen = 0.0.0.0:22
+
+# Other nodes.
+# peer.listen = 0.0.0.0:9200
+# peer.connect = 192.168.1.20:9200
+
+# Who may do what. Off: anyone who can reach the socket may do anything.
+# security = on

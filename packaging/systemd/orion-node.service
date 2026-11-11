@@ -1,0 +1,65 @@
+# Node logic: the records, workloads, actions and files, as the comm core's first client.
+# Installed as /usr/lib/systemd/system/orion-node.service.
+#
+# It runs as the orion user (orion.sysusers), which the settings let in as node logic
+# (`socket.node_uids = 901`). It keeps its state in /var/lib/orion/node, its own, apart from the
+# comm core's keys. Change this unit with drop-ins, not an edited copy. See packaging/README.md.
+
+[Unit]
+Description=Orion node logic
+Documentation=https://github.com/Prometheus-Dynamics/Orion/blob/main/packaging/README.md
+# It is a client of the comm core and connects again if the comm core restarts, so it wants the
+# comm core but does not stop with it.
+Wants=orion-comm.service
+After=orion-comm.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/orion node
+TimeoutStopSec=30s
+Restart=always
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=30s
+
+User=orion
+Group=orion
+SupplementaryGroups=dialout
+StateDirectory=orion/node
+StateDirectoryMode=0750
+# The settings file is shared with the comm core; this is node logic's own state directory.
+Environment=ORION_STATE_DIR=/var/lib/orion/node
+# glibc malloc: one arena, and freed memory given back.
+Environment=MALLOC_ARENA_MAX=1 MALLOC_TRIM_THRESHOLD_=65536
+UMask=0007
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectProc=invisible
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+# AF_INET and AF_INET6: fetching a file from a URL (`files.pull`).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# /run/orion is the comm core's; node logic only connects there.
+ReadWritePaths=/run/orion
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target
