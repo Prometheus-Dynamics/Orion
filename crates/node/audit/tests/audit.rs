@@ -72,7 +72,25 @@ fn it_rotates_under_load_and_every_line_is_whole() {
         .max()
         .expect("threads");
     audit.flush();
-    let total = u64::from(THREADS * EACH);
+    // On a slow machine nearly all of that may have been dropped, which is the log doing
+    // what it should. So that there is certainly enough to rotate several times whatever
+    // the machine, some more at a pace the writer keeps up with.
+    const AFTER: u32 = 2_000;
+    for number in 0..AFTER {
+        let what = format!("t{THREADS}/{number}");
+        audit.record(&Entry {
+            time_ms: 1_700_000_100_000 + u64::from(number),
+            who: Who::Local(1000 + THREADS),
+            did: "put",
+            what: &what,
+            result: "ok",
+        });
+        if number % 50 == 49 {
+            audit.flush();
+        }
+    }
+    audit.flush();
+    let total = u64::from(THREADS * EACH + AFTER);
     // Nothing is lost without being counted.
     assert_eq!(audit.written() + audit.dropped(), total);
     assert!(audit.written() > 0);
@@ -89,7 +107,7 @@ fn it_rotates_under_load_and_every_line_is_whole() {
     // The files: no more than the one and those kept, none past the cap.
     let kept = files(&path, 3);
     assert_eq!(kept.len(), 4, "{kept:?}");
-    let mut newest_seen: Vec<Option<u32>> = vec![None; THREADS as usize];
+    let mut newest_seen: Vec<Option<u32>> = vec![None; THREADS as usize + 1];
     // Oldest first.
     for file in kept.iter().rev() {
         let text = std::fs::read_to_string(file).expect("a file of text");
