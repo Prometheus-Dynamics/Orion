@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -29,6 +29,8 @@ topic-peers = ["tcp", "dep:orion-topic-peers"]
 ws = ["dep:orion-ws"]
 # The NT4 gateway: mapped topics as an NT4 server.
 nt4 = ["dep:orion-nt4-gateway"]
+# The NT4 gateway as a client of an NT4 server somewhere else.
+nt4-client = ["dep:orion-nt4-client-gateway"]
 # Tells systemd when the comm core is ready and that it is alive.
 systemd = []
 # Finding the other nodes of the cluster.
@@ -57,6 +59,7 @@ orion-keys = { path = "../keys" }
 orion-link-can = { path = "../link-can", optional = true }
 orion-link-serial = { path = "../link-serial", optional = true }
 orion-link-usb = { path = "../link-usb", optional = true }
+orion-nt4-client-gateway = { path = "../../gateways/nt4-client-gateway", optional = true }
 orion-nt4-gateway = { path = "../../gateways/nt4-gateway", optional = true }
 orion-outbound = { path = "../outbound", optional = true }
 orion-relay = { path = "../relay", optional = true }

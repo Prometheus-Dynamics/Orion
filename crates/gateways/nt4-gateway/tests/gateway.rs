@@ -379,8 +379,8 @@ fn a_mapping_that_does_not_hold_together_is_refused() {
         .expect("some");
     assert_eq!(
         (
-            config.publish[0].nt_type.as_str(),
-            config.publish[0].nt_name.as_str()
+            config.mapping.publish[0].nt_type.as_str(),
+            config.mapping.publish[0].nt_name.as_str()
         ),
         ("struct:Pose2d", "/Smart Dashboard/Field:Robot")
     );

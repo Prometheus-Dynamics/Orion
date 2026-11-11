@@ -109,7 +109,7 @@ Other boards, browsers and NT4.
 - [x] [F5](docs/prs/F5.md) Browser video example (wave 10; needs F4)
 - [x] [F6](docs/prs/F6.md) NT4 protocol crate (wave 2; needs A1)
 - [x] [F7](docs/prs/F7.md) NT4 gateway (wave 9; needs F6, C3, F3)
-- [ ] [F8](docs/prs/F8.md) NT4 gateway: client form (wave 10; needs F7; board run)
+- [x] [F8](docs/prs/F8.md) NT4 gateway: client form (wave 10; needs F7; board run)
 
 ## G. Access and recovery
 

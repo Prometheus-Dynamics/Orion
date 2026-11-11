@@ -55,6 +55,10 @@ pub struct CommSettings {
     /// `nt4.*`: the NT4 gateway and its mapping. `None` unless `nt4.listen` is said.
     #[cfg(feature = "nt4")]
     pub nt4: Option<orion_nt4_gateway::Nt4Config>,
+    /// `nt4.server` and the rest of `nt4.*`: the NT4 gateway as a client of a server
+    /// somewhere else. `None` unless `nt4.server` is said.
+    #[cfg(feature = "nt4-client")]
+    pub nt4_client: Option<orion_nt4_client_gateway::Nt4ClientConfig>,
     /// `peer.nodes`: where the other nodes are, each `name=address:port`. A topic of one of
     /// them can be subscribed to here.
     #[cfg(feature = "topic-peers")]
@@ -175,6 +179,8 @@ impl CommSettings {
             ws_send_buffer: source.get("ws.send_buffer", 256 * 1024_usize)?,
             #[cfg(feature = "nt4")]
             nt4: orion_nt4_gateway::Nt4Config::from_source(source)?,
+            #[cfg(feature = "nt4-client")]
+            nt4_client: orion_nt4_client_gateway::Nt4ClientConfig::from_source(source)?,
             #[cfg(feature = "topic-peers")]
             peer_nodes: source.list("peer.nodes")?,
             #[cfg(feature = "link-serial")]

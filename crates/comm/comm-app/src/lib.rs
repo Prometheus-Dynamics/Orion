@@ -67,6 +67,9 @@ pub struct CommCore {
     /// The NT4 gateway, if it runs.
     #[cfg(feature = "nt4")]
     nt4: Option<orion_nt4_gateway::Gateway>,
+    /// The NT4 gateway in its client form, if it runs.
+    #[cfg(feature = "nt4-client")]
+    nt4_client: Option<orion_nt4_client_gateway::ClientGateway>,
     /// Kept for the same reason.
     #[cfg(feature = "topic-peers")]
     _topic_peers: orion_topic_peers::TopicPeers,
@@ -305,6 +308,20 @@ impl CommCore {
             None => None,
         };
 
+        // The same mapping against an NT4 server somewhere else.
+        #[cfg(feature = "nt4-client")]
+        let nt4_client = match settings.nt4_client.clone() {
+            Some(config) => {
+                parts.push("nt4 client");
+                let server = format!("nt4.server {}:{}", config.host, config.port);
+                Some(
+                    orion_nt4_client_gateway::ClientGateway::start(&topics, config)
+                        .map_err(|error| failed(server, error))?,
+                )
+            }
+            None => None,
+        };
+
         #[cfg(feature = "discovery")]
         let discovery = match (settings.discovery, peer_addr) {
             (true, Some(addr)) => {
@@ -347,6 +364,8 @@ impl CommCore {
             _outbound: outbound,
             #[cfg(feature = "nt4")]
             nt4,
+            #[cfg(feature = "nt4-client")]
+            nt4_client,
             #[cfg(feature = "topic-peers")]
             _topic_peers: topic_peers,
             #[cfg(feature = "self-status")]
@@ -395,6 +414,13 @@ impl CommCore {
     #[must_use]
     pub const fn nt4(&self) -> Option<&orion_nt4_gateway::Gateway> {
         self.nt4.as_ref()
+    }
+
+    /// The NT4 gateway in its client form, if it runs.
+    #[cfg(feature = "nt4-client")]
+    #[must_use]
+    pub const fn nt4_client(&self) -> Option<&orion_nt4_client_gateway::ClientGateway> {
+        self.nt4_client.as_ref()
     }
 
     /// The board's status topics.

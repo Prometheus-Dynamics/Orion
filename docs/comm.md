@@ -205,6 +205,28 @@ It is off unless `nt4.listen` is set.
   the mapping says, or longer than `nt4.max_payload`, is dropped and that is logged once.
   A topic cannot both go to NT4 and come from it, and an NT4 name is mapped once.
 
+### As a client of a server somewhere else
+
+Some machines run an NT4 server of their own that their programs talk to. A board beside one
+joins it as one more client: `orion-nt4-client-gateway`, on when `nt4.server` is set.
+
+```
+nt4.server  = 10.0.0.2
+nt4.name    = coprocessor
+nt4.publish = tank.level:litres=double@/Tank/level
+nt4.accept  = machine.state:enabled=boolean@/Machine/enabled
+```
+
+The mapping and its rules are the same. `nt4.publish` fields are published on the server;
+`nt4.accept` names topics of the server, whoever writes them there, and their values are
+published here. The client reconnects on its own: what the board publishes is sent again,
+each topic's last value with it, and the accepted topics are subscribed to again. A value
+that expires stops being published there until its next sample. `nt4.server` and
+`nt4.listen` together are refused: a board is a server or a client of one.
+
+A topic that comes from NT4 holds state, not a stream: a program that subscribes after the
+value was published reads it with `latest`.
+
 ## Topics of other nodes
 
 A program subscribes to `<node>/<topic>` exactly as to a topic of its own board: it is handed
@@ -600,6 +622,8 @@ other program. Settings come from one file of `key = value` lines and the enviro
 | `ws.origins` | any | the pages that may connect, by origin |
 | `ws.send_buffer` | 262144 | the most bytes the kernel may hold for one browser that has not taken them; 0 leaves it to the kernel |
 | `nt4.listen` | off | where NT4 clients connect (`nt4`) |
+| `nt4.server` | off | the NT4 server to join as a client, `host` or `host:port` (`nt4-client`) |
+| `nt4.name` | `orion` | what the board calls itself on that server |
 | `nt4.period_ms` | 20 | how often mapped topics are read for NT4 |
 | `nt4.publish` | none | the fields that go to NT4, each `topic:field=type@name` |
 | `nt4.accept` | none | the NT4 topics whose values are published here, in the same form |

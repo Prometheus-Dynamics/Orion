@@ -70,48 +70,66 @@ pub fn field_type(nt_type: &str) -> Option<FieldType> {
     })
 }
 
-/// What the gateway is told.
+/// The mapping, and how often it is looked at: the same for both forms of the gateway.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Nt4Config {
-    /// `nt4.listen`: where NT4 clients connect.
-    pub listen: SocketAddr,
+pub struct Mapping {
     /// `nt4.period_ms`: how often topics are read for NT4. NT4 carries the latest value, so
     /// what was published and replaced within one period is never sent.
     pub period: Duration,
     /// `nt4.publish`: the fields that go to NT4.
     pub publish: Vec<Entry>,
-    /// `nt4.accept`: the NT4 topics whose values, written by NT4 clients, are published here.
+    /// `nt4.accept`: the NT4 topics whose values are published here.
     pub accept: Vec<Entry>,
     /// `nt4.max_payload`: the longest text, bytes or array taken from NT4, in bytes.
     pub max_payload: u32,
 }
 
+/// What the server form of the gateway is told.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Nt4Config {
+    /// `nt4.listen`: where NT4 clients connect.
+    pub listen: SocketAddr,
+    /// The mapping.
+    pub mapping: Mapping,
+}
+
 impl Nt4Config {
-    /// The gateway's settings, or `None` if `nt4.listen` is not set: no gateway.
+    /// The gateway's settings, or `None` if `nt4.listen` is not set: no gateway of this
+    /// form.
+    ///
+    /// # Errors
+    ///
+    /// As [`Mapping::from_source`].
+    pub fn from_source(source: &mut Source) -> Result<Option<Self>, ConfigError> {
+        let listen: Option<SocketAddr> = source.optional("nt4.listen")?;
+        let mapping = Mapping::from_source(source)?;
+        Ok(listen.map(|listen| Self { listen, mapping }))
+    }
+}
+
+impl Mapping {
+    /// The mapping as the settings give it.
     ///
     /// # Errors
     ///
     /// An entry that does not parse, an NT4 name used twice, or an accepted type that has
     /// no like here.
-    pub fn from_source(source: &mut Source) -> Result<Option<Self>, ConfigError> {
-        let listen = source.optional("nt4.listen")?;
-        let config = Self {
-            listen: listen
-                .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], orion_nt4::DEFAULT_PORT))),
+    pub fn from_source(source: &mut Source) -> Result<Self, ConfigError> {
+        let mapping = Self {
             period: Duration::from_millis(source.get("nt4.period_ms", 20_u64)?.max(1)),
             publish: source.list("nt4.publish")?,
             accept: source.list("nt4.accept")?,
             max_payload: source.get("nt4.max_payload", 1024_u32)?,
         };
-        config.check()?;
-        Ok(listen.map(|_| config))
+        mapping.check()?;
+        Ok(mapping)
     }
 
     /// Whether the mapping holds together.
     ///
     /// # Errors
     ///
-    /// As [`Nt4Config::from_source`].
+    /// As [`Mapping::from_source`].
     pub fn check(&self) -> Result<(), ConfigError> {
         let wrong = |key: &str, message: String| ConfigError {
             key: key.into(),
