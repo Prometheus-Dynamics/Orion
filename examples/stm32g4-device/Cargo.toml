@@ -1,0 +1,53 @@
+[package]
+name = "orion-stm32g4-device"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "An STM32G4 device on Orion's wire over FDCAN or a UART, publishing two topics."
+
+# Standalone: not a member of the Orion workspace. Build with `cargo build --release` from this
+# directory (the target is set in `.cargo/config.toml`).
+[workspace]
+
+[features]
+default = ["link-can", "small-mem"]
+# Orion's wire over FDCAN1 (PA11 RX, PA12 TX): CAN FD frames at 500 kbit/s nominal and 2 Mbit/s
+# data.
+link-can = []
+# Orion's wire over USART2 (PA2 TX, PA3 RX) at 115200 baud: the ST-LINK virtual COM port on a
+# Nucleo-G431.
+link-uart = []
+# Byte-loop mem* routines instead of compiler-builtins' unrolled ones.
+small-mem = []
+# The frame CRC-32C on the chip's CRC unit instead of the software table.
+hw-crc = ["orion-wire/crc-extern"]
+
+[dependencies]
+# `device`: the firmware supplies the interrupt vectors itself (one unused entry, see main.rs)
+# instead of cortex-m-rt's default table of 240.
+cortex-m-rt = { version = "0.7.5", features = ["device"] }
+orion-device-core = { path = "../../crates/device/core" }
+orion-device-topics = { path = "../../crates/device/topics" }
+orion-wire = { path = "../../crates/core/wire", default-features = false }
+
+[profile.dev]
+panic = "abort"
+opt-level = "s"
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = false
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

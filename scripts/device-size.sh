@@ -90,4 +90,109 @@ for target in "${targets[@]}"; do
 done
 
 [ "$measured" -gt 0 ] || echo "    no microcontroller target is installed here: nothing was measured"
+
+# A whole firmware: examples/stm32g4-device, held to its committed baseline
+# (examples/stm32g4-device/size-baseline.txt) per variant.
+#
+#   flash       .vector_table + .text + .rodata + .data (what is written to the chip)
+#   static RAM  .data + .bss
+#   stack       the worst case from `-Z emit-stack-sizes` and the call graph
+#               (scripts/stack-depth.py): main plus the deepest exception with its frame. The
+#               firmware publishes the measured high-water mark as topic `stack`.
+#
+# A variant fails past its baseline by more than the tolerance; a change that grows the firmware
+# updates the baseline in the same commit (DEVICE_SIZE_UPDATE=1), so every growth is a line in
+# the diff. The stack bound needs STACK_TOOLCHAIN (pinned, so the bound does not move with
+# nightly) with the target; without it the column is skipped.
+firmware="$PWD/examples/stm32g4-device"
+baseline="$firmware/size-baseline.txt"
+g4=thumbv7em-none-eabihf
+g4_dir="$(cd "$target_dir" && pwd)/stm32g4-size"
+stack_toolchain="${STACK_TOOLCHAIN:-nightly-2026-10-15}"
+flash_tolerance=64
+ram_tolerance=32
+declare -A g4_features=(
+    [can]="link-can,small-mem"
+    [uart]="link-uart,small-mem"
+    [can-hw-crc]="link-can,small-mem,hw-crc"
+    [can-builtin-mem]="link-can"
+)
+g4_variants=(can uart can-hw-crc can-builtin-mem)
+
+if ! grep -qx "$g4" <<<"$installed"; then
+    echo "    stm32g4 firmware: $g4 not installed here, not measured"
+    [ "$failures" -eq 0 ]
+    exit
+fi
+section() { awk -v s="$2" '$1 == s { print $2; found = 1 } END { if (!found) print 0 }' <<<"$1"; }
+have_stack=1
+if ! libdir="$(rustup run "$stack_toolchain" rustc --print target-libdir --target "$g4" 2>/dev/null)" ||
+    [ ! -d "$libdir" ]; then
+    echo "    stm32g4 firmware: no $stack_toolchain with $g4, stack bound not measured"
+    have_stack=0
+fi
+declare -A base
+if [ -f "$baseline" ]; then
+    while read -r name flash ram stack; do
+        [[ -z "$name" || "$name" == \#* ]] && continue
+        base[$name]="$flash $ram $stack"
+    done <"$baseline"
+fi
+# Its own lints: it is not a workspace member, so the workspace's steps never see it.
+(cd "$firmware" && cargo fmt --check)
+for v in can uart; do
+    (cd "$firmware" && cargo clippy --quiet --release --target "$g4" --target-dir "$g4_dir/stable" \
+        --no-default-features --features "${g4_features[$v]},hw-crc" -- -D warnings)
+done
+results=()
+for v in "${g4_variants[@]}"; do
+    (cd "$firmware" && cargo build --quiet --release --target "$g4" --target-dir "$g4_dir/stable" \
+        --no-default-features --features "${g4_features[$v]}")
+    sizes="$(size -A "$g4_dir/stable/$g4/release/orion-stm32g4-device")"
+    data=$(section "$sizes" .data)
+    flash=$(($(section "$sizes" .vector_table) + $(section "$sizes" .text) + $(section "$sizes" .rodata) + data))
+    ram=$((data + $(section "$sizes" .bss)))
+    stack=-
+    if ((have_stack)); then
+        (cd "$firmware" && RUSTFLAGS="-C link-arg=-Tlink.x -Z emit-stack-sizes" \
+            cargo "+$stack_toolchain" build --quiet --release --target "$g4" \
+            --target-dir "$g4_dir/stack" --no-default-features --features "${g4_features[$v]}")
+        stack="$(python3 scripts/stack-depth.py "$g4_dir/stack/$g4/release/orion-stm32g4-device" |
+            awk '/^worst case:/ { print $3 }')"
+    fi
+    results+=("$v $flash $ram $stack")
+    line="    stm32g4 $v: flash $flash, static RAM $ram, stack $stack"
+    if [ -n "${base[$v]:-}" ]; then
+        read -r base_flash base_ram base_stack <<<"${base[$v]}"
+        line+=" (baseline $base_flash / $base_ram / $base_stack)"
+        if ((flash > base_flash + flash_tolerance)); then
+            line+="  FAIL: flash +$((flash - base_flash))"
+            failures=$((failures + 1))
+        fi
+        if ((ram > base_ram + ram_tolerance)); then
+            line+="  FAIL: RAM +$((ram - base_ram))"
+            failures=$((failures + 1))
+        fi
+        if [[ "$stack" != - && "$base_stack" != - ]] && ((stack > base_stack + ram_tolerance)); then
+            line+="  FAIL: stack +$((stack - base_stack))"
+            failures=$((failures + 1))
+        fi
+    elif [ -z "${DEVICE_SIZE_UPDATE:-}" ]; then
+        line+="  FAIL: no baseline"
+        failures=$((failures + 1))
+    fi
+    echo "$line"
+done
+
+if [ -n "${DEVICE_SIZE_UPDATE:-}" ]; then
+    {
+        echo "# variant flash static-ram stack (bytes); written by DEVICE_SIZE_UPDATE=1 scripts/device-size.sh"
+        printf '%s\n' "${results[@]}"
+    } >"$baseline"
+    echo "    updated $baseline"
+fi
+if [ "$failures" -ne 0 ]; then
+    echo "    a size grew past its budget or baseline: win the bytes back, or raise it with the reason" >&2
+    echo "    (the firmware's: DEVICE_SIZE_UPDATE=1 scripts/device-size.sh)" >&2
+fi
 [ "$failures" -eq 0 ]

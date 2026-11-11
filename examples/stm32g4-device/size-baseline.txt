@@ -1,0 +1,5 @@
+# variant flash static-ram stack (bytes); written by DEVICE_SIZE_UPDATE=1 scripts/device-size.sh
+can 7040 4 1128
+uart 6368 4 1056
+can-hw-crc 6996 4 1112
+can-builtin-mem 8168 4 1128

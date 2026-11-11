@@ -312,6 +312,9 @@ from any sender. A lost frame is sent again after two quiet seconds.
 `examples/mcu-template` is where a firmware starts: ports for an `embedded-io` stream and an
 `embedded-can` controller, and a C API over one static (`include/orion_mcu.h`) for firmware
 written against a vendor SDK, with firmware slots over flash hooks the port defines.
+`examples/stm32g4-device` is a whole firmware with no HAL, and `scripts/device-size.sh` holds it
+to a committed baseline: 7,040 bytes of flash and 1,132 of RAM (4 static, the rest the stack
+bound) over CAN FD.
 
 On the board, a device is a resource like any other: the device gateway in the comm core writes
 its record from what it declared and registered (see `docs/comm.md`, "Devices as resources").
