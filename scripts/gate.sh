@@ -23,10 +23,10 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   # A crate that must build without std says so in its manifest:
   # [package.metadata.orion]
   # no_std = true
-  mapfile -t no_std_crates < <(grep -l '^no_std = true' crates/*/*/Cargo.toml | xargs -r -n1 dirname | xargs -r -n1 basename)
+  mapfile -t no_std_crates < <(grep -l '^no_std = true' crates/*/*/Cargo.toml | xargs -r sed -n 's/^name = "\(.*\)"$/\1/p')
   for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
     for crate in "${no_std_crates[@]}"; do
-      step "$crate on $target" cargo check -q -p "orion-$crate" --no-default-features --target "$target"
+      step "$crate on $target" cargo check -q -p "$crate" --no-default-features --target "$target"
     done
   done
 else
@@ -40,6 +40,10 @@ fi
 
 if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
   step "size gate" scripts/size-gate.sh
+fi
+
+if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
+  step "device size" scripts/device-size.sh
 fi
 
 # The stable-toolchain garbage test always runs. These go deeper where the tools are installed.

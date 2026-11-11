@@ -1,0 +1,32 @@
+[package]
+name = "orion-device-probe"
+description = "A firmware-shaped use of the device crates, linked to see what they cost in flash and RAM."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+# The same device on a CAN bus instead of a byte stream.
+can = []
+
+[dependencies]
+orion-device-core = { path = "../core" }
+
+# C entry points and one static need `unsafe`.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_attributes = "deny"
+
+[lints.clippy]
+await_holding_lock = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

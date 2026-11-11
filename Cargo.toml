@@ -38,6 +38,14 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# What goes on a microcontroller: as small as it gets, and a panic is the end.
+[profile.device]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
 # What ships on boards. Unwinding is what lets a component's panic be contained.
 [profile.service]
 inherits = "release"

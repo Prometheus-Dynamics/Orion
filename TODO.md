@@ -126,7 +126,7 @@ SSH served by Orion, the recovery shell and the recovery build.
 
 The device side on the same wire, with its size gate.
 
-- [ ] [H1](docs/prs/H1.md) Device core (wave 5; needs A5)
+- [x] [H1](docs/prs/H1.md) Device core (wave 5; needs A5)
 - [ ] [H2](docs/prs/H2.md) Device topics (wave 6; needs H1, A7)
 - [ ] [H3](docs/prs/H3.md) Device actions (wave 6; needs H1, A8)
 - [ ] [H4](docs/prs/H4.md) Device firmware receive (wave 6; needs H1, A10)

@@ -272,6 +272,14 @@ paths are never backed off. One misbehaving connection, peer, provider or link i
 The device side keeps its size gate: 9,228 B flash and 1,988 B RAM on the STM32G4 example. A device
 sends topics, takes actions and receives firmware on the same wire, minus shared memory.
 
+`crates/device/core` is the session: hello with the role `device`, welcome, pings, reconnect. It
+has no allocator, no clock and no I/O; the port feeds bytes or CAN segments, passes a millisecond
+counter that may wrap, and sends what it is handed. Its own frames are encoded by hand in the
+postcard format, so neither serde nor postcard nor `core::fmt` reaches a firmware.
+`scripts/device-size.sh` links the smallest firmware (`crates/device/probe`) for each MCU target
+with only what its entry points reach. Today the session costs 5.8 KB flash and 512 B RAM on
+thumbv7em, 6.3 KB on thumbv6m and 6.7 KB on riscv32imc, about 1.4 KB of it memmove.
+
 ## Size and memory
 
 Measured on a CM5 today, against the targets. The targets are unbuilt, and an allocation profile of
