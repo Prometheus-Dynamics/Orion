@@ -30,6 +30,76 @@ struct Probe {
     /// The run to answer, if one came.
     #[cfg(feature = "actions")]
     run: Option<u64>,
+    #[cfg(feature = "firmware")]
+    firmware: Option<orion_device_firmware::Firmware<flash::Mapped>>,
+}
+
+/// Flash as a firmware's port has it, mapped at fixed addresses: enough to measure.
+#[cfg(feature = "firmware")]
+mod flash {
+    use orion_device_firmware::{FlashError, RECORD_LEN, SlotFlash};
+
+    const SLOT: [usize; 2] = [0x0801_0000, 0x0804_0000];
+    const RECORD: [usize; 2] = [0x0807_C000, 0x0807_E000];
+    const CAPACITY: u32 = 0x3_0000;
+
+    /// The port's flash.
+    #[derive(Debug)]
+    pub struct Mapped;
+
+    fn at(base: &[usize; 2], which: u8, offset: u32) -> Result<*mut u8, FlashError> {
+        let base = base.get(usize::from(which)).ok_or(FlashError)?;
+        Ok((base + offset as usize) as *mut u8)
+    }
+
+    impl SlotFlash for Mapped {
+        fn slot_capacity(&self) -> u32 {
+            CAPACITY
+        }
+
+        fn erase_slot(&mut self, slot: u8) -> Result<(), FlashError> {
+            let to = at(&SLOT, slot, 0)?;
+            // SAFETY: the slot's region is this firmware's, as the port lays it out.
+            unsafe { core::ptr::write_volatile(to, 0xFF) };
+            Ok(())
+        }
+
+        fn write_slot(&mut self, slot: u8, offset: u32, data: &[u8]) -> Result<(), FlashError> {
+            let to = at(&SLOT, slot, offset)?;
+            for (n, byte) in data.iter().enumerate() {
+                // SAFETY: as in `erase_slot`.
+                unsafe { core::ptr::write_volatile(to.wrapping_add(n), *byte) };
+            }
+            Ok(())
+        }
+
+        fn read_slot(&self, slot: u8, offset: u32, out: &mut [u8]) -> Result<(), FlashError> {
+            let from = at(&SLOT, slot, offset)?;
+            for (n, byte) in out.iter_mut().enumerate() {
+                // SAFETY: as in `erase_slot`.
+                *byte = unsafe { core::ptr::read_volatile(from.wrapping_add(n)) };
+            }
+            Ok(())
+        }
+
+        fn read_record(&self, copy: u8, out: &mut [u8; RECORD_LEN]) -> Result<(), FlashError> {
+            let from = at(&RECORD, copy, 0)?;
+            for (n, byte) in out.iter_mut().enumerate() {
+                // SAFETY: as in `erase_slot`.
+                *byte = unsafe { core::ptr::read_volatile(from.wrapping_add(n)) };
+            }
+            Ok(())
+        }
+
+        fn write_record(&mut self, copy: u8, data: &[u8; RECORD_LEN]) -> Result<(), FlashError> {
+            let to = at(&RECORD, copy, 0)?;
+            for (n, byte) in data.iter().enumerate() {
+                // SAFETY: as in `erase_slot`.
+                unsafe { core::ptr::write_volatile(to.wrapping_add(n), *byte) };
+            }
+            Ok(())
+        }
+    }
 }
 
 #[cfg(feature = "actions")]
@@ -69,6 +139,8 @@ static PROBE: Shared = Shared(UnsafeCell::new(Probe {
     actions: orion_device_actions::Actions::new(&ACTIONS),
     #[cfg(feature = "actions")]
     run: None,
+    #[cfg(feature = "firmware")]
+    firmware: None,
 }));
 
 /// The firmware. The port must not call two entry points at once.
@@ -103,7 +175,27 @@ pub extern "C" fn orion_probe_poll(now_ms: u32) -> u32 {
             probe.run = None;
         }
     }
+    // The record is read from flash, so the firmware layer starts on the first call.
+    #[cfg(feature = "firmware")]
+    probe
+        .firmware
+        .get_or_insert_with(|| {
+            orion_device_firmware::Firmware::new("devices/probe/firmware", flash::Mapped)
+        })
+        .poll(&mut probe.device.link, now_ms);
     probe.device.link.state() as u32
+}
+
+/// What the bootloader calls after a reset: the slot to start, or 255 for none.
+#[cfg(feature = "firmware")]
+#[unsafe(no_mangle)]
+pub extern "C" fn orion_probe_boot(fault: bool) -> u8 {
+    let reason = if fault {
+        orion_device_firmware::ResetReason::Fault
+    } else {
+        orion_device_firmware::ResetReason::Normal
+    };
+    orion_device_firmware::boot(&mut flash::Mapped, reason).unwrap_or(0xFF)
 }
 
 /// Feeds `len` bytes from the port at `bytes`.
@@ -120,12 +212,18 @@ pub unsafe extern "C" fn orion_probe_receive(bytes: *const u8, len: usize) {
     let topics = &mut probe.topics;
     #[cfg(feature = "actions")]
     let (actions, run) = (&mut probe.actions, &mut probe.run);
+    #[cfg(feature = "firmware")]
+    let firmware = &mut probe.firmware;
     let up = |_: &mut _, _frame: &orion_device_core::FrameView<'_>| {
         #[cfg(feature = "topics")]
         let _ = topics.handle(_frame);
         #[cfg(feature = "actions")]
         if let orion_device_actions::Heard::Run { call, .. } = actions.handle(_frame) {
             *run = Some(call);
+        }
+        #[cfg(feature = "firmware")]
+        if let Some(firmware) = firmware.as_mut() {
+            let _ = firmware.handle(_frame);
         }
     };
     #[cfg(not(feature = "can"))]

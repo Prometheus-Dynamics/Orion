@@ -8,19 +8,21 @@
 # are what a firmware pays, not what the archive holds. Flash is code and constants and
 # initial values; RAM is what is static. A stack is the firmware's own.
 #
-# DEVICE_SIZE_TARGETS and DEVICE_SIZE_VARIANTS (stream, can, topics, actions) narrow it. Each
-# variant past stream is the stream device with one more layer. A change that goes
+# DEVICE_SIZE_TARGETS and DEVICE_SIZE_VARIANTS (stream, can, topics, actions, firmware)
+# narrow it. Each variant past can is the stream device with one more layer. A change that goes
 # past a budget either wins the bytes back or raises the budget here, with the reason.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 read -r -a targets <<<"${DEVICE_SIZE_TARGETS:-thumbv6m-none-eabi thumbv7em-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf}"
-read -r -a variants <<<"${DEVICE_SIZE_VARIANTS:-stream can topics actions}"
+read -r -a variants <<<"${DEVICE_SIZE_VARIANTS:-stream can topics actions firmware}"
 
 # Bytes: flash and RAM for each target and variant, a tenth above what was measured.
 # Measured: v6m 6262/512 and 6438/544, v7em 5758/512 and 5962/544, riscv 6742/512 and
 # 6840/544 (stream/can); with one topic, v6m 8090, v7em 7510, riscv 8946, all 544 RAM;
-# with one action, v6m 7862, v7em 7430, riscv 8698, all 552 RAM.
+# with one action, v6m 7862, v7em 7430, riscv 8698, all 552 RAM; with firmware (SHA-256,
+# two slots, the boot record and the bootloader's choice), v6m 12318, v7em 12606, riscv
+# 13892, all 712 RAM.
 # About 1.4 KB of the flash is memmove from compiler_builtins.
 declare -A budget=(
     [thumbv6m-none-eabi/stream]="6900 570"
@@ -29,15 +31,19 @@ declare -A budget=(
     [riscv32imac-unknown-none-elf/stream]="7420 570"
     [thumbv6m-none-eabi/topics]="8900 600"
     [thumbv6m-none-eabi/actions]="8650 610"
+    [thumbv6m-none-eabi/firmware]="13550 790"
     [thumbv6m-none-eabi/can]="7090 600"
     [thumbv7em-none-eabihf/topics]="8260 600"
     [thumbv7em-none-eabihf/actions]="8180 610"
+    [thumbv7em-none-eabihf/firmware]="13870 790"
     [thumbv7em-none-eabihf/can]="6560 600"
     [riscv32imc-unknown-none-elf/topics]="9840 600"
     [riscv32imc-unknown-none-elf/actions]="9570 610"
+    [riscv32imc-unknown-none-elf/firmware]="15280 790"
     [riscv32imc-unknown-none-elf/can]="7530 600"
     [riscv32imac-unknown-none-elf/topics]="9840 600"
     [riscv32imac-unknown-none-elf/actions]="9570 610"
+    [riscv32imac-unknown-none-elf/firmware]="15280 790"
     [riscv32imac-unknown-none-elf/can]="7530 600"
 )
 
@@ -67,7 +73,7 @@ for target in "${targets[@]}"; do
         elf="$work/$target-$variant.elf"
         # Only what the entry points reach is kept, as a firmware's own link keeps it.
         "$tools/rust-lld" -flavor gnu --gc-sections -e orion_probe_poll \
-            -u orion_probe_poll -u orion_probe_receive -u orion_probe_transmit -u orion_probe_publish \
+            -u orion_probe_poll -u orion_probe_receive -u orion_probe_transmit -u orion_probe_publish -u orion_probe_boot \
             -o "$elf" "$target_dir/$target/device/liborion_device_probe.a"
         read -r text data bss < <("$tools/llvm-size" -B "$elf" | awk 'NR==2 {print $1, $2, $3}')
         flash=$((text + data))

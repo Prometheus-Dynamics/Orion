@@ -293,6 +293,16 @@ it likes. Nothing about a run is kept on the device: a result the link has no ro
 again by the firmware, and one that never comes is ended by the run's deadline on the host. One
 action adds 1.7 KB on thumbv7em.
 
+`crates/device/firmware` takes new firmware through the file kinds: it asks for a prefix of its
+own with `FileSink` and answers `FileBegin`, `FileChunk` and `FileCommit` with `FileStatus`, as
+any receiver does. The image goes to the slot that is not running; a commit reads it back and
+checks its SHA-256, and only then is it put on trial. The bootloader starts a trial once; the
+application confirms it, or the next reset goes back. Every boot checks a slot's stored bytes
+against the CRC-32C recorded when it checked out, so an image that is bad, or went bad, never
+starts. The boot record is kept twice and written to the older copy, so a power cut leaves the
+one before. The port supplies the flash; nothing names a chip. It adds 6.8 KB on thumbv7em,
+SHA-256 written small rather than unrolled.
+
 ## Size and memory
 
 Measured on a CM5 today, against the targets. The targets are unbuilt, and an allocation profile of

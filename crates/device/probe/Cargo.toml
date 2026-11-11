@@ -18,10 +18,13 @@ can = []
 topics = ["dep:orion-device-topics"]
 # A device that also registers an action and answers it.
 actions = ["dep:orion-device-actions"]
+# A device that also takes new firmware into two slots.
+firmware = ["dep:orion-device-firmware"]
 
 [dependencies]
 orion-device-actions = { path = "../actions", optional = true }
 orion-device-core = { path = "../core" }
+orion-device-firmware = { path = "../firmware", optional = true }
 orion-device-topics = { path = "../topics", optional = true }
 
 # C entry points and one static need `unsafe`.
