@@ -105,7 +105,7 @@ Other boards, browsers and NT4.
 - [x] [F1](docs/prs/F1.md) Topics across boards (wave 8; needs C3, C6)
 - [x] [F2](docs/prs/F2.md) Outbound limits and the drop rule (wave 7; needs C3)
 - [x] [F3](docs/prs/F3.md) WebSocket carrier (wave 8; needs C1, F2)
-- [ ] [F4](docs/prs/F4.md) TypeScript client (wave 9; needs F3)
+- [x] [F4](docs/prs/F4.md) TypeScript client (wave 9; needs F3)
 - [ ] [F5](docs/prs/F5.md) Browser video example (wave 10; needs F4)
 - [ ] [F6](docs/prs/F6.md) NT4 protocol crate (wave 2; needs A1)
 - [ ] [F7](docs/prs/F7.md) NT4 gateway (wave 9; needs F6, C3, F3)

@@ -244,6 +244,36 @@ starting, running, stopping, gone, or failed or lost.
 the board and the SHA-256 of what must be there. Orion starts it only when every one is in
 place, and until then says which it waits for.
 
+## From a web page
+
+`web/client` is the client for a browser: one TypeScript file with no dependencies, built to
+`web/client/dist/orion.js` (checked in, so a page needs no build step). It talks to the comm
+core's WebSocket listener (`ws.listen`, see `docs/comm.md`).
+
+```js
+import { Orion, FieldType } from "./orion.js";
+
+const orion = await Orion.connect("ws://board.local:8080/orion", "dashboard");
+
+const level = await orion.subscribe("tank.level", (sample) => {
+  // sample.field, sample.time (bigint, nanoseconds), sample.payload (Uint8Array)
+});
+
+const clicks = await orion.declare({
+  name: "page.clicks",
+  fields: [{ name: "count", type: FieldType.Int }],
+  history: 16,
+  maxPayload: 8,
+});
+clicks.publish(0, BigInt(Date.now()) * 1000000n, payload);
+
+const result = await orion.run({ name: "pump.start" }, (step) => show(step.percent));
+```
+
+A request the board refuses throws `Refused`, with the board's code in `code`. Records, files
+and workloads are not in the web client. After changing `src/orion.ts`, run
+`web/client/build.sh`; a test fails if `dist/` is not the build of the source.
+
 ## From C
 
 `orion-capi` builds `liborion_c.a` and `liborion_c.so` (SONAME `liborion_c.so.1`), and

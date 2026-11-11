@@ -1,0 +1,16 @@
+{
+  "name": "orion-web-client",
+  "version": "1.0.1-dev",
+  "description": "Orion in a browser: subscribe, publish and run actions over a WebSocket.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "dist/orion.js",
+  "types": "dist/orion.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "./build.sh"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

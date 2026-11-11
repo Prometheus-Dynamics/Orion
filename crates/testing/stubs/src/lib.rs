@@ -36,6 +36,7 @@ pub use receiver::Shelf;
 pub struct Board {
     socket: PathBuf,
     network: SocketAddr,
+    websocket: SocketAddr,
     shelf: Arc<Shelf>,
     keys: SharedKeys,
     dir: PathBuf,
@@ -197,16 +198,33 @@ impl Board {
                 };
                 let listen = SocketAddr::from(([127, 0, 0, 1], port.unwrap_or(0)));
                 let tcp = TcpCarrier::bind(listen, options).await.expect("listen");
-                ready.send(tcp.local_addr().expect("addr")).expect("ready");
-                let (on_socket, on_network) = (comm.clone(), comm);
+                // And the way in for browsers.
+                let mut pages = orion_ws::WsListener::bind(
+                    SocketAddr::from(([127, 0, 0, 1], 0)),
+                    orion_ws::WsOptions::default(),
+                )
+                .await
+                .expect("listen for browsers");
+                let ws = orion_ws::WsCarrier::on(&mut pages);
+                ready
+                    .send((
+                        tcp.local_addr().expect("addr"),
+                        pages.local_addr().expect("addr"),
+                    ))
+                    .expect("ready");
+                tokio::task::spawn_local(pages.run());
+                let (on_socket, on_network, on_pages) = (comm.clone(), comm.clone(), comm);
                 tokio::task::spawn_local(async move { on_socket.serve(unix).await });
                 tokio::task::spawn_local(async move { on_network.serve(tcp).await });
+                tokio::task::spawn_local(async move { on_pages.serve(ws).await });
                 let _ = stopped.await;
             });
         });
+        let (network, websocket) = started.recv().expect("the board starts");
         Self {
             socket,
-            network: started.recv().expect("the board starts"),
+            network,
+            websocket,
             shelf,
             keys,
             dir: dir.to_owned(),
@@ -225,6 +243,12 @@ impl Board {
     #[must_use]
     pub const fn network(&self) -> SocketAddr {
         self.network
+    }
+
+    /// Where the board listens for browsers: a WebSocket.
+    #[must_use]
+    pub const fn websocket(&self) -> SocketAddr {
+        self.websocket
     }
 
     /// The board's directory.
