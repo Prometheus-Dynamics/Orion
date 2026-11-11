@@ -68,7 +68,7 @@ impl Board {
         Self::start_as(dir, security, port, false)
     }
 
-    /// Starts a board with no stand-in for the record store: records are passed to node
+    /// Starts a board with no stand-in for the record store or the action router: those are passed to node
     /// logic, which the user running the test may be. Without node logic they are refused.
     ///
     /// # Panics
@@ -77,6 +77,16 @@ impl Board {
     #[must_use]
     pub fn start_for_node(dir: &Path) -> Self {
         Self::start_as(dir, Security::Off, None, true)
+    }
+
+    /// As [`Board::start_for_node`], with the security switch where the test wants it.
+    ///
+    /// # Panics
+    ///
+    /// If the board cannot start.
+    #[must_use]
+    pub fn start_for_node_with(dir: &Path, security: Security) -> Self {
+        Self::start_as(dir, security, None, true)
     }
 
     fn start_as(dir: &Path, security: Security, port: Option<u16>, for_node: bool) -> Self {
@@ -137,11 +147,11 @@ impl Board {
                 )
                 .expect("time");
                 if for_node {
-                    comm.add_service(orion_relay::Relay::new(orion_relay::RECORDS));
+                    comm.add_service(orion_relay::Relay::new(&orion_relay::routes()));
                 } else {
                     comm.add_service(store::Store::default());
+                    comm.add_service(router::Router::default());
                 }
-                comm.add_service(router::Router::default());
                 comm.add_service(receiver::Receiver::new(on_shelf));
                 comm.add_service(tracker::Tracker::new(node));
                 let unix = UnixCarrier::bind(&path, Some(0o600), &node_uids).expect("socket");

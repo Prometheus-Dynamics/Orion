@@ -420,13 +420,29 @@ others.
 - When a session ends that node logic was passed a request from, it is told with `NodeGone`.
 - With no node logic attached, or for a kind it did not name, the request is refused with
   `unavailable`. Nothing else in the comm core notices that node logic is away.
-- A request that stands, a watch, is kept (64 a session, the oldest goes first) and passed
-  again to the node logic that comes back. So a program that was watching goes on being told
-  without asking again. It may be told a version it already has: the same record again.
+- A request that stands, a watch or a registered action, is kept and passed again to the node
+  logic that comes back. So a program that was watching goes on being told, and one that
+  added an action still has it, without asking again. A watcher may be told a version it
+  already has: the same record again. A session may have 1024 standing; one more is refused
+  as `busy`. One that node logic refuses does not stand.
 - One node logic at a time: when another attaches, the one before is closed.
 
-Which kind asks for what, and who may ask, is a table of routes in the relay. Programs on the
-board, operators and peers may read and write records; an operator needs the grant.
+Which kind asks for what, and who may ask, is a table of routes in the relay.
+
+| Kinds | Who may ask |
+| --- | --- |
+| `Put`, `Get`, `Watch` | programs on the board, operators with the grant, peers |
+| `Register` (an action) | programs on the board |
+| `Run` (an action) | whoever the action was registered for |
+| `Progress`, `ActionResult` | programs on the board; node logic takes them only from the program that has the run |
+| `Cancel` | programs on the board, operators, peers; node logic takes it only from the run's caller |
+
+**Actions and the one check.** The list of actions is node logic's, but who may run one is
+decided here. A `Register` stands, so the relay holds it, and it carries the action's policy.
+A `Run` names an action and a target; the relay finds the standing `Register` with the same
+name and target and gives its policy to the check. With none, the action is `not found`. So
+node logic is only ever handed a run that was allowed, and registering an action without a
+policy is not something the wire can say.
 
 ## The comm core as a program
 

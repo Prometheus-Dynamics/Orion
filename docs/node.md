@@ -57,6 +57,7 @@ touched. Observed records are not kept: a node that has just started sees nothin
 the board's socket with the node role, says which kinds it answers, and from then on is passed
 those requests by the comm core, already checked (see "Passing requests to node logic" in
 `docs/comm.md`). It answers through the comm core. It has no socket of its own and no door.
+Being a client like any other, it publishes what it has to show as topics.
 
 | Setting | Default | What it is |
 | --- | --- | --- |
@@ -79,7 +80,10 @@ those requests by the comm core, already checked (see "Passing requests to node 
   apart at first and at most a second. Watches are forgotten: they belonged to sessions that
   ended with the comm core, and their programs ask again when they reconnect.
 
-One thread, with the store as plain data owned by it.
+- **Actions.** Node logic keeps the open list (below) and publishes what happens to runs on
+  the topic `orion.actions`.
+
+One thread, with the store and the lists as plain data owned by it.
 
 ## The workload tracker
 
@@ -162,3 +166,34 @@ What a node does with a peer's summary:
   `agreed_at` to be kept across a restart.
 - **Whose message.** The connection says who the peer is. A message that names another node is
   refused.
+
+## The open list of actions
+
+`orion-action-list` is the list of actions and the runs under way. Orion ships almost no
+actions; any program on the board adds its own.
+
+- **Adding.** `Register` names the action, what it runs against (this node, or a resource) and
+  who may run it. It is answered with `Registered`. A name is taken once for a target; the
+  same name for another target is another action. The same registration again from the same
+  program is the same action. An action for another node cannot be added here.
+- **Running.** `Run` names an action and a target. The program that added it is handed a
+  `Claim`. A run has two numbers: the caller's `call`, unique on its session, and the list's
+  own, which is the one in `Claim`. Each side only ever sees its own. `Progress` (which may be
+  dropped if the caller is not reading) and `ActionResult` from the program go to the caller
+  under the caller's number. `Cancel` from the caller reaches the program; the run ends when
+  the program says how.
+- **Who may run it** is not decided here. The policy the action was registered with is what
+  the check is told at the door, so only a run that passed arrives.
+- **When an end goes away.** A caller that goes has its run cancelled, unless the run is
+  detached: that one carries on. A program that goes takes its actions off the list and its
+  runs end as `Failed`.
+- **Deadlines.** A run with a deadline that passes ends as `TimedOut` and the program is told
+  to stop. What the program says of it afterwards is ignored.
+- **Only the program that has a run speaks for it.** A result from anyone else is `denied`.
+- **Runs as a topic.** `orion.actions` has two fields. `event` is a line for each thing that
+  happens to a run: `<run> <action> <node|resource>:<target> <percent> <outcome or -> <message>`,
+  with 255 for a percent that is not known. `running` is how many runs are under way.
+- There is room for 4096 runs at once; one more is refused as `busy`.
+
+Not here yet: reattaching to a detached run (E12), and a run for another node or for a resource
+another node has (E11).

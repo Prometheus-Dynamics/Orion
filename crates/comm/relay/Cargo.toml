@@ -8,6 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-server = { path = "../server" }
 orion-wire = { path = "../../core/wire" }

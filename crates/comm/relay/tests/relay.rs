@@ -1,10 +1,12 @@
 //! The relay: requests reach node logic and answers come back, node logic being away is a
 //! refusal and nothing worse, and a watch outlives the node logic it was first passed to.
 
+use orion_msg_actions::{Register, Run, Target};
 use orion_msg_records::{Changed, Get, RecordClass, Watch};
 use orion_msg_session::{Hello, NodeAnswer, NodeAttach, NodeGone, NodeRequest, Refusal, Welcome};
-use orion_relay::{RECORDS, Relay};
+use orion_relay::{MAX_STANDING, Relay, routes};
 use orion_server::mem::{self, MemConnection, MemConnector};
+use orion_server::{Admits, Policy};
 use orion_server::{Comm, Error, FdSet, Limits, Principal, Roles, Security};
 use orion_types::HlcTimestamp;
 use orion_wire::body::encode_fields;
@@ -27,9 +29,13 @@ fn run(test: impl Future<Output = ()>) {
 }
 
 fn board() -> MemConnector {
+    board_with(Security::Off)
+}
+
+fn board_with(security: Security) -> MemConnector {
     let node: orion_types::NodeName = "board".parse().expect("name");
-    let comm = Comm::new(node, Security::Off, None, Limits::default());
-    comm.add_service(Relay::new(RECORDS));
+    let comm = Comm::new(node, security, None, Limits::default());
+    comm.add_service(Relay::new(&routes()));
     let (carrier, connector) = mem::carrier(Roles::CLIENT.and(Roles::NODE), 64 * 1024);
     tokio::task::spawn_local(async move { comm.serve(carrier).await });
     connector
@@ -115,10 +121,40 @@ impl Client {
 async fn node(board: &MemConnector) -> Client {
     let mut node = Client::open(board.connect(ROOT), Roles::NODE).await;
     node.send(&NodeAttach {
-        kinds: Bytes(&[kind::PUT, kind::GET, kind::WATCH]),
+        kinds: Bytes(&[
+            kind::PUT,
+            kind::GET,
+            kind::WATCH,
+            kind::ACTION_REGISTER,
+            kind::ACTION_RUN,
+        ]),
     })
     .await;
     node
+}
+
+fn fan() -> Target {
+    Target::Resource("fan.left".parse().expect("name"))
+}
+
+fn register(name: &str, admits: Admits) -> Register<'static> {
+    Register {
+        name: name.parse().expect("name"),
+        target: fan(),
+        policy: Policy::new(admits),
+        description: "",
+    }
+}
+
+fn run_of(name: &str, target: Target) -> Run<'static> {
+    Run {
+        call: 1,
+        name: name.parse().expect("name"),
+        target,
+        args: Bytes(b"x"),
+        deadline_ms: 0,
+        detached: false,
+    }
 }
 
 const GET: Get<'static> = Get {
@@ -293,5 +329,145 @@ fn a_second_node_logic_takes_over_from_the_first() {
                 }
             }
         }
+    });
+}
+
+#[test]
+fn a_run_is_decided_at_the_door_by_the_policy_its_action_was_registered_with() {
+    run_test_secure(Security::On, true);
+}
+
+#[test]
+fn with_security_off_the_same_run_passes() {
+    run_test_secure(Security::Off, false);
+}
+
+fn run_test_secure(security: Security, refused: bool) {
+    run(async move {
+        let board = board_with(security);
+        let mut node = node(&board).await;
+        let mut provider = Client::open(board.connect(USER), Roles::CLIENT).await;
+        let mut caller = Client::open(board.connect(USER), Roles::CLIENT).await;
+
+        // Nothing is registered: there is no such action, whoever asks.
+        let seq = caller.send(&run_of("open", fan())).await;
+        assert_eq!(caller.refused(seq).await, Error::NotFound);
+
+        // One action for programs on the board, one for operators alone.
+        provider.send(&register("open", Admits::LOCAL)).await;
+        provider.send(&register("wipe", Admits::OPERATOR)).await;
+        let (_, _, kind, _) = node.passed().await;
+        assert_eq!(kind, kind::ACTION_REGISTER);
+        let (_, _, kind, _) = node.passed().await;
+        assert_eq!(kind, kind::ACTION_REGISTER);
+
+        let open = caller.send(&run_of("open", fan())).await;
+        let (_, seq, kind, payload) = node.passed().await;
+        assert_eq!((seq, kind), (open, kind::ACTION_RUN));
+        assert_eq!(Run::decode(&payload).expect("run").name.as_str(), "open");
+
+        let wipe = caller.send(&run_of("wipe", fan())).await;
+        if refused {
+            // Node logic never sees it.
+            assert_eq!(caller.refused(wipe).await, Error::Denied);
+        } else {
+            let (_, seq, ..) = node.passed().await;
+            assert_eq!(seq, wipe);
+        }
+
+        // The same name for another target is another action, and is not registered.
+        let other = Target::Resource("fan.right".parse().expect("name"));
+        let seq = caller.send(&run_of("open", other)).await;
+        assert_eq!(caller.refused(seq).await, Error::NotFound);
+
+        // The program goes, and its actions with it.
+        drop(provider);
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let seq = caller.send(&run_of("open", fan())).await;
+        assert_eq!(caller.refused(seq).await, Error::NotFound);
+    });
+}
+
+#[test]
+fn a_registration_node_logic_refuses_does_not_stand() {
+    run(async {
+        let board = board_with(Security::On);
+        let mut first = node(&board).await;
+        let mut provider = Client::open(board.connect(USER), Roles::CLIENT).await;
+        let mut caller = Client::open(board.connect(USER), Roles::CLIENT).await;
+        let registered = provider.send(&register("open", Admits::LOCAL)).await;
+        let (session, seq, ..) = first.passed().await;
+        assert_eq!(seq, registered);
+
+        // Node logic says no: another program has the name.
+        let mut refusal = [0_u8; 64];
+        let len = encode_fields(
+            &Refusal {
+                request_seq: seq,
+                code: Error::AlreadyExists.code(),
+                detail: "",
+            },
+            &mut refusal,
+        )
+        .expect("encode");
+        first
+            .send(&NodeAnswer {
+                session,
+                kind: kind::REFUSAL,
+                may_drop: false,
+                payload: Bytes(&refusal[..len]),
+            })
+            .await;
+        assert_eq!(provider.refused(registered).await, Error::AlreadyExists);
+
+        // So a run of it is of nothing, and a node logic that comes back is not passed it.
+        let seq = caller.send(&run_of("open", fan())).await;
+        assert_eq!(caller.refused(seq).await, Error::NotFound);
+        drop(first);
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let mut second = node(&board).await;
+        let watch = caller.send(&WATCH).await;
+        let (_, seq, kind, _) = second.passed().await;
+        assert_eq!(
+            (seq, kind),
+            (watch, kind::WATCH),
+            "the registration was not passed again"
+        );
+    });
+}
+
+#[test]
+fn registered_actions_are_passed_again_to_the_node_logic_that_comes_back() {
+    run(async {
+        let board = board();
+        let first = node(&board).await;
+        let mut provider = Client::open(board.connect(USER), Roles::CLIENT).await;
+        let registered = provider.send(&register("open", Admits::LOCAL)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        drop(first);
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let mut second = node(&board).await;
+        let (_, seq, kind, payload) = second.passed().await;
+        assert_eq!((seq, kind), (registered, kind::ACTION_REGISTER));
+        assert_eq!(
+            Register::decode(&payload).expect("register").name.as_str(),
+            "open"
+        );
+    });
+}
+
+#[test]
+fn a_session_stands_for_so_much_and_no_more() {
+    run(async {
+        let board = board();
+        let _node = node(&board).await;
+        let mut provider = Client::open(board.connect(USER), Roles::CLIENT).await;
+        for index in 0..MAX_STANDING {
+            provider
+                .send(&register(&format!("a{index}"), Admits::LOCAL))
+                .await;
+        }
+        let over = provider.send(&register("one-more", Admits::LOCAL)).await;
+        assert_eq!(provider.refused(over).await, Error::Busy);
     });
 }

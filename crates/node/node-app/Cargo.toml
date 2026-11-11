@@ -8,15 +8,21 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+orion-action-list = { path = "../action-list" }
 orion-config = { path = "../../core/config" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
+orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-session = { path = "../../core/msg-session" }
+orion-msg-topics = { path = "../../core/msg-topics" }
 orion-persist = { path = "../persist" }
+orion-reply = { path = "../reply" }
+orion-ring = { path = "../../core/ring" }
 orion-store = { path = "../store" }
+orion-topics = { path = "../../client/topics" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire", features = ["std"] }
-tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"] }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal", "net"] }
 tracing.workspace = true
 
 [dev-dependencies]

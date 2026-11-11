@@ -1,0 +1,16 @@
+[package]
+name = "orion-reply"
+description = "What node logic is asked and how it answers: a request the comm core passed on, and the way back to its session."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-session = { path = "../../core/msg-session" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+
+[lints]
+workspace = true

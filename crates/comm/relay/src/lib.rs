@@ -10,21 +10,25 @@
 //! "restarting". Nothing else in the comm core notices. When it comes back, the requests that
 //! stand (a watch) are passed to it again, so a program that was watching goes on being told.
 //!
-//! The relay keeps no record, no workload and no policy of its own beyond the table of
-//! [`Route`]s: which kind asks for what, and who may ask.
+//! The relay keeps no record and no workload. What it knows is the table of [`Route`]s: which
+//! kind asks for what, and who may ask. For an action that is whoever the action was
+//! registered for: a `Register` stands, so the relay has it, and a `Run` is checked against
+//! the policy in it. That keeps the one check at the door for actions too, though the list of
+//! actions is node logic's.
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use orion_msg_session::{NodeAnswer, NodeAttach, NodeGone, NodeRequest};
+use orion_msg_actions::{Register, Target};
+use orion_msg_session::{NodeAnswer, NodeAttach, NodeGone, NodeRequest, Refusal};
 use orion_server::{
     Admits, Checked, Cx, Delivery, Error, Incoming, Policy, Principal, Roles, Service, SessionId,
     Sessions, What,
 };
-use orion_wire::{Bytes, FrameView, kind};
+use orion_wire::{Bytes, Decode, FrameView, body, kind};
 
-/// How many standing requests are kept for one session. The oldest goes first.
-pub const MAX_STANDING: usize = 64;
+/// How many standing requests are kept for one session. One more is refused as busy.
+pub const MAX_STANDING: usize = 1024;
 
 /// What a kind asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +39,19 @@ pub enum Access {
     Write(&'static str),
 }
 
+/// Who may send a kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Who {
+    /// These classes. An operator also needs the grant.
+    Granted(Admits),
+    /// These classes, and an operator needs no grant: what is asked is already bound to the
+    /// session that asks, like a word about a run it started.
+    Any(Admits),
+    /// Whoever the action being run was registered for: the policy in the standing
+    /// `Register` with the same name and target. With none, the action is not found.
+    ActionPolicy,
+}
+
 /// One kind that is node logic's to answer.
 #[derive(Clone, Copy, Debug)]
 pub struct Route {
@@ -43,7 +60,7 @@ pub struct Route {
     /// What it asks for.
     pub access: Access,
     /// Who may ask.
-    pub admits: Admits,
+    pub who: Who,
     /// Whether the request stands until its session ends, and is passed again to a node
     /// logic that comes back: a watch.
     pub standing: bool,
@@ -57,22 +74,62 @@ pub const RECORDS: &[Route] = &[
     Route {
         kind: kind::PUT,
         access: Access::Write("records"),
-        admits: KNOWN,
+        who: Who::Granted(KNOWN),
         standing: false,
     },
     Route {
         kind: kind::GET,
         access: Access::Read("records"),
-        admits: KNOWN,
+        who: Who::Granted(KNOWN),
         standing: false,
     },
     Route {
         kind: kind::WATCH,
         access: Access::Read("records"),
-        admits: KNOWN,
+        who: Who::Granted(KNOWN),
         standing: true,
     },
 ];
+
+/// The action kinds. A run is decided by the policy its action was registered with.
+pub const ACTIONS: &[Route] = &[
+    Route {
+        kind: kind::ACTION_REGISTER,
+        access: Access::Write("actions"),
+        who: Who::Granted(Admits::LOCAL),
+        standing: true,
+    },
+    Route {
+        kind: kind::ACTION_RUN,
+        access: Access::Read("actions"),
+        who: Who::ActionPolicy,
+        standing: false,
+    },
+    Route {
+        kind: kind::ACTION_PROGRESS,
+        access: Access::Write("actions"),
+        who: Who::Any(Admits::LOCAL),
+        standing: false,
+    },
+    Route {
+        kind: kind::ACTION_RESULT,
+        access: Access::Write("actions"),
+        who: Who::Any(Admits::LOCAL),
+        standing: false,
+    },
+    Route {
+        kind: kind::ACTION_CANCEL,
+        access: Access::Read("actions"),
+        who: Who::Any(KNOWN),
+        standing: false,
+    },
+];
+
+/// Every kind that is node logic's.
+#[must_use]
+pub fn routes() -> Vec<Route> {
+    [RECORDS, ACTIONS].concat()
+}
 
 #[derive(Debug)]
 struct Standing {
@@ -178,25 +235,26 @@ impl Relay {
         true
     }
 
-    fn keep(&mut self, session: SessionId, seq: u16, kind: u8, payload: &[u8]) {
+    fn keep(
+        &mut self,
+        session: SessionId,
+        seq: u16,
+        kind: u8,
+        payload: &[u8],
+    ) -> Result<(), Error> {
         if let Some(same) = self.standing.iter_mut().find(|standing| {
             standing.session == session && standing.kind == kind && standing.payload == payload
         }) {
             same.seq = seq;
-            return;
+            return Ok(());
         }
         let held = self
             .standing
             .iter()
             .filter(|standing| standing.session == session)
             .count();
-        if held >= MAX_STANDING
-            && let Some(oldest) = self
-                .standing
-                .iter()
-                .position(|standing| standing.session == session)
-        {
-            self.standing.remove(oldest);
+        if held >= MAX_STANDING {
+            return Err(Error::Busy);
         }
         self.standing.push(Standing {
             session,
@@ -204,6 +262,21 @@ impl Relay {
             kind,
             payload: payload.to_vec(),
         });
+        Ok(())
+    }
+
+    /// The policy the action a `Run` names was registered with.
+    fn action_policy<'a>(&self, run: &'a [u8]) -> Result<(&'a str, Policy), Error> {
+        let (_call, rest) = body::take::<u64>(run)?;
+        let (name, rest) = body::take::<&str>(rest)?;
+        let (target, _) = body::take::<Target>(rest)?;
+        self.standing
+            .iter()
+            .filter(|standing| standing.kind == kind::ACTION_REGISTER)
+            .filter_map(|standing| Register::decode(&standing.payload).ok())
+            .find(|register| register.name.as_str() == name && register.target == target)
+            .map(|register| (name, register.policy))
+            .ok_or(Error::NotFound)
     }
 
     fn attach(&mut self, attach: &NodeAttach<'_>, cx: &mut Cx<'_>) -> Result<(), Error> {
@@ -258,7 +331,14 @@ impl Service for Relay {
             Access::Read(thing) => What::Read(thing),
             Access::Write(thing) => What::Write(thing),
         };
-        Ok((what, Policy::new(route.admits)))
+        match route.who {
+            Who::Granted(admits) => Ok((what, Policy::new(admits))),
+            Who::Any(admits) => Ok((what, Policy::new(admits).without_grant())),
+            Who::ActionPolicy => {
+                let (name, policy) = self.action_policy(frame.payload())?;
+                Ok((What::Run(name), policy))
+            }
+        }
     }
 
     fn handle(&mut self, request: Checked<Incoming<'_>>, cx: &mut Cx<'_>) -> Result<(), Error> {
@@ -275,6 +355,14 @@ impl Service for Relay {
                 return Err(Error::Denied);
             }
             let answer: NodeAnswer<'_> = incoming.body()?;
+            if answer.kind == kind::REFUSAL
+                && let Ok(refusal) = Refusal::decode(answer.payload.0)
+            {
+                // Node logic turned a standing request down: it does not stand.
+                self.standing.retain(|standing| {
+                    !(standing.session.0 == answer.session && standing.seq == refusal.request_seq)
+                });
+            }
             let delivery = if answer.may_drop {
                 Delivery::MayDrop
             } else {
@@ -294,7 +382,7 @@ impl Service for Relay {
         let standing = self.route(kind).is_some_and(|route| route.standing);
         let payload = incoming.frame().payload();
         if standing {
-            self.keep(from, seq, kind, payload);
+            self.keep(from, seq, kind, payload)?;
         }
         let Some(node) = self.node.filter(|_| self.answered(kind)) else {
             return if standing {

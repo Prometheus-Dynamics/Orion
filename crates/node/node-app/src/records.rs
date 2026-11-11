@@ -1,12 +1,11 @@
 //! Records, answered: writes, reads and watches against the store.
 
-use orion_connect::ClientError;
 use orion_msg_records::{Changed, Get, Put, RecordClass, RecordEntry, Watch};
 use orion_store::{Record, Scope, Store};
 use orion_types::{Error, HlcTimestamp};
 use orion_wire::{List, kind};
 
-use crate::{Asked, Out};
+use orion_reply::{Asked, Out};
 
 /// About how many bytes of records go in one message. A record larger than this goes alone.
 const PAGE_BYTES: usize = 24 * 1024;
@@ -29,16 +28,18 @@ pub struct Records {
 
 /// Sends `records` to `session` as answers to `seq`, in as many messages as it takes. With
 /// none, one empty message when `always` is set: a read is always answered.
+///
+/// A record that does not fit a message is an error, and nothing after it is sent.
 fn send(
     out: &mut dyn Out,
     session: u32,
     seq: u16,
     records: &[Record],
     always: bool,
-) -> Result<(), ClientError> {
+) -> Result<(), Error> {
     if records.is_empty() {
         if always {
-            out.answer(
+            out.send(
                 session,
                 &Changed {
                     request_seq: seq,
@@ -56,7 +57,7 @@ fn send(
         bytes += record.key.len() + record.version.value.len() + 24;
         let last = index + 1 == records.len();
         if bytes >= PAGE_BYTES || last {
-            out.answer(
+            out.send(
                 session,
                 &Changed {
                     request_seq: seq,
@@ -121,13 +122,12 @@ impl Records {
     ///
     /// # Errors
     ///
-    /// [`Error`] for the caller, as a refusal. A failure to send is in `sent`.
-    pub(crate) fn request(
+    /// [`Error`] for the caller, as a refusal.
+    pub fn request(
         &mut self,
         asked: &Asked<'_>,
         wall_ms: u64,
         out: &mut dyn Out,
-        sent: &mut Result<(), ClientError>,
     ) -> Result<(), Error> {
         let (session, seq) = (asked.session, asked.seq);
         match asked.kind {
@@ -144,30 +144,25 @@ impl Records {
                         self.store
                             .put(entry.class, entry.key, entry.value.0, wall_ms);
                     }
-                    let class = entry.class;
-                    let key = entry.key;
                     // As stored: with the stamp the store gave it.
-                    if let Some(version) = self.store.version(class, key) {
+                    if let Some(version) = self.store.version(entry.class, entry.key) {
                         stored.push(Record {
-                            class,
-                            key: key.to_owned(),
+                            class: entry.class,
+                            key: entry.key.to_owned(),
                             version: version.clone(),
                         });
                     }
                 }
-                *sent = send(out, session, seq, &stored, true);
-                if sent.is_ok() {
-                    *sent = self.publish(out);
-                }
-                Ok(())
+                let answered = send(out, session, seq, &stored, true);
+                self.publish(out);
+                answered
             }
             kind::GET => {
                 let get: Get<'_> = asked.body()?;
                 let found: Vec<Record> = self.store.list(get.class, get.prefix).collect();
-                *sent = send(out, session, seq, &found, true);
-                Ok(())
+                send(out, session, seq, &found, true)
             }
-            _ => {
+            kind::WATCH => {
                 let watch: Watch<'_> = asked.body()?;
                 self.watchers.retain(|watcher| {
                     !(watcher.session == session
@@ -181,19 +176,15 @@ impl Records {
                     prefix: watch.prefix.to_owned(),
                 });
                 let newer = self.store.since(watch.class, watch.prefix, watch.after);
-                *sent = send(out, session, seq, &newer, false);
-                Ok(())
+                send(out, session, seq, &newer, false)
             }
+            _ => Err(Error::Unsupported),
         }
     }
 
     /// Tells the watchers what changed in the store since the last call, and marks the store
     /// to be saved.
-    ///
-    /// # Errors
-    ///
-    /// If the comm core could not be sent to.
-    pub fn publish(&mut self, out: &mut dyn Out) -> Result<(), ClientError> {
+    pub fn publish(&mut self, out: &mut dyn Out) {
         let Some(changes) = self.store.take_changes() else {
             // More changed than was kept track of: every watcher is sent what it watches,
             // whole. A version it already has is the same record again.
@@ -202,12 +193,12 @@ impl Records {
                 let all = self
                     .store
                     .since(watcher.class, &watcher.prefix, HlcTimestamp::ZERO);
-                send(out, watcher.session, watcher.seq, &all, false)?;
+                let _ = send(out, watcher.session, watcher.seq, &all, false);
             }
-            return Ok(());
+            return;
         };
         if changes.is_empty() {
-            return Ok(());
+            return;
         }
         self.dirty = true;
         let desired: Vec<Record> = changes
@@ -223,8 +214,7 @@ impl Records {
                 })
                 .cloned()
                 .collect();
-            send(out, watcher.session, watcher.seq, &theirs, false)?;
+            let _ = send(out, watcher.session, watcher.seq, &theirs, false);
         }
-        Ok(())
     }
 }

@@ -4,43 +4,53 @@
 //! program, with the node role, and tells the comm core which kinds it answers. The comm core
 //! checks each such request at the door and passes it on; node logic answers through the comm
 //! core, which sends the answer to the session that asked. There is no other protocol between
-//! the two.
+//! the two, and being a client like any other, node logic publishes what it has to show as
+//! topics.
 //!
 //! So when node logic dies, the comm core and everything on it stay up: links, topics, the
-//! hello document. Requests for records are refused with "unavailable" until node logic is
-//! back. It then loads what it had saved, connects, and the watches programs had are passed
-//! to it again.
+//! hello document. What is node logic's is refused with "unavailable" until it is back. It
+//! then loads what it had saved, connects, and the requests that stand, watches and
+//! registered actions, are passed to it again.
 //!
-//! One thread. The store is plain data owned by it. The one slow thing, writing the snapshot,
-//! is done by a helper thread that exists only while it writes.
+//! One thread. The store and the lists are plain data owned by it. The one slow thing,
+//! writing the snapshot, is done by a helper thread that exists only while it writes.
 
 #![cfg(target_os = "linux")]
 
+mod logic;
 pub mod records;
 
+use std::cell::RefCell;
 use std::io;
-use std::path::PathBuf;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use orion_config::{Config, ConfigError, Source};
-use orion_connect::{Address, ClientError, Options, Roles, Session};
-use orion_msg_session::{NodeAnswer, NodeAttach, NodeGone, NodeRequest, Refusal};
+use orion_connect::{Address, Client, ClientError, Options, Roles, Session};
+use orion_msg_session::NodeAttach;
 use orion_persist::{Persist, Source as Loaded};
 use orion_store::{Record, Store, StoreConfig};
-use orion_types::Error;
-use orion_wire::body::encode_fields;
-use orion_wire::{Body, Bytes, Decode, kind};
+use orion_topics::{Publisher, TopicDecl, Topics};
+use orion_wire::Bytes;
+use tokio::io::Interest;
+use tokio::net::UnixDatagram;
 use tracing::{info, warn};
 
+use logic::{Direct, Logic};
+pub use orion_action_list::Actions;
+pub use orion_reply::{Asked, Out};
 pub use records::Records;
+
+/// The topic node logic publishes what happens to action runs on.
+pub const ACTIONS_TOPIC: &str = "orion.actions";
 
 /// What node logic is told.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeSettings {
     /// What every build needs: the node's name, the socket, the state directory.
     pub config: Config,
-    /// `records.save_after`: how long after a change the records are saved. Changes made in
-    /// that time go in the same save.
+    /// `records.save_after_ms`: how long after a change the records are saved. Changes made
+    /// in that time go in the same save.
     pub save_after: Duration,
     /// `records.max_drift_ms`: a stamp from a peer further ahead of this node's clock than
     /// this is refused.
@@ -63,99 +73,6 @@ impl NodeSettings {
     }
 }
 
-/// One request, as the comm core passed it on.
-#[derive(Clone, Copy, Debug)]
-pub struct Asked<'a> {
-    /// The session that asked.
-    pub session: u32,
-    /// The `seq` of its request.
-    pub seq: u16,
-    /// The kind of its request.
-    pub kind: u8,
-    payload: &'a [u8],
-}
-
-impl<'a> Asked<'a> {
-    /// The request's body, as a `B`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Malformed`] if it does not decode.
-    pub fn body<B: Body + Decode<'a>>(&self) -> Result<B, Error> {
-        B::decode(self.payload)
-    }
-}
-
-/// Where answers go: to a session, through the comm core.
-pub trait Out {
-    /// Sends a frame of `kind` with `payload` to `session`.
-    ///
-    /// # Errors
-    ///
-    /// If the comm core could not be sent to.
-    fn frame(
-        &mut self,
-        session: u32,
-        kind: u8,
-        payload: &[u8],
-        may_drop: bool,
-    ) -> Result<(), ClientError>;
-
-    /// Room to encode a body in.
-    fn scratch(&mut self) -> &mut Vec<u8>;
-}
-
-impl dyn Out + '_ {
-    /// Sends `body` to `session`.
-    ///
-    /// # Errors
-    ///
-    /// If the body does not fit a frame, or the comm core could not be sent to.
-    pub fn answer<B: Body>(&mut self, session: u32, body: &B) -> Result<(), ClientError> {
-        let mut scratch = std::mem::take(self.scratch());
-        let result = encode_fields(body, &mut scratch)
-            .map_err(|_| ClientError::TooLarge)
-            .and_then(|len| self.frame(session, B::KIND, &scratch[..len], false));
-        *self.scratch() = scratch;
-        result
-    }
-}
-
-/// Answers through a session with the comm core.
-struct Through<'a> {
-    session: &'a mut Session,
-    scratch: &'a mut Vec<u8>,
-}
-
-impl Out for Through<'_> {
-    fn frame(
-        &mut self,
-        session: u32,
-        kind: u8,
-        payload: &[u8],
-        may_drop: bool,
-    ) -> Result<(), ClientError> {
-        self.session
-            .send(&NodeAnswer {
-                session,
-                kind,
-                may_drop,
-                payload: Bytes(payload),
-            })
-            .map(|_| ())
-    }
-
-    fn scratch(&mut self) -> &mut Vec<u8> {
-        self.scratch
-    }
-}
-
-fn wall_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_millis() as u64)
-}
-
 /// Why node logic could not start.
 #[derive(Debug)]
 pub struct StartError {
@@ -172,16 +89,21 @@ impl std::fmt::Display for StartError {
 impl std::error::Error for StartError {}
 
 /// Node logic: what it keeps, and where it keeps it across a restart.
-#[derive(Debug)]
 pub struct Node {
     settings: NodeSettings,
-    records: Records,
+    logic: Rc<RefCell<Logic>>,
     /// `None` while a helper is writing with it.
     persist: Option<Persist>,
     saving: Option<tokio::task::JoinHandle<(Persist, io::Result<()>)>>,
     /// When the oldest change not yet saved was made.
     unsaved_since: Option<Instant>,
     scratch: Vec<u8>,
+}
+
+impl std::fmt::Debug for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Node({})", self.settings.config.node_name)
+    }
 }
 
 impl Node {
@@ -191,11 +113,11 @@ impl Node {
     ///
     /// If the state directory cannot be made or used.
     pub fn load(settings: NodeSettings) -> Result<Self, StartError> {
-        let dir: PathBuf = settings.config.state_dir.clone();
-        let mut persist = Persist::open(&dir).map_err(|error| StartError {
-            what: "state directory",
-            error,
-        })?;
+        let mut persist =
+            Persist::open(&settings.config.state_dir).map_err(|error| StartError {
+                what: "state directory",
+                error,
+            })?;
         let loaded = persist.load();
         for problem in &loaded.problems {
             warn!("{problem}");
@@ -212,10 +134,11 @@ impl Node {
             max_drift_ms: settings.max_drift_ms,
             ..StoreConfig::default()
         };
-        let store = Store::restored(settings.config.node_name.clone(), config, loaded.records);
+        let name = settings.config.node_name.clone();
+        let store = Store::restored(name.clone(), config, loaded.records);
         Ok(Self {
             settings,
-            records: Records::new(store),
+            logic: Rc::new(RefCell::new(Logic::new(store, name))),
             persist: Some(persist),
             saving: None,
             unsaved_since: None,
@@ -223,94 +146,18 @@ impl Node {
         })
     }
 
-    /// The record service.
+    /// How many records are kept, deletes included.
     #[must_use]
-    pub const fn records(&self) -> &Records {
-        &self.records
-    }
-
-    /// The kinds node logic answers.
-    #[must_use]
-    pub const fn kinds() -> &'static [u8] {
-        Records::KINDS
-    }
-
-    /// Answers one request. Whatever is wrong with the request is the caller's to hear, as a
-    /// refusal.
-    ///
-    /// # Errors
-    ///
-    /// If the comm core could not be sent to.
-    pub fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) -> Result<(), ClientError> {
-        let mut sent = Ok(());
-        let answered = self.records.request(asked, wall_ms(), out, &mut sent);
-        sent?;
-        if let Err(error) = answered {
-            let detail = error.to_string();
-            out.answer(
-                asked.session,
-                &Refusal {
-                    request_seq: asked.seq,
-                    code: error.code(),
-                    detail: &detail,
-                },
-            )?;
-        }
-        if self.records.take_dirty() && self.unsaved_since.is_none() {
-            self.unsaved_since = Some(Instant::now());
-        }
-        Ok(())
-    }
-
-    /// Takes one frame from the comm core. `payload` is a copy: the session is sent on while
-    /// it is read.
-    fn frame(
-        &mut self,
-        kind: u8,
-        payload: &[u8],
-        session: &mut Session,
-    ) -> Result<(), ClientError> {
-        const UNREADABLE: ClientError = ClientError::Protocol("a body that does not decode");
-        match kind {
-            kind::NODE_REQUEST => {
-                let passed = NodeRequest::decode(payload).map_err(|_| UNREADABLE)?;
-                let asked = Asked {
-                    session: passed.session,
-                    seq: passed.seq,
-                    kind: passed.kind,
-                    payload: passed.payload.0,
-                };
-                let mut scratch = std::mem::take(&mut self.scratch);
-                let result = self.request(
-                    &asked,
-                    &mut Through {
-                        session,
-                        scratch: &mut scratch,
-                    },
-                );
-                self.scratch = scratch;
-                result
-            }
-            kind::NODE_GONE => {
-                let gone = NodeGone::decode(payload).map_err(|_| UNREADABLE)?;
-                self.records.gone(gone.session);
-                Ok(())
-            }
-            kind::REFUSAL => {
-                let refusal = Refusal::decode(payload).map_err(|_| UNREADABLE)?;
-                warn!(
-                    "the comm core refused node logic: {} ({})",
-                    refusal.detail, refusal.code
-                );
-                Ok(())
-            }
-            _ => Ok(()),
-        }
+    pub fn records(&self) -> usize {
+        self.logic.borrow().records.store().len()
     }
 
     /// Starts a save if there is something to save, it has waited long enough, and no save
     /// is under way.
     fn save_if_due(&mut self, now: Instant) {
+        if self.logic.borrow_mut().records.take_dirty() && self.unsaved_since.is_none() {
+            self.unsaved_since = Some(now);
+        }
         let due = self
             .unsaved_since
             .is_some_and(|since| now.duration_since(since) >= self.settings.save_after);
@@ -320,7 +167,7 @@ impl Node {
         let Some(mut persist) = self.persist.take() else {
             return;
         };
-        let records: Vec<Record> = self.records.store().all().collect();
+        let records: Vec<Record> = self.logic.borrow().records.store().all().collect();
         self.unsaved_since = None;
         self.saving = Some(tokio::task::spawn_blocking(move || {
             let result = persist.save(records.into_iter());
@@ -350,63 +197,108 @@ impl Node {
             let done = saving.await;
             self.saved(done);
         }
+        if self.logic.borrow_mut().records.take_dirty() {
+            self.unsaved_since.get_or_insert_with(Instant::now);
+        }
         if self.unsaved_since.take().is_none() {
             return;
         }
         if let Some(persist) = &mut self.persist
-            && let Err(error) = persist.save(self.records.store().all())
+            && let Err(error) = persist.save(self.logic.borrow().records.store().all())
         {
             warn!("the records were not saved: {error}");
         }
     }
 
+    /// What is done between frames: deadlines, and telling the topic what runs did.
+    fn turn(
+        &mut self,
+        client: &Client,
+        progress: Option<&mut Publisher>,
+    ) -> Result<(), ClientError> {
+        let mut direct = Direct::new(client, &mut self.scratch);
+        let events = {
+            let mut logic = self.logic.borrow_mut();
+            let now = logic.now_ms();
+            logic.actions.tick(now, &mut direct);
+            logic.actions.take_events()
+        };
+        direct.result()?;
+        if let Some(progress) = progress {
+            logic::publish(progress, &events, self.logic.borrow().actions.running());
+        }
+        Ok(())
+    }
+
     /// Serves one session until it is lost.
-    async fn serve(&mut self, session: &mut Session) -> ClientError {
-        if let Err(error) = session.send(&NodeAttach {
-            kinds: Bytes(Self::kinds()),
+    async fn serve(&mut self, session: Session) -> ClientError {
+        // Tokio waits on a duplicate of the session's descriptor. It is only ever asked
+        // whether there is something to read.
+        let waiter = session
+            .as_fd()
+            .try_clone_to_owned()
+            .map(std::os::unix::net::UnixDatagram::from)
+            .and_then(UnixDatagram::from_std);
+        let waiter = match waiter {
+            Ok(waiter) => waiter,
+            Err(error) => return error.into(),
+        };
+        let client = Client::new(session);
+        client.add(self.logic.clone());
+        if let Err(error) = client.send(&NodeAttach {
+            kinds: Bytes(Logic::KINDS),
         }) {
             return error;
         }
-        // A frame is copied out of the session's buffer, because answering it sends on the
-        // session. The copy's room is kept.
-        let mut held = Vec::new();
-        let copy = |frame: Result<Option<orion_connect::Incoming<'_>>, ClientError>,
-                    held: &mut Vec<u8>| {
-            frame.map(|frame| {
-                frame.map(|frame| {
-                    held.clear();
-                    held.extend_from_slice(frame.payload());
-                    frame.kind()
-                })
-            })
+        let mut progress = match Topics::new(&client).declare(&TopicDecl {
+            name: ACTIONS_TOPIC,
+            fields: &logic::ACTION_FIELDS,
+            history: 256,
+            expiry_ms: 0,
+            max_payload: 512,
+        }) {
+            Ok(publisher) => Some(publisher),
+            Err(error) => {
+                warn!("action runs are not published as a topic: {error}");
+                None
+            }
         };
         loop {
-            self.save_if_due(Instant::now());
-            let wait = match (self.unsaved_since, &self.saving) {
-                (Some(since), None) => (since + self.settings.save_after)
-                    .saturating_duration_since(Instant::now())
-                    .max(Duration::from_millis(1)),
-                _ => Duration::from_secs(1),
+            if let Err(error) = client.drain() {
+                return error;
+            }
+            if let Err(error) = self.turn(&client, progress.as_mut()) {
+                return error;
+            }
+            let now = Instant::now();
+            self.save_if_due(now);
+            // Never longer than the session's heartbeat needs to be looked after.
+            let mut wait = Duration::from_millis(500);
+            if let (Some(since), None) = (self.unsaved_since, &self.saving) {
+                wait = wait.min((since + self.settings.save_after).saturating_duration_since(now));
+            }
+            if let Some(due) = self.logic.borrow().next_deadline() {
+                wait = wait.min(due);
+            }
+            let wait = wait.max(Duration::from_millis(1));
+            let readable = async {
+                if let Ok(Ok(_)) =
+                    tokio::time::timeout(wait, waiter.ready(Interest::READABLE)).await
+                {
+                    // Readiness is forgotten here and asked for again after the next look,
+                    // so a frame that is only partly here does not spin.
+                    let _ = waiter.try_io(Interest::READABLE, || {
+                        Err::<(), _>(io::Error::from(io::ErrorKind::WouldBlock))
+                    });
+                }
             };
-            let taken = if let Some(saving) = &mut self.saving {
+            if let Some(saving) = &mut self.saving {
                 tokio::select! {
-                    done = saving => {
-                        self.saved(done);
-                        continue;
-                    }
-                    frame = session.next_async(wait) => copy(frame, &mut held),
+                    done = saving => self.saved(done),
+                    () = readable => {}
                 }
             } else {
-                copy(session.next_async(wait).await, &mut held)
-            };
-            match taken {
-                Ok(Some(kind)) => {
-                    if let Err(error) = self.frame(kind, &held, session) {
-                        return error;
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => return error,
+                readable.await;
             }
         }
     }
@@ -420,20 +312,20 @@ impl Node {
         let mut said = false;
         'run: loop {
             let options = Options {
-                roles: Roles::NODE.and(Roles::CLIENT),
+                roles: Roles::NODE.and(Roles::CLIENT).and(Roles::PROVIDER),
                 ..Options::default()
             };
             match Session::connect(&address, "node", options) {
-                Ok(mut session) => {
+                Ok(session) => {
                     info!("connected to the comm core as node logic");
                     pause = Duration::from_millis(20);
                     said = false;
-                    // Whatever was watching came through a comm core that is gone, or is
-                    // passed again by the one that stayed.
-                    self.records.forget_sessions();
+                    // Whatever was watching, or had an action, came through a comm core that
+                    // is gone, or is passed again by the one that stayed.
+                    self.logic.borrow_mut().forget_sessions();
                     let lost = tokio::select! {
                         () = &mut stop => break 'run,
-                        lost = self.serve(&mut session) => lost,
+                        lost = self.serve(session) => lost,
                     };
                     warn!("the comm core is gone: {lost}");
                 }
