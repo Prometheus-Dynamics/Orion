@@ -4,7 +4,9 @@ use orion_check::{Admits, Policy};
 use orion_msg_actions::{
     ActionResult, Attach, Cancel, Claim, Outcome, Progress, Register, Registered, Run, Target,
 };
-use orion_msg_files::{FileBegin, FileChunk, FileCommit, FilePull, FileState, FileStatus};
+use orion_msg_files::{
+    FileBegin, FileChunk, FileCommit, FilePull, FileSink, FileSinkReady, FileState, FileStatus,
+};
 use orion_msg_peers::{
     EnrollChallenge, EnrollConfirm, EnrollHello, EnrollRole, GrantedAction, OperatorEnroll,
     OperatorEntry, OperatorList, OperatorState, OperatorWelcome, Operators, PeerObserved,
@@ -313,6 +315,8 @@ fn files(out: &mut Vec<Sample>) {
             digest: DIGEST
         }
     );
+    sample!(out, FileSink { prefix: "slots/" });
+    sample!(out, FileSinkReady { request_seq: 9 });
 }
 
 fn actions(out: &mut Vec<Sample>) {

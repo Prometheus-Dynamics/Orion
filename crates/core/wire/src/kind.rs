@@ -78,6 +78,8 @@ kinds! {
         FILE_COMMIT = 0x22,
         FILE_STATUS = 0x23,
         FILE_PULL = 0x24,
+        FILE_SINK = 0x25,
+        FILE_SINK_READY = 0x26,
     }
     Actions {
         ACTION_REGISTER = 0x30,

@@ -179,6 +179,23 @@ pub const FILES: &[Route] = &[
         standing: false,
         ends: Ends::Nothing,
     },
+    // A program on the board asks to be the receiver of files under a prefix. It stands, so
+    // it is still the receiver after node logic restarts.
+    Route {
+        kind: kind::FILE_SINK,
+        access: Access::Write("files"),
+        who: Who::Granted(Admits::LOCAL),
+        standing: true,
+        ends: Ends::Nothing,
+    },
+    // A receiver's answers about the transfers passing through it.
+    Route {
+        kind: kind::FILE_STATUS,
+        access: Access::Write("files"),
+        who: Who::Any(Admits::LOCAL),
+        standing: false,
+        ends: Ends::Nothing,
+    },
 ];
 
 /// Every kind that is node logic's.

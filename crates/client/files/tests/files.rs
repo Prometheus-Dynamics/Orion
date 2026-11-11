@@ -528,3 +528,56 @@ fn a_file_is_checked_before_it_is_in_place_and_refusals_are_heard() {
         .expect("pull");
     assert_eq!(missing.state, FileState::Rejected);
 }
+
+/// A source that is slow to read the first time through, which is when it is hashed.
+struct SlowToHash {
+    inner: Cursor<Vec<u8>>,
+    hashed: bool,
+    pause: Duration,
+}
+
+impl std::io::Read for SlowToHash {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        if read == 0 {
+            self.hashed = true;
+        } else if !self.hashed {
+            std::thread::sleep(self.pause);
+        }
+        Ok(read)
+    }
+}
+
+impl std::io::Seek for SlowToHash {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+#[test]
+fn a_file_that_takes_long_to_hash_does_not_cost_the_session() {
+    let board = Board::start("slow-hash");
+    let client = Client::new(
+        Session::connect(
+            &Address::Local(board.socket.clone()),
+            "tool",
+            Options::default(),
+        )
+        .expect("connect"),
+    );
+    let files = Files::new(&client);
+    // 2.5 MiB in 32 KiB reads, each a tenth of a second: eight seconds of hashing, which is
+    // longer than a board waits to hear from a session before it gives it up.
+    let data = contents(9);
+    let reads = data.len().div_ceil(32 * 1024) as u32;
+    let mut source = SlowToHash {
+        inner: Cursor::new(data.clone()),
+        hashed: false,
+        pause: Duration::from_millis(8_000) / reads,
+    };
+    let done = files
+        .push("slow.bin", &mut source, |_, _| {})
+        .expect("the session was kept while the file was hashed");
+    assert_eq!(done.state, FileState::Committed, "{}", done.detail);
+    assert_eq!(done.received, data.len() as u64);
+}

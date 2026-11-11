@@ -57,6 +57,8 @@ decoders! {
     FILE_COMMIT => files::FileCommit,
     FILE_STATUS => files::FileStatus,
     FILE_PULL => files::FilePull,
+    FILE_SINK => files::FileSink,
+    FILE_SINK_READY => files::FileSinkReady,
     ACTION_REGISTER => actions::Register,
     ACTION_RUN => actions::Run,
     ACTION_CLAIM => actions::Claim,

@@ -14,6 +14,7 @@ orion-audit = { path = "../audit" }
 orion-config = { path = "../../core/config" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
 orion-file-store = { path = "../file-store" }
+orion-files-sink = { path = "../files-sink" }
 orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-files = { path = "../../core/msg-files" }
 orion-msg-records = { path = "../../core/msg-records" }
@@ -33,6 +34,7 @@ tracing.workspace = true
 [dev-dependencies]
 orion = { path = "../../client/orion", features = ["files", "provider"] }
 orion-stubs = { path = "../../testing/stubs" }
+sha2 = { version = "0.11.0", default-features = false }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 
 [lints]

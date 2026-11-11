@@ -84,3 +84,23 @@ body! {
         pub digest: [u8; 32],
     }
 }
+
+body! {
+    /// Asks to be handed every file whose destination starts with `prefix`, instead of the
+    /// node keeping it: the file then goes straight to where this program puts it, and is
+    /// never held twice. Answered with [`FileSinkReady`]. From then on this program is sent
+    /// [`FileBegin`], [`FileChunk`] and [`FileCommit`] for those files and answers each with
+    /// [`FileStatus`], as a node would.
+    pub struct FileSink<'a> = kind::FILE_SINK {
+        /// What the destinations start with. Not empty.
+        pub prefix: &'a str,
+    }
+}
+
+body! {
+    /// Answers a [`FileSink`]: files under its prefix now go to that program.
+    pub struct FileSinkReady = kind::FILE_SINK_READY {
+        /// The `seq` of the [`FileSink`].
+        pub request_seq: u16,
+    }
+}

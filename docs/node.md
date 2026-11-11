@@ -273,8 +273,32 @@ files.
 - At most 64 transfers are under way at once; one more is `busy`. A file larger than
   `files.max_size` is rejected at `FileBegin`.
 
-Not here yet: pulling by URL (E14), and writing straight to a destination outside the store
-such as a boot slot (E15).
+Not here yet: pulling by URL (E14).
+
+## Files that go straight to a receiver
+
+Some files are not the node's to keep. An image for a boot slot is written to the slot by the
+program that manages the board, and a small board cannot hold it once in the node's store and
+again in the slot. `orion-files-sink` is how such a program takes them.
+
+- **Asking.** A program on the board sends `FileSink` with a prefix and is answered
+  `FileSinkReady`. It is now the receiver of every file whose destination starts with that
+  prefix. A prefix has one receiver; of two prefixes a destination starts with, the longer
+  one's receiver has it. The request stands: the program is still the receiver after node
+  logic restarts.
+- **Passing.** A `FileBegin` for such a destination, each `FileChunk` and the `FileCommit`
+  are sent on to the receiver as they came, and the receiver's `FileStatus` answers are sent
+  back to the sender as they came. The receiver is the receiver in every sense: it says how
+  many bytes it has, which paces the sender and is where a resumed push goes on from; it
+  checks the digest; it says committed or rejected.
+- **Nothing is kept.** The node stores none of the file and holds a chunk only for the call
+  that brought it. Memory does not grow with the file.
+- **A sender that comes back** in a new session and begins the same transfer again is the one
+  told from then on.
+- **A receiver that goes** takes its prefixes with it. Whoever was sending to it is told the
+  transfer is rejected, "the program that receives it went away". The destination is then a
+  place in the node's own store again.
+- At most 64 prefixes and 256 transfers passing through at once; one more is `busy`.
 
 ## The audit log
 

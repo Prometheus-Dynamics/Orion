@@ -168,10 +168,20 @@ rejected with why. A push resumes: the transfer's number comes from the file's d
 destination, so the same file to the same place is the same transfer, and beginning it again is
 answered with how many bytes the board already has. After a broken connection, reconnect and
 push again; nothing the board has is sent twice. At most eight chunks of 32 KiB are on their
-way at once, so a push neither fills the connection nor waits for an answer to each chunk.
+way at once, so a push neither fills the connection nor waits for an answer to each chunk. The
+file is hashed before anything is sent; the session is looked after meanwhile, however long
+that takes.
 
 `files.pull(..)` asks the board to fetch the file itself from a URL, check it and put it in
 place. Only the request and the board's reports cross the connection.
+
+`files.sink(prefix)` is the other end, for a program on the board that puts files where they
+belong itself, as board management does with a boot slot. It becomes the receiver of every
+file whose destination starts with the prefix, and the node keeps none of it. `sink.next(wait)`
+hands it a `Begin` (answer with how many bytes of that transfer it already has), then each
+`Chunk`, then `Commit`; it answers each with `sink.status(transfer, received, state, detail)`.
+Its answers pace the sender, so it is never handed more than a few chunks ahead of what it has
+answered for.
 
 ## The executor role
 

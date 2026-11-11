@@ -9,6 +9,7 @@ use orion_action_list::{Actions, Event};
 use orion_audit::{Audit, Entry, Who};
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_file_store::Files;
+use orion_files_sink::Sinks;
 use orion_msg_actions::{Cancel, Register, Run, Target};
 use orion_msg_files::{FileBegin, FileCommit};
 use orion_msg_records::{NodeRecord, Put, RecordClass, ResourceRecord};
@@ -91,6 +92,7 @@ pub(crate) struct Logic {
     pub(crate) records: Records,
     pub(crate) actions: Actions,
     pub(crate) files: Files,
+    pub(crate) sinks: Sinks,
     pub(crate) forwards: Forwards,
     audit: Option<Audit>,
     started: Instant,
@@ -112,6 +114,8 @@ impl Logic {
         kind::FILE_BEGIN,
         kind::FILE_CHUNK,
         kind::FILE_COMMIT,
+        kind::FILE_SINK,
+        kind::FILE_STATUS,
     ];
 
     pub(crate) fn new(
@@ -126,6 +130,7 @@ impl Logic {
             forwards: Forwards::new(node.clone(), identity),
             actions: Actions::new(node),
             files,
+            sinks: Sinks::new(),
             audit,
             started: Instant::now(),
             scratch: vec![0; 64 * 1024],
@@ -148,6 +153,7 @@ impl Logic {
         self.records.forget_sessions(wall().as_millis() as u64);
         self.actions.forget_sessions();
         self.forwards.forget_sessions();
+        self.sinks.forget_sessions();
     }
 
     /// Carries a run to the node that has the action: the node the run names, or the node
@@ -181,8 +187,15 @@ impl Logic {
     fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) {
         let answered = if Records::KINDS.contains(&asked.kind) {
             self.records.request(asked, wall().as_millis() as u64, out)
+        } else if Sinks::KINDS.contains(&asked.kind) {
+            self.sinks.request(asked, out)
         } else if Files::KINDS.contains(&asked.kind) {
-            self.files.request(asked, out)
+            // A file for a receiver goes straight to it. Any other is the store's.
+            match self.sinks.pass(asked, out) {
+                Ok(true) => Ok(()),
+                Ok(false) => self.files.request(asked, out),
+                Err(error) => Err(error),
+            }
         } else {
             let now = self.now_ms();
             match self.actions.request(asked, now, out) {
@@ -305,6 +318,7 @@ impl Handler for Logic {
                 .gone(gone.session, wall().as_millis() as u64, &mut through);
             self.files.gone(gone.session);
             self.forwards.gone(gone.session);
+            self.sinks.gone(gone.session, &mut through);
             let now = self.now_ms();
             self.actions.gone(gone.session, now, &mut through);
         }
