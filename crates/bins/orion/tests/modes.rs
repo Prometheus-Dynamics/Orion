@@ -1,6 +1,6 @@
 //! The binary run as a board runs it: the comm core and node logic, each a run of the same
-//! file from the same settings, and the command line reaching them. The two services share
-//! the file's pages of code.
+//! file from the same settings, and the command line reaching them. The two services run
+//! their code from the same file.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -83,28 +83,18 @@ fn until(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-/// The mapping of the binary's code in `pid`: its device and inode, and how many of its
-/// bytes are mapped by another process too.
-fn code(pid: u32) -> (String, u64) {
-    let smaps = std::fs::read_to_string(format!("/proc/{pid}/smaps")).expect("smaps");
-    let mut lines = smaps.lines();
-    while let Some(line) = lines.next() {
-        let fields: Vec<_> = line.split_whitespace().collect();
-        let is_code = fields.len() >= 6
-            && fields[1] == "r-xp"
-            && Path::new(fields[5]).file_name() == Path::new(BINARY).file_name();
-        if !is_code {
-            continue;
-        }
-        let file = format!("{} {}", fields[3], fields[4]);
-        for line in lines.by_ref() {
-            if let Some(kb) = line.strip_prefix("Shared_Clean:") {
-                let kb: u64 = kb.trim().trim_end_matches("kB").trim().parse().expect("kB");
-                return (file, kb * 1024);
-            }
-        }
-    }
-    panic!("no code mapping of the binary in {pid}");
+/// The file the binary's code is mapped from in `pid`: its device and inode.
+fn code(pid: u32) -> String {
+    let maps = std::fs::read_to_string(format!("/proc/{pid}/maps")).expect("maps");
+    maps.lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>())
+        .find(|fields| {
+            fields.len() >= 6
+                && fields[1] == "r-xp"
+                && Path::new(fields[5]).file_name() == Path::new(BINARY).file_name()
+        })
+        .map(|fields| format!("{} {}", fields[3], fields[4]))
+        .unwrap_or_else(|| panic!("no code mapping of the binary in {pid}"))
 }
 
 #[test]
@@ -153,12 +143,10 @@ fn both_services_from_one_file_and_the_command_line_reaches_them() {
     assert!(linked.status.success());
     assert!(String::from_utf8_lossy(&linked.stdout).contains("board"));
 
-    // One file mapped by both, and pages of its code held once for the two.
-    let (comm_file, _) = code(comm.pid());
-    let (node_file, shared) = code(node.pid());
-    assert_eq!(comm_file, node_file, "both map the same file");
-    println!("code shared by the two services: {} KiB", shared / 1024);
-    assert!(shared > 0, "no page of code is shared");
+    // Both run their code from the same file, so its pages are in the page cache once for
+    // the two. (How `smaps` counts a page as shared depends on the kernel's folios, so the
+    // file is what is checked.)
+    assert_eq!(code(comm.pid()), code(node.pid()), "both map the same file");
 
     assert!(node.stop(), "node logic stops cleanly");
     assert!(comm.stop(), "the comm core stops cleanly");
