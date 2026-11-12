@@ -326,3 +326,13 @@ body! {
         pub session: u32,
     }
 }
+
+body! {
+    /// To a session node logic had been passed requests from: node logic is back after
+    /// being away, and remembers nothing of this session. What the session had written as
+    /// its own (its resources) is to be written again.
+    pub struct NodeBack = kind::NODE_BACK {
+        /// How many times node logic has attached to this comm core, this one included.
+        pub attach: u32,
+    }
+}

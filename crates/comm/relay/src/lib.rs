@@ -8,7 +8,9 @@
 //!
 //! When node logic is away, the same requests are refused with [`Error::Unavailable`]:
 //! "restarting". Nothing else in the comm core notices. When it comes back, the requests that
-//! stand (a watch) are passed to it again, so a program that was watching goes on being told.
+//! stand (a watch) are passed to it again, so a program that was watching goes on being told,
+//! and every session the node logic before it was serving is told it is back ([`NodeBack`]), so
+//! a provider writes its resources again.
 //!
 //! The relay keeps no record and no workload. What it knows is the table of [`Route`]s: which
 //! kind asks for what, and who may ask. For an action that is whoever the action was
@@ -20,7 +22,7 @@ use std::collections::{HashSet, VecDeque};
 use std::fmt::Write as _;
 
 use orion_msg_actions::{Register, Target};
-use orion_msg_session::{NodeAnswer, NodeAttach, NodeGone, NodeRequest, Refusal};
+use orion_msg_session::{NodeAnswer, NodeAttach, NodeBack, NodeGone, NodeRequest, Refusal};
 use orion_server::{
     Admits, Checked, Cx, Delivery, Error, Incoming, Policy, Principal, Roles, Service, SessionId,
     Sessions, What,
@@ -285,8 +287,12 @@ pub struct Relay {
     node: Option<SessionId>,
     /// The kinds it said it answers, one bit each.
     answers: [u64; 4],
-    /// Sessions node logic has been passed a request from, to tell it when they end.
+    /// Sessions node logic has been passed a request from, to tell it when they end, and
+    /// sessions that asked while it was away. Kept while it is away: they are told when it is
+    /// back ([`NodeBack`]).
     passed: HashSet<SessionId>,
+    /// How many times node logic has attached.
+    attaches: u32,
     standing: Vec<Standing>,
     waiting: VecDeque<Waiting>,
     caller: String,
@@ -312,6 +318,7 @@ impl Relay {
             node: None,
             answers: [0; 4],
             passed: HashSet::new(),
+            attaches: 0,
             standing: Vec::new(),
             waiting: VecDeque::new(),
             caller: String::new(),
@@ -471,7 +478,15 @@ impl Relay {
             }
         }
         self.node = Some(node);
-        self.passed.clear();
+        self.attaches = self.attaches.wrapping_add(1);
+        // The sessions the node logic before this one was serving: this one knows nothing of
+        // them, so what they wrote as their own is to be written again.
+        let back = NodeBack {
+            attach: self.attaches,
+        };
+        for session in std::mem::take(&mut self.passed) {
+            let _ = cx.sessions().send(session, &back, Delivery::Must);
+        }
         let standing = std::mem::take(&mut self.standing);
         for request in &standing {
             if self.answered(request.kind)
@@ -565,6 +580,8 @@ impl Service for Relay {
             self.keep(from, seq, kind, payload)?;
         }
         let Some(node) = self.node.filter(|_| self.answered(kind)) else {
+            // Told when node logic is back, like a session it was serving.
+            self.passed.insert(from);
             return if standing {
                 // Kept, and passed on when node logic comes.
                 Ok(())
@@ -601,7 +618,6 @@ impl Service for Relay {
         if self.node == Some(session) {
             self.node = None;
             self.answers = [0; 4];
-            self.passed.clear();
             self.fail_waiting(sessions);
             return;
         }

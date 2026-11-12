@@ -214,16 +214,21 @@ impl Logic {
 
     /// How long until the next deadline: a run that times out, a workload to start again.
     pub(crate) fn next_deadline(&self) -> Option<Duration> {
-        [self.actions.next_deadline(), self.workloads.next_deadline()]
-            .into_iter()
-            .flatten()
-            .min()
-            .map(|due| Duration::from_millis(due.saturating_sub(self.now_ms())))
+        [
+            self.actions.next_deadline(),
+            self.workloads.next_deadline(),
+            self.records.reclaim_at(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .map(|due| Duration::from_millis(due.saturating_sub(self.now_ms())))
     }
 
     /// Starts again the workloads that are due.
     pub(crate) fn restarts(&mut self, out: &mut dyn Out) {
         let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
+        self.records.reclaim(now, wall_ms, out);
         self.workloads
             .tick(self.records.store_mut(), now, wall_ms, out);
         // A workload starts only when its files are here. Looked at when a file has been
@@ -242,12 +247,12 @@ impl Logic {
     }
 
     pub(crate) fn forget_sessions(&mut self) {
-        self.records.forget_sessions(wall().as_millis() as u64);
+        let now = self.now_ms();
+        self.records.forget_sessions(now);
         self.actions.forget_sessions();
         self.forwards.forget_sessions();
         self.sinks.forget_sessions();
         self.sends.forget();
-        let now = self.now_ms();
         self.workloads.forget_sessions(now);
         #[cfg(feature = "pull")]
         self.pulling.forget_sessions();

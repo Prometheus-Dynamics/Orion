@@ -372,8 +372,7 @@ its topics and runs its actions. The records are the store's and reach every nod
   a resource record, or sits under another name than its own, is `malformed`.
 - **Lost, not gone.** When its provider's session ends, a resource stays listed with state
   `Lost` and everything else as its provider said. When the provider is back and writes it
-  again, it is what the provider says. If the comm core goes, every resource provided
-  through it is lost the same way.
+  again, it is what the provider says.
 - **Bindings are leases.** Whoever is to use a resource alone holds it: a lease record under
   the resource's name, with the holder and when the lease ends (zero for "until released").
   A resource has one holder at a time; another is `busy`. Only a resource that is `Ready` can
@@ -382,8 +381,12 @@ its topics and runs its actions. The records are the store's and reach every nod
   takes its lease with it. Node logic binds with `bind` and `release`; a program binds by
   writing the lease record, under the same rules.
 
-After node logic restarts it no longer knows which session provides what, until each provider
-writes its resource again. A provider that dies in that time is not noticed.
+**After a restart.** Who provides what is not kept: when node logic starts again, or the comm
+core does, node logic knows no provider. The comm core tells every session that node logic
+had been serving, and every one that asked while it was away, that it is back (`NodeBack`),
+and a program's client writes its resources again then, and after it reconnects. Two seconds
+after node logic connects, a resource of this node that nobody has written again is `Lost`.
+A provider that died while node logic was away is noticed that way.
 
 ## Placement
 

@@ -65,6 +65,7 @@ kinds! {
         NODE_REQUEST = 0x0C,
         NODE_ANSWER = 0x0D,
         NODE_GONE = 0x0E,
+        NODE_BACK = 0x0F,
     }
     Records {
         PUT = 0x10,

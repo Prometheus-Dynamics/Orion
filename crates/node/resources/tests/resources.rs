@@ -497,13 +497,34 @@ fn everything_a_holder_holds_is_released_at_once() {
 }
 
 #[test]
-fn a_comm_core_that_goes_loses_every_resource_here() {
+fn after_the_sessions_are_forgotten_what_nobody_writes_again_is_lost() {
     let mut bench = Bench::with_camera();
     bench
         .provide(OTHER, "cam.rear", ResourceState::Ready)
         .expect("provide");
-    assert_eq!(bench.resources.forget_sessions(&mut bench.store, NOW), 2);
-    assert_eq!(bench.state("cam.front"), Some(ResourceState::Lost));
-    assert_eq!(bench.state("cam.rear"), Some(ResourceState::Lost));
+    bench.resources.forget_sessions();
     assert_eq!(bench.resources.provided(), 0);
+    // Nothing is lost yet: the providers have time to say it again.
+    assert_eq!(bench.state("cam.front"), Some(ResourceState::Ready));
+    // One does, through a session with another number.
+    bench
+        .provide(CAMERA_DRIVER + 100, "cam.front", ResourceState::Ready)
+        .expect("provide again");
+    assert_eq!(bench.resources.lose_unprovided(&mut bench.store, NOW), 1);
+    assert_eq!(bench.state("cam.front"), Some(ResourceState::Ready));
+    assert_eq!(bench.state("cam.rear"), Some(ResourceState::Lost));
+    // A lost one is not lost again.
+    assert_eq!(bench.resources.lose_unprovided(&mut bench.store, NOW), 0);
+}
+
+#[test]
+fn a_resource_of_another_node_is_not_lost_here() {
+    let mut bench = Bench::new();
+    let value = camera("cam.far", "other", ResourceState::Ready);
+    bench
+        .store
+        .put(RecordClass::Resource, "cam.far", &value, NOW);
+    bench.resources.forget_sessions();
+    assert_eq!(bench.resources.lose_unprovided(&mut bench.store, NOW), 0);
+    assert_eq!(bench.state("cam.far"), Some(ResourceState::Ready));
 }

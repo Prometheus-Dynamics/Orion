@@ -19,7 +19,8 @@
 //! - `viewer`: reads `drill.frames` and checks each frame is whole. `frame N`, and `torn N`.
 //! - `executor`: the sample executor, offering `process`.
 //! - `provider`: the actions `drill.echo` (answers with its arguments), `drill.stuck` (never
-//!   answers) and `drill.crash` (the provider exits while running it).
+//!   answers) and `drill.crash` (the provider exits while running it), and the resource
+//!   `drill.thing`, `Ready` while it runs.
 //! - `throttle LISTEN TARGET RATE`: not a program of the board's but a slow link to it, for a
 //!   page watching from far away (`testing/board-runs/I7.md`).
 //!
@@ -34,6 +35,7 @@ use std::time::{Duration, Instant};
 
 use orion::actions::{ActionDecl, Admits, Outcome, Policy, Request, Target};
 use orion::buffers::{HoldLimits, NextFrame, Pool};
+use orion::provider::ResourceState;
 use orion::topics::{FieldId, FrameTime, Next, TopicDecl};
 use orion::{Address, Error, Options, Orion, Roles, fields};
 
@@ -49,6 +51,8 @@ pub const COUNT: &str = "drill.count";
 pub const FRAMES: &str = "drill.frames";
 /// The size of a frame.
 pub const FRAME_SIZE: usize = 4096;
+/// The resource the provider speaks for.
+pub const THING: &str = "drill.thing";
 
 /// Runs the role `args` names, or `None` if they do not name one.
 #[must_use]
@@ -292,6 +296,11 @@ fn provider(socket: &Path) -> Result<(), Failed> {
         };
         registrations.push(orion.register_action(&decl, Policy::new(Admits::LOCAL))?);
     }
+    // A resource it speaks for, kept while it runs.
+    let _thing = orion
+        .provider()
+        .resource(THING, "drill")?
+        .publish(ResourceState::Ready)?;
     println!("registered");
     let mut keep = Keep::new();
     loop {

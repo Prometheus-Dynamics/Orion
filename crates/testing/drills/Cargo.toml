@@ -13,7 +13,7 @@ name = "orion-drill"
 path = "src/main.rs"
 
 [dependencies]
-orion = { path = "../../client/orion", features = ["topics", "buffers", "actions", "workloads", "executor"] }
+orion = { path = "../../client/orion", features = ["topics", "buffers", "actions", "workloads", "executor", "provider"] }
 orion-bin = { path = "../../bins/orion" }
 orion-sample-executor = { path = "../sample-executor" }
 rustix = { version = "1", default-features = false, features = ["std", "net"] }
@@ -22,7 +22,7 @@ rustix = { version = "1", default-features = false, features = ["std", "net"] }
 workspace = true
 
 [dev-dependencies]
-orion = { path = "../../client/orion", features = ["topics", "buffers", "actions", "workloads", "executor"] }
+orion = { path = "../../client/orion", features = ["topics", "buffers", "actions", "workloads", "executor", "provider"] }
 orion-device-core = { path = "../../device/core" }
 orion-device-topics = { path = "../../device/topics" }
 rustix = { version = "1", default-features = false, features = ["std", "pty"] }

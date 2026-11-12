@@ -719,6 +719,9 @@ others.
 - Node logic answers with `NodeAnswer`: a session, a kind and a payload. The relay sends that
   frame to that session as it is. A session that is gone is not node logic's failure.
 - When a session ends that node logic was passed a request from, it is told with `NodeGone`.
+- When node logic attaches after one before it, every session that one was passed a request
+  from, and every session refused while it was away, is sent `NodeBack`: node logic knows
+  nothing of it now. The client writes the program's resources again on it.
 - With no node logic attached, or for a kind it did not name, the request is refused with
   `unavailable`. Nothing else in the comm core notices that node logic is away.
 - A request that stands, a watch or a registered action, is kept and passed again to the node

@@ -196,9 +196,23 @@ impl Resources {
     }
 
     /// Forgets who provides what: the sessions are gone with the comm core they came
-    /// through. Their resources are marked lost.
-    pub fn forget_sessions(&mut self, store: &mut Store, wall_ms: u64) -> usize {
-        let names: Vec<String> = std::mem::take(&mut self.providers).into_keys().collect();
+    /// through, or node logic was away. A provider that is still there writes its resources
+    /// again; [`Resources::lose_unprovided`] marks the rest lost.
+    pub fn forget_sessions(&mut self) {
+        self.providers.clear();
+    }
+
+    /// Marks lost every resource of this node that nobody provides now. How many that was.
+    pub fn lose_unprovided(&mut self, store: &mut Store, wall_ms: u64) -> usize {
+        let names: Vec<String> = store
+            .list(RecordClass::Resource, "")
+            .filter(|record| !self.providers.contains_key(&record.key))
+            .filter(|record| {
+                ResourceRecord::decode(&record.version.value)
+                    .is_ok_and(|resource| resource.node == self.me)
+            })
+            .map(|record| record.key)
+            .collect();
         names
             .iter()
             .filter(|name| lose(store, name, wall_ms))

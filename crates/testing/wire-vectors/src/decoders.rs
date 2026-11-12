@@ -46,6 +46,7 @@ decoders! {
     NODE_REQUEST => session::NodeRequest,
     NODE_ANSWER => session::NodeAnswer,
     NODE_GONE => session::NodeGone,
+    NODE_BACK => session::NodeBack,
     IDENTITY => session::Identity,
     REFUSAL => session::Refusal,
     PUT => records::Put,

@@ -13,9 +13,13 @@
 //! taking changes, and once the program has caught up with what it holds the watch asks the
 //! store for everything newer than the last change it was given. Nothing is skipped; a record
 //! that changed several times in between is seen at its latest.
+//!
+//! **A program's resources outlive what node logic remembers.** The resources a program wrote
+//! are kept here and written again when the store has forgotten who provides them: after
+//! [`Records::restore`], and when the comm core says node logic is back after being away.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -85,14 +89,59 @@ struct State {
     answers: Vec<Answer>,
     watches: Vec<Watching>,
     next_watch: u64,
+    /// The resources this program wrote and has not taken away, by name: the value as it was
+    /// last written.
+    provided: BTreeMap<String, Vec<u8>>,
+}
+
+impl State {
+    /// Keeps what a write that was taken says about this program's resources.
+    fn wrote(&mut self, records: &[RecordEntry<'_>]) {
+        for entry in records
+            .iter()
+            .filter(|entry| entry.class == RecordClass::Resource)
+        {
+            if entry.deleted {
+                self.provided.remove(entry.key);
+            } else {
+                self.provided
+                    .insert(entry.key.to_owned(), entry.value.0.to_vec());
+            }
+        }
+    }
+
+    /// This program's resources, to be written again.
+    fn again(&self) -> Vec<RecordEntry<'_>> {
+        self.provided
+            .iter()
+            .map(|(key, value)| RecordEntry {
+                class: RecordClass::Resource,
+                key,
+                stamp: HlcTimestamp::ZERO,
+                deleted: false,
+                value: Bytes(value),
+            })
+            .collect()
+    }
 }
 
 impl Handler for State {
     fn kinds(&self) -> &'static [u8] {
-        &[kind::CHANGED]
+        &[kind::CHANGED, kind::NODE_BACK]
     }
 
-    fn handle(&mut self, frame: &Incoming<'_>, _cx: &mut Cx<'_>) -> Result<(), ClientError> {
+    fn handle(&mut self, frame: &Incoming<'_>, cx: &mut Cx<'_>) -> Result<(), ClientError> {
+        if frame.kind() == kind::NODE_BACK {
+            // Node logic is back and does not know who provides what: say it again. The
+            // answer is not waited for; one that refuses changes nothing here.
+            if !self.provided.is_empty() {
+                let again = self.again();
+                cx.send(&Put {
+                    records: List::new(&again),
+                })?;
+            }
+            return Ok(());
+        }
         let changed: Changed<'_> = frame.body()?;
         if let Some(answer) = self
             .answers
@@ -186,7 +235,9 @@ impl Records {
         let seq = self.client.send(&Put {
             records: List::new(records),
         })?;
-        self.answer(seq)
+        let written = self.answer(seq)?;
+        self.state.borrow_mut().wrote(records);
+        Ok(written)
     }
 
     /// Reads the records of `class` whose keys start with `prefix`. An empty prefix is all of
@@ -238,14 +289,38 @@ impl Records {
         })
     }
 
-    /// Asks again for every watch, each from the newest change it was given, of a store that
-    /// has no memory of this session. Call it after
+    /// Writes this program's resources again, and asks again for every watch, each from the
+    /// newest change it was given, of a store that has no memory of this session. Call it after
     /// [`orion_connect::Session::reconnect`]: nothing is missed, and nothing is seen twice.
     ///
     /// # Errors
     ///
     /// If the connection broke again.
     pub fn restore(&self) -> Result<(), ClientError> {
+        let again: Vec<(String, Vec<u8>)> = {
+            let state = self.state.borrow();
+            state
+                .provided
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        };
+        if !again.is_empty() {
+            let entries: Vec<RecordEntry<'_>> = again
+                .iter()
+                .map(|(key, value)| RecordEntry {
+                    class: RecordClass::Resource,
+                    key,
+                    stamp: HlcTimestamp::ZERO,
+                    deleted: false,
+                    value: Bytes(value),
+                })
+                .collect();
+            // Not waited for: a store that refuses changes nothing here.
+            self.client.send(&Put {
+                records: List::new(&entries),
+            })?;
+        }
         let watches: Vec<(u64, RecordClass, String, HlcTimestamp)> = {
             let state = self.state.borrow();
             state

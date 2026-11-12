@@ -11,6 +11,10 @@ use orion_resources::Resources;
 /// About how many bytes of records go in one message. A record larger than this goes alone.
 const PAGE_BYTES: usize = 24 * 1024;
 
+/// How long a provider has to write its resources again after node logic connects, before
+/// the ones nobody wrote are marked lost.
+pub const RECLAIM_MS: u64 = 2_000;
+
 #[derive(Debug)]
 struct Watcher {
     session: u32,
@@ -26,6 +30,8 @@ pub struct Records {
     resources: Resources,
     watchers: Vec<Watcher>,
     dirty: bool,
+    /// When the resources nobody has written again since node logic connected are lost.
+    reclaim_at: Option<u64>,
 }
 
 /// Sends `records` to `session` as answers to `seq`, in as many messages as it takes. With
@@ -83,6 +89,7 @@ impl Records {
             store,
             watchers: Vec::new(),
             dirty: false,
+            reclaim_at: None,
         }
     }
 
@@ -111,14 +118,30 @@ impl Records {
         self.watchers.len()
     }
 
-    /// Forgets every watch: the comm core they came through is gone, and so are they. What
-    /// those sessions provided is lost until its provider is back.
-    pub fn forget_sessions(&mut self, wall_ms: u64) {
+    /// Forgets every watch and who provides what: the comm core they came through is gone,
+    /// or node logic was away. A provider that is still there writes its resources again
+    /// (the comm core tells it to); the ones nobody has written by `now_ms` and
+    /// [`RECLAIM_MS`] are lost.
+    pub fn forget_sessions(&mut self, now_ms: u64) {
         self.watchers.clear();
-        if self.resources.forget_sessions(&mut self.store, wall_ms) != 0 {
-            self.dirty = true;
-            // Nobody is watching: the changes are only to be saved.
-            let _ = self.store.take_changes();
+        self.resources.forget_sessions();
+        self.reclaim_at = Some(now_ms + RECLAIM_MS);
+    }
+
+    /// When the resources nobody wrote again are to be marked lost, if that is still to come.
+    #[must_use]
+    pub const fn reclaim_at(&self) -> Option<u64> {
+        self.reclaim_at
+    }
+
+    /// Marks lost, once the time has come, the resources of this node nobody wrote again.
+    pub fn reclaim(&mut self, now_ms: u64, wall_ms: u64, out: &mut dyn Out) {
+        if self.reclaim_at.is_none_or(|at| now_ms < at) {
+            return;
+        }
+        self.reclaim_at = None;
+        if self.resources.lose_unprovided(&mut self.store, wall_ms) != 0 {
+            self.publish(out);
         }
     }
 
