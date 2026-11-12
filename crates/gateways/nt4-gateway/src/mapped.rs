@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use orion_broker::{LocalPublisher, TopicId, Topics};
 use orion_msg_topics::{Declare, FieldType};
-use orion_ring::{FieldId, FrameTime, Reader};
+use orion_ring::{FieldId, Reader, SampleTime};
 use orion_wire::Decode;
 use tracing::warn;
 
@@ -197,11 +197,11 @@ impl std::fmt::Debug for Mapped {
     }
 }
 
-fn now() -> FrameTime {
+fn now() -> SampleTime {
     let since = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    FrameTime::from_nanos(since.as_nanos() as u64)
+    SampleTime::from_nanos(since.as_nanos() as u64)
 }
 
 impl Mapped {

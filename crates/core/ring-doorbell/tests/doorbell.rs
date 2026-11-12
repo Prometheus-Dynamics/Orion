@@ -6,7 +6,7 @@ use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use orion_ring::{FieldId, Flags, FrameTime, Next, Ring, Spec};
+use orion_ring::{FieldId, Flags, Next, Ring, SampleTime, Spec};
 use orion_ring_doorbell::{Bell, Doorbell, Wake};
 
 fn readable(doorbell: &Doorbell) -> bool {
@@ -156,7 +156,7 @@ fn no_wake_up_is_lost() {
             writer
                 .publish(
                     FieldId(0),
-                    FrameTime::from_nanos(seq),
+                    SampleTime::from_nanos(seq),
                     Flags::NONE,
                     &seq.to_le_bytes(),
                 )

@@ -27,13 +27,13 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_msg_topics::{BufferInfo, BufferOffer, Field, FieldType, Holds};
-use orion_ring::{FieldId, FrameTime};
+use orion_ring::{FieldId, SampleTime};
 use orion_ring_buffers::{BufferDesc, BufferReader, BufferWriter, PoolView};
 use orion_ring_holds::{HoldTable, Limits};
 use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
 use orion_wire::{List, kind};
 
-pub use orion_ring_buffers::{BufferError, BufferIndex, Dropped, Frame, Held, NextFrame, Pool};
+pub use orion_ring_buffers::{Batch, BufferError, BufferIndex, Dropped, Held, NextBatch, Pool};
 pub use orion_ring_holds::Marks;
 
 /// The most buffers a subscriber's page of marks covers.
@@ -416,7 +416,7 @@ impl BufferPublisher {
     pub fn publish(
         &mut self,
         buffers: &[BufferIndex],
-        time: FrameTime,
+        time: SampleTime,
         meta: &[u8],
     ) -> Result<u64, BufferError> {
         let seq = self.writer.publish(buffers, time, meta)?;
@@ -526,7 +526,7 @@ impl BufferSubscriber {
     /// read: no system call, no allocation, and the frame's bytes are not copied.
     // Not an iterator: a frame borrows the subscriber's copy of its metadata.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> NextFrame<'_, Arc<Marks>> {
+    pub fn next(&mut self) -> NextBatch<'_, Arc<Marks>> {
         refresh(
             &self.state,
             &mut self.handle,
@@ -536,7 +536,7 @@ impl BufferSubscriber {
         );
         match &mut self.frames {
             Some(frames) => frames.next(),
-            None => NextFrame::Empty,
+            None => NextBatch::Empty,
         }
     }
 

@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 use loom::sync::Arc;
 use loom::sync::atomic::AtomicU64;
 use orion_ring::{
-    FieldId, Flags, FrameTime, Geometry, Mem, MemMut, Next, Reader, Sample, Spec, Writer, format,
+    FieldId, Flags, Geometry, Mem, MemMut, Next, Reader, Sample, SampleTime, Spec, Writer, format,
 };
 
 /// Ring memory made of loom's atomics.
@@ -72,7 +72,7 @@ fn payload(seq: u64) -> ([u8; 16], usize) {
 fn publish(writer: &mut Writer<Model>, field: u16) {
     let seq = writer.published();
     let (bytes, len) = payload(seq);
-    let time = FrameTime::from_nanos(1000 + seq);
+    let time = SampleTime::from_nanos(1000 + seq);
     assert_eq!(
         writer.publish(FieldId(field), time, Flags(seq as u8), &bytes[..len]),
         Ok(seq)

@@ -1,4 +1,4 @@
-//! Frame topics through the broker: the pool handed over once, hold marks honoured before a
+//! Buffer topics through the broker: the pool handed over once, hold marks honoured before a
 //! subscriber sees a buffer, a replaced pool, and a comm core that restarts under it all.
 
 use std::os::fd::OwnedFd;
@@ -11,8 +11,8 @@ use orion_msg_session::{Hello, Refusal, Welcome};
 use orion_msg_topics::{
     BufferInfo, BufferOffer, Declare, Field, FieldType, Holds, Opened, Subscribe,
 };
-use orion_ring::{FieldId, FrameTime, Reader, Writer};
-use orion_ring_buffers::{BufferDesc, BufferReader, BufferWriter, Held, NextFrame, Pool, PoolView};
+use orion_ring::{FieldId, Reader, SampleTime, Writer};
+use orion_ring_buffers::{BufferDesc, BufferReader, BufferWriter, Held, NextBatch, Pool, PoolView};
 use orion_ring_doorbell::Doorbell;
 use orion_ring_holds::{HoldTable, Limits as HoldLimits, Marks};
 use orion_server::mem::{self, MemConnection, MemConnector};
@@ -26,7 +26,7 @@ const USER: Principal = Principal::Local {
     gid: 1000,
 };
 const FRAME: usize = 4096;
-const TOPIC: &str = "cam0.frames";
+const TOPIC: &str = "sensor0.data";
 
 fn run(test: impl Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -241,7 +241,7 @@ impl Camera {
         };
         self.writer.buffer_mut(buffer).expect("free").fill(fill);
         self.writer
-            .publish(&[buffer], FrameTime::from_nanos(self.now_ms), &[fill])
+            .publish(&[buffer], SampleTime::from_nanos(self.now_ms), &[fill])
             .expect("publish");
         true
     }
@@ -342,8 +342,8 @@ impl Viewer {
         let mut newest = None;
         for _ in 0..64 {
             match frames.next() {
-                NextFrame::Frame(frame) => newest = Some((frame.meta[0], frame.held)),
-                NextFrame::Empty => break,
+                NextBatch::Batch(frame) => newest = Some((frame.meta[0], frame.held)),
+                NextBatch::Empty => break,
                 _ => {}
             }
         }

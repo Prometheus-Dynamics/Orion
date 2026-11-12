@@ -1,6 +1,6 @@
 [package]
 name = "orion-ring-time"
-description = "The value of a field at or before a frame time: hit, lagged or missing, with a bounded wait."
+description = "The value of a field at or before a sample time: hit, lagged or missing, with a bounded wait."
 edition.workspace = true
 version.workspace = true
 license.workspace = true

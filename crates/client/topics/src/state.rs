@@ -280,7 +280,7 @@ impl State {
         &mut self,
         handle: u32,
         field: u16,
-        time: orion_ring::FrameTime,
+        time: orion_ring::SampleTime,
         flags: u8,
         payload: &[u8],
     ) {

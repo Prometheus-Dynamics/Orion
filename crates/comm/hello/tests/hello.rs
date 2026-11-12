@@ -8,7 +8,7 @@ use orion_hello::{Hello as HelloService, verify};
 use orion_keys::{Identity as Key, Keys, KeysConfig, SharedKeys, random};
 use orion_msg_session::{Hello, Identify, Identity, Refusal, Welcome};
 use orion_msg_topics::{Declare, Field, FieldType, Opened};
-use orion_ring::{FieldId, Flags, FrameTime, Writer};
+use orion_ring::{FieldId, Flags, SampleTime, Writer};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Limits, Principal, Roles, Security};
 use orion_types::KeyId;
@@ -127,7 +127,7 @@ impl Client {
         let _: Opened = Opened::decode(self.payload()).expect("opened");
         let mut writer = Writer::attach(self.fds.take(0).expect("write end")).expect("writer");
         writer
-            .publish(FieldId(0), FrameTime::ZERO, Flags::NONE, value)
+            .publish(FieldId(0), SampleTime::ZERO, Flags::NONE, value)
             .expect("publish");
         writer
     }
@@ -260,7 +260,7 @@ fn facts_other_programs_publish_are_in_the_document_and_go_when_they_go() {
 
         // A fact that changes is the new value the next time someone asks.
         serial
-            .publish(FieldId(0), FrameTime::ZERO, Flags::NONE, b"0000b2")
+            .publish(FieldId(0), SampleTime::ZERO, Flags::NONE, b"0000b2")
             .expect("publish");
         let payload = asker.identify(&nonce).await.to_vec();
         assert_eq!(

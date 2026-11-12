@@ -18,7 +18,7 @@ use std::time::Duration;
 use orion::actions::{ActionCall, Admits, Outcome, Policy, Request, Target};
 use orion::executor::{ExecError, Executor, WorkloadKind, WorkloadName, WorkloadState};
 use orion::provider::ResourceState;
-use orion::topics::{FieldId, FrameTime};
+use orion::topics::{FieldId, SampleTime};
 use orion::workloads::{RestartPolicy, Workload};
 use orion::{Address, Error, Options, Orion, Roles, fields};
 
@@ -86,7 +86,7 @@ pub fn run(socket: &Path) -> Result<Vec<String>, Error> {
     let mut fan = describing.publish(ResourceState::Ready)?;
     speed.publish(
         FieldId(0),
-        FrameTime::from_nanos(1),
+        SampleTime::from_nanos(1),
         &900.0_f64.to_le_bytes(),
     )?;
 
@@ -139,7 +139,7 @@ pub fn run(socket: &Path) -> Result<Vec<String>, Error> {
         && let Some(Request::Run { call, args, .. }) = requests.wait(Duration::from_secs(2))?
     {
         let rpm = f64::from_le_bytes(args.as_slice().try_into().unwrap_or_default());
-        speed.publish(FieldId(0), FrameTime::from_nanos(2), &rpm.to_le_bytes())?;
+        speed.publish(FieldId(0), SampleTime::from_nanos(2), &rpm.to_le_bytes())?;
         requests.finish(call, Outcome::Succeeded, &[], "")?;
     }
     let ended = set.finish(Duration::from_secs(2))?;

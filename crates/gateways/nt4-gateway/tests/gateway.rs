@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use orion::topics::{FieldId, FrameTime, Next, TopicDecl};
+use orion::topics::{FieldId, Next, SampleTime, TopicDecl};
 use orion::{Address, Orion, fields};
 use orion_comm_app::{CommCore, CommSettings};
 use orion_config::Source;
@@ -130,7 +130,7 @@ fn programs(socket: &Path, told: &Told, read: &mpsc::Sender<(u16, Vec<u8>)>) {
     let (mut step, mut alarms) = (0_u64, 0);
     while !told.stop.load(Ordering::Relaxed) {
         step += 1;
-        let time = FrameTime::from_nanos(step);
+        let time = SampleTime::from_nanos(step);
         let litres = step as f64 * 0.5;
         level
             .publish(FieldId(0), time, &litres.to_le_bytes())

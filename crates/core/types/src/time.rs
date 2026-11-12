@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
     Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
 #[serde(transparent)]
-pub struct FrameTime(u64);
+pub struct SampleTime(u64);
 
-impl FrameTime {
+impl SampleTime {
     /// The earliest time.
     pub const ZERO: Self = Self(0);
 
@@ -33,7 +33,7 @@ impl FrameTime {
     }
 }
 
-impl fmt::Display for FrameTime {
+impl fmt::Display for SampleTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}ns", self.0)
     }

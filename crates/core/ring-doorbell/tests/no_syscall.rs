@@ -3,7 +3,7 @@
 
 #![allow(unsafe_code)]
 
-use orion_ring::{FieldId, Flags, FrameTime, Ring, Spec};
+use orion_ring::{FieldId, Flags, Ring, SampleTime, Spec};
 use orion_ring_doorbell::Doorbell;
 
 /// Runs `body` in a child that is killed on any system call but `exit`; returns how it ended.
@@ -84,7 +84,7 @@ fn publishing_to_an_awake_subscriber_makes_no_system_call() {
             if writer
                 .publish(
                     FieldId(0),
-                    FrameTime::from_nanos(seq),
+                    SampleTime::from_nanos(seq),
                     Flags::NONE,
                     &[1; 64],
                 )
@@ -111,7 +111,7 @@ fn ringing_a_sleeping_subscriber_is_the_one_system_call() {
     let mut bell = doorbell.bell().expect("bell");
     doorbell.arm();
     let status = under_the_filter(|| {
-        let _ = writer.publish(FieldId(0), FrameTime::ZERO, Flags::NONE, &[1; 64]);
+        let _ = writer.publish(FieldId(0), SampleTime::ZERO, Flags::NONE, &[1; 64]);
         libc::c_long::from(bell.ring())
     });
     assert!(

@@ -11,7 +11,7 @@ use orion::actions::{Admits, Outcome, Policy, Request};
 use orion::executor::{ExecError, Executor, WorkloadKind, WorkloadName, WorkloadState};
 use orion::provider::ResourceState;
 use orion::records::{Bytes, RecordClass, RecordEntry};
-use orion::topics::{FieldId, FrameTime, TopicDecl};
+use orion::topics::{FieldId, SampleTime, TopicDecl};
 use orion::types::HlcTimestamp;
 use orion::{Address, Options, Orion, Roles, fields};
 use orion_msg_records::{Label, NodeRecord};
@@ -105,12 +105,12 @@ fn fan(socket: &Path) -> Beside {
         let mut fan = describing.publish(ResourceState::Ready).expect("publish");
         let mut publish = |rpm: f64, at: u64| {
             speed
-                .publish(FieldId(0), FrameTime::from_nanos(at), &rpm.to_le_bytes())
+                .publish(FieldId(0), SampleTime::from_nanos(at), &rpm.to_le_bytes())
                 .expect("publish");
             speed
                 .publish(
                     FieldId(1),
-                    FrameTime::from_nanos(at),
+                    SampleTime::from_nanos(at),
                     &[u8::from(rpm > 0.0)],
                 )
                 .expect("publish");
@@ -242,7 +242,7 @@ fn node_show_peers_and_time() {
         })
         .expect("declare");
     model
-        .publish(FieldId(0), FrameTime::from_nanos(1), b"bench-rig")
+        .publish(FieldId(0), SampleTime::from_nanos(1), b"bench-rig")
         .expect("publish");
 
     let (code, out, err) = ctl(&board, "node show");
@@ -366,7 +366,7 @@ fn topic_read_watch_and_publish() {
                 count += 1;
                 tick.publish(
                     FieldId(0),
-                    FrameTime::from_nanos(count as u64 * 10),
+                    SampleTime::from_nanos(count as u64 * 10),
                     &count.to_le_bytes(),
                 )
                 .expect("publish");

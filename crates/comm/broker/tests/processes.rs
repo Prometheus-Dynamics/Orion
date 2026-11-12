@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use common::{Client, Event, Wire};
 use orion_broker::{Broker, BrokerConfig};
-use orion_ring::{FieldId, Flags, FrameTime, Next};
+use orion_ring::{FieldId, Flags, Next, SampleTime};
 use orion_ring_doorbell::{Bell, Doorbell, Wake};
 use orion_server::{Comm, Limits, Security};
 use orion_unix::{UnixCarrier, UnixConnection};
@@ -57,7 +57,7 @@ async fn publisher() {
         writer
             .publish(
                 FieldId(0),
-                FrameTime::from_nanos(value),
+                SampleTime::from_nanos(value),
                 Flags::NONE,
                 &value.to_le_bytes(),
             )

@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use orion_measure::CountingAlloc;
 use orion_measure::harness::steady_allocs;
 use orion_measure::sched::{SystemCalls, pin_current_thread, thread_cpu_ns, without_system_calls};
-use orion_ring::{FieldId, Flags, FrameTime, Next, Reader, Ring, Spec, Writer};
-use orion_ring_buffers::{BufferReader, BufferWriter, NextFrame, Pool};
+use orion_ring::{FieldId, Flags, Next, Reader, Ring, SampleTime, Spec, Writer};
+use orion_ring_buffers::{BufferReader, BufferWriter, NextBatch, Pool};
 use orion_ring_doorbell::{Bell, Doorbell};
 use orion_ring_holds::{HoldTable, Limits, Marks};
 use orion_ring_time::at_or_before;
@@ -99,7 +99,7 @@ fn value_ring() -> Ring {
 
 fn publish(writer: &mut Writer, time: u64) {
     writer
-        .publish(FIELD, FrameTime::from_nanos(time), Flags::NONE, &PAYLOAD)
+        .publish(FIELD, SampleTime::from_nanos(time), Flags::NONE, &PAYLOAD)
         .expect("publish");
 }
 
@@ -155,10 +155,15 @@ fn memory_paths() {
     println!("latest: {latest:.1} ns");
     let lookup = per_call(ROUNDS, |round| {
         black_box(
-            at_or_before(&mut reader, FIELD, FrameTime::from_nanos(time - round % 60)).is_hit(),
+            at_or_before(
+                &mut reader,
+                FIELD,
+                SampleTime::from_nanos(time - round % 60),
+            )
+            .is_hit(),
         );
     });
-    println!("lookup by frame time, 64 deep: {lookup:.1} ns");
+    println!("lookup by sample time, 64 deep: {lookup:.1} ns");
 
     let allocs = steady_allocs(16, 100_000, || {
         time += 1;
@@ -175,7 +180,7 @@ fn memory_paths() {
     let calls = without_system_calls(|| {
         for round in 0..100_000_u64 {
             if writer
-                .publish(FIELD, FrameTime::from_nanos(round), Flags::NONE, &PAYLOAD)
+                .publish(FIELD, SampleTime::from_nanos(round), Flags::NONE, &PAYLOAD)
                 .is_err()
                 || bell.ring()
             {
@@ -316,7 +321,7 @@ fn frames(options: &Options) {
     const BUFFERS: u32 = 4;
     const FRAME: usize = 1 << 20;
     println!(
-        "## Frame topic with hold marks ({} frames at {} Hz, {BUFFERS} buffers of {FRAME} bytes)",
+        "## Buffer topic with hold marks ({} frames at {} Hz, {BUFFERS} buffers of {FRAME} bytes)",
         options.frames, options.hz
     );
     println!();
@@ -393,7 +398,7 @@ fn frames(options: &Options) {
             writer.buffer_mut(buffer).expect("free")[..8].copy_from_slice(&sent.to_le_bytes());
             table.enforce(sent, writer.pool().page());
             writer
-                .publish(&[buffer], FrameTime::from_nanos(sent), &PAYLOAD[..16])
+                .publish(&[buffer], SampleTime::from_nanos(sent), &PAYLOAD[..16])
                 .expect("publish");
             rings += u64::from(bell.ring());
             cost.push(base.elapsed().as_nanos() as u64 - sent);
@@ -438,7 +443,7 @@ fn take_frame(
     pending: &mut Option<(u64, HeldFrame)>,
 ) {
     if pending.is_none()
-        && let NextFrame::Frame(frame) = reader.next()
+        && let NextBatch::Batch(frame) = reader.next()
     {
         *pending = Some((frame.time.as_nanos(), frame.held));
     }
@@ -448,7 +453,7 @@ fn take_frame(
 fn frames_awake() {
     const BUFFERS: u32 = 4;
     const ROUNDS: u64 = 1_000_000;
-    println!("## Frame topic with hold marks, subscriber awake (one thread)");
+    println!("## Buffer topic with hold marks, subscriber awake (one thread)");
     println!();
     let ring = Ring::create(&Spec {
         fields: 1,
@@ -482,13 +487,13 @@ fn frames_awake() {
             return false;
         };
         if writer
-            .publish(&[buffer], FrameTime::from_nanos(time), &PAYLOAD[..16])
+            .publish(&[buffer], SampleTime::from_nanos(time), &PAYLOAD[..16])
             .is_err()
             || bell.ring()
         {
             return false;
         }
-        if let NextFrame::Frame(frame) = reader.next() {
+        if let NextBatch::Batch(frame) = reader.next() {
             held += u64::from(frame.held.bytes(0).is_some());
         }
         true

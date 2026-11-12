@@ -11,7 +11,7 @@ use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_measure::{CountingAlloc, thread_counts};
 use orion_msg_topics::{Declare, Field, FieldType};
-use orion_ring::{FieldId, FrameTime, Next};
+use orion_ring::{FieldId, Next, SampleTime};
 use orion_ring_time::Lookup;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_tcp::{TcpCarrier, TcpOptions};
@@ -207,13 +207,13 @@ fn publish_and_read(board: &Board, publishes: &Address, topic: &str) {
         publisher
             .publish(
                 ANGLE,
-                FrameTime::from_nanos(step * 100),
+                SampleTime::from_nanos(step * 100),
                 &(step as f64 * 0.5).to_le_bytes(),
             )
             .expect("publish");
     }
     publisher
-        .publish(STATE, FrameTime::from_nanos(1000), &7_i64.to_le_bytes())
+        .publish(STATE, SampleTime::from_nanos(1000), &7_i64.to_le_bytes())
         .expect("publish");
     assert!(
         subscriber.wait(Duration::from_secs(2)).expect("wait"),
@@ -246,24 +246,24 @@ fn publish_and_read(board: &Board, publishes: &Address, topic: &str) {
         Some(7_i64.to_le_bytes().to_vec())
     );
     // The value that belongs to a time: the newest at or before it.
-    let Lookup::Hit(found) = subscriber.at_or_before(ANGLE, FrameTime::from_nanos(400)) else {
+    let Lookup::Hit(found) = subscriber.at_or_before(ANGLE, SampleTime::from_nanos(400)) else {
         panic!("no sample for 400");
     };
     assert_eq!(angle(found), (2.0, 400));
     let Lookup::Lagged { sample, lag_ns } =
-        subscriber.at_or_before(ANGLE, FrameTime::from_nanos(450))
+        subscriber.at_or_before(ANGLE, SampleTime::from_nanos(450))
     else {
         panic!("no sample before 450");
     };
     assert_eq!((angle(sample), lag_ns), ((2.0, 400), 50));
     assert!(matches!(
-        subscriber.at_or_before(ANGLE, FrameTime::from_nanos(50)),
+        subscriber.at_or_before(ANGLE, SampleTime::from_nanos(50)),
         Lookup::Missing
     ));
 
     // A sample that is not the topic's is refused where it is made.
     let too_long = [0_u8; 17];
-    match publisher.publish(ANGLE, FrameTime::from_nanos(1), &too_long) {
+    match publisher.publish(ANGLE, SampleTime::from_nanos(1), &too_long) {
         Err(TopicError::Publish(_)) => {}
         // Across the network the comm core refuses it, and the refusal is heard later.
         Ok(()) => assert!(!matches!(publishes, Address::Local(_))),
@@ -275,7 +275,7 @@ fn publish_and_read(board: &Board, publishes: &Address, topic: &str) {
         publisher
             .publish(
                 ANGLE,
-                FrameTime::from_nanos(2000 + step),
+                SampleTime::from_nanos(2000 + step),
                 &1.0_f64.to_le_bytes(),
             )
             .expect("publish");
@@ -285,7 +285,7 @@ fn publish_and_read(board: &Board, publishes: &Address, topic: &str) {
         publisher
             .publish(
                 ANGLE,
-                FrameTime::from_nanos(3000 + step),
+                SampleTime::from_nanos(3000 + step),
                 &(step as f64).to_le_bytes(),
             )
             .expect("publish");
@@ -307,7 +307,7 @@ fn publish_and_read(board: &Board, publishes: &Address, topic: &str) {
             read += 1;
         }
         if subscriber
-            .at_or_before(ANGLE, FrameTime::from_nanos(20_000))
+            .at_or_before(ANGLE, SampleTime::from_nanos(20_000))
             .sample()
             .is_some()
         {
@@ -359,7 +359,7 @@ fn a_subscriber_sleeps_until_something_is_published() {
             publisher
                 .publish(
                     ANGLE,
-                    FrameTime::from_nanos(tick),
+                    SampleTime::from_nanos(tick),
                     &(tick as f64).to_le_bytes(),
                 )
                 .expect("publish");

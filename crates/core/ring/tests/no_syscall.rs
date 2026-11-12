@@ -5,7 +5,7 @@
 
 #![allow(unsafe_code)]
 
-use orion_ring::{FieldId, Flags, FrameTime, Next, Ring, Spec};
+use orion_ring::{FieldId, Flags, Next, Ring, SampleTime, Spec};
 
 const DONE: libc::c_long = 0;
 const WRONG: libc::c_long = 9;
@@ -96,7 +96,7 @@ fn publish_and_read_make_no_system_call() {
         for seq in 0..20_000_u64 {
             let field = FieldId((seq % 2) as u16);
             if writer
-                .publish(field, FrameTime::from_nanos(seq), Flags::NONE, &payload)
+                .publish(field, SampleTime::from_nanos(seq), Flags::NONE, &payload)
                 .is_err()
                 || writer.subscribers() != 0
             {

@@ -31,7 +31,7 @@ use orion_connect::{Client, ClientError};
 use orion_msg_topics::{
     Declare, Field, Sample as SampleMessage, SampleFlags, Subscribe, TopicStatus,
 };
-use orion_ring::{FieldId, Flags, FrameTime, Next, PublishError, Reader, RingError, Sample};
+use orion_ring::{FieldId, Flags, Next, PublishError, Reader, RingError, Sample, SampleTime};
 use orion_ring_doorbell::Doorbell;
 use orion_ring_time::Lookup;
 use orion_types::TopicRef;
@@ -355,7 +355,7 @@ impl Publisher {
     pub fn publish(
         &mut self,
         field: FieldId,
-        time: FrameTime,
+        time: SampleTime,
         payload: &[u8],
     ) -> Result<(), TopicError> {
         self.publish_flagged(field, time, Flags::NONE, payload)
@@ -369,7 +369,7 @@ impl Publisher {
     pub fn publish_flagged(
         &mut self,
         field: FieldId,
-        time: FrameTime,
+        time: SampleTime,
         flags: Flags,
         payload: &[u8],
     ) -> Result<(), TopicError> {
@@ -529,7 +529,7 @@ impl Subscriber {
     }
 
     /// The sample of `field` that belongs to `time`: the newest one at or before it.
-    pub fn at_or_before(&mut self, field: FieldId, time: FrameTime) -> Lookup<'_> {
+    pub fn at_or_before(&mut self, field: FieldId, time: SampleTime) -> Lookup<'_> {
         self.refresh();
         match &mut self.reader {
             Some(reader) => orion_ring_time::at_or_before(reader, field, time),

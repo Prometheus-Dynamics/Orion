@@ -32,7 +32,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use orion_broker::{LocalPublisher, Topics};
 use orion_msg_topics::FieldType;
-use orion_ring::{FieldId, FrameTime};
+use orion_ring::{FieldId, SampleTime};
 use orion_server::Comm;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::task::JoinHandle;
@@ -132,7 +132,7 @@ impl StatusTopic {
             .unwrap_or_default();
         if self
             .publisher
-            .publish(FrameTime::from_nanos(since.as_nanos() as u64), &changed)
+            .publish(SampleTime::from_nanos(since.as_nanos() as u64), &changed)
             .is_ok()
         {
             self.last = Some(status.clone());

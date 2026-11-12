@@ -1,4 +1,4 @@
-//! Buffer topics: frames are topics.
+//! Buffer topics: data too large to copy, passed as buffers in shared memory.
 //!
 //! A frame is too large to copy into a ring, so a buffer topic's ring carries *which buffers*
 //! hold the frame, and the buffers themselves are shared memory handed over once.
@@ -8,7 +8,7 @@
 //!   descriptors plus a small [pool page](page) the publisher writes.
 //! - A [`PoolView`] is a subscriber's read-only mapping of the same buffers.
 //! - Each frame is one ring [entry](entry): the pool's generation, one or more buffers (an image
-//!   and its pyramid levels travel together), the frame time and opaque metadata.
+//!   and its pyramid levels travel together), the sample time and opaque metadata.
 //! - A [`BufferWriter`] publishes entries and takes buffers back. A [`BufferReader`] reads
 //!   entries and hands out [`Held`] frames, read in place: no copy.
 //!
@@ -38,7 +38,7 @@ mod writer;
 use core::fmt;
 
 pub use pool::{BufferDesc, Pool, PoolView};
-pub use reader::{BufferReader, Frame, Held, NextFrame};
+pub use reader::{Batch, BufferReader, Held, NextBatch};
 pub use writer::BufferWriter;
 
 /// A buffer of a pool: its position in the pool's list.

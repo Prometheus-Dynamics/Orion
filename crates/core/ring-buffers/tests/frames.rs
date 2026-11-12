@@ -6,10 +6,10 @@ use std::os::fd::{FromRawFd, OwnedFd};
 
 use orion_measure::CountingAlloc;
 use orion_measure::harness::assert_steady_no_allocs;
-use orion_ring::{FieldId, FrameTime, Ring, RingError, Spec};
+use orion_ring::{FieldId, Ring, RingError, SampleTime, Spec};
 use orion_ring_buffers::{
-    BufferDesc, BufferError, BufferIndex, BufferReader, BufferWriter, Dropped, Frame, Holders,
-    NextFrame, NoHolders, NoMarks, Pool, PoolView,
+    Batch, BufferDesc, BufferError, BufferIndex, BufferReader, BufferWriter, Dropped, Holders,
+    NextBatch, NoHolders, NoMarks, Pool, PoolView,
 };
 
 #[global_allocator]
@@ -46,14 +46,14 @@ fn send(
     let buffer = writer.take(holders)?;
     writer.buffer_mut(buffer).expect("free").fill(fill);
     writer
-        .publish(&[buffer], FrameTime::from_nanos(time), &[fill, fill])
+        .publish(&[buffer], SampleTime::from_nanos(time), &[fill, fill])
         .expect("publish");
     Ok(buffer)
 }
 
-fn frame<'a>(next: NextFrame<'a>) -> Frame<'a> {
+fn frame<'a>(next: NextBatch<'a>) -> Batch<'a> {
     match next {
-        NextFrame::Frame(frame) => frame,
+        NextBatch::Batch(frame) => frame,
         other => panic!("{other:?}"),
     }
 }
@@ -70,12 +70,12 @@ impl Holders for Holding {
 #[test]
 fn a_frame_is_read_in_place_with_its_time_and_metadata() {
     let (_ring, mut writer, mut reader) = topic(4);
-    assert!(matches!(reader.next(), NextFrame::Empty));
+    assert!(matches!(reader.next(), NextBatch::Empty));
     let buffer = send(&mut writer, &NoHolders, 0xAB, 777).expect("frame");
     let frame = frame(reader.next());
     assert_eq!(
         (frame.seq, frame.time, frame.meta),
-        (0, FrameTime::from_nanos(777), &[0xAB, 0xAB][..])
+        (0, SampleTime::from_nanos(777), &[0xAB, 0xAB][..])
     );
     assert_eq!((frame.held.len(), frame.held.buffer(0)), (1, Some(buffer)));
     let bytes = frame.held.bytes(0).expect("bytes");
@@ -109,7 +109,7 @@ fn a_frame_whose_buffer_was_taken_back_is_skipped_not_misread() {
     for fill in 1..=3 {
         send(&mut writer, &NoHolders, fill, u64::from(fill)).expect("frame");
     }
-    assert!(matches!(reader.next(), NextFrame::Skipped(1)));
+    assert!(matches!(reader.next(), NextBatch::Skipped(1)));
     for fill in 2..=3 {
         let frame = frame(reader.next());
         assert_eq!(frame.meta, [fill, fill]);
@@ -122,7 +122,7 @@ fn a_frame_whose_buffer_was_taken_back_is_skipped_not_misread() {
                 .all(|byte| *byte == fill)
         );
     }
-    assert!(matches!(reader.next(), NextFrame::Empty));
+    assert!(matches!(reader.next(), NextBatch::Empty));
     assert_eq!(reader.missed(), 1);
 }
 
@@ -141,7 +141,7 @@ fn the_publisher_drops_frames_instead_of_waiting_and_keeps_the_newest_frame() {
     for _ in 0..2 {
         assert!(matches!(
             reader.next(),
-            NextFrame::Skipped(_) | NextFrame::Frame(_)
+            NextBatch::Skipped(_) | NextBatch::Batch(_)
         ));
     }
     // One reader lets go: that buffer, and only that one, comes back.
@@ -163,7 +163,7 @@ fn a_frame_of_several_buffers_travels_and_comes_back_together() {
             .fill(level as u8 + 10);
     }
     writer
-        .publish(&levels, FrameTime::from_nanos(9), b"pyramid")
+        .publish(&levels, SampleTime::from_nanos(9), b"pyramid")
         .expect("publish");
     let frame = frame(reader.next());
     assert_eq!((frame.held.len(), frame.meta), (3, &b"pyramid"[..]));
@@ -187,7 +187,7 @@ fn a_frame_of_several_buffers_travels_and_comes_back_together() {
 #[test]
 fn publishes_that_break_the_rules_are_refused() {
     let (_ring, mut writer, _reader) = topic(2);
-    let t = FrameTime::ZERO;
+    let t = SampleTime::ZERO;
     assert_eq!(writer.publish(&[], t, b""), Err(BufferError::Count));
     assert_eq!(
         writer.publish(&[BufferIndex(0); 9], t, b""),
@@ -228,7 +228,7 @@ fn a_replaced_pool_is_announced_and_old_frames_stay_readable_while_held() {
     // The reader is told, once, and loses the frame it could not read.
     assert!(matches!(
         reader.next(),
-        NextFrame::PoolChanged { generation: 2 }
+        NextBatch::PoolChanged { generation: 2 }
     ));
     reader.set_pool(view, NoMarks);
     let new = frame(reader.next());
@@ -327,7 +327,7 @@ fn an_entry_naming_buffers_outside_the_pool_is_not_followed() {
         let len = orion_ring_buffers::entry::write(&mut payload, 1, buffers, b"").expect("entry");
         raw.publish(
             FieldId(0),
-            FrameTime::ZERO,
+            SampleTime::ZERO,
             orion_ring::Flags::NONE,
             &payload[..len],
         )
@@ -336,20 +336,20 @@ fn an_entry_naming_buffers_outside_the_pool_is_not_followed() {
     // Garbage where an entry should be, and an entry cut short.
     raw.publish(
         FieldId(0),
-        FrameTime::ZERO,
+        SampleTime::ZERO,
         orion_ring::Flags::NONE,
         &[0xFF; 40],
     )
     .expect("publish");
     raw.publish(
         FieldId(0),
-        FrameTime::ZERO,
+        SampleTime::ZERO,
         orion_ring::Flags::NONE,
         &[1, 0, 0, 0, 2, 0, 0, 0, 0],
     )
     .expect("publish");
-    assert!(matches!(reader.next(), NextFrame::Skipped(4)));
-    assert!(matches!(reader.next(), NextFrame::Empty));
+    assert!(matches!(reader.next(), NextBatch::Skipped(4)));
+    assert!(matches!(reader.next(), NextBatch::Empty));
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn publishing_and_reading_frames_allocates_nothing() {
     assert_steady_no_allocs("frames", 16, 10_000, || {
         fill = fill.wrapping_add(1);
         send(&mut writer, &NoHolders, fill, u64::from(fill)).expect("frame");
-        if let NextFrame::Frame(frame) = reader.next() {
+        if let NextBatch::Batch(frame) = reader.next() {
             read += u64::from(frame.held.bytes(0).expect("bytes")[100] == fill);
         }
     });

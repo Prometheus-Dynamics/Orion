@@ -13,9 +13,9 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use orion_fdpass::{recv, send};
-use orion_ring::{FieldId, FrameTime, Reader, Ring, Spec};
+use orion_ring::{FieldId, Reader, Ring, SampleTime, Spec};
 use orion_ring_buffers::{
-    BufferDesc, BufferReader, BufferWriter, NextFrame, NoHolders, NoMarks, Pool, PoolView,
+    BufferDesc, BufferReader, BufferWriter, NextBatch, NoHolders, NoMarks, Pool, PoolView,
 };
 
 const SOCKET_ENV: &str = "ORION_TEST_SUBSCRIBER_SOCKET";
@@ -73,10 +73,10 @@ fn subscriber_process() {
 
     let mut found = None;
     wait_for("a frame", || {
-        if let NextFrame::Frame(frame) = reader.next() {
+        if let NextBatch::Batch(frame) = reader.next() {
             assert_eq!(
                 (frame.time, frame.meta),
-                (FrameTime::from_nanos(1234), &b"exposure=7"[..])
+                (SampleTime::from_nanos(1234), &b"exposure=7"[..])
             );
             found = Some(frame.held);
         }
@@ -161,7 +161,7 @@ fn a_pool_passes_between_processes_and_a_frame_is_read_back_with_no_copy() {
     let buffer = writer.take(&NoHolders).expect("a free buffer");
     writer.buffer_mut(buffer).expect("free").fill(0x5A);
     writer
-        .publish(&[buffer], FrameTime::from_nanos(1234), b"exposure=7")
+        .publish(&[buffer], SampleTime::from_nanos(1234), b"exposure=7")
         .expect("publish");
 
     expect(ours.as_fd(), b"read");

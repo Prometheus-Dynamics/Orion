@@ -14,7 +14,7 @@
 //! [`Latest`] also remembers what it last returned for each field, so a reader that looks at
 //! many fields over and over can skip the ones that have not changed without copying them.
 
-use orion_ring::{FieldId, FrameTime, Mem, ReadMap, Reader, Sample};
+use orion_ring::{FieldId, Mem, ReadMap, Reader, Sample, SampleTime};
 
 /// What a field holds now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +43,7 @@ impl<'a> Value<'a> {
 /// Whether a sample that belongs to `time` is past `expiry_ms` at `now`. An expiry of zero never
 /// expires. A sample from the future (a clock that stepped back) is not expired.
 #[must_use]
-pub const fn is_expired(time: FrameTime, now: FrameTime, expiry_ms: u32) -> bool {
+pub const fn is_expired(time: SampleTime, now: SampleTime, expiry_ms: u32) -> bool {
     expiry_ms != 0 && now.saturating_since(time) > expiry_ms as u64 * 1_000_000
 }
 
@@ -79,7 +79,7 @@ impl<M: Mem> Latest<M> {
     }
 
     /// The value of `field` at `now`. Constant time in the number of fields.
-    pub fn get(&mut self, field: FieldId, now: FrameTime) -> Value<'_> {
+    pub fn get(&mut self, field: FieldId, now: SampleTime) -> Value<'_> {
         let expiry_ms = self.expiry_ms();
         match self.reader.latest(field) {
             Some(sample) if is_expired(sample.time, now, expiry_ms) => Value::Expired(sample),

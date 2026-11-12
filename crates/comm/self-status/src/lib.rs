@@ -28,7 +28,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use orion_broker::{Broker, LocalPublisher, Topic, TopicId, TopicWatch, Topics};
 use orion_msg_topics::FieldType;
-use orion_ring::{FieldId, FrameTime};
+use orion_ring::{FieldId, SampleTime};
 use orion_server::{Comm, Error, SessionId, Sessions};
 use orion_supervise::{State, Status};
 use tokio::sync::Notify;
@@ -63,11 +63,11 @@ const COMM_FIELDS: [&str; 10] = [
 ];
 const STATE_FIELDS: [&str; 4] = ["state", "failures", "restarts", "retry_at_ms"];
 
-fn now() -> FrameTime {
+fn now() -> SampleTime {
     let since = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    FrameTime::from_nanos(since.as_nanos() as u64)
+    SampleTime::from_nanos(since.as_nanos() as u64)
 }
 
 /// Declares a topic the comm core publishes itself: latest values of eight bytes each.

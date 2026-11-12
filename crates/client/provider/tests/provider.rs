@@ -7,7 +7,7 @@ use orion_connect::{Address, Client, Options, Roles, Session};
 use orion_msg_topics::{Declare, Field, FieldType};
 use orion_provider::{Found, Provider, ResourceState, resources};
 use orion_records::Records;
-use orion_ring::{FieldId, FrameTime};
+use orion_ring::{FieldId, SampleTime};
 use orion_stubs::Board;
 use orion_topics::{Publisher, Topics};
 use orion_wire::Decode;
@@ -99,7 +99,7 @@ struct Fan {
 impl Fan {
     fn publish(&mut self) {
         self.ticks += 1;
-        let time = FrameTime::from_nanos(self.ticks);
+        let time = SampleTime::from_nanos(self.ticks);
         self.speed
             .publish(FieldId(0), time, &self.rpm.to_le_bytes())
             .expect("publish");

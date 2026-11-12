@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use orion::topics::{FieldId, FrameTime, Next, TopicDecl};
+use orion::topics::{FieldId, Next, SampleTime, TopicDecl};
 use orion::{Address, Error, Orion, fields};
 
 fn main() -> Result<(), Error> {
@@ -33,7 +33,7 @@ fn main() -> Result<(), Error> {
     let mut reading = dashboard.subscribe("tank.level")?;
 
     for litres in [40.0_f64, 41.5, 43.0] {
-        level.publish(FieldId(0), FrameTime::from_nanos(0), &litres.to_le_bytes())?;
+        level.publish(FieldId(0), SampleTime::from_nanos(0), &litres.to_le_bytes())?;
     }
     reading.wait(Duration::from_secs(2))?;
     while let Next::Sample(sample) = reading.next() {

@@ -5,7 +5,7 @@
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use orion_ring::{FieldId, Flags, FrameTime, Next, Reader, Ring, RingError, Spec, Writer};
+use orion_ring::{FieldId, Flags, Next, Reader, Ring, RingError, SampleTime, Spec, Writer};
 
 fn spec(fields: u32, history: u32, max_payload: u32) -> Spec {
     Spec {
@@ -47,7 +47,7 @@ fn a_sample_crosses_from_the_write_end_to_a_read_end() {
     writer
         .publish(
             FieldId(1),
-            FrameTime::from_nanos(42),
+            SampleTime::from_nanos(42),
             Flags::OTHERS_DEPEND,
             b"hello",
         )
@@ -55,7 +55,7 @@ fn a_sample_crosses_from_the_write_end_to_a_read_end() {
     match reader.next() {
         Next::Sample(sample) => {
             assert_eq!((sample.seq, sample.field), (0, FieldId(1)));
-            assert_eq!(sample.time, FrameTime::from_nanos(42));
+            assert_eq!(sample.time, SampleTime::from_nanos(42));
             assert!(sample.flags.has(Flags::OTHERS_DEPEND));
             assert_eq!(sample.payload, b"hello");
         }
@@ -216,7 +216,7 @@ fn readers_racing_the_writer_never_see_a_torn_sample() {
             let payload = fill(&mut buffer, seq);
             let field = FieldId((seq % 2) as u16);
             writer
-                .publish(field, FrameTime::from_nanos(seq * 7), Flags::NONE, payload)
+                .publish(field, SampleTime::from_nanos(seq * 7), Flags::NONE, payload)
                 .expect("publish");
         }
         done.store(true, Ordering::Release);

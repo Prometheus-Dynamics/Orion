@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 use orion::actions::{ActionCall, Outcome, Target, Update};
 use orion::files::{FileState, Pull};
 use orion::records::RecordClass;
-use orion::topics::{FieldId, FrameTime, Next, Status, Subscriber, TopicDecl};
+use orion::topics::{FieldId, Next, SampleTime, Status, Subscriber, TopicDecl};
 use orion::workloads::{RestartPolicy, Workload, WorkloadState};
 use orion::{Address, Error, Options, Orion};
 use orion_msg_records::NodeRecord;
@@ -399,7 +399,7 @@ fn topic_publish(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         expiry_ms: 0,
         max_payload: largest as u32,
     })?;
-    let time = FrameTime::from_nanos(
+    let time = SampleTime::from_nanos(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_nanos() as u64),

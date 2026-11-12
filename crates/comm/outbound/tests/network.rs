@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use orion::topics::{FieldId, FrameTime, Next, Status, Subscriber, TopicDecl};
+use orion::topics::{FieldId, Next, SampleTime, Status, Subscriber, TopicDecl};
 use orion::{Address, Orion, fields};
 use orion_stubs::Board;
 
@@ -71,7 +71,7 @@ fn a_subscriber_across_the_network_reads_as_one_on_the_board_does() {
         level
             .publish(
                 FieldId(0),
-                FrameTime::from_nanos(*time),
+                SampleTime::from_nanos(*time),
                 &litres.to_le_bytes(),
             )
             .expect("publish");
@@ -93,7 +93,7 @@ fn a_subscriber_across_the_network_reads_as_one_on_the_board_does() {
     level
         .publish(
             FieldId(0),
-            FrameTime::from_nanos(201),
+            SampleTime::from_nanos(201),
             &100.5_f64.to_le_bytes(),
         )
         .expect("publish");

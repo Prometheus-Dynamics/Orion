@@ -11,7 +11,7 @@ use orion_msg_topics::{
     BatchSample, Declare, Demand, Field, FieldType, Opened, Sample, SampleBatch, SampleFlags,
     Subscribe,
 };
-use orion_ring::{FieldId, Flags, FrameTime, Next, Reader};
+use orion_ring::{FieldId, Flags, Next, Reader, SampleTime};
 use orion_ring_doorbell::{Doorbell, Wake};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Limits, Principal, Roles, Security};
@@ -163,7 +163,7 @@ impl Client {
         let sample = Sample {
             handle,
             field,
-            time: FrameTime::from_nanos(time),
+            time: SampleTime::from_nanos(time),
             flags: SampleFlags::OTHERS_DEPEND,
             payload: Bytes(&value.to_le_bytes()),
         };
@@ -232,7 +232,7 @@ fn a_publisher_without_shared_memory_and_a_reader_with_it_agree() {
         }
         assert_eq!(read(&mut reader), None);
         let newest = reader.latest(FieldId(1)).expect("latest");
-        assert_eq!(newest.time, FrameTime::from_nanos(1049));
+        assert_eq!(newest.time, SampleTime::from_nanos(1049));
 
         // A sleeping subscriber is woken by a sample published on its behalf.
         doorbell.arm();
@@ -252,7 +252,7 @@ fn a_publisher_without_shared_memory_and_a_reader_with_it_agree() {
             .enumerate()
             .map(|(index, value)| BatchSample {
                 field: 1,
-                time: FrameTime::from_nanos(3000 + index as u64),
+                time: SampleTime::from_nanos(3000 + index as u64),
                 flags: SampleFlags::NONE,
                 payload: Bytes(value),
             })
@@ -308,7 +308,7 @@ fn only_a_topics_own_publisher_without_a_ring_may_send_its_samples() {
         let big = Sample {
             handle,
             field: 0,
-            time: FrameTime::ZERO,
+            time: SampleTime::ZERO,
             flags: SampleFlags::NONE,
             payload: Bytes(&[0; 17]),
         };

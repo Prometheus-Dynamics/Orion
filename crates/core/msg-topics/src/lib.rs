@@ -4,7 +4,7 @@
 
 #![no_std]
 
-use orion_types::{FrameTime, TopicName, TopicRef};
+use orion_types::{SampleTime, TopicName, TopicRef};
 use orion_wire::{Bytes, List, body, kind, open_enum};
 use serde::{Deserialize, Serialize};
 
@@ -71,7 +71,7 @@ body! {
         /// The field.
         pub field: u16,
         /// The time it belongs to.
-        pub time: FrameTime,
+        pub time: SampleTime,
         /// Its flags.
         pub flags: SampleFlags,
         /// The value.
@@ -163,7 +163,7 @@ body! {
         /// The field.
         pub field: u16,
         /// The time it belongs to.
-        pub time: FrameTime,
+        pub time: SampleTime,
         /// Its flags.
         pub flags: SampleFlags,
         /// The value.

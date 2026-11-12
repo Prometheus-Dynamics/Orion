@@ -21,7 +21,7 @@ use orion_reply::{Asked, Out};
 use orion_ring::FieldId;
 use orion_store::Store;
 use orion_topics::Publisher;
-use orion_types::{Error, FrameTime, NodeName};
+use orion_types::{Error, NodeName, SampleTime};
 use orion_wire::{Bytes, Decode, kind};
 
 use crate::records::Records;
@@ -83,10 +83,10 @@ pub(crate) fn publish(topic: &mut Publisher, events: &[Event], running: usize) {
             end -= 1;
         }
         line.push_str(&event.message[..end]);
-        let time = FrameTime::from_nanos(wall().as_nanos() as u64);
+        let time = SampleTime::from_nanos(wall().as_nanos() as u64);
         let _ = topic.publish(FieldId(0), time, line.as_bytes());
     }
-    let time = FrameTime::from_nanos(wall().as_nanos() as u64);
+    let time = SampleTime::from_nanos(wall().as_nanos() as u64);
     let _ = topic.publish(FieldId(1), time, &(running as i64).to_le_bytes());
 }
 

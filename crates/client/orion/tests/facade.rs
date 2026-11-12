@@ -6,7 +6,7 @@ mod roles;
 use std::time::Duration;
 
 use orion::records::{RecordClass, RecordEntry};
-use orion::topics::{FieldId, FrameTime, Next, Status, TopicDecl};
+use orion::topics::{FieldId, Next, SampleTime, Status, TopicDecl};
 use orion::types::HlcTimestamp;
 use orion::{Address, Orion, fields};
 use orion_stubs::Board;
@@ -54,7 +54,7 @@ fn a_comm_core_that_restarts_stops_nothing_that_was_flowing() {
         level
             .publish(
                 FieldId(0),
-                FrameTime::from_nanos(value),
+                SampleTime::from_nanos(value),
                 &(value as f64).to_le_bytes(),
             )
             .expect("publish");
@@ -147,7 +147,7 @@ fn orion_wire_bytes(bytes: &[u8]) -> orion::records::Bytes<'_> {
 #[cfg(feature = "buffers")]
 #[test]
 fn a_camera_offers_its_pool_again_to_a_comm_core_that_restarts() {
-    use orion::buffers::{HoldLimits, NextFrame, Pool};
+    use orion::buffers::{HoldLimits, NextBatch, Pool};
 
     let mut board = Board::start("facade-pool");
     let (dir, port) = (board.dir().to_owned(), board.network().port());
@@ -182,11 +182,11 @@ fn a_camera_offers_its_pool_again_to_a_comm_core_that_restarts() {
         if let Ok(buffer) = frames.take() {
             frames.buffer_mut(buffer).expect("memory").fill(fill);
             frames
-                .publish(&[buffer], FrameTime::from_nanos(u64::from(fill)), &[])
+                .publish(&[buffer], SampleTime::from_nanos(u64::from(fill)), &[])
                 .expect("publish");
         }
         let _ = viewer.pump(Duration::from_millis(5));
-        if let NextFrame::Frame(frame) = reading.next() {
+        if let NextBatch::Batch(frame) = reading.next() {
             let filled = frame.time.as_nanos() as u8;
             assert!(
                 frame

@@ -1,4 +1,4 @@
-//! Buffer topics in the broker: frames are topics.
+//! Buffer topics in the broker.
 //!
 //! A frame topic is an ordinary topic whose ring entries name buffers. What it adds to set-up
 //! is the buffers themselves and the hold marks:

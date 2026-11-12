@@ -243,7 +243,7 @@ a ring and reads it. The ring is a local copy, and `orion-topic-peers` fills it.
   on they are same-board subscribers, with history and "the value at or before".
 - **Before the topic exists** a subscriber waits, as it would on its own board, and is handed
   the ring when someone on the other node declares the topic.
-- **Frame times in this board's time.** A sample's time is on its publisher's clock. The link
+- **Sample times in this board's time.** A sample's time is on its publisher's clock. The link
   compares the two clocks with the request the time service answers, when it connects and
   every ten seconds, and adds this clock less that one to each sample's time. A difference
   smaller than half the round trip, or than a fifth of a millisecond, is not one the

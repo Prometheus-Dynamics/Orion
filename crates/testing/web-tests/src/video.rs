@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use orion::topics::{FieldId, Flags, FrameTime, TopicDecl};
+use orion::topics::{FieldId, Flags, SampleTime, TopicDecl};
 use orion::{Error, Orion, fields};
 
 /// The topic of JPEG pictures.
@@ -139,7 +139,7 @@ pub fn publish(orion: &Orion, clip: &Clip, rate: u32, stop: &AtomicBool) -> Resu
     while !stop.load(Ordering::Relaxed) {
         let at = number as usize;
         number += 1;
-        let time = FrameTime::from_nanos(number);
+        let time = SampleTime::from_nanos(number);
         if !clip.jpegs.is_empty() {
             jpeg.publish(FieldId(0), time, &clip.jpegs[at % clip.jpegs.len()])?;
         }

@@ -16,4 +16,4 @@ pub use names::{
     ActionName, DeviceName, FileName, KeyId, NodeName, ResourceName, TopicName, TopicRef,
     WorkloadKind, WorkloadName,
 };
-pub use time::FrameTime;
+pub use time::SampleTime;

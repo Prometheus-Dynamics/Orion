@@ -59,7 +59,7 @@ the same way by every party, so there is no stored offset to point somewhere els
 | Word | Holds |
 | --- | --- |
 | 0 | Stamp. 0: never written. `(seq + 1) << 1`: holds the sample with sequence `seq`. That plus 1: being written |
-| 1 | Frame time, nanoseconds |
+| 1 | Sample time, nanoseconds |
 | 2 | Payload length in bytes (bits 0 to 31), field (32 to 47), flags (48 to 55) |
 | 3 | Lane sequence: which of its field's samples this is, counting from zero |
 | 4 on | Payload, packed little-endian, the last word zero-padded |
@@ -174,9 +174,9 @@ reading it does not depend on how many fields there are. A value is expired when
 clock is more than the declaration's expiry past the sample's time; it is still returned, marked
 expired.
 
-## Lookup by frame time
+## Lookup by sample time
 
-`crates/core/ring-time`. The value of a field at or before a frame time is a search of the field's
+`crates/core/ring-time`. The value of a field at or before a sample time is a search of the field's
 lane, on the samples' times alone (`time_at` reads a slot's time without copying its payload): the
 newest four one by one, then a binary search of the rest. The reply is a hit (a sample for exactly
 that time), lagged (the newest earlier one, with how far behind), or missing.

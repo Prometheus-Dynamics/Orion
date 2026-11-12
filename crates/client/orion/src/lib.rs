@@ -5,7 +5,7 @@
 //!
 //! ```no_run
 //! use orion::{Address, Orion, fields};
-//! use orion::topics::{FieldId, FrameTime, TopicDecl};
+//! use orion::topics::{FieldId, SampleTime, TopicDecl};
 //!
 //! let orion = Orion::connect(&Address::default(), "thermometer")?;
 //! let mut reading = orion.declare(&TopicDecl {
@@ -15,7 +15,7 @@
 //!     expiry_ms: 0,
 //!     max_payload: 8,
 //! })?;
-//! reading.publish(FieldId(0), FrameTime::from_nanos(1), &21.5_f64.to_le_bytes())?;
+//! reading.publish(FieldId(0), SampleTime::from_nanos(1), &21.5_f64.to_le_bytes())?;
 //! # Ok::<(), orion::Error>(())
 //! ```
 //!
@@ -56,7 +56,7 @@ pub use orion_types as types;
 #[cfg(feature = "topics")]
 pub mod topics {
     pub use orion_msg_topics::{Field, FieldType};
-    pub use orion_ring::{FieldId, Flags, FrameTime, Next, Sample};
+    pub use orion_ring::{FieldId, Flags, Next, Sample, SampleTime};
     pub use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
 }
 
@@ -64,8 +64,8 @@ pub mod topics {
 #[cfg(feature = "buffers")]
 pub mod buffers {
     pub use orion_buffers::{
-        BufferError, BufferIndex, BufferPublisher, BufferSubscriber, Buffers, Dropped, Frame, Held,
-        HoldLimits, NextFrame, Pool,
+        Batch, BufferError, BufferIndex, BufferPublisher, BufferSubscriber, Buffers, Dropped, Held,
+        HoldLimits, NextBatch, Pool,
     };
 }
 

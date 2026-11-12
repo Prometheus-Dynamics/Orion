@@ -24,10 +24,14 @@ Orion is orchestration and interconnect, inside a board and out of it.
 
 **Orion does not know:**
 
-- What a camera, a pose or a graph is.
+- What a camera, a frame, a pose or a graph is.
 - What is inside a topic beyond its type.
 - How to encode video. A publisher gives it bytes.
 - Which competition it runs in. NT4 topic names come from the product as configuration.
+
+**Movers don't know what they move.** Orion moves bytes with a name, a sample time and a place in
+memory. A new kind of data, whatever it is, never needs a change to Orion: its meaning is between
+the program that publishes it and the ones that read it.
 - How to talk to hardware or update a board.
 
 ## Where it sits
@@ -123,7 +127,7 @@ everyone else. They ship as one binary with modes `comm`, `node` and `ctl`, and 
 | If this dies | What keeps working | How it comes back |
 | --- | --- | --- |
 | Node logic | Links, SSH, topics, gateways. Requests for records are refused "unavailable" | Reconnects as a client |
-| Comm core | Graphs and every same-board topic, frames included, because those hold their rings. No new connections | Restarts. Publishers re-offer their rings. Peers and browsers reconnect, access paths with no backoff |
+| Comm core | Graphs and every same-board topic, buffer topics included, because those hold their rings. No new connections | Restarts. Publishers re-offer their rings. Peers and browsers reconnect, access paths with no backoff |
 | An executor | Everything else. Its records stay, marked lost | Orion restarts its workloads |
 | Orion, both parts | Graphs keep running | Orion finds them by name and takes them back |
 
@@ -168,7 +172,7 @@ pose is one sample. One declaration can hold several related fields.
 - A publish writes in place: no reply, no system call, no timer.
 - Each subscriber has a doorbell, rung only if that subscriber is asleep. It is pollable.
 - Old entries are overwritten. A slow reader skips ahead and counts what it missed.
-- Latest value, history and the lookup by frame time all read the same entries. A latest-value topic
+- Latest value, history and the lookup by sample time all read the same entries. A latest-value topic
   is a ring two deep with an expiry.
 - Each field keeps its own history, so a busy field never erases a quiet one's newest value. An
   index keeps the order across fields. [`ring.md`](ring.md) pins the layout.
@@ -179,7 +183,7 @@ pose is one sample. One declaration can hold several related fields.
 
 ### Time
 
-Ask for the value at or before frame time *t*, optionally waiting a bounded time. Replies are hit,
+Ask for the value at or before sample time *t*, optionally waiting a bounded time. Replies are hit,
 lagged or missing. Time sync between boards already exists and carries over.
 
 ### Across boards
@@ -187,23 +191,24 @@ lagged or missing. Time sync between boards already exists and carries over.
 A subscriber names `<node>/<topic>`. The comm cores carry it over `orion+tcp` into a local copy of
 the ring, only while someone asked. The subscriber's call is the same as on one board.
 
-### Buffers: frames are topics
+### Buffer topics
 
-A camera is a topic like any other. There is no second path.
+Data too large to copy (images, point clouds, audio, anything) is a topic like any other. There
+is no second path.
 
-1. The publisher declares `cam0.frames` and gives Orion its buffers, once.
+1. The publisher declares a buffer topic, `sensor0.data`, and gives Orion its buffers, once.
 2. A subscriber subscribes and can say what it wants. Orion passes that to the publisher without
    reading it, so one capture can be planned for all subscribers.
 3. Orion hands the subscriber the buffers, the ring and a doorbell, once.
-4. Each frame is a ring entry: buffer numbers, frame time, then a wake. Orion is not in this part.
+4. Each batch is a ring entry: buffer numbers, sample time, then a wake. Orion is not in this part.
 
 What a buffer topic adds to a value ring:
 
 - Hold marks: each reader marks the buffers it holds in a page only that reader writes. A buffer is
   free when no reader marks it, and a dead reader's marks go away with its page. This is the one
   new thing in the ring.
-- Limits on a subscription (frames held, how long), applied by the publisher, which sees the marks.
-  The publisher never waits for buffers. It drops frames instead.
+- Limits on a subscription (batches held, how long), applied by the publisher, which sees the marks.
+  The publisher never waits for buffers. It drops a batch instead.
 - One entry can name several buffers (image pyramid levels).
 
 Measured on the test board at 120 Hz: passing fds on every frame 34.5 µs; a ring slot and wake 18.1 µs; a
@@ -382,7 +387,7 @@ pub trait Service {
 
 // crates/core/ring. One writer, many readers. Neither call makes a system call.
 impl Writer {
-    pub fn publish(&mut self, field: FieldId, time: FrameTime, flags: Flags, payload: &[u8]) -> Result<u64, PublishError>;
+    pub fn publish(&mut self, field: FieldId, time: SampleTime, flags: Flags, payload: &[u8]) -> Result<u64, PublishError>;
     pub fn subscribers(&self) -> u32;
 }
 impl Reader {
@@ -391,14 +396,14 @@ impl Reader {
     pub fn at(&mut self, field: FieldId, lane_seq: u64) -> Option<Sample<'_>>;   // a field's history
 }
 // crates/core/ring-time
-pub fn at_or_before(reader: &Reader, field: FieldId, time: FrameTime) -> Lookup<'_>;   // Hit, Lagged, Missing
+pub fn at_or_before(reader: &Reader, field: FieldId, time: SampleTime) -> Lookup<'_>;   // Hit, Lagged, Missing
 
 // crates/core/ring-buffers and ring-holds
 impl BufferWriter {
-    pub fn take(&mut self, holders: &impl Holders) -> Result<BufferIndex, Dropped>;   // a free buffer, or drop the frame
-    pub fn publish(&mut self, buffers: &[BufferIndex], time: FrameTime, meta: &[u8]) -> Result<u64, BufferError>;
+    pub fn take(&mut self, holders: &impl Holders) -> Result<BufferIndex, Dropped>;   // a free buffer, or drop the batch
+    pub fn publish(&mut self, buffers: &[BufferIndex], time: SampleTime, meta: &[u8]) -> Result<u64, BufferError>;
 }
-impl BufferReader { pub fn next(&mut self) -> NextFrame<'_>; }   // Frame { time, meta, held }; dropping Held clears the mark
+impl BufferReader { pub fn next(&mut self) -> NextBatch<'_>; }   // Batch { time, meta, held }; dropping Held clears the mark
 impl HoldTable { pub fn enforce(&mut self, now_ns: u64, pool_page: &impl MemMut) -> u32; }   // cuts off readers over a limit
 
 // crates/client/orion. The same calls on any address.
@@ -452,7 +457,7 @@ queues everywhere; no timer on a data path; nothing on the wire names a kind of 
 - Clean-slate `next`; `dev` frozen as the reference.
 - Six concepts, one wire, rkyv gone.
 - Two processes, one binary, node logic as the comm core's first client.
-- Frames are topics. The camera library keeps its own way to pass frames for anyone not using Orion.
+- Buffers are topics. The camera library keeps its own way to pass frames for anyone not using Orion.
 - Orion is the only authority on what runs. Executors keep no journal.
 - NT4 is a gateway.
 - Compile-time single check.
@@ -479,7 +484,7 @@ way back from a broken slot.
 
 ## Open
 
-- **What wakes a graph.** Every topic gives a subscriber something it can sleep on, so a frame, a
+- **What wakes a graph.** Every topic gives a subscriber something it can sleep on, so a batch, a
   topic or a timer all work.
 - **Pinning a graph to a core.** A workload's placement has room for a CPU set.
 
@@ -490,7 +495,7 @@ come from what each PR needs. A PR is ready when everything it needs has merged,
 `scripts/pr-status.py` lists those.
 
 - **A. Foundation.** 18 PRs. Types, the wire, the check and the tools everyone builds on. A1 to A5 go one at a time, then the group fans out.
-- **B. Rings.** 9 PRs. The shared-memory ring that values and frames travel through. The riskiest code in the rebuild, so it is proven alone first.
+- **B. Rings.** 9 PRs. The shared-memory ring that values and buffers travel through. The riskiest code in the rebuild, so it is proven alone first.
 - **C. Comm core.** 15 PRs. The always-up program: connections, the broker, hello, discovery, time and links.
 - **D. Client.** 11 PRs. One client with the same calls on any address, plus the C surface and orionctl.
 - **E. Node logic.** 18 PRs. Records, peer sync, the workload tracker, actions and files.
@@ -506,7 +511,7 @@ All on the test board.
 | Test | Passes when |
 | --- | --- |
 | Publish with a subscriber awake | No system call from the publisher |
-| Frame topic at 120 fps, hold marks included | About 18 µs per frame, Orion using no CPU per frame |
+| Buffer topic at 120 a second, hold marks included | About 18 µs per batch, Orion using no CPU per batch |
 | Graph to graph, nobody remote | Orion idle |
 | Memory under the full setup | 2.5 MB data and 2 MB code, both parts together |
 | Kill each part while running | Behaves as in the table above |

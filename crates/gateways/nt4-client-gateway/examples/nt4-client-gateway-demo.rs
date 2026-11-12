@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use orion::topics::{FieldId, FrameTime, TopicDecl};
+use orion::topics::{FieldId, SampleTime, TopicDecl};
 use orion::{Address, Orion, fields};
 use orion_comm_app::{CommCore, CommSettings};
 use orion_config::Source;
@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let litres = step as f64 * 0.5;
         level.publish(
             FieldId(0),
-            FrameTime::from_nanos(step),
+            SampleTime::from_nanos(step),
             &litres.to_le_bytes(),
         )?;
         if let Some(sample) = robot.latest(FieldId(0))

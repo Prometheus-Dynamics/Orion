@@ -4,7 +4,7 @@
 use std::sync::atomic::Ordering;
 
 use orion_ring::{
-    FieldId, Flags, FrameTime, Geometry, Heap, Mem, MemMut, Next, Reader, Spec, Writer, format,
+    FieldId, Flags, Geometry, Heap, Mem, MemMut, Next, Reader, SampleTime, Spec, Writer, format,
 };
 
 /// Words of memory a hostile ring is given. Small, so the fuzzer reaches every part of it.
@@ -55,7 +55,7 @@ pub fn hostile(data: &[u8]) {
             let field = FieldId((seq % 3) as u16);
             let _ = writer.publish(
                 field,
-                FrameTime::from_nanos(seq),
+                SampleTime::from_nanos(seq),
                 Flags::NONE,
                 &[seq as u8; 24],
             );

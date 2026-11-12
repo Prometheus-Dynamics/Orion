@@ -4,7 +4,7 @@ use std::os::fd::OwnedFd;
 use std::sync::atomic::Ordering;
 
 use crate::layout::{Geometry, SLOT_HEADER_WORDS, W_HEAD, stamp};
-use crate::{FieldId, Flags, FrameTime, Mem, ReadMap, RingError};
+use crate::{FieldId, Flags, Mem, ReadMap, RingError, SampleTime};
 
 /// How many samples one [`Reader::next`] call steps over looking for one that is still there.
 const PROBES: u32 = 64;
@@ -19,7 +19,7 @@ pub struct Sample<'a> {
     /// The field it belongs to.
     pub field: FieldId,
     /// The time it belongs to.
-    pub time: FrameTime,
+    pub time: SampleTime,
     /// Its flags.
     pub flags: Flags,
     /// The value.
@@ -207,7 +207,7 @@ impl<M: Mem> Reader<M> {
     /// The time of sample number `lane_seq` of `field`, without copying its payload: for
     /// searching a field's history by time. `None` as for [`Reader::at`].
     #[must_use]
-    pub fn time_at(&self, field: FieldId, lane_seq: u64) -> Option<FrameTime> {
+    pub fn time_at(&self, field: FieldId, lane_seq: u64) -> Option<SampleTime> {
         let head = self.lane_head(field);
         if lane_seq >= head || head - lane_seq > u64::from(self.geometry.history) {
             return None;
@@ -224,14 +224,14 @@ impl<M: Mem> Reader<M> {
         if holds != lane_seq || self.mem.load(at, Ordering::Relaxed) != before {
             return None;
         }
-        Some(FrameTime::from_nanos(time))
+        Some(SampleTime::from_nanos(time))
     }
 
     fn sample(&self, found: Found) -> Sample<'_> {
         Sample {
             seq: found.seq,
             field: FieldId(found.field),
-            time: FrameTime::from_nanos(found.time),
+            time: SampleTime::from_nanos(found.time),
             flags: Flags(found.flags),
             payload: &self.scratch[..found.len],
         }

@@ -153,7 +153,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 
 Agreed with the libraries around Orion on 2026-11-11.
 
-- [ ] [J1](docs/prs/J1.md) Opaque data: sample times and buffer topics (wave 17)
+- [x] [J1](docs/prs/J1.md) Opaque data: sample times and buffer topics (wave 17)
 - [ ] [J2](docs/prs/J2.md) The shared ring crates (wave 18; needs J1; waits on the device library)
 - [ ] [J3](docs/prs/J3.md) Name the clock (wave 17; needs J1)
 - [x] [J4](docs/prs/J4.md) Board management is the device library's (wave 17)

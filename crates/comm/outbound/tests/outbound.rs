@@ -15,7 +15,7 @@ use orion_msg_topics::{
 use orion_outbound::{Outbound, OutboundLimits};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Admits, Comm, FdSet, Limits, Policy, Principal, Roles, Security};
-use orion_types::{FrameTime, TopicRef};
+use orion_types::{SampleTime, TopicRef};
 use orion_wire::frame;
 use orion_wire::{Body, Bytes, Decode, List, encode_body, kind};
 
@@ -184,7 +184,7 @@ impl Client {
         self.send(&Sample {
             handle,
             field,
-            time: FrameTime::from_nanos(u64::from(number)),
+            time: SampleTime::from_nanos(u64::from(number)),
             flags: if key {
                 SampleFlags::OTHERS_DEPEND
             } else {

@@ -14,9 +14,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use orion_fdpass::{recv, send};
-use orion_ring::{FieldId, FrameTime, Reader, Ring, Spec};
+use orion_ring::{FieldId, Reader, Ring, SampleTime, Spec};
 use orion_ring_buffers::{
-    BufferDesc, BufferReader, BufferWriter, Dropped, NextFrame, Pool, PoolView,
+    BufferDesc, BufferReader, BufferWriter, Dropped, NextBatch, Pool, PoolView,
 };
 use orion_ring_holds::{HoldTable, Limits, Marks};
 
@@ -55,7 +55,7 @@ fn reader_process() {
 
     // Hold the first frame and never let go. The publisher kills this process here.
     let held = loop {
-        if let NextFrame::Frame(frame) = reader.next() {
+        if let NextBatch::Batch(frame) = reader.next() {
             break frame.held;
         }
         std::thread::sleep(Duration::from_millis(1));
@@ -78,7 +78,7 @@ impl Publisher {
         let buffer = self.writer.take(&self.table)?;
         self.writer.buffer_mut(buffer).expect("free").fill(fill);
         self.writer
-            .publish(&[buffer], FrameTime::from_nanos(now_ms * MS), &[fill])
+            .publish(&[buffer], SampleTime::from_nanos(now_ms * MS), &[fill])
             .expect("publish");
         Ok(())
     }

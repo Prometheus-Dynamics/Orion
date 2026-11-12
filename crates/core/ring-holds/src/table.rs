@@ -121,7 +121,7 @@ impl<M: Mem> HoldTable<M> {
     }
 
     /// Applies every reader's limits at `now_ns`, a time on any steady clock of the
-    /// publisher's (a frame time will do). Readers over a limit are cut off: their marks stop
+    /// publisher's (a sample time will do). Readers over a limit are cut off: their marks stop
     /// counting, and they are told through `pool_page`. Returns how many were cut off by this
     /// call. Memory reads only; call it before taking a buffer for each frame.
     pub fn enforce(&mut self, now_ns: u64, pool_page: &impl MemMut) -> u32 {

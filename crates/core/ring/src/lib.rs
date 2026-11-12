@@ -34,7 +34,7 @@ use std::io;
 pub use layout::{Geometry, MAX_FIELDS, MAX_HISTORY, MAX_PAYLOAD, Spec, format};
 pub use map::{ReadMap, WriteMap, read_only, sealed_memfd};
 pub use mem::{Heap, Mem, MemMut};
-pub use orion_types::FrameTime;
+pub use orion_types::SampleTime;
 pub use reader::{Next, Reader, Sample};
 pub use ring::Ring;
 pub use writer::Writer;

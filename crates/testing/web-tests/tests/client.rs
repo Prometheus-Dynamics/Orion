@@ -10,7 +10,7 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use orion::actions::{ActionDecl, Admits, Outcome, Policy, Request, Target};
-use orion::topics::{FieldId, FrameTime, Next, TopicDecl};
+use orion::topics::{FieldId, Next, SampleTime, TopicDecl};
 use orion::{Address, Orion, fields};
 use orion_stubs::Board;
 use orion_web_tests::browser::browse;
@@ -210,7 +210,7 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
             level
                 .publish(
                     FieldId(0),
-                    FrameTime::from_nanos(step),
+                    SampleTime::from_nanos(step),
                     &(step as f64 * 0.5).to_le_bytes(),
                 )
                 .expect("publish");

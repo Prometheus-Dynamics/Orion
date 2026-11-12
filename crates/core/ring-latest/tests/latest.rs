@@ -1,6 +1,6 @@
 use orion_measure::CountingAlloc;
 use orion_measure::harness::assert_steady_no_allocs;
-use orion_ring::{FieldId, Flags, FrameTime, Ring, Spec};
+use orion_ring::{FieldId, Flags, Ring, SampleTime, Spec};
 use orion_ring_latest::{Latest, Value, is_expired};
 
 #[global_allocator]
@@ -8,8 +8,8 @@ static GLOBAL: CountingAlloc = CountingAlloc::system();
 
 const MS: u64 = 1_000_000;
 
-fn at(ms: u64) -> FrameTime {
-    FrameTime::from_nanos(ms * MS)
+fn at(ms: u64) -> SampleTime {
+    SampleTime::from_nanos(ms * MS)
 }
 
 fn ring(fields: u32, expiry_ms: u32) -> Ring {
@@ -41,7 +41,7 @@ fn a_value_is_fresh_until_its_expiry_and_expired_after() {
             "{value:?}"
         );
     }
-    let past = FrameTime::from_nanos(1250 * MS + 1);
+    let past = SampleTime::from_nanos(1250 * MS + 1);
     let value = latest.get(FieldId(0), past);
     assert!(
         matches!(value, Value::Expired(sample) if sample.payload == b"21.5"),
@@ -71,11 +71,11 @@ fn without_an_expiry_a_value_stays_fresh() {
         .expect("publish");
     assert!(
         latest
-            .get(FieldId(0), FrameTime::from_nanos(u64::MAX))
+            .get(FieldId(0), SampleTime::from_nanos(u64::MAX))
             .fresh()
             .is_some()
     );
-    assert!(!is_expired(at(1), FrameTime::from_nanos(u64::MAX), 0));
+    assert!(!is_expired(at(1), SampleTime::from_nanos(u64::MAX), 0));
     assert!(is_expired(at(1), at(3), 1));
     assert!(!is_expired(at(1), at(2), 1));
     // The largest expiry does not overflow.

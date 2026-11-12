@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use orion::records::{Bytes, Record, RecordClass, RecordEntry, Records};
-use orion::topics::{FieldId, FrameTime, Next, TopicDecl};
+use orion::topics::{FieldId, Next, SampleTime, TopicDecl};
 use orion::types::{Error, HlcTimestamp};
 use orion::{Address, ClientError, Orion, fields};
 use orion_node_app::{Node, NodeSettings};
@@ -138,7 +138,7 @@ fn node_logic_can_die_and_links_stay_up_and_it_resumes() {
         level
             .publish(
                 FieldId(0),
-                FrameTime::from_nanos(value),
+                SampleTime::from_nanos(value),
                 &(value as f64).to_le_bytes(),
             )
             .expect("publish");

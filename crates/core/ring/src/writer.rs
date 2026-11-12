@@ -4,7 +4,7 @@ use std::os::fd::OwnedFd;
 use std::sync::atomic::Ordering;
 
 use crate::layout::{Geometry, SLOT_HEADER_WORDS, W_HEAD, W_SUBSCRIBERS, busy, stamp};
-use crate::{FieldId, Flags, FrameTime, MemMut, PublishError, RingError, WriteMap};
+use crate::{FieldId, Flags, MemMut, PublishError, RingError, SampleTime, WriteMap};
 
 /// The write end of a ring. There must be exactly one per ring: two would corrupt that topic, and
 /// only that topic.
@@ -71,7 +71,7 @@ impl<M: MemMut> Writer<M> {
     pub fn publish(
         &mut self,
         field: FieldId,
-        time: FrameTime,
+        time: SampleTime,
         flags: Flags,
         payload: &[u8],
     ) -> Result<u64, PublishError> {

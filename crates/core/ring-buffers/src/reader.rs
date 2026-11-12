@@ -3,7 +3,7 @@
 use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 
-use orion_ring::{FieldId, FrameTime, Mem, Next, ReadMap, Reader};
+use orion_ring::{FieldId, Mem, Next, ReadMap, Reader, SampleTime};
 
 use crate::{BufferDesc, BufferIndex, MAX_PER_FRAME, Marker, NoMarks, PoolView, entry, page};
 
@@ -78,11 +78,11 @@ impl<K: Marker> Drop for Held<K> {
 
 /// One frame.
 #[derive(Debug)]
-pub struct Frame<'a, K: Marker = NoMarks> {
+pub struct Batch<'a, K: Marker = NoMarks> {
     /// Its number in the order of publication.
     pub seq: u64,
     /// The time it belongs to.
-    pub time: FrameTime,
+    pub time: SampleTime,
     /// The publisher's metadata, passed on unread. Valid until the next call on the reader.
     pub meta: &'a [u8],
     /// Its buffers. Move this out to keep the frame past the next call on the reader.
@@ -91,9 +91,9 @@ pub struct Frame<'a, K: Marker = NoMarks> {
 
 /// What [`BufferReader::next`] found.
 #[derive(Debug)]
-pub enum NextFrame<'a, K: Marker = NoMarks> {
+pub enum NextBatch<'a, K: Marker = NoMarks> {
     /// The next frame.
-    Frame(Frame<'a, K>),
+    Batch(Batch<'a, K>),
     /// Nothing new.
     Empty,
     /// This many frames were gone before the reader got to them: overwritten in the ring, or
@@ -121,15 +121,15 @@ pub struct BufferReader<M: Mem = ReadMap, K: Marker = NoMarks> {
     shared: Arc<Shared<K>>,
     meta: Box<[u8]>,
     /// A frame found behind lost ones, kept for the next call: sequence, time, metadata length.
-    pending: Option<(u64, FrameTime, usize, Held<K>)>,
+    pending: Option<(u64, SampleTime, usize, Held<K>)>,
     missed: u64,
 }
 
 /// What one step found, with nothing borrowed.
 enum Step<K: Marker> {
-    Frame {
+    Batch {
         seq: u64,
-        time: FrameTime,
+        time: SampleTime,
         meta: usize,
         held: Held<K>,
     },
@@ -186,15 +186,15 @@ impl<M: Mem, K: Marker> BufferReader<M, K> {
     /// The next frame, held.
     // Not an iterator: a frame's metadata borrows the reader.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> NextFrame<'_, K> {
+    pub fn next(&mut self) -> NextBatch<'_, K> {
         let pool = &self.shared.pool;
         if let Some(slot) = self.shared.marker.slot()
             && page::is_cut_off(pool.page(), pool.len(), slot)
         {
-            return NextFrame::CutOff;
+            return NextBatch::CutOff;
         }
         if let Some((seq, time, meta, held)) = self.pending.take() {
-            return NextFrame::Frame(Frame {
+            return NextBatch::Batch(Batch {
                 seq,
                 time,
                 meta: &self.meta[..meta],
@@ -206,7 +206,7 @@ impl<M: Mem, K: Marker> BufferReader<M, K> {
             match self.step() {
                 Step::Gone => gone += 1,
                 Step::Other => {}
-                Step::Frame {
+                Step::Batch {
                     seq,
                     time,
                     meta,
@@ -217,7 +217,7 @@ impl<M: Mem, K: Marker> BufferReader<M, K> {
                         self.pending = Some((seq, time, meta, held));
                         break;
                     }
-                    return NextFrame::Frame(Frame {
+                    return NextBatch::Batch(Batch {
                         seq,
                         time,
                         meta: &self.meta[..meta],
@@ -231,19 +231,19 @@ impl<M: Mem, K: Marker> BufferReader<M, K> {
                 }
                 Step::PoolChanged(generation) => {
                     self.missed = self.missed.saturating_add(gone + 1);
-                    return NextFrame::PoolChanged { generation };
+                    return NextBatch::PoolChanged { generation };
                 }
                 Step::Limited => {
                     self.missed = self.missed.saturating_add(gone + 1);
-                    return NextFrame::Limited;
+                    return NextBatch::Limited;
                 }
             }
         }
         if gone == 0 {
-            return NextFrame::Empty;
+            return NextBatch::Empty;
         }
         self.missed = self.missed.saturating_add(gone);
-        NextFrame::Skipped(gone)
+        NextBatch::Skipped(gone)
     }
 
     fn step(&mut self) -> Step<K> {
@@ -288,7 +288,7 @@ impl<M: Mem, K: Marker> BufferReader<M, K> {
             }
         }
         self.meta[..entry.meta.len()].copy_from_slice(entry.meta);
-        Step::Frame {
+        Step::Batch {
             seq: sample.seq,
             time: sample.time,
             meta: entry.meta.len(),

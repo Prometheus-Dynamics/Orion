@@ -34,9 +34,9 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use orion::actions::{ActionDecl, Admits, Outcome, Policy, Request, Target};
-use orion::buffers::{HoldLimits, NextFrame, Pool};
+use orion::buffers::{HoldLimits, NextBatch, Pool};
 use orion::provider::ResourceState;
-use orion::topics::{FieldId, FrameTime, Next, TopicDecl};
+use orion::topics::{FieldId, Next, SampleTime, TopicDecl};
 use orion::{Address, Error, Options, Orion, Roles, fields};
 
 /// Why a role stopped.
@@ -153,7 +153,7 @@ fn publisher(socket: &Path) -> Result<(), Failed> {
     for value in 1..=u64::MAX {
         let published = count.publish(
             FieldId(0),
-            FrameTime::from_nanos(value),
+            SampleTime::from_nanos(value),
             &(value as f64).to_le_bytes(),
         );
         if let Err(error) = published {
@@ -217,7 +217,7 @@ fn camera(socket: &Path) -> Result<(), Failed> {
                 if let Some(bytes) = frames.buffer_mut(buffer) {
                     bytes.fill(fill(number));
                 }
-                if let Err(error) = frames.publish(&[buffer], FrameTime::from_nanos(number), &[]) {
+                if let Err(error) = frames.publish(&[buffer], SampleTime::from_nanos(number), &[]) {
                     println!("unpublished {number} {error}");
                 }
             }
@@ -249,7 +249,7 @@ fn viewer(socket: &Path) -> Result<(), Failed> {
     loop {
         loop {
             match frames.next() {
-                NextFrame::Frame(frame) => {
+                NextBatch::Batch(frame) => {
                     let number = frame.time.as_nanos();
                     let whole = frame.held.bytes(0).is_some_and(|bytes| {
                         bytes.len() == FRAME_SIZE && bytes.iter().all(|&b| b == fill(number))
@@ -259,8 +259,8 @@ fn viewer(socket: &Path) -> Result<(), Failed> {
                     }
                     last = number;
                 }
-                NextFrame::Empty => break,
-                NextFrame::CutOff => {
+                NextBatch::Empty => break,
+                NextBatch::CutOff => {
                     println!("cut off");
                     break;
                 }

@@ -12,10 +12,10 @@ use std::time::{Duration, Instant};
 
 use orion_broker::{Broker, BrokerConfig};
 use orion_broker_buffers::BrokerBuffers;
-use orion_buffers::{Buffers, HoldLimits, NextFrame, Pool};
+use orion_buffers::{Buffers, HoldLimits, NextBatch, Pool};
 use orion_connect::{Address, Client, Options, Session};
 use orion_measure::{CountingAlloc, thread_counts};
-use orion_ring::FrameTime;
+use orion_ring::SampleTime;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_topics::{Status, TopicError, Topics};
 use orion_unix::UnixCarrier;
@@ -83,14 +83,14 @@ fn viewer_process() {
         }
         loop {
             let held = match frames.next() {
-                NextFrame::Frame(frame) => {
+                NextBatch::Batch(frame) => {
                     last = u64::from_le_bytes(frame.meta.try_into().expect("the frame's number"));
-                    assert_eq!(frame.time, FrameTime::from_nanos(last));
+                    assert_eq!(frame.time, SampleTime::from_nanos(last));
                     frame.held
                 }
-                NextFrame::Empty => break,
-                NextFrame::CutOff => panic!("cut off"),
-                NextFrame::Skipped(_) | NextFrame::Limited | NextFrame::PoolChanged { .. } => {
+                NextBatch::Empty => break,
+                NextBatch::CutOff => panic!("cut off"),
+                NextBatch::Skipped(_) | NextBatch::Limited | NextBatch::PoolChanged { .. } => {
                     continue;
                 }
             };
@@ -213,7 +213,7 @@ fn two_processes_pass_frames_without_a_copy() {
                 camera
                     .publish(
                         &[buffer],
-                        FrameTime::from_nanos(number),
+                        SampleTime::from_nanos(number),
                         &number.to_le_bytes(),
                     )
                     .expect("publish");

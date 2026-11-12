@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 
 use crate::layout::{W_HEAD, format};
 use crate::{
-    FieldId, Flags, FrameTime, Heap, Mem, MemMut, Next, PublishError, Reader, Spec, Writer,
+    FieldId, Flags, Heap, Mem, MemMut, Next, PublishError, Reader, SampleTime, Spec, Writer,
 };
 
 fn ring(fields: u32, history: u32, max_payload: u32) -> Heap {
@@ -19,8 +19,8 @@ fn ring(fields: u32, history: u32, max_payload: u32) -> Heap {
     mem
 }
 
-fn time(nanos: u64) -> FrameTime {
-    FrameTime::from_nanos(nanos)
+fn time(nanos: u64) -> SampleTime {
+    SampleTime::from_nanos(nanos)
 }
 
 /// A payload of `len` bytes that says which sample it belongs to in every byte.

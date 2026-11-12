@@ -29,8 +29,8 @@ use orion_msg_workloads::{
     WorkloadPut, WorkloadRemove, WorkloadState, WorkloadStatus,
 };
 use orion_types::{
-    ActionName, Error, FileName, FrameTime, HlcTimestamp, KeyId, NodeName, ResourceName, TopicName,
-    TopicRef, WorkloadKind, WorkloadName,
+    ActionName, Error, FileName, HlcTimestamp, KeyId, NodeName, ResourceName, SampleTime,
+    TopicName, TopicRef, WorkloadKind, WorkloadName,
 };
 use orion_wire::{Body, Bytes, Decode, List, body::encode_fields};
 
@@ -439,7 +439,7 @@ fn topics(out: &mut Vec<Sample>) {
         TopicSample {
             handle: 2,
             field: 1,
-            time: FrameTime::from_nanos(99),
+            time: SampleTime::from_nanos(99),
             flags: SampleFlags::OTHERS_DEPEND,
             payload: Bytes(b"v")
         }
@@ -447,13 +447,13 @@ fn topics(out: &mut Vec<Sample>) {
     let batch = [
         BatchSample {
             field: 0,
-            time: FrameTime::from_nanos(1),
+            time: SampleTime::from_nanos(1),
             flags: SampleFlags::NONE,
             payload: Bytes(b"a"),
         },
         BatchSample {
             field: 1,
-            time: FrameTime::from_nanos(2),
+            time: SampleTime::from_nanos(2),
             flags: SampleFlags::NONE,
             payload: Bytes(b"bc"),
         },

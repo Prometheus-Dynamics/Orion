@@ -17,7 +17,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
 
 use orion::topics::{
-    Field, FieldId, FieldType, FrameTime, Next, Publisher, Subscriber, TopicDecl, TopicError,
+    Field, FieldId, FieldType, Next, Publisher, SampleTime, Subscriber, TopicDecl, TopicError,
 };
 use orion::{Address, ClientError, Error, Options, Orion};
 
@@ -363,7 +363,7 @@ pub unsafe extern "C" fn orion_publish(
         };
         handle
             .publisher
-            .publish(FieldId(field), FrameTime::from_nanos(time_ns), payload)?;
+            .publish(FieldId(field), SampleTime::from_nanos(time_ns), payload)?;
         Ok(ORION_OK)
     })
 }

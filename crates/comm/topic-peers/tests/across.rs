@@ -1,6 +1,6 @@
 //! Two comm cores: a program on one subscribes to a topic of the other with the code it
 //! would use on its own board, only while it asks, through the other node restarting, and
-//! with frame times in its own board's time.
+//! with sample times in its own board's time.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use orion::topics::{FieldId, FrameTime, Next, Publisher, Status, Subscriber, TopicDecl};
+use orion::topics::{FieldId, Next, Publisher, SampleTime, Status, Subscriber, TopicDecl};
 use orion::{Address, Orion, fields};
 use orion_broker::{Broker, BrokerConfig};
 use orion_broker_proxy::BrokerProxy;
@@ -175,7 +175,7 @@ fn publish(level: &mut Publisher, time: u64, litres: f64) {
     level
         .publish(
             FieldId(0),
-            FrameTime::from_nanos(time),
+            SampleTime::from_nanos(time),
             &litres.to_le_bytes(),
         )
         .expect("publish");
@@ -346,7 +346,7 @@ fn a_subscriber_may_come_before_the_topic_and_outlives_the_other_node_restarting
 }
 
 #[test]
-fn frame_times_arrive_in_this_boards_time() {
+fn sample_times_arrive_in_this_boards_time() {
     // The left board's clock is five seconds ahead of the right's: they are not synced.
     const AHEAD: u64 = 5_000_000_000;
     let map = Map::default();

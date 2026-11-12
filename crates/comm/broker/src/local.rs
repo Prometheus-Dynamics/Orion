@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use orion_msg_topics::{Declare, Field, FieldType};
-use orion_ring::{FieldId, Flags, FrameTime, Spec, Writer};
+use orion_ring::{FieldId, Flags, SampleTime, Spec, Writer};
 use orion_ring_doorbell::Bell;
 use orion_server::Error;
 use orion_types::TopicName;
@@ -59,7 +59,7 @@ impl Writing {
     pub fn publish(
         &mut self,
         field: FieldId,
-        time: FrameTime,
+        time: SampleTime,
         flags: Flags,
         payload: &[u8],
     ) -> Result<(), Error> {
@@ -162,7 +162,7 @@ impl LocalPublisher {
     /// # Errors
     ///
     /// As [`Writing::new`] and [`Writing::publish`].
-    pub fn publish(&mut self, time: FrameTime, samples: &[(FieldId, &[u8])]) -> Result<(), Error> {
+    pub fn publish(&mut self, time: SampleTime, samples: &[(FieldId, &[u8])]) -> Result<(), Error> {
         let topics = self.topics.borrow();
         let topic = topics.get(self.id).ok_or(Error::NotFound)?;
         if self

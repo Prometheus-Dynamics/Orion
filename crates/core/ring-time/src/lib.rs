@@ -1,4 +1,4 @@
-//! Lookup by frame time.
+//! Lookup by sample time.
 //!
 //! Everything computed from a frame carries the frame's time. So "the pose that goes with this
 //! frame" is a lookup: the value of a field at or before time *t*.
@@ -26,14 +26,14 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use orion_ring::{FieldId, FrameTime, Mem, Reader, Sample};
+use orion_ring::{FieldId, Mem, Reader, Sample, SampleTime};
 use orion_ring_doorbell::Doorbell;
 
 /// How many of the newest samples are checked one by one before searching. A reader is nearly
 /// always asking about the newest frame or the one before.
 const NEAR: u64 = 4;
 
-/// What a field held at a frame time.
+/// What a field held at a sample time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lookup<'a> {
     /// The sample for exactly that time.
@@ -67,7 +67,7 @@ impl<'a> Lookup<'a> {
 }
 
 /// Which of `field`'s samples is the newest at or before `time`: its number within the field.
-fn find<M: Mem>(reader: &Reader<M>, field: FieldId, time: FrameTime) -> Option<u64> {
+fn find<M: Mem>(reader: &Reader<M>, field: FieldId, time: SampleTime) -> Option<u64> {
     let head = reader.lane_head(field);
     let kept = head.min(u64::from(reader.geometry().history()));
     let oldest = head - kept;
@@ -99,7 +99,11 @@ fn find<M: Mem>(reader: &Reader<M>, field: FieldId, time: FrameTime) -> Option<u
 ///
 /// A sample that the writer overwrites during the search counts as gone: with the writer far
 /// enough ahead to do that, the answer is `Missing`, and the next call searches afresh.
-pub fn at_or_before<M: Mem>(reader: &mut Reader<M>, field: FieldId, time: FrameTime) -> Lookup<'_> {
+pub fn at_or_before<M: Mem>(
+    reader: &mut Reader<M>,
+    field: FieldId,
+    time: SampleTime,
+) -> Lookup<'_> {
     let Some(lane_seq) = find(reader, field, time) else {
         return Lookup::Missing;
     };
@@ -115,7 +119,7 @@ pub fn at_or_before<M: Mem>(reader: &mut Reader<M>, field: FieldId, time: FrameT
 
 /// Whether `field`'s publisher has reached `time`: its newest sample is for that frame or a
 /// later one. While it hasn't, a sample for `time` may still be coming.
-fn reached<M: Mem>(reader: &Reader<M>, field: FieldId, time: FrameTime) -> bool {
+fn reached<M: Mem>(reader: &Reader<M>, field: FieldId, time: SampleTime) -> bool {
     let head = reader.lane_head(field);
     head > 0
         && reader
@@ -138,7 +142,7 @@ pub fn wait_at_or_before<'a, M: Mem>(
     reader: &'a mut Reader<M>,
     doorbell: &mut Doorbell,
     field: FieldId,
-    time: FrameTime,
+    time: SampleTime,
     max_wait: Duration,
 ) -> io::Result<Lookup<'a>> {
     if !reached(reader, field, time) && !max_wait.is_zero() {

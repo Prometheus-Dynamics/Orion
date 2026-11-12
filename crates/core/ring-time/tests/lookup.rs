@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use orion_measure::CountingAlloc;
 use orion_measure::harness::assert_steady_no_allocs;
-use orion_ring::{FieldId, Flags, FrameTime, Reader, Ring, Spec, Writer};
+use orion_ring::{FieldId, Flags, Reader, Ring, SampleTime, Spec, Writer};
 use orion_ring_doorbell::Doorbell;
 use orion_ring_time::{Lookup, at_or_before, wait_at_or_before};
 
@@ -11,8 +11,8 @@ static GLOBAL: CountingAlloc = CountingAlloc::system();
 
 const FIELD: FieldId = FieldId(0);
 
-fn at(time: u64) -> FrameTime {
-    FrameTime::from_nanos(time)
+fn at(time: u64) -> SampleTime {
+    SampleTime::from_nanos(time)
 }
 
 fn topic(history: u32) -> (Ring, Writer, Reader) {

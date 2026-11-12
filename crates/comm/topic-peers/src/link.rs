@@ -11,7 +11,7 @@ use orion_msg_topics::{Declare, Opened, Sample, Subscribe, TopicState, TopicStat
 use orion_ring::{FieldId, Flags, Spec};
 use orion_server::{Connection, Error, FdSet, FrameRead, FrameWrite};
 use orion_tcp::{TcpRead, TcpWrite};
-use orion_types::{FrameTime, NodeName, TopicName, TopicRef};
+use orion_types::{NodeName, SampleTime, TopicName, TopicRef};
 use orion_wire::{Body, Bytes, Decode, INTERFACE_REVISION, encode_body, frame, kind};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -525,7 +525,7 @@ fn write_sample(
     }
     drop(topics);
     let writing = mirror.writing.as_mut().ok_or(Error::Internal)?;
-    let time = FrameTime::from_nanos(sample.time.as_nanos().saturating_add_signed(offset_ns));
+    let time = SampleTime::from_nanos(sample.time.as_nanos().saturating_add_signed(offset_ns));
     writing.publish(
         FieldId(sample.field),
         time,

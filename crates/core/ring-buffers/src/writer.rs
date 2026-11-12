@@ -1,6 +1,6 @@
 //! The publisher of a buffer topic.
 
-use orion_ring::{FieldId, Flags, FrameTime, MemMut, WriteMap, Writer};
+use orion_ring::{FieldId, Flags, MemMut, SampleTime, WriteMap, Writer};
 
 use crate::{BufferError, BufferIndex, Dropped, Holders, MAX_PER_FRAME, Pool, entry, page};
 
@@ -69,7 +69,7 @@ impl<M: MemMut> BufferWriter<M> {
     pub fn publish(
         &mut self,
         buffers: &[BufferIndex],
-        time: FrameTime,
+        time: SampleTime,
         meta: &[u8],
     ) -> Result<u64, BufferError> {
         if buffers.is_empty() || buffers.len() > MAX_PER_FRAME {

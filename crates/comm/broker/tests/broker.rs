@@ -7,7 +7,7 @@ use std::time::Duration;
 use common::{Client, Event, FIELDS, Wire};
 use orion_broker::{Broker, BrokerConfig};
 use orion_msg_topics::{Field, FieldType, TopicStatus};
-use orion_ring::{FieldId, Flags, FrameTime, Next, Reader, Writer};
+use orion_ring::{FieldId, Flags, Next, Reader, SampleTime, Writer};
 use orion_ring_doorbell::{Bell, Doorbell, Wake};
 use orion_server::mem::{self, MemConnector};
 use orion_server::{Comm, Error, Limits, Principal, Roles, Security};
@@ -63,7 +63,7 @@ fn publish(writer: &mut Writer, value: u64) {
     writer
         .publish(
             FieldId(0),
-            FrameTime::from_nanos(value),
+            SampleTime::from_nanos(value),
             Flags::NONE,
             &value.to_le_bytes(),
         )

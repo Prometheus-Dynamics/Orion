@@ -2,7 +2,7 @@
 
 use orion_measure::CountingAlloc;
 use orion_measure::harness::assert_steady_no_allocs;
-use orion_ring::{FieldId, Flags, FrameTime, Next, Ring, Spec};
+use orion_ring::{FieldId, Flags, Next, Ring, SampleTime, Spec};
 
 #[global_allocator]
 static GLOBAL: CountingAlloc = CountingAlloc::system();
@@ -24,7 +24,7 @@ fn publish_next_and_latest_allocate_nothing() {
     assert_steady_no_allocs("publish", 16, 10_000, || {
         let field = FieldId((seq % 4) as u16);
         writer
-            .publish(field, FrameTime::from_nanos(seq), Flags::NONE, &payload)
+            .publish(field, SampleTime::from_nanos(seq), Flags::NONE, &payload)
             .expect("publish");
         seq += 1;
     });
@@ -34,7 +34,7 @@ fn publish_next_and_latest_allocate_nothing() {
     assert_steady_no_allocs("publish, next and latest", 16, 10_000, || {
         let field = FieldId((seq % 4) as u16);
         writer
-            .publish(field, FrameTime::from_nanos(seq), Flags::NONE, &payload)
+            .publish(field, SampleTime::from_nanos(seq), Flags::NONE, &payload)
             .expect("publish");
         seq += 1;
         while let Next::Sample(sample) = reader.next() {

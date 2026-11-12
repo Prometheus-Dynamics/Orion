@@ -13,7 +13,7 @@ use orion_comm_app::systemd::Notifier;
 use orion_comm_app::{CommCore, CommSettings, run_until};
 use orion_config::Source;
 use orion_msg_session::{Hello, Identify};
-use orion_ring::{FieldId, Flags, FrameTime, Reader};
+use orion_ring::{FieldId, Flags, Reader, SampleTime};
 use orion_server::{FdSet, Roles};
 use orion_unix::UnixConnection;
 use orion_wire::{Body, Bytes, encode_body, frame, kind};
@@ -187,7 +187,7 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
         writer
             .publish(
                 FieldId(0),
-                FrameTime::from_nanos(5),
+                SampleTime::from_nanos(5),
                 Flags::NONE,
                 &2.5_f64.to_le_bytes(),
             )
@@ -195,7 +195,7 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
         let read = pose.latest(FieldId(0)).expect("the sample");
         assert_eq!(
             (read.payload, read.time),
-            (2.5_f64.to_le_bytes().as_slice(), FrameTime::from_nanos(5))
+            (2.5_f64.to_le_bytes().as_slice(), SampleTime::from_nanos(5))
         );
 
         // The board's vital signs and the comm core's own counters are topics too.

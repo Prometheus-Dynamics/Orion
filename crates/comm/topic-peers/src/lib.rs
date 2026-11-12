@@ -11,7 +11,7 @@
 //!   each sample. The declaration makes a ring of the same shape here, which the waiting
 //!   subscribers are handed; each sample is written into it and the subscribers that are
 //!   asleep are rung. From there on they are same-board subscribers.
-//! - **Frame times in this board's time.** A sample's time is on its publisher's clock. The
+//! - **Sample times in this board's time.** A sample's time is on its publisher's clock. The
 //!   link compares the two boards' clocks, with the same request the time service answers,
 //!   and moves each sample's time by the difference, so that "the value at or before this
 //!   frame" means the same on both boards. Boards whose clocks agree (time sync is what

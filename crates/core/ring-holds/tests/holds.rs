@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use orion_measure::CountingAlloc;
 use orion_measure::harness::assert_steady_no_allocs;
-use orion_ring::{FieldId, FrameTime, Ring, Spec, WriteMap};
+use orion_ring::{FieldId, Ring, SampleTime, Spec, WriteMap};
 use orion_ring_buffers::{
-    BufferIndex, BufferReader, BufferWriter, Dropped, Held, Marker, NextFrame, Pool,
+    BufferIndex, BufferReader, BufferWriter, Dropped, Held, Marker, NextBatch, Pool,
 };
 use orion_ring_holds::{HoldTable, Limits, Marks};
 
@@ -64,7 +64,7 @@ impl Topic {
         let buffer = self.writer.take(&self.table)?;
         self.writer.buffer_mut(buffer).expect("free").fill(fill);
         self.writer
-            .publish(&[buffer], FrameTime::from_nanos(now_ms * MS), &[fill])
+            .publish(&[buffer], SampleTime::from_nanos(now_ms * MS), &[fill])
             .expect("publish");
         Ok(buffer)
     }
@@ -73,7 +73,7 @@ impl Topic {
 /// Reads until a frame comes, and holds it.
 fn hold(reader: &mut Reader) -> (u8, Held<Marks>) {
     for _ in 0..100 {
-        if let NextFrame::Frame(frame) = reader.next() {
+        if let NextBatch::Batch(frame) = reader.next() {
             return (frame.meta[0], frame.held);
         }
     }
@@ -139,9 +139,9 @@ fn a_slow_reader_within_its_limits_does_not_cost_the_others_a_frame() {
     topic.send(250, 300).expect("frame");
     assert!(matches!(
         slow.next(),
-        NextFrame::Skipped(_) | NextFrame::Limited
+        NextBatch::Skipped(_) | NextBatch::Limited
     ));
-    while !matches!(slow.next(), NextFrame::Empty) {}
+    while !matches!(slow.next(), NextBatch::Empty) {}
     kept.clear();
     topic.send(251, 301).expect("frame");
     assert_eq!(hold(&mut slow).0, 251);
@@ -176,16 +176,16 @@ fn a_stuck_reader_is_cut_off_and_its_buffers_come_back() {
     }
     assert!(topic.table.is_cut_off(stuck_slot));
     assert!(!topic.table.is_cut_off(good_slot));
-    assert!(matches!(stuck.next(), NextFrame::CutOff));
-    assert!(matches!(stuck.next(), NextFrame::CutOff));
+    assert!(matches!(stuck.next(), NextBatch::CutOff));
+    assert!(matches!(stuck.next(), NextBatch::CutOff));
     // The reader that behaved never noticed.
     let mut last = 0;
     loop {
         match good.next() {
-            NextFrame::Frame(frame) => last = frame.meta[0],
-            NextFrame::Empty => break,
+            NextBatch::Batch(frame) => last = frame.meta[0],
+            NextBatch::Empty => break,
             // It was not reading while the others ran, so the oldest frames are gone.
-            NextFrame::Skipped(_) => {}
+            NextBatch::Skipped(_) => {}
             other => panic!("{other:?}"),
         }
     }
@@ -314,7 +314,7 @@ fn frames_held_across_threads_are_never_torn() {
                         }
                     });
                     while !done.load(Ordering::Acquire) {
-                        if let NextFrame::Frame(frame) = reader.next() {
+                        if let NextBatch::Batch(frame) = reader.next() {
                             let fill = frame.meta[0];
                             assert!(whole(&frame.held, fill), "a frame was torn when read");
                             send.send((fill, frame.held)).expect("checker");
@@ -358,7 +358,7 @@ fn holding_and_enforcing_allocate_nothing() {
     assert_steady_no_allocs("frames with holds", 16, 10_000, || {
         round += 1;
         topic.send(round as u8, round).expect("frame");
-        if let NextFrame::Frame(frame) = reader.next() {
+        if let NextBatch::Batch(frame) = reader.next() {
             read += u64::from(whole(&frame.held, round as u8));
             // Keep each frame until the next one, so a hold is always live.
             kept = Some(frame.held);
