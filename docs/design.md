@@ -459,21 +459,23 @@ queues everywhere; no timer on a data path; nothing on the wire names a kind of 
 - SSH served by Orion.
 - Node-to-node traffic stays on `orion+tcp`.
 
-## Pinned
+## Board management
 
-**Board management.** Update, slots, confirm, rollback, reboot, USB and board identity go with
-the device library, as drivers that add their actions to Orion's open list, so Orion has no board
-knowledge. The details come back later. Open when they do:
+Update, slots, confirm, rollback, reboot, USB and board identity are the device library's: it
+plans them as drivers that add their actions to Orion's open list, with a long-job form for an
+update, so Orion has no board knowledge. Orion's part is built and kept ready:
 
-- An update needs the device daemon alive. A slot should only be confirmed if the update action
-  answers, so a build with a broken update path rolls itself back. SSH and the USB flasher remain
-  for a broken running slot.
-- Storage is outside the device library today, so a driver would need to work with files and boot
-  config.
-- An update is far longer than a normal driver call, so drivers need a long-job form with progress
-  and cancel.
+- **The open action list** (E10): a driver's actions are registered like any program's, with
+  a policy, and reached from any node.
+- **The one check**: every run passes the door with the policy its driver registered.
+- **Long runs** (E12): a run can be detached and report progress as it goes; its result is
+  kept for its starter, and cancel reaches the driver.
+- **Files delivered** (E15): an image is put on the board once and written straight to a
+  receiver, in chunks it can take.
 
-Orion's part is built regardless: the open action list, the check, progress and File delivery.
+What the device library has to settle is its own: a slot confirmed only when the update action
+answers again, drivers working with files and boot config, and SSH and the USB flasher as the
+way back from a broken slot.
 
 ## Open
 

@@ -149,13 +149,14 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I8](docs/prs/I8.md) User documentation (wave 14; needs I1)
 - [x] [I9](docs/prs/I9.md) Clean up the plan (wave 16; needs I5, I6, I7, I8)
 
-## Pinned
+## J. The stack around Orion
 
-Direction is agreed. The detail comes back later, and no PR above builds it.
+Agreed with the libraries around Orion on 2026-11-11.
 
-- Board management (update, slots, reboot, identity, USB). It goes with the device library as drivers that add
-  their actions, and Orion only routes them. Orion's part is in the list: the open action list
-  (E10), detached actions (E12), and files written straight to a receiver (E15).
+- [ ] [J1](docs/prs/J1.md) Opaque data: sample times and buffer topics (wave 17)
+- [ ] [J2](docs/prs/J2.md) The shared ring crates (wave 18; needs J1; waits on the device library)
+- [ ] [J3](docs/prs/J3.md) Name the clock (wave 17; needs J1)
+- [x] [J4](docs/prs/J4.md) Board management is the device library's (wave 17)
 
 ## Open
 
