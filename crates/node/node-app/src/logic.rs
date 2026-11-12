@@ -174,7 +174,8 @@ impl Logic {
         node: NodeName,
         files: Files,
         audit: Option<Audit>,
-        identity: PathBuf,
+        keys_dir: PathBuf,
+        check: bool,
         stop_grace: Duration,
     ) -> Self {
         // What should run here is in the store. It is adopted from the executors that are
@@ -194,7 +195,7 @@ impl Logic {
             reviewed_commits: 0,
             reviewed_ms: 0,
             records: Records::new(store),
-            forwards: Forwards::new(node.clone(), identity),
+            forwards: Forwards::new(node.clone(), keys_dir, check),
             actions: Actions::new(node),
             files,
             sinks: Sinks::new(),

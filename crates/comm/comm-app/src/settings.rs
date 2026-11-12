@@ -173,7 +173,7 @@ impl CommSettings {
             broker: BrokerConfig::from_source(source)?,
             #[cfg(feature = "outbound")]
             outbound: orion_outbound::OutboundLimits::from_source(source)?,
-            keys: KeysConfig::from_source(source, &config.state_dir)?,
+            keys: KeysConfig::from_source(source, &config.keys_dir)?,
             socket_mode,
             node_uids: source.list("socket.node_uids")?,
             status_interval,

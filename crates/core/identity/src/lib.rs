@@ -42,7 +42,8 @@ impl Identity {
     }
 
     /// The identity kept at `path`, made and saved there if there is none. The file holds the
-    /// 32 secret bytes and is readable by its owner only.
+    /// 32 secret bytes and is readable by its owner and its group: the comm core's group is
+    /// node logic's, which acts as the node toward other nodes.
     ///
     /// # Errors
     ///
@@ -68,7 +69,8 @@ impl Identity {
                 let made = std::fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
-                    .mode(0o600)
+                    // The service's group may read it: node logic acts as the node too.
+                    .mode(0o640)
                     .open(path);
                 match made {
                     Ok(mut file) => {

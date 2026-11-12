@@ -293,10 +293,10 @@ again when they reconnect.
 
 | | What it is | Where it is kept |
 | --- | --- | --- |
-| The node's identity | An ed25519 key, made on the first start | `<state.dir>/node-identity.ed25519`, 32 bytes, owner only |
-| Peers | Other nodes, each pinned to one key | `<state.dir>/trust` |
-| Operators | People's tools: a key, and what it may do | `<state.dir>/trust` |
-| Revoked keys | Never trusted again | `<state.dir>/trust` |
+| The node's identity | An ed25519 key, made on the first start | `<keys.dir>/node-identity.ed25519`, 32 bytes, owner and group |
+| Peers | Other nodes, each pinned to one key | `<keys.dir>/trust` |
+| Operators | People's tools: a key, and what it may do | `<keys.dir>/trust` |
+| Revoked keys | Never trusted again | `<keys.dir>/trust` |
 
 `trust` is text, one entry per line, written beside and renamed over. Lines this build does not
 know are kept, so an older node never destroys what a newer one stored. A key or store that is

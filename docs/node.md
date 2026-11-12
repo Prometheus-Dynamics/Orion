@@ -225,6 +225,10 @@ carries a run to the node that has it.
   record. With no such record the action is `not found`.
 - **How.** Node logic connects to the other node's comm core over the network, with this
   node's key, and runs the action the way any caller would. No kind was added for it.
+- **Only to the node pinned.** The key the trust file pins for the other node (`peer NAME KEY`,
+  in `keys.dir`) is asked for when connecting, and a node that does not prove it holds that
+  key is refused, `denied`. With security on, a node the trust file does not name is `denied`
+  too. The file is read on each connect, so a peer trusted or revoked since is seen.
 - **The check runs where the action runs.** This node's door lets a run of an action it does
   not have through to node logic for anyone it knows; it has no policy for it. The other
   node's door sees a peer and decides by the policy the action was registered with there. An

@@ -2,8 +2,8 @@
 # Installed as /usr/lib/systemd/system/orion-node.service.
 #
 # It runs as the orion user (orion.sysusers), which the settings let in as node logic
-# (`socket.node_uids = 901`). It keeps its state in /var/lib/orion/node, its own, apart from the
-# comm core's keys. Change this unit with drop-ins, not an edited copy. See packaging/README.md.
+# (`socket.node_uids = 901`). It keeps its state in /var/lib/orion/node, its own, and reads the
+# comm core's key and trust file in /var/lib/orion, which the orion group may read. Change this unit with drop-ins, not an edited copy. See packaging/README.md.
 
 [Unit]
 Description=Orion node logic
@@ -30,6 +30,9 @@ StateDirectory=orion/node
 StateDirectoryMode=0750
 # The settings file is shared with the comm core; this is node logic's own state directory.
 Environment=ORION_STATE_DIR=/var/lib/orion/node
+# The node's key and the peers it pins, made and kept by the comm core. Node logic acts as the
+# node when it carries a run to another node, and checks that node is the one pinned.
+Environment=ORION_KEYS_DIR=/var/lib/orion
 # glibc malloc: one arena, and freed memory given back.
 Environment=MALLOC_ARENA_MAX=1 MALLOC_TRIM_THRESHOLD_=65536
 UMask=0007

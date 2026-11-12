@@ -71,7 +71,8 @@ taken back, and programs on the board connect again by themselves.
 
 ## What is kept
 
-- `/var/lib/orion`: the comm core's identity, trust store and SSH host key.
+- `/var/lib/orion`: the comm core's identity, trust store and SSH host key. Node logic reads
+  the identity (root's, the orion group may read it) and the trust store (`keys.dir`).
 - `/var/lib/orion/node`: node logic's records (what should run, resources, actions), files
   sent to the board, and the audit log.
 

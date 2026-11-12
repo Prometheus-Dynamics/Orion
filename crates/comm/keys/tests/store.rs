@@ -34,20 +34,24 @@ fn node() -> NodeName {
 }
 
 #[test]
-fn the_nodes_identity_is_made_once_kept_private_and_never_replaced() {
+fn the_nodes_identity_is_made_once_kept_from_others_and_never_replaced() {
     let dir = directory("identity");
     let first = open(&dir).identity().public();
     let file = dir.join("node-identity.ed25519");
-    assert_eq!(
-        std::fs::metadata(&file)
+    let mode = |file: &Path| {
+        std::fs::metadata(file)
             .expect("key file")
             .permissions()
             .mode()
-            & 0o777,
-        0o600
-    );
-    // The same board the next time.
+            & 0o777
+    };
+    // Its owner and its group, node logic's, may read it; nobody else.
+    assert_eq!(mode(&file), 0o640);
+    // The same board the next time. A key an older build made owner-only is opened to the
+    // group.
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("chmod");
     assert_eq!(open(&dir).identity().public(), first);
+    assert_eq!(mode(&file), 0o640);
     assert!(fingerprint(&first).starts_with("sha256:") && fingerprint(&first).len() == 39);
 
     // A key file that is there but is not a key stops the node. It is not written over.

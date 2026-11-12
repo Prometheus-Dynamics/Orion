@@ -45,8 +45,10 @@ struct Forwarded {
 #[derive(Debug)]
 pub struct Forwards {
     me: NodeName,
-    /// Where this node's key is. It is read when the first run is carried.
-    identity: PathBuf,
+    /// Where this node's key and the trust file are. Both are read when a session is made.
+    keys_dir: PathBuf,
+    /// Whether the other node must prove it holds the key the trust file pins for it.
+    check: bool,
     links: BTreeMap<NodeName, Link>,
     events: Receiver<Event>,
     reporter: Sender<Event>,
@@ -55,13 +57,16 @@ pub struct Forwards {
 }
 
 impl Forwards {
-    /// Forwarding for the node `me`, whose key is the file `identity`.
+    /// Forwarding for the node `me`, whose key and trust file are in `keys_dir`. With `check`,
+    /// a run goes only to a node the trust file names, and only once it has proved it holds
+    /// that key.
     #[must_use]
-    pub fn new(me: NodeName, identity: PathBuf) -> Self {
+    pub fn new(me: NodeName, keys_dir: PathBuf, check: bool) -> Self {
         let (reporter, events) = mpsc::channel();
         Self {
             me,
-            identity,
+            keys_dir,
+            check,
             links: BTreeMap::new(),
             events,
             reporter,
@@ -109,7 +114,8 @@ impl Forwards {
             Link::start(
                 node.clone(),
                 self.me.clone(),
-                self.identity.clone(),
+                self.keys_dir.clone(),
+                self.check,
                 self.reporter.clone(),
             )
         });

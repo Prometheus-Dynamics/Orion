@@ -36,7 +36,8 @@ as two services so that each restarts alone and each has only the rights it need
   comm core's first client and connects again when the comm core restarts, so it wants the comm
   core but does not stop with it. The settings let uid 901 in as node logic
   (`socket.node_uids = 901`); without that line the comm core refuses it. Its state is in
-  `/var/lib/orion/node` (`ORION_STATE_DIR`), apart from the comm core's keys. It is hardened
+  `/var/lib/orion/node` (`ORION_STATE_DIR`), apart from the comm core's keys, which it reads in
+  `/var/lib/orion` (`ORION_KEYS_DIR`) to act as the node toward other nodes. It is hardened
   fully: `systemd-analyze security` rates it 1.8, and the check fails it above 2.5.
 
 Change either unit with a drop-in (`/etc/systemd/system/orion-comm.service.d/*.conf`), not an

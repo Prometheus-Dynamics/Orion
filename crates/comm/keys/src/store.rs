@@ -135,6 +135,18 @@ fn matches(pattern: &str, name: &str) -> bool {
     }
 }
 
+/// Lets the group read a key made owner-only by an older build, so node logic, in the group,
+/// can act as the node. Anything else about the file's mode is left as it is.
+fn group_may_read(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    if permissions.mode() & 0o777 == 0o600 {
+        permissions.set_mode(0o640);
+        std::fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -173,7 +185,10 @@ impl Keys {
     pub fn open(config: KeysConfig, security: Security) -> Result<Self, KeysError> {
         let identity = match &config.state_dir {
             Some(dir) => {
-                Identity::load_or_create(&dir.join(IDENTITY_FILE)).map_err(KeysError::Identity)?
+                let path = dir.join(IDENTITY_FILE);
+                let identity = Identity::load_or_create(&path).map_err(KeysError::Identity)?;
+                group_may_read(&path).map_err(KeysError::Identity)?;
+                identity
             }
             None => Identity::generate(),
         };

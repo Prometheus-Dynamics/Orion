@@ -279,6 +279,10 @@ pub struct Config {
     pub socket: PathBuf,
     /// `state.dir`: where the node keeps its state.
     pub state_dir: PathBuf,
+    /// `keys.dir`: where the node's key and the trust file are, made and kept by the comm
+    /// core and read by node logic. `state.dir` unless set: the two services can have
+    /// different state directories and still share one key.
+    pub keys_dir: PathBuf,
     /// `peer.listen`: where other nodes connect. `off` for nowhere.
     pub peer_listen: Option<SocketAddr>,
     /// `peer.connect`: nodes to connect to.
@@ -310,8 +314,13 @@ impl Config {
             security,
             socket: source.get("socket", PathBuf::from("/run/orion/orion.sock"))?,
             state_dir: source.get("state.dir", PathBuf::from("/var/lib/orion"))?,
+            keys_dir: PathBuf::new(),
             peer_listen: source.optional("peer.listen")?,
             peer_connect: source.list("peer.connect")?,
+        })
+        .and_then(|mut config| {
+            config.keys_dir = source.get("keys.dir", config.state_dir.clone())?;
+            Ok(config)
         })
     }
 }

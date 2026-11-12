@@ -33,7 +33,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use orion_audit::{Audit, AuditConfig};
-use orion_config::{Config, ConfigError, Source};
+use orion_config::{Config, ConfigError, Security, Source};
 use orion_connect::{Address, Client, ClientError, Options, Roles, Session};
 use orion_file_store::{Files, FilesConfig};
 use orion_msg_session::NodeAttach;
@@ -188,8 +188,9 @@ impl Node {
             what: "files directory",
             error,
         })?;
-        // The node's key, which the comm core makes and keeps here.
-        let identity = settings.config.state_dir.join("node-identity.ed25519");
+        // The node's key and the peers it pins, which the comm core makes and keeps there.
+        let keys_dir = settings.config.keys_dir.clone();
+        let check = settings.config.security != Security::Off;
         let audit = match &settings.audit {
             Some(config) => Some(
                 Audit::start(name.as_str(), config.clone()).map_err(|error| StartError {
@@ -203,7 +204,7 @@ impl Node {
         Ok(Self {
             settings,
             logic: Rc::new(RefCell::new(Logic::new(
-                store, name, files, audit, identity, stop_grace,
+                store, name, files, audit, keys_dir, check, stop_grace,
             ))),
             persist: Some(persist),
             saving: None,

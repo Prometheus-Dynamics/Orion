@@ -29,6 +29,9 @@ fn settings(dir: &Path, name: &str) -> NodeSettings {
     let mut settings = NodeSettings::from_source(&mut source).expect("defaults");
     settings.config.socket = dir.join("orion.sock");
     settings.config.state_dir = dir.join("state");
+    settings.config.keys_dir = dir.join("state");
+    // Node logic checks the node it forwards to as the comm core checks a peer.
+    settings.config.security = Security::On;
     settings.files_dir = dir.join("files");
     settings.audit = Some(orion_audit::AuditConfig::new(&dir.join("state/audit.log")));
     settings.config.node_name = name.parse().expect("name");
@@ -216,6 +219,10 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
     let left_key = Identity::load_or_create(&left_dir.join("state/node-identity.ed25519"))
         .expect("key")
         .public();
+    std::fs::create_dir_all(right_dir.join("state")).expect("state");
+    let right_key = Identity::load_or_create(&right_dir.join("state/node-identity.ed25519"))
+        .expect("key")
+        .public();
 
     let left = Board::start_named(&left_dir, Security::On, "left", None);
     let _left_logic = Logic::start(settings(&left_dir, "left"));
@@ -253,6 +260,34 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
             Err(error) => panic!("put: {error}"),
         }
     }
+
+    // The left node forwards only to a node its trust file pins, and only once that node has
+    // proved it holds the pinned key.
+    match finish(&caller, &call("blink", b"")) {
+        Err(ClientError::Refused(Error::Denied)) => {}
+        other => panic!("expected denied with no pin, got {other:?}"),
+    }
+    let wrong = Identity::load_or_create(&left_dir.join("wrong.ed25519"))
+        .expect("key")
+        .public();
+    let right_name = "right".parse().expect("name");
+    assert!(
+        left.keys()
+            .lock()
+            .trust_peer(&right_name, wrong)
+            .expect("trust")
+    );
+    match finish(&caller, &call("blink", b"")) {
+        Err(ClientError::Refused(Error::Denied)) => {}
+        other => panic!("expected denied with the wrong pin, got {other:?}"),
+    }
+    left.keys().lock().revoke(wrong).expect("revoke");
+    assert!(
+        left.keys()
+            .lock()
+            .trust_peer(&right_name, right_key)
+            .expect("trust")
+    );
 
     // It runs on the right node, with its progress, for a caller on the left.
     let mut run = caller.run(&call("blink", b"twice")).expect("run");

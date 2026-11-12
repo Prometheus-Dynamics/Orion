@@ -94,14 +94,15 @@ impl Board {
     }
 
     /// As [`Board::start_for_node_with`], for a board with another name than `board`, on
-    /// `port` if it is to come back where it was: one of several in a test.
+    /// `port` if it is to come back where it was: one of several in a test. Its key and trust
+    /// file are kept in `dir/state`, where node logic reads them.
     ///
     /// # Panics
     ///
     /// If the board cannot start.
     #[must_use]
     pub fn start_named(dir: &Path, security: Security, name: &str, port: Option<u16>) -> Self {
-        Self::start_all(dir, security, port, true, name, Vec::new())
+        Self::start_all(dir, security, port, true, name, Vec::new(), true)
     }
 
     /// As [`Board::start_for_node`], with a serial link on each of `links`: a device on the
@@ -112,11 +113,19 @@ impl Board {
     /// If the board cannot start.
     #[must_use]
     pub fn start_for_node_with_links(dir: &Path, links: &[PathBuf]) -> Self {
-        Self::start_all(dir, Security::Off, None, true, "board", links.to_vec())
+        Self::start_all(
+            dir,
+            Security::Off,
+            None,
+            true,
+            "board",
+            links.to_vec(),
+            false,
+        )
     }
 
     fn start_as(dir: &Path, security: Security, port: Option<u16>, for_node: bool) -> Self {
-        Self::start_all(dir, security, port, for_node, "board", Vec::new())
+        Self::start_all(dir, security, port, for_node, "board", Vec::new(), false)
     }
 
     fn start_all(
@@ -126,6 +135,7 @@ impl Board {
         for_node: bool,
         name: &str,
         links: Vec<PathBuf>,
+        on_disk: bool,
     ) -> Self {
         let name = name.to_owned();
         use std::os::unix::fs::MetadataExt;
@@ -138,8 +148,13 @@ impl Board {
             .collect();
         let socket = dir.join("orion.sock");
         let shelf = Arc::new(Shelf::default());
-        let keys =
-            SharedKeys::new(Keys::open(KeysConfig::in_memory("lab"), security).expect("keys"));
+        // A named board keeps its key and trust file in `dir/state`, as a comm core does: node
+        // logic reads them there, and the key stays the same across a restart.
+        let keys_config = KeysConfig {
+            state_dir: on_disk.then(|| dir.join("state")),
+            ..KeysConfig::in_memory("lab")
+        };
+        let keys = SharedKeys::new(Keys::open(keys_config, security).expect("keys"));
         let (ready, started) = mpsc::channel();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let (path, on_shelf, board_keys) = (socket.clone(), shelf.clone(), keys.clone());

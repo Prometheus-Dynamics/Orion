@@ -1,7 +1,7 @@
 //! The helper for one other node: a thread that holds a session to its comm core.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
@@ -20,6 +20,44 @@ const IDLE: Duration = Duration::from_secs(30);
 
 /// How long the helper waits on the session before it looks for something to send.
 const TURN: Duration = Duration::from_millis(10);
+
+/// This node's key, which the comm core makes and keeps.
+const IDENTITY_FILE: &str = "node-identity.ed25519";
+
+/// The comm core's trust file, which names the peers and their keys.
+const TRUST_FILE: &str = "trust";
+
+/// The key the trust file at `path` pins for `node`: a line `peer NODE HEX`, unless the key is
+/// also on a `revoked HEX` line. No file pins nothing.
+fn pinned(path: &Path, node: &NodeName) -> Result<Option<[u8; 32]>, ClientError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(ClientError::Io(error)),
+    };
+    let mut key = None;
+    let mut revoked = Vec::new();
+    for line in text.lines() {
+        let mut words = line.split_whitespace();
+        match (words.next(), words.next(), words.next()) {
+            (Some("peer"), Some(name), Some(hex)) if name == node.as_str() => key = unhex(hex),
+            (Some("revoked"), Some(hex), _) => revoked.extend(unhex(hex)),
+            _ => {}
+        }
+    }
+    Ok(key.filter(|key| !revoked.contains(key)))
+}
+
+fn unhex(text: &str) -> Option<[u8; 32]> {
+    let mut key = [0_u8; 32];
+    if text.len() != 64 {
+        return None;
+    }
+    for (byte, pair) in key.iter_mut().zip(text.as_bytes().chunks(2)) {
+        *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(key)
+}
 
 /// What node logic tells the helper.
 #[derive(Debug)]
@@ -75,14 +113,16 @@ impl Link {
     pub(crate) fn start(
         node: NodeName,
         me: NodeName,
-        identity: PathBuf,
+        keys_dir: PathBuf,
+        check: bool,
         events: Sender<Event>,
     ) -> Self {
         let (commands, waiting) = mpsc::channel();
         let helper = Helper {
             node,
             me,
-            identity,
+            keys_dir,
+            check,
             events,
             session: None,
             running: BTreeMap::new(),
@@ -107,7 +147,8 @@ impl Link {
 struct Helper {
     node: NodeName,
     me: NodeName,
-    identity: PathBuf,
+    keys_dir: PathBuf,
+    check: bool,
     events: Sender<Event>,
     session: Option<Session>,
     /// The `seq` each run was asked with, to match a refusal.
@@ -133,7 +174,14 @@ impl Helper {
         if self.session.is_some() {
             return Ok(());
         }
-        let identity = Identity::load_or_create(&self.identity)?;
+        // Read on each connect: a peer trusted, or revoked, since is seen.
+        let key = pinned(&self.keys_dir.join(TRUST_FILE), &self.node)?;
+        if self.check && key.is_none() {
+            return Err(ClientError::Denied(
+                "the trust file pins no key for that node",
+            ));
+        }
+        let identity = Identity::load_or_create(&self.keys_dir.join(IDENTITY_FILE))?;
         let options = Options {
             roles: Roles::CLIENT,
             identity: Some(identity),
@@ -142,7 +190,7 @@ impl Helper {
         };
         let address = Address::Network {
             host: address.to_owned(),
-            key: None,
+            key,
         };
         let name = format!("node:{}", self.me);
         let session = Session::connect(&address, &name, options)?;
@@ -163,10 +211,12 @@ impl Helper {
             } => {
                 if let Err(error) = self.connect(&address) {
                     warn!("{} cannot be reached at {address}: {error}", self.node);
-                    self.tell(Event::Refused {
-                        id,
-                        error: Error::Unavailable,
-                    });
+                    // A node that is not the one pinned is refused as such, not as away.
+                    let error = match error {
+                        ClientError::Denied(_) => Error::Denied,
+                        _ => Error::Unavailable,
+                    };
+                    self.tell(Event::Refused { id, error });
                     return;
                 }
                 let run = Run {

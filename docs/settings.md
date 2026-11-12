@@ -20,10 +20,13 @@ the recovery way in (`docs/comm.md`, "Recovery").
 | `security` | `off` | the one switch |
 | `socket` | `/run/orion/orion.sock` | the board's socket |
 | `state.dir` | `/var/lib/orion` | the identity, the trust store, the saved time |
+| `keys.dir` | `state.dir` | where the node's key and the trust file are |
 
-The comm core keeps its identity, trust store, SSH host key and saved time in `state.dir`;
-node logic keeps its records, files and audit log there. On a board the two are given different
-directories (`packaging/README.md`).
+The comm core keeps its SSH host key and saved time in `state.dir`, and its identity and trust
+store in `keys.dir`; node logic keeps its records, files and audit log in `state.dir`, and reads
+the key and the trust file in `keys.dir` to act as the node toward other nodes. On a board the
+two have different state directories and one `keys.dir`, the comm core's
+(`packaging/README.md`).
 
 ## The comm core
 
