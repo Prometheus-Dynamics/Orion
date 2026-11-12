@@ -84,25 +84,22 @@ root = pathlib.Path(sys.argv[1])
 errors = []
 
 # Crates allowed to use `unsafe`. Everywhere else the workspace lint forbids it.
-UNSAFE_OK = ("crates/core/ring", "crates/core/fdpass", "crates/core/measure", "crates/client/capi", "crates/device/", "crates/bridges/")
+UNSAFE_OK = ("crates/core/ring", "crates/core/fdpass", "crates/core/measure", "crates/client/capi", "crates/device/")
 UNSAFE_FILES = ("crates/core/wire/src/crc.rs", "crates/testing/sample-executor/src/spawn.rs")
 # Network stacks the design names, and the only crates that may hold them.
 NET_DEPS = {"hyper", "axum", "reqwest", "ureq", "http", "h2", "h3", "quinn", "quiche", "rustls", "tokio-rustls", "tonic", "actix-web"}
 NET_OK = ("crates/node/files-pull",)
 # Other libraries and products go by their role (the camera library, the device library, the
-# product). Open: the graph runtime's bridge (crates/bridges/daedalus) is named after the
-# runtime, and so is what the design says about it; until it is decided whether the bridge
-# stays here, that one name is not checked.
+# graph runtime, the product).
 PRODUCT = re.compile(
-    r"\b(photon|photonvision|helios|atlas|lemnos|lemnosd|styx|eidos|raze|cm5|raspberry|bcm2712|roborio|wpilib|frc|robots?|apriltag|opencv|libcamera)\b",
+    r"\b(photon|photonvision|helios|atlas|lemnos|lemnosd|styx|eidos|raze|daedalus|daedalusd|cm5|raspberry|bcm2712|roborio|wpilib|frc|robots?|apriltag|opencv|libcamera)\b",
     re.I,
 )
 # Where the names stay: the NT4 crates, whose protocol's own vocabulary they are; the record of
-# the NT4 client run, which quotes that vocabulary from a real server; the bridge; this file;
-# and the lock file's dependency names.
+# the NT4 client run, which quotes that vocabulary from a real server; this file; and the lock
+# file's dependency names.
 PRODUCT_OK = (
-    "scripts/check-boundaries.sh", "crates/gateways/nt4", "crates/bridges/daedalus",
-    "testing/board-runs/F8.md", "Cargo.lock",
+    "scripts/check-boundaries.sh", "crates/gateways/nt4", "testing/board-runs/F8.md", "Cargo.lock",
 )
 LIMIT = 800
 

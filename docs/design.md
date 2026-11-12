@@ -35,7 +35,7 @@ Orion is orchestration and interconnect, inside a board and out of it.
 | Library | Job |
 | --- | --- |
 | A camera library | Cameras and media |
-| Daedalus | Runs graphs |
+| A graph runtime | Runs graphs |
 | A vision library | Vision |
 | A device library | Devices and drivers |
 | Orion | Orchestration and interconnect |
@@ -67,7 +67,7 @@ the whole protocol is made of them.
  |            access (SSH, recovery shell), hello, discovery, time          |
  ===+==========+==============+==============+================+=============
     |          |              |              |                |
-  node logic  web API       device daemon  daedalusd       camera service
+  node logic  web API       device daemon  graph runtime   camera service
   (records,   (the product, (devices,      (runs graphs,   (owns sensors)
   workloads,   a client)     actions)       an executor)
   actions)                       \              |              /
@@ -91,7 +91,6 @@ crates/
   node/      store, persist, workloads, workload-*, executors, sync, placement, actions*, files*,
              resources, audit, node-app, assembly
   gateways/  nt4, nt4-gateway, nt4-client-gateway
-  bridges/   daedalus
   bins/      orion, orion-recovery
   testing/   wire-vectors, ring-model, ring-bench, drills
 web/         TypeScript client and the browser video example
@@ -313,10 +312,8 @@ the largest chunk its receive buffer holds when it asks for its prefix, and the 
 chunks to fit and sends one frame at a time, so a device with a 512-byte buffer takes an image
 from any sender. A lost frame is sent again after two quiet seconds.
 
-`crates/bridges/daedalus` is a plugin library for `daedalusd`: nodes that read a topic, write
-one, and take frames from a buffer topic. A frame goes to the graph where it is, in the
-publisher's shared memory, and its buffer is held until Daedalus lets the last value of it go.
-It builds against a pinned Daedalus commit, outside the workspace, with its own `check.sh`.
+A graph runtime reaches topics through the client like any other program. A bridge that makes
+topics into graph nodes belongs with the runtime, not here.
 
 `examples/mcu-template` is where a firmware starts: ports for an `embedded-io` stream and an
 `embedded-can` controller, and a C API over one static (`include/orion_mcu.h`) for firmware
@@ -415,7 +412,7 @@ impl Orion {
     pub fn register_action(&mut self, decl: ActionDecl, policy: Policy) -> Result<ActionRegistration, ClientError>;
 }
 
-// crates/client/executor. What daedalusd implements.
+// crates/client/executor. What a graph runtime's daemon implements.
 pub trait Executor {
     fn kinds(&self) -> &[WorkloadKind];
     fn start(&mut self, name: &WorkloadName, spec: &[u8]) -> Result<(), ExecError>;
@@ -434,7 +431,7 @@ queues everywhere; no timer on a data path; nothing on the wire names a kind of 
 | --- | --- |
 | **Ported** | Link wire and device code; time sync; discovery; auth keys and enrollment; HLC merge; placement; MCU examples and size gates; the NT4 crate, reworked as a gateway; fd framing |
 | **Rewritten** | The client, as one instead of local and remote copies; status and streams, as topics; actions around the check; workloads with the new states; storage without rkyv; orionctl |
-| **New** | Rings and buffer topics; WebSocket and the web client; SSH access; the executor protocol; URL pull; the Daedalus plugin |
+| **New** | Rings and buffer topics; WebSocket and the web client; SSH access; the executor protocol; URL pull |
 | **Left behind** | HTTP control API, QUIC, `transport-tcp`; `data-plane`; the rkyv control messages; update intents; maintenance admin; metrics export (a part's state is a topic) |
 
 ## Known risks
@@ -498,7 +495,7 @@ come from what each PR needs. A PR is ready when everything it needs has merged,
 - **F. Leaving the board.** 8 PRs. Other boards, browsers and NT4.
 - **G. Access and recovery.** 6 PRs. SSH served by Orion, the recovery shell and the recovery build.
 - **H. Microcontrollers.** 8 PRs. The device side on the same wire, with its size gate.
-- **I. Finish.** 9 PRs. One binary, packaging, the Daedalus bridge, failure drills and the hardware proof.
+- **I. Finish.** 9 PRs. One binary, packaging, the graph bridge (dropped), failure drills and the hardware proof.
 
 ## Proof on hardware
 

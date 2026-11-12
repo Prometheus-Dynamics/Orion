@@ -1,8 +1,6 @@
 [workspace]
 # Every directory two levels under crates/ must be a crate. Adding a crate never edits this file.
 members = ["crates/*/*"]
-# Built on their own, against another project's workspace: see each one's check.sh.
-exclude = ["crates/bridges"]
 resolver = "3"
 
 [workspace.package]
