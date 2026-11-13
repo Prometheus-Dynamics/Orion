@@ -1,4 +1,4 @@
-//! Who a board is, and what time it has.
+//! Who a board is, what time it has, and where its sync with other boards is.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -6,8 +6,12 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_identity::{fingerprint, hello, random};
-use orion_msg_peers::{CLOCK_REALTIME, TimeReply, TimeRequest};
+pub use orion_msg_peers::SyncState;
+use orion_msg_peers::{
+    CLOCK_REALTIME, PeerForgive, PeerStates, PeerStatus, TimeReply, TimeRequest,
+};
 use orion_msg_session::Identify;
+use orion_types::NodeName;
 use orion_wire::{Bytes, kind};
 
 /// One fact about a board, as some program on it published it.
@@ -49,19 +53,44 @@ pub struct Clock {
     pub delay_ns: u64,
 }
 
+/// Where a board's sync with one other board is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncPeer {
+    /// The other board.
+    pub node: String,
+    /// Where sync with it is.
+    pub state: SyncState,
+    /// When the two last agreed, in milliseconds since 1970, if they ever have.
+    pub agreed_ms: Option<u64>,
+}
+
 #[derive(Default)]
 pub(crate) struct State {
     identity: Option<Vec<u8>>,
     time: Option<(TimeReply, Instant, i128)>,
+    peers: Option<(u16, Vec<SyncPeer>)>,
 }
 
 impl Handler for State {
     fn kinds(&self) -> &'static [u8] {
-        &[kind::IDENTITY, kind::TIME_REPLY]
+        &[kind::IDENTITY, kind::TIME_REPLY, kind::PEER_STATES]
     }
 
     fn handle(&mut self, frame: &Incoming<'_>, _cx: &mut Cx<'_>) -> Result<(), ClientError> {
-        if frame.kind() == kind::IDENTITY {
+        if frame.kind() == kind::PEER_STATES {
+            let states: PeerStates<'_> = frame.body()?;
+            let peers = states
+                .peers
+                .iter()
+                .flatten()
+                .map(|peer| SyncPeer {
+                    node: peer.node.to_string(),
+                    state: peer.state,
+                    agreed_ms: (peer.agreed_ms != 0).then_some(peer.agreed_ms),
+                })
+                .collect();
+            self.peers = Some((states.request_seq, peers));
+        } else if frame.kind() == kind::IDENTITY {
             self.identity = Some(frame.payload().to_vec());
         } else {
             self.time = Some((frame.body()?, Instant::now(), wall_ns()));
@@ -135,4 +164,30 @@ pub(crate) fn clock(client: &Client, state: &Rc<RefCell<State>>) -> Result<Clock
         offset_ns: offset.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
         delay_ns: (round - held).max(0) as u64,
     })
+}
+
+/// Where sync is with each peer, after forgiving `forgive` if it is given.
+pub(crate) fn peers(
+    client: &Client,
+    state: &Rc<RefCell<State>>,
+    forgive: Option<&str>,
+) -> Result<Vec<SyncPeer>, ClientError> {
+    state.borrow_mut().peers = None;
+    let seq = match forgive {
+        Some(node) => client.send(&PeerForgive {
+            node: node
+                .parse::<NodeName>()
+                .map_err(|_| ClientError::Protocol("a node name that is not one"))?,
+        })?,
+        None => client.send(&PeerStatus {})?,
+    };
+    client.answered(seq, || {
+        state
+            .borrow()
+            .peers
+            .as_ref()
+            .is_some_and(|(answered, _)| *answered == seq)
+    })?;
+    let (_, peers) = state.borrow_mut().peers.take().ok_or(ClientError::Lost)?;
+    Ok(peers)
 }

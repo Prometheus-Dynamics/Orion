@@ -287,6 +287,27 @@ impl Orion {
         Ok(node::clock(&self.client, &self.node)?)
     }
 
+    /// Where the board's sync with each other board is.
+    ///
+    /// # Errors
+    ///
+    /// Refused without read access to records; as [`Orion::clock`].
+    pub fn sync_peers(&self) -> Result<Vec<node::SyncPeer>, Error> {
+        Ok(node::peers(&self.client, &self.node, None)?)
+    }
+
+    /// Lets the board sync again with `peer`, which was away longer than deletes are
+    /// remembered. What was deleted while it was away may come back. The peer has to forgive
+    /// this board too. Answers where sync is with each peer after.
+    ///
+    /// # Errors
+    ///
+    /// Refused without write access to records, `not found` if `peer` is not one; as
+    /// [`Orion::clock`].
+    pub fn forgive(&self, peer: &str) -> Result<Vec<node::SyncPeer>, Error> {
+        Ok(node::peers(&self.client, &self.node, Some(peer))?)
+    }
+
     /// The session itself, for what this handle does not cover.
     #[must_use]
     pub const fn client(&self) -> &Client {

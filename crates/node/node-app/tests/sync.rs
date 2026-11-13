@@ -215,3 +215,97 @@ fn a_node_not_pinned_is_not_synced_with() {
         "a node that is not the one pinned got the records"
     );
 }
+
+#[test]
+fn a_stale_peer_is_not_synced_with_until_both_forgive_it() {
+    use orion::node::SyncState;
+    let (left_dir, right_dir) = (dir("stale-left"), dir("stale-right"));
+    // Each last agreed with the other at the start of 1970: longer ago than deletes are kept.
+    std::fs::write(left_dir.join("state/sync-agreed"), "right 1\n").expect("agreed");
+    std::fs::write(right_dir.join("state/sync-agreed"), "left 1\n").expect("agreed");
+    let (left_key, right_key) = (key(&left_dir), key(&right_dir));
+    let right = Side::start(&right_dir, "right", None, "left", left_key);
+    let port = right.board.network().port();
+    let left = Side::start(&left_dir, "left", None, "right", right_key);
+    let state = |side: &Side, peer: &str| {
+        // Unavailable until node logic is there.
+        side.caller
+            .sync_peers()
+            .ok()?
+            .into_iter()
+            .find(|found| found.node == peer)
+            .map(|found| (found.state, found.agreed_ms))
+    };
+    until("the kept agreement is read back", || {
+        state(&left, "right") == Some((SyncState::Down, Some(1)))
+    });
+
+    left.put_node("right", &format!("127.0.0.1:{port}"));
+    until("the left node sees the right one is stale", || {
+        state(&left, "right") == Some((SyncState::Stale, Some(1)))
+    });
+    until("the right node sees the left one is stale", || {
+        state(&right, "left").is_some_and(|(state, _)| state == SyncState::Stale)
+    });
+    left.put_node("spare", "");
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!right.has_node("spare"), "a stale peer is not synced with");
+
+    // Forgiving a node that is not a peer is refused.
+    assert!(matches!(
+        left.caller.forgive("nobody"),
+        Err(orion::Error::Client(ClientError::Refused(Error::NotFound)))
+    ));
+
+    // One side forgiving is not enough: the other still refuses.
+    let after = left.caller.forgive("right").expect("forgive");
+    assert!(after.iter().any(|peer| peer.node == "right"
+        && peer.state != SyncState::Stale
+        && peer.agreed_ms.is_none()));
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!right.has_node("spare"), "the right node has not forgiven");
+
+    // The other side, through the command line.
+    let ctl = |line: &str| {
+        let mut words = vec![
+            "--address".to_owned(),
+            right.board.socket().display().to_string(),
+        ];
+        words.extend(line.split_whitespace().map(str::to_owned));
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = orion_ctl::run(&words, &mut out, &mut err);
+        let (out, err) = (
+            String::from_utf8(out).expect("text"),
+            String::from_utf8(err).expect("text"),
+        );
+        assert_eq!((code, err.as_str()), (0, ""), "{line}: {out}");
+        out
+    };
+    let out = ctl("node sync");
+    assert!(out.contains("left  Stale  agreed at 1 ms"), "{out}");
+    let out = ctl("node forgive left");
+    assert!(out.starts_with("left is forgiven"), "{out}");
+    assert!(
+        out.contains("left  ") && out.contains("never agreed"),
+        "{out}"
+    );
+    until("the record put while stale is on the right", || {
+        right.has_node("spare")
+    });
+    until("the two agree", || {
+        state(&left, "right").is_some_and(|(state, _)| state == SyncState::InSync)
+    });
+    // It is said in the audit log, and the old agreement is no longer kept.
+    let audit = std::fs::read_to_string(left_dir.join("state/audit.log")).expect("audit");
+    assert!(
+        audit
+            .lines()
+            .any(|line| line.contains("forgive") && line.contains("node:right")),
+        "{audit}"
+    );
+    until("the old agreement is gone from the file", || {
+        !std::fs::read_to_string(left_dir.join("state/sync-agreed"))
+            .unwrap_or_default()
+            .contains("right 1\n")
+    });
+}

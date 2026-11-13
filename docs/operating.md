@@ -64,6 +64,13 @@ A misbehaving client, peer, provider or link is cut off without the others notic
 backs off for good: a part that fails tries again, at most 5 to 10 s apart, and access paths
 never wait.
 
+## A node that was away a long time
+
+A node that has not agreed with a peer for longer than deletes are remembered (seven days) is
+stale to it: the two do not sync, since it would bring back what was deleted while it was
+away. `orion node sync` on either says so. Once whoever runs the cluster accepts that, run
+`orion node forgive PEER` on each of the two, naming the other; they sync from then on.
+
 ## Updating Orion
 
 Replace `/usr/bin/orion` and restart both services: workloads keep running through it and are

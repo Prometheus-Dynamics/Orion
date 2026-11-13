@@ -271,10 +271,30 @@ pub const SYNC: &[Route] = &[
     },
 ];
 
+/// Asking where sync is with each peer, and forgiving a stale one: from operators and
+/// programs on the board. Forgiving is a write: it lets back what was deleted while the peer
+/// was away.
+pub const SYNC_ASKED: &[Route] = &[
+    Route {
+        kind: kind::PEER_STATUS,
+        access: Access::Read("records"),
+        who: Who::Granted(Admits::LOCAL.and(Admits::OPERATOR)),
+        standing: false,
+        ends: Ends::Answer,
+    },
+    Route {
+        kind: kind::PEER_FORGIVE,
+        access: Access::Write("records"),
+        who: Who::Granted(Admits::LOCAL.and(Admits::OPERATOR)),
+        standing: false,
+        ends: Ends::Answer,
+    },
+];
+
 /// Every kind that is node logic's.
 #[must_use]
 pub fn routes() -> Vec<Route> {
-    [RECORDS, ACTIONS, FILES, WORKLOADS, SYNC].concat()
+    [RECORDS, ACTIONS, FILES, WORKLOADS, SYNC, SYNC_ASKED].concat()
 }
 
 /// How many requests are remembered as waiting on node logic. The oldest goes first.

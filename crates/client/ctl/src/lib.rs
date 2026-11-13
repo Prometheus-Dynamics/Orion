@@ -10,6 +10,8 @@
 //! node      show                      who the board is, checked against its signature
 //! node      peers                     the nodes it knows
 //! node      time                      how its clock compares with this computer's
+//! node      sync                      where its sync with each other node is
+//! node      forgive PEER              lets a stale peer sync again
 //! resource  list [PREFIX]             the things that exist
 //! resource  show NAME                 one of them: its topics, its actions, its labels
 //! topic     read TOPIC                the newest value of each field
@@ -51,7 +53,7 @@ use args::{Args, Usage};
 pub const USAGE: &str = "\
 usage: orion [--address A] [--name N] [--timeout MS] <concept> <verb> ...
 
-  node      show | peers | time
+  node      show | peers | time | sync | forgive PEER
   resource  list [PREFIX] | show NAME
   topic     read TOPIC | watch TOPIC [--count N] [--for MS]
             publish TOPIC NAME:TYPE=VALUE... [--hold MS]
@@ -147,6 +149,8 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
         ("node", "show") => node_show,
         ("node", "peers") => node_peers,
         ("node", "time") => node_time,
+        ("node", "sync") => node_sync,
+        ("node", "forgive") => node_forgive,
         ("resource", "list") => resource_list,
         ("resource", "show") => resource_show,
         ("topic", "read") => topic_read,
@@ -221,6 +225,33 @@ fn node_time(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         "the board's clock is {:.3} ms {which} this computer's (round trip {delay_ms:.3} ms)",
         offset_ms.abs()
     )?;
+    Ok(())
+}
+
+fn node_sync(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
+    args.done()?;
+    sync_peers(&orion.sync_peers()?, out)
+}
+
+fn node_forgive(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
+    let peer = args.word("the peer to forgive")?;
+    args.done()?;
+    let peers = orion.forgive(&peer)?;
+    writeln!(
+        out,
+        "{peer} is forgiven: what was deleted while it was away may come back. It has to forgive this node too."
+    )?;
+    sync_peers(&peers, out)
+}
+
+fn sync_peers(peers: &[orion::node::SyncPeer], out: &mut dyn Write) -> Done {
+    for peer in peers {
+        let agreed = peer.agreed_ms.map_or_else(
+            || "never agreed".to_owned(),
+            |at| format!("agreed at {at} ms"),
+        );
+        writeln!(out, "{}  {:?}  {agreed}", peer.node, peer.state)?;
+    }
     Ok(())
 }
 

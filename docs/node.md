@@ -168,7 +168,10 @@ What a node does with a peer's summary:
   The two then differ until time catches up; everything is sent once for it and not again.
 - **Stale peers.** A peer last agreed with longer ago than deletes are remembered (seven days)
   would bring back what was deleted while it was away. It is not synced with in either
-  direction, and shows as `Stale`, until `forgive` is called for it. Two nodes that stayed
+  direction, and shows as `Stale`, until it is forgiven: `PeerForgive`, from a program on the
+  board or an operator with write access to records, or `orion node forgive PEER`. Each node
+  refuses the other, so both have to forgive. `PeerStatus` (`orion node sync`) says where
+  sync is with each peer and when the two last agreed. Two nodes that stayed
   connected and in agreement are never stale. When peers last agreed is given back by
   `agreed_at` to be kept across a restart.
 - **Whose message.** The connection says who the peer is. A message that names another node is

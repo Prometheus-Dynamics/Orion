@@ -176,6 +176,59 @@ body! {
     }
 }
 
+open_enum! {
+    /// Where sync with a peer is.
+    pub enum SyncState: u8 {
+        /// There is no connection to it.
+        Down = 1,
+        /// Connected, and the two have not been seen to agree since.
+        Syncing = 2,
+        /// The two agreed when it was last heard from.
+        InSync = 3,
+        /// It was away longer than deletes are remembered, and is not synced with until it
+        /// is forgiven.
+        Stale = 4,
+    }
+}
+
+body! {
+    /// One peer, as sync sees it.
+    pub struct PeerState {
+        /// The peer.
+        pub node: NodeName,
+        /// Where sync with it is.
+        pub state: SyncState,
+        /// When the two last agreed, wall clock milliseconds; zero for never.
+        pub agreed_ms: u64,
+    }
+}
+
+body! {
+    /// Asks where sync is with each peer. Answered with [`PeerStates`].
+    pub struct PeerStatus = kind::PEER_STATUS {
+    }
+}
+
+body! {
+    /// Lets a stale peer sync again. Whoever asks accepts that what was deleted while it was
+    /// away may come back. Answered with [`PeerStates`], or `not found` for a node that is
+    /// not a peer.
+    pub struct PeerForgive = kind::PEER_FORGIVE {
+        /// The peer.
+        pub node: NodeName,
+    }
+}
+
+body! {
+    /// Where sync is with each peer.
+    pub struct PeerStates<'a> = kind::PEER_STATES {
+        /// The `seq` of the request.
+        pub request_seq: u16,
+        /// The peers, by name.
+        pub peers: List<'a, PeerState>,
+    }
+}
+
 /// [`TimeRequest::clock`]: the wall clock, `CLOCK_REALTIME`, which time sync sets.
 pub const CLOCK_REALTIME: u8 = 0;
 /// [`TimeRequest::clock`]: `CLOCK_MONOTONIC`, which sample times are on.

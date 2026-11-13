@@ -13,6 +13,7 @@ use orion_file_store::Files;
 use orion_files_sink::Sinks;
 use orion_msg_actions::{Cancel, Claim, Register, Run, Target};
 use orion_msg_files::{FileBegin, FileCommit, FileStatus};
+use orion_msg_peers::PeerForgive;
 use orion_msg_records::{NodeRecord, Put, RecordClass, ResourceRecord};
 use orion_msg_session::{NodeAnswer, NodeGone, NodeRequest};
 use orion_msg_topics::{Field, FieldType};
@@ -149,6 +150,8 @@ impl Logic {
         kind::FILE_PULL,
         kind::PEER_SYNC,
         kind::PEER_OBSERVED,
+        kind::PEER_STATUS,
+        kind::PEER_FORGIVE,
     ];
 
     /// The kinds node logic answers.
@@ -175,6 +178,8 @@ impl Logic {
         kind::EXECUTOR_INVENTORY,
         kind::PEER_SYNC,
         kind::PEER_OBSERVED,
+        kind::PEER_STATUS,
+        kind::PEER_FORGIVE,
     ];
 
     pub(crate) fn new(
@@ -392,6 +397,9 @@ impl Logic {
         } else if Peers::KINDS.contains(&asked.kind) {
             self.peers
                 .request(asked, &mut self.records, wall().as_millis() as u64, out)
+        } else if Peers::ASKED.contains(&asked.kind) {
+            self.peers
+                .ask(asked, &self.records, wall().as_millis() as u64, out)
         } else if asked.kind == kind::FILE_PULL {
             self.pull(asked, out)
         } else if Sinks::KINDS.contains(&asked.kind) {
@@ -511,6 +519,10 @@ fn done(asked: &Asked<'_>) -> Option<(&'static str, String)> {
             let remove: WorkloadRemove = asked.body().ok()?;
             let how = if remove.force { " by force" } else { "" };
             Some(("remove", format!("{}{how}", remove.name)))
+        }
+        kind::PEER_FORGIVE => {
+            let forgive: PeerForgive = asked.body().ok()?;
+            Some(("forgive", format!("node:{}", forgive.node)))
         }
         _ => None,
     }

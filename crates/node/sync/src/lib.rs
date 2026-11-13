@@ -148,6 +148,14 @@ impl Sync {
         self.peers.get(peer).map_or(PeerStatus::Down, Peer::status)
     }
 
+    /// Every peer sync knows of, by name: where sync with it is, and when the two last
+    /// agreed, wall clock milliseconds.
+    pub fn peers(&self) -> impl Iterator<Item = (&NodeName, PeerStatus, Option<u64>)> {
+        self.peers
+            .iter()
+            .map(|(name, peer)| (name, peer.status(), peer.agreed_ms))
+    }
+
     /// When each peer was last agreed with, to keep across a restart.
     pub fn agreed_at(&self) -> impl Iterator<Item = (&NodeName, u64)> {
         self.peers

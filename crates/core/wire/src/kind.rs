@@ -129,6 +129,9 @@ kinds! {
         OPERATOR_WELCOME = 0x67,
         OPERATOR_LIST = 0x68,
         OPERATORS = 0x69,
+        PEER_STATUS = 0x6A,
+        PEER_FORGIVE = 0x6B,
+        PEER_STATES = 0x6C,
     }
     Time {
         TIME_REQUEST = 0x70,

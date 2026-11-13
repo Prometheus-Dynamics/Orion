@@ -10,7 +10,8 @@ use orion_msg_files::{
 use orion_msg_peers::{
     CLOCK_MONOTONIC, EnrollChallenge, EnrollConfirm, EnrollHello, EnrollRole, GrantedAction,
     OperatorEnroll, OperatorEntry, OperatorList, OperatorState, OperatorWelcome, Operators,
-    PeerObserved, PeerRevoke, PeerSync, TimeOffer, TimeReply, TimeRequest, TimeTurn,
+    PeerForgive, PeerObserved, PeerRevoke, PeerState, PeerStates, PeerStatus, PeerSync, SyncState,
+    TimeOffer, TimeReply, TimeRequest, TimeTurn,
 };
 use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, RecordEntry, Watch};
 use orion_msg_session::{
@@ -698,6 +699,27 @@ fn peers(out: &mut Vec<Sample>) {
         Operators {
             request_seq: 1,
             operators: List::new(&operators)
+        }
+    );
+    sample!(out, PeerStatus {});
+    sample!(out, PeerForgive { node: node("left") });
+    let states = [
+        PeerState {
+            node: node("left"),
+            state: SyncState::InSync,
+            agreed_ms: 1,
+        },
+        PeerState {
+            node: node("right"),
+            state: SyncState::Stale,
+            agreed_ms: 0,
+        },
+    ];
+    sample!(
+        out,
+        PeerStates {
+            request_seq: 1,
+            peers: List::new(&states)
         }
     );
     sample!(

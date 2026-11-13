@@ -7,6 +7,8 @@
 //!   made: one of the two being able to reach the other is enough.
 //! - **Up and down.** A peer is up while either way is. Its observed slice is forgotten when
 //!   neither is.
+//! - **Asked.** Where sync is with each peer can be asked for, and a stale peer forgiven:
+//!   `PeerStatus` and `PeerForgive`, both answered with `PeerStates`.
 //! - **Agreed.** When each peer was last agreed with is written to `sync-agreed` in the state
 //!   directory when it changes, and read back at start, so a node that was away too long is
 //!   still stale after a restart.
@@ -17,13 +19,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
 
+use orion_msg_peers::{PeerForgive, PeerState, PeerStates, PeerStatus, SyncState};
 use orion_msg_records::{NodeRecord, RecordClass};
 use orion_peer_links::{Heard, PeerLinks};
 use orion_reply::{Asked, Out};
 use orion_store::Store;
 use orion_sync::{Sync, SyncConfig};
 use orion_types::{Error, HlcTimestamp, NodeName};
-use orion_wire::{Decode, kind};
+use orion_wire::{Decode, List, kind};
 use tracing::{info, warn};
 
 use crate::records::Records;
@@ -74,6 +77,9 @@ impl orion_sync::Out for To<'_> {
 impl Peers {
     /// The kinds the comm core passes on from peers.
     pub(crate) const KINDS: &'static [u8] = &[kind::PEER_SYNC, kind::PEER_OBSERVED];
+
+    /// The kinds an operator or a program on the board asks about sync with.
+    pub(crate) const ASKED: &'static [u8] = &[kind::PEER_STATUS, kind::PEER_FORGIVE];
 
     pub(crate) fn new(me: NodeName, links: PeerLinks, state_dir: PathBuf) -> Self {
         let mut sync = Sync::new(me, SyncConfig::default());
@@ -147,6 +153,63 @@ impl Peers {
         )?;
         self.settle(records, wall_ms, out);
         Ok(())
+    }
+
+    /// Where sync is with each peer, after forgiving the one a `PeerForgive` names. Whoever
+    /// forgives accepts that what was deleted while the peer was away may come back.
+    pub(crate) fn ask(
+        &mut self,
+        asked: &Asked<'_>,
+        records: &Records,
+        wall_ms: u64,
+        out: &mut dyn Out,
+    ) -> Result<(), Error> {
+        if asked.kind == kind::PEER_FORGIVE {
+            let forgive: PeerForgive = asked.body()?;
+            if !self.sync.peers().any(|(peer, ..)| *peer == forgive.node) {
+                return Err(Error::NotFound);
+            }
+            let Self {
+                sync,
+                links,
+                incoming,
+                ..
+            } = self;
+            let mut to = To {
+                links,
+                incoming,
+                out,
+            };
+            sync.forgive(&forgive.node, records.store(), wall_ms, &mut to);
+            warn!(
+                "{} was forgiven: what was deleted while it was away may come back",
+                forgive.node
+            );
+            self.save_agreed();
+        } else {
+            let _: PeerStatus = asked.body()?;
+        }
+        let states: Vec<PeerState> = self
+            .sync
+            .peers()
+            .map(|(node, status, agreed)| PeerState {
+                node: node.clone(),
+                state: match status {
+                    orion_sync::PeerStatus::Down => SyncState::Down,
+                    orion_sync::PeerStatus::Syncing => SyncState::Syncing,
+                    orion_sync::PeerStatus::InSync => SyncState::InSync,
+                    orion_sync::PeerStatus::Stale => SyncState::Stale,
+                },
+                agreed_ms: agreed.unwrap_or(0),
+            })
+            .collect();
+        out.send(
+            asked.session,
+            &PeerStates {
+                request_seq: asked.seq,
+                peers: List::new(&states),
+            },
+        )
     }
 
     /// A session ended. A peer it was the last way to is down.

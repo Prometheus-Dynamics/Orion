@@ -26,6 +26,7 @@ orion-files-pull = { path = "../files-pull", optional = true }
 orion-files-sink = { path = "../files-sink" }
 orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-files = { path = "../../core/msg-files" }
+orion-msg-peers = { path = "../../core/msg-peers" }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
@@ -46,6 +47,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 orion = { path = "../../client/orion", features = ["files", "provider", "workloads", "executor"] }
+orion-ctl = { path = "../../client/ctl" }
 orion-sample-executor = { path = "../../testing/sample-executor" }
 orion-stubs = { path = "../../testing/stubs" }
 sha2 = { version = "0.11.0", default-features = false }

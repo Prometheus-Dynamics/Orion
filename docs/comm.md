@@ -441,7 +441,7 @@ orion [ctl] <concept> <verb>   the command line (docs/client.md)
 - Both services read the same file (`/etc/orion/orion.conf` unless one is named) and the
   environment. A key that neither reads is logged by both; one that only the other reads is
   not.
-- `orion node show`, `peers` and `time` are the command line's. Anything that is not a mode
+- `orion node show`, `peers`, `time`, `sync` and `forgive` are the command line's. Anything that is not a mode
   is the command line too, so `orion topic read imu` needs no `ctl`.
 - Linked as `orionctl`, `orion-comm` or `orion-node`, it is that mode.
 - The comm core here is the whole one, recovery included, and the file is its helper programs.
