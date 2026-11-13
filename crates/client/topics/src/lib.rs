@@ -13,21 +13,24 @@
 //! subscriber keeps a ring of its own that arriving samples are written to. The program reads
 //! a ring either way.
 //!
+//! Rings are shared on Linux alone, where the board is. On Windows and macOS the same calls go
+//! over the network: samples are messages both ways, and a subscriber's own ring is on the
+//! heap. [`Topics::adopt`] and the doorbell are Linux's.
+//!
 //! A subscriber may come before the topic exists: it waits and is given the ring when the
 //! topic is declared. One whose publisher goes away keeps the ring and the last values, and
 //! carries on when the publisher is back.
 
-#![cfg(target_os = "linux")]
-
+mod mirror;
+mod platform;
 mod state;
 
 use std::cell::RefCell;
 use std::fmt;
-use std::os::fd::{AsFd, BorrowedFd};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use orion_connect::{Client, ClientError};
+use orion_connect::{BorrowedFd, Client, ClientError};
 use orion_msg_topics::{
     Declare, Field, OnSubscribe, Sample as SampleMessage, SampleFlags, Subscribe, TopicStatus,
     TopicWithdraw,
@@ -35,11 +38,11 @@ use orion_msg_topics::{
 use orion_types::TopicRef;
 use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, List, kind};
-use rustix::event::{PollFd, PollFlags, Timespec, poll};
-use shm_ring::{FieldId, Flags, Next, PublishError, Reader, Ring, RingError, Sample, SampleTime};
-use shm_ring_doorbell::Doorbell;
+use shm_ring::{FieldId, Flags, Next, PublishError, RingError, Sample, SampleTime};
 use shm_ring_time::Lookup;
 
+pub use mirror::RingReader;
+use platform::{copy, keep, lend};
 use state::State;
 
 /// Why a call on a topic failed.
@@ -105,7 +108,7 @@ pub struct TopicDecl<'a> {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Holding<'a> {
     /// Its page of hold marks, which the publisher reads.
-    pub marks: Option<std::os::fd::BorrowedFd<'a>>,
+    pub marks: Option<BorrowedFd<'a>>,
     /// How many buffers it asks to be allowed to hold. Zero for no limit.
     pub max_held: u32,
     /// For how long, in milliseconds. Zero for no limit.
@@ -170,7 +173,13 @@ impl Topics {
     ///
     /// If the session is not on the board, the ring's descriptor cannot be duplicated, or the
     /// comm core refuses, as [`Topics::declare`].
-    pub fn adopt(&self, topic: &TopicDecl<'_>, ring: &Ring) -> Result<Publisher, TopicError> {
+    #[cfg(target_os = "linux")]
+    pub fn adopt(
+        &self,
+        topic: &TopicDecl<'_>,
+        ring: &shm_ring::Ring,
+    ) -> Result<Publisher, TopicError> {
+        use std::os::fd::AsFd;
         if !self.client.session(|session| session.passes_descriptors()) {
             return Err(TopicError::Invalid(
                 "a ring is shared only with programs on the board".into(),
@@ -260,6 +269,28 @@ impl Topics {
         if !self.client.session(|session| session.passes_descriptors()) {
             return Ok(self.client.send(&subscribe)?);
         }
+        self.send_subscribe_on_board(&subscribe, holding)
+    }
+
+    /// Sends `subscribe` on the board's own socket, where no descriptor travels.
+    #[cfg(not(target_os = "linux"))]
+    fn send_subscribe_on_board(
+        &self,
+        subscribe: &Subscribe<'_>,
+        _holding: &Holding<'_>,
+    ) -> Result<u16, TopicError> {
+        Ok(self.client.send(subscribe)?)
+    }
+
+    /// Sends `subscribe` on the board's own socket, with this program's doorbell and its marks.
+    #[cfg(target_os = "linux")]
+    fn send_subscribe_on_board(
+        &self,
+        subscribe: &Subscribe<'_>,
+        holding: &Holding<'_>,
+    ) -> Result<u16, TopicError> {
+        use shm_ring_doorbell::Doorbell;
+        use std::os::fd::AsFd;
         // One doorbell for everything this program subscribes to.
         let (eventfd, page) = {
             let mut state = self.state.borrow_mut();
@@ -276,10 +307,10 @@ impl Topics {
         Ok(match holding.marks {
             Some(marks) => self
                 .client
-                .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd(), marks])?,
+                .send_with_fds(subscribe, &[eventfd.as_fd(), page.as_fd(), marks])?,
             None => self
                 .client
-                .send_with_fds(&subscribe, &[eventfd.as_fd(), page.as_fd()])?,
+                .send_with_fds(subscribe, &[eventfd.as_fd(), page.as_fd()])?,
         })
     }
 
@@ -300,10 +331,14 @@ impl Topics {
         let publishers = self.state.borrow().publishers_to_restore();
         for (index, declaration, ring) in publishers {
             let seq = match ring.as_ref().filter(|_| shares) {
-                Some(ring) => {
-                    self.client
-                        .send_frame(kind::TOPIC_DECLARE, &declaration, &[ring.as_fd()])?
-                }
+                #[cfg(unix)]
+                Some(ring) => self.client.send_frame(
+                    kind::TOPIC_DECLARE,
+                    &declaration,
+                    &[std::os::fd::AsFd::as_fd(ring)],
+                )?,
+                #[cfg(not(unix))]
+                Some(_) => unreachable!("no descriptor exists here"),
                 None => self
                     .client
                     .send_frame(kind::TOPIC_DECLARE, &declaration, &[])?,
@@ -317,10 +352,7 @@ impl Topics {
             let (topic, request, max_held, max_hold_ms, marks) = {
                 let state = self.state.borrow();
                 let asked = &state.subscriber(index).asked;
-                let marks = asked
-                    .marks
-                    .as_ref()
-                    .and_then(|marks| marks.try_clone().ok());
+                let marks = asked.marks.as_ref().and_then(copy);
                 (
                     asked.topic.clone(),
                     asked.request.clone(),
@@ -330,7 +362,7 @@ impl Topics {
                 )
             };
             let holding = Holding {
-                marks: marks.as_ref().map(AsFd::as_fd),
+                marks: lend(marks.as_ref()),
                 max_held,
                 max_hold_ms,
             };
@@ -372,9 +404,7 @@ impl Topics {
             request: request.to_vec(),
             max_held: holding.max_held,
             max_hold_ms: holding.max_hold_ms,
-            marks: holding
-                .marks
-                .and_then(|marks| marks.try_clone_to_owned().ok()),
+            marks: holding.marks.and_then(keep),
         };
         let index = self.state.borrow_mut().add_subscriber(seq, asked);
         let answered = self
@@ -564,7 +594,7 @@ pub struct Subscriber {
     client: Client,
     state: Rc<RefCell<State>>,
     index: usize,
-    reader: Option<Reader>,
+    reader: Option<RingReader>,
 }
 
 impl fmt::Debug for Subscriber {
@@ -598,7 +628,7 @@ impl Subscriber {
     /// [`Subscriber::next`]: a topic of shared buffers. `None` until the topic exists. A
     /// reader that can be taken again later is a new ring: the topic was declared
     /// differently.
-    pub fn take_reader(&mut self) -> Option<Reader> {
+    pub fn take_reader(&mut self) -> Option<RingReader> {
         self.refresh();
         self.reader.take()
     }
@@ -650,7 +680,7 @@ impl Subscriber {
     /// How many samples have been lost to this subscriber for reading too slowly.
     #[must_use]
     pub fn missed(&self) -> u64 {
-        self.reader.as_ref().map_or(0, Reader::missed)
+        self.reader.as_ref().map_or(0, RingReader::missed)
     }
 
     /// Whether there is something [`Subscriber::next`] has not returned yet.
@@ -693,33 +723,15 @@ impl Subscriber {
             }
             // Say "about to sleep", then look once more: a sample published in between is
             // either seen here or rings the doorbell.
-            if let Some(doorbell) = &mut self.state.borrow_mut().doorbell {
-                doorbell.arm();
-            }
+            self.arm(true);
             let found = ready(self);
             let now = Instant::now();
             if !found && now < deadline {
                 let heartbeat = self.client.session(|session| session.welcomed().heartbeat);
                 let sleep = deadline.saturating_duration_since(now).min(heartbeat / 2);
-                let timeout = Timespec {
-                    tv_sec: sleep.as_secs() as i64,
-                    tv_nsec: i64::from(sleep.subsec_nanos()),
-                };
-                let state = self.state.borrow();
-                self.client.session(|session| {
-                    let session_fd = PollFd::from_borrowed_fd(session.as_fd(), PollFlags::IN);
-                    let _ = match &state.doorbell {
-                        Some(doorbell) => poll(
-                            &mut [session_fd, PollFd::new(doorbell, PollFlags::IN)],
-                            Some(&timeout),
-                        ),
-                        None => poll(&mut [session_fd], Some(&timeout)),
-                    };
-                });
+                self.sleep(sleep)?;
             }
-            if let Some(doorbell) = &mut self.state.borrow_mut().doorbell {
-                doorbell.disarm();
-            }
+            self.arm(false);
             if found {
                 return Ok(true);
             }

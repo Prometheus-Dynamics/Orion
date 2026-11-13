@@ -1,5 +1,7 @@
 //! A sample executor against a tracker that stands in for node logic's.
 
+#![cfg(target_os = "linux")]
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};

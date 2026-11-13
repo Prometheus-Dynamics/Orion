@@ -1,14 +1,28 @@
 //! What the comm core has told this program about its topics.
 
-use std::os::fd::OwnedFd;
-
-use orion_connect::{ClientError, Cx, Handler, Incoming};
+use orion_connect::{ClientError, Cx, Handler, Incoming, OwnedFd};
 use orion_msg_topics::{
     Bell as BellMessage, Declare, Demand, Opened, Sample, SampleBatch, TopicState, TopicStatus,
 };
 use orion_wire::{Decode, kind};
-use shm_ring::{FieldId, Flags, Reader, Ring, Spec, Writer};
+use shm_ring::{FieldId, Flags, Spec, Writer};
+#[cfg(target_os = "linux")]
 use shm_ring_doorbell::{Bell, Doorbell};
+
+use crate::copy;
+
+use crate::mirror::{Mirror, RingReader};
+
+/// A subscriber's doorbell, as its publisher holds it.
+#[cfg(not(target_os = "linux"))]
+pub(crate) enum Bell {}
+
+#[cfg(not(target_os = "linux"))]
+impl Bell {
+    pub(crate) const fn ring(&mut self) {
+        match *self {}
+    }
+}
 
 pub(crate) struct PublisherState {
     /// The `seq` of the declaration, which its answer names.
@@ -53,11 +67,12 @@ pub(crate) struct SubscriberState {
     pub(crate) status: TopicStatus,
     pub(crate) declaration: Vec<u8>,
     /// Which ring this subscriber reads, so one handed over again is known for the same.
+    #[cfg(target_os = "linux")]
     ring: Option<(u64, u64)>,
     /// A ring that has arrived and the subscriber has not taken yet.
-    pub(crate) arrived: Option<Reader>,
+    pub(crate) arrived: Option<RingReader>,
     /// Off the board: this program's own ring, and the writer that arriving samples go to.
-    mirror: Option<(Ring, Writer)>,
+    mirror: Option<Mirror>,
 }
 
 impl SubscriberState {
@@ -67,6 +82,7 @@ impl SubscriberState {
 }
 
 /// What tells one shared memory file from another.
+#[cfg(target_os = "linux")]
 fn identity(fd: &OwnedFd) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
     let meta = std::fs::File::from(fd.try_clone().ok()?).metadata().ok()?;
@@ -79,6 +95,8 @@ pub(crate) struct State {
     subscribers: Vec<Option<SubscriberState>>,
     /// The declaration that came just before the ring it describes.
     declaration: Vec<u8>,
+    /// What this program sleeps on: one doorbell for every topic it subscribes to.
+    #[cfg(target_os = "linux")]
     pub(crate) doorbell: Option<Doorbell>,
 }
 
@@ -131,6 +149,7 @@ impl State {
             asked,
             status: TopicStatus::Waiting,
             declaration: Vec::new(),
+            #[cfg(target_os = "linux")]
             ring: None,
             arrived: None,
             mirror: None,
@@ -157,10 +176,7 @@ impl State {
                 let publisher = publisher
                     .as_ref()
                     .filter(|publisher| !publisher.withdrawn)?;
-                let ring = publisher
-                    .ring
-                    .as_ref()
-                    .and_then(|ring| ring.try_clone().ok());
+                let ring = publisher.ring.as_ref().and_then(copy);
                 Some((index, publisher.declaration.clone(), ring))
             })
             .collect()
@@ -224,6 +240,8 @@ impl State {
 
     fn opened(&mut self, opened: &Opened, cx: &mut Cx<'_>) -> Result<(), ClientError> {
         let ring = |_| ClientError::Protocol("a ring that cannot be mapped");
+        // A ring comes with the answer only on the board's own socket.
+        let fd = cx.take_fd(0).filter(|_| opened.shared_memory);
         if let Some(publisher) = self
             .publishers
             .iter_mut()
@@ -234,17 +252,18 @@ impl State {
             publisher.handle = opened.handle;
             publisher.open = true;
             publisher.bells.clear();
-            match cx.take_fd(0) {
-                Some(fd) if opened.shared_memory => {
-                    publisher.ring = fd.try_clone().ok();
-                    // A publisher that writes the ring itself already has its writer, on
-                    // this same memory if the comm core took the ring back.
-                    if !publisher.taken {
-                        publisher.writer = Some(Writer::attach(fd).map_err(ring)?);
-                    }
+            publisher.writer = None;
+            #[cfg(target_os = "linux")]
+            if let Some(fd) = fd {
+                publisher.ring = copy(&fd);
+                // A publisher that writes the ring itself already has its writer, on this
+                // same memory if the comm core took the ring back.
+                if !publisher.taken {
+                    publisher.writer = Some(Writer::attach(fd).map_err(ring)?);
                 }
-                _ => publisher.writer = None,
             }
+            #[cfg(not(target_os = "linux"))]
+            let _ = fd;
             return Ok(());
         }
         let declaration = &self.declaration;
@@ -259,35 +278,34 @@ impl State {
         subscriber.handle = Some(opened.handle);
         subscriber.status = TopicStatus::Live;
         subscriber.declaration.clone_from(declaration);
-        match cx.take_fd(0) {
-            Some(fd) if opened.shared_memory => {
-                subscriber.mirror = None;
-                // The same ring again, after the comm core came back: the reader the
-                // subscriber has is still on it, where it was. A new one would start at the
-                // newest sample and pass over what was published meanwhile.
-                let which = identity(&fd);
-                if which.is_none() || which != subscriber.ring {
-                    subscriber.ring = which;
-                    subscriber.arrived = Some(Reader::attach(fd).map_err(ring)?);
-                }
+        #[cfg(target_os = "linux")]
+        if let Some(fd) = fd {
+            subscriber.mirror = None;
+            // The same ring again, after the comm core came back: the reader the subscriber
+            // has is still on it, where it was. A new one would start at the newest sample
+            // and pass over what was published meanwhile.
+            let which = identity(&fd);
+            if which.is_none() || which != subscriber.ring {
+                subscriber.ring = which;
+                subscriber.arrived = Some(shm_ring::Reader::attach(fd).map_err(ring)?);
             }
-            _ => {
-                // No ring can be shared with this program: it keeps one of its own, shaped
-                // by the declaration, for the samples that arrive as messages.
-                let declare = Declare::decode(declaration)
-                    .map_err(|_| ClientError::Protocol("a declaration"))?;
-                let mirror = Ring::create(&Spec {
-                    fields: declare.fields.len() as u32,
-                    history: declare.history,
-                    max_payload: declare.max_payload,
-                    expiry_ms: declare.expiry_ms,
-                })
-                .map_err(ring)?;
-                subscriber.arrived = Some(mirror.reader().map_err(ring)?);
-                let writer = mirror.writer().map_err(ring)?;
-                subscriber.mirror = Some((mirror, writer));
-            }
+            return Ok(());
         }
+        #[cfg(not(target_os = "linux"))]
+        let _ = fd;
+        // No ring can be shared with this program: it keeps one of its own, shaped by the
+        // declaration, for the samples that arrive as messages.
+        let declare =
+            Declare::decode(declaration).map_err(|_| ClientError::Protocol("a declaration"))?;
+        let (mirror, reader) = Mirror::create(&Spec {
+            fields: declare.fields.len() as u32,
+            history: declare.history,
+            max_payload: declare.max_payload,
+            expiry_ms: declare.expiry_ms,
+        })
+        .map_err(ring)?;
+        subscriber.arrived = Some(reader);
+        subscriber.mirror = Some(mirror);
         Ok(())
     }
 
@@ -301,10 +319,12 @@ impl State {
     ) {
         for subscriber in self.subscribers.iter_mut().flatten() {
             if subscriber.handle == Some(handle)
-                && let Some((_, writer)) = &mut subscriber.mirror
+                && let Some(mirror) = &mut subscriber.mirror
             {
                 // One that does not fit the declaration is dropped: the comm core checked it.
-                let _ = writer.publish(FieldId(field), time, Flags(flags), payload);
+                let _ = mirror
+                    .writer
+                    .publish(FieldId(field), time, Flags(flags), payload);
             }
         }
     }
@@ -364,6 +384,7 @@ impl Handler for State {
                     publisher
                         .bells
                         .retain(|(subscriber, _)| *subscriber != bell.subscriber);
+                    #[cfg(target_os = "linux")]
                     if bell.present
                         && let (Some(eventfd), Some(page)) = fds
                         && let Ok(attached) = Bell::attach(eventfd, page)
@@ -371,6 +392,8 @@ impl Handler for State {
                         publisher.bells.push((bell.subscriber, attached));
                     }
                 }
+                #[cfg(not(target_os = "linux"))]
+                let _ = fds;
             }
             kind::TOPIC_DEMAND => {
                 let demand: Demand<'_> = frame.body()?;

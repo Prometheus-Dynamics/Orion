@@ -11,13 +11,17 @@ repository.workspace = true
 orion-connect = { path = "../connect" }
 orion-msg-topics = { path = "../../core/msg-topics" }
 shm-ring = { workspace = true }
-shm-ring-doorbell = { workspace = true }
 shm-ring-time = { workspace = true }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
+
+# Rings shared on the board, and the doorbell a subscriber sleeps on.
+[target.'cfg(target_os = "linux")'.dependencies]
+shm-ring-doorbell = { workspace = true }
 rustix = { version = "1", default-features = false, features = ["std", "event"] }
 
-[dev-dependencies]
+# The tests that need a comm core run on Linux, where it is.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 orion-broker = { path = "../../comm/broker" }
 orion-broker-proxy = { path = "../../comm/broker-proxy" }
 orion-keys = { path = "../../comm/keys" }

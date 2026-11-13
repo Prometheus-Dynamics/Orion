@@ -44,7 +44,25 @@ The sections below are the crates the handle is made of.
 | Network | `orion+tcp://host[:port]`, with `#<key in hex>` to accept only that node | a comm core on the network. Port 9200 unless told. |
 | Serial | `serial:<path>[@baud]`, with `#<key in hex>` to accept only that board | a comm core at the other end of a serial line, 115200 unless told. |
 
-`Session::over_link` takes a link that someone else opened.
+`Session::over_link` takes a link that someone else opened, as one descriptor.
+`Session::over(read, write, expect, name, options)` takes one the program opened itself in two
+halves, a USB interface it claimed say: a `LinkRead` and a `LinkWrite`. The same frames go over
+it as over a serial port, signed with a key in `options`, and `expect` is then the key the board
+must prove. `reconnect_over(read, write)` says hello again over new halves, as the same program.
+
+The read half runs on a thread of its own; the session writes on the caller's thread. The
+session never waits for that thread. When the session is dropped, or given new halves, it drops
+its write half: that is the program's signal to make the read return with an error (cancel the
+transfer, close the handle), which ends the thread. What a late read brought is thrown away.
+
+**Systems.** The client builds on Linux, Windows and macOS. Off Linux a session reaches a comm
+core across the network (`orion+tcp://`) or over a link the program opened (`Session::over`);
+the board's own socket and serial addresses are Linux's, and fail elsewhere with an I/O error
+of kind `Unsupported`. So
+is all that needs the board's socket: buffer topics, adopting a ring, `as_fd`, `next_async`.
+Topics work: a subscriber's samples arrive as messages and go to a ring of its own on the heap,
+read with the same calls. CI builds the client and runs its tests on Windows and macOS; the
+tests that need a comm core run on Linux, where the comm core is.
 
 With a key in its options a client's network session is signed: the node knows who is calling,
 the client checks the node holds its key, and nothing can be changed on the way. Without one it

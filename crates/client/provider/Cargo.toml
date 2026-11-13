@@ -17,7 +17,8 @@ orion-topics = { path = "../topics" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
 
-[dev-dependencies]
+# The tests that need a comm core run on Linux, where it is.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 shm-ring = { workspace = true }
 orion-stubs = { path = "../../testing/stubs" }
 

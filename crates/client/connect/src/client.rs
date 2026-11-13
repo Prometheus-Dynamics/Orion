@@ -9,8 +9,8 @@
 //! A client is one thread's: its handles are not `Send`. A program that talks to the comm
 //! core from several threads opens a session in each.
 
+use crate::fd::BorrowedFd;
 use std::cell::{Cell, RefCell};
-use std::os::fd::BorrowedFd;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 

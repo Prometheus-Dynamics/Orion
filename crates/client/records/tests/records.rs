@@ -1,6 +1,8 @@
 //! Records against a store that stands in for node logic: read, write, and a watch that
 //! delivers every change in order.
 
+#![cfg(target_os = "linux")]
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;

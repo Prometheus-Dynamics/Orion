@@ -1,49 +1,55 @@
 //! The client's connection to a comm core.
 //!
 //! One [`Session`], with the same calls wherever the comm core is: on this board
-//! ([`Address::Local`]), on the network ([`Address::Network`]) or at the other end of a link
-//! ([`Address::Serial`]). Every other client crate is built on it.
+//! ([`Address::Local`]), on the network ([`Address::Network`]), at the other end of a serial
+//! port ([`Address::Serial`]), or at the other end of a link the program opened itself
+//! ([`Session::over`]). Every other client crate is built on it.
+//!
+//! **On every system.** The network and a link the program opened work on Linux, Windows and
+//! macOS. The board's own socket, descriptors with frames, and serial ports by path are
+//! Linux's, as the board is.
 //!
 //! The session is blocking and owns no thread and no timer. [`Session::next`] waits for the
 //! next frame for as long as it is told to, and while it waits it does the session's
 //! housekeeping: it answers the comm core's pings, sends its own, and notices when the comm
 //! core has gone quiet. A program that has nothing to wait for calls it with a zero wait from
-//! its own loop. [`Session::as_fd`] is the descriptor to give `poll` when the program waits on
-//! other things too.
+//! its own loop. On Linux, `Session::as_fd` is the descriptor to give `poll` when the program
+//! waits on other things too.
 //!
 //! **There is one way back.** When a call fails with an error that [`ClientError::is_lost`],
 //! [`Session::reconnect`] connects again to the same address, as the same program. It waits a
 //! short, fixed time between tries and never gives up: a client's connection to its comm core
 //! is a way in, and those are not backed off.
 //!
-//! With feature `tokio`, [`Session::next_async`] waits inside a runtime instead of blocking a
-//! thread.
-
-#![cfg(target_os = "linux")]
+//! With feature `tokio`, on Linux, `Session::next_async` waits inside a runtime instead of
+//! blocking a thread.
 
 mod address;
 mod client;
 mod error;
+mod fd;
 mod link_sign;
+mod piped;
 mod transport;
 
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::time::{Duration, Instant};
 
 use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, Welcome};
 use orion_supervise::{Decision, Path, Supervisor};
 use orion_types::NodeName;
 use orion_wire::{Body, Decode, FrameView, INTERFACE_REVISION, encode_body, frame, kind};
-use shm_fdpass::FdSet;
 
 pub use address::{Address, DEFAULT_PORT, DEFAULT_SOCKET};
 pub use client::{Client, Handler};
 pub use error::ClientError;
+pub use fd::{BorrowedFd, OwnedFd};
 pub use orion_identity::Identity;
 pub use orion_msg_session::Roles;
 pub use orion_supervise::Status;
+pub use piped::{LinkRead, LinkWrite};
 
-use transport::{Step, Transport, readable};
+use fd::FdSet;
+use transport::{Step, Transport};
 
 /// How a session is made.
 #[derive(Debug)]
@@ -185,6 +191,8 @@ impl Cx<'_> {
 pub struct Session {
     transport: Transport,
     address: Option<Address>,
+    /// The key the board at the other end of a link the program opened must prove.
+    link_key: Option<[u8; 32]>,
     name: String,
     options: Options,
     welcomed: Welcomed,
@@ -226,6 +234,7 @@ impl Session {
     /// # Errors
     ///
     /// As [`Session::connect`].
+    #[cfg(target_os = "linux")]
     pub fn over_link(link: OwnedFd, name: &str, options: Options) -> Result<Self, ClientError> {
         let transport = signed(
             Transport::link(transport::nonblocking(link)?),
@@ -233,6 +242,73 @@ impl Session {
             &options,
         )?;
         Self::hello(transport, None, name, options)
+    }
+
+    /// A session over a link the program opened itself, as two halves: a USB interface it
+    /// claimed, say. The same frames go over it as over a serial port, and with a key in
+    /// `options` the session is signed; `expect` is then the key the board must prove.
+    ///
+    /// `read` goes to a thread of its own; the session writes with `write` on the caller's
+    /// thread. The session never waits for that thread: dropping the session drops `write`,
+    /// and the program then makes `read` return an error, which ends the thread. See
+    /// [`LinkRead`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::connect`]; [`ClientError::Denied`] for an `expect` without a key.
+    pub fn over(
+        read: impl LinkRead,
+        write: impl LinkWrite,
+        expect: Option<[u8; 32]>,
+        name: &str,
+        options: Options,
+    ) -> Result<Self, ClientError> {
+        let transport = signed(Transport::over(read, write)?, expect.as_ref(), &options)?;
+        let mut session = Self::hello(transport, None, name, options)?;
+        session.link_key = expect;
+        Ok(session)
+    }
+
+    /// Says hello again, as the same program, over new halves of a link the program opened:
+    /// the cable was plugged in again, say. The old halves are let go first.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::over`].
+    pub fn reconnect_over(
+        &mut self,
+        read: impl LinkRead,
+        write: impl LinkWrite,
+    ) -> Result<(), ClientError> {
+        let options = self.same_options();
+        let transport = signed(
+            Transport::over(read, write)?,
+            self.link_key.as_ref(),
+            &options,
+        )?;
+        let fresh = Self::hello(transport, None, &self.name, options)?;
+        let (started, reconnects, link_key) = (self.started, self.reconnects, self.link_key);
+        *self = Self {
+            started,
+            reconnects: reconnects + 1,
+            link_key,
+            ..fresh
+        };
+        Ok(())
+    }
+
+    /// The options this session was made with, again.
+    fn same_options(&self) -> Options {
+        Options {
+            roles: self.options.roles,
+            identity: self
+                .options
+                .identity
+                .as_ref()
+                .map(|identity| Identity::from_secret(&identity.secret())),
+            max_frame: self.options.max_frame,
+            timeout: self.options.timeout,
+        }
     }
 
     fn hello(
@@ -260,7 +336,7 @@ impl Session {
                 Step::Closed => return Err(ClientError::Lost),
                 Step::Nothing => {
                     let left = deadline.saturating_duration_since(Instant::now());
-                    if left.is_zero() || !readable(transport.fd(), left)? {
+                    if left.is_zero() || !transport.wait(left)? {
                         return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
                     }
                     continue;
@@ -298,6 +374,7 @@ impl Session {
         Ok(Self {
             transport,
             address,
+            link_key: None,
             name: name.to_owned(),
             options,
             next_ping: now + welcomed.heartbeat,
@@ -400,7 +477,7 @@ impl Session {
             if now >= deadline {
                 return Ok(None);
             }
-            readable(self.transport.fd(), until.saturating_duration_since(now))?;
+            self.transport.wait(until.saturating_duration_since(now))?;
         }
     }
 
@@ -483,6 +560,7 @@ impl Session {
 
     /// The descriptor to wait on, with `poll` or its like, when the program waits on other
     /// things too. When it is readable, call [`Session::next`].
+    #[cfg(target_os = "linux")]
     #[must_use]
     pub fn as_fd(&self) -> BorrowedFd<'_> {
         self.transport.fd()
@@ -506,16 +584,7 @@ impl Session {
         ))?;
         let mut supervisor = Supervisor::new(Path::Access);
         loop {
-            let options = Options {
-                roles: self.options.roles,
-                identity: self
-                    .options
-                    .identity
-                    .as_ref()
-                    .map(|identity| Identity::from_secret(&identity.secret())),
-                max_frame: self.options.max_frame,
-                timeout: self.options.timeout,
-            };
+            let options = self.same_options();
             let error = match open(&address, &options)
                 .and_then(|transport| Self::hello(transport, None, &self.name, options))
             {
@@ -598,7 +667,8 @@ impl Session {
     }
 }
 
-impl AsFd for Session {
+#[cfg(target_os = "linux")]
+impl std::os::fd::AsFd for Session {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.transport.fd()
     }
@@ -606,6 +676,7 @@ impl AsFd for Session {
 
 fn open(address: &Address, options: &Options) -> Result<Transport, ClientError> {
     match address {
+        #[cfg(target_os = "linux")]
         Address::Local(path) => Transport::local(path),
         Address::Network { host, key } => Transport::network(
             host,
@@ -617,9 +688,16 @@ fn open(address: &Address, options: &Options) -> Result<Transport, ClientError> 
         Address::Serial { key: Some(_), .. } if options.identity.is_none() => Err(
             ClientError::Denied("a board's key can only be checked on a signed session"),
         ),
+        #[cfg(target_os = "linux")]
         Address::Serial { path, baud, key } => {
             signed(Transport::serial(path, *baud)?, key.as_ref(), options)
         }
+        #[cfg(not(target_os = "linux"))]
+        Address::Local(_) | Address::Serial { .. } => Err(ClientError::Io(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "a board's own socket and a serial port by path are Linux's; use the network, or \
+             a link the program opened (Session::over)",
+        ))),
     }
 }
 
@@ -642,7 +720,7 @@ fn signed(
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(all(feature = "tokio", target_os = "linux"))]
 mod wait {
     //! Waiting for the session inside a tokio runtime.
 

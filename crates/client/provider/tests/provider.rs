@@ -1,5 +1,7 @@
 //! A provider's device appears, is read and is driven by a program with no code for it.
 
+#![cfg(target_os = "linux")]
+
 use std::time::{Duration, Instant};
 
 use orion_actions::{ActionCall, Actions, Admits, Outcome, Policy, Request, Target};

@@ -13,7 +13,8 @@ orion-msg-records = { path = "../../core/msg-records" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
 
-[dev-dependencies]
+# The tests that need a comm core run on Linux, where it is.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 orion-server = { path = "../../comm/server" }
 orion-unix = { path = "../../comm/unix" }
 tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }

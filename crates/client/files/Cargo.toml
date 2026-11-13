@@ -14,7 +14,8 @@ orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
 sha2 = { version = "0.11.0", default-features = false }
 
-[dev-dependencies]
+# The tests that need a comm core run on Linux, where it is.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 orion-keys = { path = "../../comm/keys" }
 orion-server = { path = "../../comm/server" }
 orion-tcp = { path = "../../comm/tcp" }

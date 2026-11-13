@@ -1,6 +1,7 @@
 //! The node's key, and the two things done with keys: signing and checking.
 
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
@@ -66,12 +67,13 @@ impl Identity {
                     std::fs::create_dir_all(parent)?;
                 }
                 // `create_new`: if another start got there first, use its key, not ours.
-                let made = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    // The service's group may read it: node logic acts as the node too.
-                    .mode(0o640)
-                    .open(path);
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                // The service's group may read it: node logic acts as the node too. Elsewhere
+                // the file has the user's own folder's permissions.
+                #[cfg(unix)]
+                options.mode(0o640);
+                let made = options.open(path);
                 match made {
                     Ok(mut file) => {
                         file.write_all(&identity.0.to_bytes())?;

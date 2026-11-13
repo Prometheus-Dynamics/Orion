@@ -1,6 +1,8 @@
 //! One session, the same calls, wherever the comm core is: the same test on the board's
 //! socket, on the network plain and signed, and over a link.
 
+#![cfg(target_os = "linux")]
+
 use std::os::fd::OwnedFd;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -517,4 +519,81 @@ fn a_session_waits_inside_a_runtime_without_blocking_it() {
             let _ = seq;
         }
     });
+}
+
+/// A half of a link the program opened itself, as a blocking file.
+struct Half(std::fs::File);
+
+impl orion_connect::LinkRead for Half {
+    fn read(&mut self, into: &mut [u8]) -> std::io::Result<usize> {
+        std::io::Read::read(&mut self.0, into)
+    }
+}
+
+impl orion_connect::LinkWrite for Half {
+    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        std::io::Write::write_all(&mut self.0, bytes)
+    }
+}
+
+/// The board's link, in two halves. Its reading thread is never ended here, so each board's
+/// link is opened this way once.
+fn halves(board: &mut Board) -> (Half, Half) {
+    let link = board.link.take().expect("link");
+    let write = Half(std::fs::File::from(
+        link.try_clone().expect("the link again"),
+    ));
+    (Half(std::fs::File::from(link)), write)
+}
+
+#[test]
+fn a_link_the_program_opened_in_two_halves_carries_the_same_calls() {
+    // Plain.
+    let mut board = Board::start("halves", Security::Off);
+    let (read, write) = halves(&mut board);
+    exercise(
+        Session::over(read, write, None, "tool", options(None)).expect("halves"),
+        false,
+    );
+    let _ = std::fs::remove_dir_all(&board.dir);
+
+    // Signed, and the board proves the key it was expected to have.
+    let mut board = Board::start("halves-signed", Security::On);
+    let me = Identity::generate();
+    board
+        .keys
+        .lock()
+        .approve_operator(me.public(), "me")
+        .expect("enroll");
+    let copy = || Some(Identity::from_secret(&me.secret()));
+    let (read, write) = halves(&mut board);
+    let session =
+        Session::over(read, write, Some(board.key), "tool", options(copy())).expect("signed");
+    assert!(session.welcomed().max_frame <= 8192 - 32);
+    exercise(session, false);
+    let _ = std::fs::remove_dir_all(&board.dir);
+
+    // Another key than the one expected: refused, with both keys.
+    let mut board = Board::start("halves-other", Security::On);
+    board
+        .keys
+        .lock()
+        .approve_operator(me.public(), "me")
+        .expect("enroll");
+    let (read, write) = halves(&mut board);
+    match Session::over(read, write, Some([9; 32]), "tool", options(copy())) {
+        Err(ClientError::OtherKey { asked, answered }) => {
+            assert_eq!((asked, answered), ([9; 32], board.key));
+        }
+        other => panic!("expected another key, got {:?}", other.err()),
+    }
+    // A key expected with none to sign with.
+    let mut board2 = Board::start("halves-nokey", Security::On);
+    let (read, write) = halves(&mut board2);
+    assert!(matches!(
+        Session::over(read, write, Some(board2.key), "tool", options(None)),
+        Err(ClientError::Denied(_))
+    ));
+    let _ = std::fs::remove_dir_all(&board.dir);
+    let _ = std::fs::remove_dir_all(&board2.dir);
 }

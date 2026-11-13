@@ -160,7 +160,7 @@ dependencies = [
 [[package]]
 name = "shm-sample-time"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=d6b9361d006e5f633149b6dea8bb5d1be9483d0a#d6b9361d006e5f633149b6dea8bb5d1be9483d0a"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=d1a8939a4f428575e20797e8c5eebee8de7a7942#d1a8939a4f428575e20797e8c5eebee8de7a7942"
 dependencies = [
  "libc",
  "serde",

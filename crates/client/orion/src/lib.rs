@@ -43,8 +43,11 @@
 //! declared with their rings handed back, subscriptions and watches are asked for from where
 //! they were, actions are registered. On the board, what was flowing through a ring never
 //! stopped.
-
-#![cfg(target_os = "linux")]
+//!
+//! **Systems.** All of it builds on Linux, Windows and macOS, except what needs the board's own
+//! socket: `buffers`, which shares memory, and adopting a ring the program made
+//! ([`Topics::adopt`](topics::Topics::adopt)), are Linux's. Off Linux a session reaches a comm
+//! core across the network, and a topic's samples travel as messages.
 
 use std::fmt;
 use std::time::Duration;
@@ -58,12 +61,15 @@ pub use orion_types as types;
 #[cfg(feature = "topics")]
 pub mod topics {
     pub use orion_msg_topics::{Field, FieldType, OnSubscribe};
+    pub use orion_topics::RingReader;
     pub use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
-    pub use shm_ring::{FieldId, Flags, Next, Ring, Sample, SampleTime, Spec};
+    #[cfg(target_os = "linux")]
+    pub use shm_ring::Ring;
+    pub use shm_ring::{FieldId, Flags, Next, Sample, SampleTime, Spec};
 }
 
 /// Frames in shared buffers.
-#[cfg(feature = "buffers")]
+#[cfg(all(feature = "buffers", target_os = "linux"))]
 pub mod buffers {
     pub use orion_buffers::{
         AdoptedBuffers, Batch, BufferDesc, BufferError, BufferIndex, BufferPublisher,
@@ -202,7 +208,7 @@ pub struct Orion {
     node: std::rc::Rc<std::cell::RefCell<node::State>>,
     #[cfg(feature = "topics")]
     topics: orion_topics::Topics,
-    #[cfg(feature = "buffers")]
+    #[cfg(all(feature = "buffers", target_os = "linux"))]
     buffers: orion_buffers::Buffers,
     #[cfg(feature = "records")]
     records: orion_records::Records,
@@ -251,7 +257,7 @@ impl Orion {
         #[cfg(feature = "topics")]
         let topics = orion_topics::Topics::new(&client);
         Self {
-            #[cfg(feature = "buffers")]
+            #[cfg(all(feature = "buffers", target_os = "linux"))]
             buffers: orion_buffers::Buffers::new(&client, &topics),
             #[cfg(feature = "topics")]
             topics,
@@ -408,7 +414,7 @@ impl Orion {
     ///
     /// If this session is not on the board, or the comm core refuses: a ring of another shape
     /// than `topic` is `malformed`.
-    #[cfg(feature = "topics")]
+    #[cfg(all(feature = "topics", target_os = "linux"))]
     pub fn adopt(
         &self,
         topic: &topics::TopicDecl<'_>,
@@ -447,7 +453,7 @@ impl Orion {
     /// # Errors
     ///
     /// If this session is not on the board, or the comm core refuses.
-    #[cfg(feature = "buffers")]
+    #[cfg(all(feature = "buffers", target_os = "linux"))]
     pub fn declare_buffers(
         &self,
         name: &str,
@@ -464,7 +470,7 @@ impl Orion {
     /// # Errors
     ///
     /// If this session is not on the board, or the comm core refuses.
-    #[cfg(feature = "buffers")]
+    #[cfg(all(feature = "buffers", target_os = "linux"))]
     pub fn adopt_buffers(
         &self,
         name: &str,
@@ -484,7 +490,7 @@ impl Orion {
     /// # Errors
     ///
     /// If this session is not on the board, or the comm core refuses.
-    #[cfg(feature = "buffers")]
+    #[cfg(all(feature = "buffers", target_os = "linux"))]
     pub fn subscribe_buffers(
         &self,
         topic: &str,

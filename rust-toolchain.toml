@@ -1,4 +1,12 @@
 [toolchain]
 channel = "1.99.0"
 components = ["rustfmt", "clippy"]
-targets = ["thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"]
+targets = [
+    "thumbv7em-none-eabihf",
+    "riscv32imac-unknown-none-elf",
+    # The client builds on Windows and macOS: the gate checks it for each.
+    "x86_64-pc-windows-msvc",
+    "x86_64-pc-windows-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]

@@ -1,6 +1,8 @@
 //! Every verb of the command line, end to end, against a comm core with stand-ins for node
 //! logic.
 
+#![cfg(target_os = "linux")]
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;

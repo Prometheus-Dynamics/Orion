@@ -14,7 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [dependencies]
 orion = { path = "../orion", default-features = false, features = ["topics"] }
 
-[dev-dependencies]
+# The tests that need a comm core run on Linux, where it is.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 orion-stubs = { path = "../../testing/stubs" }
 
 [lints.rust]

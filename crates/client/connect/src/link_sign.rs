@@ -11,10 +11,10 @@ use orion_msg_session::{
 };
 use orion_net_handshake::{Fresh, SIGNATURE_LEN, Seal, Transcript, hello};
 use orion_wire::{Body, Bytes, Decode, encode_body, frame, kind};
-use shm_fdpass::FdSet;
 
 use crate::error::ClientError;
-use crate::transport::{Step, Transport, readable};
+use crate::fd::FdSet;
+use crate::transport::{Step, Transport};
 
 const DAMAGED: ClientError = ClientError::Protocol("a handshake message that does not read");
 
@@ -36,7 +36,7 @@ fn next(
             Step::Closed => return Err(ClientError::Lost),
             Step::Nothing => {
                 let left = deadline.saturating_duration_since(Instant::now());
-                if left.is_zero() || !readable(transport.fd(), left)? {
+                if left.is_zero() || !transport.wait(left)? {
                     return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
                 }
             }

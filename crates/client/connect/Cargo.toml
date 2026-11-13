@@ -13,17 +13,21 @@ default = []
 tokio = ["dep:tokio"]
 
 [dependencies]
-shm-fdpass = { workspace = true }
 orion-identity = { path = "../../core/identity" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-net-handshake = { path = "../../core/net-handshake" }
 orion-supervise = { path = "../../core/supervise" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire", features = ["std"] }
-rustix = { version = "1", default-features = false, features = ["std", "event", "termios", "fs"] }
 tokio = { workspace = true, features = ["net", "time"], optional = true }
 
-[dev-dependencies]
+# The board's own socket, descriptors with frames, serial ports and waiting with `poll`.
+[target.'cfg(target_os = "linux")'.dependencies]
+shm-fdpass = { workspace = true }
+rustix = { version = "1", default-features = false, features = ["std", "event", "termios", "fs", "pipe"] }
+
+# The tests that need a comm core run on Linux, where it is.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 orion-hello = { path = "../../comm/hello" }
 orion-keys = { path = "../../comm/keys" }
 orion-link-serial = { path = "../../comm/link-serial" }

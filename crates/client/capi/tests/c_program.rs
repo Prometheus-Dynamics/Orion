@@ -1,5 +1,7 @@
 //! A C program publishes and subscribes, against the static library and the shared one.
 
+#![cfg(target_os = "linux")]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

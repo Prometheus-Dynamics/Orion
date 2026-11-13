@@ -26,3 +26,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/gate.sh
+
+  # The client on the systems it is built for besides Linux: built, and its tests run. The tests
+  # that need a comm core are Linux's; what runs here is the rest.
+  client:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - shell: bash
+        run: >
+          cargo test --all-features
+          -p orion-connect -p orion-topics -p orion-records -p orion-actions -p orion-files
+          -p orion-executor -p orion-provider -p orion-ctl -p orion-capi -p orion

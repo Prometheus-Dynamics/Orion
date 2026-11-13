@@ -1,6 +1,8 @@
 //! Files against a receiver that stands in for node logic's: a push that is interrupted
 //! carries on where it stopped, on the board's socket and across the network.
 
+#![cfg(target_os = "linux")]
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Cursor;

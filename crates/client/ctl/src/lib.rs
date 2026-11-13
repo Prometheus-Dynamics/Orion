@@ -30,8 +30,6 @@
 //! [`run`] is the whole tool as a function: arguments in, text out, an exit code back. That
 //! is what lets it be a mode of the one binary, and what its tests call.
 
-#![cfg(target_os = "linux")]
-
 mod args;
 mod operator;
 mod value;

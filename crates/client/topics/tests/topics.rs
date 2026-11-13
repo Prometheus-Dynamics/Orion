@@ -1,5 +1,7 @@
 //! Publish and subscribe with the same calls, on the board and across the network.
 
+#![cfg(target_os = "linux")]
+
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc;

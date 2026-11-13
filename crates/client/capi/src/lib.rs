@@ -9,8 +9,6 @@
 //! arguments, runs the Rust inside `catch_unwind` so a panic never crosses into C, and turns
 //! the result into a status and a message the caller can ask for.
 
-#![cfg(target_os = "linux")]
-
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};

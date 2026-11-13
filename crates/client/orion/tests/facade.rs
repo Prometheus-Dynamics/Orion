@@ -1,5 +1,7 @@
 //! The facade: each role through `orion` alone, and a comm core that restarts under it.
 
+#![cfg(target_os = "linux")]
+
 #[path = "../examples/roles.rs"]
 mod roles;
 

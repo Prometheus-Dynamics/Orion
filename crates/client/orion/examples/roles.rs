@@ -11,6 +11,8 @@
 //! `cargo run -p orion --example roles --features full` starts a comm core for them to talk
 //! to and prints what happened.
 
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
@@ -189,6 +191,7 @@ pub fn run(socket: &Path) -> Result<Vec<String>, Error> {
 }
 
 #[allow(dead_code)]
+#[cfg(target_os = "linux")]
 fn main() -> Result<(), Error> {
     let board = orion_stubs::Board::start("roles-example");
     for line in run(board.socket())? {
@@ -196,3 +199,8 @@ fn main() -> Result<(), Error> {
     }
     Ok(())
 }
+
+/// The comm core this example starts for its programs runs on Linux alone. Elsewhere it
+/// builds, and does nothing.
+#[cfg(not(target_os = "linux"))]
+fn main() {}

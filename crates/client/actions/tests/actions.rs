@@ -3,6 +3,8 @@
 //! This test is the comm core, with a small router standing in for node logic's, and the
 //! caller. It starts the same test binary again as the program that owns the action.
 
+#![cfg(target_os = "linux")]
+
 use std::cell::RefCell;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};

@@ -37,6 +37,19 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
       step "$crate on $target" cargo check -q -p "$crate" --no-default-features --target "$target"
     done
   done
+
+  # The client builds on Windows and macOS as well as Linux. Clippy for each, tests included:
+  # what needs a comm core is Linux's and drops out. CI's hosted runners build and run them on
+  # those systems (`.github/workflows/next.yml`).
+  client=()
+  for crate in orion-connect orion-topics orion-records orion-actions orion-files orion-executor \
+    orion-provider orion-ctl orion-capi orion; do
+    client+=(-p "$crate")
+  done
+  for target in x86_64-pc-windows-msvc x86_64-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin; do
+    step "client on $target" cargo clippy -q "${client[@]}" --all-features --all-targets \
+      --target "$target" -- -D warnings
+  done
 else
   echo "no crates yet"
 fi

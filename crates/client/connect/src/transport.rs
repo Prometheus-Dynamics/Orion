@@ -1,14 +1,18 @@
-//! The three ways bytes reach a comm core, behind one pair of calls: send a frame, and take
-//! a frame if a whole one is there.
+//! The ways bytes reach a comm core, behind one pair of calls: send a frame, and take a frame
+//! if a whole one is there.
 
-use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::{
+    fs::{File, OpenOptions},
+    os::fd::{AsFd, BorrowedFd, OwnedFd},
+    os::unix::fs::OpenOptionsExt,
+    os::unix::net::UnixStream,
+    path::Path,
+    time::Instant,
+};
 
 use orion_identity::Identity;
 use orion_msg_session::{LINK_SEALED_OVERHEAD, LinkSealed};
@@ -17,12 +21,20 @@ use orion_net_handshake::{
     preamble,
 };
 use orion_wire::{Bytes, Decode, StreamDecoder, StreamEncoder, encode_body, frame, kind};
+#[cfg(target_os = "linux")]
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
+#[cfg(target_os = "linux")]
 use rustix::fs::OFlags;
+#[cfg(target_os = "linux")]
 use rustix::termios::{ControlModes, InputModes, OptionalActions, QueueSelector, SpecialCodeIndex};
-use shm_fdpass::{FdSet, MAX_FDS, RecvError, SendError};
+#[cfg(target_os = "linux")]
+use shm_fdpass::{MAX_FDS, RecvError, SendError};
 
 use crate::error::ClientError;
+use crate::fd::{BorrowedFd as AnyBorrowedFd, FdSet};
+use crate::piped::{LinkRead, LinkWrite, Piped};
+#[cfg(not(target_os = "linux"))]
+use crate::piped::{TcpRead, TcpWrite};
 
 /// The largest frame a link carries.
 const LINK_FRAME: usize = 8192;
@@ -31,6 +43,7 @@ const LINK_FRAME: usize = 8192;
 const SEND_WAIT: Duration = Duration::from_secs(5);
 
 /// Writes all of `bytes` to a non-blocking descriptor, waiting for room when there is none.
+#[cfg(target_os = "linux")]
 fn write_all<W: Write + AsFd>(mut to: W, bytes: &[u8]) -> Result<(), ClientError> {
     let mut sent = 0;
     while sent < bytes.len() {
@@ -59,16 +72,79 @@ pub(crate) enum Step {
     Closed,
 }
 
+/// Where a transport's bytes come from and go to.
+pub(crate) enum Io {
+    /// A non-blocking descriptor, waited on with `poll`.
+    #[cfg(target_os = "linux")]
+    Fd(File),
+    /// A reading thread, and the half that writes.
+    Piped {
+        read: Piped,
+        write: Box<dyn LinkWrite>,
+    },
+}
+
+impl Io {
+    fn piped(read: impl LinkRead, write: impl LinkWrite) -> io::Result<Self> {
+        Ok(Self::Piped {
+            read: Piped::start(read)?,
+            write: Box::new(write),
+        })
+    }
+
+    /// What has arrived, without waiting: `WouldBlock` if nothing has, `Ok(0)` at the end.
+    fn read(&mut self, into: &mut [u8]) -> io::Result<usize> {
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::Fd(file) => match file.read(into) {
+                // A terminal whose other end is gone reads as an error, not the end.
+                Err(error) if error.raw_os_error() == Some(5) => Ok(0),
+                read => read,
+            },
+            Self::Piped { read, .. } => match read.read(into) {
+                // A link's read that fails is its end.
+                Err(error) if error.kind() != io::ErrorKind::WouldBlock => Ok(0),
+                read => read,
+            },
+        }
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), ClientError> {
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::Fd(file) => write_all(&*file, bytes),
+            Self::Piped { write, .. } => write.write_all(bytes).map_err(|_| ClientError::Lost),
+        }
+    }
+
+    fn wait(&mut self, wait: Duration) -> io::Result<bool> {
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::Fd(file) => readable(file.as_fd(), wait),
+            Self::Piped { read, .. } => read.wait(wait),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn fd(&self) -> BorrowedFd<'_> {
+        match self {
+            Self::Fd(file) => file.as_fd(),
+            Self::Piped { read, .. } => read.fd(),
+        }
+    }
+}
+
 pub(crate) enum Transport {
+    #[cfg(target_os = "linux")]
     Local(UnixStream),
     Network {
-        stream: TcpStream,
+        io: Io,
         seals: Option<(Seal, Seal)>,
         /// Bytes read and not yet a whole frame.
         partial: Vec<u8>,
     },
     Link {
-        file: File,
+        io: Io,
         decoder: Box<StreamDecoder<LINK_FRAME>>,
         chunk: Box<[u8; 1024]>,
         at: usize,
@@ -81,10 +157,12 @@ pub(crate) enum Transport {
 }
 
 /// Waits until `fd` can be read, or `wait` has passed. `true` if it can.
+#[cfg(target_os = "linux")]
 pub(crate) fn readable(fd: BorrowedFd<'_>, wait: Duration) -> io::Result<bool> {
     wait_for(fd, PollFlags::IN, wait)
 }
 
+#[cfg(target_os = "linux")]
 fn wait_for(fd: BorrowedFd<'_>, flags: PollFlags, wait: Duration) -> io::Result<bool> {
     let deadline = Instant::now() + wait;
     loop {
@@ -102,6 +180,7 @@ fn wait_for(fd: BorrowedFd<'_>, flags: PollFlags, wait: Duration) -> io::Result<
     }
 }
 
+#[cfg(target_os = "linux")]
 fn open_serial(path: &Path, baud: u32) -> io::Result<File> {
     let flags = OFlags::NOCTTY | OFlags::NONBLOCK | OFlags::CLOEXEC;
     let file = OpenOptions::new()
@@ -132,6 +211,7 @@ fn open_serial(path: &Path, baud: u32) -> io::Result<File> {
 }
 
 impl Transport {
+    #[cfg(target_os = "linux")]
     pub(crate) fn local(path: &Path) -> Result<Self, ClientError> {
         let stream = UnixStream::connect(path)?;
         // Every descriptor of a session is non-blocking, so a runtime can wait on it too.
@@ -140,14 +220,20 @@ impl Transport {
         Ok(Self::Local(stream))
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn serial(path: &Path, baud: u32) -> Result<Self, ClientError> {
-        Ok(Self::link(open_serial(path, baud)?))
+        Ok(Self::link(Io::Fd(open_serial(path, baud)?)))
     }
 
-    /// A link over a byte stream someone else opened.
-    pub(crate) fn link(file: File) -> Self {
+    /// A link over two halves the application opened.
+    pub(crate) fn over(read: impl LinkRead, write: impl LinkWrite) -> Result<Self, ClientError> {
+        Ok(Self::link(Io::piped(read, write)?))
+    }
+
+    /// A link over a byte stream.
+    pub(crate) fn link(io: Io) -> Self {
         Self::Link {
-            file,
+            io,
             decoder: Box::new(StreamDecoder::new()),
             chunk: Box::new([0; 1024]),
             at: 0,
@@ -240,25 +326,48 @@ impl Transport {
             }
         };
         stream.set_read_timeout(None)?;
-        stream.set_write_timeout(None)?;
-        stream.set_nonblocking(true)?;
+        #[cfg(target_os = "linux")]
+        let io = {
+            stream.set_write_timeout(None)?;
+            stream.set_nonblocking(true)?;
+            Io::Fd(File::from(OwnedFd::from(stream)))
+        };
+        // A send that finds no room for this long counts the session lost.
+        #[cfg(not(target_os = "linux"))]
+        let io = {
+            stream.set_write_timeout(Some(SEND_WAIT))?;
+            Io::piped(TcpRead(stream.try_clone()?), TcpWrite(stream))?
+        };
         Ok(Self::Network {
-            stream,
+            io,
             seals,
             partial: Vec::with_capacity(4096),
         })
     }
 
+    /// The descriptor that is readable when there is something to take.
+    #[cfg(target_os = "linux")]
     pub(crate) fn fd(&self) -> BorrowedFd<'_> {
         match self {
             Self::Local(stream) => stream.as_fd(),
-            Self::Network { stream, .. } => stream.as_fd(),
-            Self::Link { file, .. } => file.as_fd(),
+            Self::Network { io, .. } | Self::Link { io, .. } => io.fd(),
+        }
+    }
+
+    /// Waits up to `wait` for something to take. `true` if there is.
+    pub(crate) fn wait(&mut self, wait: Duration) -> io::Result<bool> {
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::Local(stream) => readable(stream.as_fd(), wait),
+            Self::Network { io, .. } | Self::Link { io, .. } => io.wait(wait),
         }
     }
 
     pub(crate) const fn passes_descriptors(&self) -> bool {
-        matches!(self, Self::Local(_))
+        #[cfg(target_os = "linux")]
+        return matches!(self, Self::Local(_));
+        #[cfg(not(target_os = "linux"))]
+        false
     }
 
     /// The largest frame this way of connecting carries, whatever was asked for.
@@ -270,8 +379,13 @@ impl Transport {
         }
     }
 
-    pub(crate) fn send(&mut self, frame: &[u8], fds: &[BorrowedFd<'_>]) -> Result<(), ClientError> {
+    pub(crate) fn send(
+        &mut self,
+        frame: &[u8],
+        fds: &[AnyBorrowedFd<'_>],
+    ) -> Result<(), ClientError> {
         match self {
+            #[cfg(target_os = "linux")]
             Self::Local(stream) => loop {
                 match shm_fdpass::send(stream.as_fd(), &[frame], fds, true) {
                     Ok(()) => return Ok(()),
@@ -288,20 +402,17 @@ impl Transport {
                 }
             },
             _ if !fds.is_empty() => Err(ClientError::NoDescriptors),
-            Self::Network { stream, seals, .. } => {
-                write_all(&*stream, &(frame.len() as u32).to_le_bytes())?;
-                write_all(&*stream, frame)?;
+            Self::Network { io, seals, .. } => {
+                io.write_all(&(frame.len() as u32).to_le_bytes())?;
+                io.write_all(frame)?;
                 if let Some((_, to_server)) = seals {
                     let tag = to_server.seal(frame);
-                    write_all(&*stream, &tag)?;
+                    io.write_all(&tag)?;
                 }
                 Ok(())
             }
             Self::Link {
-                file,
-                seals,
-                sealed,
-                ..
+                io, seals, sealed, ..
             } => {
                 let frame = match seals {
                     Some((_, to_board)) => {
@@ -323,7 +434,7 @@ impl Transport {
                     if len == 0 {
                         return Ok(());
                     }
-                    write_all(&*file, &out[..len])?;
+                    io.write_all(&out[..len])?;
                 }
             }
         }
@@ -331,7 +442,10 @@ impl Transport {
 
     /// Takes one whole frame into `buf` if one is there, without waiting.
     pub(crate) fn take(&mut self, buf: &mut [u8], fds: &mut FdSet) -> Result<Step, ClientError> {
+        #[cfg(not(target_os = "linux"))]
+        let _ = fds;
         match self {
+            #[cfg(target_os = "linux")]
             Self::Local(stream) => match shm_fdpass::recv(stream.as_fd(), buf, MAX_FDS, true) {
                 Ok(Some(received)) => {
                     *fds = received.fds;
@@ -345,11 +459,7 @@ impl Transport {
                 Err(RecvError::TooLarge { .. }) => Err(ClientError::TooLarge),
                 Err(_) => Err(ClientError::Protocol("a frame arrived damaged")),
             },
-            Self::Network {
-                stream,
-                seals,
-                partial,
-            } => {
+            Self::Network { io, seals, partial } => {
                 let tag = if seals.is_some() { TAG_LEN } else { 0 };
                 loop {
                     if partial.len() >= 4 {
@@ -378,7 +488,7 @@ impl Transport {
                     }
                     let start = partial.len();
                     partial.resize((start + 4096).min(partial.capacity()), 0);
-                    let read = stream.read(&mut partial[start..]);
+                    let read = io.read(&mut partial[start..]);
                     partial.truncate(start + *read.as_ref().unwrap_or(&0));
                     match read {
                         Ok(0) => return Ok(Step::Closed),
@@ -396,7 +506,7 @@ impl Transport {
                 }
             }
             Self::Link {
-                file,
+                io,
                 decoder,
                 chunk,
                 at,
@@ -405,7 +515,7 @@ impl Transport {
                 ..
             } => loop {
                 if *at == *len {
-                    match file.read(&mut chunk[..]) {
+                    match io.read(&mut chunk[..]) {
                         Ok(0) => return Ok(Step::Closed),
                         Ok(read) => (*at, *len) = (0, read),
                         Err(error)
@@ -416,8 +526,6 @@ impl Transport {
                         {
                             return Ok(Step::Nothing);
                         }
-                        // A terminal whose other end is gone reads as an error, not the end.
-                        Err(error) if error.raw_os_error() == Some(5) => return Ok(Step::Closed),
                         Err(error) => return Err(error.into()),
                     }
                 }
@@ -451,7 +559,8 @@ impl Transport {
 }
 
 /// Makes a descriptor someone else opened non-blocking, as a link's must be.
-pub(crate) fn nonblocking(fd: OwnedFd) -> io::Result<File> {
+#[cfg(target_os = "linux")]
+pub(crate) fn nonblocking(fd: OwnedFd) -> io::Result<Io> {
     rustix::io::ioctl_fionbio(&fd, true)?;
-    Ok(File::from(fd))
+    Ok(Io::Fd(File::from(fd)))
 }
