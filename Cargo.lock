@@ -1689,6 +1689,7 @@ version = "1.0.1-dev"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
+ "hmac",
  "orion-msg-session",
  "orion-types",
  "orion-wire",
@@ -1701,7 +1702,6 @@ version = "1.0.1-dev"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
- "hmac",
  "orion-config",
  "orion-identity",
  "orion-msg-peers",
@@ -1709,7 +1709,6 @@ dependencies = [
  "orion-server",
  "orion-types",
  "orion-wire",
- "sha2",
  "tokio",
  "tracing",
 ]

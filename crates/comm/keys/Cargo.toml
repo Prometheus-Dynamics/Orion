@@ -10,14 +10,12 @@ repository.workspace = true
 [dependencies]
 ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast", "zeroize"] }
 getrandom = "0.4"
-hmac = "0.13.0"
 orion-identity = { path = "../../core/identity" }
 orion-config = { path = "../../core/config" }
 orion-msg-peers = { path = "../../core/msg-peers" }
 orion-server = { path = "../server" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
-sha2 = { version = "0.11.0", default-features = false }
 tracing.workspace = true
 
 [dev-dependencies]

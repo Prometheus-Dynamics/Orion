@@ -1,15 +1,17 @@
-//! Who a board is, what time it has, and where its sync with other boards is.
+//! Who a board is, what time it has, where its sync with other boards is, and enrolling an
+//! operator with it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
-use orion_identity::{fingerprint, hello, random};
-pub use orion_msg_peers::SyncState;
+use orion_identity::{fingerprint, hello, proof, random};
 use orion_msg_peers::{
-    CLOCK_REALTIME, PeerForgive, PeerStates, PeerStatus, TimeReply, TimeRequest,
+    CLOCK_REALTIME, OperatorEnroll, OperatorWelcome, PeerForgive, PeerStates, PeerStatus,
+    TimeReply, TimeRequest,
 };
+pub use orion_msg_peers::{OperatorState, SyncState};
 use orion_msg_session::Identify;
 use orion_types::NodeName;
 use orion_wire::{Bytes, kind};
@@ -64,16 +66,44 @@ pub struct SyncPeer {
     pub agreed_ms: Option<u64>,
 }
 
+/// A node's answer to enrolling an operator.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Enrollment {
+    /// The node that answered.
+    pub node: String,
+    /// Its public key, and that key's fingerprint for people to compare.
+    pub node_key: [u8; 32],
+    /// The fingerprint of `node_key`.
+    pub fingerprint: String,
+    /// The cluster it belongs to.
+    pub cluster: String,
+    /// Where the operator is now: `Enrolled`, `Pending` (until someone on the board approves
+    /// it), or `Revoked` (refused before, and it stays so).
+    pub state: OperatorState,
+    /// Whether the operator may read.
+    pub read: bool,
+    /// Whether it may run every action.
+    pub all_actions: bool,
+    /// The actions it may run, when not all.
+    pub actions: Vec<String>,
+}
+
 #[derive(Default)]
 pub(crate) struct State {
     identity: Option<Vec<u8>>,
     time: Option<(TimeReply, Instant, i128)>,
     peers: Option<(u16, Vec<SyncPeer>)>,
+    welcome: Option<Enrollment>,
 }
 
 impl Handler for State {
     fn kinds(&self) -> &'static [u8] {
-        &[kind::IDENTITY, kind::TIME_REPLY, kind::PEER_STATES]
+        &[
+            kind::IDENTITY,
+            kind::TIME_REPLY,
+            kind::PEER_STATES,
+            kind::OPERATOR_WELCOME,
+        ]
     }
 
     fn handle(&mut self, frame: &Incoming<'_>, _cx: &mut Cx<'_>) -> Result<(), ClientError> {
@@ -90,6 +120,34 @@ impl Handler for State {
                 })
                 .collect();
             self.peers = Some((states.request_seq, peers));
+        } else if frame.kind() == kind::OPERATOR_WELCOME {
+            let welcome: OperatorWelcome<'_> = frame.body()?;
+            let operator = welcome
+                .operator
+                .iter()
+                .flatten()
+                .next()
+                .ok_or(ClientError::Protocol("a welcome that names no operator"))?;
+            let node_key: [u8; 32] = welcome
+                .public_key
+                .0
+                .try_into()
+                .map_err(|_| ClientError::Protocol("a node key that is not 32 bytes"))?;
+            self.welcome = Some(Enrollment {
+                node: welcome.node.to_string(),
+                fingerprint: fingerprint(&node_key),
+                node_key,
+                cluster: welcome.cluster.to_owned(),
+                state: operator.state,
+                read: operator.read,
+                all_actions: operator.all_actions,
+                actions: operator
+                    .actions
+                    .iter()
+                    .flatten()
+                    .map(|action| action.name.to_owned())
+                    .collect(),
+            });
         } else if frame.kind() == kind::IDENTITY {
             self.identity = Some(frame.payload().to_vec());
         } else {
@@ -190,4 +248,27 @@ pub(crate) fn peers(
     })?;
     let (_, peers) = state.borrow_mut().peers.take().ok_or(ClientError::Lost)?;
     Ok(peers)
+}
+
+/// Asks the node, `node` by name, to enrol `public_key` as an operator called `name`. With
+/// `enrollment_key` the proof that the asker knows the cluster's enrollment key goes with it,
+/// made here; the key itself is not sent.
+pub(crate) fn enroll(
+    client: &Client,
+    state: &Rc<RefCell<State>>,
+    node: &str,
+    public_key: [u8; 32],
+    name: &str,
+    enrollment_key: Option<&[u8]>,
+) -> Result<Enrollment, ClientError> {
+    state.borrow_mut().welcome = None;
+    let made =
+        enrollment_key.map(|key| proof::proof(key, &proof::operator_proof(node, &public_key)));
+    let seq = client.send(&OperatorEnroll {
+        public_key: Bytes(&public_key),
+        name,
+        proof: Bytes(made.as_ref().map_or(&[][..], |made| &made[..])),
+    })?;
+    client.answered(seq, || state.borrow().welcome.is_some())?;
+    state.borrow_mut().welcome.take().ok_or(ClientError::Lost)
 }

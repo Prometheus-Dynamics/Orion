@@ -32,6 +32,7 @@
 #![cfg(target_os = "linux")]
 
 mod args;
+mod operator;
 mod value;
 
 use std::io::Write;
@@ -51,7 +52,7 @@ use args::{Args, Usage};
 
 /// The lines printed for `help`, and after a command that was not understood.
 pub const USAGE: &str = "\
-usage: orion [--address A] [--name N] [--timeout MS] <concept> <verb> ...
+usage: orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <verb> ...
 
   node      show | peers | time | sync | forgive PEER
   resource  list [PREFIX] | show NAME
@@ -64,12 +65,15 @@ usage: orion [--address A] [--name N] [--timeout MS] <concept> <verb> ...
             remove NAME [--force] [--for MS]
   file      push DESTINATION PATH
             pull DESTINATION URL --size BYTES --sha256 HEX [--for MS]
+  operator  ask --as NAME [--enrollment-key-file PATH]   (needs --key: enrolls that key)
+            enroll KEY --as NAME                          (root on the board, any key)
 
 An address is a socket path, orion+tcp://host[:port] or serial:<path>[@baud].
-Without one, the board's own socket.";
+Without one, the board's own socket. --key FILE is this operator's key, made there if it is
+not: a network session is signed with it.";
 
 /// Why a command did not do what was asked.
-enum Failed {
+pub(crate) enum Failed {
     /// The command line cannot be understood.
     Usage(String),
     /// The client failed, or the board said no.
@@ -108,7 +112,7 @@ impl From<std::io::Error> for Failed {
     }
 }
 
-type Done = Result<(), Failed>;
+pub(crate) type Done = Result<(), Failed>;
 
 /// Runs one command. `args` are the words after the program's name. What a person is to read
 /// goes to `out`, what went wrong to `err`. Returns the exit code: 0 done, 1 not done, 2 not
@@ -138,12 +142,29 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
         .option("--name")?
         .unwrap_or_else(|| "orion-ctl".to_owned());
     let timeout = Duration::from_millis(args.number("--timeout")?.unwrap_or(5000));
+    let identity = match args.option("--key")? {
+        Some(path) => Some(orion::Identity::load_or_create(std::path::Path::new(
+            &path,
+        ))?),
+        None => None,
+    };
     let concept = args.word("a concept: node, resource, topic, action, workload or file")?;
     if concept == "help" {
         writeln!(out, "{USAGE}")?;
         return Ok(());
     }
     let verb = args.word("a verb")?;
+    if concept == "operator" {
+        let own = identity.as_ref().map(orion::Identity::public);
+        let check = operator::understood(&verb, own)?;
+        let options = Options {
+            timeout,
+            identity,
+            ..Options::default()
+        };
+        let orion = Orion::connect_with(&address, &name, options)?;
+        return operator::run(&orion, check, &mut args, out);
+    }
     let run: fn(&Orion, &mut Args, &mut dyn Write) -> Done = match (concept.as_str(), verb.as_str())
     {
         ("node", "show") => node_show,
@@ -167,6 +188,7 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
     // Understood before anything is asked of a board: a mistake costs no connection.
     let options = Options {
         timeout,
+        identity,
         ..Options::default()
     };
     let orion = Orion::connect_with(&address, &name, options)?;

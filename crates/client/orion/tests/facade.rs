@@ -5,6 +5,7 @@ mod roles;
 
 use std::time::Duration;
 
+use orion::node::OperatorState;
 use orion::records::{RecordClass, RecordEntry};
 use orion::topics::{FieldId, Next, SampleTime, Status, TopicDecl};
 use orion::types::HlcTimestamp;
@@ -223,6 +224,67 @@ fn a_comm_core_set_to_wait_longer_is_waited_for_as_long() {
     let welcomed = orion.welcomed();
     assert_eq!(welcomed.heartbeat, Duration::from_secs(5));
     assert_eq!(welcomed.idle, Duration::from_secs(60));
+    drop(orion);
+    drop(board);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_operator_asks_to_be_enrolled_and_proves_the_enrollment_key() {
+    let dir = std::env::temp_dir().join(format!("orion-facade-enroll-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    let board = Board::start_with(
+        &dir,
+        Options {
+            security: orion_stubs::Security::On,
+            enrollment_key: Some(b"correct horse".to_vec()),
+            ..Options::default()
+        },
+    );
+    let me = orion::Identity::generate();
+    let public = me.public();
+    let address = Address::Network {
+        host: board.network().to_string(),
+        key: None,
+    };
+    let options = orion::Options {
+        identity: Some(me),
+        ..orion::Options::default()
+    };
+    let orion = Orion::connect_with(&address, "desk", options).expect("a signed session");
+
+    // Without the enrollment key: waiting for someone on the board.
+    let asked = orion.enroll(public, "desk", None).expect("asked");
+    assert_eq!(asked.state, OperatorState::Pending);
+    assert_eq!(asked.node, "board");
+    assert_eq!(asked.cluster, "lab");
+    assert_eq!(
+        asked.fingerprint.len(),
+        orion.node().expect("node").fingerprint.len()
+    );
+    // A wrong key proves nothing; the right one enrolls it.
+    let wrong = orion
+        .enroll(public, "desk", Some(b"battery staple"))
+        .expect("asked");
+    assert_eq!(wrong.state, OperatorState::Pending);
+    let enrolled = orion
+        .enroll(public, "desk", Some(b"correct horse"))
+        .expect("enrolled");
+    assert_eq!(enrolled.state, OperatorState::Enrolled);
+    assert_eq!(enrolled.node_key, orion.node().expect("node").public_key);
+
+    // Nobody speaks for another key.
+    let other = orion.enroll([7; 32], "someone", Some(b"correct horse"));
+    assert!(
+        matches!(
+            other,
+            Err(orion::Error::Client(orion::ClientError::Refused(
+                orion::types::Error::Denied
+            )))
+        ),
+        "{other:?}"
+    );
     drop(orion);
     drop(board);
     let _ = std::fs::remove_dir_all(&dir);

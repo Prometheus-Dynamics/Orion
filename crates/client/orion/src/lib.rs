@@ -308,6 +308,35 @@ impl Orion {
         Ok(node::peers(&self.client, &self.node, Some(peer))?)
     }
 
+    /// Asks the board to enrol `public_key` as an operator called `name`.
+    ///
+    /// Who may ask: an administrator on the board (root, on the board's own socket), for any
+    /// key, which is enrolled at once; or the operator itself, on a session signed with that
+    /// key (`Options::identity`), which is enrolled at once if it gives `enrollment_key`, the
+    /// cluster's enrollment key, and is `Pending` until someone on the board approves it if not.
+    /// A key that was revoked stays `Revoked`. Asking again is harmless: the answer says where
+    /// the operator is.
+    ///
+    /// # Errors
+    ///
+    /// Refused `denied` for anyone else; as [`Orion::clock`].
+    pub fn enroll(
+        &self,
+        public_key: [u8; 32],
+        name: &str,
+        enrollment_key: Option<&[u8]>,
+    ) -> Result<node::Enrollment, Error> {
+        let at = self.welcomed().node.to_string();
+        Ok(node::enroll(
+            &self.client,
+            &self.node,
+            &at,
+            public_key,
+            name,
+            enrollment_key,
+        )?)
+    }
+
     /// The session itself, for what this handle does not cover.
     #[must_use]
     pub const fn client(&self) -> &Client {

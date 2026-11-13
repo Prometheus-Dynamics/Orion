@@ -647,3 +647,61 @@ fn what_is_not_understood_is_said_before_any_board_is_asked() {
         "{err}"
     );
 }
+
+#[test]
+fn operator_ask_with_and_without_the_enrollment_key() {
+    let dir = std::env::temp_dir().join(format!("orion-ctl-operator-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    let board = Board::start_with(
+        &dir,
+        orion_stubs::Options {
+            security: orion_stubs::Security::On,
+            enrollment_key: Some(b"correct horse".to_vec()),
+            ..orion_stubs::Options::default()
+        },
+    );
+    let key = dir.join("operator.key");
+    let secret = dir.join("enrollment.key");
+    std::fs::write(&secret, "correct horse\n").expect("write");
+    let at = format!("orion+tcp://{}", board.network());
+    let line = |rest: &str| -> Vec<String> {
+        let mut words = vec![
+            "--address".to_owned(),
+            at.clone(),
+            "--key".to_owned(),
+            key.display().to_string(),
+        ];
+        words.extend(rest.split_whitespace().map(str::to_owned));
+        words
+    };
+
+    // The key file is made on first use; without the enrollment key the answer is to wait.
+    let (code, out, err) = run(&line("operator ask --as desk"));
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(out.contains("operator    pending"), "{out}");
+    assert!(out.contains("node        board"), "{out}");
+    assert!(key.exists());
+    // Proven: enrolled, and the same key from the same file.
+    let with = format!(
+        "operator ask --as desk --enrollment-key-file {}",
+        secret.display()
+    );
+    let (code, out, err) = run(&line(&with));
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("operator    enrolled"), "{out}");
+
+    // `ask` without a key, and a key that is not one, are not understood.
+    let (code, _, err) = run(&[
+        "operator".to_owned(),
+        "ask".to_owned(),
+        "--as".to_owned(),
+        "x".to_owned(),
+    ]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("--key"), "{err}");
+    let (code, _, err) = run(&line("operator enroll abc --as x"));
+    assert_eq!(code, 2, "{err}");
+    drop(board);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -61,6 +61,36 @@ target/release/orion --address /tmp/orion/orion.sock topic read greeting
 The verbs are in [client.md](client.md), "The command line". Across a network the address is
 `orion+tcp://host:port`, with `peer.listen` set on the board.
 
+## The first connection to a board with security on
+
+A board with `security = on` answers a network session only if it is signed, and does for an
+operator only what its trust store grants. A tool's key is a file of its own (`--key`, made the
+first time it is named). To be let in:
+
+1. **Ask.** From the desk, with this operator's key:
+
+   ```bash
+   orion --address orion+tcp://board:9200 --key ~/.config/orion/operator.key operator ask --as desk
+   ```
+
+   It prints `operator    pending`, this operator's key (`its key`) and the board's
+   (`node key`, with its fingerprint). Compare the fingerprint with the one the board shows
+   (`orion node show` on the board) before trusting anything it says.
+2. **Be approved,** one of two ways:
+   - someone on the board, as root, enrolls that key:
+     `orion operator enroll <its key> --as desk`;
+   - or the cluster has an enrollment key (`enrollment.key`), and the operator proves it knows it:
+     the same `operator ask` with `--enrollment-key-file <file holding it>`. The key itself is
+     never sent.
+
+   It prints `operator    enrolled` and what the operator may do (`operators.read`,
+   `operators.actions`, or the grants an administrator gave).
+3. **Pin the board.** From then on, name the board with its key, so a different board at that
+   address is refused, both keys shown: `orion+tcp://board:9200#<node key>`.
+
+Programs do the same through `Orion::enroll` ([client.md](client.md)). With security off none of
+this is needed or recorded.
+
 ## A program
 
 [`crates/client/orion/examples/first_program.rs`](../crates/client/orion/examples/first_program.rs)

@@ -54,6 +54,9 @@ pub struct Options {
     /// `comm.idle_ms`: how long a session may go unheard, either way, before it is over. Zero,
     /// the default, is three heartbeats; otherwise at least two.
     pub idle_ms: u32,
+    /// `enrollment.key`: what an operator or a node proves it knows to enroll itself. None by
+    /// default: only someone on the board enrolls anyone.
+    pub enrollment_key: Option<Vec<u8>>,
 }
 
 impl Default for Options {
@@ -67,6 +70,7 @@ impl Default for Options {
             on_disk: false,
             heartbeat_ms: Limits::default().heartbeat_ms,
             idle_ms: 0,
+            enrollment_key: None,
         }
     }
 }
@@ -205,6 +209,7 @@ impl Board {
             on_disk,
             heartbeat_ms,
             idle_ms,
+            enrollment_key,
         } = options;
         use std::os::unix::fs::MetadataExt;
         // Whoever owns the directory runs the test, and may be the node logic.
@@ -220,6 +225,7 @@ impl Board {
         // logic reads them there, and the key stays the same across a restart.
         let keys_config = KeysConfig {
             state_dir: on_disk.then(|| dir.join("state")),
+            enrollment_key,
             ..KeysConfig::in_memory("lab")
         };
         let keys = SharedKeys::new(Keys::open(keys_config, security).expect("keys"));

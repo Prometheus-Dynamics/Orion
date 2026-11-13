@@ -81,6 +81,7 @@ One client with the same calls on any address, plus the C surface and orionctl.
 - [x] [D9](docs/prs/D9.md) The orion facade (wave 10; needs D2, D3, D4, D5, D6, D7, D8)
 - [x] [D10](docs/prs/D10.md) C surface (wave 11; needs D9)
 - [x] [D11](docs/prs/D11.md) orionctl (wave 11; needs D9)
+- [x] [D13](docs/prs/D13.md) The first connection: enrolling an operator (wave 18)
 - [x] [D14](docs/prs/D14.md) Which key answered, when it is not the one pinned (wave 18)
 
 ## E. Node logic

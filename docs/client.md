@@ -57,6 +57,14 @@ the comm core sets `comm.idle_ms`). A program with nothing to wait for calls it
 with a zero wait from its own loop; one that waits on other things too gives `as_fd` to `poll`.
 With feature `tokio`, `next_async` waits inside a runtime instead.
 
+**Who the board is, and being let in.** `node()` is who the board says it is, signed by its key
+and made for the question, `clock()` how its clock compares, `sync_peers()` and `forgive(peer)`
+where its sync with other boards is. `enroll(public_key, name, enrollment_key)` asks the board to
+let an operator in: from root on the board for any key, at once; from the operator itself, on a
+session signed with that key, at once with the cluster's enrollment key (only a proof made from
+it is sent) and `Pending` until approved without. The answer (`node::Enrollment`) has the state,
+what the operator may do, and the board's key.
+
 **There is one way back.** A call that fails with an error for which `is_lost` is true means
 the connection broke or the comm core went quiet. `reconnect` connects again to the same
 address as the same program, a short fixed time between tries, for as long as the caller
@@ -344,7 +352,7 @@ made of, and `--address` takes any address the client does, so what it does to a
 bench it does to one across the network.
 
 ```text
-orion [--address A] [--name N] [--timeout MS] <concept> <verb> ...
+orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <verb> ...
 
 node      show                      who the board is, checked against its signature
 node      peers                     the nodes it knows
@@ -361,7 +369,15 @@ workload  put NAME --kind K [--spec TEXT | --spec-file PATH] [--node N]
 workload  remove NAME [--force] [--for MS]
 file      push DESTINATION PATH
 file      pull DESTINATION URL --size BYTES --sha256 HEX [--for MS]
+operator  ask --as NAME [--enrollment-key-file PATH]   this operator's key (--key) asks to be let in
+operator  enroll KEY --as NAME                         root on the board lets a key in
 ```
+
+`--key FILE` is the operator's key, made there the first time: a network session is signed with
+it. `operator ask` prints where the operator is (`enrolled`, or `pending` until someone on the
+board approves it), its own key, and the board's key with its fingerprint, to compare and to pin
+the address to ([getting-started.md](getting-started.md), "The first connection to a board with
+security on"). It exits 0 only when the operator is enrolled.
 
 It exits 0 when the thing was done, 1 when it was not (the board refused, the action failed,
 the time ran out), and 2 when the command was not understood, which it finds out before it

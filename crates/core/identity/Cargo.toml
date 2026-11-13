@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast", "zeroize"] }
 getrandom = "0.4"
+hmac = "0.13.0"
 orion-msg-session = { path = "../msg-session" }
 orion-types = { path = "../types" }
 orion-wire = { path = "../wire" }

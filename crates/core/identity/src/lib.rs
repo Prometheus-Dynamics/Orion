@@ -179,3 +179,43 @@ pub mod hello {
         genuine.then_some(document)
     }
 }
+
+/// The proof that an operator knows a cluster's enrollment key: computed by the operator's tool,
+/// checked by the node. The key itself never crosses the wire.
+pub mod proof {
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+
+    const OPERATOR_DOMAIN: &[u8] = b"orion-operator-v1";
+
+    fn mac(key: &[u8], message: &[u8]) -> Hmac<Sha256> {
+        let mut mac =
+            <Hmac<Sha256> as KeyInit>::new_from_slice(key).expect("HMAC takes a key of any length");
+        mac.update(message);
+        mac
+    }
+
+    /// `HMAC-SHA256(key, message)`: the proof of knowing the enrollment key.
+    #[must_use]
+    pub fn proof(key: &[u8], message: &[u8]) -> [u8; 32] {
+        mac(key, message).finalize().into_bytes().into()
+    }
+
+    /// Checks a proof, in constant time.
+    #[must_use]
+    pub fn verify_proof(key: &[u8], message: &[u8], proof: &[u8]) -> bool {
+        mac(key, message).verify_slice(proof).is_ok()
+    }
+
+    /// The message an operator's proof is over: bound to the node it enrolls with and to its
+    /// own key, so it is no use for any other key or on any other node.
+    #[must_use]
+    pub fn operator_proof(node: &str, public_key: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(96);
+        for bytes in [OPERATOR_DOMAIN, node.as_bytes(), public_key] {
+            out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            out.extend_from_slice(bytes);
+        }
+        out
+    }
+}
