@@ -84,11 +84,35 @@ pub struct Mapping {
     pub max_payload: u32,
 }
 
+/// Where NT4 clients connect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Nt4Listen {
+    /// A port of the gateway's own, NT4's being 5810.
+    Port(SocketAddr),
+    /// The comm core's WebSocket listener (`ws.listen`), which hands over the connections
+    /// that ask for an NT4 subprotocol: one port for browsers and NT4 clients.
+    Ws,
+}
+
+impl FromStr for Nt4Listen {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, String> {
+        if text.trim() == "ws" {
+            return Ok(Self::Ws);
+        }
+        text.trim()
+            .parse()
+            .map(Self::Port)
+            .map_err(|error| format!("{text:?} is neither `ws` nor an address: {error}"))
+    }
+}
+
 /// What the server form of the gateway is told.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Nt4Config {
-    /// `nt4.listen`: where NT4 clients connect.
-    pub listen: SocketAddr,
+    /// `nt4.listen`: where NT4 clients connect, an address or `ws`.
+    pub listen: Nt4Listen,
     /// The mapping.
     pub mapping: Mapping,
 }
@@ -101,7 +125,7 @@ impl Nt4Config {
     ///
     /// As [`Mapping::from_source`].
     pub fn from_source(source: &mut Source) -> Result<Option<Self>, ConfigError> {
-        let listen: Option<SocketAddr> = source.optional("nt4.listen")?;
+        let listen: Option<Nt4Listen> = source.optional("nt4.listen")?;
         let mapping = Mapping::from_source(source)?;
         Ok(listen.map(|listen| Self { listen, mapping }))
     }

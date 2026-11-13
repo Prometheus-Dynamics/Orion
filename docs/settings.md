@@ -52,7 +52,7 @@ The name in brackets is the cargo feature that carries the part.
 | `ssh.max_unauthenticated` | 10 | the most that have not logged in |
 | `ssh.login_ms` | 60000 | how long a connection has to log in |
 | `recovery.keys` | `/etc/orion/recovery_keys` | the public keys that may log in when the comm core is in recovery (`recovery`) |
-| `nt4.listen` | off | where NT4 clients connect (`nt4`) |
+| `nt4.listen` | off | where NT4 clients connect, or `ws` to share `ws.listen` (`nt4`) |
 | `nt4.server` | off | the NT4 server to join as a client, `host` or `host:port` (`nt4-client`) |
 | `nt4.name` | `orion` | what the board calls itself on that server |
 | `nt4.period_ms` | 20 | how often mapped topics are read for NT4 |

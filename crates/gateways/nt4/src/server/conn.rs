@@ -32,7 +32,7 @@ pub(super) struct Liveness {
 /// Accepts connections until the owning task is aborted; each connection runs in a `JoinSet`, so
 /// aborting this loop also ends them.
 pub(super) async fn accept_loop(
-    listener: TcpListener,
+    listener: Option<TcpListener>,
     mut taken: tokio::sync::mpsc::UnboundedReceiver<WsSocket>,
     state: std::sync::Arc<Mutex<State>>,
     liveness: Liveness,
@@ -40,7 +40,13 @@ pub(super) async fn accept_loop(
     let mut connections = JoinSet::new();
     loop {
         tokio::select! {
-            accepted = listener.accept() => match accepted {
+            accepted = async {
+                match &listener {
+                    Some(listener) => listener.accept().await,
+                    // Only what is handed over.
+                    None => std::future::pending().await,
+                }
+            } => match accepted {
                 Ok((stream, from)) => {
                     crate::net::tune(&stream, liveness.timeout);
                     let state = std::sync::Arc::clone(&state);

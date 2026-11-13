@@ -258,19 +258,22 @@ fn everything_works_through_a_child_that_cannot_gain_rights() {
 
     // While a connection is open there is a child for it, and that child can gain no
     // rights by any means; when it is over the child is gone.
+    // The children of the connections before are gone first, so the one counted is this one's.
+    until("the earlier children are gone", || {
+        server.children().is_empty() && server.connections() == 0
+    });
     std::thread::scope(|scope| {
         let open = scope.spawn(|| server.ssh(&server.key, &[], &["sleep 2; echo done"], ""));
-        until("a child for the connection", || {
-            server.children().len() == 1
+        // The child sets it on itself once it starts, so it is looked at until then.
+        until("a child for the connection that can gain no rights", || {
+            server.children().iter().any(|pid| {
+                std::fs::read_to_string(format!("/proc/{pid}/status")).is_ok_and(|status| {
+                    status
+                        .lines()
+                        .any(|line| line.replace('\t', " ") == "NoNewPrivs: 1")
+                })
+            })
         });
-        let pid = server.children()[0];
-        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).expect("status");
-        assert!(
-            status
-                .lines()
-                .any(|line| line.replace('\t', " ") == "NoNewPrivs: 1"),
-            "{status}"
-        );
         assert_eq!(text(&open.join().expect("ssh").stdout), "done\n");
     });
     until("the child is gone", || {

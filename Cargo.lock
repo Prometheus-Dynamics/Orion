@@ -2001,6 +2001,7 @@ dependencies = [
  "orion-types",
  "orion-values",
  "orion-wire",
+ "orion-ws",
  "tokio",
  "tracing",
 ]

@@ -39,7 +39,7 @@ pub use error::{Error, Result};
 pub use message::{Control, Properties, SubscribeOptions};
 #[cfg(feature = "server")]
 pub use server::{
-    ClientInfo, Server, ServerConfig, ServerEvent, ServerHandle, TopicOwner, TopicSnapshot,
+    ClientInfo, Server, ServerConfig, ServerEvent, ServerHandle, Taker, TopicOwner, TopicSnapshot,
 };
 pub use time::now_micros;
 pub use value::{Value, type_id_for_name};

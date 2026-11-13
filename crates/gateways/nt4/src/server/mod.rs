@@ -41,6 +41,10 @@ const PERSIST_DEBOUNCE: Duration = Duration::from_secs(1);
 pub struct ServerConfig {
     /// Listen address. The default is `0.0.0.0:5810`.
     pub bind: SocketAddr,
+    /// Whether the server has a port of its own at [`ServerConfig::bind`]. Without one it
+    /// serves only the connections handed to [`Server::take`] by a listener it shares.
+    /// Default on.
+    pub listen: bool,
     /// JSON file holding every `persistent` topic. Off by default. Changes to such a topic are
     /// written (compact JSON, synced to disk) within about a second, and any pending change is
     /// written when the [`Server`] is dropped. Restored on start.
@@ -58,6 +62,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: SocketAddr::from(([0, 0, 0, 0], crate::DEFAULT_PORT)),
+            listen: true,
             persist_path: None,
             client_timeout: Duration::from_secs(3),
             ping_interval: Duration::from_secs(1),
@@ -77,14 +82,33 @@ pub struct Server {
     writes: Arc<Mutex<()>>,
 }
 
+/// Hands connections upgraded elsewhere to a [`Server`]: see [`Server::taker`]. Once the
+/// server is gone, what is handed is dropped.
+#[derive(Clone, Debug)]
+pub struct Taker(tokio::sync::mpsc::UnboundedSender<orion_ws::WsSocket>);
+
+impl Taker {
+    /// As [`Server::take`].
+    pub fn take(&self, socket: orion_ws::WsSocket) {
+        let _ = self.0.send(socket);
+    }
+}
+
 impl Server {
     /// Binds the listener and starts accepting on the current Tokio runtime.
     pub async fn start(config: ServerConfig) -> Result<Self> {
         let (events, _) = broadcast::channel(256);
         let mut state = State::new(config.persist_path.clone(), events);
         state.load_persisted()?;
-        let listener = TcpListener::bind(config.bind).await?;
-        let local_addr = listener.local_addr()?;
+        let listener = if config.listen {
+            Some(TcpListener::bind(config.bind).await?)
+        } else {
+            None
+        };
+        let local_addr = match &listener {
+            Some(listener) => listener.local_addr()?,
+            None => config.bind,
+        };
         let persist_enabled = config.persist_path.is_some();
         let inner = Arc::new(Mutex::new(state));
         let writes = Arc::new(Mutex::new(()));
@@ -125,7 +149,14 @@ impl Server {
         let _ = self.taken.send(socket);
     }
 
-    /// The bound address (useful with port 0).
+    /// What hands connections to this server from a task of its own: [`Server::take`] that
+    /// can be cloned and kept.
+    pub fn taker(&self) -> Taker {
+        Taker(self.taken.clone())
+    }
+
+    /// The bound address (useful with port 0). With no port of its own, the address it was
+    /// given.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }

@@ -14,6 +14,8 @@
 
 #[cfg(feature = "ssh")]
 mod helper;
+#[cfg(feature = "nt4")]
+mod nt4_ws;
 #[cfg(feature = "recovery")]
 mod recover;
 mod settings;
@@ -25,7 +27,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-#[cfg(any(feature = "tcp", feature = "systemd"))]
+#[cfg(any(feature = "tcp", feature = "systemd", feature = "ws"))]
 use std::time::Duration;
 
 use orion_broker::{Broker, Topics};
@@ -67,6 +69,8 @@ pub struct CommCore {
     topics: Rc<RefCell<Topics>>,
     socket: PathBuf,
     peer_addr: Option<SocketAddr>,
+    #[cfg(feature = "ws")]
+    ws_addr: Option<SocketAddr>,
     tasks: Vec<JoinHandle<()>>,
     parts: Vec<&'static str>,
     /// Kept so that it runs for as long as the comm core does.
@@ -309,6 +313,14 @@ impl CommCore {
             return Err(failed("peer.listen", "this build has no network way in"));
         }
 
+        #[cfg(all(feature = "ws", feature = "nt4"))]
+        let mut nt4_on_ws: Option<nt4_ws::Nt4OnWs> = None;
+        #[cfg(feature = "nt4")]
+        #[cfg_attr(not(feature = "ws"), allow(unused_variables))]
+        let nt4_wants_ws = nt4_ws::wanted(&settings)?;
+        #[cfg(feature = "ws")]
+        let mut ws_addr = None;
+
         // The WebSocket way in, for browsers. Its listener is one other WebSocket protocols
         // can share.
         #[cfg(feature = "ws")]
@@ -322,7 +334,12 @@ impl CommCore {
             let mut listener = orion_ws::WsListener::bind(listen, options)
                 .await
                 .map_err(|error| failed(format!("ws.listen {listen}"), error))?;
+            ws_addr = listener.local_addr().ok();
             let carrier = orion_ws::WsCarrier::on(&mut listener);
+            #[cfg(feature = "nt4")]
+            if nt4_wants_ws {
+                nt4_on_ws = Some(nt4_ws::take_from(&mut listener));
+            }
             tasks.push(tokio::task::spawn_local(listener.run()));
             serve(&mut tasks, Carriers::Ws(carrier));
         }
@@ -381,11 +398,15 @@ impl CommCore {
             Some(config) => {
                 parts.push("nt4");
                 let listen = config.listen;
-                Some(
-                    orion_nt4_gateway::Gateway::start(&topics, config)
-                        .await
-                        .map_err(|error| failed(format!("nt4.listen {listen}"), error))?,
-                )
+                let gateway = orion_nt4_gateway::Gateway::start(&topics, config)
+                    .await
+                    .map_err(|error| failed(format!("nt4.listen {listen:?}"), error))?;
+                #[cfg(feature = "ws")]
+                if let Some(incoming) = nt4_on_ws.take() {
+                    parts.push("nt4 on the websocket");
+                    tasks.push(nt4_ws::forward(&gateway, incoming));
+                }
+                Some(gateway)
             }
             None => None,
         };
@@ -440,6 +461,8 @@ impl CommCore {
             topics,
             socket,
             peer_addr,
+            #[cfg(feature = "ws")]
+            ws_addr,
             tasks,
             parts,
             #[cfg(feature = "outbound")]
@@ -491,6 +514,13 @@ impl CommCore {
     #[must_use]
     pub const fn peer_addr(&self) -> Option<SocketAddr> {
         self.peer_addr
+    }
+
+    /// Where browsers connect, if anywhere.
+    #[cfg(feature = "ws")]
+    #[must_use]
+    pub const fn ws_addr(&self) -> Option<SocketAddr> {
+        self.ws_addr
     }
 
     /// The SSH way in, if it is open.

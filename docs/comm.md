@@ -172,7 +172,9 @@ publisher on behalf, like a program on another board.
 
 Programs that speak NetworkTables 4 reach topics through `orion-nt4-gateway`, an NT4 server
 inside the comm core (`crates/gateways/nt4-gateway`, on the NT4 crate `crates/gateways/nt4`).
-It is off unless `nt4.listen` is set.
+It is off unless `nt4.listen` is set. `nt4.listen = ws` puts it on the WebSocket listener
+(`ws.listen`) instead of a port of its own: connections that ask for an NT4 subprotocol go to
+the gateway, the rest stay Orion's.
 
 - **The mapping is configuration.** Each entry is `topic:field=type@name`: one field of one
   topic here, the NT4 type string that is announced, and the NT4 topic's name, which runs to

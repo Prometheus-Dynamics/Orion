@@ -39,12 +39,25 @@ struct Board {
 
 impl Board {
     fn start(name: &str) -> Self {
+        Self::start_on(name, false)
+    }
+
+    /// With `on_ws`, the gateway shares the WebSocket listener instead of a port of its own.
+    fn start_on(name: &str, on_ws: bool) -> Self {
         let dir = std::env::temp_dir().join(format!("orion-nt4-gw-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
         let text = format!(
-            "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n{MAPPING}",
-            dir.display()
+            "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n{1}",
+            dir.display(),
+            if on_ws {
+                MAPPING.replace(
+                    "nt4.listen = 127.0.0.1:0",
+                    "ws.listen = 127.0.0.1:0\nnt4.listen = ws",
+                )
+            } else {
+                MAPPING.to_owned()
+            }
         );
         let mut source = Source::parse(&text, Vec::new()).expect("source");
         let settings = CommSettings::from_source(&mut source).expect("settings");
@@ -60,7 +73,12 @@ impl Board {
                 let core = CommCore::start(settings)
                     .await
                     .expect("the comm core starts");
-                let nt4 = core.nt4().expect("the gateway runs").local_addr();
+                let gateway = core.nt4().expect("the gateway runs").local_addr();
+                let nt4 = if on_ws {
+                    core.ws_addr().expect("the websocket listens")
+                } else {
+                    gateway
+                };
                 ready.send((core.socket().to_owned(), nt4)).expect("ready");
                 let _ = stopped.await;
             });
@@ -359,6 +377,61 @@ fn an_nt4_client_sees_mapped_topics_and_writes_one_back() {
     });
     told.stop.store(true, Ordering::Relaxed);
     running.join().expect("the programs end");
+}
+
+#[test]
+fn an_nt4_client_reaches_the_gateway_on_the_websocket_port() {
+    let board = Board::start_on("on-ws", true);
+    let told = Arc::new(Told::default());
+    let (read, _on_board) = mpsc::channel();
+    let (socket, telling) = (board.socket.clone(), told.clone());
+    let running = std::thread::spawn(move || programs(&socket, &telling, &read));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let client = connect(board.nt4, "robot").await;
+        let mut topics = client
+            .handle()
+            .subscribe(&["/Tank/level"], SubscribeOptions::default())
+            .expect("subscribe");
+        let first = until(&mut topics, |event| match value_of(event, "/Tank/level") {
+            Some(Value::Double(litres)) => Some(*litres),
+            _ => None,
+        })
+        .await;
+        until(&mut topics, |event| match value_of(event, "/Tank/level") {
+            Some(Value::Double(litres)) if *litres > first => Some(()),
+            _ => None,
+        })
+        .await;
+    });
+    told.stop.store(true, Ordering::Relaxed);
+    running.join().expect("the programs end");
+}
+
+#[test]
+fn nt4_on_the_websocket_needs_a_websocket_listener() {
+    let dir = std::env::temp_dir().join(format!("orion-nt4-gw-no-ws-{}", std::process::id()));
+    let text = format!(
+        "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n{1}",
+        dir.display(),
+        MAPPING.replace("nt4.listen = 127.0.0.1:0", "nt4.listen = ws")
+    );
+    let mut source = Source::parse(&text, Vec::new()).expect("source");
+    let settings = CommSettings::from_source(&mut source).expect("settings");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let started = tokio::task::LocalSet::new()
+        .block_on(&runtime, CommCore::start(settings))
+        .map(|_| ());
+    let error = started.expect_err("nothing to share").to_string();
+    assert!(error.contains("no ws.listen to share"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

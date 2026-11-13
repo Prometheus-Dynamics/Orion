@@ -39,7 +39,8 @@ use tokio::task::JoinHandle;
 use tracing::debug;
 
 pub use mapped::{Counters, Far, Mapped};
-pub use mapping::{Entry, Mapping, Nt4Config, field_type};
+pub use mapping::{Entry, Mapping, Nt4Config, Nt4Listen, field_type};
+pub use orion_nt4::{SUBPROTOCOL_V4_0, SUBPROTOCOL_V4_1};
 
 /// The NT4 side of the server form: the table of the server the gateway runs.
 struct Table(ServerHandle);
@@ -68,7 +69,7 @@ pub struct Gateway {
     local_addr: SocketAddr,
     task: JoinHandle<()>,
     /// Kept so that it serves for as long as the gateway lives.
-    _server: Server,
+    server: Server,
 }
 
 impl std::fmt::Debug for Gateway {
@@ -100,7 +101,11 @@ impl Gateway {
         } = config.mapping;
         let mapped = Mapped::new(topics, publish, &accept, max_payload)?;
         let server = Server::start(ServerConfig {
-            bind: config.listen,
+            bind: match config.listen {
+                Nt4Listen::Port(addr) => addr,
+                Nt4Listen::Ws => SocketAddr::from(([0, 0, 0, 0], 0)),
+            },
+            listen: matches!(config.listen, Nt4Listen::Port(_)),
             ..ServerConfig::default()
         })
         .await
@@ -143,14 +148,27 @@ impl Gateway {
             state,
             local_addr,
             task,
-            _server: server,
+            server,
         })
     }
 
-    /// Where NT4 clients connect.
+    /// Where NT4 clients connect. With `nt4.listen = ws`, the address is not one.
     #[must_use]
     pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    /// Serves an NT4 client whose connection a WebSocket listener this gateway shares
+    /// upgraded: one that asked for [`orion_nt4::SUBPROTOCOL_V4_1`] or
+    /// [`orion_nt4::SUBPROTOCOL_V4_0`].
+    pub fn take(&self, socket: orion_ws::WsSocket) {
+        self.server.take(socket);
+    }
+
+    /// As [`Gateway::take`], from a task of its own.
+    #[must_use]
+    pub fn taker(&self) -> orion_nt4::Taker {
+        self.server.taker()
     }
 
     /// What has been counted.
