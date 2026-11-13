@@ -266,6 +266,8 @@ fn the_flasher_example_is_read_whole_and_starts() {
             ("ORION_SOCKET", dir.join("orion.sock").display().to_string()),
             ("ORION_STATE_DIR", dir.join("state").display().to_string()),
             ("ORION_SSH_LISTEN", "127.0.0.1:0".to_owned()),
+            // The gadget's interface stands for `lo` here.
+            ("ORION_SSH_INTERFACE", "lo".to_owned()),
         ],
     );
     let seen = running.seen.borrow().join("\n");

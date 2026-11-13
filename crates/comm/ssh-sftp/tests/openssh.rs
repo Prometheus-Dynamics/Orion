@@ -73,6 +73,7 @@ impl Server {
         let helper: PathBuf = env!("CARGO_BIN_EXE_orion-sftp-helper").into();
         let config = SshConfig {
             listen: "127.0.0.1:0".parse().expect("addr"),
+            interface: None,
             host_key: dir.join("host_key"),
             helper: Helper {
                 program: helper.clone(),

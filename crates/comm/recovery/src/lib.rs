@@ -42,6 +42,9 @@ pub const KEYS_FILE: &str = "/etc/orion/recovery_keys";
 pub struct RecoveryConfig {
     /// Where to listen: the first of these that can be, each time it tries.
     pub listen: Vec<SocketAddr>,
+    /// The one network interface to listen on, if the board's settings were read and named
+    /// one (`ssh.interface`): recovery is never open wider than the board is.
+    pub interface: Option<String>,
     /// The public keys that may log in, one OpenSSH public key a line.
     pub keys_file: PathBuf,
     /// The board's host key, if it can be read. One is made for the run if not.
@@ -181,6 +184,7 @@ impl Recovery {
                 for listen in &config.listen {
                     let ssh = SshConfig {
                         listen: *listen,
+                        interface: config.interface.clone(),
                         host_key: config.host_key.clone(),
                         helper: config.helper.clone(),
                         subsystems: config.subsystems.clone(),
@@ -194,7 +198,12 @@ impl Recovery {
                     match Ssh::start(ssh, config.security, running.keys.clone()).await {
                         Ok(server) => {
                             let at = server.local_addr();
-                            info!("recovery: SSH is open on {at}");
+                            match &config.interface {
+                                Some(interface) => info!(
+                                    "recovery: SSH is open on {at}, on {interface} only (once it is there)"
+                                ),
+                                None => info!("recovery: SSH is open on {at}"),
+                            }
                             *running
                                 .local_addr
                                 .lock()

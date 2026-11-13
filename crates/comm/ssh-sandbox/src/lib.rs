@@ -148,9 +148,16 @@ impl SandboxedSsh {
             .to_openssh(LineEnding::LF)
             .map_err(std::io::Error::other)?
             .to_string();
-        let listener = TcpListener::bind(config.listen).await?;
-        let local_addr = listener.local_addr()?;
-        tracing::info!("ssh: each connection is read by a child; open on {local_addr}");
+        let (at, interface) = (config.listen, config.interface.clone());
+        let listener = match orion_ssh::listen(at, interface.as_deref()) {
+            Ok(listener) => Some(listener),
+            Err(error) if interface.is_some() && orion_ssh::absent(&error) => None,
+            Err(error) => return Err(error),
+        };
+        let local_addr = listener.as_ref().map_or(Ok(at), TcpListener::local_addr)?;
+        if listener.is_some() {
+            tracing::info!("ssh: each connection is read by a child; open on {local_addr}");
+        }
         // Who a child becomes, if this process may make it anyone.
         let become_ids = if rustix::process::getuid().is_root() {
             let user = users::lookup(&config.etc, &sandbox.user)
@@ -178,6 +185,11 @@ impl SandboxedSsh {
         });
         let accepting = shared.clone();
         let task = tokio::spawn(async move {
+            let listener = match (listener, interface) {
+                (Some(listener), _) => listener,
+                (None, Some(interface)) => orion_ssh::listen_when_there(at, &interface).await,
+                (None, None) => unreachable!("only a named interface is waited for"),
+            };
             loop {
                 let (stream, peer) = match listener.accept().await {
                     Ok(accepted) => accepted,

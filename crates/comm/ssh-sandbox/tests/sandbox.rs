@@ -52,6 +52,7 @@ fn me() -> users::User {
 fn config(dir: &Path) -> SshConfig {
     SshConfig {
         listen: "127.0.0.1:0".parse().expect("addr"),
+        interface: None,
         host_key: dir.join("host_key"),
         helper: Helper {
             program: env!("CARGO_BIN_EXE_orion-sandbox-helper").into(),

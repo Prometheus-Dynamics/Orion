@@ -349,7 +349,11 @@ Settings: `cluster` (`default`), `enrollment.key` (none: only an administrator e
 ## The SSH way in
 
 `crates/comm/ssh` (`orion-ssh`). The comm core answers SSH itself, on `ssh.listen`; a person's
-ordinary `ssh` connects to it. It is off unless `ssh.listen` is set.
+ordinary `ssh` connects to it. It is off unless `ssh.listen` or `ssh.interface` is set.
+`ssh.interface` keeps it to one network interface whatever its address (`SO_BINDTODEVICE`), on
+`ssh.listen`'s port (22 if not set); an interface that is not there yet, such as a USB gadget's
+network that comes up after the comm core, is waited for, and SSH opens on it when it comes.
+Recovery keeps to the same interface when the settings were read.
 
 - **Logins go through the one check.** The client proves it holds a key. The trust store says
   whose key it is, and the check decides whether that operator may log in: an operator
@@ -417,6 +421,8 @@ or identity that cannot be read, an address that cannot be listened on.
   settings were read, their SSH address is tried first and their security switch holds: a
   board that says security is off is as open in recovery as it always is.
 - **Never wider.** With security on and no recovery keys, nobody gets in, and that is logged.
+  Settings that were read and name `ssh.interface` keep every address recovery tries to that
+  interface.
 - **Nothing written.** The host key is the board's if it can be read, and one for the run if
   not. A session needs no home directory, and an account whose shell is gone gets `/bin/sh`.
   If the account files themselves are gone and the comm core is root, `root` is still let in.

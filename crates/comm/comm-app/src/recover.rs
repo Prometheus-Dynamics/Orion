@@ -114,6 +114,8 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
     );
     Recovery::start(RecoveryConfig {
         listen,
+        // Only from settings that were read: ones that could not be say nothing.
+        interface: ssh.and_then(|ssh| ssh.interface.clone()),
         keys_file: settings.map_or(with.keys_file, |settings| settings.recovery_keys.clone()),
         host_key: ssh.map_or_else(
             || state_dir.join("ssh_host_ed25519_key"),

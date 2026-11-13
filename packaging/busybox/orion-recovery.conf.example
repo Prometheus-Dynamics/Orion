@@ -10,14 +10,19 @@ node.name = flasher
 # after the cable comes back.
 links.usb = usb
 
-# SSH, for a person, on the gadget's network only: name the board's address on it. Left out,
-# there is no SSH while the settings are good; recovery still opens it if they are not.
-# ssh.listen = <the board's address on the gadget network>:22
+# SSH, for a person, on the gadget's network interface and no other, whatever address the
+# image gives it: `usb0` is the usual name of a gadget's network function; name the one the
+# image makes. The comm core starts before the gadget does: SSH waits for the interface and
+# opens on it when it comes up. Recovery, if the comm core ends up there, keeps to it too.
+ssh.interface = usb0
+ssh.listen = 0.0.0.0:22
 
-# Security off: whoever is on the other end of the cable may do anything, as they may with
-# the boot ROM that started this image. Fresh in RAM each boot, the flasher has no trust store
-# to check against. Keep it off only while the cable is the only way in: with SSH bound to the
-# gadget's address and no other network brought up.
+# Security off: whoever is on the other end of the cable may do anything, root included, as
+# they may with the boot ROM that started this image. Fresh in RAM each boot, the flasher has
+# no trust store to check against. This is safe only because the cable is the only way in:
+# the Orion link is the USB link and SSH is on the gadget's interface. Never use this file on
+# a board on a shared network, or in an image that brings up Ethernet or Wi-Fi with Orion
+# listening there: anyone on that network would own the board.
 security = off
 
 # The state directory is in RAM: the host key and the board's key last one boot.

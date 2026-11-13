@@ -70,6 +70,7 @@ fn keygen(dir: &Path, name: &str) -> (PathBuf, String) {
 fn config(dir: &Path, why: &str) -> RecoveryConfig {
     RecoveryConfig {
         listen: vec!["127.0.0.1:0".parse().expect("addr")],
+        interface: None,
         keys_file: dir.join("recovery_keys"),
         host_key: dir.join("state/ssh_host_ed25519_key"),
         helper: Helper {
@@ -352,5 +353,37 @@ fn it_tries_again_at_the_same_pace_for_ever() {
         began.elapsed()
     );
     assert!(board.lets_in(Some(&repairer)));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn on_one_interface_recovery_is_open_there_and_nowhere_else() {
+    if !installed() {
+        return;
+    }
+    let dir = temp("interface");
+    // The board's settings named an interface that is not there yet: nothing listens on
+    // the address alone, which would be wider than the board is.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind")
+        .local_addr()
+        .expect("addr")
+        .port();
+    let mut absent = config(&dir, "the interface is not there yet");
+    absent.listen = vec![SocketAddr::from(([127, 0, 0, 1], port))];
+    absent.interface = Some("orionnone0".to_owned());
+    absent.security = Security::Off;
+    let board = Board::start(&dir, absent);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
+    drop(board);
+
+    // On one that is there, it lets in as the settings say: security off, no key.
+    let mut there = config(&dir, "on lo");
+    there.interface = Some("lo".to_owned());
+    there.security = Security::Off;
+    let board = Board::start(&dir, there);
+    assert!(board.lets_in(None));
+    drop(board);
     let _ = std::fs::remove_dir_all(dir);
 }

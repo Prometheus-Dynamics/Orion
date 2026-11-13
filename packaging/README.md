@@ -100,10 +100,21 @@ from `orion.sysusers`.
 **An initramfs or a flasher image** runs `orion-recovery`, the comm core alone, with
 `S40orion-recovery` and no node logic. `orion-recovery.conf.example` is the settings for a board
 reached over a USB gadget: the USB link by name (the program that sets up the gadget hands its
-endpoints over), SSH on the gadget's network only, security off while the cable is the only way
-in. With no settings file at all, `orion-recovery` listens for SSH on port 22 of every address,
-with security off: anyone who can reach the board gets in. That suits an image whose only network
-is the cable; an image that brings up any other network ships a settings file.
+endpoints over), SSH on the gadget's network interface only (`ssh.interface`, waited for if it
+comes up after the comm core), and security off.
+
+**Security off in a flasher means anyone who reaches it is root on the board**: through the USB
+link they may do anything Orion can, and through SSH they get a shell. That is the trust the boot
+ROM already gives whoever holds the cable, and no more, only while the cable is the only way in.
+On a shared network it is a board anyone on that network owns. So:
+
+- an image with this file brings up no network but the gadget's;
+- `ssh.interface` names the gadget's interface, never left out for `ssh.listen` alone;
+- a board that is on any other network runs `orion` with security on, never the flasher's file.
+
+With no settings file at all, `orion-recovery` listens for SSH on port 22 of every address, with
+security off. That is the same trust with no interface to keep it to: an image ships a settings
+file.
 
 What is lost without systemd:
 
