@@ -138,6 +138,10 @@ and does nothing different.
 - **Woken, not polled.** Publishers ring one doorbell for all such subscribers, as they would
   ring a subscriber's own, and only when the sender is asleep.
 - Subscriptions take turns of 256 samples, so one busy topic does not starve another.
+- **The newest first, if the topic asks.** A topic declared with `on_subscribe: Latest` sends a
+  subscription it starts carrying the newest sample of each field, unless it has expired, before
+  anything newer. A subscription carried again because the publisher came back is not sent them
+  again. The byte limit applies to these samples too.
 
 ## The WebSocket carrier
 

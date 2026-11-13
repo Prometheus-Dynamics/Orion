@@ -26,6 +26,7 @@ fn main() -> Result<(), Error> {
         history: 64,
         expiry_ms: 0,
         max_payload: 8,
+        on_subscribe: Default::default(),
     })?;
 
     // A dashboard subscribes. It reads the sensor's ring directly: nothing is copied.

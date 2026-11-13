@@ -123,6 +123,7 @@ fn programs(socket: &Path, told: &Told, read: &mpsc::Sender<(u16, Vec<u8>)>) {
             history: 8,
             expiry_ms: 0,
             max_payload: 16,
+            on_subscribe: Default::default(),
         })
         .expect("declare");
     let mut alarm = orion
@@ -132,6 +133,7 @@ fn programs(socket: &Path, told: &Told, read: &mpsc::Sender<(u16, Vec<u8>)>) {
             history: 2,
             expiry_ms: 300,
             max_payload: 32,
+            on_subscribe: Default::default(),
         })
         .expect("declare");
     // Not mapped: NT4 never hears of it.
@@ -142,6 +144,7 @@ fn programs(socket: &Path, told: &Told, read: &mpsc::Sender<(u16, Vec<u8>)>) {
             history: 2,
             expiry_ms: 0,
             max_payload: 8,
+            on_subscribe: Default::default(),
         })
         .expect("declare");
     let mut panel = orion.subscribe("panel.setpoint").expect("subscribe");

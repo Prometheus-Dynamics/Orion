@@ -203,6 +203,7 @@ fn a_program_s_own_value_ring_becomes_a_topic() {
         history: 16,
         expiry_ms: 0,
         max_payload: 8,
+        on_subscribe: Default::default(),
     };
     let connect = |name: &str| {
         let session = Session::connect(&Address::Local(socket.clone()), name, Options::default())

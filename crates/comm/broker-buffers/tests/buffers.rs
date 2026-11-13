@@ -151,6 +151,7 @@ impl Camera {
             history: 8,
             expiry_ms: 0,
             max_payload: 64,
+            on_subscribe: Default::default(),
         };
         let offered: Vec<OwnedFd> = ring.into_iter().collect();
         client.send(&declare, &offered).await;
@@ -655,6 +656,7 @@ impl Camera {
             history: 8,
             expiry_ms: 0,
             max_payload: 64,
+            on_subscribe: Default::default(),
         };
         client.send(&declare, &[ring]).await;
         assert_eq!(client.next().await, kind::TOPIC_OPENED);

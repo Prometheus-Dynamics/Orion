@@ -332,6 +332,7 @@ pub unsafe extern "C" fn orion_declare(
             history,
             expiry_ms: 0,
             max_payload,
+            on_subscribe: Default::default(),
         })?;
         // SAFETY: `out` is not null and the caller promises space for one pointer.
         unsafe { out.write(Box::into_raw(Box::new(OrionPublisher { publisher }))) };

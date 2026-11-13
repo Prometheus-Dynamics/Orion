@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use orion_msg_topics::{Declare, Field, FieldType};
+use orion_msg_topics::{Declare, Field, FieldType, OnSubscribe};
 use orion_server::Error;
 use orion_types::TopicName;
 use orion_wire::List;
@@ -125,6 +125,7 @@ impl LocalPublisher {
             history,
             expiry_ms: 0,
             max_payload,
+            on_subscribe: OnSubscribe::FromNow,
         };
         let mut bytes = vec![0_u8; 64 + fields.len() * 96];
         let len = encode_fields(&declare, &mut bytes)?;

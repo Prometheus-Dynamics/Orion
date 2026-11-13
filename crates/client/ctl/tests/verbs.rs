@@ -239,6 +239,7 @@ fn node_show_peers_and_time() {
             history: 2,
             expiry_ms: 0,
             max_payload: 64,
+            on_subscribe: Default::default(),
         })
         .expect("declare");
     model
@@ -364,6 +365,7 @@ fn topic_read_watch_and_publish() {
                 history: 64,
                 expiry_ms: 0,
                 max_payload: 8,
+                on_subscribe: Default::default(),
             })
             .expect("declare");
         let mut count = 0_i64;

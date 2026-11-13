@@ -393,6 +393,7 @@ impl Node {
             history: 256,
             expiry_ms: 0,
             max_payload: 512,
+            on_subscribe: Default::default(),
         }) {
             Ok(publisher) => Some(publisher),
             Err(error) => {

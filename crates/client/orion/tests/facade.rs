@@ -44,6 +44,7 @@ fn a_comm_core_that_restarts_stops_nothing_that_was_flowing() {
             history: 64,
             expiry_ms: 0,
             max_payload: 8,
+            on_subscribe: Default::default(),
         })
         .expect("declare");
     let mut reading = dashboard.subscribe("tank.level").expect("subscribe");

@@ -119,6 +119,7 @@ impl Describing {
             history,
             expiry_ms: 0,
             max_payload,
+            on_subscribe: Default::default(),
         })?;
         self.topics.push(full);
         Ok(publisher)

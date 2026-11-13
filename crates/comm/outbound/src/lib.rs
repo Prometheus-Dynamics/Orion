@@ -24,6 +24,11 @@
 //!
 //! Nothing is polled. The publisher rings one doorbell for all such subscribers, as it would
 //! ring a subscriber's own, and only when this is asleep.
+//!
+//! A topic declared with `on_subscribe: Latest` gives a subscriber that starts being carried
+//! the newest sample of each field first, unless it has expired, each with its own time. One
+//! that was carried already, and is carried again because the publisher came back, is not
+//! sent them again.
 
 #![cfg(target_os = "linux")]
 
@@ -34,10 +39,11 @@ use std::time::Duration;
 
 use orion_broker::{Broker, Topic, TopicId, TopicWatch, Topics};
 use orion_config::{ConfigError, Source};
-use orion_msg_topics::{Sample, SampleFlags};
+use orion_msg_topics::{Declare, OnSubscribe, Sample, SampleFlags};
 use orion_server::{Comm, Delivery, Error, SessionId, Sessions};
 use orion_wire::Bytes;
-use shm_ring::{Flags, Next, Reader};
+use orion_wire::Decode;
+use shm_ring::{FieldId, Flags, Next, Reader, SampleTime};
 use shm_ring_doorbell::Doorbell;
 use tokio::io::Interest;
 use tokio::net::UnixDatagram;
@@ -134,17 +140,24 @@ const fn bit(field: u16) -> u64 {
 struct Watching(Rc<RefCell<State>>);
 
 impl TopicWatch for Watching {
-    fn declared(&mut self, topic: &Topic, _sessions: &mut Sessions) {
+    fn declared(&mut self, topic: &Topic, sessions: &mut Sessions) {
         // A new ring, or a publisher that is back: every subscriber without a ring reads
         // the ring there is now.
         let mut state = self.0.borrow_mut();
+        let before: Vec<SessionId> = state
+            .carried
+            .iter()
+            .filter(|carried| carried.topic == topic.id)
+            .map(|carried| carried.session)
+            .collect();
         state.carried.retain(|carried| carried.topic != topic.id);
         for subscription in topic.subscribers.iter().filter(|sub| !sub.shared) {
-            state.carry(topic, subscription.session);
+            let first = !before.contains(&subscription.session);
+            state.carry(topic, subscription.session, first, sessions);
         }
     }
 
-    fn subscribed(&mut self, topic: &Topic, session: SessionId, _sessions: &mut Sessions) {
+    fn subscribed(&mut self, topic: &Topic, session: SessionId, sessions: &mut Sessions) {
         let mut state = self.0.borrow_mut();
         state
             .carried
@@ -154,7 +167,7 @@ impl TopicWatch for Watching {
             .iter()
             .any(|subscription| subscription.session == session && !subscription.shared);
         if without_ring {
-            state.carry(topic, session);
+            state.carry(topic, session, true, sessions);
         }
     }
 
@@ -167,23 +180,50 @@ impl TopicWatch for Watching {
 }
 
 impl State {
-    /// Starts reading `topic`'s ring for `session`.
-    fn carry(&mut self, topic: &Topic, session: SessionId) {
+    /// Starts reading `topic`'s ring for `session`. `first` if it was not carried before:
+    /// then a topic that asks for it sends the newest of each field first.
+    fn carry(&mut self, topic: &Topic, session: SessionId, first: bool, sessions: &mut Sessions) {
         let reader = topic
             .ring
             .as_ref()
             .and_then(|ring| ring.read_fd().ok())
             .and_then(|fd| Reader::attach(fd).ok());
-        match reader {
-            Some(reader) => self.carried.push(Carried {
-                topic: topic.id,
-                session,
-                reader,
-                keyed: 0,
-                skipping: 0,
-            }),
-            None => warn!("topic {} cannot be read for a subscriber", topic.name),
+        let Some(mut reader) = reader else {
+            warn!("topic {} cannot be read for a subscriber", topic.name);
+            return;
+        };
+        if first
+            && let Ok(declare) = Declare::decode(&topic.declare)
+            && declare.on_subscribe == OnSubscribe::Latest
+        {
+            let now = SampleTime::now();
+            let expiry_ns = u64::from(declare.expiry_ms) * 1_000_000;
+            for field in 0..declare.fields.len() {
+                let Ok(field) = u16::try_from(field) else {
+                    break;
+                };
+                let Some(sample) = reader.latest(FieldId(field)) else {
+                    continue;
+                };
+                if expiry_ns != 0 && now.saturating_since(sample.time) > expiry_ns {
+                    continue;
+                }
+                let room =
+                    sessions.pending(session) + sample.payload.len() + 32 <= self.limits.max_bytes;
+                if room && send(sessions, session, topic.id, &sample) == Ok(()) {
+                    self.counters.sent += 1;
+                } else {
+                    self.counters.dropped += 1;
+                }
+            }
         }
+        self.carried.push(Carried {
+            topic: topic.id,
+            session,
+            reader,
+            keyed: 0,
+            skipping: 0,
+        });
     }
 
     /// Sends every carried subscription what it has room for. Whether anything was read.

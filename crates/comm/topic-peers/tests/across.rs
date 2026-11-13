@@ -165,6 +165,7 @@ fn level(sensor: &Orion, name: &str) -> Publisher {
             history: 256,
             expiry_ms: 0,
             max_payload: 8,
+            on_subscribe: Default::default(),
         })
         .expect("declare")
 }

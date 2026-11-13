@@ -29,7 +29,8 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{Client, ClientError};
 use orion_msg_topics::{
-    Declare, Field, Sample as SampleMessage, SampleFlags, Subscribe, TopicStatus, TopicWithdraw,
+    Declare, Field, OnSubscribe, Sample as SampleMessage, SampleFlags, Subscribe, TopicStatus,
+    TopicWithdraw,
 };
 use orion_types::TopicRef;
 use orion_wire::body::encode_fields;
@@ -95,6 +96,9 @@ pub struct TopicDecl<'a> {
     pub expiry_ms: u32,
     /// The largest sample, in bytes.
     pub max_payload: u32,
+    /// What a subscriber that is sent samples as messages gets first: what is published from
+    /// now on, or the newest of each field before that.
+    pub on_subscribe: OnSubscribe,
 }
 
 /// What a subscriber to a topic of shared buffers brings with it.
@@ -207,6 +211,7 @@ impl Topics {
             history: topic.history,
             expiry_ms: topic.expiry_ms,
             max_payload: topic.max_payload,
+            on_subscribe: topic.on_subscribe,
         };
         let mut raw = vec![0_u8; 128 + topic.fields.len() * 96];
         let len = encode_fields(&declare, &mut raw)

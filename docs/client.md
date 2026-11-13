@@ -112,6 +112,12 @@ publisher no system call. Off the board the same publisher sends each sample as 
 the comm core writes it to the ring, and the same subscriber keeps a ring of its own for the
 samples that arrive as messages. The program reads a ring either way.
 
+A `TopicDecl` says what a subscriber that is sent samples as messages gets when it starts
+(`on_subscribe`). This is a subscriber on another board, or in a browser. `FromNow` gives it
+what is published from then on. `Latest` first gives it the newest sample of each field that
+has one and has not passed `expiry_ms`, each with its own time. A subscriber that reads the ring
+has `subscriber.latest(field)` for that.
+
 `wait` sleeps on the subscriber's doorbell and on the session together, so nothing is polled on
 a timer and the session is kept up while the program sleeps.
 

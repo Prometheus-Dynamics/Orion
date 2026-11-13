@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use orion::topics::{FieldId, Next, SampleTime, Status, Subscriber, TopicDecl};
+use orion::topics::{FieldId, Next, OnSubscribe, SampleTime, Status, Subscriber, TopicDecl};
 use orion::{Address, Orion, fields};
 use orion_stubs::Board;
 
@@ -48,6 +48,7 @@ fn a_subscriber_across_the_network_reads_as_one_on_the_board_does() {
             history: 256,
             expiry_ms: 0,
             max_payload: 8,
+            on_subscribe: Default::default(),
         })
         .expect("declare");
 
@@ -98,4 +99,74 @@ fn a_subscriber_across_the_network_reads_as_one_on_the_board_does() {
         )
         .expect("publish");
     assert_eq!(read(&mut far_reading, 1), [(201, 100.5)]);
+}
+
+#[test]
+fn a_subscriber_across_the_network_is_given_the_newest_of_each_field_when_the_topic_asks() {
+    let board = Board::start("outbound-latest");
+    let on_board = Address::Local(board.socket().to_owned());
+    let across: Address = format!("orion+tcp://{}", board.network())
+        .parse()
+        .expect("address");
+    let sensor = Orion::connect(&on_board, "sensor").expect("connect");
+    let declare = |name, on_subscribe| TopicDecl {
+        name,
+        fields: &fields![left: Float "l", right: Float "l", spare: Float "l"],
+        history: 16,
+        expiry_ms: 60_000,
+        max_payload: 8,
+        on_subscribe,
+    };
+    let mut latest = sensor
+        .declare(&declare("tank.latest", OnSubscribe::Latest))
+        .expect("declare");
+    let mut from_now = sensor
+        .declare(&declare("tank.now", OnSubscribe::FromNow))
+        .expect("declare");
+    let now = SampleTime::now().as_nanos();
+    for publisher in [&mut latest, &mut from_now] {
+        for (field, time, value) in [
+            (0, now - 3, 1.0_f64),
+            (0, now - 2, 2.0),
+            (1, now - 1, 3.0),
+            // Long expired: not given.
+            (2, 1, 9.0),
+        ] {
+            publisher
+                .publish(
+                    FieldId(field),
+                    SampleTime::from_nanos(time),
+                    &value.to_le_bytes(),
+                )
+                .expect("publish");
+        }
+    }
+
+    let far = Orion::connect(&across, "dashboard").expect("connect over the network");
+    let mut given = far.subscribe("tank.latest").expect("subscribe");
+    assert_eq!(read(&mut given, 2), [(now - 2, 2.0), (now - 1, 3.0)]);
+    let mut nothing = far.subscribe("tank.now").expect("subscribe");
+    std::thread::sleep(Duration::from_millis(200));
+    for reading in [&mut given, &mut nothing] {
+        reading.wait(Duration::from_millis(50)).expect("wait");
+        assert!(matches!(reading.next(), Next::Empty), "nothing more");
+    }
+
+    // Then it goes on as any subscription does.
+    latest
+        .publish(
+            FieldId(1),
+            SampleTime::from_nanos(now),
+            &4.0_f64.to_le_bytes(),
+        )
+        .expect("publish");
+    from_now
+        .publish(
+            FieldId(1),
+            SampleTime::from_nanos(now),
+            &4.0_f64.to_le_bytes(),
+        )
+        .expect("publish");
+    assert_eq!(read(&mut given, 1), [(now, 4.0)]);
+    assert_eq!(read(&mut nothing, 1), [(now, 4.0)]);
 }

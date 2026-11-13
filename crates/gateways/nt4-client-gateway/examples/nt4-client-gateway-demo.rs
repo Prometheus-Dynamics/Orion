@@ -76,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         history: 8,
         expiry_ms: 0,
         max_payload: 8,
+        on_subscribe: Default::default(),
     })?;
     let mut robot = orion.subscribe("robot.state")?;
     let (mut step, mut last): (u64, Option<Vec<u8>>) = (0, None);

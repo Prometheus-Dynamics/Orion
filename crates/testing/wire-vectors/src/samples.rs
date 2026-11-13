@@ -418,7 +418,8 @@ fn topics(out: &mut Vec<Sample>) {
             fields: List::new(&fields),
             history: 512,
             expiry_ms: 100,
-            max_payload: 64
+            max_payload: 64,
+            on_subscribe: orion_msg_topics::OnSubscribe::Latest,
         }
     );
     sample!(

@@ -454,6 +454,7 @@ fn topic_publish(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         history: 16,
         expiry_ms: 0,
         max_payload: largest as u32,
+        on_subscribe: Default::default(),
     })?;
     let time = SampleTime::now();
     for (index, (.., bytes)) in parsed.iter().enumerate() {

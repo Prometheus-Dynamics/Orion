@@ -137,6 +137,7 @@ impl Client {
             history: 64,
             expiry_ms: 0,
             max_payload: 16,
+            on_subscribe: Default::default(),
         };
         self.send(&declare, &[]).await;
         let opened: Opened = self.recv().await;

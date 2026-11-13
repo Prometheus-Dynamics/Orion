@@ -131,6 +131,7 @@ fn node_logic_can_die_and_links_stay_up_and_it_resumes() {
             history: 64,
             expiry_ms: 0,
             max_payload: 8,
+            on_subscribe: Default::default(),
         })
         .expect("declare");
     let mut reading = dashboard.subscribe("tank.level").expect("subscribe");

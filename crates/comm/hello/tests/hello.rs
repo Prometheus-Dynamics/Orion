@@ -128,6 +128,7 @@ impl Client {
             history: 2,
             expiry_ms: 0,
             max_payload: 512,
+            on_subscribe: Default::default(),
         };
         self.send(&declare).await;
         assert_eq!(self.next().await, kind::TOPIC_OPENED);

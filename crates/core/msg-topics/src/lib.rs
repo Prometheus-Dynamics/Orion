@@ -106,6 +106,24 @@ body! {
         pub expiry_ms: u32,
         /// The largest sample.
         pub max_payload: u32,
+        ;
+        /// What a subscriber that is sent samples as messages gets first.
+        pub on_subscribe: OnSubscribe,
+    }
+}
+
+open_enum! {
+    /// What a subscriber that is sent samples as messages (one on another board, or a
+    /// browser) gets when it starts. One that reads the ring asks the ring for the newest
+    /// itself.
+    #[derive(Default)]
+    pub enum OnSubscribe: u8 {
+        /// What is published from now on.
+        #[default]
+        FromNow = 0,
+        /// The newest sample of each field that has one and has not expired, with its own
+        /// time, then what is published from now on.
+        Latest = 1,
     }
 }
 

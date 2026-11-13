@@ -202,6 +202,7 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
                 history: 64,
                 expiry_ms: 0,
                 max_payload: 8,
+                on_subscribe: Default::default(),
             })
             .expect("declare");
         let mut step = 0_u64;

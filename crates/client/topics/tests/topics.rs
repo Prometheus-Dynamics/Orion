@@ -144,6 +144,7 @@ fn decl(name: &str) -> TopicDecl<'_> {
         history: 64,
         expiry_ms: 0,
         max_payload: 16,
+        on_subscribe: Default::default(),
     }
 }
 

@@ -82,6 +82,7 @@ impl Buffers {
                 history,
                 expiry_ms: 0,
                 max_payload: ENTRY_OVERHEAD + max_meta,
+                on_subscribe: Default::default(),
             },
             ring,
         )?;

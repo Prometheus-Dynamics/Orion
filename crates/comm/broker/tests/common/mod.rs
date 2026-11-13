@@ -194,6 +194,7 @@ impl Client {
             history,
             expiry_ms: 0,
             max_payload: 64,
+            on_subscribe: Default::default(),
         }
     }
 

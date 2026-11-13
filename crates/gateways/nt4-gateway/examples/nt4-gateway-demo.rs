@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         history: 8,
         expiry_ms: 0,
         max_payload: 8,
+        on_subscribe: Default::default(),
     })?;
     let mut panel = orion.subscribe("panel.setpoint")?;
     let mut step = 0_u64;

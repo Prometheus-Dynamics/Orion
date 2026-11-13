@@ -14,6 +14,7 @@
 //!     history: 64,
 //!     expiry_ms: 0,
 //!     max_payload: 8,
+//!     on_subscribe: Default::default(),
 //! })?;
 //! reading.publish(FieldId(0), SampleTime::from_nanos(1), &21.5_f64.to_le_bytes())?;
 //! # Ok::<(), orion::Error>(())
@@ -56,7 +57,7 @@ pub use orion_types as types;
 /// Publish and subscribe.
 #[cfg(feature = "topics")]
 pub mod topics {
-    pub use orion_msg_topics::{Field, FieldType};
+    pub use orion_msg_topics::{Field, FieldType, OnSubscribe};
     pub use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
     pub use shm_ring::{FieldId, Flags, Next, Ring, Sample, SampleTime, Spec};
 }

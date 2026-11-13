@@ -148,6 +148,7 @@ fn publisher(socket: &Path) -> Result<(), Failed> {
         history: 4096,
         expiry_ms: 0,
         max_payload: 8,
+        on_subscribe: Default::default(),
     })?;
     let mut keep = Keep::new();
     for value in 1..=u64::MAX {

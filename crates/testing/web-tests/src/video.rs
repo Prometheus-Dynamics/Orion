@@ -126,6 +126,7 @@ pub fn publish(orion: &Orion, clip: &Clip, rate: u32, stop: &AtomicBool) -> Resu
         history: 8,
         expiry_ms: 0,
         max_payload: largest(&mut clip.jpegs.iter().map(Vec::len)),
+        on_subscribe: Default::default(),
     })?;
     let mut h264 = orion.declare(&TopicDecl {
         name: H264,
@@ -133,6 +134,7 @@ pub fn publish(orion: &Orion, clip: &Clip, rate: u32, stop: &AtomicBool) -> Resu
         history: 32,
         expiry_ms: 0,
         max_payload: largest(&mut clip.fragments.iter().map(|fragment| fragment.bytes.len())),
+        on_subscribe: Default::default(),
     })?;
     let between = Duration::from_secs(1) / rate.max(1);
     let mut number = 0_u64;

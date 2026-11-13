@@ -138,6 +138,7 @@ impl Client {
             history: 64,
             expiry_ms: 0,
             max_payload: 2048,
+            on_subscribe: Default::default(),
         })
         .await;
         loop {
