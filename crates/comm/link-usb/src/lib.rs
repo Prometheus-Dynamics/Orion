@@ -9,8 +9,10 @@
 //!
 //! - **a stream**: one descriptor that can be waited on and carries bytes both ways. A gadget's
 //!   serial function, a serial port over USB that is already open, a socket.
-//! - **endpoints**: two descriptors that block, one to read and one to write. A gadget
-//!   function's bulk endpoints. A thread sits in each, so nothing is polled.
+//! - **endpoints**: two descriptors that block, one to read and one to write, and optionally a
+//!   third that says when the offerer wants them back. A gadget function's bulk endpoints. A
+//!   thread sits in each, so nothing is polled. The host going away (`ESHUTDOWN`, then
+//!   `EAGAIN`) does not end the link; any other error does.
 //! - **a device** (feature `bulk`): a USB device's descriptor with the interface and the two
 //!   bulk endpoints to use.
 //!
@@ -203,7 +205,7 @@ impl Service for UsbLinkService {
         let offer: LinkOffer<'_> = incoming.body()?;
         let stream = match (offer.transport, fds.len()) {
             (LinkTransport::Stream, 1) => UsbStream::polled(fds),
-            (LinkTransport::Endpoints, 2) => UsbStream::endpoints(fds),
+            (LinkTransport::Endpoints, 2 | 3) => UsbStream::endpoints(fds),
             #[cfg(feature = "bulk")]
             (LinkTransport::Bulk, 1) => {
                 UsbStream::bulk(fds, offer.interface, offer.endpoint_in, offer.endpoint_out)

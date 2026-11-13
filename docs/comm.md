@@ -798,6 +798,19 @@ polled), or, with feature `bulk`, a USB device with the interface and bulk endpo
 link with no handle opens nothing and waits. When a new handle is offered for a link that has
 one, the device was unplugged and is back: the old stream ends and the link goes on over the new.
 
+- **The host going away is not the end of a link over endpoints.** A gadget's endpoints fail
+  the call in flight with `ESHUTDOWN` when the host is unplugged, resets, unconfigures or the
+  function is disabled, and every call after with `EAGAIN` until it is back. The link keeps its
+  descriptors and reads again 100 ms later, doubling to 1 s while the host stays away; bytes
+  written meanwhile are lost, not the link. The session running over it ends at its own
+  deadline, and the host's next hello starts another, with no new offer. Any other error, or
+  the end of a file, ends the link.
+- **Taking endpoints back.** An offer of endpoints may carry a third descriptor, the end (a
+  pipe, an eventfd, a socket). When it becomes readable or its other end is closed, the link
+  lets go of all three and waits for the next offer. The holder needs this to take the function
+  down or mount it again, which the kernel refuses (`EBUSY`) while the comm core has copies.
+  Without an end descriptor the comm core keeps them until the link ends some other way.
+
 ## Passing requests to node logic
 
 Records, and later workloads, actions and files, are node logic's to answer, and node logic is

@@ -479,3 +479,57 @@ fn with_no_list_of_links_root_may_hand_over_a_link_by_any_name() {
         assert_eq!(*made.borrow(), ["gadget"]);
     });
 }
+
+#[test]
+fn an_end_descriptor_takes_the_endpoints_back_and_all_three_are_closed() {
+    run(async {
+        let board = board();
+        let mut owner = Owner::open(board.connector.connect(ROOT)).await;
+        for (round, written) in [(1_u64, true), (2, false)] {
+            let (mut device, mut handle) = Device::endpoints();
+            let (end, offerer_end) = rustix::pipe::pipe().expect("pipe");
+            handle.push(end);
+            assert_eq!(
+                owner.offer("usb0", LinkTransport::Endpoints, handle).await,
+                Ok(kind::LINK_TAKEN)
+            );
+            device.hello().await;
+            device.ping(round).await;
+            assert_eq!(device_sessions(&board), 1);
+
+            // The holder wants its endpoints back: it writes to its end, or closes it.
+            if written {
+                rustix::io::write(&offerer_end, b"x").expect("write");
+            } else {
+                drop(offerer_end);
+            }
+            // The board lets go: the endpoint it wrote to is closed, the session is over.
+            let closed = tokio::time::timeout(Duration::from_secs(5), device.next()).await;
+            assert_eq!(closed, Ok(None), "the board's write end was never closed");
+            until("the session ends", || device_sessions(&board) == 0).await;
+            // The thread reading its endpoint lets go once its call returns.
+            let mut closed = false;
+            for _ in 0..500 {
+                match device.tx.try_write(b"\0") {
+                    Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
+                        closed = true;
+                        break;
+                    }
+                    _ => tokio::time::sleep(Duration::from_millis(4)).await,
+                }
+            }
+            assert!(closed, "the board's read end was never closed");
+        }
+        // Each offer was taken and let go; the link waits for the next.
+        assert_eq!((board.stats)().opens, 2);
+        let (mut device, handle) = Device::stream();
+        assert_eq!(
+            owner
+                .offer("usb0", LinkTransport::Stream, vec![handle])
+                .await,
+            Ok(kind::LINK_TAKEN)
+        );
+        device.hello().await;
+        device.ping(3).await;
+    });
+}

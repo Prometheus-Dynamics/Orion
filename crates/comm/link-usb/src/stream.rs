@@ -7,6 +7,8 @@ use std::rc::Rc;
 
 use orion_link_serial::ByteStream;
 use tokio::net::unix::pipe;
+use tokio::task::JoinHandle;
+use tracing::info;
 
 use crate::Ended;
 use crate::blocking::Blocking;
@@ -27,6 +29,8 @@ enum Over {
 pub struct UsbStream {
     over: Over,
     ended: Rc<Ended>,
+    /// Waits on the end descriptor, if the offer had one.
+    watch: Option<JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for UsbStream {
@@ -45,6 +49,7 @@ impl UsbStream {
         Self {
             over,
             ended: Rc::new(Ended::default()),
+            watch: None,
         }
     }
 
@@ -60,11 +65,34 @@ impl UsbStream {
         }))
     }
 
-    /// Over two descriptors that block: the first to read, the second to write.
+    /// Over two descriptors that block: the first to read, the second to write; and a third, if
+    /// there is one, that says when the offerer wants them back.
+    ///
+    /// **The end descriptor.** Whoever holds the hardware cannot take its function down or
+    /// mount it again while the comm core keeps copies of the endpoints (`EBUSY`). With a third
+    /// descriptor (a pipe, an eventfd, a socket: anything that can be waited on) the offerer
+    /// takes them back by writing to it or closing its own end: the link then lets go of all
+    /// three and waits for the next offer. Without one, the comm core keeps the endpoints until
+    /// the link ends some other way.
     pub(crate) fn endpoints(mut fds: Vec<OwnedFd>) -> io::Result<Self> {
+        let end = if fds.len() == 3 { fds.pop() } else { None };
         let write = File::from(fds.pop().ok_or(io::ErrorKind::InvalidInput)?);
         let read = File::from(fds.pop().ok_or(io::ErrorKind::InvalidInput)?);
-        Ok(Self::new(Over::Blocking(Blocking::start(read, write)?)))
+        let mut stream = Self::new(Over::Blocking(Blocking::start(read, write)?));
+        if let Some(end) = end {
+            // Waited on as the stream's own descriptor is: tokio's safe way to wait on one that
+            // is not a socket of its own.
+            let end = pipe::Receiver::from_file_unchecked(nonblocking(File::from(end))?)?;
+            let ended = stream.ended.clone();
+            stream.watch = Some(tokio::task::spawn_local(async move {
+                // Readable, or hung up: either is the offerer taking the link back.
+                let _ = end.readable().await;
+                info!("usb link: its holder took it back");
+                ended.ended.set(true);
+                ended.wake.notify_one();
+            }));
+        }
+        Ok(stream)
     }
 
     /// Over a USB device's bulk endpoints.
@@ -82,6 +110,15 @@ impl UsbStream {
 
     pub(crate) fn ended(&self) -> Rc<Ended> {
         self.ended.clone()
+    }
+}
+
+impl Drop for UsbStream {
+    fn drop(&mut self) {
+        // The end descriptor is closed with the rest.
+        if let Some(watch) = self.watch.take() {
+            watch.abort();
+        }
     }
 }
 
