@@ -357,7 +357,8 @@ fn actions(out: &mut Vec<Sample>) {
             name: action(),
             target: target(),
             args: Bytes(b"a"),
-            deadline_ms: 5000
+            deadline_ms: 5000,
+            caller: "local:1000"
         }
     );
     sample!(

@@ -78,6 +78,11 @@ body! {
         pub args: Bytes<'a>,
         /// When to give up. Zero for no deadline.
         pub deadline_ms: u64,
+        ;
+        /// Who asked for the run, as the audit log names them: `local:<uid>`,
+        /// `operator:<key>`, `peer:<node>`, `device:<name>` or `anonymous`. Empty from a host
+        /// that does not say.
+        pub caller: &'a str,
     }
 }
 

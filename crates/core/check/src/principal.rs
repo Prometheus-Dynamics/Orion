@@ -52,3 +52,20 @@ impl Principal {
         }
     }
 }
+
+/// As the audit log names the caller: `local:<uid>`, `operator:<key>`, `peer:<node>`,
+/// `device:<name>` or `anonymous`.
+impl core::fmt::Display for Principal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Anonymous => f.write_str("anonymous"),
+            Self::Local { uid, .. } => write!(f, "local:{uid}"),
+            Self::Operator(key) => {
+                f.write_str("operator:")?;
+                key.0.iter().try_for_each(|byte| write!(f, "{byte:02x}"))
+            }
+            Self::Peer(node) => write!(f, "peer:{node}"),
+            Self::Device(device) => write!(f, "device:{device}"),
+        }
+    }
+}

@@ -148,6 +148,7 @@ impl Service for Router {
                     doing: None,
                     finished: None,
                 });
+                let caller = cx.caller().principal.to_string();
                 cx.sessions().send(
                     owner,
                     &Claim {
@@ -156,6 +157,7 @@ impl Service for Router {
                         target: run.target.clone(),
                         args: run.args,
                         deadline_ms: run.deadline_ms,
+                        caller: &caller,
                     },
                     Delivery::Must,
                 )

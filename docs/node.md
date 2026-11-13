@@ -208,7 +208,8 @@ actions; any program on the board adds its own.
   program is the same action. An action for another node cannot be added here.
 - **Running.** `Run` names an action and a target. The program that added it is handed a
   `Claim`. A run has two numbers: the caller's `call`, unique on its session, and the list's
-  own, which is the one in `Claim`. Each side only ever sees its own. `Progress` (which may be
+  own, which is the one in `Claim`. Each side only ever sees its own. `Claim.caller` names who
+  asked, as the audit log does. `Progress` (which may be
   dropped if the caller is not reading) and `ActionResult` from the program go to the caller
   under the caller's number. `Cancel` from the caller reaches the program; the run ends when
   the program says how.

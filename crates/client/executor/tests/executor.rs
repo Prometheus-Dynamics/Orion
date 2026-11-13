@@ -217,6 +217,11 @@ impl Executor for Sample {
         if spec == b"broken" {
             return Err(ExecError("the graph does not load".into()));
         }
+        if spec == b"done" {
+            // Ends, well, before anyone looks.
+            self.running.remove(name.as_str());
+            return Ok(());
+        }
         self.running
             .insert(name.to_string(), (WorkloadState::Starting, 0));
         Ok(())
@@ -371,6 +376,16 @@ fn a_sample_executor_starts_stops_and_reports_what_is_true() {
         ))
     );
     assert!(!sample.running.contains_key("broken"));
+
+    // One that ends well before it is ever in an inventory is gone, not left starting.
+    board
+        .tell
+        .send(Tell::Start("blink", b"done"))
+        .expect("tell");
+    serve_until(&mut serving, &mut sample, "blink is gone", |_| {
+        reported(&board, "blink").last() == Some(&WorkloadState::Gone)
+    });
+    assert_eq!(reported(&board, "blink"), [WorkloadState::Gone]);
 
     // A second workload, then a stop: stopping, then gone when it really is.
     board

@@ -156,6 +156,9 @@ pub struct Serving {
     state: Rc<RefCell<State>>,
     /// What Orion was last told about each workload.
     told: Vec<(WorkloadName, WorkloadState)>,
+    /// Started since the inventory was last looked at. One that ends well before it is looked
+    /// at is never in an inventory, and is gone all the same.
+    started: Vec<WorkloadName>,
 }
 
 impl fmt::Debug for Serving {
@@ -174,6 +177,7 @@ impl Serving {
             client: client.clone(),
             state,
             told: Vec::new(),
+            started: Vec::new(),
         }
     }
 
@@ -258,7 +262,11 @@ impl Serving {
                     spec,
                     cpus,
                 } => {
-                    if let Err(error) = executor.start_on(&name, &kind, &spec, &cpus) {
+                    let started = executor.start_on(&name, &kind, &spec, &cpus);
+                    if started.is_ok() {
+                        self.started.push(name.clone());
+                    }
+                    if let Err(error) = started {
                         self.report(&name, WorkloadState::Failed, &error.0)?;
                         // What was told is what the inventory is compared with next.
                         self.told.retain(|(told, _)| *told != name);
@@ -275,6 +283,7 @@ impl Serving {
             // again, after which it knows what this executor has.
             self.inventory(&has)?;
             self.told = has;
+            self.started.clear();
             return Ok(());
         }
         for (name, state) in &has {
@@ -292,6 +301,15 @@ impl Serving {
             let still = has.iter().any(|(now, _)| now == name);
             if !still && !matches!(was, WorkloadState::Gone | WorkloadState::Failed) {
                 self.report(name, WorkloadState::Gone, "")?;
+            }
+        }
+        for name in std::mem::take(&mut self.started) {
+            // Started and already ended, well, before anyone looked: it came and went.
+            // One that was told before is gone by the loop above.
+            let seen = has.iter().any(|(now, _)| *now == name)
+                || self.told.iter().any(|(told, _)| *told == name);
+            if !seen {
+                self.report(&name, WorkloadState::Gone, "")?;
             }
         }
         self.told = has;

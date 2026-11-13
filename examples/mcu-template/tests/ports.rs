@@ -73,6 +73,7 @@ fn claim(peer: &mut Peer) -> Vec<u8> {
         target: Target::Resource("imu-board".parse().expect("name")),
         args: Bytes(&[]),
         deadline_ms: 0,
+        caller: "",
     })
 }
 

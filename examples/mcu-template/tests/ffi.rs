@@ -139,6 +139,7 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         target: Target::Resource("c-board".parse().expect("name")),
         args: Bytes(b"now"),
         deadline_ms: 0,
+        caller: "",
     });
     feed(&claim);
     // A second while the first waits is turned away at once.
@@ -148,6 +149,7 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         target: Target::Resource("c-board".parse().expect("name")),
         args: Bytes(&[]),
         deadline_ms: 0,
+        caller: "",
     });
     feed(&second);
     exchange(&mut peer, &mut reader);

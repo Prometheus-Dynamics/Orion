@@ -357,6 +357,7 @@ impl Actions {
                     .retain(|ended| !(ended.call == run.call && ended.starter == starter));
                 self.next += 1;
                 let id = self.next;
+                let principal = asked.principal();
                 out.send(
                     owner,
                     &Claim {
@@ -365,6 +366,7 @@ impl Actions {
                         target: run.target.clone(),
                         args: run.args,
                         deadline_ms: run.deadline_ms,
+                        caller: &principal,
                     },
                 )?;
                 self.running.push(Running {

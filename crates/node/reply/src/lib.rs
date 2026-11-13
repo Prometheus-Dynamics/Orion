@@ -44,6 +44,20 @@ impl<'a> Asked<'a> {
         }
     }
 
+    /// Who asked, as the audit log names them: `local:<uid>`, `operator:<key>`,
+    /// `peer:<node>`, `device:<name>` or `anonymous`.
+    #[must_use]
+    pub fn principal(&self) -> String {
+        // The bits of `orion_check::PrincipalClass`.
+        match self.class {
+            2 | 4 => format!("local:{}", self.uid),
+            8 => format!("operator:{}", self.caller),
+            16 => format!("peer:{}", self.caller),
+            32 => format!("device:{}", self.caller),
+            _ => "anonymous".to_owned(),
+        }
+    }
+
     /// The request's body, as a `B`.
     ///
     /// # Errors

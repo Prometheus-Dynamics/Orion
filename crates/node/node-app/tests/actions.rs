@@ -114,7 +114,14 @@ fn provider_process() {
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         match open.wait(Duration::from_millis(100)).expect("connected") {
-            Some(Request::Run { call, args, .. }) => {
+            Some(Request::Run {
+                call, args, caller, ..
+            }) => {
+                if args == b"who" {
+                    open.finish(call, Outcome::Succeeded, caller.as_bytes(), "")
+                        .expect("finish");
+                    continue;
+                }
                 if args == b"quit" {
                     open.finish(call, Outcome::Succeeded, b"bye", "")
                         .expect("finish");
@@ -298,6 +305,15 @@ fn an_action_from_another_process_runs_and_is_refused_by_its_policy() {
         "{log}"
     );
     assert_eq!(did("\"did\":\"run\",\"what\":\"wipe"), 0, "{log}");
+
+    // The provider is told who asked, as the audit log names them.
+    let who = caller
+        .run(&call("open", b"who"))
+        .expect("run")
+        .finish(Duration::from_secs(5))
+        .expect("ends");
+    let uid = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(&dir).expect("dir"));
+    assert_eq!(who.output, format!("local:{uid}").as_bytes());
 
     // The other process goes away: its actions leave the list.
     drop(provider.0.kill());

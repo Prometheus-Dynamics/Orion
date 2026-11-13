@@ -173,6 +173,11 @@ Registering an action needs a policy, and that policy is what the one check deci
 by. A run the check refuses never reaches the program that owns the action: the caller is told
 `Denied` and the owner hears nothing.
 
+A run handed to the program says who asked for it (`caller`), as the audit log names them:
+`local:<uid>`, `operator:<key>`, `peer:<node>`, `device:<name>` or `anonymous`. A run forwarded
+from another node was asked for by that node. The check has already decided; `caller` is for a
+program that answers different callers differently, or keeps its own log.
+
 A program that is not taking its runs does not have them pile up: 64 wait, and the next is
 answered as rejected, busy, at once.
 

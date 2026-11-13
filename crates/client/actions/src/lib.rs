@@ -89,6 +89,8 @@ pub enum Update {
 }
 
 /// What a program that registered an action is asked.
+// A run is most of what is asked, and a program matches on its fields: not boxed.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     /// Run the action.
@@ -103,6 +105,11 @@ pub enum Request {
         args: Vec<u8>,
         /// When to give up, in milliseconds. Zero for no deadline.
         deadline_ms: u64,
+        /// Who asked for the run, as the audit log names them: `local:<uid>`,
+        /// `operator:<key>`, `peer:<node>`, `device:<name>` or `anonymous`. Empty from a node
+        /// that does not say. A run forwarded from another node was asked for by that node:
+        /// `peer:<node>`.
+        caller: String,
     },
     /// Stop this run. Finish it as [`Outcome::Cancelled`], or as whatever it had become.
     Cancel {
@@ -191,6 +198,7 @@ impl Handler for State {
                     target: claim.target,
                     args: claim.args.0.to_vec(),
                     deadline_ms: claim.deadline_ms,
+                    caller: claim.caller.to_owned(),
                 });
             }
             kind::ACTION_CANCEL => {
