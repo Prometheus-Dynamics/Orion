@@ -11,8 +11,8 @@ repository.workspace = true
 orion-broker = { path = "../broker" }
 orion-config = { path = "../../core/config" }
 orion-msg-topics = { path = "../../core/msg-topics" }
-orion-ring = { path = "../../core/ring" }
-orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+shm-ring = { workspace = true }
+shm-ring-doorbell = { workspace = true }
 orion-server = { path = "../server" }
 orion-wire = { path = "../../core/wire" }
 tokio = { workspace = true, features = ["rt", "time", "net"] }

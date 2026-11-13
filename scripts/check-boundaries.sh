@@ -84,7 +84,7 @@ root = pathlib.Path(sys.argv[1])
 errors = []
 
 # Crates allowed to use `unsafe`. Everywhere else the workspace lint forbids it.
-UNSAFE_OK = ("crates/core/ring", "crates/core/fdpass", "crates/core/measure", "crates/client/capi", "crates/device/")
+UNSAFE_OK = ("crates/core/measure", "crates/client/capi", "crates/device/")
 UNSAFE_FILES = ("crates/core/wire/src/crc.rs", "crates/testing/sample-executor/src/spawn.rs")
 # Network stacks the design names, and the only crates that may hold them.
 NET_DEPS = {"hyper", "axum", "reqwest", "ureq", "http", "h2", "h3", "quinn", "quiche", "rustls", "tokio-rustls", "tonic", "actix-web"}
@@ -97,7 +97,8 @@ PRODUCT = re.compile(
 )
 # Where the names stay: the NT4 crates, whose protocol's own vocabulary they are; the record of
 # the NT4 client run, which quotes that vocabulary from a real server; this file; and the lock
-# file's dependency names.
+# file's dependency names. A manifest's `git = "..."` is where a dependency is fetched from, an
+# address and not a mention, and is not looked at; nor is a lock file's `source = "..."`.
 PRODUCT_OK = (
     "scripts/check-boundaries.sh", "crates/gateways/nt4", "testing/board-runs/F8.md", "Cargo.lock",
 )
@@ -164,6 +165,10 @@ for rel in listed:
                     errors.append(f"{rel}:{number}: unsafe outside the allowed crates")
     if not rel.startswith(PRODUCT_OK):
         for number, line in enumerate(text.splitlines(), 1):
+            if rel.endswith("Cargo.toml"):
+                line = re.sub(r'git = "[^"]*"', 'git = ""', line)
+            if rel.endswith("Cargo.lock"):
+                line = re.sub(r'source = "[^"]*"', 'source = ""', line)
             match = PRODUCT.search(line)
             if match:
                 errors.append(f"{rel}:{number}: product name '{match.group(0)}'")

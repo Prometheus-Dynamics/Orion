@@ -23,9 +23,9 @@ use std::rc::Rc;
 
 use orion_broker::{Broker, TopicId, Topics, Writing};
 use orion_msg_topics::{Sample, SampleBatch};
-use orion_ring::{FieldId, Flags};
 use orion_server::{Checked, Cx, Error, Incoming, Policy, Service, SessionId, Sessions, What};
 use orion_wire::{FrameView, kind};
+use shm_ring::{FieldId, Flags};
 
 /// The service. Add it to the server next to the [`Broker`] it was made from.
 pub struct BrokerProxy {

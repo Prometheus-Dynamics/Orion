@@ -12,7 +12,7 @@ orion-broker = { path = "../broker" }
 orion-keys = { path = "../keys" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
-orion-ring = { path = "../../core/ring" }
+shm-ring = { workspace = true }
 orion-server = { path = "../server" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }

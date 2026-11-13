@@ -3,7 +3,6 @@
 use std::rc::Rc;
 
 use orion_check::{Check, Grants, Refused, Security};
-use orion_fdpass::FdSet;
 use orion_msg_session::{
     Hello, Ping, Pong, Refusal, Reject, RejectReason, Welcome, session_revision,
 };
@@ -11,6 +10,7 @@ use orion_supervise::contain;
 use orion_types::{Error, NodeName};
 use orion_wire::frame;
 use orion_wire::{Body, Decode, FrameView, INTERFACE_REVISION, kind};
+use shm_fdpass::FdSet;
 
 use crate::service::{Cx, Incoming, Service};
 use crate::sessions::{Delivery, SessionId, Sessions};

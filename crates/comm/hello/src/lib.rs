@@ -28,13 +28,13 @@ use orion_broker::{TopicId, Topics};
 use orion_keys::SharedKeys;
 use orion_msg_session::{Identify, Identity, IdentityField};
 use orion_msg_topics::Declare;
-use orion_ring::{FieldId, Reader};
 use orion_server::{
     Admits, Checked, Cx, Error, Incoming, Policy, Service, SessionId, Sessions, What,
 };
 use orion_types::NodeName;
 use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, Decode, FrameView, INTERFACE_REVISION, List, kind};
+use shm_ring::{FieldId, Reader};
 
 /// What a board fact's topic name starts with.
 pub const FACT_PREFIX: &str = "hello.";

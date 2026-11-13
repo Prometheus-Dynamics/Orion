@@ -14,7 +14,7 @@ forward = ["orion-ssh/forward"]
 
 [dependencies]
 orion-check = { path = "../../core/check" }
-orion-fdpass = { path = "../../core/fdpass" }
+shm-fdpass = { workspace = true }
 orion-keys = { path = "../keys" }
 orion-ssh = { path = "../ssh" }
 postcard = { workspace = true, features = ["alloc"] }

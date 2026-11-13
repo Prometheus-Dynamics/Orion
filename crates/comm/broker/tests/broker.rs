@@ -7,11 +7,11 @@ use std::time::Duration;
 use common::{Client, Event, FIELDS, Wire};
 use orion_broker::{Broker, BrokerConfig};
 use orion_msg_topics::{Field, FieldType, TopicStatus};
-use orion_ring::{FieldId, Flags, Next, Reader, SampleTime, Writer};
-use orion_ring_doorbell::{Bell, Doorbell, Wake};
 use orion_server::mem::{self, MemConnector};
 use orion_server::{Comm, Error, Limits, Principal, Roles, Security};
 use orion_wire::Decode;
+use shm_ring::{FieldId, Flags, Next, Reader, SampleTime, Writer};
+use shm_ring_doorbell::{Bell, Doorbell, Wake};
 
 const USER: Principal = Principal::Local {
     uid: 1000,
@@ -461,7 +461,7 @@ fn a_restarted_comm_core_adopts_the_rings_its_publishers_kept() {
 
         // A ring offered under a declaration it does not fit is refused.
         let mut liar = second.client("liar").await;
-        let other = orion_ring::Ring::create(&orion_ring::Spec {
+        let other = shm_ring::Ring::create(&shm_ring::Spec {
             fields: 1,
             history: 2,
             max_payload: 8,

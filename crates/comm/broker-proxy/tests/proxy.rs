@@ -11,13 +11,13 @@ use orion_msg_topics::{
     BatchSample, Declare, Demand, Field, FieldType, Opened, Sample, SampleBatch, SampleFlags,
     Subscribe,
 };
-use orion_ring::{FieldId, Flags, Next, Reader, SampleTime};
-use orion_ring_doorbell::{Doorbell, Wake};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Limits, Principal, Roles, Security};
 use orion_types::TopicRef;
 use orion_wire::frame;
 use orion_wire::{Body, Bytes, Decode, List, encode_body, kind};
+use shm_ring::{FieldId, Flags, Next, Reader, SampleTime};
+use shm_ring_doorbell::{Doorbell, Wake};
 
 #[global_allocator]
 static GLOBAL: CountingAlloc = CountingAlloc::system();

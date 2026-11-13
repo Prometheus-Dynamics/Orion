@@ -104,7 +104,7 @@ pub fn send<T: Serialize>(
 ) -> std::io::Result<()> {
     let bytes = postcard::to_allocvec(message).map_err(broken)?;
     let fds: Vec<_> = fds.iter().map(AsFd::as_fd).collect();
-    orion_fdpass::send_on(socket, &[&bytes], &fds).map_err(|error| broken(format!("{error:?}")))
+    shm_fdpass::send_on(socket, &[&bytes], &fds).map_err(|error| broken(format!("{error:?}")))
 }
 
 /// Receives one message and what came beside it. `None` when the other end is gone.
@@ -116,10 +116,10 @@ pub fn recv<T: for<'de> Deserialize<'de>>(
     socket: &UnixStream,
 ) -> std::io::Result<Option<(T, Vec<OwnedFd>)>> {
     let mut buffer = vec![0_u8; MAX_MESSAGE];
-    let received = match orion_fdpass::recv(socket.as_fd(), &mut buffer, 4, false) {
+    let received = match shm_fdpass::recv(socket.as_fd(), &mut buffer, 4, false) {
         Ok(Some(received)) => received,
         Ok(None) => return Ok(None),
-        Err(orion_fdpass::RecvError::Io(error)) => return Err(error),
+        Err(shm_fdpass::RecvError::Io(error)) => return Err(error),
         Err(error) => return Err(broken(format!("{error:?}"))),
     };
     let message = postcard::from_bytes(&buffer[..received.len]).map_err(broken)?;

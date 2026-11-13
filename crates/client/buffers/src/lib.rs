@@ -27,14 +27,14 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_msg_topics::{BufferInfo, BufferOffer, Field, FieldType, Holds};
-use orion_ring::{FieldId, SampleTime};
-use orion_ring_buffers::{BufferDesc, BufferReader, BufferWriter, PoolView};
-use orion_ring_holds::{HoldTable, Limits};
 use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
 use orion_wire::{List, kind};
+use shm_ring::{FieldId, SampleTime};
+use shm_ring_buffers::{BufferDesc, BufferReader, BufferWriter, PoolView};
+use shm_ring_holds::{HoldTable, Limits};
 
-pub use orion_ring_buffers::{Batch, BufferError, BufferIndex, Dropped, Held, NextBatch, Pool};
-pub use orion_ring_holds::Marks;
+pub use shm_ring_buffers::{Batch, BufferError, BufferIndex, Dropped, Held, NextBatch, Pool};
+pub use shm_ring_holds::Marks;
 
 /// The most buffers a subscriber's page of marks covers.
 const MARKS_BUFFERS: u32 = 1024;
@@ -463,7 +463,7 @@ pub struct BufferSubscriber {
     subscriber: Subscriber,
     handle: u32,
     marks: Arc<Marks>,
-    frames: Option<BufferReader<orion_ring::ReadMap, Arc<Marks>>>,
+    frames: Option<BufferReader<shm_ring::ReadMap, Arc<Marks>>>,
 }
 
 impl fmt::Debug for BufferSubscriber {
@@ -478,7 +478,7 @@ fn refresh(
     handle: &mut u32,
     marks: &Arc<Marks>,
     subscriber: &mut Subscriber,
-    frames: &mut Option<BufferReader<orion_ring::ReadMap, Arc<Marks>>>,
+    frames: &mut Option<BufferReader<shm_ring::ReadMap, Arc<Marks>>>,
 ) {
     let mut state = state.borrow_mut();
     let Some(side) = state

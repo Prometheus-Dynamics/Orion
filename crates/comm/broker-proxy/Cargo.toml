@@ -10,12 +10,12 @@ repository.workspace = true
 [dependencies]
 orion-broker = { path = "../broker" }
 orion-msg-topics = { path = "../../core/msg-topics" }
-orion-ring = { path = "../../core/ring" }
+shm-ring = { workspace = true }
 orion-server = { path = "../server" }
 orion-wire = { path = "../../core/wire" }
 
 [dev-dependencies]
-orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+shm-ring-doorbell = { workspace = true }
 orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-types = { path = "../../core/types" }

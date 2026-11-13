@@ -13,17 +13,17 @@ orion-config = { path = "../../core/config" }
 orion-measure = { path = "../../core/measure", features = ["clock"] }
 orion-msg-peers = { path = "../../core/msg-peers" }
 orion-msg-topics = { path = "../../core/msg-topics" }
-orion-ring = { path = "../../core/ring" }
+shm-ring = { workspace = true }
 orion-server = { path = "../server" }
 orion-wire = { path = "../../core/wire" }
 tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "rt", "macros"] }
 tracing.workspace = true
 
-orion-types = { path = "../../core/types", features = ["now"] }
+orion-types = { path = "../../core/types" }
 
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
-orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+shm-ring-doorbell = { workspace = true }
 orion-unix = { path = "../unix" }
 tokio = { workspace = true, features = ["test-util"] }
 

@@ -14,12 +14,12 @@ use orion_msg_peers::{
     CLOCK_MONOTONIC, CLOCK_REALTIME, TimeOffer, TimeReply, TimeRequest, TimeTurn,
 };
 use orion_msg_session::{Hello, Refusal};
-use orion_ring::{FieldId, Reader};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Grants, Limits, Principal, Roles, Security, What};
 use orion_time::{CLOCK_SET, Clock, TIME_TOPIC, TimeConfig, TimeMode, TimeSync};
 use orion_types::{KeyId, SampleTime};
 use orion_wire::{Body, Decode, encode_body, frame, kind};
+use shm_ring::{FieldId, Reader};
 
 const S: i64 = 1_000_000_000;
 const USER: Principal = Principal::Local {

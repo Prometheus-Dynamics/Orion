@@ -14,11 +14,11 @@ use std::time::{Duration, Instant};
 use orion_measure::CountingAlloc;
 use orion_measure::harness::steady_allocs;
 use orion_measure::sched::{SystemCalls, pin_current_thread, thread_cpu_ns, without_system_calls};
-use orion_ring::{FieldId, Flags, Next, Reader, Ring, SampleTime, Spec, Writer};
-use orion_ring_buffers::{BufferReader, BufferWriter, NextBatch, Pool};
-use orion_ring_doorbell::{Bell, Doorbell};
-use orion_ring_holds::{HoldTable, Limits, Marks};
-use orion_ring_time::at_or_before;
+use shm_ring::{FieldId, Flags, Next, Reader, Ring, SampleTime, Spec, Writer};
+use shm_ring_buffers::{BufferReader, BufferWriter, NextBatch, Pool};
+use shm_ring_doorbell::{Bell, Doorbell};
+use shm_ring_holds::{HoldTable, Limits, Marks};
+use shm_ring_time::at_or_before;
 
 #[global_allocator]
 static GLOBAL: CountingAlloc = CountingAlloc::system();
@@ -436,10 +436,10 @@ fn frames(options: &Options) {
     println!();
 }
 
-type HeldFrame = orion_ring_buffers::Held<Marks>;
+type HeldFrame = shm_ring_buffers::Held<Marks>;
 
 fn take_frame(
-    reader: &mut BufferReader<orion_ring::ReadMap, Marks>,
+    reader: &mut BufferReader<shm_ring::ReadMap, Marks>,
     pending: &mut Option<(u64, HeldFrame)>,
 ) {
     if pending.is_none()

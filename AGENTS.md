@@ -50,7 +50,7 @@ The work is a pre-planned list of PRs into `next`.
 - Failure rule: never give up, backoff capped at 5 to 10 s, no default auto-off, an easy manual off,
   auto-off only as a configured policy, backoff state visible. Access paths are never backed off.
 - One bad connection, peer, provider or link never takes the rest down.
-- `unsafe` only in `crates/core/ring*`, `crates/core/fdpass`, `crates/core/measure`, the CRC
+- `unsafe` only in `crates/core/measure`, the CRC
   instructions in `crates/core/wire/src/crc.rs`, `crates/client/capi` and `crates/device/*` ports, with
   a `SAFETY` comment on each block.
 - Everything is behind features. Lean is the default. A recovery build has no node logic.

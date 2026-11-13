@@ -9,7 +9,6 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-orion-ring-model = { path = "../../crates/testing/ring-model" }
 orion-wire = { path = "../../crates/core/wire" }
 orion-wire-vectors = { path = "../../crates/testing/wire-vectors" }
 
@@ -95,13 +94,6 @@ bench = false
 [[bin]]
 name = "time"
 path = "fuzz_targets/time.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "ring"
-path = "fuzz_targets/ring.rs"
 test = false
 doc = false
 bench = false

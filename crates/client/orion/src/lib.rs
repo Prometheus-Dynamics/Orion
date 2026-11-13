@@ -56,8 +56,8 @@ pub use orion_types as types;
 #[cfg(feature = "topics")]
 pub mod topics {
     pub use orion_msg_topics::{Field, FieldType};
-    pub use orion_ring::{FieldId, Flags, Next, Sample, SampleTime};
     pub use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
+    pub use shm_ring::{FieldId, Flags, Next, Sample, SampleTime};
 }
 
 /// Frames in shared buffers.

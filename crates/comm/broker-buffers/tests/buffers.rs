@@ -11,15 +11,15 @@ use orion_msg_session::{Hello, Refusal, Welcome};
 use orion_msg_topics::{
     BufferInfo, BufferOffer, Declare, Field, FieldType, Holds, Opened, Subscribe,
 };
-use orion_ring::{FieldId, Reader, SampleTime, Writer};
-use orion_ring_buffers::{BufferDesc, BufferReader, BufferWriter, Held, NextBatch, Pool, PoolView};
-use orion_ring_doorbell::Doorbell;
-use orion_ring_holds::{HoldTable, Limits as HoldLimits, Marks};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Limits, Principal, Roles, Security};
 use orion_types::TopicRef;
 use orion_wire::frame;
 use orion_wire::{Body, Bytes, Decode, List, encode_body, kind};
+use shm_ring::{FieldId, Reader, SampleTime, Writer};
+use shm_ring_buffers::{BufferDesc, BufferReader, BufferWriter, Held, NextBatch, Pool, PoolView};
+use shm_ring_doorbell::Doorbell;
+use shm_ring_holds::{HoldTable, Limits as HoldLimits, Marks};
 
 const USER: Principal = Principal::Local {
     uid: 1000,
@@ -253,7 +253,7 @@ struct Viewer {
     doorbell: Doorbell,
     marks: Arc<Marks>,
     ring: Option<Reader>,
-    frames: Option<BufferReader<orion_ring::ReadMap, Arc<Marks>>>,
+    frames: Option<BufferReader<shm_ring::ReadMap, Arc<Marks>>>,
     slot: Option<u32>,
 }
 

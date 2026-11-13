@@ -10,7 +10,7 @@ repository.workspace = true
 [dependencies]
 orion-check = { path = "../../core/check" }
 orion-config = { path = "../../core/config" }
-orion-fdpass = { path = "../../core/fdpass" }
+shm-fdpass = { workspace = true }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-supervise = { path = "../../core/supervise" }
 orion-types = { path = "../../core/types" }

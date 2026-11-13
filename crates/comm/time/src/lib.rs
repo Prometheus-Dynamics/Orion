@@ -34,8 +34,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use orion_broker::{LocalPublisher, Topics};
 use orion_msg_topics::FieldType;
-use orion_ring::{FieldId, SampleTime};
 use orion_server::Comm;
+use shm_ring::{FieldId, SampleTime};
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::task::JoinHandle;
 use tracing::info;

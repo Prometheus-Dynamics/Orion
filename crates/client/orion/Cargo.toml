@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = ["topics", "records", "actions"]
 # Publish and subscribe.
-topics = ["dep:orion-topics", "dep:orion-msg-topics", "dep:orion-ring"]
+topics = ["dep:orion-topics", "dep:orion-msg-topics", "dep:shm-ring"]
 # Frames in shared buffers.
 buffers = ["topics", "dep:orion-buffers"]
 # Read, write and watch records.
@@ -43,9 +43,9 @@ orion-msg-topics = { path = "../../core/msg-topics", optional = true }
 orion-msg-workloads = { path = "../../core/msg-workloads", optional = true }
 orion-provider = { path = "../provider", optional = true }
 orion-records = { path = "../records", optional = true }
-orion-ring = { path = "../../core/ring", optional = true }
+shm-ring = { workspace = true, optional = true }
 orion-topics = { path = "../topics", optional = true }
-orion-types = { path = "../../core/types", features = ["now"] }
+orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
 
 [dev-dependencies]

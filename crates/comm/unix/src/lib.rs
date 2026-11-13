@@ -19,8 +19,8 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use orion_fdpass::{HEADER_LEN, MAX_FDS, RecvError, SendError};
 use orion_server::{Carrier, Connection, FdSet, FrameRead, FrameWrite, Principal, Roles};
+use shm_fdpass::{HEADER_LEN, MAX_FDS, RecvError, SendError};
 use tokio::io::Interest;
 use tokio::net::{UnixListener, UnixStream};
 
@@ -202,7 +202,7 @@ async fn recv(stream: &UnixStream, buf: &mut [u8], fds: &mut FdSet) -> io::Resul
         // A frame that is only partly here stays queued and counts as "would block", which
         // makes tokio wait for more of it.
         let received = stream.try_io(Interest::READABLE, || {
-            match orion_fdpass::recv(stream.as_fd(), buf, MAX_FDS, true) {
+            match shm_fdpass::recv(stream.as_fd(), buf, MAX_FDS, true) {
                 Err(RecvError::Io(error)) if error.kind() == io::ErrorKind::WouldBlock => {
                     Err(error)
                 }
@@ -242,7 +242,7 @@ async fn send(stream: &UnixStream, frame: &[u8], fds: &[OwnedFd]) -> io::Result<
     let sent = loop {
         stream.writable().await?;
         let sent = stream.try_io(Interest::WRITABLE, || {
-            match orion_fdpass::send(stream.as_fd(), &[frame], borrowed, true) {
+            match shm_fdpass::send(stream.as_fd(), &[frame], borrowed, true) {
                 Err(SendError::Io(error)) if error.kind() == io::ErrorKind::WouldBlock => {
                     Err(error)
                 }

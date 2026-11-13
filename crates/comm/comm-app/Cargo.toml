@@ -96,8 +96,8 @@ tracing.workspace = true
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
-orion-ring = { path = "../../core/ring" }
-orion-ring-doorbell = { path = "../../core/ring-doorbell" }
+shm-ring = { workspace = true }
+shm-ring-doorbell = { workspace = true }
 orion-wire = { path = "../../core/wire" }
 rustix = { version = "1", default-features = false, features = ["std", "process"] }
 tokio = { workspace = true, features = ["test-util", "net"] }

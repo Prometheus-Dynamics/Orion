@@ -10,7 +10,6 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use orion_fdpass::{FdSet, MAX_FDS, RecvError, SendError};
 use orion_identity::Identity;
 use orion_net_handshake::{
     Fresh, MODE_PLAIN, MODE_SIGNED, SERVER_HELLO_LEN, STATUS_OK, Seal, TAG_LEN, Transcript, hello,
@@ -20,6 +19,7 @@ use orion_wire::{StreamDecoder, StreamEncoder, frame};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::fs::OFlags;
 use rustix::termios::{ControlModes, InputModes, OptionalActions, QueueSelector, SpecialCodeIndex};
+use shm_fdpass::{FdSet, MAX_FDS, RecvError, SendError};
 
 use crate::error::ClientError;
 
@@ -256,7 +256,7 @@ impl Transport {
     pub(crate) fn send(&mut self, frame: &[u8], fds: &[BorrowedFd<'_>]) -> Result<(), ClientError> {
         match self {
             Self::Local(stream) => loop {
-                match orion_fdpass::send(stream.as_fd(), &[frame], fds, true) {
+                match shm_fdpass::send(stream.as_fd(), &[frame], fds, true) {
                     Ok(()) => return Ok(()),
                     // The comm core has not read what it was sent: wait for room.
                     Err(SendError::Io(error)) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -297,7 +297,7 @@ impl Transport {
     /// Takes one whole frame into `buf` if one is there, without waiting.
     pub(crate) fn take(&mut self, buf: &mut [u8], fds: &mut FdSet) -> Result<Step, ClientError> {
         match self {
-            Self::Local(stream) => match orion_fdpass::recv(stream.as_fd(), buf, MAX_FDS, true) {
+            Self::Local(stream) => match shm_fdpass::recv(stream.as_fd(), buf, MAX_FDS, true) {
                 Ok(Some(received)) => {
                     *fds = received.fds;
                     Ok(Step::Frame(received.len))

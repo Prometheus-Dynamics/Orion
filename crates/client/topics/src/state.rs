@@ -6,9 +6,9 @@ use orion_connect::{ClientError, Cx, Handler, Incoming};
 use orion_msg_topics::{
     Bell as BellMessage, Declare, Demand, Opened, Sample, SampleBatch, TopicState, TopicStatus,
 };
-use orion_ring::{FieldId, Flags, Reader, Ring, Spec, Writer};
-use orion_ring_doorbell::{Bell, Doorbell};
 use orion_wire::{Decode, kind};
+use shm_ring::{FieldId, Flags, Reader, Ring, Spec, Writer};
+use shm_ring_doorbell::{Bell, Doorbell};
 
 pub(crate) struct PublisherState {
     /// The `seq` of the declaration, which its answer names.
@@ -280,7 +280,7 @@ impl State {
         &mut self,
         handle: u32,
         field: u16,
-        time: orion_ring::SampleTime,
+        time: shm_ring::SampleTime,
         flags: u8,
         payload: &[u8],
     ) {

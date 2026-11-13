@@ -9,11 +9,11 @@ use std::time::Duration;
 
 use common::{Client, Event, FIELDS, Wire};
 use orion_broker::{Broker, BrokerConfig};
-use orion_ring::{FieldId, Reader};
 use orion_self_status::{COMM_TOPIC, HOST_TOPIC, HostSample, HostSource, SelfStatus};
 use orion_server::mem::{self, MemConnector};
 use orion_server::{Comm, Error, Limits, Principal, Roles, Security};
 use orion_supervise::{State, Status};
+use shm_ring::{FieldId, Reader};
 
 const USER: Principal = Principal::Local {
     uid: 1000,

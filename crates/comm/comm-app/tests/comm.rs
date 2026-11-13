@@ -13,10 +13,10 @@ use orion_comm_app::systemd::Notifier;
 use orion_comm_app::{CommCore, CommSettings, run_until};
 use orion_config::Source;
 use orion_msg_session::{Hello, Identify};
-use orion_ring::{FieldId, Flags, Reader, SampleTime};
 use orion_server::{FdSet, Roles};
 use orion_unix::UnixConnection;
 use orion_wire::{Body, Bytes, encode_body, frame, kind};
+use shm_ring::{FieldId, Flags, Reader, SampleTime};
 use tokio::io::AsyncReadExt;
 
 fn run(test: impl Future<Output = ()>) {

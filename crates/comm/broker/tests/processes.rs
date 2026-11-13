@@ -13,10 +13,10 @@ use std::time::Duration;
 
 use common::{Client, Event, Wire};
 use orion_broker::{Broker, BrokerConfig};
-use orion_ring::{FieldId, Flags, Next, SampleTime};
-use orion_ring_doorbell::{Bell, Doorbell, Wake};
 use orion_server::{Comm, Limits, Security};
 use orion_unix::{UnixCarrier, UnixConnection};
+use shm_ring::{FieldId, Flags, Next, SampleTime};
+use shm_ring_doorbell::{Bell, Doorbell, Wake};
 
 const ROLE: &str = "ORION_TEST_ROLE";
 const SOCKET: &str = "ORION_TEST_SOCKET";
@@ -87,7 +87,7 @@ async fn subscriber() {
                 mut fds,
                 ..
             } if request_seq == seq => {
-                break orion_ring::Reader::attach(fds.pop().expect("read end")).expect("reader");
+                break shm_ring::Reader::attach(fds.pop().expect("read end")).expect("reader");
             }
             other => panic!("{other:?}"),
         }

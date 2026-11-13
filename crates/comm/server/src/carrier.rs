@@ -5,8 +5,8 @@ use std::io;
 use std::os::fd::OwnedFd;
 
 use orion_check::Principal;
-use orion_fdpass::FdSet;
 use orion_msg_session::Roles;
+use shm_fdpass::FdSet;
 
 /// The reading half of a connection.
 pub trait FrameRead {

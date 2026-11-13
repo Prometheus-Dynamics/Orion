@@ -5,12 +5,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use orion_msg_topics::{Declare, Field, FieldType};
-use orion_ring::{FieldId, Flags, SampleTime, Spec, Writer};
-use orion_ring_doorbell::Bell;
 use orion_server::Error;
 use orion_types::TopicName;
 use orion_wire::List;
 use orion_wire::body::encode_fields;
+use shm_ring::{FieldId, Flags, SampleTime, Spec, Writer};
+use shm_ring_doorbell::Bell;
 
 use crate::topics::{Topic, TopicId, Topics};
 

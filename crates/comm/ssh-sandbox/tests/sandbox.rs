@@ -434,7 +434,7 @@ fn the_keeper_answers_only_what_a_child_in_that_state_may_ask() {
     assert_eq!(u32::from_le_bytes(code), 4);
 
     // Something that is not a question ends it.
-    orion_fdpass::send_on(&child, &[&[0xFF; 9]], &[]).expect("send");
+    shm_fdpass::send_on(&child, &[&[0xFF; 9]], &[]).expect("send");
     assert!(recv::<Answer>(&child).expect("an end").is_none());
     answering.join().expect("the keeper ends");
 

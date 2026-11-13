@@ -7,12 +7,12 @@ use std::rc::Rc;
 use orion_msg_topics::{
     Bell, Declare, Demand, Open, Opened, Subscribe, TopicState, TopicStatus, Unsubscribe,
 };
-use orion_ring::{Ring, Spec};
 use orion_server::{
     Checked, Cx, Delivery, Error, Incoming, Policy, Service, SessionId, Sessions, What,
 };
 use orion_types::NodeName;
 use orion_wire::{Bytes, FrameView, body, kind};
+use shm_ring::{Ring, Spec};
 
 use crate::topics::{BrokerConfig, Subscription, Topic, TopicId, Topics};
 
@@ -129,7 +129,7 @@ impl Service for Broker {
     }
 }
 
-fn io<T>(result: Result<T, orion_ring::RingError>) -> Result<T, Error> {
+fn io<T>(result: Result<T, shm_ring::RingError>) -> Result<T, Error> {
     result.map_err(|error| {
         tracing::warn!(%error, "a ring's descriptor could not be handed out");
         Error::Internal

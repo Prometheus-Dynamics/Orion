@@ -15,10 +15,10 @@ use orion_broker_buffers::BrokerBuffers;
 use orion_buffers::{Buffers, HoldLimits, NextBatch, Pool};
 use orion_connect::{Address, Client, Options, Session};
 use orion_measure::{CountingAlloc, thread_counts};
-use orion_ring::SampleTime;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_topics::{Status, TopicError, Topics};
 use orion_unix::UnixCarrier;
+use shm_ring::SampleTime;
 
 #[global_allocator]
 static GLOBAL: CountingAlloc = CountingAlloc::system();

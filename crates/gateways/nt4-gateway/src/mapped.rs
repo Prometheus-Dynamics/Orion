@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use orion_broker::{LocalPublisher, TopicId, Topics};
 use orion_msg_topics::{Declare, FieldType};
-use orion_ring::{FieldId, Reader, SampleTime};
 use orion_wire::Decode;
+use shm_ring::{FieldId, Reader, SampleTime};
 use tracing::warn;
 
 use crate::convert;

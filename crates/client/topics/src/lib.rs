@@ -31,13 +31,13 @@ use orion_connect::{Client, ClientError};
 use orion_msg_topics::{
     Declare, Field, Sample as SampleMessage, SampleFlags, Subscribe, TopicStatus,
 };
-use orion_ring::{FieldId, Flags, Next, PublishError, Reader, RingError, Sample, SampleTime};
-use orion_ring_doorbell::Doorbell;
-use orion_ring_time::Lookup;
 use orion_types::TopicRef;
 use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, List, kind};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use shm_ring::{FieldId, Flags, Next, PublishError, Reader, RingError, Sample, SampleTime};
+use shm_ring_doorbell::Doorbell;
+use shm_ring_time::Lookup;
 
 use state::State;
 
@@ -408,7 +408,7 @@ impl Publisher {
     /// Takes the ring's writer out, for a publisher that writes the ring some other way than
     /// [`Publisher::publish`]: a topic of shared buffers. `None` off the board, where there
     /// is no ring to write. Afterwards [`Publisher::wake`] is how subscribers are woken.
-    pub fn take_writer(&mut self) -> Option<orion_ring::Writer> {
+    pub fn take_writer(&mut self) -> Option<shm_ring::Writer> {
         let mut state = self.state.borrow_mut();
         let publisher = state.publisher_mut(self.index);
         publisher.taken = true;
@@ -532,7 +532,7 @@ impl Subscriber {
     pub fn at_or_before(&mut self, field: FieldId, time: SampleTime) -> Lookup<'_> {
         self.refresh();
         match &mut self.reader {
-            Some(reader) => orion_ring_time::at_or_before(reader, field, time),
+            Some(reader) => shm_ring_time::at_or_before(reader, field, time),
             None => Lookup::Missing,
         }
     }

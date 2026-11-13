@@ -205,6 +205,7 @@ name = "orion-types"
 version = "1.0.1-dev"
 dependencies = [
  "serde",
+ "shm-sample-time",
 ]
 
 [[package]]
@@ -283,6 +284,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shm-sample-time"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=b48efaf1af90c52e35b6be27427a93e3d2996f1d#b48efaf1af90c52e35b6be27427a93e3d2996f1d"
+dependencies = [
+ "libc",
+ "serde",
 ]
 
 [[package]]

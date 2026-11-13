@@ -11,8 +11,8 @@ use std::os::fd::OwnedFd;
 use std::rc::Rc;
 
 use orion_check::Principal;
-use orion_fdpass::FdSet;
 use orion_msg_session::Roles;
+use shm_fdpass::FdSet;
 use tokio::sync::Notify;
 
 use crate::{Carrier, Connection, FrameRead, FrameWrite};

@@ -19,11 +19,11 @@ use orion_msg_session::{NodeAnswer, NodeGone, NodeRequest};
 use orion_msg_topics::{Field, FieldType};
 use orion_msg_workloads::{WorkloadPut, WorkloadRemove};
 use orion_reply::{Asked, Out};
-use orion_ring::FieldId;
 use orion_store::Store;
 use orion_topics::Publisher;
 use orion_types::{Error, NodeName, SampleTime};
 use orion_wire::{Bytes, Decode, kind};
+use shm_ring::FieldId;
 
 use crate::peers::Peers;
 use crate::records::Records;

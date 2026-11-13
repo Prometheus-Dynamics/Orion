@@ -28,9 +28,9 @@ use std::time::Duration;
 
 use orion_broker::{Broker, LocalPublisher, Topic, TopicId, TopicWatch, Topics};
 use orion_msg_topics::FieldType;
-use orion_ring::{FieldId, SampleTime};
 use orion_server::{Comm, Error, SessionId, Sessions};
 use orion_supervise::{State, Status};
+use shm_ring::{FieldId, SampleTime};
 use tokio::sync::Notify;
 
 pub use host::{HostSample, HostSource, ProcSource};

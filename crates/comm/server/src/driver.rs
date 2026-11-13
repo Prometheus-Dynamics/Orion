@@ -6,11 +6,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use orion_check::{Grants, Security};
-use orion_fdpass::FdSet;
 use orion_msg_session::{Reject, RejectReason};
 use orion_supervise::ACCESS_RETRY_MS;
 use orion_types::NodeName;
 use orion_wire::encode_body;
+use shm_fdpass::FdSet;
 use tokio::sync::Notify;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 

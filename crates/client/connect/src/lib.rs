@@ -29,11 +29,11 @@ mod transport;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::time::{Duration, Instant};
 
-use orion_fdpass::FdSet;
 use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, Welcome};
 use orion_supervise::{Decision, Path, Supervisor};
 use orion_types::NodeName;
 use orion_wire::{Body, Decode, FrameView, INTERFACE_REVISION, encode_body, frame, kind};
+use shm_fdpass::FdSet;
 
 pub use address::{Address, DEFAULT_PORT, DEFAULT_SOCKET};
 pub use client::{Client, Handler};

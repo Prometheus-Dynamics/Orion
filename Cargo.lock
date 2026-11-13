@@ -50,15 +50,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aho-corasick"
-version = "1.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -736,21 +727,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "generator"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1be81b31c9ce4caf7f3178eeb90662bb1864d3ad363ec6bdada3201adff19c37"
-dependencies = [
- "cc",
- "cfg-if",
- "libc",
- "log",
- "rustversion",
- "windows-link",
- "windows-result",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1015,12 +991,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazy_static"
-version = "1.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
-
-[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1048,34 +1018,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
-name = "loom"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1611ddbf89dc6ae42cfbd51fc207836140130257646eab8d6d2fb16577db2d2"
-dependencies = [
- "cfg-if",
- "generator",
- "scoped-tls",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "mach2"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a1b95cd5421ec55b445b5ae102f5ea0e768de1f82bd3001e11f426c269c3aea"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "matchers"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
-dependencies = [
- "regex-automata",
 ]
 
 [[package]]
@@ -1171,15 +1119,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nu-ansi-term"
-version = "0.50.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
-dependencies = [
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1260,11 +1199,11 @@ dependencies = [
  "orion-msg-workloads",
  "orion-provider",
  "orion-records",
- "orion-ring",
  "orion-stubs",
  "orion-topics",
  "orion-types",
  "orion-wire",
+ "shm-ring",
 ]
 
 [[package]]
@@ -1348,12 +1287,12 @@ dependencies = [
  "orion-config",
  "orion-msg-session",
  "orion-msg-topics",
- "orion-ring",
- "orion-ring-doorbell",
  "orion-server",
  "orion-types",
  "orion-unix",
  "orion-wire",
+ "shm-ring",
+ "shm-ring-doorbell",
  "tokio",
  "tracing",
 ]
@@ -1365,13 +1304,13 @@ dependencies = [
  "orion-broker",
  "orion-msg-session",
  "orion-msg-topics",
- "orion-ring",
- "orion-ring-buffers",
- "orion-ring-doorbell",
- "orion-ring-holds",
  "orion-server",
  "orion-types",
  "orion-wire",
+ "shm-ring",
+ "shm-ring-buffers",
+ "shm-ring-doorbell",
+ "shm-ring-holds",
  "tokio",
  "tracing",
 ]
@@ -1384,11 +1323,11 @@ dependencies = [
  "orion-measure",
  "orion-msg-session",
  "orion-msg-topics",
- "orion-ring",
- "orion-ring-doorbell",
  "orion-server",
  "orion-types",
  "orion-wire",
+ "shm-ring",
+ "shm-ring-doorbell",
  "tokio",
 ]
 
@@ -1402,13 +1341,13 @@ dependencies = [
  "orion-measure",
  "orion-msg-session",
  "orion-msg-topics",
- "orion-ring",
- "orion-ring-buffers",
- "orion-ring-holds",
  "orion-server",
  "orion-topics",
  "orion-unix",
  "orion-wire",
+ "shm-ring",
+ "shm-ring-buffers",
+ "shm-ring-holds",
  "tokio",
 ]
 
@@ -1452,8 +1391,6 @@ dependencies = [
  "orion-outbound",
  "orion-recovery",
  "orion-relay",
- "orion-ring",
- "orion-ring-doorbell",
  "orion-self-status",
  "orion-server",
  "orion-ssh",
@@ -1468,6 +1405,8 @@ dependencies = [
  "orion-wire",
  "orion-ws",
  "rustix",
+ "shm-ring",
+ "shm-ring-doorbell",
  "tokio",
  "tracing",
 ]
@@ -1484,7 +1423,6 @@ dependencies = [
 name = "orion-connect"
 version = "1.0.1-dev"
 dependencies = [
- "orion-fdpass",
  "orion-hello",
  "orion-identity",
  "orion-keys",
@@ -1499,6 +1437,7 @@ dependencies = [
  "orion-unix",
  "orion-wire",
  "rustix",
+ "shm-fdpass",
  "tokio",
 ]
 
@@ -1683,13 +1622,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "orion-fdpass"
-version = "1.0.1-dev"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "orion-file-store"
 version = "1.0.1-dev"
 dependencies = [
@@ -1743,10 +1675,10 @@ dependencies = [
  "orion-keys",
  "orion-msg-session",
  "orion-msg-topics",
- "orion-ring",
  "orion-server",
  "orion-types",
  "orion-wire",
+ "shm-ring",
  "tokio",
 ]
 
@@ -1949,7 +1881,6 @@ dependencies = [
  "orion-persist",
  "orion-reply",
  "orion-resources",
- "orion-ring",
  "orion-sample-executor",
  "orion-store",
  "orion-stubs",
@@ -1958,6 +1889,7 @@ dependencies = [
  "orion-types",
  "orion-wire",
  "sha2",
+ "shm-ring",
  "tokio",
  "tracing",
 ]
@@ -1999,11 +1931,11 @@ dependencies = [
  "orion-config",
  "orion-msg-topics",
  "orion-nt4",
- "orion-ring",
  "orion-types",
  "orion-values",
  "orion-wire",
  "orion-ws",
+ "shm-ring",
  "tokio",
  "tracing",
 ]
@@ -2018,12 +1950,12 @@ dependencies = [
  "orion-config",
  "orion-msg-session",
  "orion-msg-topics",
- "orion-ring",
- "orion-ring-doorbell",
  "orion-server",
  "orion-stubs",
  "orion-types",
  "orion-wire",
+ "shm-ring",
+ "shm-ring-doorbell",
  "tokio",
  "tracing",
 ]
@@ -2068,11 +2000,11 @@ dependencies = [
  "orion-msg-records",
  "orion-msg-topics",
  "orion-records",
- "orion-ring",
  "orion-stubs",
  "orion-topics",
  "orion-types",
  "orion-wire",
+ "shm-ring",
 ]
 
 [[package]]
@@ -2145,81 +2077,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "orion-ring"
-version = "1.0.1-dev"
-dependencies = [
- "libc",
- "orion-measure",
- "orion-types",
-]
-
-[[package]]
 name = "orion-ring-bench"
 version = "1.0.1-dev"
 dependencies = [
  "orion-measure",
- "orion-ring",
- "orion-ring-buffers",
- "orion-ring-doorbell",
- "orion-ring-holds",
- "orion-ring-time",
-]
-
-[[package]]
-name = "orion-ring-buffers"
-version = "1.0.1-dev"
-dependencies = [
- "libc",
- "orion-fdpass",
- "orion-measure",
- "orion-ring",
-]
-
-[[package]]
-name = "orion-ring-doorbell"
-version = "1.0.1-dev"
-dependencies = [
- "libc",
- "loom",
- "orion-measure",
- "orion-ring",
-]
-
-[[package]]
-name = "orion-ring-holds"
-version = "1.0.1-dev"
-dependencies = [
- "libc",
- "loom",
- "orion-fdpass",
- "orion-measure",
- "orion-ring",
- "orion-ring-buffers",
-]
-
-[[package]]
-name = "orion-ring-latest"
-version = "1.0.1-dev"
-dependencies = [
- "orion-measure",
- "orion-ring",
-]
-
-[[package]]
-name = "orion-ring-model"
-version = "1.0.1-dev"
-dependencies = [
- "loom",
- "orion-ring",
-]
-
-[[package]]
-name = "orion-ring-time"
-version = "1.0.1-dev"
-dependencies = [
- "orion-measure",
- "orion-ring",
- "orion-ring-doorbell",
+ "shm-ring",
+ "shm-ring-buffers",
+ "shm-ring-doorbell",
+ "shm-ring-holds",
+ "shm-ring-time",
 ]
 
 [[package]]
@@ -2238,14 +2104,14 @@ dependencies = [
  "orion-broker",
  "orion-msg-session",
  "orion-msg-topics",
- "orion-ring",
- "orion-ring-doorbell",
  "orion-server",
  "orion-supervise",
  "orion-types",
  "orion-unix",
  "orion-values",
  "orion-wire",
+ "shm-ring",
+ "shm-ring-doorbell",
  "tokio",
 ]
 
@@ -2255,12 +2121,12 @@ version = "1.0.1-dev"
 dependencies = [
  "orion-check",
  "orion-config",
- "orion-fdpass",
  "orion-measure",
  "orion-msg-session",
  "orion-supervise",
  "orion-types",
  "orion-wire",
+ "shm-fdpass",
  "tokio",
  "tracing",
 ]
@@ -2293,7 +2159,6 @@ name = "orion-ssh-sandbox"
 version = "1.0.1-dev"
 dependencies = [
  "orion-check",
- "orion-fdpass",
  "orion-keys",
  "orion-ssh",
  "orion-types",
@@ -2301,6 +2166,7 @@ dependencies = [
  "russh",
  "rustix",
  "serde",
+ "shm-fdpass",
  "tokio",
  "tracing",
 ]
@@ -2400,12 +2266,12 @@ dependencies = [
  "orion-msg-peers",
  "orion-msg-session",
  "orion-msg-topics",
- "orion-ring",
- "orion-ring-doorbell",
  "orion-server",
  "orion-types",
  "orion-unix",
  "orion-wire",
+ "shm-ring",
+ "shm-ring-doorbell",
  "tokio",
  "tracing",
 ]
@@ -2422,13 +2288,13 @@ dependencies = [
  "orion-msg-session",
  "orion-msg-topics",
  "orion-outbound",
- "orion-ring",
  "orion-server",
  "orion-tcp",
  "orion-time",
  "orion-types",
  "orion-unix",
  "orion-wire",
+ "shm-ring",
  "tokio",
  "tracing",
 ]
@@ -2443,15 +2309,15 @@ dependencies = [
  "orion-keys",
  "orion-measure",
  "orion-msg-topics",
- "orion-ring",
- "orion-ring-doorbell",
- "orion-ring-time",
  "orion-server",
  "orion-tcp",
  "orion-types",
  "orion-unix",
  "orion-wire",
  "rustix",
+ "shm-ring",
+ "shm-ring-doorbell",
+ "shm-ring-time",
  "tokio",
 ]
 
@@ -2460,18 +2326,18 @@ name = "orion-types"
 version = "1.0.1-dev"
 dependencies = [
  "postcard",
- "rustix",
  "serde",
+ "shm-sample-time",
 ]
 
 [[package]]
 name = "orion-unix"
 version = "1.0.1-dev"
 dependencies = [
- "orion-fdpass",
  "orion-msg-session",
  "orion-server",
  "orion-wire",
+ "shm-fdpass",
  "tokio",
 ]
 
@@ -2823,23 +2689,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "regex-automata"
-version = "0.4.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
-dependencies = [
- "aho-corasick",
- "memchr",
- "regex-syntax",
-]
-
-[[package]]
-name = "regex-syntax"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
-
-[[package]]
 name = "rfc6979"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3049,12 +2898,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scoped-tls"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
-
-[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3209,19 +3052,72 @@ dependencies = [
 ]
 
 [[package]]
-name = "sharded-slab"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
-dependencies = [
- "lazy_static",
-]
-
-[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
+name = "shm-fdpass"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=b48efaf1af90c52e35b6be27427a93e3d2996f1d#b48efaf1af90c52e35b6be27427a93e3d2996f1d"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "shm-ring"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=b48efaf1af90c52e35b6be27427a93e3d2996f1d#b48efaf1af90c52e35b6be27427a93e3d2996f1d"
+dependencies = [
+ "libc",
+ "shm-sample-time",
+]
+
+[[package]]
+name = "shm-ring-buffers"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=b48efaf1af90c52e35b6be27427a93e3d2996f1d#b48efaf1af90c52e35b6be27427a93e3d2996f1d"
+dependencies = [
+ "libc",
+ "shm-ring",
+]
+
+[[package]]
+name = "shm-ring-doorbell"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=b48efaf1af90c52e35b6be27427a93e3d2996f1d#b48efaf1af90c52e35b6be27427a93e3d2996f1d"
+dependencies = [
+ "libc",
+ "shm-ring",
+]
+
+[[package]]
+name = "shm-ring-holds"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=b48efaf1af90c52e35b6be27427a93e3d2996f1d#b48efaf1af90c52e35b6be27427a93e3d2996f1d"
+dependencies = [
+ "shm-ring",
+ "shm-ring-buffers",
+]
+
+[[package]]
+name = "shm-ring-time"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=b48efaf1af90c52e35b6be27427a93e3d2996f1d#b48efaf1af90c52e35b6be27427a93e3d2996f1d"
+dependencies = [
+ "shm-ring",
+ "shm-ring-doorbell",
+]
+
+[[package]]
+name = "shm-sample-time"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos?rev=b48efaf1af90c52e35b6be27427a93e3d2996f1d#b48efaf1af90c52e35b6be27427a93e3d2996f1d"
+dependencies = [
+ "libc",
+ "serde",
+]
 
 [[package]]
 name = "signal-hook-registry"
@@ -3442,15 +3338,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "thread_local"
-version = "1.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "tokio"
 version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3559,36 +3446,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
- "valuable",
-]
-
-[[package]]
-name = "tracing-log"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
-dependencies = [
- "log",
- "once_cell",
- "tracing-core",
-]
-
-[[package]]
-name = "tracing-subscriber"
-version = "0.3.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
-dependencies = [
- "matchers",
- "nu-ansi-term",
- "once_cell",
- "regex-automata",
- "sharded-slab",
- "smallvec",
- "thread_local",
- "tracing",
- "tracing-core",
- "tracing-log",
 ]
 
 [[package]]
@@ -3677,12 +3534,6 @@ name = "utf8-zero"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
-
-[[package]]
-name = "valuable"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "version_check"

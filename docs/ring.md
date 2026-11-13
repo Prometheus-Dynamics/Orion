@@ -1,6 +1,9 @@
 # The topic ring
 
-`crates/core/ring` (`orion-ring`). One writer, many readers, in shared memory. This page pins the
+`shm-ring`, with the rest of the shared-memory family (`shm-ring-buffers`, `shm-ring-holds`,
+`shm-ring-doorbell`, `shm-ring-latest`, `shm-ring-time`, `shm-fdpass`, `shm-sample-time`): leaf
+crates hosted with the device library, under `shm/`, and pinned by revision in the workspace
+`Cargo.toml`. Orion has no copy. One writer, many readers, in shared memory. This page pins the
 layout: layout number 1. A change to anything here needs a new layout number.
 
 ## What it gives
@@ -35,7 +38,7 @@ the same way by every party, so there is no stored offset to point somewhere els
 
 | Word | Holds | Written by |
 | --- | --- | --- |
-| 0 | Magic: `ORIONRG1` | Owner, once, last |
+| 0 | Magic: `SHMRING1` | Owner, once, last |
 | 1 | Layout number: 1 | Owner, once |
 | 2 | Fields (low 32 bits), history (high 32 bits) | Owner, once |
 | 3 | Largest payload in bytes (low 32), expiry in ms (high 32) | Owner, once |
@@ -121,9 +124,9 @@ repeats, so an old stamp can never come back.
 The head, lane heads and finished stamps are stored with release ordering and loaded with acquire,
 so a reader that sees a count also sees everything stored before it.
 
-`crates/testing/ring-model` checks this with `loom`, which explores the interleavings of a writer
+`shm-ring-model` checks this with `loom`, which explores the interleavings of a writer
 against readers and what a relaxed load may return, running the ring's own code. It also holds
-the hostile-ring check that the `ring` fuzz target drives. A deliberately broken reader, one that
+the hostile-ring check that its fuzz target drives. A deliberately broken reader, one that
 skips the second stamp load, is in the same file and must be caught.
 
 ## What a reader assumes about the writer: nothing
@@ -148,7 +151,7 @@ the old writer died in is busy until its field's lane comes round to it.
 
 ## Doorbells
 
-`crates/core/ring-doorbell`. A subscriber has one doorbell for everything it subscribes to: an
+`shm-ring-doorbell`. A subscriber has one doorbell for everything it subscribes to: an
 eventfd it polls, and a sealed page that only it writes. A publisher holds the eventfd and the page
 read-only.
 
@@ -169,14 +172,14 @@ subscriber that does not look again, and a publisher that does not fence.
 
 ## Latest values
 
-`crates/core/ring-latest`. The newest sample of a field is the slot before its lane head, so
+`shm-ring-latest`. The newest sample of a field is the slot before its lane head, so
 reading it does not depend on how many fields there are. A value is expired when the reader's
 clock is more than the declaration's expiry past the sample's time; it is still returned, marked
 expired.
 
 ## Lookup by sample time
 
-`crates/core/ring-time`. The value of a field at or before a sample time is a search of the field's
+`shm-ring-time`. The value of a field at or before a sample time is a search of the field's
 lane, on the samples' times alone (`time_at` reads a slot's time without copying its payload): the
 newest four one by one, then a binary search of the rest. The reply is a hit (a sample for exactly
 that time), lagged (the newest earlier one, with how far behind), or missing.
@@ -186,7 +189,7 @@ earlier frame, and returns as soon as the publisher reaches the frame or passes 
 
 ## Buffer topics
 
-`crates/core/ring-buffers`. A frame is too large for a ring, so a buffer topic's entries say which
+`shm-ring-buffers`. A frame is too large for a ring, so a buffer topic's entries say which
 buffers hold the frame, and the buffers are shared memory handed over once.
 
 **The pool.** The publisher's buffers are slices of a few descriptors: a camera's dma-bufs, or a
@@ -198,7 +201,7 @@ shared-memory file that is not sealed against shrinking.
 
 | Word | Holds |
 | --- | --- |
-| 0 | Magic: `ORIONPL1` |
+| 0 | Magic: `SHMPOOL1` |
 | 1 | Generation (low 32 bits), buffers (high 32) |
 | 2 to 7 | Reserved, zero |
 | 8 | Tickets: one word per buffer, `uses << 1 | taken back` |
@@ -225,7 +228,7 @@ frame only while each buffer's ticket is exactly the one in the entry.
 
 ## Hold marks
 
-`crates/core/ring-holds`. A reader's marks are a sealed page only that reader writes: word 0 is a
+`shm-ring-holds`. A reader's marks are a sealed page only that reader writes: word 0 is a
 version, and word `1 + b` is nonzero while it holds buffer `b`. The publisher maps each reader's
 page read-only. A buffer is free when no reader marks it.
 

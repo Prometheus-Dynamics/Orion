@@ -14,8 +14,8 @@ orion-config = { path = "../../core/config" }
 orion-msg-topics = { path = "../../core/msg-topics" }
 orion-nt4 = { path = "../nt4", default-features = false, features = ["server"] }
 orion-ws = { path = "../../comm/ws" }
-orion-ring = { path = "../../core/ring" }
-orion-types = { path = "../../core/types", features = ["now"] }
+shm-ring = { workspace = true }
+orion-types = { path = "../../core/types" }
 orion-values = { path = "../../core/values" }
 orion-wire = { path = "../../core/wire" }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }

@@ -8,14 +8,14 @@ use orion_msg_session::{Hello, Refusal, Welcome};
 use orion_msg_topics::{
     Bell, Declare, Demand, Field, FieldType, Open, Opened, Subscribe, TopicState, Unsubscribe,
 };
-use orion_ring::{Reader, Writer};
-use orion_ring_doorbell::Doorbell;
 use orion_server::mem::MemConnection;
 use orion_server::{Error, FdSet, Roles};
 use orion_types::TopicRef;
 use orion_unix::UnixConnection;
 use orion_wire::frame;
 use orion_wire::{Body, Bytes, Decode, List, encode_body, kind};
+use shm_ring::{Reader, Writer};
+use shm_ring_doorbell::Doorbell;
 
 /// Either kind of connection, as a client uses it.
 pub enum Wire {

@@ -11,14 +11,14 @@ use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_measure::{CountingAlloc, thread_counts};
 use orion_msg_topics::{Declare, Field, FieldType};
-use orion_ring::{FieldId, Next, SampleTime};
-use orion_ring_time::Lookup;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_tcp::{TcpCarrier, TcpOptions};
 use orion_topics::{Status, TopicDecl, TopicError, Topics};
 use orion_types::Error;
 use orion_unix::UnixCarrier;
 use orion_wire::Decode;
+use shm_ring::{FieldId, Next, SampleTime};
+use shm_ring_time::Lookup;
 
 #[global_allocator]
 static GLOBAL: CountingAlloc = CountingAlloc::system();
@@ -147,7 +147,7 @@ fn decl(name: &str) -> TopicDecl<'_> {
     }
 }
 
-fn angle(sample: orion_ring::Sample<'_>) -> (f64, u64) {
+fn angle(sample: shm_ring::Sample<'_>) -> (f64, u64) {
     (
         f64::from_le_bytes(sample.payload.try_into().expect("eight bytes")),
         sample.time.as_nanos(),

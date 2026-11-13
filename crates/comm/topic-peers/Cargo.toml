@@ -12,10 +12,10 @@ orion-broker = { path = "../broker" }
 orion-msg-peers = { path = "../../core/msg-peers" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
-orion-ring = { path = "../../core/ring" }
+shm-ring = { workspace = true }
 orion-server = { path = "../server" }
 orion-tcp = { path = "../tcp" }
-orion-types = { path = "../../core/types", features = ["now"] }
+orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
 tracing.workspace = true

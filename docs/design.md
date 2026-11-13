@@ -87,7 +87,7 @@ unless someone off the board asked for them.
 
 ```text
 crates/
-  core/      types, wire, msg-*, check, supervise, measure, fdpass, config, log, values, ring, ring-*
+  core/      types, wire, msg-*, check, supervise, measure, config, log, values
   device/    microcontroller side: core, topics, actions, firmware. no_std, size gated
   client/    connect, topics, buffers, records, actions, files, executor, provider, orion, capi, ctl
   comm/      server, unix, tcp, ws, link-*, broker*, topic-peers, outbound, keys, hello,
@@ -96,11 +96,14 @@ crates/
              resources, audit, node-app, assembly
   gateways/  nt4, nt4-gateway, nt4-client-gateway
   bins/      orion, orion-recovery
-  testing/   wire-vectors, ring-model, ring-bench, drills
+  testing/   wire-vectors, ring-bench, drills
 web/         TypeScript client and the browser video example
 examples/    mcu-template, stm32g4-device, sample-executor. Their own workspaces
 docs/  scripts/  packaging/  testing/board-runs/
 ```
+
+The rings are not in it: `shm-ring` and its family are leaf crates hosted with the device
+library and pinned by revision in the workspace `Cargo.toml` ([ring.md](ring.md)).
 
 The workspace is one glob, `crates/*/*`, so adding a crate never edits the root. Small crates are
 what let many sessions work at once without conflicts. Fat LTO means they cost nothing in the
@@ -389,7 +392,7 @@ pub trait Service {
     fn closed(&mut self, session: SessionId, sessions: &mut Sessions);
 }
 
-// crates/core/ring. One writer, many readers. Neither call makes a system call.
+// shm-ring. One writer, many readers. Neither call makes a system call.
 impl Writer {
     pub fn publish(&mut self, field: FieldId, time: SampleTime, flags: Flags, payload: &[u8]) -> Result<u64, PublishError>;
     pub fn subscribers(&self) -> u32;
@@ -399,10 +402,10 @@ impl Reader {
     pub fn latest(&mut self, field: FieldId) -> Option<Sample<'_>>;
     pub fn at(&mut self, field: FieldId, lane_seq: u64) -> Option<Sample<'_>>;   // a field's history
 }
-// crates/core/ring-time
+// shm-ring-time
 pub fn at_or_before(reader: &Reader, field: FieldId, time: SampleTime) -> Lookup<'_>;   // Hit, Lagged, Missing
 
-// crates/core/ring-buffers and ring-holds
+// shm-ring-buffers and shm-ring-holds
 impl BufferWriter {
     pub fn take(&mut self, holders: &impl Holders) -> Result<BufferIndex, Dropped>;   // a free buffer, or drop the batch
     pub fn publish(&mut self, buffers: &[BufferIndex], time: SampleTime, meta: &[u8]) -> Result<u64, BufferError>;

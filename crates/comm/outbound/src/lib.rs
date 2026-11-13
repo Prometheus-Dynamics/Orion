@@ -35,10 +35,10 @@ use std::time::Duration;
 use orion_broker::{Broker, Topic, TopicId, TopicWatch, Topics};
 use orion_config::{ConfigError, Source};
 use orion_msg_topics::{Sample, SampleFlags};
-use orion_ring::{Flags, Next, Reader};
-use orion_ring_doorbell::Doorbell;
 use orion_server::{Comm, Delivery, Error, SessionId, Sessions};
 use orion_wire::Bytes;
+use shm_ring::{Flags, Next, Reader};
+use shm_ring_doorbell::Doorbell;
 use tokio::io::Interest;
 use tokio::net::UnixDatagram;
 use tokio::task::JoinHandle;
@@ -241,7 +241,7 @@ fn send(
     sessions: &mut Sessions,
     session: SessionId,
     topic: TopicId,
-    sample: &orion_ring::Sample<'_>,
+    sample: &shm_ring::Sample<'_>,
 ) -> Result<(), Error> {
     let frame = Sample {
         handle: topic.0,

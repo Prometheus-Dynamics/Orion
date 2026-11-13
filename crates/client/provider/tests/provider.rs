@@ -7,10 +7,10 @@ use orion_connect::{Address, Client, Options, Roles, Session};
 use orion_msg_topics::{Declare, Field, FieldType};
 use orion_provider::{Found, Provider, ResourceState, resources};
 use orion_records::Records;
-use orion_ring::{FieldId, SampleTime};
 use orion_stubs::Board;
 use orion_topics::{Publisher, Topics};
 use orion_wire::Decode;
+use shm_ring::{FieldId, SampleTime};
 
 struct Side {
     records: Records,
@@ -50,7 +50,7 @@ fn show(reader: &Side, found: &Found) -> Vec<String> {
         let deadline = Instant::now() + Duration::from_secs(2);
         while subscriber.latest(FieldId(0)).is_none() && Instant::now() < deadline {
             let _ = subscriber.wait(Duration::from_millis(20)).expect("wait");
-            while !matches!(subscriber.next(), orion_ring::Next::Empty) {}
+            while !matches!(subscriber.next(), shm_ring::Next::Empty) {}
         }
         // The declaration says what the fields are; the reader decides nothing.
         let fields: Vec<(String, FieldType, String)> = subscriber.with_declaration(|declaration| {

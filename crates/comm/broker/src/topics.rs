@@ -3,9 +3,9 @@
 use std::os::fd::OwnedFd;
 
 use orion_config::{ConfigError, Source};
-use orion_ring::{Ring, Spec};
 use orion_server::{Admits, Policy, SessionId, Sessions};
 use orion_types::{Error, NodeName, TopicName};
+use shm_ring::{Ring, Spec};
 
 /// A topic's number: the handle its publisher and subscribers know it by.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -343,16 +343,14 @@ impl Topics {
         let ring = match offered {
             Some(fd) => {
                 let ring = Ring::adopt(fd).map_err(|_| Error::Malformed)?;
-                let wanted =
-                    orion_ring::Geometry::for_spec(spec).map_err(|_| Error::Unsupported)?;
+                let wanted = shm_ring::Geometry::for_spec(spec).map_err(|_| Error::Unsupported)?;
                 if *ring.geometry() != wanted {
                     return Err(Error::Malformed);
                 }
                 ring
             }
             None => {
-                let wanted =
-                    orion_ring::Geometry::for_spec(spec).map_err(|_| Error::Unsupported)?;
+                let wanted = shm_ring::Geometry::for_spec(spec).map_err(|_| Error::Unsupported)?;
                 // Rounded to pages, as it will be mapped: checked before it is made.
                 let bytes = wanted.bytes().next_multiple_of(4096);
                 if self.bytes - had + bytes > self.config.max_bytes {

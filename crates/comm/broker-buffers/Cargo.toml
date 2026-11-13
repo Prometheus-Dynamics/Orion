@@ -16,10 +16,10 @@ tracing.workspace = true
 
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
-orion-ring = { path = "../../core/ring" }
-orion-ring-buffers = { path = "../../core/ring-buffers" }
-orion-ring-doorbell = { path = "../../core/ring-doorbell" }
-orion-ring-holds = { path = "../../core/ring-holds" }
+shm-ring = { workspace = true }
+shm-ring-buffers = { workspace = true }
+shm-ring-doorbell = { workspace = true }
+shm-ring-holds = { workspace = true }
 orion-types = { path = "../../core/types" }
 tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
 

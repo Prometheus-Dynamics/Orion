@@ -3,9 +3,9 @@
 use std::os::fd::OwnedFd;
 
 use orion_check::{Checked, Policy, Request, What};
-use orion_fdpass::FdSet;
 use orion_types::Error;
 use orion_wire::{Body, Decode, FrameView, decode_body};
+use shm_fdpass::FdSet;
 
 use crate::sessions::{Delivery, SessionId, SessionInfo, Sessions};
 

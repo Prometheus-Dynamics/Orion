@@ -8,12 +8,12 @@ use orion_hello::{Hello as HelloService, verify};
 use orion_keys::{Identity as Key, Keys, KeysConfig, SharedKeys, random};
 use orion_msg_session::{Hello, Identify, Identity, Refusal, Welcome};
 use orion_msg_topics::{Declare, Field, FieldType, Opened};
-use orion_ring::{FieldId, Flags, SampleTime, Writer};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Limits, Principal, Roles, Security};
 use orion_types::KeyId;
 use orion_wire::frame;
 use orion_wire::{Body, Bytes, Decode, List, encode_body, kind};
+use shm_ring::{FieldId, Flags, SampleTime, Writer};
 
 const USER: Principal = Principal::Local {
     uid: 1000,

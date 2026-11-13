@@ -18,7 +18,7 @@ orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
 
 [dev-dependencies]
-orion-ring = { path = "../../core/ring" }
+shm-ring = { workspace = true }
 orion-stubs = { path = "../../testing/stubs" }
 
 [lints]

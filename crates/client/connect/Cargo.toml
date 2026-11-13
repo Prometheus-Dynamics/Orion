@@ -13,7 +13,7 @@ default = []
 tokio = ["dep:tokio"]
 
 [dependencies]
-orion-fdpass = { path = "../../core/fdpass" }
+shm-fdpass = { workspace = true }
 orion-identity = { path = "../../core/identity" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-net-handshake = { path = "../../core/net-handshake" }
