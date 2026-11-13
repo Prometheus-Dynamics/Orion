@@ -352,7 +352,8 @@ fn actions(out: &mut Vec<Sample>) {
             target: target(),
             args: Bytes(b"a"),
             deadline_ms: 5000,
-            detached: true
+            detached: true,
+            on_behalf: 4
         }
     );
     sample!(

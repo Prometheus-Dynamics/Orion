@@ -4,7 +4,7 @@
 mod common;
 
 use common::{Bench, CALLER, HOUR, OTHER, OWNER, fan};
-use orion_msg_actions::{Cancel, CancelReason, Claim, Run};
+use orion_msg_actions::{CallerGone, Cancel, CancelReason, Claim, Run};
 use orion_types::Error;
 use orion_wire::Bytes;
 
@@ -30,6 +30,7 @@ impl Bench {
                 args: Bytes(&[]),
                 deadline_ms: 0,
                 detached: false,
+                on_behalf: 0,
             },
         )
         .expect("run");
@@ -174,4 +175,88 @@ fn a_program_is_not_told_of_its_own_session() {
     let _: Cancel = bench.take(OWNER);
     // `OWNER` goes: `KEEPER`, gone, is told nothing.
     assert!(bench.gone(OWNER).is_empty());
+}
+
+/// A peer's session, carrying runs for sessions of its own.
+const PEER: u32 = 50;
+/// The class bit of a peer.
+const AS_PEER: u8 = orion_check::PrincipalClass::Peer as u8;
+
+impl Bench {
+    /// A run of `set` asked by `from`, of `class`, for the caller it names `on_behalf`; the
+    /// token its claim carried.
+    fn run_for(&mut self, from: u32, class: u8, call: u64, on_behalf: u64) -> u64 {
+        self.ask_class(
+            from,
+            class,
+            &Run {
+                call,
+                name: "set".parse().expect("name"),
+                target: fan(),
+                args: Bytes(&[]),
+                deadline_ms: 0,
+                detached: false,
+                on_behalf,
+            },
+        )
+        .expect("run");
+        let claim: Claim<'_> = self.take(OWNER);
+        claim.session
+    }
+}
+
+#[test]
+fn each_caller_a_peer_carries_runs_for_is_a_caller_of_its_own() {
+    let mut bench = Bench::with_action();
+    let seven = bench.run_for(PEER, AS_PEER, 1, 7);
+    let eight = bench.run_for(PEER, AS_PEER, 2, 8);
+    let own = bench.run_for(PEER, AS_PEER, 3, 0);
+    assert!(seven != eight && seven != own && eight != own);
+    assert_eq!(bench.run_for(PEER, AS_PEER, 4, 7), seven);
+
+    // The peer says its caller 7 ended: the program hears it, once, and nothing is cancelled.
+    bench
+        .ask_class(PEER, AS_PEER, &CallerGone { session: 7 })
+        .expect("taken");
+    let told = bench.gone_frames();
+    assert_eq!(told, [(OWNER, seven)]);
+    assert!(bench.sent.frames.is_empty());
+    assert_eq!(bench.actions.take_ended(), [seven]);
+    // Said again, or of a caller it never carried, it is nothing.
+    bench
+        .ask_class(PEER, AS_PEER, &CallerGone { session: 7 })
+        .expect("taken");
+    bench
+        .ask_class(PEER, AS_PEER, &CallerGone { session: 99 })
+        .expect("taken");
+    assert!(bench.sent.frames.is_empty());
+
+    // The link goes: every caller behind it ends, each once.
+    let mut told = bench.gone(PEER);
+    told.sort_unstable();
+    let mut want = [(OWNER, eight), (OWNER, own)];
+    want.sort_unstable();
+    assert_eq!(told, want);
+    let mut ended = bench.actions.take_ended();
+    ended.sort_unstable();
+    let mut want = [eight, own];
+    want.sort_unstable();
+    assert_eq!(ended, want);
+}
+
+#[test]
+fn only_a_peer_speaks_for_another_session() {
+    let mut bench = Bench::with_action();
+    // A program on the board naming another caller is still itself.
+    let own = bench.run_for(CALLER, 4, 1, 0);
+    assert_eq!(bench.run_for(CALLER, 4, 2, 7), own);
+    // And may not say anyone ended.
+    assert_eq!(
+        bench.ask_class(CALLER, 4, &CallerGone { session: own }),
+        Err(Error::Denied)
+    );
+    assert!(bench.sent.frames.is_empty());
+    // Its own end is handed on, for runs carried elsewhere.
+    assert_eq!(bench.gone(CALLER), [(OWNER, own)]);
+    assert_eq!(bench.actions.take_ended(), [own]);
 }

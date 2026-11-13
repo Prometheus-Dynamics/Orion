@@ -62,6 +62,11 @@ body! {
         pub deadline_ms: u64,
         /// Whether it carries on if the caller goes away.
         pub detached: bool,
+        ;
+        /// For a run another node carries here: that node's token for the session that asked
+        /// it, so each session behind one peer link is a caller of its own here. Zero for the
+        /// asker's own session, and read as zero from anyone but a peer.
+        pub on_behalf: u64,
     }
 }
 
@@ -169,6 +174,9 @@ body! {
     /// The session named by `session` in a [`Claim`] ended, for whatever cause. Sent once to
     /// each program that was given a run from it, whether its runs are still going or not. A
     /// detached run goes on; what a program holds for that caller is its own business.
+    ///
+    /// Also sent by a peer's node logic to this node, naming its own token for a session it
+    /// carried runs for with [`Run::on_behalf`]: that session ended there, so it has here.
     pub struct CallerGone = kind::ACTION_CALLER_GONE {
         /// The session's token.
         pub session: u64,

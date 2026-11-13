@@ -224,7 +224,13 @@ actions; any program on the board adds its own.
   `ACTION_CALLER_GONE` with the token, once, whether its runs are still going or not. A detached
   run goes on until its deadline, or until a later session of the same identity attaches and
   cancels it. Orion says only that the session ended: what a program holds for that caller is
-  its own business. A run forwarded from another node was asked for by that node's session.
+  its own business. A run carried here by another node names, in `on_behalf`, that node's
+  token for the session that asked it, so each session behind one peer link is a caller of its
+  own here with a token of its own. When that session ends there, the node that carried the
+  run sends `ACTION_CALLER_GONE` with its token, and the program here is told as above, while
+  the link between the nodes lives on; when the link ends, every caller behind it does. Only a
+  peer's `on_behalf` is read, and only a peer may say a caller ended. Each node passes an end
+  on to where it carried runs, so a run carried over several nodes is told at the end of them.
 - **Detached runs.** A run started detached carries on when its caller's session ends, with
   its deadline and under its program as before. It must have a deadline, so that it ends
   even if nobody comes back: without one it is refused as `a detached run needs a deadline`,

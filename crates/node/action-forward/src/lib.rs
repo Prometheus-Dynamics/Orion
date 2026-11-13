@@ -52,6 +52,9 @@ pub struct Forwards {
     reporter: Sender<Event>,
     forwarded: BTreeMap<u64, Forwarded>,
     next: u64,
+    /// Each other node a caller's runs went to, and that caller's token here: who is told
+    /// when the caller ends.
+    carried: Vec<(NodeName, u64)>,
 }
 
 impl Forwards {
@@ -68,6 +71,7 @@ impl Forwards {
             reporter,
             forwarded: BTreeMap::new(),
             next: 0,
+            carried: Vec::new(),
         }
     }
 
@@ -83,13 +87,21 @@ impl Forwards {
         self.forwarded.len()
     }
 
-    /// Carries a run to `node`, which is reached at `address` (`host:port`).
+    /// Carries a run to `node`, which is reached at `address` (`host:port`), for the caller
+    /// this node knows by `token`: the other node is told the token, and is told again when
+    /// that caller ends.
     ///
     /// # Errors
     ///
     /// [`Error::Busy`] with too many under way, [`Error::Unsupported`] for a run to this node
     /// itself, [`Error::AlreadyExists`] if the caller already has a run with that number.
-    pub fn run(&mut self, asked: &Asked<'_>, node: &NodeName, address: &str) -> Result<(), Error> {
+    pub fn run(
+        &mut self,
+        asked: &Asked<'_>,
+        token: u64,
+        node: &NodeName,
+        address: &str,
+    ) -> Result<(), Error> {
         let run: Run<'_> = asked.body()?;
         if *node == self.me {
             return Err(Error::Unsupported);
@@ -116,7 +128,15 @@ impl Forwards {
             target: run.target.clone(),
             args: run.args.0.to_vec(),
             deadline_ms: run.deadline_ms,
+            on_behalf: token,
         });
+        if !self
+            .carried
+            .iter()
+            .any(|(to, carried)| to == node && *carried == token)
+        {
+            self.carried.push((node.clone(), token));
+        }
         self.forwarded.insert(
             id,
             Forwarded {
@@ -164,6 +184,21 @@ impl Forwards {
                 }
             }
         }
+    }
+
+    /// The caller this node knows by `token` ended: each other node its runs went to is told,
+    /// once.
+    pub fn caller_gone(&mut self, token: u64) {
+        let links = &self.links;
+        self.carried.retain(|(node, carried)| {
+            if *carried != token {
+                return true;
+            }
+            if let Some(link) = links.get(node) {
+                link.send(Command::CallerGone { token });
+            }
+            false
+        });
     }
 
     /// Forgets every caller: the comm core they came through is gone. Their runs are

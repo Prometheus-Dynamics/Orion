@@ -74,6 +74,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C29](docs/prs/C29.md) A subscriber across the network can start from the newest values (wave 18)
 - [x] [D15](docs/prs/D15.md) A push with a known digest, a pushed file checked for change, a stepped push (wave 18)
 - [x] [C33](docs/prs/C33.md) A program hears that a caller's session ended (wave 18)
+- [x] [C34](docs/prs/C34.md) A caller's session and its end follow a run to another node (wave 18; needs C33)
 
 ## D. Client
 
@@ -189,3 +190,5 @@ Agreed with the libraries around Orion on 2026-11-11.
 
 - What wakes a graph. Every topic gives a subscriber something it can sleep on, so any answer works.
 - Pinning a graph to a core. A workload's placement has room for a CPU set (A9).
+- The MCU template's C API does not pass `CALLER_GONE` on (C33). Low priority: it runs one run at a
+  time and holds nothing for a caller.

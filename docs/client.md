@@ -213,7 +213,8 @@ told it was cancelled). Node logic sets it. What a caller says of why is not kep
 from another node keeps the reason that node gave. `Unsaid` comes from a host that does not say.
 
 A run also carries `session`, a token for the caller's session that is never reused while the
-node runs, also when one identity connects twice. When that session ends, for any cause, the
+node runs, also when one identity connects twice, and also for a caller on another node whose
+run was carried here. When that session ends, for any cause, the
 program is told once with `Request::CallerGone { session }`, whether its runs from it are still
 going or not: that is the time to let go of what it holds for that caller. A detached run goes
 on until its deadline. A detached run needs a deadline (`deadline_ms`), no longer than the node

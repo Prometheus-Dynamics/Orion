@@ -158,6 +158,14 @@ pub const ACTIONS: &[Route] = &[
         standing: false,
         ends: Ends::ActionResult,
     },
+    // Another node's node logic saying a session it carried runs for has ended.
+    Route {
+        kind: kind::ACTION_CALLER_GONE,
+        access: Access::Read("actions"),
+        who: Who::Any(Admits::PEER),
+        standing: false,
+        ends: Ends::Nothing,
+    },
 ];
 
 /// The kinds of a file being sent to this node. Their answers name the transfer, not the

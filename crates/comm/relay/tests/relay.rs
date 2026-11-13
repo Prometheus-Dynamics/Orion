@@ -154,6 +154,7 @@ fn run_of(name: &str, target: Target) -> Run<'static> {
         args: Bytes(b"x"),
         deadline_ms: 0,
         detached: false,
+        on_behalf: 0,
     }
 }
 

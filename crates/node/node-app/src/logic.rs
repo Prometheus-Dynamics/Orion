@@ -137,6 +137,7 @@ impl Logic {
         kind::ACTION_RESULT,
         kind::ACTION_CANCEL,
         kind::ACTION_ATTACH,
+        kind::ACTION_CALLER_GONE,
         kind::FILE_BEGIN,
         kind::FILE_CHUNK,
         kind::FILE_COMMIT,
@@ -166,6 +167,7 @@ impl Logic {
         kind::ACTION_RESULT,
         kind::ACTION_CANCEL,
         kind::ACTION_ATTACH,
+        kind::ACTION_CALLER_GONE,
         kind::FILE_BEGIN,
         kind::FILE_CHUNK,
         kind::FILE_COMMIT,
@@ -361,7 +363,16 @@ impl Logic {
         if address.is_empty() {
             return Err(Error::NotFound);
         }
-        self.forwards.run(asked, &node, address)
+        // The other node is told who asked, so that it hears when they are gone.
+        let token = self.actions.caller_token(asked)?;
+        self.forwards.run(asked, token, &node, address)
+    }
+
+    /// Tells the other nodes that carried runs for callers who ended since the last call.
+    fn pass_ended(&mut self) {
+        for token in self.actions.take_ended() {
+            self.forwards.caller_gone(token);
+        }
     }
 
     fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) {
@@ -425,6 +436,7 @@ impl Logic {
                 answered => answered,
             }
         };
+        self.pass_ended();
         if let Some(audit) = &self.audit
             && let Some((did, what)) = done(asked)
         {
@@ -594,6 +606,7 @@ impl Handler for Logic {
             self.pulling.gone(gone.session);
             let now = self.now_ms();
             self.actions.gone(gone.session, now, &mut through);
+            self.pass_ended();
         }
         let failed = through.failed.take();
         self.scratch = scratch;

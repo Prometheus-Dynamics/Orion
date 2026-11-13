@@ -86,6 +86,9 @@ struct Driver {
     stop: Arc<AtomicBool>,
     /// Why each run it was told to stop was stopped, in order.
     heard: Arc<std::sync::Mutex<Vec<String>>>,
+    /// The session token of each run it was handed, in order, and each session it was told
+    /// had ended.
+    sessions: Arc<std::sync::Mutex<(Vec<u64>, Vec<u64>)>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -95,6 +98,8 @@ impl Driver {
         let (socket, stopping) = (socket.to_owned(), stop.clone());
         let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
         let hearing = heard.clone();
+        let sessions = Arc::new(std::sync::Mutex::new((Vec::new(), Vec::new())));
+        let seeing = sessions.clone();
         let (ready, started) = std::sync::mpsc::channel();
         let thread = std::thread::spawn(move || {
             let orion = Orion::connect(&Address::Local(socket), "light-driver").expect("connect");
@@ -126,7 +131,13 @@ impl Driver {
                     return;
                 };
                 match request {
-                    Some(Request::Run { call, args, .. }) => {
+                    Some(Request::Run {
+                        call,
+                        args,
+                        session,
+                        ..
+                    }) => {
+                        seeing.lock().expect("sessions").0.push(session);
                         let _ = blink.progress(call, 40, "blinking", b"");
                         if args == b"slow" {
                             continue;
@@ -144,7 +155,10 @@ impl Driver {
                             &format!("stopped: {reason:?}"),
                         );
                     }
-                    Some(Request::CallerGone { .. }) | None => {}
+                    Some(Request::CallerGone { session }) => {
+                        seeing.lock().expect("sessions").1.push(session);
+                    }
+                    None => {}
                 }
             }
         });
@@ -154,6 +168,7 @@ impl Driver {
         Self {
             stop,
             heard,
+            sessions,
             thread: Some(thread),
         }
     }
@@ -354,6 +369,13 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
         "why crosses to the other node"
     );
 
+    // Every run the caller asked for came to the program as one caller's, though it came
+    // over the link between the nodes.
+    let (ran, gone) = right_node.driver.sessions.lock().expect("sessions").clone();
+    let mine = ran[0];
+    assert!(ran.iter().all(|session| *session == mine), "{ran:?}");
+    assert!(gone.is_empty(), "{gone:?}");
+
     // A caller that goes with a run under way on the other node: the program there is told
     // why it is to stop, as the node that carried the run said it.
     let brief =
@@ -372,6 +394,34 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
     assert_eq!(
         *right_node.driver.heard.lock().expect("heard"),
         ["Asked", "CallerGone"]
+    );
+    // And it hears that caller's session ended, by a token of its own, while the link between
+    // the nodes lives on: once, and not for the caller still there.
+    let theirs = *right_node
+        .driver
+        .sessions
+        .lock()
+        .expect("sessions")
+        .0
+        .last()
+        .expect("a run");
+    assert_ne!(theirs, mine);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while right_node
+        .driver
+        .sessions
+        .lock()
+        .expect("sessions")
+        .1
+        .is_empty()
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        right_node.driver.sessions.lock().expect("sessions").1,
+        [theirs]
     );
 
     // The owner goes away with a run under way: the caller is told, and does not wait.

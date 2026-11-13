@@ -130,14 +130,25 @@ pub struct Actions {
     next: u64,
     events: Vec<Event>,
     ended: VecDeque<Ended>,
-    /// Each session that asked for a run, and its token: the comm core's numbers come round
-    /// again, tokens never do.
-    tokens: Vec<(u32, u64)>,
+    /// Each caller that asked for a run, as its session and, for a peer carrying runs for
+    /// sessions of its own, that node's token for one of them; and its token here. The comm
+    /// core's numbers come round again, tokens never do.
+    tokens: Vec<Caller>,
     next_token: u64,
     /// Each program that was given a run, and the token of the session that asked for it:
     /// who is told when that session ends.
     given: Vec<(u32, u64)>,
     max_detached_ms: u64,
+    /// Tokens of callers that ended since [`Actions::take_ended`].
+    ended_tokens: Vec<u64>,
+}
+
+/// A caller: a session, or one session behind a peer's.
+#[derive(Debug)]
+struct Caller {
+    session: u32,
+    on_behalf: u64,
+    token: u64,
 }
 
 impl Actions {
@@ -149,6 +160,7 @@ impl Actions {
         kind::ACTION_RESULT,
         kind::ACTION_CANCEL,
         kind::ACTION_ATTACH,
+        kind::ACTION_CALLER_GONE,
     ];
 
     /// An empty list on the node `me`.
@@ -165,6 +177,7 @@ impl Actions {
             next_token: 0,
             given: Vec::new(),
             max_detached_ms: MAX_DETACHED_MS,
+            ended_tokens: Vec::new(),
         }
     }
 
@@ -173,14 +186,50 @@ impl Actions {
         self.max_detached_ms = max_ms;
     }
 
-    /// The token of `session`, made the first time it asks for a run.
-    fn token(&mut self, session: u32) -> u64 {
-        if let Some((_, token)) = self.tokens.iter().find(|(known, _)| *known == session) {
-            return *token;
+    /// The token of `session`, or of the session behind it that a peer named `on_behalf`,
+    /// made the first time it is asked for.
+    fn token(&mut self, session: u32, on_behalf: u64) -> u64 {
+        if let Some(caller) = self
+            .tokens
+            .iter()
+            .find(|caller| caller.session == session && caller.on_behalf == on_behalf)
+        {
+            return caller.token;
         }
         self.next_token += 1;
-        self.tokens.push((session, self.next_token));
+        self.tokens.push(Caller {
+            session,
+            on_behalf,
+            token: self.next_token,
+        });
         self.next_token
+    }
+
+    /// The token of whoever asked `asked`, a `Run`: what a run carried to another node names
+    /// as its [`Run::on_behalf`], so the session's end can follow it there.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Malformed`] for a body that is not a `Run`.
+    pub fn caller_token(&mut self, asked: &Asked<'_>) -> Result<u64, Error> {
+        let run: Run<'_> = asked.body()?;
+        Ok(self.token(asked.session, on_behalf(asked, &run)))
+    }
+
+    /// The tokens of callers that ended since the last call, for runs this node carried
+    /// elsewhere on their behalf.
+    pub fn take_ended(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.ended_tokens)
+    }
+
+    /// The caller at `at` ended: each program given a run from it is told, once.
+    fn caller_ended(&mut self, at: usize, out: &mut dyn Out) {
+        let token = self.tokens.swap_remove(at).token;
+        for (owner, _) in self.given.iter().filter(|(_, given)| *given == token) {
+            let _ = out.send(*owner, &CallerGone { session: token });
+        }
+        self.given.retain(|(_, given)| *given != token);
+        self.ended_tokens.push(token);
     }
 
     /// How many actions are on the list.
@@ -203,6 +252,7 @@ impl Actions {
         self.ended.clear();
         self.tokens.clear();
         self.given.clear();
+        self.ended_tokens.clear();
     }
 
     /// How many detached runs that ended are kept for their starter.
@@ -404,7 +454,7 @@ impl Actions {
                 self.next += 1;
                 let id = self.next;
                 let principal = asked.principal();
-                let session = self.token(from);
+                let session = self.token(from, on_behalf(asked, &run));
                 out.send(
                     owner,
                     &Claim {
@@ -495,6 +545,21 @@ impl Actions {
                 )
             }
             kind::ACTION_ATTACH => self.attach(asked, now_ms, out),
+            kind::ACTION_CALLER_GONE => {
+                // A peer's session that it carried runs here for ended there.
+                if asked.class != orion_check::PrincipalClass::Peer as u8 {
+                    return Err(Error::Denied);
+                }
+                let gone: CallerGone = asked.body()?;
+                if gone.session != 0
+                    && let Some(at) = self.tokens.iter().position(|caller| {
+                        caller.session == from && caller.on_behalf == gone.session
+                    })
+                {
+                    self.caller_ended(at, out);
+                }
+                Ok(())
+            }
             _ => Err(Error::Unsupported),
         }
     }
@@ -544,13 +609,14 @@ impl Actions {
             }
             at += 1;
         }
-        // After its runs are dealt with: then the session itself.
-        if let Some(at) = self.tokens.iter().position(|(known, _)| *known == session) {
-            let (_, token) = self.tokens.swap_remove(at);
-            for (owner, _) in self.given.iter().filter(|(_, given)| *given == token) {
-                let _ = out.send(*owner, &CallerGone { session: token });
-            }
-            self.given.retain(|(_, given)| *given != token);
+        // After its runs are dealt with: then the session itself, and every session a peer
+        // carried runs for over it.
+        while let Some(at) = self
+            .tokens
+            .iter()
+            .position(|caller| caller.session == session)
+        {
+            self.caller_ended(at, out);
         }
     }
 
@@ -612,5 +678,15 @@ fn reason_of(asked: &Asked<'_>, said: CancelReason) -> CancelReason {
         said
     } else {
         CancelReason::Asked
+    }
+}
+
+/// Whom `asked`'s `run` is for behind its session: what a peer named, and nothing for anyone
+/// else, so no caller can pass for another.
+fn on_behalf(asked: &Asked<'_>, run: &Run<'_>) -> u64 {
+    if asked.class == orion_check::PrincipalClass::Peer as u8 {
+        run.on_behalf
+    } else {
+        0
     }
 }

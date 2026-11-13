@@ -113,8 +113,8 @@ pub enum Request {
         caller: String,
         /// The token of the session that asked: never the same for two sessions while the
         /// node runs, also when one identity connects twice. [`Request::CallerGone`] names
-        /// it when that session ends. Zero from a node that does not say. A run forwarded
-        /// from another node was asked for by that node's session.
+        /// it when that session ends. Zero from a node that does not say. A run carried
+        /// from another node has the token of the session that asked for it there.
         session: u64,
     },
     /// Stop this run. Finish it as [`Outcome::Cancelled`], or as whatever it had become.
@@ -314,6 +314,8 @@ impl Actions {
             args: Bytes(action.args),
             deadline_ms: action.deadline_ms,
             detached: action.detached,
+            // Its own session: only another node's node logic speaks for another.
+            on_behalf: 0,
         })?;
         Ok(self.follow(call, seq))
     }

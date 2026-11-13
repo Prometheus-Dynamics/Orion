@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{ClientError, Roles, Session};
 use orion_dial::Dialer;
-use orion_msg_actions::{ActionResult, Cancel, CancelReason, Outcome, Progress, Run, Target};
+use orion_msg_actions::{
+    ActionResult, CallerGone, Cancel, CancelReason, Outcome, Progress, Run, Target,
+};
 use orion_msg_session::Refusal;
 use orion_types::{ActionName, Error, NodeName};
 use orion_wire::{Bytes, kind};
@@ -30,12 +32,16 @@ pub(crate) enum Command {
         target: Target,
         args: Vec<u8>,
         deadline_ms: u64,
+        /// This node's token for the caller.
+        on_behalf: u64,
     },
     Cancel {
         id: u64,
         /// Why, for the other node to pass on.
         reason: CancelReason,
     },
+    /// The caller this node knows by `token` ended.
+    CallerGone { token: u64 },
 }
 
 /// What the helper tells node logic.
@@ -142,6 +148,7 @@ impl Helper {
                 target,
                 args,
                 deadline_ms,
+                on_behalf,
             } => {
                 if let Err(error) = self.connect(&address) {
                     warn!("{} cannot be reached at {address}: {error}", self.node);
@@ -162,6 +169,7 @@ impl Helper {
                     // Whether the caller here may leave is this node's to remember. To the
                     // other node this session is the caller, and it stays.
                     detached: false,
+                    on_behalf,
                 };
                 let sent = self.session.as_mut().map(|session| session.send(&run));
                 match sent {
@@ -182,6 +190,14 @@ impl Helper {
                 if self.running.contains_key(&id)
                     && let Some(session) = &mut self.session
                     && let Err(error) = session.send(&Cancel { call: id, reason })
+                {
+                    self.lost(&error);
+                }
+            }
+            Command::CallerGone { token } => {
+                // With no session, the other node has already seen every caller behind it end.
+                if let Some(session) = &mut self.session
+                    && let Err(error) = session.send(&CallerGone { session: token })
                 {
                     self.lost(&error);
                 }

@@ -116,6 +116,7 @@ impl Bench {
                 args: Bytes(b"1500"),
                 deadline_ms,
                 detached,
+                on_behalf: 0,
             },
         )
     }
@@ -124,6 +125,11 @@ impl Bench {
     /// was sent and returned, in order; the rest stays to be taken.
     pub fn gone(&mut self, session: u32) -> Vec<(u32, u64)> {
         self.actions.gone(session, self.now, &mut self.sent);
+        self.gone_frames()
+    }
+
+    /// The `CallerGone` frames sent so far, taken out of what was sent, in order.
+    pub fn gone_frames(&mut self) -> Vec<(u32, u64)> {
         let mut told = Vec::new();
         self.sent.frames.retain(|(to, kind, payload, _)| {
             if *kind != kind::ACTION_CALLER_GONE {
