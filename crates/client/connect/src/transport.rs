@@ -11,11 +11,12 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use orion_identity::Identity;
+use orion_msg_session::{LINK_SEALED_OVERHEAD, LinkSealed};
 use orion_net_handshake::{
     Fresh, MODE_PLAIN, MODE_SIGNED, SERVER_HELLO_LEN, STATUS_OK, Seal, TAG_LEN, Transcript, hello,
     preamble,
 };
-use orion_wire::{StreamDecoder, StreamEncoder, frame};
+use orion_wire::{Bytes, Decode, StreamDecoder, StreamEncoder, encode_body, frame, kind};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::fs::OFlags;
 use rustix::termios::{ControlModes, InputModes, OptionalActions, QueueSelector, SpecialCodeIndex};
@@ -72,6 +73,10 @@ pub(crate) enum Transport {
         chunk: Box<[u8; 1024]>,
         at: usize,
         len: usize,
+        /// Once the link's session is signed: the board's seal, then this client's.
+        seals: Option<(Seal, Seal)>,
+        /// Room for one sealed frame, on a signed link.
+        sealed: Vec<u8>,
     },
 }
 
@@ -147,6 +152,16 @@ impl Transport {
             chunk: Box::new([0; 1024]),
             at: 0,
             len: 0,
+            seals: None,
+            sealed: Vec::new(),
+        }
+    }
+
+    /// Seals every frame on this link from now on (`sign_link`).
+    pub(crate) fn seal_link(&mut self, from_board: Seal, to_board: Seal) {
+        if let Self::Link { seals, sealed, .. } = self {
+            *seals = Some((from_board, to_board));
+            *sealed = vec![0; LINK_FRAME];
         }
     }
 
@@ -249,7 +264,8 @@ impl Transport {
     /// The largest frame this way of connecting carries, whatever was asked for.
     pub(crate) const fn frame_limit(&self) -> usize {
         match self {
-            Self::Link { .. } => LINK_FRAME,
+            Self::Link { seals: None, .. } => LINK_FRAME,
+            Self::Link { .. } => LINK_FRAME - LINK_SEALED_OVERHEAD,
             _ => usize::MAX,
         }
     }
@@ -281,7 +297,25 @@ impl Transport {
                 }
                 Ok(())
             }
-            Self::Link { file, .. } => {
+            Self::Link {
+                file,
+                seals,
+                sealed,
+                ..
+            } => {
+                let frame = match seals {
+                    Some((_, to_board)) => {
+                        let tag = to_board.seal(frame);
+                        let body = LinkSealed {
+                            frame: Bytes(frame),
+                            tag: Bytes(&tag),
+                        };
+                        let len =
+                            encode_body(&body, 0, sealed).map_err(|_| ClientError::TooLarge)?;
+                        &sealed[..len]
+                    }
+                    None => frame,
+                };
                 let mut encoder = StreamEncoder::for_frame(frame).with_leading_delimiter();
                 let mut out = [0_u8; 512];
                 loop {
@@ -367,6 +401,8 @@ impl Transport {
                 chunk,
                 at,
                 len,
+                seals,
+                ..
             } => loop {
                 if *at == *len {
                     match file.read(&mut chunk[..]) {
@@ -387,6 +423,23 @@ impl Transport {
                 }
                 let (used, pushed) = decoder.push_slice(&chunk[*at..*len]);
                 *at += used;
+                if let (Ok(Some(view)), Some((from_board, _))) = (&pushed, seals.as_mut()) {
+                    if view.kind() != kind::LINK_SEALED {
+                        return Err(ClientError::Protocol(
+                            "a frame of a signed link came unsealed",
+                        ));
+                    }
+                    let body = LinkSealed::decode(view.payload())
+                        .map_err(|_| ClientError::Protocol("a sealed frame that does not read"))?;
+                    if !from_board.open(body.frame.0, body.tag.0) {
+                        return Err(ClientError::Protocol("a frame failed its check"));
+                    }
+                    let to = buf
+                        .get_mut(..body.frame.0.len())
+                        .ok_or(ClientError::TooLarge)?;
+                    to.copy_from_slice(body.frame.0);
+                    return Ok(Step::Frame(to.len()));
+                }
                 if let Ok(Some(view)) = pushed {
                     return frame::encode(view.header(), view.payload(), buf)
                         .map(Step::Frame)

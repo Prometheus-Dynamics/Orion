@@ -8,6 +8,8 @@ use std::os::fd::OwnedFd;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use orion_keys::SharedKeys;
+use orion_net_handshake::Seal;
 use orion_server::{Carrier, Connection, FdSet, FrameRead, FrameWrite, Principal, Roles};
 use orion_supervise::{Decision, Path, Report, Status, Supervisor};
 use orion_types::DeviceName;
@@ -15,6 +17,8 @@ use orion_wire::frame;
 use orion_wire::{StreamDecoder, StreamEncoder};
 use tokio::sync::Notify;
 use tracing::{info, warn};
+
+use crate::signed::{self, Frames, Signed};
 
 /// The largest frame a link carries.
 pub const MAX_FRAME: usize = 8192;
@@ -127,6 +131,60 @@ async fn next_frame<S: ByteStream>(
     }
 }
 
+/// Writes `frame` to the stream, encoded, through `out`.
+async fn write_frame<S: ByteStream>(
+    shared: &Shared<S>,
+    stream: &S,
+    out: &mut [u8; CHUNK],
+    frame: &[u8],
+) -> io::Result<()> {
+    // The leading delimiter ends any noise since the last frame, so it cannot spoil this one.
+    let mut encoder = StreamEncoder::for_frame(frame).with_leading_delimiter();
+    loop {
+        let len = encoder.fill(out);
+        if len == 0 {
+            return Ok(());
+        }
+        let mut sent = 0;
+        while sent < len {
+            match stream.write(&out[sent..len]).await {
+                Ok(0) => {
+                    shared.failed.set(true);
+                    return Err(io::ErrorKind::WriteZero.into());
+                }
+                Ok(wrote) => {
+                    sent += wrote;
+                    shared.count(|stats| stats.bytes_tx += wrote as u64);
+                }
+                Err(error) => {
+                    shared.failed.set(true);
+                    return Err(error);
+                }
+            }
+        }
+    }
+}
+
+/// The handshake's frames, on the stream itself, before any connection has it.
+struct Handshake<'a, S> {
+    shared: &'a Shared<S>,
+    stream: &'a S,
+    reading: &'a mut Reading,
+    frame: Vec<u8>,
+    out: [u8; CHUNK],
+}
+
+impl<S: ByteStream> Frames for Handshake<'_, S> {
+    async fn send(&mut self, frame: &[u8]) -> io::Result<()> {
+        write_frame(self.shared, self.stream, &mut self.out, frame).await
+    }
+
+    async fn next(&mut self) -> io::Result<Option<&[u8]>> {
+        let found = next_frame(self.shared, self.stream, self.reading, &mut self.frame).await?;
+        Ok(found.map(|len| &self.frame[..len]))
+    }
+}
+
 /// A link over a byte stream, as a carrier of the one wire.
 pub struct StreamCarrier<O: Open> {
     open: O,
@@ -135,6 +193,7 @@ pub struct StreamCarrier<O: Open> {
     supervisor: Supervisor,
     started: Instant,
     report: Option<Box<dyn Report>>,
+    keys: Option<SharedKeys>,
 }
 
 impl<O: Open> std::fmt::Debug for StreamCarrier<O> {
@@ -166,7 +225,17 @@ impl<O: Open> StreamCarrier<O> {
             supervisor: Supervisor::new(Path::Access),
             started: Instant::now(),
             report: None,
+            keys: None,
         }
+    }
+
+    /// Takes signed sessions too: a tool that proves a key with the board's `keys` is that key's
+    /// operator (or pinned peer) on this link, not its device, and its frames are sealed. Without
+    /// this a tool that asks is told the link takes no signed sessions.
+    #[must_use]
+    pub fn signed(mut self, keys: SharedKeys) -> Self {
+        self.keys = Some(keys);
+        self
     }
 
     /// Where the link's state goes whenever it changes: running, or retrying and when.
@@ -249,6 +318,39 @@ impl<O: Open> Carrier for StreamCarrier<O> {
             let found = next_frame(&self.shared, &stream, &mut reading, &mut first).await;
             reading.first = first;
             match found {
+                Ok(Some(len)) if signed::asks(&reading.first[..len]) => {
+                    let asked = reading.first[..len].to_vec();
+                    let mut handshake = Handshake {
+                        shared: &self.shared,
+                        stream: &stream,
+                        reading: &mut reading,
+                        frame: vec![0; MAX_FRAME],
+                        out: [0; CHUNK],
+                    };
+                    let welcomed = tokio::time::timeout(
+                        signed::HANDSHAKE,
+                        signed::welcome(&mut handshake, &asked, self.keys.as_ref()),
+                    )
+                    .await;
+                    match welcomed {
+                        Ok(Ok(signed)) => {
+                            info!(link = %self.name, principal = ?signed.principal, "a signed session on the link");
+                            self.shared.count(|stats| stats.connections += 1);
+                            return Ok(StreamConnection {
+                                name: self.name.clone(),
+                                shared: self.shared.clone(),
+                                stream,
+                                reading,
+                                first: 0,
+                                signed: Some(signed),
+                            });
+                        }
+                        Ok(Err(error)) => {
+                            info!(link = %self.name, %error, "a signed session was not let in");
+                        }
+                        Err(_) => info!(link = %self.name, "a signed session took too long"),
+                    }
+                }
                 Ok(Some(len)) => {
                     self.shared.count(|stats| stats.connections += 1);
                     return Ok(StreamConnection {
@@ -257,6 +359,7 @@ impl<O: Open> Carrier for StreamCarrier<O> {
                         stream,
                         reading,
                         first: len,
+                        signed: None,
                     });
                 }
                 Ok(None) => self.shared.failed.set(true),
@@ -277,6 +380,8 @@ pub struct StreamConnection<S: ByteStream> {
     stream: Rc<S>,
     reading: Box<Reading>,
     first: usize,
+    /// The key the session proved, and its seals; `None` for a device.
+    signed: Option<Signed>,
 }
 
 impl<S: ByteStream> std::fmt::Debug for StreamConnection<S> {
@@ -290,14 +395,21 @@ impl<S: ByteStream + 'static> Connection for StreamConnection<S> {
     type Write = StreamWrite<S>;
 
     fn principal(&self) -> Principal {
-        Principal::Device(self.name.clone())
+        match &self.signed {
+            Some(signed) => signed.principal.clone(),
+            None => Principal::Device(self.name.clone()),
+        }
     }
 
     fn offers(&self) -> Roles {
-        Roles::DEVICE
-            .and(Roles::PROVIDER)
-            .and(Roles::EXECUTOR)
-            .and(Roles::CLIENT)
+        match &self.signed {
+            // What the network offers a key: a tool, or another node.
+            Some(_) => Roles::CLIENT.and(Roles::PEER),
+            None => Roles::DEVICE
+                .and(Roles::PROVIDER)
+                .and(Roles::EXECUTOR)
+                .and(Roles::CLIENT),
+        }
     }
 
     fn passes_descriptors(&self) -> bool {
@@ -305,17 +417,33 @@ impl<S: ByteStream + 'static> Connection for StreamConnection<S> {
     }
 
     fn split(self) -> (Self::Read, Self::Write) {
+        let (reading, writing) = match self.signed {
+            Some(signed) => (Some(signed.reading), Some(signed.writing)),
+            None => (None, None),
+        };
+        // Room for one sealed frame each way, only on a signed session.
+        let room = |seal: &Option<Seal>| {
+            if seal.is_some() {
+                vec![0; MAX_FRAME]
+            } else {
+                Vec::new()
+            }
+        };
         (
             StreamRead {
                 shared: self.shared.clone(),
                 stream: self.stream.clone(),
                 reading: Some(self.reading),
                 first: self.first,
+                sealed: room(&reading),
+                seal: reading,
             },
             StreamWrite {
                 shared: self.shared,
                 stream: self.stream,
                 out: [0; CHUNK],
+                sealed: room(&writing),
+                seal: writing,
             },
         )
     }
@@ -327,6 +455,8 @@ pub struct StreamRead<S: ByteStream> {
     stream: Rc<S>,
     reading: Option<Box<Reading>>,
     first: usize,
+    seal: Option<Seal>,
+    sealed: Vec<u8>,
 }
 
 impl<S: ByteStream> std::fmt::Debug for StreamRead<S> {
@@ -351,11 +481,22 @@ impl<S: ByteStream> FrameRead for StreamRead<S> {
             to.copy_from_slice(&reading.first[..len]);
             return Ok(Some(len));
         }
-        let found = next_frame(&self.shared, &self.stream, reading, buf).await;
-        if !matches!(found, Ok(Some(_))) {
-            self.shared.failed.set(true);
+        let Some(seal) = &mut self.seal else {
+            let found = next_frame(&self.shared, &self.stream, reading, buf).await;
+            if !matches!(found, Ok(Some(_))) {
+                self.shared.failed.set(true);
+            }
+            return found;
+        };
+        match next_frame(&self.shared, &self.stream, reading, &mut self.sealed).await {
+            // A frame that fails its check ends the session, not the link: the next frame on
+            // the link starts over.
+            Ok(Some(len)) => signed::open(seal, &self.sealed[..len], buf).map(Some),
+            other => {
+                self.shared.failed.set(true);
+                other
+            }
         }
-        found
     }
 }
 
@@ -372,6 +513,8 @@ pub struct StreamWrite<S: ByteStream> {
     shared: Rc<Shared<S>>,
     stream: Rc<S>,
     out: [u8; CHUNK],
+    seal: Option<Seal>,
+    sealed: Vec<u8>,
 }
 
 impl<S: ByteStream> std::fmt::Debug for StreamWrite<S> {
@@ -388,30 +531,12 @@ impl<S: ByteStream> FrameWrite for StreamWrite<S> {
                 "a link carries no descriptors",
             ));
         }
-        // The leading delimiter ends any noise since the last frame, so it cannot spoil this one.
-        let mut encoder = StreamEncoder::for_frame(frame).with_leading_delimiter();
-        loop {
-            let len = encoder.fill(&mut self.out);
-            if len == 0 {
-                return Ok(());
+        match &mut self.seal {
+            Some(seal) => {
+                let sealed = signed::seal(seal, frame, &mut self.sealed)?;
+                write_frame(&self.shared, &self.stream, &mut self.out, sealed).await
             }
-            let mut sent = 0;
-            while sent < len {
-                match self.stream.write(&self.out[sent..len]).await {
-                    Ok(0) => {
-                        self.shared.failed.set(true);
-                        return Err(io::ErrorKind::WriteZero.into());
-                    }
-                    Ok(wrote) => {
-                        sent += wrote;
-                        self.shared.count(|stats| stats.bytes_tx += wrote as u64);
-                    }
-                    Err(error) => {
-                        self.shared.failed.set(true);
-                        return Err(error);
-                    }
-                }
-            }
+            None => write_frame(&self.shared, &self.stream, &mut self.out, frame).await,
         }
     }
 }

@@ -2,7 +2,13 @@
 
 #![no_std]
 
+mod link_sign;
 mod shell;
+
+pub use link_sign::{
+    LINK_SEALED_OVERHEAD, LINK_SIGN_OK, LINK_SIGN_REFUSED, LINK_SIGN_UNSUPPORTED, LinkSealed,
+    LinkSignAnswer, LinkSignChallenge, LinkSignHello, LinkSignProve,
+};
 
 pub use shell::{
     ShellClose, ShellCredit, ShellData, ShellEof, ShellExit, ShellOpen, ShellOpened, ShellResize,

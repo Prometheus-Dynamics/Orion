@@ -62,6 +62,7 @@ impl Board {
         let (ready, started) = mpsc::channel();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let (for_board, path) = (keys.clone(), socket.clone());
+        let for_link = keys.clone();
         let thread = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -99,7 +100,8 @@ impl Board {
                         path: slave,
                         baud: 115_200,
                     },
-                );
+                )
+                .signed(for_link);
                 let opened = link.stats();
                 for carrier in [
                     tokio::task::spawn_local({
@@ -325,6 +327,79 @@ fn a_signed_network_session_is_the_same_again_and_checks_who_is_there() {
         "{error}"
     );
     let _ = std::fs::remove_dir_all(&board.dir);
+}
+
+#[test]
+fn a_tool_with_a_key_signs_its_session_on_a_link() {
+    let mut board = Board::start("signed-link", Security::On);
+    let me = Identity::generate();
+    board
+        .keys
+        .lock()
+        .approve_operator(me.public(), "me")
+        .expect("enroll");
+    let copy = || Some(Identity::from_secret(&me.secret()));
+    let link = board.link.take().expect("link");
+    let end = || link.try_clone().expect("the link again");
+    // The board's last session on the link has to be over before the next one is heard.
+    let gone = || std::thread::sleep(HEARTBEAT * 8);
+
+    // Signed: the same calls, sealed, in a frame a little shorter than a plain link's.
+    let session = Session::over_link(end(), "tool", options(copy())).expect("signed");
+    assert!(session.welcomed().max_frame <= 8192 - 32);
+    exercise(session, false);
+    gone();
+
+    // A key the board revoked is told so, and the link stays the board's for the next.
+    let revoked = Identity::generate();
+    board.keys.lock().revoke(revoked.public()).expect("revoke");
+    let error = Session::over_link(end(), "tool", options(Some(revoked))).expect_err("revoked");
+    assert!(
+        matches!(error, ClientError::Denied(why) if why.contains("refused this client's key")),
+        "{error}"
+    );
+
+    // No key, with security on: the link's device, as before.
+    exercise(
+        Session::over_link(end(), "device", options(None)).expect("plain"),
+        false,
+    );
+    gone();
+    // And signed again after it.
+    exercise(
+        Session::over_link(end(), "tool", options(copy())).expect("signed again"),
+        false,
+    );
+    let _ = std::fs::remove_dir_all(&board.dir);
+}
+
+#[test]
+fn a_serial_address_names_the_key_its_board_must_prove() {
+    let key = "ab".repeat(32);
+    let address: Address = format!("serial:/dev/ttyACM0@921600#{key}")
+        .parse()
+        .expect("address");
+    assert_eq!(
+        address,
+        Address::Serial {
+            path: "/dev/ttyACM0".into(),
+            baud: 921_600,
+            key: Some([0xab; 32]),
+        }
+    );
+    assert_eq!(
+        address.to_string(),
+        format!("serial:/dev/ttyACM0@921600#{key}")
+    );
+    // A key needs a signed session, and this client has none: said before any port is opened.
+    let nowhere: Address = format!("serial:/nonexistent/tty#{key}")
+        .parse()
+        .expect("address");
+    let error = Session::connect(&nowhere, "tool", options(None)).expect_err("no key");
+    assert!(
+        matches!(error, ClientError::Denied(why) if why.contains("signed session")),
+        "{error}"
+    );
 }
 
 #[test]

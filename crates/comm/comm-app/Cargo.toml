@@ -98,6 +98,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 orion = { path = "../../client/orion", default-features = false, features = ["shell"] }
+orion-connect = { path = "../../client/connect" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
 shm-ring = { workspace = true }
@@ -113,6 +114,10 @@ required-features = ["ssh"]
 [[test]]
 name = "shell"
 required-features = ["shell", "recovery"]
+
+[[test]]
+name = "signed_link"
+required-features = ["shell", "recovery", "link-usb"]
 
 [[test]]
 name = "recovery"

@@ -40,13 +40,16 @@ The sections below are the crates the handle is made of.
 | --- | --- | --- |
 | Local | `/run/orion/orion.sock` or `unix:<path>` | the socket of the comm core on this board. Descriptors travel here and nowhere else. |
 | Network | `orion+tcp://host[:port]`, with `#<key in hex>` to accept only that node | a comm core on the network. Port 9200 unless told. |
-| Serial | `serial:<path>[@baud]` | a comm core at the other end of a serial line, 115200 unless told. |
+| Serial | `serial:<path>[@baud]`, with `#<key in hex>` to accept only that board | a comm core at the other end of a serial line, 115200 unless told. |
 
 `Session::over_link` takes a link that someone else opened.
 
 With a key in its options a client's network session is signed: the node knows who is calling,
 the client checks the node holds its key, and nothing can be changed on the way. Without one it
-is plain, which a node with security on refuses. A node that proves another key than the one the
+is plain, which a node with security on refuses. On a link (a serial port, a USB cable) the same:
+with a key the session is signed and the board knows the client as that key's operator; without
+one the client is the link's device, which a board takes with security on as well, for what a
+device may do. A signed link's frames are 32 bytes shorter than a plain one's. A node that proves another key than the one the
 address is pinned to (`#<key>`) is refused with `ClientError::OtherKey { asked, answered }`: both
 keys, so a tool can show the two fingerprints and let a person decide whether the board was
 replaced or is not the one they meant.

@@ -239,6 +239,7 @@ impl CommCore {
             parts.push("serial link");
             let carrier =
                 orion_link_serial::StreamCarrier::new(link.name.clone(), link.serial.clone())
+                    .signed(keys.clone())
                     .reporting(link_state(link.name.as_str())?);
             serve(&mut tasks, Carriers::Serial(carrier));
         }
@@ -265,6 +266,7 @@ impl CommCore {
                     .parse()
                     .map_err(|error| failed(format!("links.usb {name}"), error))?;
                 let carrier = orion_link_serial::StreamCarrier::new(device, links.link(name))
+                    .signed(keys.clone())
                     .reporting(link_state(name)?);
                 serve(&mut tasks, Carriers::Usb(carrier));
             }

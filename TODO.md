@@ -126,6 +126,7 @@ Other boards, browsers and NT4.
 - [x] [F7](docs/prs/F7.md) NT4 gateway (wave 9; needs F6, C3, F3)
 - [x] [F8](docs/prs/F8.md) NT4 gateway: client form (wave 10; needs F7; board run)
 - [x] [F9](docs/prs/F9.md) NT4 on the WebSocket listener (wave 10; needs F7, F3)
+- [x] [F10a](docs/prs/F10a.md) A signed session on a link (wave 18)
 
 ## G. Access and recovery
 

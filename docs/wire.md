@@ -45,6 +45,7 @@ one is repeated or sits outside its range. A receiver ignores kinds it doesn't k
 | `0x60` to `0x6F` | Peers and trust |
 | `0x70` to `0x7F` | Time |
 | `0x80` to `0x8F` | Shell |
+| `0x90` to `0x9F` | Link: a signed session on a link, and its sealed frames |
 
 ## Bodies
 

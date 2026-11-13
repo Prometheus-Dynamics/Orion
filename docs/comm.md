@@ -691,6 +691,22 @@ the link.
 A serial link is written `name=path@baud` (`uart0=/dev/ttyAMA0@115200`): 8 data bits, no parity,
 one stop bit, no flow control.
 
+**A tool with a key signs its session** (`crates/core/msg-session`, `link_sign`). The far end of
+a link is the link's device unless it proves a key. A tool that holds one starts with the
+handshake of `orion+tcp`, carried in link frames (kinds `0x90` to `0x93`): each side proves its
+key over both sides' fresh values, and an ephemeral exchange gives them a secret. The board knows
+the tool by its key, as on the network: an operator, with what the trust store grants it, or a
+pinned peer; a revoked key is refused. Every frame after travels inside a sealed frame (`0x94`)
+with a MAC under that secret and a count, so nothing on the cable can be changed, added, dropped
+or played back: a frame that fails its check ends the session, and the next frame on the link
+starts over. A handshake has 5 seconds. A link with no trust store (none is configured that way
+today) says it takes no signed sessions. A device that says hello is a device, as before, with
+security on or off.
+
+Recovery takes signed sessions on its links too. Its trust store holds the recovery keys
+(`recovery.keys`) and nothing else, each an operator granted `login`, read again every couple of
+seconds: a person with a recovery key gets a shell over the USB cable of a board in recovery.
+
 **A link never gives up.** A port that can't be opened, or that fails, is opened again 250 ms
 later, for as long as the program runs. A link is a way into the machine, and ways in are not
 backed off. Its state (running, or retrying and when) is reported as it changes.

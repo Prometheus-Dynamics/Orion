@@ -22,12 +22,14 @@ pub enum Address {
         /// The key the node must prove it holds.
         key: Option<[u8; 32]>,
     },
-    /// A comm core at the other end of a serial line: `serial:<path>[@baud]`.
+    /// A comm core at the other end of a serial line: `serial:<path>[@baud][#key]`.
     Serial {
         /// The port.
         path: PathBuf,
         /// Bits per second.
         baud: u32,
+        /// The key the board must prove it holds, on a signed session.
+        key: Option<[u8; 32]>,
     },
 }
 
@@ -77,6 +79,13 @@ impl FromStr for Address {
             return Ok(Self::Network { host, key });
         }
         if let Some(rest) = text.strip_prefix("serial:") {
+            let (rest, key) = match rest.rsplit_once('#') {
+                Some((rest, key)) => (
+                    rest,
+                    Some(key_from_hex(key).ok_or("the key after # is not 64 hex digits")?),
+                ),
+                None => (rest, None),
+            };
             let (path, baud) = match rest.rsplit_once('@') {
                 Some((path, baud)) => (
                     path,
@@ -91,6 +100,7 @@ impl FromStr for Address {
             return Ok(Self::Serial {
                 path: PathBuf::from(path),
                 baud,
+                key,
             });
         }
         let path = text.strip_prefix("unix:").unwrap_or(text);
@@ -115,7 +125,14 @@ impl fmt::Display for Address {
                 write!(f, "orion+tcp://{host}#")?;
                 key.iter().try_for_each(|byte| write!(f, "{byte:02x}"))
             }
-            Self::Serial { path, baud } => write!(f, "serial:{}@{baud}", path.display()),
+            Self::Serial { path, baud, key } => {
+                write!(f, "serial:{}@{baud}", path.display())?;
+                if let Some(key) = key {
+                    f.write_str("#")?;
+                    key.iter().try_for_each(|byte| write!(f, "{byte:02x}"))?;
+                }
+                Ok(())
+            }
         }
     }
 }

@@ -21,6 +21,7 @@ mod carrier;
 #[cfg(feature = "sealed")]
 pub mod sealed;
 mod serial;
+mod signed;
 
 pub use carrier::{
     ByteStream, LinkStats, MAX_FRAME, Open, StreamCarrier, StreamConnection, StreamRead,

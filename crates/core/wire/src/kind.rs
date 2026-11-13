@@ -24,6 +24,8 @@ pub enum Concept {
     Time = 0x7,
     /// `0x80` to `0x8F`.
     Shell = 0x8,
+    /// `0x90` to `0x9F`: what a link says about itself, below the session.
+    Link = 0x9,
 }
 
 /// One row of the table.
@@ -151,6 +153,13 @@ kinds! {
         SHELL_EOF = 0x85,
         SHELL_EXIT = 0x86,
         SHELL_CLOSE = 0x87,
+    }
+    Link {
+        LINK_SIGN_HELLO = 0x90,
+        LINK_SIGN_CHALLENGE = 0x91,
+        LINK_SIGN_PROVE = 0x92,
+        LINK_SIGN_ANSWER = 0x93,
+        LINK_SEALED = 0x94,
     }
 }
 

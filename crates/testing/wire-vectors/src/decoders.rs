@@ -50,6 +50,11 @@ decoders! {
     SHELL_EOF => session::ShellEof,
     SHELL_EXIT => session::ShellExit,
     SHELL_CLOSE => session::ShellClose,
+    LINK_SIGN_HELLO => session::LinkSignHello,
+    LINK_SIGN_CHALLENGE => session::LinkSignChallenge,
+    LINK_SIGN_PROVE => session::LinkSignProve,
+    LINK_SIGN_ANSWER => session::LinkSignAnswer,
+    LINK_SEALED => session::LinkSealed,
     NODE_ATTACH => session::NodeAttach,
     NODE_REQUEST => session::NodeRequest,
     NODE_ANSWER => session::NodeAnswer,
@@ -145,7 +150,12 @@ fn decode_elements(concept: Concept, bytes: &[u8]) {
             exercise::<peers::GrantedAction>(bytes);
             exercise::<peers::OperatorEntry>(bytes);
         }
-        Concept::Session | Concept::Files | Concept::Actions | Concept::Time | Concept::Shell => {}
+        Concept::Session
+        | Concept::Files
+        | Concept::Actions
+        | Concept::Time
+        | Concept::Shell
+        | Concept::Link => {}
     }
 }
 

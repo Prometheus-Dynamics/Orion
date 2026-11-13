@@ -24,6 +24,7 @@
 mod address;
 mod client;
 mod error;
+mod link_sign;
 mod transport;
 
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -226,7 +227,11 @@ impl Session {
     ///
     /// As [`Session::connect`].
     pub fn over_link(link: OwnedFd, name: &str, options: Options) -> Result<Self, ClientError> {
-        let transport = Transport::link(transport::nonblocking(link)?);
+        let transport = signed(
+            Transport::link(transport::nonblocking(link)?),
+            None,
+            &options,
+        )?;
         Self::hello(transport, None, name, options)
     }
 
@@ -608,7 +613,32 @@ fn open(address: &Address, options: &Options) -> Result<Transport, ClientError> 
             options.identity.as_ref(),
             options.timeout,
         ),
-        Address::Serial { path, baud } => Transport::serial(path, *baud),
+        // Said before the port is opened: nothing on the line hears a session that cannot be.
+        Address::Serial { key: Some(_), .. } if options.identity.is_none() => Err(
+            ClientError::Denied("a board's key can only be checked on a signed session"),
+        ),
+        Address::Serial { path, baud, key } => {
+            signed(Transport::serial(path, *baud)?, key.as_ref(), options)
+        }
+    }
+}
+
+/// A link's session, signed if this client has a key: the board then knows the client by it,
+/// not as a device on the link, and must prove it holds `expect` if that is given.
+fn signed(
+    mut transport: Transport,
+    expect: Option<&[u8; 32]>,
+    options: &Options,
+) -> Result<Transport, ClientError> {
+    match &options.identity {
+        Some(identity) => {
+            transport.sign_link(identity, expect, options.timeout)?;
+            Ok(transport)
+        }
+        None if expect.is_some() => Err(ClientError::Denied(
+            "a board's key can only be checked on a signed session",
+        )),
+        None => Ok(transport),
     }
 }
 

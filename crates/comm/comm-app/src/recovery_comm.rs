@@ -6,6 +6,11 @@
 //! document is signed, but by a key no one has pinned, and a tool that pinned the board's own
 //! key is told it is another (it is: the board is not itself). Security is on unless the
 //! settings were read and say otherwise.
+//!
+//! **Signed sessions on its links.** A tool that proves a key on a USB or serial link is that
+//! key's operator. Recovery's trust store holds the recovery keys and nothing else: each is an
+//! operator granted `login`, which is a shell as any account, read again every couple of
+//! seconds as SSH reads them. A key taken out of the file keeps no grant.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -15,6 +20,7 @@ use orion_check::Security;
 use orion_hello::{BoardState, Hello, SharedState};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_server::{Comm, Limits};
+use orion_types::KeyId;
 use orion_unix::UnixCarrier;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
@@ -25,6 +31,8 @@ use crate::{Carriers, CommSettings};
 const SOCKET: &str = "/run/orion/orion.sock";
 /// How long between tries to open the socket.
 const RETRY: std::time::Duration = std::time::Duration::from_millis(100);
+/// How often the recovery keys are read again.
+const RELOAD: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Orion's protocol, served in recovery. Dropping it stops it.
 #[derive(Debug)]
@@ -36,12 +44,14 @@ pub struct RecoveryComm {
 impl RecoveryComm {
     /// Serves `settings`' socket and USB links, if they were read; else the usual socket, and
     /// a USB link for any name root offers. `why` is what the hello document says. With
-    /// `shell`, a shell may be opened over the session, by whom the check lets.
+    /// `shell`, a shell may be opened over the session, by whom the check lets. The keys in
+    /// `recovery_keys` may prove themselves on its links and log in.
     #[must_use]
     pub fn start(
         settings: Option<&CommSettings>,
         why: &str,
         shell: Option<orion_ssh::SshConfig>,
+        recovery_keys: &Path,
     ) -> Self {
         let node = settings.map_or_else(
             || "node.local".parse().expect("a node name"),
@@ -73,6 +83,9 @@ impl RecoveryComm {
         #[cfg(not(feature = "shell"))]
         let _ = shell;
         let tasks: Rc<RefCell<Vec<JoinHandle<()>>>> = Rc::default();
+        tasks
+            .borrow_mut()
+            .push(admit(keys.clone(), recovery_keys.to_owned()));
         let serve = {
             let (comm, tasks) = (comm.clone(), tasks.clone());
             move |carrier| {
@@ -92,21 +105,22 @@ impl RecoveryComm {
             let named = settings.map(|settings| settings.usb_links.as_slice());
             for name in named.unwrap_or_default() {
                 match name.parse() {
-                    Ok(device) => serve(Carriers::Usb(orion_link_serial::StreamCarrier::new(
-                        device,
-                        links.link(name),
-                    ))),
+                    Ok(device) => serve(Carriers::Usb(
+                        orion_link_serial::StreamCarrier::new(device, links.link(name))
+                            .signed(keys.clone()),
+                    )),
                     Err(error) => warn!("recovery: links.usb {name}: {error}"),
                 }
             }
             if named.is_none() {
                 // No list to go by: whatever link root hands over is served.
-                let serve = serve.clone();
+                let (serve, keys) = (serve.clone(), keys.clone());
                 links.any_name(move |name, link| match name.parse() {
                     Ok(device) => {
-                        serve(Carriers::Usb(orion_link_serial::StreamCarrier::new(
-                            device, link,
-                        )));
+                        serve(Carriers::Usb(
+                            orion_link_serial::StreamCarrier::new(device, link)
+                                .signed(keys.clone()),
+                        ));
                     }
                     Err(error) => warn!("recovery: a link named {name:?}: {error}"),
                 });
@@ -153,6 +167,45 @@ impl RecoveryComm {
     pub const fn state(&self) -> &SharedState {
         &self.state
     }
+}
+
+/// Keeps the recovery keys in `file` operators of `keys`, granted `login`, for as long as it
+/// runs; a key that leaves the file loses its grants.
+fn admit(keys: SharedKeys, file: PathBuf) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut admitted: Vec<[u8; 32]> = Vec::new();
+        loop {
+            let listed = std::fs::read_to_string(&file)
+                .map(|text| orion_recovery::keys_in(&text))
+                .unwrap_or_default();
+            {
+                let mut keys = keys.lock();
+                for (key, name) in &listed {
+                    let name = if name.is_empty() {
+                        "recovery"
+                    } else {
+                        name.as_str()
+                    };
+                    let given = keys.approve_operator(*key, name).is_ok()
+                        && keys
+                            .grant(&KeyId(*key), false, vec!["login".to_owned()], false)
+                            .is_ok_and(|granted| granted);
+                    if given && !admitted.contains(key) {
+                        info!(name, "recovery: a recovery key may sign in on the links");
+                        admitted.push(*key);
+                    }
+                }
+                admitted.retain(|key| {
+                    let kept = listed.iter().any(|(listed, _)| listed == key);
+                    if !kept {
+                        let _ = keys.grant(&KeyId(*key), false, Vec::new(), false);
+                    }
+                    kept
+                });
+            }
+            tokio::time::sleep(RELOAD).await;
+        }
+    })
 }
 
 fn bind(socket: &Path, mode: u32, node_uids: &[u32]) -> std::io::Result<UnixCarrier> {
