@@ -46,12 +46,14 @@ impl Buffers {
     /// Makes `ring` and `pool`, which the program made and writes, the buffer topic `name`.
     /// `history` and `max_meta` are the declaration's, as for [`Buffers::declare`], and must
     /// be the ring's shape. `reader_slots` are the hold-table slots Orion may give its
-    /// subscribers, a bit for each of the 64; zero lets it use any.
+    /// subscribers, a bit for each of the 64. The program's own readers are in other slots:
+    /// Orion never puts a subscriber in a slot outside these, and never touches one.
     ///
     /// # Errors
     ///
-    /// If the session is not on the board, or the comm core refuses: a ring of another shape
-    /// is `malformed`.
+    /// If `reader_slots` is zero (an adopted ring has readers Orion did not place, so Orion is
+    /// told which slots are its own), if the session is not on the board, or if the comm core
+    /// refuses: a ring of another shape is `malformed`.
     pub fn adopt(
         &self,
         name: &str,
@@ -61,6 +63,11 @@ impl Buffers {
         pool: &Pool,
         reader_slots: u64,
     ) -> Result<AdoptedBuffers, TopicError> {
+        if reader_slots == 0 {
+            return Err(TopicError::Invalid(
+                "an adopted buffer topic names the reader slots that are Orion's".into(),
+            ));
+        }
         shared_only(&self.client)?;
         let fields = [Field {
             name: "frame",
@@ -103,9 +110,14 @@ impl AdoptedBuffers {
     /// the comm core is. A subscriber gets no frames until this has run, so call it once a
     /// frame or whenever the program is idle. It does not wait.
     ///
+    /// Only Orion's slots (`reader_slots`) are ever changed in `table`. A subscriber whose
+    /// slot the program has a reader of its own in is not put there, is not given the pool,
+    /// and is the error; the other changes are made all the same.
+    ///
     /// # Errors
     ///
-    /// If the connection broke, or a subscriber's marks cannot be put in `table`.
+    /// If the connection broke, or a subscriber's marks cannot be put in `table`: its slot is
+    /// taken by one of the program's own readers, or its page cannot be mapped.
     pub fn poll(&mut self, pool: &Pool, table: &mut HoldTable) -> Result<(), TopicError> {
         self.client.drain()?;
         let now = self.publisher.handle();
@@ -138,16 +150,24 @@ impl AdoptedBuffers {
                 _ => return Ok(()),
             }
         };
+        let mut refused = None;
         for change in changes {
-            table.remove(change.slot, pool.page());
-            self.readers.retain(|(slot, _, _)| *slot != change.slot);
+            // Only a slot that is Orion's is emptied: one of the program's own readers is
+            // never touched.
+            if self.readers.iter().any(|(slot, _, _)| *slot == change.slot) {
+                table.remove(change.slot, pool.page());
+                self.readers.retain(|(slot, _, _)| *slot != change.slot);
+            }
             let Some(page) = change.page else {
                 continue;
             };
             let keep = page
                 .try_clone()
                 .map_err(|error| TopicError::Client(error.into()))?;
-            table.add(change.slot, page, change.limits)?;
+            if let Err(error) = table.add(change.slot, page, change.limits) {
+                refused.get_or_insert(TopicError::Ring(error));
+                continue;
+            }
             self.readers.push((change.slot, keep, change.limits));
             // Only now is the subscriber given the pool: it never reads a frame the program
             // is not yet protecting.
@@ -159,7 +179,7 @@ impl AdoptedBuffers {
                 present: true,
             })?;
         }
-        Ok(())
+        refused.map_or(Ok(()), Err)
     }
 
     /// Puts Orion's subscribers in `table` again, for a program that made a new table, as it

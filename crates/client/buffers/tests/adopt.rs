@@ -255,3 +255,74 @@ fn a_program_s_own_value_ring_becomes_a_topic() {
     let _again = counter.adopt(&decl, &ring).expect("the same ring");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn orion_never_takes_a_slot_that_is_the_programs_own() {
+    let dir = std::env::temp_dir().join(format!("orion-adopt-slots-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    let socket = dir.join("orion.sock");
+    let _stop = comm_core(socket.clone());
+
+    let spec = Spec {
+        fields: 1,
+        history: 8,
+        max_payload: MAX_PAYLOAD,
+        expiry_ms: 0,
+    };
+    let ring = Ring::create(&spec).expect("ring");
+    let pool = Pool::in_memory(1, BUFFERS, FRAME).expect("pool");
+    let writer = BufferWriter::new(ring.writer().expect("writer"), FieldId(0), pool);
+    let side = buffers(&socket, "camera");
+
+    // An adopted ring has readers Orion did not place: Orion has to be told which slots are
+    // its own. "Any" is refused.
+    let any = side.adopt(TOPIC, 8, 8, &ring, writer.pool(), 0);
+    assert!(matches!(any, Err(TopicError::Invalid(_))), "{any:?}");
+
+    // The program says slot 1 is Orion's, and then puts a reader of its own there anyway.
+    let mut table = HoldTable::new(BUFFERS);
+    let own = Marks::create(BUFFERS, 1, 2).expect("marks");
+    let limits = HoldTableLimits {
+        max_held: 2,
+        max_hold: None,
+    };
+    table
+        .add(1, own.page_fd().expect("page"), limits)
+        .expect("own reader");
+    let mut adopted = side
+        .adopt(TOPIC, 8, 8, &ring, writer.pool(), 0b10)
+        .expect("adopt");
+    let viewer = buffers(&socket, "viewer");
+    let held = HoldLimits {
+        max_held: 2,
+        max_hold_ms: 0,
+    };
+    let mut frames = viewer.subscribe(TOPIC, b"", held).expect("subscribe");
+
+    // Orion's subscriber is given slot 1, which is taken: the program hears it, its own
+    // reader is left where it was, and the subscriber is not handed the pool.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let refused = loop {
+        match adopted.poll(writer.pool(), &mut table) {
+            Err(error) => break error,
+            Ok(()) => {
+                assert!(Instant::now() < deadline, "the clash was never said");
+                let _ = frames.wait(Duration::from_millis(5)).expect("wait");
+            }
+        }
+    };
+    assert!(matches!(refused, TopicError::Ring(_)), "{refused:?}");
+    assert_eq!(
+        table.readers(),
+        1,
+        "the program's own reader is still there"
+    );
+    for _ in 0..20 {
+        adopted.poll(writer.pool(), &mut table).expect("poll");
+        let _ = frames.wait(Duration::from_millis(5)).expect("wait");
+    }
+    assert!(frames.pool().is_none(), "never handed the pool");
+    assert_eq!(table.readers(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

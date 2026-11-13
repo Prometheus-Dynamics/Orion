@@ -126,7 +126,11 @@ the pool as it was offered (`pool()`: each buffer's descriptor and where it is),
 frame's `held`. The same declaration again with another ring is refused, `malformed`, if that ring
 is not of its shape. For a buffer topic, `poll(pool, table)` puts Orion's subscribers'
 marks in the program's table, in the reader slots it lets Orion use (`reader_slots`, a bit
-each); its own readers keep the rest. A ring of another shape than the declaration is refused.
+each, and not zero: `adopt_buffers` refuses "any", since the ring has readers Orion did not
+place); its own readers keep the rest. `poll` only ever empties a slot it filled itself. If a
+subscriber's slot is taken by one of the program's own readers, that reader is left where it is,
+the subscriber is not given the pool, `poll` makes the other changes and returns the error
+(`TopicError::Ring`). A ring of another shape than the declaration is refused.
 A comm core that restarts is handed the same ring and pool again.
 
 `withdraw` on a buffer publisher, adopted or not, ends a buffer topic the same way. A provider's
