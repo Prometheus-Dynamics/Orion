@@ -170,6 +170,7 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [J4](docs/prs/J4.md) Board management is the device library's (wave 17)
 - [x] [J5](docs/prs/J5.md) The gate fails on a stale lockfile (wave 18)
 - [x] [J6](docs/prs/J6.md) Small boards: three targets, BusyBox init, a flasher's recovery (wave 18)
+- [x] [J7](docs/prs/J7.md) The shm-* pins at the revision everyone holds (wave 18)
 
 ## Open
 
