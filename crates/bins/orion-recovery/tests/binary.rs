@@ -53,6 +53,8 @@ struct Running {
     child: Child,
     port: u16,
     log: mpsc::Receiver<String>,
+    /// Every line it has logged so far.
+    seen: std::cell::RefCell<Vec<String>>,
 }
 
 impl Running {
@@ -81,6 +83,7 @@ impl Running {
             child,
             port: 0,
             log,
+            seen: std::cell::RefCell::default(),
         };
         // "ssh: open on 127.0.0.1:PORT" or "recovery: SSH is open on 127.0.0.1:PORT".
         let line = running.logged("open on 127.0.0.1:");
@@ -98,8 +101,12 @@ impl Running {
         loop {
             let left = WAIT.saturating_sub(began.elapsed());
             match self.log.recv_timeout(left) {
-                Ok(line) if line.contains(what) => return line,
-                Ok(_) => {}
+                Ok(line) => {
+                    self.seen.borrow_mut().push(line.clone());
+                    if line.contains(what) {
+                        return line;
+                    }
+                }
                 Err(_) => panic!("it never logged {what:?}"),
             }
         }
@@ -239,5 +246,36 @@ fn with_a_broken_settings_file_it_stays_up_in_recovery() {
     // It did not end; who the recovery keys name gets a shell, and nobody else does.
     assert_eq!(said(&running.ssh(&dir, Some(&key), "echo in")), "in\n");
     assert_eq!(said(&running.ssh(&dir, None, "echo in")), "");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_flasher_example_is_read_whole_and_starts() {
+    if !installed() {
+        return;
+    }
+    let dir = temp("flasher");
+    let example = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../packaging/busybox/orion-recovery.conf.example"
+    );
+    // As shipped, but for where it keeps things and listens: those come from the environment.
+    let running = Running::start(
+        Path::new(example),
+        &[
+            ("ORION_SOCKET", dir.join("orion.sock").display().to_string()),
+            ("ORION_STATE_DIR", dir.join("state").display().to_string()),
+            ("ORION_SSH_LISTEN", "127.0.0.1:0".to_owned()),
+        ],
+    );
+    let seen = running.seen.borrow().join("\n");
+    assert!(!seen.contains("unknown"), "{seen}");
+    assert!(
+        !seen.contains("recovery:"),
+        "it started as the settings say: {seen}"
+    );
+    // Security off, as the example says: in without a key.
+    assert_eq!(said(&running.ssh(&dir, None, "echo in")), "in\n");
+    drop(running);
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -1,0 +1,56 @@
+#!/bin/sh
+# Orion's node logic, for boards with BusyBox init. Installed as /etc/init.d/S41orion-node,
+# after the comm core. It connects again when the comm core restarts, so stopping the comm core
+# does not stop it. Same user, state and keys as orion-node.service (packaging/README.md).
+NAME=orion-node
+MODE=node
+PIDFILE=/run/$NAME.pid
+LOG=${SUPERVISE_LOG:-/var/log/$NAME.log}
+
+prepare() {
+    mkdir -p /var/lib/orion/node
+    chown orion:orion /var/lib/orion/node
+    chmod 0750 /var/lib/orion/node
+}
+
+running() {
+    [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+start() {
+    if running; then
+        echo "$NAME: already running"
+        return 0
+    fi
+    prepare
+    # The supervisor in the background, its output appended to the log.
+    /usr/lib/orion/orion-supervise "$MODE" >> "$LOG" 2>&1 < /dev/null &
+    echo $! > "$PIDFILE"
+    echo "$NAME: started"
+}
+
+stop() {
+    if ! running; then
+        rm -f "$PIDFILE"
+        echo "$NAME: not running"
+        return 0
+    fi
+    pid=$(cat "$PIDFILE")
+    # The supervisor gives the service 30 s to stop, then kills it.
+    kill -TERM "$pid"
+    waited=0
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 35 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    rm -f "$PIDFILE"
+    echo "$NAME: stopped"
+}
+
+case "${1:-}" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    status) if running; then echo "$NAME: running"; else echo "$NAME: stopped"; exit 1; fi ;;
+    *) echo "usage: $0 start|stop|restart|status" >&2; exit 2 ;;
+esac

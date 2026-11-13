@@ -6,6 +6,10 @@
 # - the systemd units load (`systemd-analyze verify`), and node logic's unit stays hardened
 #   (`systemd-analyze security`, at most EXPOSURE_LIMIT);
 # - the sysusers entry parses (`systemd-sysusers --dry-run`).
+# - the BusyBox init scripts parse (`sh -n`), and the supervisor's failure rule holds: it starts
+#   a service that ends again, after a growing wait, and a TERM stops it;
+# - each settings example is read by the binary it is for, with no key unknown to it
+#   (the binaries' own tests: `orion-bin`, `orion-recovery-bin`).
 #
 # A tool that is not installed is skipped with a line saying so: the gate runs on machines
 # without systemd.
@@ -63,6 +67,41 @@ if command -v systemd-sysusers > /dev/null; then
     fi
 else
     echo "    sysusers not checked: no systemd-sysusers"
+fi
+
+for script in packaging/busybox/orion-supervise packaging/busybox/S4*; do
+    if ! out=$(sh -n "$script" 2>&1); then
+        echo "    FAIL: $script does not parse:"
+        echo "$out" | sed 's/^/      /'
+        failures=$((failures + 1))
+    fi
+done
+echo "    busybox scripts: parse"
+
+# The supervisor, with a stand-in for the binary that ends at once: started, started again
+# after 1 s and then 2 s, and stopped by TERM within a moment.
+fake="$work/fake-orion"
+printf '#!/bin/sh\necho run >> "%s/runs"\nexit 3\n' "$work" > "$fake"
+chmod 755 "$fake"
+# Recovery mode runs the binary as it is; the others run it as `orion comm` or as the orion user.
+SUPERVISE_BIN="$fake" ORION_SOCKET="$work/none.sock" sh packaging/busybox/orion-supervise recovery \
+    > "$work/supervise.log" 2>&1 &
+supervisor=$!
+sleep 4
+kill -TERM "$supervisor"
+stopped=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$supervisor" 2> /dev/null || { stopped=1; break; }
+    sleep 0.2
+done
+wait "$supervisor" 2> /dev/null || true
+runs=$(wc -l < "$work/runs" 2> /dev/null || echo 0)
+if [ "$stopped" -eq 1 ] && [ "$runs" -eq 3 ] && grep -q "again in 2 s" "$work/supervise.log"; then
+    echo "    supervisor: restarts after 1 s then 2 s, stops on TERM"
+else
+    echo "    FAIL: supervisor: $runs runs in 4 s (3 expected), stopped: $stopped"
+    sed 's/^/      /' "$work/supervise.log"
+    failures=$((failures + 1))
 fi
 
 [ "$failures" -eq 0 ]

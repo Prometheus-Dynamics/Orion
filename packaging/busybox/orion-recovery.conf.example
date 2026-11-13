@@ -1,0 +1,24 @@
+# /etc/orion/orion.conf for orion-recovery in a flasher image: a RAM-only initramfs whose
+# board is reached over a USB gadget, so that flashing it is an ordinary update. The
+# environment overrides a key: `node.name` is ORION_NODE_NAME.
+
+# This board's name while it is in the flasher.
+node.name = flasher
+
+# The USB link. Only its name is set here: the program that sets up the gadget opens the
+# FunctionFS endpoints and hands them to the comm core at run time (a LinkOffer), and again
+# after the cable comes back.
+links.usb = usb
+
+# SSH, for a person, on the gadget's network only: name the board's address on it. Left out,
+# there is no SSH while the settings are good; recovery still opens it if they are not.
+# ssh.listen = <the board's address on the gadget network>:22
+
+# Security off: whoever is on the other end of the cable may do anything, as they may with
+# the boot ROM that started this image. Fresh in RAM each boot, the flasher has no trust store
+# to check against. Keep it off only while the cable is the only way in: with SSH bound to the
+# gadget's address and no other network brought up.
+security = off
+
+# The state directory is in RAM: the host key and the board's key last one boot.
+state.dir = /var/lib/orion

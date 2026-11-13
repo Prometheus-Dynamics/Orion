@@ -1,0 +1,15 @@
+#!/bin/sh
+# C compiler for armv7-unknown-linux-musleabihf: zig cc, from PATH. For crates that build C (ring, through russh).
+# Writes nothing here: zig keeps its cache where ZIG_GLOBAL_CACHE_DIR / ZIG_LOCAL_CACHE_DIR say.
+# Drops the target and code-generation flags the cc crate adds for gcc, which zig takes from
+# -target instead.
+set -eu
+n=$#
+while [ "$n" -gt 0 ]; do
+  a=$1; shift; n=$((n - 1))
+  case "$a" in
+    --target=*|-fuse-ld=lld|-B*gcc-ld|-march=*|-mabi=*|-mfpu=*|-mfloat-abi=*|-Wl,--fix-cortex-a53-843419) ;;
+    *) set -- "$@" "$a" ;;
+  esac
+done
+exec zig cc -target arm-linux-musleabihf "$@"

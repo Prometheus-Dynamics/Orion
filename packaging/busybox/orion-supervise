@@ -1,0 +1,93 @@
+#!/bin/sh
+# Keeps one Orion service running, for boards with BusyBox init and no systemd. Started by
+# /etc/init.d/S40orion-comm and S41orion-node. Installed as /usr/lib/orion/orion-supervise.
+#
+#   orion-supervise comm|node|recovery
+#
+# `recovery` runs orion-recovery, the comm core alone (/etc/init.d/S40orion-recovery, for an
+# initramfs or a flasher image), in place of `comm`; a board runs one or the other.
+#
+# SUPERVISE_CONF names another settings file, SUPERVISE_BIN another binary (not ORION_*: the
+# service reads every ORION_* variable as a setting). ORION_SOCKET is the setting itself.
+#
+# The failure rule is the systemd units': start again after 1 s, doubling to at most 30 s, and
+# never give up (the way into the board is never switched off). A run that lasted a minute
+# starts the wait over at 1 s. TERM stops it: the service is sent TERM, given 30 s, then KILL.
+set -u
+mode=$1
+if [ "$mode" = recovery ]; then
+    bin=${SUPERVISE_BIN:-/usr/bin/orion-recovery}
+else
+    bin=${SUPERVISE_BIN:-/usr/bin/orion}
+fi
+socket=${ORION_SOCKET:-/run/orion/orion.sock}
+# The settings file, if not /etc/orion/orion.conf.
+conf=${SUPERVISE_CONF:-}
+child=
+stopping=
+
+stop() {
+    stopping=1
+    [ -n "$child" ] || exit 0
+    kill -TERM "$child" 2>/dev/null
+    waited=0
+    while kill -0 "$child" 2>/dev/null && [ "$waited" -lt 30 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    kill -KILL "$child" 2>/dev/null
+    wait "$child" 2>/dev/null
+    exit 0
+}
+trap stop TERM INT
+
+run() {
+    case "$mode" in
+        # As root. The socket is given to the orion group once it is there, as the unit's
+        # Group=orion does: programs in that group may connect (mode 0660).
+        comm|recovery)
+            if [ "$mode" = comm ]; then
+                "$bin" comm $conf &
+            else
+                "$bin" $conf &
+            fi
+            child=$!
+            tries=0
+            while [ ! -S "$socket" ] && [ "$tries" -lt 100 ] && kill -0 "$child" 2>/dev/null; do
+                sleep 0.1
+                tries=$((tries + 1))
+            done
+            [ -S "$socket" ] && chgrp orion "$socket" 2>/dev/null
+            ;;
+        # As the orion user (uid 901), its own state apart from the comm core's keys.
+        node)
+            ORION_STATE_DIR=/var/lib/orion/node ORION_KEYS_DIR=/var/lib/orion \
+                su -s /bin/sh orion -c "umask 0007; exec $bin node $conf" &
+            child=$!
+            ;;
+        *)
+            echo "orion-supervise: comm, node or recovery, not $mode" >&2
+            exit 2
+            ;;
+    esac
+}
+
+delay=1
+while [ -z "$stopping" ]; do
+    started=$(cut -d. -f1 /proc/uptime)
+    run
+    wait "$child"
+    code=$?
+    child=
+    [ -n "$stopping" ] && break
+    ran=$(( $(cut -d. -f1 /proc/uptime) - started ))
+    [ "$ran" -ge 60 ] && delay=1
+    echo "orion $mode ended ($code) after ${ran} s; starting again in ${delay} s" >&2
+    # In the background, so TERM is taken at once rather than after the wait.
+    sleep "$delay" &
+    nap=$!
+    wait "$nap"
+    kill "$nap" 2>/dev/null
+    delay=$((delay * 2))
+    [ "$delay" -gt 30 ] && delay=30
+done

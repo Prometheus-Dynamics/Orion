@@ -72,6 +72,67 @@ units need systemd 254 or newer (`RestartSteps=`). arm64 kernels with 16 KiB or 
 the binary: the workspace `.cargo/config.toml` aligns segments to 64 KiB.
 
 `orion-recovery`, the comm core alone, builds static for `aarch64-unknown-linux-musl` and needs
-nothing from the image but a shell (docs/comm.md, "Recovery"); starting it, from an initramfs
-or a unit of the image's own, is the image's part. `orion-capi` builds `liborion_c.so`, whose
+nothing from the image but a shell (docs/comm.md, "Recovery"). With BusyBox init,
+`busybox/S40orion-recovery` starts it (below); under systemd, a unit of the image's own does. `orion-capi` builds `liborion_c.so`, whose
 SONAME is `liborion_c.so.1`.
+
+## Without systemd
+
+Boards with BusyBox init (the smallest ones) start Orion from `packaging/busybox/`:
+
+| File | Installed as |
+| --- | --- |
+| `S40orion-comm` | `/etc/init.d/S40orion-comm` |
+| `S41orion-node` | `/etc/init.d/S41orion-node` |
+| `orion-supervise` | `/usr/lib/orion/orion-supervise` |
+| `S40orion-recovery` | `/etc/init.d/S40orion-recovery`, in place of the two above |
+| `orion-recovery.conf.example` | `/etc/orion/orion.conf`, edited, in a flasher image |
+
+The rcS that runs `/etc/init.d/S??*` in order starts them; each takes `start`, `stop`,
+`restart` and `status`. They keep what the units keep: the same settings file, socket and state
+directories; the comm core as root with its socket given to the `orion` group; node logic as the
+`orion` user (901) with `ORION_STATE_DIR` and `ORION_KEYS_DIR` as in its unit; the same failure
+rule (start again after 1 s, doubling to 30 s, never giving up; a run of a minute starts the wait
+over); and a clean stop (TERM, 30 s, then KILL). Output goes to `/var/log/orion-comm.log` and
+`/var/log/orion-node.log` (`SUPERVISE_LOG` names another). The user and group are made by the image
+from `orion.sysusers`.
+
+**An initramfs or a flasher image** runs `orion-recovery`, the comm core alone, with
+`S40orion-recovery` and no node logic. `orion-recovery.conf.example` is the settings for a board
+reached over a USB gadget: the USB link by name (the program that sets up the gadget hands its
+endpoints over), SSH on the gadget's network only, security off while the cable is the only way
+in. With no settings file at all, `orion-recovery` listens for SSH on port 22 of every address,
+with security off: anyone who can reach the board gets in. That suits an image whose only network
+is the cable; an image that brings up any other network ships a settings file.
+
+What is lost without systemd:
+
+- **The watchdog.** A comm core that hangs without exiting is not restarted; one that exits or
+  is killed is.
+- **The sandbox.** Node logic runs as `orion` with none of its unit's hardening: no syscall
+  filter, no read-only system, no `NoNewPrivileges=`, no private `/tmp`. The comm core loses the
+  little its unit sets.
+- **Readiness.** Node logic is started after the comm core's script, not after its listeners are
+  up; it connects again until they are, as after any restart.
+- **The journal.** Logs are files, not rotated by Orion.
+- **`/run/orion` across restarts** is kept by the script, which never removes it; that much is
+  the same.
+
+## Building for a board
+
+Board files are static musl builds, one package per invocation (built together, cargo gives each
+the features of both):
+
+```bash
+cargo build --locked --profile service --target aarch64-unknown-linux-musl -p orion-bin
+cargo build --locked --profile service --target aarch64-unknown-linux-musl -p orion-recovery-bin
+```
+
+The same for `armv7-unknown-linux-musleabihf` and `riscv64gc-unknown-linux-musl`, which build and
+pass the size gate but have not run on a board. The SSH way in (`russh`) brings `ring`, which
+compiles C: name a C compiler for the target, `CC_<triple>`. `scripts/zigcc/<triple>` is one,
+`zig cc` from `PATH`, with `scripts/zigcc/<triple>-ar` for archives; zig carries musl for every
+target, so it is the only C toolchain needed. Rust links with `rust-lld`
+(`CARGO_TARGET_<TRIPLE>_LINKER=rust-lld`). `.cargo/config.toml` makes the riscv64 build static
+(`+crt-static`: that target links dynamically otherwise, and fails); keep its flags when setting
+your own (`CARGO_TARGET_<TRIPLE>_RUSTFLAGS` adds to them, `RUSTFLAGS` replaces them).
