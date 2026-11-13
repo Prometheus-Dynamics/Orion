@@ -17,7 +17,8 @@
 //!   `ssh-connection` it is the one the comm core asked for.
 //!
 //! The environment can set anything the file can: `ssh.listen` is `ORION_SSH_LISTEN`.
-//! `ORION_RECOVERY_KEYS` and `ORION_RECOVERY_LISTEN` hold even when the file is broken.
+//! `ORION_RECOVERY_KEYS`, `ORION_RECOVERY_LISTEN` and `ORION_RECOVERY_LAST_GOOD` hold even when the
+//! file is broken.
 //! `ORION_LOG` names how much is logged, to standard error.
 
 use std::path::PathBuf;

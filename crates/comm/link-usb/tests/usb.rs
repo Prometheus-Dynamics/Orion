@@ -407,3 +407,75 @@ fn only_a_program_on_the_board_hands_over_a_device_and_only_a_whole_one() {
         );
     });
 }
+
+#[test]
+fn with_no_list_of_links_root_may_hand_over_a_link_by_any_name() {
+    run(async {
+        let comm = Comm::new(
+            "board".parse().expect("name"),
+            Security::On,
+            Some(Rc::new(NoGrants)),
+            Limits::default(),
+        );
+        let links = UsbLinks::new();
+        comm.add_service(links.service());
+        let made = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        {
+            let (comm, made) = (comm.clone(), made.clone());
+            links.any_name(move |name, link| {
+                made.borrow_mut().push(name.to_owned());
+                let carrier = StreamCarrier::new(name.parse().expect("name"), link);
+                let comm = comm.clone();
+                tokio::task::spawn_local(async move { comm.serve(carrier).await });
+            });
+        }
+        let (socket, connector) = mem::carrier(Roles::CLIENT.and(Roles::PROVIDER), 64 * 1024);
+        let serving = comm.clone();
+        tokio::task::spawn_local(async move { serving.serve(socket).await });
+        let board = Board {
+            comm,
+            connector,
+            stats: Box::new(LinkStats::default),
+        };
+
+        // Someone on the board who is not root may not name a link.
+        let user = Principal::Local {
+            uid: 1000,
+            gid: 1000,
+        };
+        let mut someone = Owner::open(board.connector.connect(user)).await;
+        let (_device, handle) = Device::stream();
+        assert_eq!(
+            someone
+                .offer("gadget", LinkTransport::Stream, vec![handle])
+                .await,
+            Err(Some(Error::NotFound))
+        );
+        assert!(made.borrow().is_empty());
+
+        // Root may: the link is made, served, and runs.
+        let mut owner = Owner::open(board.connector.connect(ROOT)).await;
+        let (mut device, handle) = Device::stream();
+        assert_eq!(
+            owner
+                .offer("gadget", LinkTransport::Stream, vec![handle])
+                .await,
+            Ok(kind::LINK_TAKEN)
+        );
+        device.hello().await;
+        device.ping(1).await;
+        assert_eq!(device_sessions(&board), 1);
+
+        // The same name again is the same link, taking the new handle: not a second link.
+        let (mut again, handle) = Device::stream();
+        assert_eq!(
+            owner
+                .offer("gadget", LinkTransport::Stream, vec![handle])
+                .await,
+            Ok(kind::LINK_TAKEN)
+        );
+        again.hello().await;
+        again.ping(2).await;
+        assert_eq!(*made.borrow(), ["gadget"]);
+    });
+}

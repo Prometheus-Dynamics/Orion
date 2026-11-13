@@ -11,7 +11,7 @@ use orion_config::ConfigError;
 use orion_recovery::{Recovery, RecoveryConfig};
 use tracing::info;
 
-use crate::{CommCore, CommSettings, StartError, systemd};
+use crate::{CommCore, CommSettings, RecoveryComm, StartError, systemd};
 
 /// Recovery's host key when the state directory must not be written: in /run, for one boot.
 const RUN_HOST_KEY: &str = "/run/orion-recovery/ssh_host_ed25519_key";
@@ -27,6 +27,8 @@ pub struct RecoverWith {
     pub helper: Option<PathBuf>,
     /// How long between tries to listen.
     pub retry: Duration,
+    /// The record of the last good start, opened when the settings cannot be read.
+    pub last_good: PathBuf,
 }
 
 impl Default for RecoverWith {
@@ -39,6 +41,7 @@ impl Default for RecoverWith {
             keys_file: orion_recovery::KEYS_FILE.into(),
             helper: None,
             retry: Duration::from_secs(1),
+            last_good: crate::last_good::USUAL.into(),
         }
     }
 }
@@ -49,7 +52,10 @@ impl RecoverWith {
     /// when the settings file is what is broken.
     #[must_use]
     pub fn from_env() -> Self {
-        let mut with = Self::default();
+        let mut with = Self {
+            last_good: crate::last_good::path_from_env(),
+            ..Self::default()
+        };
         if let Some(keys) = std::env::var_os("ORION_RECOVERY_KEYS") {
             with.keys_file = keys.into();
         }
@@ -72,13 +78,46 @@ pub enum Started {
     /// The comm core, as it was told to be.
     Core(Box<CommCore>),
     /// The recovery way in, because the comm core could not be.
-    Recovery(Recovery),
+    Recovery(InRecovery),
+}
+
+/// Recovery: SSH, and Orion's own protocol saying the board is in recovery. Dropping it
+/// stops both.
+#[derive(Debug)]
+pub struct InRecovery {
+    /// The SSH way in.
+    pub ssh: Recovery,
+    /// The board's socket and USB links, with the hello document only.
+    pub comm: RecoveryComm,
+}
+
+impl std::ops::Deref for InRecovery {
+    type Target = Recovery;
+
+    fn deref(&self) -> &Recovery {
+        &self.ssh
+    }
 }
 
 /// The recovery way in for a comm core that could not start because of `why`. `settings`
-/// are the board's, if they could be read: only then is anything in them believed.
+/// are the board's, if they could be read: only then is anything in them believed. If they
+/// could not, the ways in of the last good start are opened, from its record, if there is
+/// one; with neither, the usual socket, and a USB link for any name root hands over.
 #[must_use]
-pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) -> Recovery {
+pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) -> InRecovery {
+    let record = settings
+        .is_none()
+        .then(|| crate::last_good::read(&with.last_good))
+        .flatten();
+    let why = match &record {
+        Some(_) => format!(
+            "{why}; the ways in are the last good start's ({})",
+            with.last_good.display()
+        ),
+        None => why,
+    };
+    let settings = settings.or(record.as_ref());
+    let comm = RecoveryComm::start(settings, &why);
     let ssh = settings.and_then(|settings| settings.ssh.as_ref());
     let helper = ssh
         .map(|ssh| ssh.helper.clone())
@@ -126,7 +165,7 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
     {
         host_key = PathBuf::from(RUN_HOST_KEY);
     }
-    Recovery::start(RecoveryConfig {
+    let ssh = Recovery::start(RecoveryConfig {
         listen,
         // Only from settings that were read: ones that could not be say nothing.
         interface: ssh.and_then(|ssh| ssh.interface.clone()),
@@ -139,7 +178,8 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         security: settings.map_or(Security::On, |settings| settings.config.security),
         retry: with.retry,
         why,
-    })
+    });
+    InRecovery { ssh, comm }
 }
 
 /// Starts the comm core `settings` describe. If the settings could not be read, or the

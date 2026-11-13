@@ -21,6 +21,7 @@ the recovery way in (`docs/comm.md`, "Recovery").
 | `socket` | `/run/orion/orion.sock` | the board's socket |
 | `state.dir` | `/var/lib/orion` | the identity, the trust store, the saved time |
 | `keys.dir` | `state.dir` | where the node's key and the trust file are |
+| `hello.state` | `running` | what the hello document says the board is doing: `running`, or `flasher` for a flasher image |
 | `state.require_mount` | `false` | the comm core refuses to start when `state.dir` or `keys.dir` would be on the root file system (for boards updated by slot) |
 
 The comm core keeps its SSH host key and saved time in `state.dir`, and its identity and trust

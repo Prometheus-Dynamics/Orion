@@ -12,13 +12,17 @@
 
 #![cfg(target_os = "linux")]
 
+mod carriers;
 mod error;
 #[cfg(feature = "ssh")]
 mod helper;
+pub mod last_good;
 #[cfg(feature = "nt4")]
 mod nt4_ws;
 #[cfg(feature = "recovery")]
 mod recover;
+#[cfg(feature = "recovery")]
+mod recovery_comm;
 mod settings;
 mod state_dirs;
 #[cfg(feature = "systemd")]
@@ -43,11 +47,14 @@ use tracing::info;
 #[cfg(feature = "ssh")]
 pub use helper::helper;
 #[cfg(feature = "recovery")]
-pub use recover::{RecoverWith, Started, recover, run_or_recover, start_or_recover};
+pub use recover::{InRecovery, RecoverWith, Started, recover, run_or_recover, start_or_recover};
+#[cfg(feature = "recovery")]
+pub use recovery_comm::RecoveryComm;
 pub use settings::CommSettings;
 #[cfg(feature = "link-sealed")]
 pub use settings::SealedLink;
 
+use carriers::{Carriers, Tasks};
 pub use error::StartError;
 use error::failed;
 
@@ -60,7 +67,7 @@ pub struct CommCore {
     peer_addr: Option<SocketAddr>,
     #[cfg(feature = "ws")]
     ws_addr: Option<SocketAddr>,
-    tasks: Vec<JoinHandle<()>>,
+    _tasks: Tasks,
     parts: Vec<&'static str>,
     /// Kept so that it runs for as long as the comm core does.
     #[cfg(feature = "outbound")]
@@ -130,7 +137,7 @@ impl CommCore {
         );
         let broker = Broker::new(node.clone(), settings.broker);
         let topics = broker.topics();
-        let mut tasks = Vec::new();
+        let mut tasks = Tasks::default();
         // Which of these grow depends on the build.
         #[allow(unused_mut)]
         let mut parts = vec!["socket", "topics", "keys", "hello"];
@@ -196,7 +203,8 @@ impl CommCore {
             #[cfg(not(feature = "devices"))]
             comm.add_service(relay);
         }
-        comm.add_service(Hello::new(node.clone(), keys.clone(), Some(topics.clone())));
+        let hello = Hello::new(node.clone(), keys.clone(), Some(topics.clone()));
+        comm.add_service(hello.in_state(settings.board_state.clone()));
         comm.add_service(KeysService::new(node.clone(), keys.clone()));
         #[cfg(feature = "devices")]
         comm.add_service(devices.watch(broker));
@@ -459,7 +467,7 @@ impl CommCore {
             peer_addr,
             #[cfg(feature = "ws")]
             ws_addr,
-            tasks,
+            _tasks: tasks,
             parts,
             #[cfg(feature = "outbound")]
             _outbound: outbound,
@@ -478,6 +486,7 @@ impl CommCore {
             #[cfg(feature = "discovery")]
             discovery,
         };
+        last_good::write(&settings);
         info!(node = %node, security = ?security, "comm core started: {}", core.summary());
         Ok(core)
     }
@@ -577,14 +586,6 @@ impl CommCore {
     }
 }
 
-impl Drop for CommCore {
-    fn drop(&mut self) {
-        for task in &self.tasks {
-            task.abort();
-        }
-    }
-}
-
 /// Where a link's state goes.
 #[cfg(any(feature = "link-serial", feature = "link-can"))]
 enum LinkState {
@@ -619,97 +620,6 @@ fn discovery_backend(
         let _ = settings;
         Err(failed("discovery", "this build has no mDNS"))
     }
-}
-
-/// Every carrier this build can serve, as one type the server is generic over.
-macro_rules! carriers {
-    ($( $(#[$cfg:meta])* $variant:ident($carrier:ty, $connection:ty) ),* $(,)?) => {
-        // One of each per carrier or connection, made once: their size is what they hold.
-        #[allow(clippy::large_enum_variant)]
-        enum Carriers { $( $(#[$cfg])* $variant($carrier), )* }
-        #[allow(clippy::large_enum_variant)]
-        enum Connections { $( $(#[$cfg])* $variant($connection), )* }
-        #[allow(clippy::large_enum_variant)]
-        enum Reads { $( $(#[$cfg])* $variant(<$connection as orion_server::Connection>::Read), )* }
-        #[allow(clippy::large_enum_variant)]
-        enum Writes { $( $(#[$cfg])* $variant(<$connection as orion_server::Connection>::Write), )* }
-
-        impl orion_server::Carrier for Carriers {
-            type Connection = Connections;
-
-            async fn accept(&mut self) -> std::io::Result<Connections> {
-                match self {
-                    $( $(#[$cfg])* Self::$variant(carrier) => carrier.accept().await.map(Connections::$variant), )*
-                }
-            }
-        }
-
-        impl orion_server::Connection for Connections {
-            type Read = Reads;
-            type Write = Writes;
-
-            fn principal(&self) -> orion_server::Principal {
-                match self { $( $(#[$cfg])* Self::$variant(connection) => connection.principal(), )* }
-            }
-
-            fn offers(&self) -> orion_server::Roles {
-                match self { $( $(#[$cfg])* Self::$variant(connection) => connection.offers(), )* }
-            }
-
-            fn passes_descriptors(&self) -> bool {
-                match self { $( $(#[$cfg])* Self::$variant(connection) => connection.passes_descriptors(), )* }
-            }
-
-            fn split(self) -> (Reads, Writes) {
-                match self {
-                    $( $(#[$cfg])* Self::$variant(connection) => {
-                        let (read, write) = connection.split();
-                        (Reads::$variant(read), Writes::$variant(write))
-                    } )*
-                }
-            }
-        }
-
-        impl orion_server::FrameRead for Reads {
-            async fn recv(&mut self, buf: &mut [u8], fds: &mut orion_server::FdSet) -> std::io::Result<Option<usize>> {
-                match self { $( $(#[$cfg])* Self::$variant(read) => read.recv(buf, fds).await, )* }
-            }
-        }
-
-        impl orion_server::FrameWrite for Writes {
-            async fn send(&mut self, frame: &[u8], fds: &[std::os::fd::OwnedFd]) -> std::io::Result<()> {
-                match self { $( $(#[$cfg])* Self::$variant(write) => write.send(frame, fds).await, )* }
-            }
-        }
-    };
-}
-
-carriers! {
-    Unix(UnixCarrier, orion_unix::UnixConnection),
-    #[cfg(feature = "tcp")]
-    Tcp(orion_tcp::TcpCarrier, orion_tcp::TcpConnection),
-    #[cfg(feature = "ws")]
-    Ws(orion_ws::WsCarrier, orion_ws::WsConnection),
-    #[cfg(feature = "link-serial")]
-    Serial(
-        orion_link_serial::StreamCarrier<orion_link_serial::Serial>,
-        orion_link_serial::StreamConnection<orion_link_serial::SerialPort>
-    ),
-    #[cfg(feature = "link-sealed")]
-    Sealed(
-        orion_link_serial::StreamCarrier<orion_link_serial::sealed::SealedListener>,
-        orion_link_serial::StreamConnection<orion_link_serial::sealed::SealedStream>
-    ),
-    #[cfg(feature = "link-usb")]
-    Usb(
-        orion_link_serial::StreamCarrier<orion_link_usb::UsbLink>,
-        orion_link_serial::StreamConnection<orion_link_usb::UsbStream>
-    ),
-    #[cfg(feature = "link-can")]
-    Can(
-        orion_link_can::CanCarrier<orion_link_can::SocketCanBus>,
-        orion_link_can::CanConnection<orion_link_can::SocketCan>
-    ),
 }
 
 /// Runs the comm core until `stop` finishes: starts it, tells `notifier` it is ready, says it

@@ -16,6 +16,9 @@ pub struct CommSettings {
     /// `state.require_mount`: refuse to start when `state.dir` or `keys.dir` would be on the
     /// root file system, as on a board updated by slot whose state partition is not mounted.
     pub state_require_mount: bool,
+    /// `hello.state`: what the hello document says the board is: `running`, or `flasher` for
+    /// a flasher image.
+    pub board_state: orion_hello::BoardState,
     /// `comm.*`: the server's limits.
     pub limits: Limits,
     /// `topics.*`: the broker's limits.
@@ -171,7 +174,18 @@ impl CommSettings {
                 "needs peer.listen: that is what is announced".into(),
             ));
         }
+        let board_state = match source.text("hello.state") {
+            None | Some("running") => orion_hello::BoardState::Running,
+            Some("flasher") => orion_hello::BoardState::Flasher,
+            Some(other) => {
+                return Err(error(
+                    "hello.state",
+                    format!("expected running or flasher, got {other:?}"),
+                ));
+            }
+        };
         Ok(Self {
+            board_state,
             state_require_mount: source.get("state.require_mount", false)?,
             limits: Limits::from_source(source)?,
             broker: BrokerConfig::from_source(source)?,
@@ -318,6 +332,23 @@ mod tests {
         assert_eq!(
             parse("comm.max_sessions = 0").expect_err("limits").key,
             "comm.max_sessions"
+        );
+        assert_eq!(
+            parse("hello.state = recovery").expect_err("state").key,
+            "hello.state"
+        );
+    }
+
+    #[test]
+    fn a_flasher_image_says_so_and_a_board_is_running_unless_it_says() {
+        use orion_hello::BoardState;
+        assert_eq!(parse("").expect("none").0.board_state, BoardState::Running);
+        assert_eq!(
+            parse("hello.state = flasher")
+                .expect("flasher")
+                .0
+                .board_state,
+            BoardState::Flasher
         );
     }
 }

@@ -158,6 +158,7 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
             keys_file: dir.join("recovery_keys"),
             helper: Some(helper()),
             retry: Duration::from_millis(100),
+            last_good: dir.join("no-record"),
         };
         let good = |state: &Path| {
             format!(
@@ -333,6 +334,123 @@ fn a_comm_core_that_can_start_is_reached_with_ssh_through_a_child() {
             "from the desk\n"
         );
         drop(started);
+        let _ = std::fs::remove_dir_all(dir);
+    });
+}
+
+/// What the board on `socket` says it is doing, and why if it is in recovery.
+async fn board_state(socket: &Path) -> (Option<String>, Option<String>) {
+    let address: orion::Address = socket.display().to_string().parse().expect("address");
+    tokio::task::spawn_blocking(move || {
+        // Recovery opens the socket once whatever held it has let go: a moment, at most.
+        let began = Instant::now();
+        let orion = loop {
+            match orion::Orion::connect(&address, "test") {
+                Ok(orion) => break orion,
+                Err(error) => assert!(began.elapsed() < WAIT, "connect: {error}"),
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let node = orion.node().expect("hello");
+        (
+            node.state().map(str::to_owned),
+            node.recovery_why().map(str::to_owned),
+        )
+    })
+    .await
+    .expect("asked")
+}
+
+#[test]
+fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
+    run(async {
+        let dir = temp("last-good");
+        let with = || RecoverWith {
+            listen: vec!["127.0.0.1:0".parse().expect("addr")],
+            keys_file: dir.join("recovery_keys"),
+            helper: Some(helper()),
+            retry: Duration::from_millis(100),
+            last_good: dir.join("state/last-good.carriers"),
+        };
+        let socket = dir.join("board.sock");
+        let good = format!(
+            "node.name = board\nsocket = {}\nstate.dir = {}/state\n\
+             enrollment.key = do-not-copy-me\nrecovery.keys = {}/recovery_keys\n",
+            socket.display(),
+            dir.display(),
+            dir.display()
+        );
+
+        // A good start: the board says it is running, and its ways in are recorded.
+        let started = start_or_recover(settings(&good), with()).await;
+        assert!(matches!(started, Started::Core(_)), "{started:?}");
+        assert_eq!(board_state(&socket).await, (Some("running".into()), None));
+        let record =
+            std::fs::read_to_string(dir.join("state/last-good.carriers")).expect("recorded");
+        assert!(
+            record.contains(&format!("socket = {}", socket.display())),
+            "{record}"
+        );
+        assert!(
+            !record.contains("do-not-copy-me"),
+            "nothing secret: {record}"
+        );
+        drop(started);
+        // Aborted tasks are dropped, and let go of the socket, when the runtime next runs.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // The settings break. Recovery opens the socket of the last good start, and the
+        // board says on it that it is in recovery, and why.
+        let started = start_or_recover(settings("node.name board\n[[[\n"), with()).await;
+        let (_, why) = in_recovery(&started).await;
+        assert!(why.contains("the last good start's"), "{why}");
+        let (state, said_why) = board_state(&socket).await;
+        assert_eq!(state.as_deref(), Some("recovery"));
+        let said_why = said_why.expect("why");
+        assert!(
+            said_why.contains("the settings cannot be read"),
+            "{said_why}"
+        );
+        drop(started);
+        // Aborted tasks are dropped, and let go of the socket, when the runtime next runs.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Settings that can be read but cannot be started as they say: recovery on their
+        // own socket, with the comm core's reason.
+        std::fs::write(dir.join("not-a-directory"), "x").expect("write");
+        let broken = good.replace(
+            &format!("state.dir = {}/state", dir.display()),
+            &format!("state.dir = {}/not-a-directory", dir.display()),
+        );
+        let started = start_or_recover(settings(&broken), with()).await;
+        let (_, why) = in_recovery(&started).await;
+        assert!(!why.contains("last good"), "{why}");
+        let (state, said_why) = board_state(&socket).await;
+        assert_eq!(state.as_deref(), Some("recovery"));
+        assert!(said_why.expect("why").contains("state.dir"));
+        drop(started);
+        // Aborted tasks are dropped, and let go of the socket, when the runtime next runs.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // A start that fails after the board's socket is already served: an address another
+        // program holds. Nothing of the failed start is left serving, and recovery has the
+        // socket.
+        let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let busy = format!(
+            "{good}peer.listen = {}\n",
+            taken.local_addr().expect("addr")
+        );
+        let started = start_or_recover(settings(&busy), with()).await;
+        let (_, why) = in_recovery(&started).await;
+        assert!(
+            why.contains("peer.listen") || why.contains("network"),
+            "{why}"
+        );
+        let (state, _) = board_state(&socket).await;
+        assert_eq!(state.as_deref(), Some("recovery"));
+        drop(started);
+        // Aborted tasks are dropped, and let go of the socket, when the runtime next runs.
+        tokio::time::sleep(Duration::from_millis(50)).await;
         let _ = std::fs::remove_dir_all(dir);
     });
 }

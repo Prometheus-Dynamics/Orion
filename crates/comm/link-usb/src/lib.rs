@@ -32,7 +32,7 @@ use std::rc::Rc;
 
 use orion_link_serial::Open;
 use orion_msg_session::{LinkOffer, LinkTaken, LinkTransport};
-use orion_server::{Admits, Checked, Cx, Error, Incoming, Policy, Service, What};
+use orion_server::{Admits, Checked, Cx, Error, Incoming, Policy, Principal, Service, What};
 use orion_wire::{FrameView, kind};
 use tokio::sync::Notify;
 use tracing::{info, warn};
@@ -60,7 +60,12 @@ struct Slot {
 #[derive(Clone, Default)]
 pub struct UsbLinks {
     slots: Rc<RefCell<Vec<Slot>>>,
+    /// Told of a link made for a name root offered, if links are made for any name.
+    any_name: Rc<RefCell<Option<NewLink>>>,
 }
+
+/// What is told of a link made for a name that was offered: it is to be served.
+type NewLink = Box<dyn Fn(&str, UsbLink)>;
 
 impl std::fmt::Debug for UsbLinks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -106,7 +111,22 @@ impl UsbLinks {
         UsbLinkService(self.clone())
     }
 
-    fn offer(&self, name: &str, stream: UsbStream) -> Result<(), Error> {
+    /// Makes a link for any name root offers a handle for, and tells `serve` of it. For a
+    /// comm core that has no list of links to go by: recovery with neither settings nor a
+    /// record of the last good start. Only root: anyone else may offer only a named link.
+    pub fn any_name(&self, serve: impl Fn(&str, UsbLink) + 'static) {
+        *self.any_name.borrow_mut() = Some(Box::new(serve));
+    }
+
+    fn offer(&self, name: &str, stream: UsbStream, root: bool) -> Result<(), Error> {
+        let known = self.slots.borrow().iter().any(|slot| slot.name == name);
+        if !known
+            && root
+            && let Some(serve) = &*self.any_name.borrow()
+        {
+            info!(link = name, "a link made for the name offered");
+            serve(name, self.link(name));
+        }
         let mut slots = self.slots.borrow_mut();
         let slot = slots
             .iter_mut()
@@ -198,7 +218,8 @@ impl Service for UsbLinkService {
             warn!(link = offer.link, %error, "an offered handle could not be used");
             Error::Malformed
         })?;
-        self.0.offer(offer.link, stream)?;
+        let root = matches!(cx.caller().principal, Principal::Local { uid: 0, .. });
+        self.0.offer(offer.link, stream, root)?;
         info!(link = offer.link, transport = ?offer.transport, "link handle taken");
         cx.reply(&LinkTaken {
             request_seq: cx.request_seq(),

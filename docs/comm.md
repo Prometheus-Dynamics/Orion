@@ -435,6 +435,23 @@ or identity that cannot be read, an address that cannot be listened on.
 sftp and scp work in recovery, so a log can be copied off a broken board and a fixed file
 copied on.
 
+**Orion's own protocol in recovery.** Recovery also serves the board's socket and its USB
+links, with the hello document only, saying `recovery` and why: a tool that finds the board
+on its socket or over a USB cable is told what is wrong without logging in. The node's key
+there is one made for the run (nothing is read from the state directory), so a tool that
+pinned the board's key is told it is another.
+
+- **The ways in of the last good start.** Every start that gets as far as serving writes
+  `last-good.carriers` to the state directory: its socket, USB links, SSH address and
+  interface and recovery addresses, in the settings' own words, nothing secret. When the
+  settings cannot be read, recovery opens those ways in from it (`ORION_RECOVERY_LAST_GOOD`
+  names another place), with security on, and says so in its reason. A broken settings file is
+  the likeliest reason for recovery, and the board is still reached the way it was before.
+- **With neither,** recovery serves `/run/orion/orion.sock`, and makes a USB link for any
+  name root hands a handle over for: the program that sets up the gadget needs no list.
+- A comm core whose start failed part way stops what it had started before recovery opens,
+  so recovery in the same process gets the board's socket.
+
 ## The helper programs
 
 The comm core starts helper programs: a session that becomes the user (`ssh-session`), the
@@ -541,6 +558,7 @@ a nonce) and is answered (`Identity`):
 | --- | --- |
 | Node name, cluster, public key, interface revision | Orion |
 | Clock, milliseconds since 1970 | Orion |
+| `state`: `running`, `recovery`, `flasher` or `updating`; in recovery, `recovery_why` | Orion |
 | Facts about the board: name, type, value | Other programs |
 | The asker's nonce | The question |
 | Signature | The node's key, over a fixed label and everything before this field |
@@ -552,6 +570,11 @@ a nonce) and is answered (`Identity`):
 - **Orion invents no board facts.** A program that knows one publishes it as a topic named
   `hello.<fact>`; the document carries the newest value of each, in name order, up to 64 facts of
   256 bytes. When that program goes, its facts go.
+- **What the board is doing is Orion's own,** as two text facts among the rest, signed with
+  them: `state` (`running`; `flasher` when `hello.state = flasher`; `recovery`; `updating`, set by
+  whatever updates the board through `Hello::state()`) and, in recovery, `recovery_why`, the
+  reason, cut to 256 bytes. A program's fact by either name is left out. A tool knows a board
+  in recovery, and why, from its first question (`Node::state`, `Node::recovery_why`).
 - **Anyone may ask**, a key that has been granted nothing included.
 - **Always answers.** It is in the comm core and needs nothing else running.
 - Someone on the board who gives no nonce is not checking a signature and gets the document

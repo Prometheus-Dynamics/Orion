@@ -5,6 +5,10 @@
 # This board's name while it is in the flasher.
 node.name = flasher
 
+# What the hello document says the board is doing: a tool that finds it knows it is a flasher
+# to be written to, not a board to run things on.
+hello.state = flasher
+
 # The USB link. Only its name is set here: the program that sets up the gadget opens the
 # FunctionFS endpoints and hands them to the comm core at run time (a LinkOffer), and again
 # after the cable comes back.

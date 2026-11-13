@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use orion_broker::{Broker, BrokerConfig};
-use orion_hello::{Hello as HelloService, verify};
+use orion_hello::{BoardState, Hello as HelloService, MAX_FACT_BYTES, SharedState, verify};
 use orion_keys::{Identity as Key, Keys, KeysConfig, SharedKeys, random};
 use orion_msg_session::{Hello, Identify, Identity, Refusal, Welcome};
 use orion_msg_topics::{Declare, Field, FieldType, Opened};
@@ -31,6 +31,11 @@ fn run(test: impl Future<Output = ()>) {
 
 /// A comm core with nothing but the broker and hello: no node logic, no other client.
 fn board(security: Security) -> (SharedKeys, MemConnector) {
+    let (keys, connector, _) = board_in(security);
+    (keys, connector)
+}
+
+fn board_in(security: Security) -> (SharedKeys, MemConnector, SharedState) {
     let keys = SharedKeys::new(Keys::open(KeysConfig::in_memory("lab"), security).expect("keys"));
     let node: orion_types::NodeName = "board".parse().expect("name");
     let comm = Comm::new(
@@ -40,11 +45,13 @@ fn board(security: Security) -> (SharedKeys, MemConnector) {
         Limits::default(),
     );
     let broker = Broker::new(node.clone(), BrokerConfig::default());
-    comm.add_service(HelloService::new(node, keys.clone(), Some(broker.topics())));
+    let hello = HelloService::new(node, keys.clone(), Some(broker.topics()));
+    let state = hello.state();
+    comm.add_service(hello);
     comm.add_service(broker);
     let (carrier, connector) = mem::carrier(Roles::CLIENT.and(Roles::PROVIDER), 64 * 1024);
     tokio::task::spawn_local(async move { comm.serve(carrier).await });
-    (keys, connector)
+    (keys, connector, state)
 }
 
 struct Client {
@@ -161,9 +168,10 @@ fn a_signed_hello_verifies_and_answers_only_the_question_it_was_asked() {
         );
         assert_eq!(identity.public_key.0, board_key);
         assert!(identity.time_ms > 1_700_000_000_000);
-        assert!(
-            identity.fields.is_empty(),
-            "Orion invents no facts about the board"
+        assert_eq!(
+            facts(&identity),
+            [("state", FieldType::Text.code(), &b"running"[..])],
+            "Orion invents no facts about the board: it says only what it is doing"
         );
 
         // The same answer does not pass for another question.
@@ -238,6 +246,10 @@ fn facts_other_programs_publish_are_in_the_document_and_go_when_they_go() {
         let _empty = driver
             .publish_fact("hello.empty", FieldType::Bytes, b"")
             .await;
+        // A program's fact by one of Orion's names is left out.
+        let _state = driver
+            .publish_fact("hello.state", FieldType::Text, b"fine")
+            .await;
         let _long = driver
             .publish_fact("hello.long", FieldType::Bytes, &[7; 300])
             .await;
@@ -254,6 +266,7 @@ fn facts_other_programs_publish_are_in_the_document_and_go_when_they_go() {
                 ("model", text, &b"x1"[..]),
                 ("serial", text, b"0000a1"),
                 ("slots", FieldType::Int.code(), &2_i64.to_le_bytes()),
+                ("state", text, b"running"),
             ],
             "in name order, with their types"
         );
@@ -274,12 +287,59 @@ fn facts_other_programs_publish_are_in_the_document_and_go_when_they_go() {
         let payload = asker.identify(&nonce).await.to_vec();
         let identity = verify(&payload, &nonce).expect("genuine");
         let names: Vec<&str> = facts(&identity).iter().map(|fact| fact.0).collect();
-        assert_eq!(names, ["model", "serial"]);
+        assert_eq!(names, ["model", "serial", "state"]);
 
         // Someone on the board who gives no nonce gets the document unsigned.
         let payload = asker.identify(&[]).await.to_vec();
         let identity = Identity::decode(&payload).expect("document");
-        assert!(identity.signature.is_empty() && identity.fields.len() == 2);
+        assert!(identity.signature.is_empty() && identity.fields.len() == 3);
         assert!(verify(&payload, &[]).is_none(), "nothing to verify");
+    });
+}
+
+#[test]
+fn the_document_says_what_the_board_is_doing_and_why_it_is_in_recovery() {
+    run(async {
+        let (_keys, connector, state) = board_in(Security::On);
+        let mut asker = Client::open(connector.connect(USER)).await;
+        let nonce: [u8; 32] = random();
+        let text = FieldType::Text.code();
+
+        state.set(BoardState::Recovery(
+            "keys: the trust store cannot be read".into(),
+        ));
+        let payload = asker.identify(&nonce).await.to_vec();
+        assert_eq!(
+            facts(&verify(&payload, &nonce).expect("signed with the rest")),
+            [
+                (
+                    "recovery_why",
+                    text,
+                    &b"keys: the trust store cannot be read"[..]
+                ),
+                ("state", text, b"recovery"),
+            ]
+        );
+
+        // A reason too long for a fact is cut, on a character.
+        state.set(BoardState::Recovery("\u{e9}".repeat(200)));
+        let payload = asker.identify(&nonce).await.to_vec();
+        let identity = verify(&payload, &nonce).expect("genuine");
+        let why = facts(&identity)[0].2;
+        assert_eq!(why.len(), MAX_FACT_BYTES);
+        assert!(std::str::from_utf8(why).is_ok());
+
+        for (set, word) in [
+            (BoardState::Flasher, &b"flasher"[..]),
+            (BoardState::Updating, b"updating"),
+            (BoardState::Running, b"running"),
+        ] {
+            state.set(set);
+            let payload = asker.identify(&nonce).await.to_vec();
+            assert_eq!(
+                facts(&verify(&payload, &nonce).expect("genuine")),
+                [("state", text, word)]
+            );
+        }
     });
 }

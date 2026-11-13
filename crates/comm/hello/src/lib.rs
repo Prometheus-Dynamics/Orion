@@ -16,11 +16,17 @@
 //! `hello.<fact>`, and the document carries the newest value of each. Remove the program and
 //! the fact is gone from the document; Orion's own part is unchanged.
 //!
-//! **Always answers.** This lives in the comm core and needs nothing else to be running.
+//! **Orion's own facts.** Two names are Orion's and a program's fact by either name is left
+//! out: `state`, what the board is doing (`running`, `recovery`, `flasher` or `updating`), and,
+//! in recovery, `recovery_why`, why. Both are text, and signed with the rest, so a tool knows a
+//! board in recovery from one that is up before it asks for anything else.
+//!
+//! **Always answers.** This lives in the comm core and needs nothing else to be running, and
+//! in recovery too.
 
 #![cfg(target_os = "linux")]
 
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -45,6 +51,56 @@ pub const MAX_FACT_BYTES: usize = 256;
 use orion_keys::hello::signed_bytes;
 pub use orion_keys::hello::{MAX_NONCE, verify};
 
+/// Orion's fact: what the board is doing.
+pub const STATE_FACT: &str = "state";
+/// Orion's fact, in recovery: why.
+pub const RECOVERY_WHY_FACT: &str = "recovery_why";
+/// The number of the text field type, as facts carry it.
+const TEXT: u8 = 4;
+
+/// What the board is doing, as the hello document says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BoardState {
+    /// Up as it was told to be.
+    Running,
+    /// In recovery, and why: the comm core could not start as it was told to.
+    Recovery(String),
+    /// A flasher image: up to be written to, not to run anything (`hello.state = flasher`).
+    Flasher,
+    /// Being updated: what runs now is about to be replaced.
+    Updating,
+}
+
+impl BoardState {
+    /// The word the document carries.
+    #[must_use]
+    pub const fn word(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Recovery(_) => "recovery",
+            Self::Flasher => "flasher",
+            Self::Updating => "updating",
+        }
+    }
+}
+
+/// Where the hello service's [`BoardState`] is kept, to be changed while it runs.
+#[derive(Clone, Debug)]
+pub struct SharedState(Rc<RefCell<BoardState>>);
+
+impl SharedState {
+    /// Says the board is now `state`. The next answer carries it.
+    pub fn set(&self, state: BoardState) {
+        *self.0.borrow_mut() = state;
+    }
+
+    /// What the board is doing.
+    #[must_use]
+    pub fn get(&self) -> Ref<'_, BoardState> {
+        self.0.borrow()
+    }
+}
+
 /// One fact, read from its topic.
 struct Fact {
     topic: TopicId,
@@ -61,6 +117,7 @@ pub struct Hello {
     keys: SharedKeys,
     topics: Option<Rc<RefCell<Topics>>>,
     facts: Vec<Fact>,
+    state: SharedState,
     payload: Vec<u8>,
 }
 
@@ -80,8 +137,22 @@ impl Hello {
             keys,
             topics,
             facts: Vec::new(),
+            state: SharedState(Rc::new(RefCell::new(BoardState::Running))),
             payload: Vec::new(),
         }
+    }
+
+    /// The same, saying the board is `state` from the first answer.
+    #[must_use]
+    pub fn in_state(self, state: BoardState) -> Self {
+        self.state.set(state);
+        self
+    }
+
+    /// Where the board's state is kept: set it there and the next answer says it.
+    #[must_use]
+    pub fn state(&self) -> SharedState {
+        self.state.clone()
     }
 
     /// Brings the facts up to date with the topics that are there now, and reads each one's
@@ -101,6 +172,9 @@ impl Hello {
             let Some(name) = topic.name.as_str().strip_prefix(FACT_PREFIX) else {
                 continue;
             };
+            if name == STATE_FACT || name == RECOVERY_WHY_FACT {
+                continue;
+            }
             let known = self.facts.iter().any(|fact| fact.topic == topic.id);
             if known || self.facts.len() >= MAX_FACTS {
                 continue;
@@ -155,16 +229,35 @@ impl Service for Hello {
             return Err(Error::Malformed);
         }
         self.refresh();
-        let fields: Vec<IdentityField<'_>> = self
-            .facts
-            .iter()
-            .filter(|fact| !fact.value.is_empty())
-            .map(|fact| IdentityField {
-                name: &fact.name,
-                ty: fact.ty,
-                value: Bytes(&fact.value),
-            })
-            .collect();
+        let state = self.state.get();
+        let mut fields: Vec<IdentityField<'_>> = vec![IdentityField {
+            name: STATE_FACT,
+            ty: TEXT,
+            value: Bytes(state.word().as_bytes()),
+        }];
+        if let BoardState::Recovery(why) = &*state {
+            let mut end = why.len().min(MAX_FACT_BYTES);
+            while !why.is_char_boundary(end) {
+                end -= 1;
+            }
+            fields.push(IdentityField {
+                name: RECOVERY_WHY_FACT,
+                ty: TEXT,
+                value: Bytes(&why.as_bytes()[..end]),
+            });
+        }
+        fields.extend(
+            self.facts
+                .iter()
+                .filter(|fact| !fact.value.is_empty())
+                .map(|fact| IdentityField {
+                    name: &fact.name,
+                    ty: fact.ty,
+                    value: Bytes(&fact.value),
+                }),
+        );
+        // In name order, Orion's with the rest.
+        fields.sort_by(|a, b| a.name.cmp(b.name));
         let keys = self.keys.lock();
         let public = keys.identity().public();
         let time_ms = SystemTime::now()

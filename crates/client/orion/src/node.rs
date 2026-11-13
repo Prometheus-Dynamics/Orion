@@ -46,6 +46,28 @@ pub struct Node {
     pub facts: Vec<Fact>,
 }
 
+impl Node {
+    /// What the board says it is doing: `running`, `recovery`, `flasher` or `updating`.
+    /// `None` from a board too old to say.
+    #[must_use]
+    pub fn state(&self) -> Option<&str> {
+        self.fact_text("state")
+    }
+
+    /// Why the board is in recovery, if it is.
+    #[must_use]
+    pub fn recovery_why(&self) -> Option<&str> {
+        self.fact_text("recovery_why")
+    }
+
+    fn fact_text(&self, name: &str) -> Option<&str> {
+        self.facts
+            .iter()
+            .find(|fact| fact.name == name)
+            .and_then(|fact| std::str::from_utf8(&fact.value).ok())
+    }
+}
+
 /// How a board's clock compares with this program's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Clock {

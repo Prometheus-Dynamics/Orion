@@ -1373,6 +1373,7 @@ dependencies = [
 name = "orion-comm-app"
 version = "1.0.1-dev"
 dependencies = [
+ "orion",
  "orion-broker",
  "orion-broker-buffers",
  "orion-broker-proxy",
