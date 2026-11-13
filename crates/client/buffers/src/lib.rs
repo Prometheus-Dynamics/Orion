@@ -30,13 +30,15 @@ use orion_msg_topics::{BufferInfo, BufferOffer, Field, FieldType, Holds};
 use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
 use orion_wire::{List, kind};
 use shm_ring::{FieldId, SampleTime};
-use shm_ring_buffers::{BufferDesc, BufferReader, BufferWriter, PoolView};
+use shm_ring_buffers::{BufferReader, BufferWriter};
 use shm_ring_holds::Limits;
 
 mod adopt;
 
 pub use adopt::AdoptedBuffers;
-pub use shm_ring_buffers::{Batch, BufferError, BufferIndex, Dropped, Held, NextBatch, Pool};
+pub use shm_ring_buffers::{
+    Batch, BufferDesc, BufferError, BufferIndex, Dropped, Held, NextBatch, Pool, PoolView,
+};
 pub use shm_ring_holds::{HoldTable, Marks};
 
 /// The most buffers a subscriber's page of marks covers.
@@ -539,6 +541,21 @@ impl BufferSubscriber {
     #[must_use]
     pub fn status(&self) -> Status {
         self.subscriber.status()
+    }
+
+    /// The publisher's pool as it was handed over: each buffer's memory descriptor and where in
+    /// it the buffer is ([`PoolView::descriptor`]), for a program that maps or passes on the
+    /// buffers itself. `None` until the pool has arrived. A frame's buffers are also reached
+    /// through its `held` ([`Held::bytes`], [`Held::descriptor`]).
+    pub fn pool(&mut self) -> Option<&PoolView> {
+        refresh(
+            &self.state,
+            &mut self.handle,
+            &self.marks,
+            &mut self.subscriber,
+            &mut self.frames,
+        );
+        self.frames.as_ref().map(BufferReader::pool)
     }
 
     /// How many buffers this subscriber is holding.

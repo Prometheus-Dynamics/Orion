@@ -119,7 +119,12 @@ frame was held, or after it was dropped, is memory the publisher may be writing.
 Orion, makes its ring, pool and hold table with the `shm-*` crates. `adopt` (a value topic) and
 `adopt_buffers` (a buffer topic) make that same ring an Orion topic: Orion's subscribers are
 handed the same ring and pool, and the program keeps writing with its own writer, calling
-`wake` after each publish. For a buffer topic, `poll(pool, table)` puts Orion's subscribers'
+`wake` after each publish. Orion keeps its own subscribers' doorbells and `wake` rings them: one
+eventfd write for each that is asleep, nothing for one that is awake, and no doorbell events reach
+the program. Its own readers' doorbells are its own to ring. An Orion subscriber to the topic gets
+the pool as it was offered (`pool()`: each buffer's descriptor and where it is), besides each
+frame's `held`. The same declaration again with another ring is refused, `malformed`, if that ring
+is not of its shape. For a buffer topic, `poll(pool, table)` puts Orion's subscribers'
 marks in the program's table, in the reader slots it lets Orion use (`reader_slots`, a bit
 each); its own readers keep the rest. A ring of another shape than the declaration is refused.
 A comm core that restarts is handed the same ring and pool again.

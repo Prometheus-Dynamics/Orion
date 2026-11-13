@@ -60,6 +60,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C15](docs/prs/C15.md) Comm assembly (wave 8; needs C2, C3, C4, C5, C6, C8, C10, C14)
 - [x] [C16](docs/prs/C16.md) Adopting a publisher's own ring and pool (wave 18; needs J2)
 - [x] [C17](docs/prs/C17.md) Withdrawing one topic (wave 18; needs C16)
+- [x] [C20](docs/prs/C20.md) Adopted topics, as their first consumer found them (wave 18; needs C16)
 
 ## D. Client
 

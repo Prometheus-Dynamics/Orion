@@ -64,8 +64,8 @@ pub mod topics {
 #[cfg(feature = "buffers")]
 pub mod buffers {
     pub use orion_buffers::{
-        AdoptedBuffers, Batch, BufferError, BufferIndex, BufferPublisher, BufferSubscriber,
-        Buffers, Dropped, Held, HoldLimits, HoldTable, NextBatch, Pool,
+        AdoptedBuffers, Batch, BufferDesc, BufferError, BufferIndex, BufferPublisher,
+        BufferSubscriber, Buffers, Dropped, Held, HoldLimits, HoldTable, NextBatch, Pool, PoolView,
     };
 }
 

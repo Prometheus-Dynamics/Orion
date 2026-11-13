@@ -147,6 +147,17 @@ fn a_program_s_own_ring_and_pool_become_a_buffer_topic() {
         }
     }
     adopted.with_request(|request| assert_eq!(request, b"720p"));
+    // The subscriber has the pool as it was offered: every buffer, where it is, and a
+    // descriptor to map or pass on.
+    let offered = writer.pool().buffers().to_vec();
+    let view = frames.pool().expect("the pool");
+    assert_eq!(view.len() as usize, offered.len());
+    for (index, desc) in offered.iter().enumerate() {
+        let (_fd, seen) = view
+            .descriptor(orion_buffers::BufferIndex(index as u32))
+            .expect("a buffer");
+        assert_eq!(seen, *desc);
+    }
     assert!(seen.windows(2).all(|pair| pair[0] < pair[1]), "{seen:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -189,7 +200,8 @@ fn a_program_s_own_value_ring_becomes_a_topic() {
             .expect("connect");
         Topics::new(&Client::new(session))
     };
-    let mut publisher = connect("counter").adopt(&decl, &ring).expect("adopt");
+    let counter = connect("counter");
+    let mut publisher = counter.adopt(&decl, &ring).expect("adopt");
     let mut reader = connect("reader")
         .subscribe("counter.own", &[])
         .expect("subscribe");
@@ -221,5 +233,25 @@ fn a_program_s_own_value_ring_becomes_a_topic() {
         }
     }
     assert!(seen.windows(2).all(|pair| pair[0] < pair[1]), "{seen:?}");
+
+    // The same declaration with a ring of another shape is refused, not taken for the ring
+    // that is there.
+    let other = Ring::create(&Spec {
+        history: 32,
+        ..spec
+    })
+    .expect("ring");
+    let refused = counter.adopt(&decl, &other).expect_err("another shape");
+    assert!(
+        matches!(
+            refused,
+            orion_topics::TopicError::Client(orion_connect::ClientError::Refused(
+                orion_types::Error::Malformed
+            ))
+        ),
+        "{refused}"
+    );
+    // The same ring again is the topic carrying on.
+    let _again = counter.adopt(&decl, &ring).expect("the same ring");
     let _ = std::fs::remove_dir_all(&dir);
 }

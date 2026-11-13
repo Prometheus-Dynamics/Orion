@@ -129,6 +129,19 @@ impl Service for Broker {
     }
 }
 
+/// Whether `offered` is the memory `ring` is mapped from.
+fn same_memory(offered: &OwnedFd, ring: &Ring) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let identity = |fd: OwnedFd| {
+        let meta = std::fs::File::from(fd).metadata().ok()?;
+        Some((meta.dev(), meta.ino()))
+    };
+    let (Ok(offered), Ok(ours)) = (offered.try_clone(), ring.write_fd()) else {
+        return false;
+    };
+    identity(offered).is_some_and(|offered| Some(offered) == identity(ours))
+}
+
 fn io<T>(result: Result<T, shm_ring::RingError>) -> Result<T, Error> {
     result.map_err(|error| {
         tracing::warn!(%error, "a ring's descriptor could not be handed out");
@@ -282,8 +295,17 @@ fn declare(
         return Err(Error::AlreadyExists);
     }
     // The same declaration again carries on in the ring that is there. That is a publisher
-    // coming back, or one saying it twice.
-    let resumed = topic.ring.is_some() && topic.declare == raw;
+    // coming back, or one saying it twice. One that brings a ring carries on only if it is the
+    // same memory: another ring is checked against the declaration like any, and refused,
+    // `malformed`, if it is of another shape.
+    let resumed = topic.ring.is_some()
+        && topic.declare == raw
+        && offered.as_ref().is_none_or(|offered| {
+            topic
+                .ring
+                .as_ref()
+                .is_some_and(|ring| same_memory(offered, ring))
+        });
     if !resumed && let Err(error) = topics.set_ring(id, &spec, offered) {
         topics.remove_if_unused(id);
         return Err(error);
