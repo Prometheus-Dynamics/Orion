@@ -50,7 +50,13 @@ impl Server {
         format!("http://{}/file.bin", self.address)
     }
 
-    fn asked(&self) -> Vec<Option<String>> {
+    /// What it was asked, once it has noted `count` requests: it notes one after answering it,
+    /// so the client can be done before the server is.
+    fn asked_by(&self, count: usize) -> Vec<Option<String>> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self.asked.lock().expect("lock").len() < count && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
         self.asked.lock().expect("lock").clone()
     }
 }
@@ -151,7 +157,7 @@ fn a_file_is_fetched_whole() {
     assert_eq!(report, Report::Fetched { transfer: 7 });
     assert_eq!(std::fs::read(&part).expect("part"), data);
     assert_eq!(
-        server.asked(),
+        server.asked_by(1),
         [None],
         "nothing was here: the whole file was asked for"
     );
@@ -181,7 +187,7 @@ fn a_fetch_that_broke_off_goes_on_where_the_server_allows() {
     let report = fetch(&mut pulls, &server.url(), &part, data.len() as u64);
     assert_eq!(report, Report::Fetched { transfer: 7 });
     assert_eq!(std::fs::read(&part).expect("part"), data);
-    assert_eq!(server.asked(), [None, Some("bytes=100000-".to_owned())]);
+    assert_eq!(server.asked_by(2), [None, Some("bytes=100000-".to_owned())]);
 }
 
 #[test]
@@ -212,7 +218,7 @@ fn a_server_that_does_not_take_ranges_is_fetched_from_the_start() {
     let report = fetch(&mut pulls, &server.url(), &part, data.len() as u64);
     assert_eq!(report, Report::Fetched { transfer: 7 });
     assert_eq!(std::fs::read(&part).expect("part"), data);
-    assert_eq!(server.asked()[1], Some("bytes=100000-".to_owned()));
+    assert_eq!(server.asked_by(2)[1], Some("bytes=100000-".to_owned()));
 }
 
 #[test]
@@ -224,7 +230,7 @@ fn a_part_that_is_already_whole_is_not_fetched_again() {
     let mut pulls = Pulls::new();
     let report = fetch(&mut pulls, &server.url(), &part, data.len() as u64);
     assert_eq!(report, Report::Fetched { transfer: 7 });
-    assert!(server.asked().is_empty(), "the server was not asked");
+    assert!(server.asked_by(0).is_empty(), "the server was not asked");
     // One that is longer than the file is not that file: it is started over.
     std::fs::write(&part, vec![0_u8; data.len() + 5]).expect("part");
     let report = fetch(&mut pulls, &server.url(), &part, data.len() as u64);
