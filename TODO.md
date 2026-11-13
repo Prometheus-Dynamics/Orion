@@ -164,6 +164,7 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [J2](docs/prs/J2.md) The shared ring crates (wave 18; needs J1; waits on the device library)
 - [x] [J3](docs/prs/J3.md) Name the clock (wave 17; needs J1)
 - [x] [J4](docs/prs/J4.md) Board management is the device library's (wave 17)
+- [x] [J5](docs/prs/J5.md) The gate fails on a stale lockfile (wave 18)
 
 ## Open
 

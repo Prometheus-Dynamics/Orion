@@ -13,8 +13,16 @@ step() {
   echo "    $label: $((SECONDS - start)) s"
 }
 
+# Board images are built `--locked --offline` from Cargo.lock alone: a lockfile that no longer
+# matches the manifests fails here, first, before anything else has had the chance to rewrite
+# it.
+lockfile() {
+  cargo metadata --locked --format-version 1 > /dev/null
+}
+
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
+  step lockfile lockfile
   step format cargo fmt --all --check
   step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
   step tests cargo test --workspace --all-features
