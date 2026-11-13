@@ -203,6 +203,15 @@ impl CommCore {
             #[cfg(not(feature = "devices"))]
             comm.add_service(relay);
         }
+        #[cfg(feature = "shell")]
+        if let Some(config) = &settings.shell {
+            parts.push("shell");
+            let keeper =
+                orion_ssh::Keeper::new(config.clone(), security, keys.clone(), config.listen);
+            comm.add_service(orion_shell::ShellService::new(&comm, Rc::new(keeper)));
+        } else {
+            comm.add_service(orion_shell::ShellOff);
+        }
         let hello = Hello::new(node.clone(), keys.clone(), Some(topics.clone()));
         comm.add_service(hello.in_state(settings.board_state.clone()));
         comm.add_service(KeysService::new(node.clone(), keys.clone()));

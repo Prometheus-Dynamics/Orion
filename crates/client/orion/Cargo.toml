@@ -27,8 +27,10 @@ executor = ["dep:orion-executor"]
 provider = ["topics", "records", "actions", "dep:orion-provider"]
 # Wait for the session inside a tokio runtime.
 tokio = ["orion-connect/tokio"]
+# A shell on the board, over the session.
+shell = []
 # Everything.
-full = ["buffers", "files", "workloads", "executor", "provider"]
+full = ["buffers", "files", "workloads", "executor", "provider", "shell"]
 
 [dependencies]
 orion-actions = { path = "../actions", optional = true }

@@ -371,6 +371,7 @@ The kind table, by range, with numbers assigned in `crates/core/wire` (A4):
 | `0x50` to `0x5F` | Workloads and executors |
 | `0x60` to `0x6F` | Peers and trust |
 | `0x70` to `0x7F` | Time |
+| `0x80` to `0x8F` | Shell: open, opened, data, credit, resize, end of input, exit, close |
 
 Roles at hello: client, provider, executor, node, peer, device.
 

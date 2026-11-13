@@ -27,6 +27,8 @@ pub enum What<'a> {
     Open(&'a str),
     /// Log in.
     Login,
+    /// Open a shell as the named account.
+    Shell(&'a str),
 }
 
 /// A request the check can decide on.

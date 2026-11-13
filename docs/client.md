@@ -18,6 +18,7 @@ one handle; what it can do is behind cargo features so a program carries only wh
 | `workloads` | `workloads()`: say what should run, hear where it is |
 | `executor` | `executor()`: run workloads for Orion |
 | `provider` | `provider()`, `resources(prefix)` |
+| `shell` | `shell(account, command, terminal)`: a shell on the board over the session |
 | `tokio` | wait inside a runtime |
 
 `examples/roles.rs` in that crate is every role in one file.

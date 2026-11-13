@@ -2,6 +2,12 @@
 
 #![no_std]
 
+mod shell;
+
+pub use shell::{
+    ShellClose, ShellCredit, ShellData, ShellEof, ShellExit, ShellOpen, ShellOpened, ShellResize,
+};
+
 use orion_types::{Error, NodeName};
 use orion_wire::{Bytes, List, body, kind, open_enum};
 use serde::{Deserialize, Serialize};

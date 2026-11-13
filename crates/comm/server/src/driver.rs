@@ -29,6 +29,24 @@ pub struct Comm {
     started: Instant,
 }
 
+/// A [`Comm`] that does not keep it alive.
+#[derive(Clone)]
+pub struct WeakComm {
+    core: std::rc::Weak<RefCell<Server>>,
+    started: Instant,
+}
+
+impl WeakComm {
+    /// The server, if it is still there.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<Comm> {
+        Some(Comm {
+            core: self.core.upgrade()?,
+            started: self.started,
+        })
+    }
+}
+
 impl std::fmt::Debug for Comm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Comm")
@@ -68,6 +86,16 @@ impl Comm {
     #[must_use]
     pub fn now_ms(&self) -> u64 {
         self.started.elapsed().as_millis() as u64
+    }
+
+    /// A handle that does not keep the server alive: for a service's own tasks, since the
+    /// server holds the service.
+    #[must_use]
+    pub fn downgrade(&self) -> WeakComm {
+        WeakComm {
+            core: Rc::downgrade(&self.core),
+            started: self.started,
+        }
     }
 
     /// Runs `f` with every session, for a service's own task to send from.

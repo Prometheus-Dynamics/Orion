@@ -29,6 +29,7 @@
 //! | `records` | named state: [`Orion::records`] |
 //! | `actions` | do one thing once: [`Orion::run`], [`Orion::register_action`] |
 //! | `files` | push a file, or ask the board to pull it: [`Orion::files`] |
+//! | `shell` | a shell on the board, over the session: [`Orion::shell`] |
 //! | `workloads` | say what should run: [`Orion::workloads`] |
 //! | `executor` | run workloads for Orion: [`Orion::executor`] |
 //! | `provider` | speak for a resource: [`Orion::provider`], [`Orion::resources`] |
@@ -108,6 +109,8 @@ pub mod provider {
 
 /// Who a board is, and what time it has.
 pub mod node;
+#[cfg(feature = "shell")]
+pub mod shell;
 
 /// Saying what should run, and hearing where it is.
 #[cfg(feature = "workloads")]
@@ -204,6 +207,8 @@ pub struct Orion {
     actions: orion_actions::Actions,
     #[cfg(feature = "files")]
     files: orion_files::Files,
+    #[cfg(feature = "shell")]
+    shells: std::rc::Rc<std::cell::RefCell<shell::State>>,
     #[cfg(feature = "workloads")]
     workloads: workloads::Workloads,
 }
@@ -253,6 +258,12 @@ impl Orion {
             actions: orion_actions::Actions::new(&client),
             #[cfg(feature = "files")]
             files: orion_files::Files::new(&client),
+            #[cfg(feature = "shell")]
+            shells: {
+                let shells = std::rc::Rc::new(std::cell::RefCell::new(shell::State::default()));
+                client.add(shells.clone());
+                shells
+            },
             #[cfg(feature = "workloads")]
             workloads: workloads::Workloads::new(&client),
             client,
@@ -517,6 +528,31 @@ impl Orion {
         policy: actions::Policy,
     ) -> Result<actions::Registration, Error> {
         Ok(self.actions.register(action, policy)?)
+    }
+
+    /// Opens a shell on the board as `account`: its login shell, or `command` for that shell
+    /// to run, on `terminal` if one is given. With security on, a program on the board gets
+    /// its own account (root any), and an operator one it was granted (`login`, or
+    /// `shell:ACCOUNT`).
+    ///
+    /// # Errors
+    ///
+    /// Refused (`denied` for an account the caller may not be), the board has no shell
+    /// service, or the session broke.
+    #[cfg(feature = "shell")]
+    pub fn shell(
+        &self,
+        account: &str,
+        command: Option<&[u8]>,
+        terminal: Option<&shell::Terminal>,
+    ) -> Result<shell::Shell, Error> {
+        Ok(shell::open(
+            &self.client,
+            &self.shells,
+            account,
+            command,
+            terminal,
+        )?)
     }
 
     /// The files: push and pull.

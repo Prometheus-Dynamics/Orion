@@ -67,6 +67,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C24](docs/prs/C24.md) SSH on one interface (wave 18)
 - [x] [C19](docs/prs/C19.md) What the board is doing, and Orion's protocol in recovery (wave 18)
 - [x] [C25](docs/prs/C25.md) State directories made and tried before the start (wave 18)
+- [x] [C27](docs/prs/C27.md) A shell on the board over the session (wave 18)
 
 ## D. Client
 

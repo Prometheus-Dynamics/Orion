@@ -116,8 +116,8 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         ),
         None => why,
     };
+    let from_record = record.is_some();
     let settings = settings.or(record.as_ref());
-    let comm = RecoveryComm::start(settings, &why);
     let ssh = settings.and_then(|settings| settings.ssh.as_ref());
     let helper = ssh
         .map(|ssh| ssh.helper.clone())
@@ -129,6 +129,35 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
                 .unwrap_or_else(|| "/usr/bin/orion".into()),
             args: Vec::new(),
         });
+    // A shell over the session as well, unless the settings that were read say no.
+    #[cfg(feature = "shell")]
+    let shell = match settings {
+        Some(settings) => settings.shell.clone(),
+        None => Some(orion_ssh::SshConfig {
+            listen: SocketAddr::from(([0, 0, 0, 0], 0)),
+            interface: None,
+            host_key: PathBuf::new(),
+            helper: helper.clone(),
+            subsystems: Vec::new(),
+            forward: false,
+            etc: "/etc".into(),
+            recovery: true,
+            max_connections: 0,
+            max_unauthenticated: 0,
+            login: Duration::from_secs(60),
+        }),
+    }
+    .map(|mut shell| {
+        shell.recovery = true;
+        // The record names no helper: recovery's own.
+        if from_record {
+            shell.helper = helper.clone();
+        }
+        shell
+    });
+    #[cfg(not(feature = "shell"))]
+    let shell = None;
+    let comm = RecoveryComm::start(settings, &why, shell);
     #[allow(unused_mut)]
     let mut subsystems = ssh.map(|ssh| ssh.subsystems.clone()).unwrap_or_default();
     #[cfg(feature = "ssh-sftp")]

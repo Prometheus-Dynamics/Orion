@@ -42,6 +42,14 @@ decoders! {
     IDENTIFY => session::Identify,
     LINK_OFFER => session::LinkOffer,
     LINK_TAKEN => session::LinkTaken,
+    SHELL_OPEN => session::ShellOpen,
+    SHELL_OPENED => session::ShellOpened,
+    SHELL_DATA => session::ShellData,
+    SHELL_CREDIT => session::ShellCredit,
+    SHELL_RESIZE => session::ShellResize,
+    SHELL_EOF => session::ShellEof,
+    SHELL_EXIT => session::ShellExit,
+    SHELL_CLOSE => session::ShellClose,
     NODE_ATTACH => session::NodeAttach,
     NODE_REQUEST => session::NodeRequest,
     NODE_ANSWER => session::NodeAnswer,
@@ -137,7 +145,7 @@ fn decode_elements(concept: Concept, bytes: &[u8]) {
             exercise::<peers::GrantedAction>(bytes);
             exercise::<peers::OperatorEntry>(bytes);
         }
-        Concept::Session | Concept::Files | Concept::Actions | Concept::Time => {}
+        Concept::Session | Concept::Files | Concept::Actions | Concept::Time | Concept::Shell => {}
     }
 }
 

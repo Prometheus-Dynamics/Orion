@@ -142,7 +142,19 @@ fn an_operator_is_enrolled_by_an_administrator_by_proof_or_waits() {
     assert!(
         !alice.may(What::Read("status"))
             && alice.may(What::Login)
+            && alice.may(What::Shell("alice"))
             && !alice.may(What::Run("locate"))
+    );
+    // A shell for some accounts only.
+    assert!(
+        keys.grant(&KeyId(asker), false, vec!["shell:svc-*".to_owned()], false)
+            .expect("grant")
+    );
+    let alice = keys.operator(&KeyId(asker)).expect("alice").clone();
+    assert!(
+        alice.may(What::Shell("svc-log"))
+            && !alice.may(What::Shell("root"))
+            && !alice.may(What::Login)
     );
     assert!(
         keys.grant(&KeyId(asker), true, Vec::new(), true)

@@ -120,6 +120,16 @@ impl Operator {
             What::Login => {
                 self.all_actions || self.actions.iter().any(|pattern| matches(pattern, "login"))
             }
+            // A shell is a login: granted by `login` for any account, or `shell:ACCOUNT`.
+            What::Shell(account) => {
+                self.all_actions
+                    || self.actions.iter().any(|pattern| {
+                        matches(pattern, "login")
+                            || pattern
+                                .strip_prefix("shell:")
+                                .is_some_and(|pattern| matches(pattern, account))
+                    })
+            }
             // Changing what the board should be is for those trusted with everything.
             What::Write(_) => self.all_actions,
         }

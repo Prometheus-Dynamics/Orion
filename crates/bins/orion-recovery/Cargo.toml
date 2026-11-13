@@ -20,6 +20,7 @@ orion-comm-app = { path = "../../comm/comm-app", default-features = false, featu
     "ssh-forward",
     "ssh-sandbox",
     "recovery",
+    "shell",
     "systemd",
     # A flasher image is reached over a USB gadget.
     "link-usb",

@@ -31,7 +31,7 @@ mod service;
 mod sessions;
 
 pub use carrier::{Carrier, Connection, FrameRead, FrameWrite};
-pub use driver::Comm;
+pub use driver::{Comm, WeakComm};
 pub use limits::Limits;
 pub use orion_check::{Admits, Checked, Grants, Policy, Principal, Security, What};
 pub use orion_msg_session::Roles;

@@ -22,6 +22,8 @@ pub enum Concept {
     Peers = 0x6,
     /// `0x70` to `0x7F`.
     Time = 0x7,
+    /// `0x80` to `0x8F`.
+    Shell = 0x8,
 }
 
 /// One row of the table.
@@ -139,6 +141,16 @@ kinds! {
         TIME_REPLY = 0x71,
         TIME_OFFER = 0x72,
         TIME_TURN = 0x73,
+    }
+    Shell {
+        SHELL_OPEN = 0x80,
+        SHELL_OPENED = 0x81,
+        SHELL_DATA = 0x82,
+        SHELL_CREDIT = 0x83,
+        SHELL_RESIZE = 0x84,
+        SHELL_EOF = 0x85,
+        SHELL_EXIT = 0x86,
+        SHELL_CLOSE = 0x87,
     }
 }
 

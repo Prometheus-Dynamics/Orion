@@ -1395,6 +1395,7 @@ dependencies = [
  "orion-relay",
  "orion-self-status",
  "orion-server",
+ "orion-shell",
  "orion-ssh",
  "orion-ssh-sandbox",
  "orion-ssh-sftp",
@@ -2128,6 +2129,23 @@ dependencies = [
  "orion-types",
  "orion-wire",
  "shm-fdpass",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "orion-shell"
+version = "1.0.1-dev"
+dependencies = [
+ "orion-check",
+ "orion-config",
+ "orion-keys",
+ "orion-msg-session",
+ "orion-server",
+ "orion-ssh",
+ "orion-types",
+ "orion-wire",
+ "rustix",
  "tokio",
  "tracing",
 ]

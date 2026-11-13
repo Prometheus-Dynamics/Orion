@@ -17,6 +17,7 @@ use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, Recor
 use orion_msg_session::{
     Hello, Identify, Identity, IdentityField, LinkOffer, LinkTaken, LinkTransport, NodeAnswer,
     NodeAttach, NodeBack, NodeGone, NodeRequest, Ping, Pong, Refusal, Reject, RejectReason, Roles,
+    ShellClose, ShellCredit, ShellData, ShellEof, ShellExit, ShellOpen, ShellOpened, ShellResize,
     Welcome,
 };
 use orion_msg_topics::{
@@ -176,6 +177,51 @@ fn session(out: &mut Vec<Sample>) {
         }
     );
     sample!(out, LinkTaken { request_seq: 9 });
+    sample!(
+        out,
+        ShellOpen {
+            account: "root",
+            command: Bytes(b"uname -a"),
+            term: "xterm",
+            cols: 80,
+            rows: 24,
+            window: 65536
+        }
+    );
+    sample!(
+        out,
+        ShellOpened {
+            request_seq: 9,
+            shell: 1,
+            window: 65536
+        }
+    );
+    sample!(
+        out,
+        ShellData {
+            shell: 1,
+            stream: 1,
+            data: Bytes(b"ls\n")
+        }
+    );
+    sample!(
+        out,
+        ShellCredit {
+            shell: 1,
+            bytes: 4096
+        }
+    );
+    sample!(
+        out,
+        ShellResize {
+            shell: 1,
+            cols: 120,
+            rows: 40
+        }
+    );
+    sample!(out, ShellEof { shell: 1 });
+    sample!(out, ShellExit { shell: 1, code: 0 });
+    sample!(out, ShellClose { shell: 1 });
     sample!(
         out,
         NodeAttach {

@@ -61,6 +61,10 @@ pub struct CommSettings {
     /// `ssh.*`: the SSH way in. `None` unless `ssh.listen` is said.
     #[cfg(feature = "ssh")]
     pub ssh: Option<orion_ssh::SshConfig>,
+    /// `shell`: whether a shell may be opened over an Orion session (`on` unless `off`), and
+    /// how it is started: the SSH settings, or the same defaults with nowhere to listen.
+    #[cfg(feature = "shell")]
+    pub shell: Option<orion_ssh::SshConfig>,
     /// `recovery.keys`: the public keys that may log in when the comm core is in recovery.
     #[cfg(feature = "recovery")]
     pub recovery_keys: std::path::PathBuf,
@@ -184,7 +188,7 @@ impl CommSettings {
                 ));
             }
         };
-        Ok(Self {
+        let mut settings = Self {
             board_state,
             state_require_mount: source.get("state.require_mount", false)?,
             limits: Limits::from_source(source)?,
@@ -266,9 +270,55 @@ impl CommSettings {
             can_links: source.list("links.can")?,
             #[cfg(feature = "link-usb")]
             usb_links: source.list("links.usb")?,
+            #[cfg(feature = "shell")]
+            shell: None,
             config,
-        })
+        };
+        #[cfg(feature = "shell")]
+        let shell = match source.text("shell") {
+            None | Some("on" | "true") => true,
+            Some("off" | "false") => false,
+            Some(other) => {
+                return Err(error("shell", format!("expected on or off, got {other:?}")));
+            }
+        };
+        if shell {
+            settings.shell = Some(match &settings.ssh {
+                Some(ssh) => ssh.clone(),
+                None => shell_only(&settings.config, source)?,
+            });
+        }
+        Ok(settings)
     }
+}
+
+/// The SSH settings a shell is started with when SSH itself is off: the same helper and
+/// account files, and nowhere to listen.
+#[cfg(feature = "shell")]
+fn shell_only(config: &Config, source: &mut Source) -> Result<orion_ssh::SshConfig, ConfigError> {
+    let program = match source.optional::<std::path::PathBuf>("ssh.helper")? {
+        Some(program) => program,
+        None => std::env::current_exe().map_err(|err| ConfigError {
+            key: "ssh.helper".into(),
+            message: format!("this program has no path: {err}"),
+        })?,
+    };
+    Ok(orion_ssh::SshConfig {
+        listen: std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
+        interface: None,
+        host_key: config.state_dir.join("ssh_host_ed25519_key"),
+        helper: orion_ssh::Helper {
+            program,
+            args: Vec::new(),
+        },
+        subsystems: Vec::new(),
+        forward: false,
+        etc: "/etc".into(),
+        recovery: false,
+        max_connections: 0,
+        max_unauthenticated: 0,
+        login: Duration::from_secs(60),
+    })
 }
 
 #[cfg(test)]

@@ -35,9 +35,14 @@ pub struct RecoveryComm {
 
 impl RecoveryComm {
     /// Serves `settings`' socket and USB links, if they were read; else the usual socket, and
-    /// a USB link for any name root offers. `why` is what the hello document says.
+    /// a USB link for any name root offers. `why` is what the hello document says. With
+    /// `shell`, a shell may be opened over the session, by whom the check lets.
     #[must_use]
-    pub fn start(settings: Option<&CommSettings>, why: &str) -> Self {
+    pub fn start(
+        settings: Option<&CommSettings>,
+        why: &str,
+        shell: Option<orion_ssh::SshConfig>,
+    ) -> Self {
         let node = settings.map_or_else(
             || "node.local".parse().expect("a node name"),
             |settings| settings.config.node_name.clone(),
@@ -53,9 +58,20 @@ impl RecoveryComm {
             Some(Rc::new(keys.clone())),
             settings.map_or_else(Limits::default, |settings| settings.limits),
         );
-        let hello = Hello::new(node, keys, None).in_state(BoardState::Recovery(why.to_owned()));
+        let hello =
+            Hello::new(node, keys.clone(), None).in_state(BoardState::Recovery(why.to_owned()));
         let state = hello.state();
         comm.add_service(hello);
+        #[cfg(feature = "shell")]
+        if let Some(config) = shell {
+            let at = config.listen;
+            let keeper = orion_ssh::Keeper::new(config, security, keys.clone(), at);
+            comm.add_service(orion_shell::ShellService::new(&comm, Rc::new(keeper)));
+        } else {
+            comm.add_service(orion_shell::ShellOff);
+        }
+        #[cfg(not(feature = "shell"))]
+        let _ = shell;
         let tasks: Rc<RefCell<Vec<JoinHandle<()>>>> = Rc::default();
         let serve = {
             let (comm, tasks) = (comm.clone(), tasks.clone());

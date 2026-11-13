@@ -321,7 +321,9 @@ operator, and nobody at all if the key is revoked.
 
 **What an operator may do** is its grants: read, a list of actions (`name`, `prefix*`, `*`), or
 everything. The one check asks the trust store for every operator request. An operator trusted
-with everything may also write and log in.
+with everything may also write and log in. The grant `login` lets an operator log in and open
+a shell over a session as any account; `shell:ACCOUNT` (`shell:svc-*`) a shell as those
+accounts only.
 
 **How a key becomes trusted:**
 
@@ -451,6 +453,34 @@ pinned the board's key is told it is another.
   name root hands a handle over for: the program that sets up the gadget needs no list.
 - A comm core whose start failed part way stops what it had started before recovery opens,
   so recovery in the same process gets the board's socket.
+
+## A shell over the session
+
+`crates/comm/shell` (`orion-shell`). What SSH gives a person, a tool gets on whatever its
+session reaches the board by: the socket, the network, a USB link. `Orion::shell(account,
+command, terminal)` in the client (feature `shell`) opens one; it is on unless `shell = off`.
+
+- **The same helper as an SSH login.** The shell is started by the SSH session helper
+  (`ssh.helper`, or the comm core's own program), which becomes the account and then its
+  shell or the command. Becoming the account never happens in the comm core's process. With
+  SSH off the helper is still there for the shell.
+- **Who.** The check decides, as `shell` of the account: with security on, root and programs
+  on the board, and operators granted `login` or `shell:ACCOUNT` (a pattern, as with actions).
+  A program on the board is let in as its own account only, or as any if it is root: nobody
+  on the board becomes someone else through Orion. With security off, anyone.
+- **Under credit, both ways.** Output goes out only as far as the caller's window (64 KiB
+  unless it asks for more, at most 1 MiB), and the caller gives credit back as it reads; input
+  is the same the other way, and input past the board's window ends the shell. A shell that
+  prints faster than it is read waits, so it never fills the session: the session's other
+  calls and topics go on beside it.
+- **A command or a login shell,** on a terminal with a size if asked for, resized later;
+  output and errors apart; end of input; the exit code after the last output (255 if there
+  was none). At most 8 shells a session. Closing the shell, or the session ending, ends it.
+- **In recovery too,** over the socket and USB links recovery serves, with recovery's helper.
+  A board without the feature, or with `shell = off`, refuses the open (`Unsupported`)
+  instead of leaving it unanswered.
+
+The kinds are `0x80` to `0x87` (`docs/wire.md`).
 
 ## The helper programs
 

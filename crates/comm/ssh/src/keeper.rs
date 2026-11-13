@@ -63,8 +63,15 @@ pub enum Wanted {
 /// makes one.
 #[derive(Debug)]
 pub struct Admitted {
-    _checked: Checked<Login>,
+    _checked: Proof,
     user: User,
+}
+
+/// What let a login through: the SSH login's check, or the check of a session's request.
+#[derive(Debug)]
+enum Proof {
+    Login(#[allow(dead_code)] Checked<Login>),
+    Session,
 }
 
 impl Admitted {
@@ -260,7 +267,48 @@ impl Keeper {
         }
         info!("ssh: {from} logged in as {name} with {how}");
         Some(Admitted {
-            _checked: checked,
+            _checked: Proof::Login(checked),
+            user,
+        })
+    }
+
+    /// The account `name` for a session's request that the server's check let through
+    /// (`checked`): a shell over the session. The account must be there, and this process
+    /// must be able to become it. `caller_uid` is the caller's own account if it is a program
+    /// on the board: such a caller is let in as itself only, or as anyone if it is root, so
+    /// nobody on the board becomes someone else through Orion.
+    #[must_use]
+    pub fn admit<T>(
+        &self,
+        _checked: &Checked<T>,
+        name: &str,
+        caller_uid: Option<u32>,
+        from: &str,
+    ) -> Option<Admitted> {
+        let Some(user) = users::lookup(&self.config.etc, name).or_else(|| self.root_anyway(name))
+        else {
+            info!("shell: {from} asked for {name}, which is not an account here");
+            return None;
+        };
+        if let Some(uid) = caller_uid
+            && uid != 0
+            && uid != user.uid
+        {
+            info!("shell: {from} is user {uid} on the board and may not become {name}");
+            return None;
+        }
+        let me = rustix::process::getuid();
+        if !me.is_root() && me.as_raw() != user.uid {
+            warn!(
+                "shell: {from} asked for {name}, but the comm core runs as user {} and can only \
+                 let that user in",
+                me.as_raw()
+            );
+            return None;
+        }
+        info!("shell: {from} opened a shell as {name}");
+        Some(Admitted {
+            _checked: Proof::Session,
             user,
         })
     }

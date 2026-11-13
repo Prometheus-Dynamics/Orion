@@ -55,6 +55,7 @@ The name in brackets is the cargo feature that carries the part.
 | `ssh.max_connections` | 64 | the most SSH connections at once |
 | `ssh.max_unauthenticated` | 10 | the most that have not logged in |
 | `ssh.login_ms` | 60000 | how long a connection has to log in |
+| `shell` | `on` | whether a shell may be opened over an Orion session, `on` or `off` (`shell`); the shell runs in `ssh.helper` |
 | `recovery.keys` | `/etc/orion/recovery_keys` | the public keys that may log in when the comm core is in recovery (`recovery`) |
 | `nt4.listen` | off | where NT4 clients connect, or `ws` to share `ws.listen` (`nt4`) |
 | `nt4.server` | off | the NT4 server to join as a client, `host` or `host:port` (`nt4-client`) |

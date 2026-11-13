@@ -1,0 +1,28 @@
+[package]
+name = "orion-shell"
+description = "A shell on the board over an Orion session: the account's shell, as an SSH login gives it, carried under credit."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-session = { path = "../../core/msg-session" }
+orion-server = { path = "../server" }
+orion-ssh = { path = "../ssh" }
+orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std", "termios"] }
+tokio = { workspace = true, features = ["rt", "net", "io-util", "time", "sync", "fs"] }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-check = { path = "../../core/check" }
+orion-config = { path = "../../core/config" }
+orion-keys = { path = "../keys" }
+orion-types = { path = "../../core/types" }
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+tokio = { workspace = true, features = ["rt", "time", "macros"] }
+
+[lints]
+workspace = true

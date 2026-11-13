@@ -44,6 +44,7 @@ one is repeated or sits outside its range. A receiver ignores kinds it doesn't k
 | `0x50` to `0x5F` | Workloads and executors |
 | `0x60` to `0x6F` | Peers and trust |
 | `0x70` to `0x7F` | Time |
+| `0x80` to `0x8F` | Shell |
 
 ## Bodies
 
