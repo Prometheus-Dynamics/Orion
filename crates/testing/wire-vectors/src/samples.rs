@@ -493,7 +493,8 @@ fn topics(out: &mut Vec<Sample>) {
         BufferOffer {
             handle: 2,
             generation: 1,
-            buffers: List::new(&buffers)
+            buffers: List::new(&buffers),
+            reader_slots: 0b1100
         }
     );
     sample!(

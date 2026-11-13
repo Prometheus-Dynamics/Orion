@@ -10,10 +10,10 @@ one handle; what it can do is behind cargo features so a program carries only wh
 
 | Feature | What it gives |
 | --- | --- |
-| `topics` (default) | `declare`, `subscribe` |
+| `topics` (default) | `declare`, `adopt`, `subscribe` |
 | `records` (default) | `records()`: put, get, watch |
 | `actions` (default) | `run`, `attach`, `register_action` |
-| `buffers` | `declare_buffers`, `subscribe_buffers` |
+| `buffers` | `declare_buffers`, `adopt_buffers`, `subscribe_buffers` |
 | `files` | `files()`: push, pull |
 | `workloads` | `workloads()`: say what should run, hear where it is |
 | `executor` | `executor()`: run workloads for Orion |
@@ -113,6 +113,15 @@ a stuck reader cannot stop a camera.
 
 Read a held frame's bytes through `held.bytes(..)` each time. A slice kept from before the
 frame was held, or after it was dropped, is memory the publisher may be writing.
+
+**A ring the program made itself.** A program that serves readers of its own, with or without
+Orion, makes its ring, pool and hold table with the `shm-*` crates. `adopt` (a value topic) and
+`adopt_buffers` (a buffer topic) make that same ring an Orion topic: Orion's subscribers are
+handed the same ring and pool, and the program keeps writing with its own writer, calling
+`wake` after each publish. For a buffer topic, `poll(pool, table)` puts Orion's subscribers'
+marks in the program's table, in the reader slots it lets Orion use (`reader_slots`, a bit
+each); its own readers keep the rest. A ring of another shape than the declaration is refused.
+A comm core that restarts is handed the same ring and pool again.
 
 Buffer topics are between programs on one board: there is no memory to share across a network,
 and the calls say so there. The comm core sets the two sides up and then sees no frame.

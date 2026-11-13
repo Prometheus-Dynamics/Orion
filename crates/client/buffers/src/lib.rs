@@ -31,10 +31,13 @@ use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError
 use orion_wire::{List, kind};
 use shm_ring::{FieldId, SampleTime};
 use shm_ring_buffers::{BufferDesc, BufferReader, BufferWriter, PoolView};
-use shm_ring_holds::{HoldTable, Limits};
+use shm_ring_holds::Limits;
 
+mod adopt;
+
+pub use adopt::AdoptedBuffers;
 pub use shm_ring_buffers::{Batch, BufferError, BufferIndex, Dropped, Held, NextBatch, Pool};
-pub use shm_ring_holds::Marks;
+pub use shm_ring_holds::{HoldTable, Marks};
 
 /// The most buffers a subscriber's page of marks covers.
 const MARKS_BUFFERS: u32 = 1024;
@@ -166,6 +169,34 @@ fn shared_only(client: &Client) -> Result<(), TopicError> {
             "a buffer topic is between programs on one board".into(),
         ))
     }
+}
+
+/// Hands the comm core `pool` for topic `handle`: its page and its memory, for every
+/// subscriber now and later, and the reader slots its subscribers may have (zero for all).
+/// Returns the connection it went on.
+fn offer(client: &Client, handle: u32, pool: &Pool, reader_slots: u64) -> Result<u64, TopicError> {
+    let buffers: Vec<BufferInfo> = pool
+        .buffers()
+        .iter()
+        .enumerate()
+        .map(|(index, buffer)| BufferInfo {
+            index: index as u32,
+            size: buffer.size,
+            descriptor: buffer.descriptor,
+            offset: buffer.offset,
+        })
+        .collect();
+    let page = pool.page_fd()?;
+    let mut fds = vec![page.as_fd()];
+    fds.extend(pool.descriptors());
+    let offer = BufferOffer {
+        handle,
+        generation: pool.generation(),
+        buffers: List::new(&buffers),
+        reader_slots,
+    };
+    client.send_with_fds(&offer, &fds)?;
+    Ok(client.session(|session| session.reconnects()))
 }
 
 impl Buffers {
@@ -301,28 +332,7 @@ impl BufferPublisher {
     /// Hands the comm core the pool: its page and its memory, for every subscriber now and
     /// later.
     fn offer(&mut self) -> Result<(), TopicError> {
-        let pool = self.writer.pool();
-        let buffers: Vec<BufferInfo> = pool
-            .buffers()
-            .iter()
-            .enumerate()
-            .map(|(index, buffer)| BufferInfo {
-                index: index as u32,
-                size: buffer.size,
-                descriptor: buffer.descriptor,
-                offset: buffer.offset,
-            })
-            .collect();
-        let page = pool.page_fd()?;
-        let mut fds = vec![page.as_fd()];
-        fds.extend(pool.descriptors());
-        let offer = BufferOffer {
-            handle: self.handle,
-            generation: pool.generation(),
-            buffers: List::new(&buffers),
-        };
-        self.client.send_with_fds(&offer, &fds)?;
-        self.offered_on = self.client.session(|session| session.reconnects());
+        self.offered_on = offer(&self.client, self.handle, self.writer.pool(), 0)?;
         Ok(())
     }
 

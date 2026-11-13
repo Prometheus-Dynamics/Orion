@@ -10,6 +10,9 @@ use support::Board;
 
 const LONG: Duration = Duration::from_secs(10);
 const THING: &str = "drill.thing";
+/// Longer than node logic waits to save a change (`records.save_after_ms`, 10 ms here) and
+/// the save itself: a kill sooner may lose the resource, which the design allows.
+const SAVED: Duration = Duration::from_millis(300);
 
 /// Waits until the resource's state, as `resource show` prints it, is `state`.
 fn becomes(board: &Board, state: &str, limit: Duration) -> Duration {
@@ -39,6 +42,7 @@ fn a_provider_that_stayed_is_known_again_after_node_logic_restarts() {
     let provider = board.role("provider", &[]);
     provider.wait_line("registered", LONG);
     becomes(&board, "Ready", LONG);
+    std::thread::sleep(SAVED);
 
     node.kill();
     let _node = board.node();
@@ -61,6 +65,7 @@ fn a_provider_that_went_while_node_logic_was_away_has_its_resource_lost() {
     let provider = board.role("provider", &[]);
     provider.wait_line("registered", LONG);
     becomes(&board, "Ready", LONG);
+    std::thread::sleep(SAVED);
 
     node.kill();
     provider.kill();

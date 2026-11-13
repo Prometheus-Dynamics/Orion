@@ -59,6 +59,8 @@ struct Reader {
 #[derive(Debug)]
 struct Offer {
     generation: u32,
+    /// The slots its subscribers may have: a bit for each. Zero for all.
+    slots: u64,
     payload: Vec<u8>,
     fds: Vec<OwnedFd>,
 }
@@ -153,6 +155,63 @@ fn advance(frames: &mut Frames, at: usize, topic: &Topic, sessions: &mut Session
     }
 }
 
+/// Whether a subscriber may have `slot`, by what the publisher offered.
+fn allowed(frames: &Frames, slot: u32) -> bool {
+    frames
+        .offer
+        .as_ref()
+        .is_none_or(|offer| offer.slots == 0 || offer.slots & (1 << slot) != 0)
+}
+
+/// A slot no reader has and the publisher allows.
+fn free_slot(frames: &Frames) -> Option<u32> {
+    let taken = |slot: u32| frames.readers.iter().any(|reader| reader.slot == slot);
+    (0..SLOTS).find(|&slot| !taken(slot) && allowed(frames, slot))
+}
+
+/// Moves the readers whose slot the publisher's offer keeps for itself into slots it allows.
+/// The publisher is told the old slot is gone, and the reader's marks go to it again under
+/// the new one. A reader with no slot left is dropped and warned about.
+fn reslot(frames: &mut Frames, topic: &Topic, sessions: &mut Sessions) {
+    let mut at = 0;
+    while at < frames.readers.len() {
+        let old = frames.readers[at].slot;
+        if allowed(frames, old) {
+            at += 1;
+            continue;
+        }
+        let reader = frames.readers.remove(at);
+        if let (Marks::Sent | Marks::Honoured, Some(publisher)) = (reader.marks, topic.publisher) {
+            let gone = Holds {
+                handle: topic.id.0,
+                subscriber: old,
+                max_held: 0,
+                max_hold_ms: 0,
+                present: false,
+            };
+            let _ = sessions.send(publisher, &gone, Delivery::Must);
+        }
+        let Some(slot) = free_slot(frames) else {
+            tracing::warn!(topic = %topic.name, "a frame topic has no reader slot left");
+            continue;
+        };
+        let marks = if reader.marks == Marks::None {
+            Marks::None
+        } else {
+            Marks::Unsent
+        };
+        frames.readers.insert(
+            at,
+            Reader {
+                session: reader.session,
+                slot,
+                marks,
+            },
+        );
+        at += 1;
+    }
+}
+
 /// Gives `session` a reader slot on `topic`, if it has none, and returns where it is.
 fn enroll(frames: &mut Frames, topic: &Topic, session: SessionId) -> Option<usize> {
     if let Some(at) = frames
@@ -162,8 +221,7 @@ fn enroll(frames: &mut Frames, topic: &Topic, session: SessionId) -> Option<usiz
     {
         return Some(at);
     }
-    let taken = |slot: &u32| frames.readers.iter().any(|reader| reader.slot == *slot);
-    let Some(slot) = (0..SLOTS).find(|slot| !taken(slot)) else {
+    let Some(slot) = free_slot(frames) else {
         tracing::warn!(topic = %topic.name, "a frame topic has no reader slot left");
         return None;
     };
@@ -337,11 +395,13 @@ impl Service for BrokerBuffers {
         }
         frames.offer = Some(Offer {
             generation: offer.generation,
+            slots: offer.reader_slots,
             payload: incoming.frame().payload().to_vec(),
             fds: (0..incoming.fds())
                 .filter_map(|index| incoming.take_fd(index))
                 .collect(),
         });
+        reslot(frames, topic, cx.sessions());
         for at in 0..frames.readers.len() {
             advance(frames, at, topic, cx.sessions());
         }

@@ -57,15 +57,15 @@ pub use orion_types as types;
 pub mod topics {
     pub use orion_msg_topics::{Field, FieldType};
     pub use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
-    pub use shm_ring::{FieldId, Flags, Next, Sample, SampleTime};
+    pub use shm_ring::{FieldId, Flags, Next, Ring, Sample, SampleTime, Spec};
 }
 
 /// Frames in shared buffers.
 #[cfg(feature = "buffers")]
 pub mod buffers {
     pub use orion_buffers::{
-        Batch, BufferError, BufferIndex, BufferPublisher, BufferSubscriber, Buffers, Dropped, Held,
-        HoldLimits, NextBatch, Pool,
+        AdoptedBuffers, Batch, BufferError, BufferIndex, BufferPublisher, BufferSubscriber,
+        Buffers, Dropped, Held, HoldLimits, HoldTable, NextBatch, Pool,
     };
 }
 
@@ -356,6 +356,22 @@ impl Orion {
         Ok(self.topics.declare(topic)?)
     }
 
+    /// Makes a ring the program made and writes itself a topic, so that Orion's subscribers
+    /// read the same ring: see [`Topics::adopt`](topics::Topics::adopt).
+    ///
+    /// # Errors
+    ///
+    /// If this session is not on the board, or the comm core refuses: a ring of another shape
+    /// than `topic` is `malformed`.
+    #[cfg(feature = "topics")]
+    pub fn adopt(
+        &self,
+        topic: &topics::TopicDecl<'_>,
+        ring: &topics::Ring,
+    ) -> Result<topics::Publisher, Error> {
+        Ok(self.topics.adopt(topic, ring)?)
+    }
+
     /// Subscribes to a topic. One nobody has declared yet is waited for.
     ///
     /// # Errors
@@ -395,6 +411,27 @@ impl Orion {
         pool: buffers::Pool,
     ) -> Result<buffers::BufferPublisher, Error> {
         Ok(self.buffers.declare(name, history, max_meta, pool)?)
+    }
+
+    /// Makes a ring and pool the program made and writes itself a topic of frames: see
+    /// [`Buffers::adopt`](buffers::Buffers::adopt).
+    ///
+    /// # Errors
+    ///
+    /// If this session is not on the board, or the comm core refuses.
+    #[cfg(feature = "buffers")]
+    pub fn adopt_buffers(
+        &self,
+        name: &str,
+        history: u32,
+        max_meta: u32,
+        ring: &topics::Ring,
+        pool: &buffers::Pool,
+        reader_slots: u64,
+    ) -> Result<buffers::AdoptedBuffers, Error> {
+        Ok(self
+            .buffers
+            .adopt(name, history, max_meta, ring, pool, reader_slots)?)
     }
 
     /// Subscribes to a topic of frames.

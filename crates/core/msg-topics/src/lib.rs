@@ -202,6 +202,10 @@ body! {
         pub generation: u32,
         /// The buffers.
         pub buffers: List<'a, BufferInfo>,
+        ;
+        /// The reader slots Orion may give its subscribers, a bit for each of the 64. Zero for
+        /// all of them. A publisher with readers of its own, outside Orion, keeps theirs out.
+        pub reader_slots: u64,
     }
 }
 

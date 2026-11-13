@@ -127,6 +127,8 @@ struct Camera {
     ring: OwnedFd,
     acks: bool,
     now_ms: u64,
+    /// The reader slots it lets the broker give its subscribers. Zero for all.
+    reader_slots: u64,
 }
 
 impl Camera {
@@ -165,6 +167,7 @@ impl Camera {
             ring,
             acks: true,
             now_ms: 0,
+            reader_slots: 0,
         };
         camera.offer().await;
         camera
@@ -193,6 +196,7 @@ impl Camera {
             handle: self.handle,
             generation: pool.generation(),
             buffers: List::new(&buffers),
+            reader_slots: self.reader_slots,
         };
         self.client.send(&offer, &fds).await
     }
@@ -445,6 +449,42 @@ fn a_subscriber_is_not_given_buffers_until_the_publisher_honours_its_marks() {
 }
 
 #[test]
+fn a_publisher_keeps_reader_slots_for_readers_of_its_own() {
+    run(async {
+        let (_comm, connector) = board();
+        let mut camera = Camera::start(&connector, 1, 3, None).await;
+        let mut viewer = Viewer::start(&connector, 2, true).await;
+        camera.pump().await;
+        viewer.pump().await;
+        assert_eq!(viewer.slot, Some(0), "any slot, by default");
+
+        // The camera serves readers of its own in slots 0 and 1 and offers again, letting the
+        // broker use only 2 and 3. The viewer moves: the camera is told slot 0 is gone and
+        // given its marks under slot 2, and the viewer is told its new slot.
+        camera.reader_slots = 0b1100;
+        camera.offer().await;
+        camera.pump().await;
+        viewer.pump().await;
+        assert_eq!(viewer.slot, Some(2));
+        assert_eq!(camera.table.readers(), 1);
+        assert!(camera.frame(5));
+        assert_eq!(viewer.newest().expect("a frame").0, 5);
+
+        // A second viewer gets the other allowed slot, and a third none at all: it still has
+        // the ring, and is never handed buffers the camera does not protect.
+        let mut second = Viewer::start(&connector, 2, true).await;
+        camera.pump().await;
+        second.pump().await;
+        assert_eq!(second.slot, Some(3));
+        let mut third = Viewer::start(&connector, 2, true).await;
+        camera.pump().await;
+        third.pump().await;
+        assert!(third.ring.is_some() && third.slot.is_none() && third.frames.is_none());
+        assert_eq!(camera.table.readers(), 2);
+    });
+}
+
+#[test]
 fn a_subscriber_that_comes_before_the_camera_gets_the_pool_when_it_is_offered() {
     run(async {
         let (_comm, connector) = board();
@@ -524,6 +564,7 @@ fn only_the_publisher_may_offer_a_pool() {
             handle,
             generation: 9,
             buffers: List::new(&buffers),
+            reader_slots: 0,
         };
         let seq = other.send(&offer(camera.handle), &fds).await;
         assert_eq!(other.next().await, kind::REFUSAL);

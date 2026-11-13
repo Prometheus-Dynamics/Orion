@@ -23,7 +23,7 @@ mod state;
 
 use std::cell::RefCell;
 use std::fmt;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -35,7 +35,7 @@ use orion_types::TopicRef;
 use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, List, kind};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
-use shm_ring::{FieldId, Flags, Next, PublishError, Reader, RingError, Sample, SampleTime};
+use shm_ring::{FieldId, Flags, Next, PublishError, Reader, Ring, RingError, Sample, SampleTime};
 use shm_ring_doorbell::Doorbell;
 use shm_ring_time::Lookup;
 
@@ -148,6 +148,37 @@ impl Topics {
     ///
     /// If the comm core refuses: another program publishes it, or there is no room.
     pub fn declare(&self, topic: &TopicDecl<'_>) -> Result<Publisher, TopicError> {
+        self.declare_in(topic, None)
+    }
+
+    /// Declares a topic in a ring the program made and writes itself, so that programs that
+    /// reach it through Orion read the same ring as those that reach it some other way. The
+    /// ring must have the declaration's shape, or the comm core refuses it, `malformed`.
+    ///
+    /// The program keeps its own writer and publishes with it; [`Publisher::wake`] after each
+    /// publish wakes Orion's subscribers that are asleep, with no system call for one that is
+    /// awake. A comm core that restarts is handed the same ring back by [`Topics::restore`].
+    ///
+    /// # Errors
+    ///
+    /// If the session is not on the board, the ring's descriptor cannot be duplicated, or the
+    /// comm core refuses, as [`Topics::declare`].
+    pub fn adopt(&self, topic: &TopicDecl<'_>, ring: &Ring) -> Result<Publisher, TopicError> {
+        if !self.client.session(|session| session.passes_descriptors()) {
+            return Err(TopicError::Invalid(
+                "a ring is shared only with programs on the board".into(),
+            ));
+        }
+        let fd = ring.write_fd().map_err(TopicError::Ring)?;
+        self.declare_in(topic, Some(fd.as_fd()))
+    }
+
+    /// Declares `topic`, in `ring` if the program brings its own.
+    fn declare_in(
+        &self,
+        topic: &TopicDecl<'_>,
+        ring: Option<BorrowedFd<'_>>,
+    ) -> Result<Publisher, TopicError> {
         let declare = Declare {
             topic: topic
                 .name
@@ -162,8 +193,13 @@ impl Topics {
         let len = encode_fields(&declare, &mut raw)
             .map_err(|_| TopicError::Invalid("the declaration is too long".into()))?;
         raw.truncate(len);
-        let seq = self.client.send_frame(kind::TOPIC_DECLARE, &raw, &[])?;
+        let seq = self
+            .client
+            .send_frame(kind::TOPIC_DECLARE, &raw, ring.as_slice())?;
         let index = self.state.borrow_mut().add_publisher(seq, raw);
+        // The program writes its ring itself: the answer's descriptor is kept to hand back to
+        // a comm core that restarts, and no second writer is made on it.
+        self.state.borrow_mut().publisher_mut(index).taken = ring.is_some();
         let opened = self
             .client
             .answered(seq, || self.state.borrow().publisher_open(index));

@@ -284,6 +284,13 @@ marks holds nothing and is handed the pool at once.
   generation is refused.
 - A subscriber that leaves is taken out of the publisher's table (`Holds`, not present).
 - Only a topic's publisher may offer its pool.
+- An offer may keep reader slots back (`reader_slots`, a bit for each of the 64; zero for none
+  kept): a publisher that serves readers of its own, outside Orion, keeps their slots. A
+  subscriber already in a slot the offer keeps back is moved: the publisher is told the old slot
+  is gone and given its marks under a new one. One with no slot left is warned about and gets no
+  pool.
+- A publisher may bring its own ring to a declaration: the broker checks it against the
+  declaration and uses it, as it does for a publisher coming back after a restart.
 
 The broker maps no buffer and sees no frame. A comm core that restarts interrupts no frames: the
 ring, the pool and the marks belong to the publisher and its subscribers, who offer the same things

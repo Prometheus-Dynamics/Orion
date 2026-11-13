@@ -58,6 +58,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [ ] [C13](docs/prs/C13.md) USB link (wave 7; needs C11; board run)
 - [x] [C14](docs/prs/C14.md) Host facts and Orion's own state as topics (wave 7; needs C3)
 - [x] [C15](docs/prs/C15.md) Comm assembly (wave 8; needs C2, C3, C4, C5, C6, C8, C10, C14)
+- [x] [C16](docs/prs/C16.md) Adopting a publisher's own ring and pool (wave 18; needs J2)
 
 ## D. Client
 
