@@ -145,6 +145,18 @@ struct State {
     next_call: u64,
 }
 
+impl State {
+    /// Whether the registration sent as `seq` was confirmed. Its confirmation is used up, so
+    /// a later request that comes round to the same number waits for its own.
+    fn taken(&mut self, seq: u16) -> bool {
+        let at = self
+            .registered
+            .iter()
+            .position(|confirmed| *confirmed == seq);
+        at.map(|at| self.registered.swap_remove(at)).is_some()
+    }
+}
+
 impl Handler for State {
     fn kinds(&self) -> &'static [u8] {
         &[
@@ -312,7 +324,7 @@ impl Actions {
             description: action.description,
         })?;
         self.client
-            .answered(seq, || self.state.borrow().registered.contains(&seq))?;
+            .answered(seq, || self.state.borrow_mut().taken(seq))?;
         self.state.borrow_mut().listed.push(Listed {
             name: action.name.to_owned(),
             target: action.target.clone(),
@@ -335,6 +347,9 @@ impl Actions {
     ///
     /// If the comm core refuses an action it took before, or the connection broke again.
     pub fn restore(&self) -> Result<(), ClientError> {
+        // An answer from the session that broke is no answer to this one, which may use the
+        // same numbers.
+        self.state.borrow_mut().registered.clear();
         let count = self.state.borrow().listed.len();
         for index in 0..count {
             let seq = {
@@ -351,7 +366,7 @@ impl Actions {
                 })?
             };
             self.client
-                .answered(seq, || self.state.borrow().registered.contains(&seq))?;
+                .answered(seq, || self.state.borrow_mut().taken(seq))?;
         }
         // What was asked of this program before belongs to a session that is gone.
         self.state.borrow_mut().requests.clear();

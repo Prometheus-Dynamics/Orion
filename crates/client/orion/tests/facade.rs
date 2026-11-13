@@ -141,6 +141,56 @@ fn a_comm_core_that_restarts_stops_nothing_that_was_flowing() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[test]
+fn a_resource_is_said_again_only_once_its_actions_are_back() {
+    use orion::actions::{ActionDecl, Admits, Policy, Target};
+    use orion::provider::ResourceState;
+
+    let mut board = Board::start("facade-order");
+    let (dir, port) = (board.dir().to_owned(), board.network().port());
+    let address = Address::Local(board.socket().to_owned());
+    let options = orion::Options {
+        roles: orion::Roles::CLIENT.and(orion::Roles::PROVIDER),
+        ..orion::Options::default()
+    };
+    let driver = Orion::connect_with(&address, "fan-driver", options).expect("connect");
+    let mut describing = driver
+        .provider()
+        .resource("fan.left", "fan")
+        .expect("resource");
+    describing
+        .action("set", "Sets the fan's speed", Policy::new(Admits::LOCAL))
+        .expect("action");
+    let _fan = describing.publish(ResourceState::Ready).expect("publish");
+
+    // The comm core starts again, and another program takes the action's name first.
+    board.stop();
+    board = Board::start_in(&dir, orion_stubs::Security::Off, Some(port));
+    let other = Orion::connect(&address, "other").expect("connect");
+    let _taken = other
+        .register_action(
+            &ActionDecl {
+                name: "fan.left.set",
+                target: Target::Resource("fan.left".parse().expect("a name")),
+                description: "Not the fan's",
+            },
+            Policy::new(Admits::LOCAL),
+        )
+        .expect("register");
+
+    // The driver's actions are refused, so its resource is not said again: nobody finds a
+    // fan whose actions belong to someone else.
+    let again = driver.reconnect(|_| true);
+    assert!(again.is_err(), "the name is taken");
+    let found = other
+        .records()
+        .get(RecordClass::Resource, "fan.left")
+        .expect("get");
+    assert!(found.is_empty(), "{found:?}");
+    drop(board);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn orion_wire_bytes(bytes: &[u8]) -> orion::records::Bytes<'_> {
     orion::records::Bytes(bytes)
 }

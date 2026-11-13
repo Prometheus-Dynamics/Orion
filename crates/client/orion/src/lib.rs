@@ -365,8 +365,8 @@ impl Orion {
     }
 
     /// Connects again to the same address, for as long as `keep_trying` says, and then says
-    /// everything again: topics are declared with their rings handed back, subscriptions and
-    /// watches are asked for from where they were, and actions are registered.
+    /// everything again: topics are declared with their rings handed back, actions are
+    /// registered, and then records are put and watches asked for from where they were.
     ///
     /// # Errors
     ///
@@ -379,10 +379,12 @@ impl Orion {
             .session(|session| session.reconnect(keep_trying))?;
         #[cfg(feature = "topics")]
         self.topics.restore()?;
-        #[cfg(feature = "records")]
-        self.records.restore()?;
+        // Actions before records: a resource said again names actions that are already
+        // back, and one whose actions are refused is not said again at all.
         #[cfg(feature = "actions")]
         self.actions.restore()?;
+        #[cfg(feature = "records")]
+        self.records.restore()?;
         Ok(())
     }
 

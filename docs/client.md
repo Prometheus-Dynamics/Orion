@@ -25,8 +25,10 @@ one handle; what it can do is behind cargo features so a program carries only wh
 
 **When the comm core goes away.** A call fails with an error for which `is_lost` is true.
 `orion.reconnect(..)` connects again and says everything again: topics are declared with their
-rings handed back, subscriptions and watches are asked for from where they were, actions are
-registered. On the board a ring belongs to its publisher and its subscribers, so values kept
+rings handed back, then actions are registered, then records are put again and subscriptions and
+watches are asked for from where they were. Actions come before records, so a resource said
+again names actions that are already back. If an action is refused (another program took its
+name while the comm core was away), `reconnect` fails and the resource is not said again. On the board a ring belongs to its publisher and its subscribers, so values kept
 going from one to the other while the comm core was away, and it takes the same ring back when
 it returns. Nothing that was flowing stops.
 
