@@ -109,7 +109,10 @@ impl From<Error> for Failed {
             }
             _ if error.is_lost() => ORION_E_LOST,
             Error::Client(
-                ClientError::Refused(_) | ClientError::Rejected(_) | ClientError::Denied(_),
+                ClientError::Refused(_)
+                | ClientError::Rejected(_)
+                | ClientError::Denied(_)
+                | ClientError::OtherKey { .. },
             ) => ORION_E_REFUSED,
             Error::Topic(TopicError::Invalid(_) | TopicError::Publish(_)) => ORION_E_ARGUMENT,
             _ => ORION_E_INTERNAL,

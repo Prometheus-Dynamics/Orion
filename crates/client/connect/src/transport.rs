@@ -207,10 +207,11 @@ impl Transport {
                         "the node did not prove it holds its key",
                     ));
                 }
-                if expect.is_some_and(|expected| *expected != transcript.server_key()) {
-                    return Err(ClientError::Denied(
-                        "the node is not the one that was expected",
-                    ));
+                if let Some(asked) = expect.filter(|asked| **asked != transcript.server_key()) {
+                    return Err(ClientError::OtherKey {
+                        asked: *asked,
+                        answered: transcript.server_key(),
+                    });
                 }
                 let (to_server, to_client) = transcript.keys(&fresh, true).ok_or(
                     ClientError::Denied("the node sent a key exchange that gives no secret"),

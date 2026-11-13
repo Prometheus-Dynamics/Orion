@@ -145,7 +145,7 @@ impl Helper {
                     warn!("{} cannot be reached at {address}: {error}", self.node);
                     // A node that is not the one pinned is refused as such, not as away.
                     let error = match error {
-                        ClientError::Denied(_) => Error::Denied,
+                        ClientError::Denied(_) | ClientError::OtherKey { .. } => Error::Denied,
                         _ => Error::Unavailable,
                     };
                     self.tell(Event::Refused { id, error });

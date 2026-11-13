@@ -288,10 +288,15 @@ fn a_signed_network_session_is_the_same_again_and_checks_who_is_there() {
         key: Some([9; 32]),
     };
     let error = Session::connect(&wrong, "tool", options(copy())).expect_err("another node");
-    assert!(
-        matches!(error, ClientError::Denied(why) if why.contains("not the one")),
-        "{error}"
-    );
+    // Both keys, for a tool to show: the one asked for and the one the node proved.
+    match &error {
+        ClientError::OtherKey { asked, answered } => {
+            assert_eq!(*asked, [9; 32]);
+            assert_eq!(*answered, board.key);
+        }
+        other => panic!("{other}"),
+    }
+    assert!(error.to_string().contains(&"09".repeat(32)), "{error}");
     // No key, to a node with security on.
     let open = Address::Network {
         host: board.network.to_string(),
