@@ -446,6 +446,25 @@ the local node should do. It talks to nothing.
   node agrees. The node a resource is on arbitrates it: a lease whose workload is no longer
   assigned to the node the lease names is dropped.
 
+### On connections
+
+`orion-executors` runs it (E20) from the store, whenever a node, workload or resource record
+changes, anyone's, or an executor comes or goes, or a grace period ends:
+
+- **Who is there.** A node that observes its own node record is live: a peer's slice is
+  forgotten when neither way to it is up (E19). That record lists the kinds its executors run,
+  under `orion.kind`, and what it reports of itself; the node's record in the store says labels
+  over those. `orion.schedulable=false` keeps new work off a node.
+- **Whose it is.** The node placement chooses says so by observing the workload. If two did
+  for a moment, one that can still run it wins over one that cannot, and of those the higher
+  score: the other lets it go.
+- **Started or let go.** A workload that is this node's is put in the tracker and starts when
+  its executor and files are there. One that another node now runs is let go here, and its
+  record stays. A record that is gone, from any node, ends its run.
+- **Nobody can run it**: every node keeps it `Pending`, saying why, until one can.
+- **A workload that names a node** is that node's, as before.
+- `workloads.placement_grace_ms` (10000) is the grace period.
+
 Liveness is each node's own judgement and is not shared. Two nodes may disagree for a moment;
 that is safe because a node only ever takes work for itself, after the grace period, and two
 "mine" for one workload are one record that the store's merge settles.
@@ -524,6 +543,4 @@ Node logic reports only a key under one of its own names (`records.`, `files.`, 
 Cargo feature `pull`, on by default, is fetching files from a URL. A build without it has no
 HTTP client and no rustls.
 
-Not assembled yet: placement (`orion-placement`), which is built and proved on its own. Until
-it is wired, a workload runs on the node it was put on, or the one it names. Peer sync is
-assembled (E19).
+Peer sync (E19) and placement (E20) are assembled.

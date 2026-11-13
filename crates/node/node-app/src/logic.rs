@@ -227,6 +227,7 @@ impl Logic {
         [
             self.actions.next_deadline(),
             self.workloads.next_deadline(),
+            self.workloads.placement_deadline(),
             self.records.reclaim_at(),
         ]
         .into_iter()
@@ -264,8 +265,30 @@ impl Logic {
 
     /// Peer sync: what the links heard, and what changed here.
     pub(crate) fn sync(&mut self, out: &mut dyn Out) {
-        self.peers
-            .turn(&mut self.records, wall().as_millis() as u64, out);
+        let wall_ms = wall().as_millis() as u64;
+        self.peers.turn(&mut self.records, wall_ms, out);
+        // Which workloads are this node's, now that the records may say otherwise.
+        if self.records.take_placement_due() {
+            self.workloads.records_changed();
+        }
+        let now = self.now_ms();
+        if self.workloads.place_due()
+            || self
+                .workloads
+                .placement_deadline()
+                .is_some_and(|due| due <= now)
+        {
+            self.workloads.place(
+                self.records.store_mut(),
+                &OnBoard(&self.files),
+                now,
+                wall_ms,
+                out,
+            );
+            // What placement said is told to watchers and peers at once.
+            self.peers.turn(&mut self.records, wall_ms, out);
+            let _ = self.records.take_placement_due();
+        }
     }
 
     pub(crate) fn forget_sessions(&mut self) {

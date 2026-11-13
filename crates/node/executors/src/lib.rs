@@ -22,7 +22,9 @@
 //! the workload is gone or the session is. Putting a workload again as it is changes nothing
 //! and is how to ask where it is.
 
-use std::collections::BTreeMap;
+mod place;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use orion_msg_records::RecordClass;
 use orion_msg_workloads::{
@@ -36,6 +38,7 @@ use orion_wire::{Bytes, Decode, kind};
 use orion_workloads::{Command, Put, Reported, Tracker, Workload};
 
 pub use orion_workloads::RestartConfig;
+pub use place::{LABEL_KIND, LABEL_SCHEDULABLE};
 use tracing::{info, warn};
 
 /// The most sessions told about one workload. The oldest goes first.
@@ -88,6 +91,14 @@ pub struct Workloads {
     executors: BTreeMap<u32, Offering>,
     /// Who is told about each workload.
     askers: BTreeMap<WorkloadName, Vec<u32>>,
+    /// Which node runs a workload that names none.
+    placement: orion_placement::Coordinator,
+    /// Workloads let go because another node runs them: their records stay.
+    released: BTreeSet<WorkloadName>,
+    /// The kinds this node last said its executors run.
+    said_kinds: Option<BTreeSet<WorkloadKind>>,
+    /// Something placement depends on changed.
+    place_due: bool,
 }
 
 impl Workloads {
@@ -110,11 +121,17 @@ impl Workloads {
         board: &dyn Board,
         now_ms: u64,
     ) -> Self {
+        let placement =
+            orion_placement::Coordinator::new(me.clone(), orion_placement::DEFAULT_GRACE_MS);
         let mut workloads = Self {
             me,
             tracker: Tracker::new(config),
             executors: BTreeMap::new(),
             askers: BTreeMap::new(),
+            placement,
+            released: BTreeSet::new(),
+            said_kinds: None,
+            place_due: true,
         };
         let mut known = 0;
         for record in store.list(RecordClass::Workload, "") {
@@ -269,7 +286,11 @@ impl Workloads {
             }
             if change.dropped {
                 self.askers.remove(&change.name);
-                store.delete(RecordClass::Workload, change.name.as_str(), wall_ms);
+                // Not this node's to say it runs any more.
+                store.unobserve(RecordClass::Workload, change.name.as_str(), wall_ms);
+                if !self.released.remove(&change.name) {
+                    store.delete(RecordClass::Workload, change.name.as_str(), wall_ms);
+                }
             }
         }
     }
@@ -303,9 +324,46 @@ impl Workloads {
                     store.put(RecordClass::Workload, name.as_str(), asked.payload, wall_ms);
                 }
                 self.ask(&name, from);
+                if workload.node.is_none() {
+                    // Which node runs it is placement's to say. A put that changes nothing
+                    // here is told nothing by the tracker: the asker is told where it is.
+                    let unchanged = self
+                        .tracker
+                        .get(&name)
+                        .is_some_and(|tracked| tracked.workload == workload);
+                    self.place(store, board, now_ms, wall_ms, out);
+                    if self.tracker.get(&name).is_some() {
+                        if unchanged {
+                            self.tell_one(from, &name, out);
+                        }
+                        return Ok(());
+                    }
+                    let owner = place::assigned(
+                        store,
+                        &place::view(store),
+                        &orion_placement::Needs::of(&workload),
+                    );
+                    let detail = owner.as_ref().map_or_else(
+                        || "another node is to take it".to_owned(),
+                        |node| format!("it runs on node {node}"),
+                    );
+                    return out.send(
+                        from,
+                        &WorkloadStatus {
+                            name,
+                            state: WorkloadState::Pending,
+                            node: owner,
+                            detail: &detail,
+                        },
+                    );
+                }
                 if !self.mine(&workload) {
-                    // Another node's to run. If it ran here, it no longer should.
-                    let _ = self.tracker.remove(&name, false, now_ms);
+                    // Another node's to run. If it ran here, it no longer should; its
+                    // record stays.
+                    if self.tracker.get(&name).is_some() {
+                        self.released.insert(name.clone());
+                        let _ = self.tracker.remove(&name, false, now_ms);
+                    }
                     self.carry(store, wall_ms, out);
                     let detail = format!(
                         "it is for node {}",
@@ -384,6 +442,8 @@ impl Workloads {
                 offering.up = true;
                 let kinds = offering.kinds.clone();
                 let strays = self.tracker.executor_up(&kinds, &has, now_ms);
+                // What this node can run changed.
+                self.place_due = true;
                 for stray in strays {
                     // It runs something Orion does not want.
                     let _ = out.send(from, &ExecutorStop { name: stray });
@@ -434,6 +494,7 @@ impl Workloads {
             && offering.up
         {
             self.tracker.executor_down(&offering.kinds, now_ms);
+            self.place_due = true;
             self.carry(store, wall_ms, out);
         }
     }
@@ -442,6 +503,7 @@ impl Workloads {
     /// until its executor is back.
     pub fn forget_sessions(&mut self, now_ms: u64) {
         self.askers.clear();
+        self.place_due = true;
         for (_, offering) in std::mem::take(&mut self.executors) {
             if offering.up {
                 self.tracker.executor_down(&offering.kinds, now_ms);

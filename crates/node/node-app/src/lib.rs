@@ -73,6 +73,9 @@ pub struct NodeSettings {
     /// `workloads.stop_grace_ms`: how long a run that was asked to stop is given before
     /// it is told to end.
     pub stop_grace: Duration,
+    /// `workloads.placement_grace_ms`: how long a node that would take over a workload whose
+    /// node can no longer run it waits for that node first.
+    pub placement_grace: Duration,
     /// `audit.file`: the audit log. `audit.log` in the state directory unless it is said;
     /// `off` for none.
     pub audit: Option<AuditConfig>,
@@ -112,6 +115,9 @@ impl NodeSettings {
             files_dir,
             files_max_size: source.get("files.max_size", 16_u64 << 30)?,
             stop_grace: Duration::from_millis(source.get("workloads.stop_grace_ms", 10_000_u64)?),
+            placement_grace: Duration::from_millis(
+                source.get("workloads.placement_grace_ms", 10_000_u64)?,
+            ),
             save_after: Duration::from_millis(source.get("records.save_after_ms", 500_u64)?),
             max_drift_ms: source.get("records.max_drift_ms", defaults.max_drift_ms)?,
         })
@@ -216,11 +222,13 @@ impl Node {
             },
         )?;
         let peers = peers::Peers::new(name.clone(), links, settings.config.state_dir.clone());
+        let mut logic = Logic::new(store, name, files, audit, dialer, stop_grace, peers);
+        logic
+            .workloads
+            .set_placement_grace(settings.placement_grace.as_millis() as u64);
         Ok(Self {
             settings,
-            logic: Rc::new(RefCell::new(Logic::new(
-                store, name, files, audit, dialer, stop_grace, peers,
-            ))),
+            logic: Rc::new(RefCell::new(logic)),
             persist: Some(persist),
             saving: None,
             unsaved_since: None,
@@ -305,9 +313,9 @@ impl Node {
             logic.actions.tick(now, &mut direct);
             logic.files.poll(&mut direct);
             logic.forwards.poll(&mut direct);
-            logic.sync(&mut direct);
             logic.restarts(&mut direct);
             logic.fetches(&mut direct);
+            logic.sync(&mut direct);
             logic.actions.take_events()
         };
         direct.result()?;

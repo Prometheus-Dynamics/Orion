@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-workloads = { path = "../../core/msg-workloads" }
+orion-placement = { path = "../placement" }
 orion-reply = { path = "../reply" }
 orion-store = { path = "../store" }
 orion-types = { path = "../../core/types" }

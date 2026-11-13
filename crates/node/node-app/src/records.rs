@@ -34,6 +34,8 @@ pub struct Records {
     reclaim_at: Option<u64>,
     /// What changed since peer sync last looked. `None`: more than was kept track of.
     for_sync: Option<Vec<Change>>,
+    /// A record placement reads changed: a node, a workload, a resource, anyone's.
+    placement_due: bool,
 }
 
 /// Sends `records` to `session` as answers to `seq`, in as many messages as it takes. With
@@ -93,7 +95,13 @@ impl Records {
             dirty: false,
             reclaim_at: None,
             for_sync: Some(Vec::new()),
+            placement_due: false,
         }
+    }
+
+    /// Whether a record placement reads changed since the last call.
+    pub fn take_placement_due(&mut self) -> bool {
+        std::mem::take(&mut self.placement_due)
     }
 
     /// What changed in the store since the last call, for peer sync. `None`: more than was
@@ -242,6 +250,14 @@ impl Records {
     /// to be saved.
     pub fn publish(&mut self, out: &mut dyn Out) {
         let taken = self.store.take_changes();
+        self.placement_due |= taken.as_ref().is_none_or(|changes| {
+            changes.iter().any(|change| {
+                matches!(
+                    change.record.class,
+                    RecordClass::Node | RecordClass::Workload | RecordClass::Resource
+                )
+            })
+        });
         match (&mut self.for_sync, &taken) {
             (Some(kept), Some(changes)) => kept.extend(changes.iter().cloned()),
             (kept, _) => *kept = None,
