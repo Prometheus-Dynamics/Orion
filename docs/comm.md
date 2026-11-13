@@ -194,7 +194,8 @@ the gateway, the rest stay Orion's.
   field in `nt4.publish` and, if it has a newer sample, sets the NT4 topic to it. NT4
   carries the latest value, so a sample replaced within a period is never sent. The gateway
   reads the ring like any other reader; a publisher pays nothing for it. The NT4 topic is
-  announced with the field's first sample.
+  announced with the field's first sample. Topics declared together are announced in whatever
+  order their first samples are seen: the order is not defined, and a viewer should not rely on it.
 - **Types.** `Bool` is `boolean`; `Int` is `int` (or `double`, `float`); `Float` is `double`
   or `float`; `Text` is `string` or `json`; `Bytes` and `Structured` are `raw` and every NT4
   type that is bytes (`struct:…`, `proto:…`); `FloatArray` is `double[]` or `float[]`;

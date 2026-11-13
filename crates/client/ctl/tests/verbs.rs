@@ -284,13 +284,21 @@ fn node_show_peers_and_time() {
         (0, "node-b  orion+tcp://10.0.0.2:9200  rack=3\n")
     );
 
-    // The board's clock is this computer's, give or take the trip.
+    // The board's clock is this computer's, give or take the trip: what is measured can be
+    // off by up to the round trip, however long a loaded machine makes that.
     let (code, out, _) = ctl(&board, "node time");
     assert_eq!(code, 0);
-    assert!(
-        out.starts_with("the board's clock is 0.") && out.contains("this computer's (round trip "),
-        "{out}"
-    );
+    let ms = |after: &str| -> f64 {
+        let at = out.find(after).expect(after) + after.len();
+        out[at..]
+            .split(' ')
+            .next()
+            .expect("a number")
+            .parse()
+            .expect("a number")
+    };
+    assert!(out.contains("this computer's (round trip "), "{out}");
+    assert!(ms("the board's clock is ") <= ms("(round trip "), "{out}");
 
     // The same tool reaches a board across the network.
     let network = format!("--address orion+tcp://{} node show", board.network());
