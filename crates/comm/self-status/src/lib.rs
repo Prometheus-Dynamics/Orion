@@ -24,7 +24,7 @@ mod host;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use orion_broker::{Broker, LocalPublisher, Topic, TopicId, TopicWatch, Topics};
 use orion_msg_topics::FieldType;
@@ -64,10 +64,7 @@ const COMM_FIELDS: [&str; 10] = [
 const STATE_FIELDS: [&str; 4] = ["state", "failures", "restarts", "retry_at_ms"];
 
 fn now() -> SampleTime {
-    let since = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    SampleTime::from_nanos(since.as_nanos() as u64)
+    SampleTime::now()
 }
 
 /// Declares a topic the comm core publishes itself: latest values of eight bytes each.

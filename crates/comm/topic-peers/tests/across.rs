@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use orion::topics::{FieldId, Next, Publisher, SampleTime, Status, Subscriber, TopicDecl};
 use orion::{Address, Orion, fields};
@@ -34,11 +34,9 @@ impl Resolve for Map {
     }
 }
 
-fn wall_ns() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("after 1970")
-        .as_nanos() as u64
+/// This machine's monotonic clock, which sample times are on.
+fn monotonic_ns() -> u64 {
+    SampleTime::now().as_nanos()
 }
 
 /// A comm core in its own thread: the broker with everything a topic needs to leave the
@@ -104,7 +102,7 @@ impl Node {
                     &broker.topics(),
                     options.clone(),
                     resolve,
-                    move || wall_ns() + ahead_ns,
+                    move || monotonic_ns() + ahead_ns,
                 );
                 // The clock is answered for: that is what a link compares with.
                 let _time = orion_time::TimeSync::start(
@@ -364,8 +362,10 @@ fn sample_times_arrive_in_this_boards_time() {
     // The clocks are compared as soon as the link is up; give the answer time to arrive.
     std::thread::sleep(Duration::from_millis(300));
 
-    // A frame stamped on the right board with the right board's time.
-    let stamped = wall_ns();
+    // A sample stamped on the right board with the right board's monotonic time. Were the
+    // right board answering with its wall clock, the two would be decades apart, not five
+    // seconds.
+    let stamped = monotonic_ns();
     publish(&mut level, stamped, 1.0);
     let (arrived, _) = read(&mut reading, 1)[0];
     // On the left board it carries the left board's time for the same moment.

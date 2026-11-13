@@ -8,9 +8,9 @@ use orion_msg_files::{
     FileBegin, FileChunk, FileCommit, FilePull, FileSink, FileSinkReady, FileState, FileStatus,
 };
 use orion_msg_peers::{
-    EnrollChallenge, EnrollConfirm, EnrollHello, EnrollRole, GrantedAction, OperatorEnroll,
-    OperatorEntry, OperatorList, OperatorState, OperatorWelcome, Operators, PeerObserved,
-    PeerRevoke, PeerSync, TimeOffer, TimeReply, TimeRequest, TimeTurn,
+    CLOCK_MONOTONIC, EnrollChallenge, EnrollConfirm, EnrollHello, EnrollRole, GrantedAction,
+    OperatorEnroll, OperatorEntry, OperatorList, OperatorState, OperatorWelcome, Operators,
+    PeerObserved, PeerRevoke, PeerSync, TimeOffer, TimeReply, TimeRequest, TimeTurn,
 };
 use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, RecordEntry, Watch};
 use orion_msg_session::{
@@ -700,7 +700,13 @@ fn peers(out: &mut Vec<Sample>) {
             operators: List::new(&operators)
         }
     );
-    sample!(out, TimeRequest { sent_ns: 1 });
+    sample!(
+        out,
+        TimeRequest {
+            sent_ns: 1,
+            clock: CLOCK_MONOTONIC
+        }
+    );
     sample!(
         out,
         TimeReply {

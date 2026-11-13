@@ -11,8 +11,9 @@
 //!   each sample. The declaration makes a ring of the same shape here, which the waiting
 //!   subscribers are handed; each sample is written into it and the subscribers that are
 //!   asleep are rung. From there on they are same-board subscribers.
-//! - **Sample times in this board's time.** A sample's time is on its publisher's clock. The
-//!   link compares the two boards' clocks, with the same request the time service answers,
+//! - **Sample times in this board's time.** A sample's time is on its publisher's board's
+//!   monotonic clock. The link compares the two boards' monotonic clocks, with the request
+//!   the time service answers,
 //!   and moves each sample's time by the difference, so that "the value at or before this
 //!   frame" means the same on both boards. Boards whose clocks agree (time sync is what
 //!   makes them) have a difference smaller than the comparison can measure, and their
@@ -276,7 +277,7 @@ impl TopicPeers {
         options: TcpOptions,
         resolve: impl Resolve + 'static,
     ) -> Self {
-        Self::with_clock(comm, topics, options, resolve, link::wall_ns)
+        Self::with_clock(comm, topics, options, resolve, link::monotonic_ns)
     }
 
     /// As [`TopicPeers::start`], with the clock sample times here are on.

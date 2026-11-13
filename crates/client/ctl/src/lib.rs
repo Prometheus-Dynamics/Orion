@@ -399,11 +399,7 @@ fn topic_publish(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         expiry_ms: 0,
         max_payload: largest as u32,
     })?;
-    let time = SampleTime::from_nanos(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos() as u64),
-    );
+    let time = SampleTime::now();
     for (index, (.., bytes)) in parsed.iter().enumerate() {
         publisher.publish(FieldId(index as u16), time, bytes)?;
     }

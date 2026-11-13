@@ -35,7 +35,7 @@ orion-resources = { path = "../resources" }
 orion-ring = { path = "../../core/ring" }
 orion-store = { path = "../store" }
 orion-topics = { path = "../../client/topics" }
-orion-types = { path = "../../core/types" }
+orion-types = { path = "../../core/types", features = ["now"] }
 orion-wire = { path = "../../core/wire", features = ["std"] }
 sha2 = { version = "0.11.0", default-features = false }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal", "net"] }

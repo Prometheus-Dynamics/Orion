@@ -183,8 +183,12 @@ pose is one sample. One declaration can hold several related fields.
 
 ### Time
 
-Ask for the value at or before sample time *t*, optionally waiting a bounded time. Replies are hit,
-lagged or missing. Time sync between boards already exists and carries over.
+A sample time is nanoseconds of `CLOCK_MONOTONIC` on the board that took the sample
+(`SampleTime::now()`). The monotonic clock is never stepped, so a lookup does not jump when time
+sync sets the wall clock. Ask for the value at or before sample time *t*, optionally waiting a
+bounded time. Replies are hit, lagged or missing. A topic carried to another board has its sample
+times moved onto that board's monotonic clock on the way in, so *t* means the same moment on both.
+`orion.time` says how far each board's wall clock is from its monotonic one.
 
 ### Across boards
 

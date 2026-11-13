@@ -2,10 +2,10 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use orion_broker::{TopicId, Writing};
-use orion_msg_peers::{TimeReply, TimeRequest};
+use orion_msg_peers::{CLOCK_MONOTONIC, TimeReply, TimeRequest};
 use orion_msg_session::{Hello, Ping, Pong, Reject, Roles, Welcome};
 use orion_msg_topics::{Declare, Opened, Sample, Subscribe, TopicState, TopicStatus, Unsubscribe};
 use orion_ring::{FieldId, Flags, Spec};
@@ -26,10 +26,9 @@ const RETRY: Duration = Duration::from_millis(200);
 const COMPARE: Duration = Duration::from_secs(10);
 
 /// The time of day, in nanoseconds.
-pub(crate) fn wall_ns() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_nanos() as u64)
+/// This board's monotonic clock, which sample times are on.
+pub(crate) fn monotonic_ns() -> u64 {
+    SampleTime::now().as_nanos()
 }
 
 /// What is added to the other board's times to get this board's: this clock less that one,
@@ -312,9 +311,16 @@ async fn serve(
                 Out::Compare => {
                     let sent_ns = (writer_clock.clock)();
                     writer_session.borrow_mut().compared_at = sent_ns;
-                    send(&mut write, &writer_session, &TimeRequest { sent_ns })
-                        .await
-                        .map(|_| ())
+                    send(
+                        &mut write,
+                        &writer_session,
+                        &TimeRequest {
+                            sent_ns,
+                            clock: CLOCK_MONOTONIC,
+                        },
+                    )
+                    .await
+                    .map(|_| ())
                 }
             };
             if sent.is_err() {

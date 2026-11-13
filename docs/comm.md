@@ -601,7 +601,10 @@ and from then on sends `TimeRequest` on that session when it polls; the operator
 session ends, the next source in rank is used.
 
 **State** is the topic `orion.time`, published when it changes: `mode`, `synced`, `source`,
-`offset_ms`, `delay_ms`, `stratum`, `last_action`, `error`. `time.synced_file`
+`offset_ms`, `delay_ms`, `stratum`, `last_action`, `error`, and `monotonic_to_wall_ns`: added to
+a sample time on this board, which is on `CLOCK_MONOTONIC`, it gives the wall time. It is
+published again when it has moved by more than a millisecond. `TimeRequest` says which clock to
+answer with: the wall clock for time sync, the monotonic one for a topic link. `time.synced_file`
 (`/run/orion/time-synced`) exists while the board disciplines the clock and it is synchronized.
 
 ## Links

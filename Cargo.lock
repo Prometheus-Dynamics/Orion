@@ -2432,6 +2432,7 @@ name = "orion-types"
 version = "1.0.1-dev"
 dependencies = [
  "postcard",
+ "rustix",
  "serde",
 ]
 

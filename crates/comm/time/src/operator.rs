@@ -10,11 +10,14 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
 
-use orion_msg_peers::{TimeOffer, TimeReply, TimeRequest, TimeTurn};
+use orion_msg_peers::{
+    CLOCK_MONOTONIC, CLOCK_REALTIME, TimeOffer, TimeReply, TimeRequest, TimeTurn,
+};
 use orion_server::{
     Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Policy, Service, SessionId, Sessions,
     What,
 };
+use orion_types::SampleTime;
 use orion_wire::{FrameView, kind};
 use tokio::sync::Notify;
 
@@ -87,7 +90,10 @@ impl OperatorTime {
             exchange.answer = None;
             (session, token)
         };
-        let request = TimeRequest { sent_ns: token };
+        let request = TimeRequest {
+            sent_ns: token,
+            clock: CLOCK_REALTIME,
+        };
         if comm
             .with(|sessions, _| sessions.send(session, &request, Delivery::Must))
             .is_err()
@@ -189,12 +195,19 @@ impl Service for TimeService {
         let incoming = request.get();
         match incoming.kind() {
             kind::TIME_REQUEST => {
-                let received_ns = wall_ns();
                 let asked: TimeRequest = incoming.body()?;
+                // Read as near the arrival as can be; the body is checked first only because
+                // it says which clock.
+                let clock: fn() -> u64 = match asked.clock {
+                    CLOCK_REALTIME => wall_ns,
+                    CLOCK_MONOTONIC => || SampleTime::now().as_nanos(),
+                    _ => return Err(Error::Unsupported),
+                };
+                let received_ns = clock();
                 cx.reply(&TimeReply {
                     sent_ns: asked.sent_ns,
                     received_ns,
-                    replied_ns: wall_ns(),
+                    replied_ns: clock(),
                 })
             }
             kind::TIME_OFFER => {

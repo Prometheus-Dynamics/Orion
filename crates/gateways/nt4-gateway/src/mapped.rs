@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use orion_broker::{LocalPublisher, TopicId, Topics};
 use orion_msg_topics::{Declare, FieldType};
@@ -198,10 +198,7 @@ impl std::fmt::Debug for Mapped {
 }
 
 fn now() -> SampleTime {
-    let since = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    SampleTime::from_nanos(since.as_nanos() as u64)
+    SampleTime::now()
 }
 
 impl Mapped {

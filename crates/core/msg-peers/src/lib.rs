@@ -176,11 +176,19 @@ body! {
     }
 }
 
+/// [`TimeRequest::clock`]: the wall clock, `CLOCK_REALTIME`, which time sync sets.
+pub const CLOCK_REALTIME: u8 = 0;
+/// [`TimeRequest::clock`]: `CLOCK_MONOTONIC`, which sample times are on.
+pub const CLOCK_MONOTONIC: u8 = 1;
+
 body! {
     /// Starts a clock comparison.
     pub struct TimeRequest = kind::TIME_REQUEST {
         /// When it was sent, on the sender's clock, in nanoseconds.
         pub sent_ns: u64,
+        /// Which clock to answer with, [`CLOCK_REALTIME`] or [`CLOCK_MONOTONIC`]. Another is
+        /// refused, `unsupported`.
+        pub clock: u8,
     }
 }
 

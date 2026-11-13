@@ -10,7 +10,9 @@
 //! - **Serving** (`time.serve`): this board's clock, as SNTP over UDP and the same 48 bytes over
 //!   TCP. Over a session, anyone may ask with `TimeRequest`.
 //! - **State is a topic**, `orion.time`: `mode`, `synced`, `source`, `offset_ms`, `delay_ms`,
-//!   `stratum`, `last_action`, `error`. Published when it changes.
+//!   `stratum`, `last_action`, `error`, and `monotonic_to_wall_ns`, which added to a sample
+//!   time here gives its wall time. Published when it changes; the last by more than a
+//!   millisecond.
 //!
 //! The rules for what to do with an offset are in `discipline`; `docs/comm.md` has the whole
 //! account.
@@ -51,7 +53,19 @@ pub const TIME_TOPIC: &str = "orion.time";
 /// The longest text in the topic. Longer is cut.
 const MAX_TEXT: usize = 120;
 
-const FIELDS: [(&str, FieldType, &str); 8] = [
+/// How far `monotonic_to_wall_ns` moves before it is published again: a slew moves it a little
+/// all the time.
+const MOVED_NS: i64 = 1_000_000;
+
+/// Wall time less monotonic time, now: what is added to a sample time here to get its wall time.
+fn monotonic_to_wall_ns() -> i64 {
+    let wall = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos() as i64);
+    wall.saturating_sub(SampleTime::now().as_nanos() as i64)
+}
+
+const FIELDS: [(&str, FieldType, &str); 9] = [
     ("mode", FieldType::Text, ""),
     ("synced", FieldType::Bool, ""),
     ("source", FieldType::Text, ""),
@@ -60,6 +74,7 @@ const FIELDS: [(&str, FieldType, &str); 8] = [
     ("stratum", FieldType::Int, ""),
     ("last_action", FieldType::Text, ""),
     ("error", FieldType::Text, ""),
+    ("monotonic_to_wall_ns", FieldType::Int, "ns"),
 ];
 
 /// `text`, cut to what a field holds, on a character boundary.
@@ -75,6 +90,8 @@ fn cut(text: &str) -> &[u8] {
 struct StatusTopic {
     publisher: LocalPublisher,
     last: Option<TimeStatus>,
+    /// The `monotonic_to_wall_ns` last published.
+    last_offset: Option<i64>,
 }
 
 impl StatusTopic {
@@ -86,10 +103,15 @@ impl StatusTopic {
             .stratum
             .map(|stratum| i64::from(stratum).to_le_bytes());
         let synced = [u8::from(status.synced)];
+        let offset_now = monotonic_to_wall_ns();
+        let clocks = offset_now.to_le_bytes();
+        let clocks_same = self
+            .last_offset
+            .is_some_and(|last| (last - offset_now).abs() <= MOVED_NS);
         let same =
             |is: fn(&TimeStatus, &TimeStatus) -> bool| last.is_some_and(|last| is(last, status));
         // An error that went away is published as empty text.
-        let fields: [(bool, Option<&[u8]>); 8] = [
+        let fields: [(bool, Option<&[u8]>); 9] = [
             (same(|a, b| a.mode == b.mode), Some(cut(status.mode))),
             (same(|a, b| a.synced == b.synced), Some(&synced)),
             (
@@ -116,6 +138,7 @@ impl StatusTopic {
                 same(|a, b| a.error == b.error),
                 Some(cut(status.error.as_deref().unwrap_or(""))),
             ),
+            (clocks_same, Some(&clocks)),
         ];
         let changed: Vec<(FieldId, &[u8])> = fields
             .iter()
@@ -127,15 +150,9 @@ impl StatusTopic {
         if changed.is_empty() {
             return;
         }
-        let since = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        if self
-            .publisher
-            .publish(SampleTime::from_nanos(since.as_nanos() as u64), &changed)
-            .is_ok()
-        {
+        if self.publisher.publish(SampleTime::now(), &changed).is_ok() {
             self.last = Some(status.clone());
+            self.last_offset = Some(offset_now);
         }
     }
 }
@@ -245,6 +262,7 @@ impl TimeSync {
         if config.mode != TimeMode::Off {
             let mut topic = match topics {
                 Some(topics) => Some(StatusTopic {
+                    last_offset: None,
                     publisher: LocalPublisher::declare(
                         topics,
                         TIME_TOPIC,

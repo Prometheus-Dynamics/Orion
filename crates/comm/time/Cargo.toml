@@ -19,10 +19,11 @@ orion-wire = { path = "../../core/wire" }
 tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "rt", "macros"] }
 tracing.workspace = true
 
+orion-types = { path = "../../core/types", features = ["now"] }
+
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
 orion-ring-doorbell = { path = "../../core/ring-doorbell" }
-orion-types = { path = "../../core/types" }
 orion-unix = { path = "../unix" }
 tokio = { workspace = true, features = ["test-util"] }
 

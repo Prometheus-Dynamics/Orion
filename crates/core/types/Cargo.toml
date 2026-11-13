@@ -12,6 +12,11 @@ no_std = true
 
 [dependencies]
 serde.workspace = true
+# `now`: reads CLOCK_MONOTONIC. Off on a microcontroller, which stamps from its own clock.
+rustix = { version = "1", default-features = false, features = ["time"], optional = true }
+
+[features]
+now = ["dep:rustix"]
 
 [dev-dependencies]
 postcard.workspace = true

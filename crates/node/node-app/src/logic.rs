@@ -83,11 +83,13 @@ pub(crate) fn publish(topic: &mut Publisher, events: &[Event], running: usize) {
             end -= 1;
         }
         line.push_str(&event.message[..end]);
-        let time = SampleTime::from_nanos(wall().as_nanos() as u64);
-        let _ = topic.publish(FieldId(0), time, line.as_bytes());
+        let _ = topic.publish(FieldId(0), SampleTime::now(), line.as_bytes());
     }
-    let time = SampleTime::from_nanos(wall().as_nanos() as u64);
-    let _ = topic.publish(FieldId(1), time, &(running as i64).to_le_bytes());
+    let _ = topic.publish(
+        FieldId(1),
+        SampleTime::now(),
+        &(running as i64).to_le_bytes(),
+    );
 }
 
 /// The files a workload may need, as the node's store has them.

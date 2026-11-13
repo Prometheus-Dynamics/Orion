@@ -10,13 +10,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{Event, Wire};
 use orion_broker::{Broker, BrokerConfig};
-use orion_msg_peers::{TimeOffer, TimeReply, TimeRequest, TimeTurn};
+use orion_msg_peers::{
+    CLOCK_MONOTONIC, CLOCK_REALTIME, TimeOffer, TimeReply, TimeRequest, TimeTurn,
+};
 use orion_msg_session::{Hello, Refusal};
 use orion_ring::{FieldId, Reader};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Grants, Limits, Principal, Roles, Security, What};
 use orion_time::{CLOCK_SET, Clock, TIME_TOPIC, TimeConfig, TimeMode, TimeSync};
-use orion_types::KeyId;
+use orion_types::{KeyId, SampleTime};
 use orion_wire::{Body, Decode, encode_body, frame, kind};
 
 const S: i64 = 1_000_000_000;
@@ -301,12 +303,35 @@ fn an_operator_with_the_grant_gives_the_board_its_clock() {
         local.send(&TimeOffer { stratum: 1 }).await;
         assert_eq!(local.refused().await, Some(Error::Denied));
         // But anyone may ask what time the board has.
-        local.send(&TimeRequest { sent_ns: 42 }).await;
+        local
+            .send(&TimeRequest {
+                sent_ns: 42,
+                clock: CLOCK_REALTIME,
+            })
+            .await;
         assert_eq!(local.next().await, kind::TIME_REPLY);
         let reply: TimeReply = local.body();
         assert_eq!(reply.sent_ns, 42);
         assert!((i128::from(reply.received_ns) - wall_ns()).abs() < i128::from(S));
         assert!(reply.replied_ns >= reply.received_ns);
+        // On the clock sample times are on, when asked for it; another clock is refused.
+        local
+            .send(&TimeRequest {
+                sent_ns: 43,
+                clock: CLOCK_MONOTONIC,
+            })
+            .await;
+        assert_eq!(local.next().await, kind::TIME_REPLY);
+        let reply: TimeReply = local.body();
+        let monotonic = i128::from(SampleTime::now().as_nanos());
+        assert!((i128::from(reply.received_ns) - monotonic).abs() < i128::from(S));
+        local
+            .send(&TimeRequest {
+                sent_ns: 44,
+                clock: 7,
+            })
+            .await;
+        assert_eq!(local.refused().await, Some(Error::Unsupported));
 
         // The operator with the grant offers a clock seven seconds ahead.
         let mut operator = Client::open(

@@ -45,7 +45,7 @@ orion-provider = { path = "../provider", optional = true }
 orion-records = { path = "../records", optional = true }
 orion-ring = { path = "../../core/ring", optional = true }
 orion-topics = { path = "../topics", optional = true }
-orion-types = { path = "../../core/types" }
+orion-types = { path = "../../core/types", features = ["now"] }
 orion-wire = { path = "../../core/wire" }
 
 [dev-dependencies]

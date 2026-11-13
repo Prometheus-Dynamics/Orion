@@ -18,7 +18,7 @@ tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
 orion-ring-doorbell = { path = "../../core/ring-doorbell" }
-orion-types = { path = "../../core/types" }
+orion-types = { path = "../../core/types", features = ["now"] }
 orion-unix = { path = "../unix" }
 orion-wire = { path = "../../core/wire" }
 orion-values = { path = "../../core/values" }

@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_identity::{fingerprint, hello, random};
-use orion_msg_peers::{TimeReply, TimeRequest};
+use orion_msg_peers::{CLOCK_REALTIME, TimeReply, TimeRequest};
 use orion_msg_session::Identify;
 use orion_wire::{Bytes, kind};
 
@@ -115,7 +115,10 @@ pub(crate) fn clock(client: &Client, state: &Rc<RefCell<State>>) -> Result<Clock
     let (asked, asked_wall) = (Instant::now(), wall_ns());
     // The token only has to come back unchanged.
     let token = (asked_wall as u64).max(1);
-    let seq = client.send(&TimeRequest { sent_ns: token })?;
+    let seq = client.send(&TimeRequest {
+        sent_ns: token,
+        clock: CLOCK_REALTIME,
+    })?;
     client.answered(seq, || state.borrow().time.is_some())?;
     let (reply, heard, _) = state.borrow_mut().time.take().ok_or(ClientError::Lost)?;
     if reply.sent_ns != token {
