@@ -252,10 +252,29 @@ pub const WORKLOADS: &[Route] = &[
     },
 ];
 
+/// Peer sync: from peers only. A message stands for nothing and has no answer: what it
+/// starts is the peers' to say, on the same session.
+pub const SYNC: &[Route] = &[
+    Route {
+        kind: kind::PEER_SYNC,
+        access: Access::Write("records"),
+        who: Who::Any(Admits::PEER),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+    Route {
+        kind: kind::PEER_OBSERVED,
+        access: Access::Write("records"),
+        who: Who::Any(Admits::PEER),
+        standing: false,
+        ends: Ends::Nothing,
+    },
+];
+
 /// Every kind that is node logic's.
 #[must_use]
 pub fn routes() -> Vec<Route> {
-    [RECORDS, ACTIONS, FILES, WORKLOADS].concat()
+    [RECORDS, ACTIONS, FILES, WORKLOADS, SYNC].concat()
 }
 
 /// How many requests are remembered as waiting on node logic. The oldest goes first.

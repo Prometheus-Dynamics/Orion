@@ -21,6 +21,7 @@
 #![cfg(target_os = "linux")]
 
 mod logic;
+mod peers;
 #[cfg(feature = "pull")]
 mod pull;
 pub mod records;
@@ -201,10 +202,24 @@ impl Node {
             None => None,
         };
         let stop_grace = settings.stop_grace;
+        // Peer sync, over a session to each node the records give an address for.
+        let dialer = orion_dial::Dialer {
+            me: name.clone(),
+            keys_dir,
+            check,
+            timeout: Duration::from_secs(3),
+        };
+        let links = orion_peer_links::PeerLinks::new(dialer.clone(), peers::Peers::KINDS).map_err(
+            |error| StartError {
+                what: "peer links",
+                error,
+            },
+        )?;
+        let peers = peers::Peers::new(name.clone(), links, settings.config.state_dir.clone());
         Ok(Self {
             settings,
             logic: Rc::new(RefCell::new(Logic::new(
-                store, name, files, audit, keys_dir, check, stop_grace,
+                store, name, files, audit, dialer, stop_grace, peers,
             ))),
             persist: Some(persist),
             saving: None,
@@ -290,6 +305,7 @@ impl Node {
             logic.actions.tick(now, &mut direct);
             logic.files.poll(&mut direct);
             logic.forwards.poll(&mut direct);
+            logic.sync(&mut direct);
             logic.restarts(&mut direct);
             logic.fetches(&mut direct);
             logic.actions.take_events()
@@ -317,6 +333,18 @@ impl Node {
             .and_then(UnixDatagram::from_std);
         let waiter = match waiter {
             Ok(waiter) => waiter,
+            Err(error) => return error.into(),
+        };
+        // Rung when a link to another node heard something.
+        let bell = self
+            .logic
+            .borrow()
+            .peers
+            .bell()
+            .try_clone()
+            .and_then(UnixDatagram::from_std);
+        let bell = match bell {
+            Ok(bell) => bell,
             Err(error) => return error.into(),
         };
         let client = Client::new(session);
@@ -381,9 +409,17 @@ impl Node {
             }
             let wait = wait.max(Duration::from_millis(1));
             let readable = async {
-                if let Ok(Ok(_)) =
-                    tokio::time::timeout(wait, waiter.ready(Interest::READABLE)).await
-                {
+                let either = async {
+                    tokio::select! {
+                        ready = waiter.ready(Interest::READABLE) => ready.map(|_| ()),
+                        // What the bell says is taken in the next turn, which hushes it.
+                        ready = bell.ready(Interest::READABLE) => ready.map(|_| ()),
+                    }
+                };
+                if let Ok(Ok(())) = tokio::time::timeout(wait, either).await {
+                    let _ = bell.try_io(Interest::READABLE, || {
+                        Err::<(), _>(io::Error::from(io::ErrorKind::WouldBlock))
+                    });
                     // Readiness is forgotten here and asked for again after the next look,
                     // so a frame that is only partly here does not spin.
                     let _ = waiter.try_io(Interest::READABLE, || {

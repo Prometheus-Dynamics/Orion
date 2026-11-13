@@ -1272,6 +1272,7 @@ name = "orion-action-forward"
 version = "1.0.1-dev"
 dependencies = [
  "orion-connect",
+ "orion-dial",
  "orion-msg-actions",
  "orion-msg-session",
  "orion-reply",
@@ -1618,6 +1619,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "orion-dial"
+version = "1.0.1-dev"
+dependencies = [
+ "orion-connect",
+ "orion-types",
+]
+
+[[package]]
 name = "orion-discovery"
 version = "1.0.1-dev"
 dependencies = [
@@ -1922,6 +1931,7 @@ dependencies = [
  "orion-check",
  "orion-config",
  "orion-connect",
+ "orion-dial",
  "orion-executors",
  "orion-file-store",
  "orion-files-pull",
@@ -1932,6 +1942,7 @@ dependencies = [
  "orion-msg-session",
  "orion-msg-topics",
  "orion-msg-workloads",
+ "orion-peer-links",
  "orion-persist",
  "orion-reply",
  "orion-resources",
@@ -1939,6 +1950,7 @@ dependencies = [
  "orion-sample-executor",
  "orion-store",
  "orion-stubs",
+ "orion-sync",
  "orion-topics",
  "orion-types",
  "orion-wire",
@@ -2009,6 +2021,18 @@ dependencies = [
  "orion-types",
  "orion-wire",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "orion-peer-links"
+version = "1.0.1-dev"
+dependencies = [
+ "orion-connect",
+ "orion-dial",
+ "orion-types",
+ "orion-wire",
+ "rustix",
  "tracing",
 ]
 

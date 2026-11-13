@@ -97,6 +97,7 @@ Records, peer sync, the workload tracker, actions and files.
 - [x] [E16](docs/prs/E16.md) Resources (wave 10; needs E1, D8)
 - [x] [E17](docs/prs/E17.md) Audit log (wave 9; needs E3)
 - [x] [E18](docs/prs/E18.md) Node assembly (wave 12; needs E5, E6, E7, E9, E11, E12, E14, E15, E16, E17)
+- [x] [E19](docs/prs/E19.md) Peer sync on connections (wave 13; needs E8, E11, E18)
 
 ## F. Leaving the board
 

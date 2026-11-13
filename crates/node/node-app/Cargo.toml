@@ -18,6 +18,7 @@ orion-action-list = { path = "../action-list" }
 orion-audit = { path = "../audit" }
 orion-check = { path = "../../core/check" }
 orion-config = { path = "../../core/config" }
+orion-dial = { path = "../dial" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
 orion-executors = { path = "../executors" }
 orion-file-store = { path = "../file-store" }
@@ -29,11 +30,13 @@ orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
 orion-msg-workloads = { path = "../../core/msg-workloads" }
+orion-peer-links = { path = "../peer-links" }
 orion-persist = { path = "../persist" }
 orion-reply = { path = "../reply" }
 orion-resources = { path = "../resources" }
 orion-ring = { path = "../../core/ring" }
 orion-store = { path = "../store" }
+orion-sync = { path = "../sync" }
 orion-topics = { path = "../../client/topics" }
 orion-types = { path = "../../core/types", features = ["now"] }
 orion-wire = { path = "../../core/wire", features = ["std"] }

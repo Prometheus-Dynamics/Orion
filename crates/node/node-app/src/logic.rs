@@ -1,13 +1,13 @@
 //! What node logic keeps, and how a frame from the comm core reaches the part it is for.
 
 use std::fmt::Write as _;
-use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use orion_action_forward::Forwards;
 use orion_action_list::{Actions, Event};
 use orion_audit::{Audit, Entry, Who};
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
+use orion_dial::Dialer;
 use orion_executors::Workloads;
 use orion_file_store::Files;
 use orion_files_sink::Sinks;
@@ -24,6 +24,7 @@ use orion_topics::Publisher;
 use orion_types::{Error, NodeName, SampleTime};
 use orion_wire::{Bytes, Decode, kind};
 
+use crate::peers::Peers;
 use crate::records::Records;
 use crate::send::{Sends, Via};
 
@@ -116,6 +117,7 @@ pub(crate) struct Logic {
     #[cfg(feature = "pull")]
     pulling: crate::pull::Pulling,
     pub(crate) forwards: Forwards,
+    pub(crate) peers: Peers,
     audit: Option<Audit>,
     started: Instant,
     scratch: Vec<u8>,
@@ -145,6 +147,8 @@ impl Logic {
         kind::EXECUTOR_REPORT,
         kind::EXECUTOR_INVENTORY,
         kind::FILE_PULL,
+        kind::PEER_SYNC,
+        kind::PEER_OBSERVED,
     ];
 
     /// The kinds node logic answers.
@@ -169,6 +173,8 @@ impl Logic {
         kind::EXECUTOR_OFFER,
         kind::EXECUTOR_REPORT,
         kind::EXECUTOR_INVENTORY,
+        kind::PEER_SYNC,
+        kind::PEER_OBSERVED,
     ];
 
     pub(crate) fn new(
@@ -176,9 +182,9 @@ impl Logic {
         node: NodeName,
         files: Files,
         audit: Option<Audit>,
-        keys_dir: PathBuf,
-        check: bool,
+        dialer: Dialer,
         stop_grace: Duration,
+        peers: Peers,
     ) -> Self {
         // What should run here is in the store. It is adopted from the executors that are
         // still connected, or started, once they have said what they have.
@@ -197,7 +203,8 @@ impl Logic {
             reviewed_commits: 0,
             reviewed_ms: 0,
             records: Records::new(store),
-            forwards: Forwards::new(node.clone(), keys_dir, check),
+            forwards: Forwards::new(dialer),
+            peers,
             actions: Actions::new(node),
             files,
             sinks: Sinks::new(),
@@ -226,6 +233,12 @@ impl Logic {
         .flatten()
         .min()
         .map(|due| Duration::from_millis(due.saturating_sub(self.now_ms())))
+        .into_iter()
+        .chain(self.peers.next_deadline().map(|due| {
+            // Sync keeps its times on the wall clock.
+            Duration::from_millis(due.saturating_sub(wall().as_millis() as u64))
+        }))
+        .min()
     }
 
     /// Starts again the workloads that are due.
@@ -249,8 +262,16 @@ impl Logic {
         self.records.publish(out);
     }
 
+    /// Peer sync: what the links heard, and what changed here.
+    pub(crate) fn sync(&mut self, out: &mut dyn Out) {
+        self.peers
+            .turn(&mut self.records, wall().as_millis() as u64, out);
+    }
+
     pub(crate) fn forget_sessions(&mut self) {
         let now = self.now_ms();
+        self.peers
+            .forget_sessions(self.records.store_mut(), wall().as_millis() as u64);
         self.records.forget_sessions(now);
         self.actions.forget_sessions();
         self.forwards.forget_sessions();
@@ -345,6 +366,9 @@ impl Logic {
             // What should run is a record: watchers are told and it is saved.
             self.records.publish(out);
             answered
+        } else if Peers::KINDS.contains(&asked.kind) {
+            self.peers
+                .request(asked, &mut self.records, wall().as_millis() as u64, out)
         } else if asked.kind == kind::FILE_PULL {
             self.pull(asked, out)
         } else if Sinks::KINDS.contains(&asked.kind) {
@@ -516,6 +540,11 @@ impl Handler for Logic {
                 .gone(gone.session, wall().as_millis() as u64, &mut through);
             self.files.gone(gone.session);
             self.forwards.gone(gone.session);
+            self.peers.gone(
+                gone.session,
+                self.records.store_mut(),
+                wall().as_millis() as u64,
+            );
             self.sinks.gone(gone.session, &mut through);
             let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
             self.workloads.gone(

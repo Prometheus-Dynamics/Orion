@@ -1,7 +1,7 @@
 //! Records, answered: writes, reads and watches against the store.
 
 use orion_msg_records::{Changed, Get, Put, RecordClass, RecordEntry, Watch};
-use orion_store::{Record, Scope, Store};
+use orion_store::{Change, Record, Scope, Store};
 use orion_types::{Error, HlcTimestamp};
 use orion_wire::{List, kind};
 
@@ -32,6 +32,8 @@ pub struct Records {
     dirty: bool,
     /// When the resources nobody has written again since node logic connected are lost.
     reclaim_at: Option<u64>,
+    /// What changed since peer sync last looked. `None`: more than was kept track of.
+    for_sync: Option<Vec<Change>>,
 }
 
 /// Sends `records` to `session` as answers to `seq`, in as many messages as it takes. With
@@ -90,7 +92,14 @@ impl Records {
             watchers: Vec::new(),
             dirty: false,
             reclaim_at: None,
+            for_sync: Some(Vec::new()),
         }
+    }
+
+    /// What changed in the store since the last call, for peer sync. `None`: more than was
+    /// kept track of, and every peer is to be told where this node is.
+    pub fn take_for_sync(&mut self) -> Option<Vec<Change>> {
+        self.for_sync.replace(Vec::new())
     }
 
     /// The kinds answered here.
@@ -232,7 +241,12 @@ impl Records {
     /// Tells the watchers what changed in the store since the last call, and marks the store
     /// to be saved.
     pub fn publish(&mut self, out: &mut dyn Out) {
-        let Some(changes) = self.store.take_changes() else {
+        let taken = self.store.take_changes();
+        match (&mut self.for_sync, &taken) {
+            (Some(kept), Some(changes)) => kept.extend(changes.iter().cloned()),
+            (kept, _) => *kept = None,
+        }
+        let Some(changes) = taken else {
             // More changed than was kept track of: every watcher is sent what it watches,
             // whole. A version it already has is the same record again.
             self.dirty = true;

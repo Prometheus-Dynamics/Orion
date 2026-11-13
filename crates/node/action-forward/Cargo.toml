@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 orion-connect = { path = "../../client/connect" }
+orion-dial = { path = "../dial" }
 orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-reply = { path = "../reply" }

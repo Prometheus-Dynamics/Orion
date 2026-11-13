@@ -174,6 +174,26 @@ What a node does with a peer's summary:
 - **Whose message.** The connection says who the peer is. A message that names another node is
   refused.
 
+### On connections
+
+- **Two ways to a peer.** Node logic keeps a session to every other node its node records give
+  an address for (`orion-peer-links`), made as this node with its key, and only to a node
+  that proves it holds the key the trust file pins for it (`orion-dial`, as for a forwarded
+  run). A peer that connected here is heard through the comm core, which passes `PeerSync`
+  and `PeerObserved` on from peers and from nobody else. Frames for a peer go on this node's
+  own session to it when that is up, and otherwise back on the session the peer made: one of
+  the two being able to reach the other is enough.
+- **Up and down.** A peer is up while either way is. When neither is, its observed slice is
+  forgotten. When the other node's node logic was away and is back, it is told where this
+  node is again.
+- **A helper a node.** Each session is held by a thread that wakes node logic through a socket
+  pair when something came, and otherwise sleeps a second at a time for the heartbeat. A
+  node it cannot reach is tried again a second and then up to thirty apart.
+- **Kept.** When each peer was last agreed with is written to `sync-agreed` in the state
+  directory when it changes, and read back at start.
+- **Who to sync with** is the node records: put one for a node, with its address, on any node,
+  and every node that hears of it connects. A single board has none and starts no thread.
+
 ## The open list of actions
 
 `orion-action-list` is the list of actions and the runs under way. Orion ships almost no
@@ -504,7 +524,6 @@ Node logic reports only a key under one of its own names (`records.`, `files.`, 
 Cargo feature `pull`, on by default, is fetching files from a URL. A build without it has no
 HTTP client and no rustls.
 
-Not assembled yet, because they need connections between nodes that the comm core does not
-make yet: peer sync (`orion-sync`) and placement (`orion-placement`). Both are built and
-proved on their own. Until they are wired, a node's records stay on that node and a workload
-runs on the node it was put on, or the one it names.
+Not assembled yet: placement (`orion-placement`), which is built and proved on its own. Until
+it is wired, a workload runs on the node it was put on, or the one it names. Peer sync is
+assembled (E19).

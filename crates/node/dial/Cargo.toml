@@ -1,0 +1,15 @@
+[package]
+name = "orion-dial"
+description = "Node logic connecting to another node as this node: with its key, to the key the trust file pins for that node."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-connect = { path = "../../client/connect" }
+orion-types = { path = "../../core/types" }
+
+[lints]
+workspace = true

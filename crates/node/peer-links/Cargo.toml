@@ -1,0 +1,19 @@
+[package]
+name = "orion-peer-links"
+description = "Node logic's sessions to the other nodes that sync with it: a helper thread each, which wakes node logic when something came."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-connect = { path = "../../client/connect" }
+orion-dial = { path = "../dial" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std", "event", "time"] }
+tracing.workspace = true
+
+[lints]
+workspace = true
