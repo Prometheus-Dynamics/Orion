@@ -1,138 +1,19 @@
 //! The list: registering, routing a run to whoever registered it, and what happens to a run
 //! when either end goes away or it runs out of time.
 
-use orion_action_list::{Actions, ENDED_FOR_MS, Event, MAX_ENDED, MAX_RUNS};
+mod common;
+
+use common::{Bench, CALLER, HOUR, OTHER, OWNER, fan};
+use orion_action_list::{ENDED_FOR_MS, Event, MAX_ENDED, MAX_RUNS};
 use orion_check::{Admits, Policy};
 use orion_msg_actions::{
     ActionResult, Attach, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered,
-    Run, Target,
+    Target,
 };
-use orion_reply::{Asked, Out};
+use orion_reply::Asked;
 use orion_types::Error;
 use orion_wire::body::encode_fields;
-use orion_wire::{Body, Bytes, Decode, kind};
-
-const OWNER: u32 = 10;
-const CALLER: u32 = 20;
-const OTHER: u32 = 30;
-
-/// Keeps what was sent, to be read back.
-#[derive(Default)]
-struct Sent {
-    frames: Vec<(u32, u8, Vec<u8>, bool)>,
-    scratch: Vec<u8>,
-}
-
-impl Out for Sent {
-    fn frame(&mut self, session: u32, kind: u8, payload: &[u8], may_drop: bool) {
-        self.frames
-            .push((session, kind, payload.to_vec(), may_drop));
-    }
-
-    fn scratch(&mut self) -> &mut Vec<u8> {
-        if self.scratch.is_empty() {
-            self.scratch = vec![0; 4096];
-        }
-        &mut self.scratch
-    }
-}
-
-struct Bench {
-    actions: Actions,
-    sent: Sent,
-    now: u64,
-    seq: u16,
-}
-
-fn fan() -> Target {
-    Target::Resource("fan.left".parse().expect("name"))
-}
-
-impl Bench {
-    fn new() -> Self {
-        Self {
-            actions: Actions::new("board".parse().expect("name")),
-            sent: Sent::default(),
-            now: 1_000,
-            seq: 0,
-        }
-    }
-
-    /// With `set` registered for the left fan by `OWNER`.
-    fn with_action() -> Self {
-        let mut bench = Self::new();
-        bench.register(OWNER, "set", fan()).expect("register");
-        bench.sent.frames.clear();
-        bench
-    }
-
-    fn ask<B: Body>(&mut self, from: u32, body: &B) -> Result<(), Error> {
-        self.ask_class(from, 4, body)
-    }
-
-    /// As [`Bench::ask`], from a caller of `class`.
-    fn ask_class<B: Body>(&mut self, from: u32, class: u8, body: &B) -> Result<(), Error> {
-        self.seq += 1;
-        let mut payload = [0_u8; 1024];
-        let len = encode_fields(body, &mut payload).expect("encode");
-        let asked = Asked {
-            session: from,
-            seq: self.seq,
-            kind: B::KIND,
-            class,
-            uid: 1000,
-            caller: "",
-            payload: &payload[..len],
-        };
-        self.actions.request(&asked, self.now, &mut self.sent)
-    }
-
-    fn register(&mut self, from: u32, name: &str, target: Target) -> Result<(), Error> {
-        self.ask(
-            from,
-            &Register {
-                name: name.parse().expect("name"),
-                target,
-                policy: Policy::new(Admits::LOCAL),
-                description: "sets the speed",
-            },
-        )
-    }
-
-    fn run(&mut self, from: u32, call: u64, deadline_ms: u64, detached: bool) -> Result<(), Error> {
-        self.ask(
-            from,
-            &Run {
-                call,
-                name: "set".parse().expect("name"),
-                target: fan(),
-                args: Bytes(b"1500"),
-                deadline_ms,
-                detached,
-            },
-        )
-    }
-
-    /// The next frame sent, which must be a `B` for `to`.
-    #[track_caller]
-    fn take<B: Body + Decode<'static>>(&mut self, to: u32) -> B {
-        assert!(!self.sent.frames.is_empty(), "nothing was sent");
-        let (session, kind, payload, _) = self.sent.frames.remove(0);
-        assert_eq!((session, kind), (to, B::KIND));
-        // The body is owned by the test from here on.
-        let leaked: &'static [u8] = Box::leak(payload.into_boxed_slice());
-        B::decode(leaked).expect("decode")
-    }
-
-    /// A run under way: the caller's call 7 is the list's `id`.
-    fn running(detached: bool) -> (Self, u64) {
-        let mut bench = Self::with_action();
-        bench.run(CALLER, 7, 0, detached).expect("run");
-        let claim: Claim<'_> = bench.take(OWNER);
-        bench.actions.take_events();
-        (bench, claim.call)
-    }
-}
+use orion_wire::{Body, Bytes, kind};
 
 #[test]
 fn an_action_is_registered_once() {
@@ -322,7 +203,7 @@ fn another_nodes_reason_for_a_run_it_carried_is_passed_on() {
 #[test]
 fn node_logic_stopping_cancels_every_run_and_says_why() {
     let (mut bench, first) = Bench::running(false);
-    bench.run(CALLER, 8, 0, true).expect("run");
+    bench.run(CALLER, 8, HOUR, true).expect("run");
     let detached: Claim<'_> = bench.take(OWNER);
     let detached = detached.call;
     bench.actions.stopping(bench.now, &mut bench.sent);
@@ -362,7 +243,7 @@ fn only_the_program_that_runs_it_speaks_for_a_run() {
 #[test]
 fn a_caller_that_goes_has_its_run_cancelled_unless_it_is_detached() {
     let (mut bench, id) = Bench::running(false);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
     let cancel: Cancel = bench.take(OWNER);
     assert_eq!((cancel.call, cancel.reason), (id, CancelReason::CallerGone));
     // The program's last word about it goes nowhere, and is not an error.
@@ -381,7 +262,7 @@ fn a_caller_that_goes_has_its_run_cancelled_unless_it_is_detached() {
     assert_eq!(bench.actions.running(), 0);
 
     let (mut bench, id) = Bench::running(true);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
     assert!(bench.sent.frames.is_empty(), "a detached run carries on");
     assert_eq!(bench.actions.running(), 1);
     bench
@@ -401,7 +282,7 @@ fn a_caller_that_goes_has_its_run_cancelled_unless_it_is_detached() {
 #[test]
 fn a_program_that_goes_takes_its_actions_and_fails_its_runs() {
     let (mut bench, _) = Bench::running(false);
-    bench.actions.gone(OWNER, bench.now, &mut bench.sent);
+    bench.gone(OWNER);
     let result: ActionResult<'_> = bench.take(CALLER);
     assert_eq!((result.call, result.outcome), (7, Outcome::Failed));
     assert_eq!(result.detail, "the program that runs it went away");
@@ -507,7 +388,7 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
         )
         .expect("progress");
     let _: Progress<'_> = bench.take(CALLER);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
     // It goes on while nobody listens.
     bench
         .ask(
@@ -555,7 +436,7 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
 #[test]
 fn a_detached_run_that_ended_with_nobody_there_is_kept_for_its_starter() {
     let (mut bench, id) = Bench::running(true);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
     bench.result(id, Outcome::Failed);
     assert!(bench.sent.frames.is_empty());
     assert_eq!(bench.actions.ended(), 1);
@@ -569,7 +450,7 @@ fn a_detached_run_that_ended_with_nobody_there_is_kept_for_its_starter() {
 
     // Kept for ten minutes and no longer.
     let (mut bench, id) = Bench::running(true);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
     bench.result(id, Outcome::Succeeded);
     bench.now += ENDED_FOR_MS + 1;
     assert_eq!(bench.ask(BACK, &Attach { call: 7 }), Err(Error::NotFound));
@@ -584,11 +465,11 @@ fn a_new_run_under_a_number_replaces_what_was_kept_under_it() {
     bench.result(id, Outcome::Failed);
     let _: ActionResult<'_> = bench.take(CALLER);
     assert_eq!(bench.actions.ended(), 1);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
-    bench.run(BACK, 7, 0, true).expect("run");
+    bench.gone(CALLER);
+    bench.run(BACK, 7, HOUR, true).expect("run");
     let claim: Claim<'_> = bench.take(OWNER);
     assert_eq!(bench.actions.ended(), 0);
-    bench.actions.gone(BACK, bench.now, &mut bench.sent);
+    bench.gone(BACK);
     bench.result(claim.call, Outcome::Succeeded);
     bench.ask(30, &Attach { call: 7 }).expect("attach");
     let result: ActionResult<'_> = bench.take(30);
@@ -599,7 +480,7 @@ fn a_new_run_under_a_number_replaces_what_was_kept_under_it() {
 #[test]
 fn only_whoever_started_it_comes_back_to_a_run() {
     let (mut bench, id) = Bench::running(true);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
     // Another user on the board, with the right number.
     assert_eq!(
         bench.ask_as(OTHER, 1001, &Attach { call: 7 }),
@@ -623,7 +504,7 @@ fn only_whoever_started_it_comes_back_to_a_run() {
 #[test]
 fn a_detached_run_is_cancelled_from_the_session_that_came_back() {
     let (mut bench, id) = Bench::running(true);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
     // Nobody is attached: there is nobody whose cancel it would be.
     assert_eq!(
         bench.ask(
@@ -654,7 +535,7 @@ fn a_detached_run_still_has_its_deadline_and_its_program() {
     let mut bench = Bench::with_action();
     bench.run(CALLER, 7, 500, true).expect("run");
     let claim: Claim<'_> = bench.take(OWNER);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
     bench.now += 500;
     bench.actions.tick(bench.now, &mut bench.sent);
     let cancel: Cancel = bench.take(OWNER);
@@ -664,8 +545,8 @@ fn a_detached_run_still_has_its_deadline_and_its_program() {
     assert_eq!(result.outcome, Outcome::TimedOut);
 
     let (mut bench, _) = Bench::running(true);
-    bench.actions.gone(CALLER, bench.now, &mut bench.sent);
-    bench.actions.gone(OWNER, bench.now, &mut bench.sent);
+    bench.gone(CALLER);
+    bench.gone(OWNER);
     bench.ask(BACK, &Attach { call: 7 }).expect("attach");
     let result: ActionResult<'_> = bench.take(BACK);
     assert_eq!(result.outcome, Outcome::Failed);
@@ -675,9 +556,9 @@ fn a_detached_run_still_has_its_deadline_and_its_program() {
 fn only_so_many_ended_runs_are_kept() {
     let mut bench = Bench::with_action();
     for call in 0..(MAX_ENDED as u64 + 10) {
-        bench.run(CALLER, call, 0, true).expect("run");
+        bench.run(CALLER, call, HOUR, true).expect("run");
         let claim: Claim<'_> = bench.take(OWNER);
-        bench.actions.gone(CALLER, bench.now, &mut bench.sent);
+        bench.gone(CALLER);
         bench.result(claim.call, Outcome::Succeeded);
     }
     assert_eq!(bench.actions.ended(), MAX_ENDED);

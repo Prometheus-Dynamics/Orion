@@ -70,6 +70,10 @@ errors! {
     DigestMismatch = 16, "digest does not match";
     /// A request was out of the order the protocol requires.
     OutOfOrder = 17, "out of order";
+    /// A run that carries on without its caller was asked for without a deadline.
+    NoDeadline = 18, "a detached run needs a deadline";
+    /// A deadline was longer than the node takes.
+    DeadlineTooLong = 19, "deadline is longer than allowed";
 }
 
 impl fmt::Display for Error {

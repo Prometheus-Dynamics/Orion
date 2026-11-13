@@ -73,6 +73,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C28](docs/prs/C28.md) A cancel says why (wave 18)
 - [x] [C29](docs/prs/C29.md) A subscriber across the network can start from the newest values (wave 18)
 - [x] [D15](docs/prs/D15.md) A push with a known digest, a pushed file checked for change, a stepped push (wave 18)
+- [x] [C33](docs/prs/C33.md) A program hears that a caller's session ended (wave 18)
 
 ## D. Client
 

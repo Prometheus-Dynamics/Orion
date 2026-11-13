@@ -194,7 +194,7 @@ any program that connects adds its own.
 | `run.cancel()` | Asks for it to stop. How it ended still comes |
 | `actions.attach(number)` | Comes back to a run that was started detached |
 | `actions.register(decl, policy)` | Adds an action. The policy is required |
-| `registration.poll()`, `.wait(for)` | The next run handed to this program, or a request to stop one |
+| `registration.poll()`, `.wait(for)` | The next run handed to this program, a request to stop one, or a caller gone |
 | `registration.progress(..)`, `.finish(..)` | Says how a run is doing, and how it ended |
 
 Registering an action needs a policy, and that policy is what the one check decides every run
@@ -211,6 +211,14 @@ caller's session ended first, and it was not detached), `Deadline` (its deadline
 caller has already been told it timed out), or `Stopping` (node logic is stopping; the caller is
 told it was cancelled). Node logic sets it. What a caller says of why is not kept. A run carried
 from another node keeps the reason that node gave. `Unsaid` comes from a host that does not say.
+
+A run also carries `session`, a token for the caller's session that is never reused while the
+node runs, also when one identity connects twice. When that session ends, for any cause, the
+program is told once with `Request::CallerGone { session }`, whether its runs from it are still
+going or not: that is the time to let go of what it holds for that caller. A detached run goes
+on until its deadline. A detached run needs a deadline (`deadline_ms`), no longer than the node
+takes (`actions.max_detached_ms`, an hour unless said): it is refused otherwise, as `NoDeadline`
+or `DeadlineTooLong`.
 
 A program that is not taking its runs does not have them pile up: 64 wait, and the next is
 answered as rejected, busy, at once.
@@ -394,7 +402,8 @@ resource  show NAME                 one of them: its topics, its actions, its la
 topic     read TOPIC                the newest value of each field
 topic     watch TOPIC [--count N] [--for MS]
 topic     publish TOPIC NAME:TYPE=VALUE... [--hold MS]
-action    run NAME [--node N | --resource R] [--args TEXT] [--detached] [--for MS]
+action    run NAME [--node N | --resource R] [--args TEXT]
+                   [--deadline MS [--detached]] [--for MS]
 action    attach CALL [--for MS]
 workload  put NAME --kind K [--spec TEXT | --spec-file PATH] [--node N]
                    [--restart always|on-failure|never] [--for MS]

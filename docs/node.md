@@ -218,8 +218,18 @@ actions; any program on the board adds its own.
 - **When an end goes away.** A caller that goes has its run cancelled, unless the run is
   detached: that one carries on. A program that goes takes its actions off the list and its
   runs end as `Failed`.
+- **A caller's session ends.** `Claim` names the session that asked by a token that is never
+  reused while node logic runs, so two sessions of one identity are told apart. When that
+  session ends, for any cause, each program that was given a run from it is sent
+  `ACTION_CALLER_GONE` with the token, once, whether its runs are still going or not. A detached
+  run goes on until its deadline, or until a later session of the same identity attaches and
+  cancels it. Orion says only that the session ended: what a program holds for that caller is
+  its own business. A run forwarded from another node was asked for by that node's session.
 - **Detached runs.** A run started detached carries on when its caller's session ends, with
-  its deadline and under its program as before. Whoever started it comes back with `Attach`
+  its deadline and under its program as before. It must have a deadline, so that it ends
+  even if nobody comes back: without one it is refused as `a detached run needs a deadline`,
+  and one longer than `actions.max_detached_ms` (an hour unless said) as `deadline is longer
+  than allowed`. Whoever started it comes back with `Attach`
   and the run's number, from any session: it is sent the latest progress at once and then
   what follows, and can cancel. How a detached run ended is kept for ten minutes (256 runs
   at most, the oldest goes first) and given to its starter when it asks, once; that is so

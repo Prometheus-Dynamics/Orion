@@ -13,7 +13,11 @@
 //!   The number in `Claim` is the list's, unique here. Each side only ever sees its own.
 //! - A caller that goes away has its run cancelled, unless the run is detached. A detached
 //!   run carries on, and whoever started it can come back to it with `Attach`, from any
-//!   session: it is then told the latest progress, or how the run ended.
+//!   session: it is then told the latest progress, or how the run ended. A detached run must
+//!   have a deadline, no longer than the node takes, so that it ends without its caller.
+//! - `Claim` names the caller's session by a token that is never reused. When that session
+//!   ends, for any cause, each program that was given a run from it is told once with
+//!   `CallerGone`, whether its runs are still going or not.
 //! - A program that goes away takes its actions off the list, and its runs end as failed.
 //! - A run with a deadline that passes ends as timed out, and the program is told to stop.
 //!
@@ -22,8 +26,8 @@
 use std::collections::VecDeque;
 
 use orion_msg_actions::{
-    ActionResult, Attach, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered,
-    Run, Target,
+    ActionResult, Attach, CallerGone, Cancel, CancelReason, Claim, Outcome, Progress, Register,
+    Registered, Run, Target,
 };
 use orion_reply::{Asked, Out};
 use orion_types::{ActionName, Error, NodeName};
@@ -38,6 +42,9 @@ pub const MAX_ENDED: usize = 256;
 
 /// How long such a run is kept.
 pub const ENDED_FOR_MS: u64 = 10 * 60 * 1000;
+
+/// The longest deadline a detached run may have unless the node says otherwise: an hour.
+pub const MAX_DETACHED_MS: u64 = 60 * 60 * 1000;
 
 /// Who started a run, as the comm core said: what a session must be again to come back to it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,6 +130,14 @@ pub struct Actions {
     next: u64,
     events: Vec<Event>,
     ended: VecDeque<Ended>,
+    /// Each session that asked for a run, and its token: the comm core's numbers come round
+    /// again, tokens never do.
+    tokens: Vec<(u32, u64)>,
+    next_token: u64,
+    /// Each program that was given a run, and the token of the session that asked for it:
+    /// who is told when that session ends.
+    given: Vec<(u32, u64)>,
+    max_detached_ms: u64,
 }
 
 impl Actions {
@@ -146,7 +161,26 @@ impl Actions {
             next: 0,
             events: Vec::new(),
             ended: VecDeque::new(),
+            tokens: Vec::new(),
+            next_token: 0,
+            given: Vec::new(),
+            max_detached_ms: MAX_DETACHED_MS,
         }
+    }
+
+    /// Takes detached runs with a deadline up to `max_ms`, instead of [`MAX_DETACHED_MS`].
+    pub const fn set_max_detached(&mut self, max_ms: u64) {
+        self.max_detached_ms = max_ms;
+    }
+
+    /// The token of `session`, made the first time it asks for a run.
+    fn token(&mut self, session: u32) -> u64 {
+        if let Some((_, token)) = self.tokens.iter().find(|(known, _)| *known == session) {
+            return *token;
+        }
+        self.next_token += 1;
+        self.tokens.push((session, self.next_token));
+        self.next_token
     }
 
     /// How many actions are on the list.
@@ -167,6 +201,8 @@ impl Actions {
         self.listed.clear();
         self.running.clear();
         self.ended.clear();
+        self.tokens.clear();
+        self.given.clear();
     }
 
     /// How many detached runs that ended are kept for their starter.
@@ -335,6 +371,15 @@ impl Actions {
             }
             kind::ACTION_RUN => {
                 let run: Run<'_> = asked.body()?;
+                if run.detached {
+                    // A run that outlives its caller must end by itself some time.
+                    if run.deadline_ms == 0 {
+                        return Err(Error::NoDeadline);
+                    }
+                    if run.deadline_ms > self.max_detached_ms {
+                        return Err(Error::DeadlineTooLong);
+                    }
+                }
                 let owner = self
                     .listed
                     .iter()
@@ -359,6 +404,7 @@ impl Actions {
                 self.next += 1;
                 let id = self.next;
                 let principal = asked.principal();
+                let session = self.token(from);
                 out.send(
                     owner,
                     &Claim {
@@ -368,8 +414,12 @@ impl Actions {
                         args: run.args,
                         deadline_ms: run.deadline_ms,
                         caller: &principal,
+                        session,
                     },
                 )?;
+                if !self.given.contains(&(owner, session)) {
+                    self.given.push((owner, session));
+                }
                 self.running.push(Running {
                     id,
                     name: run.name.clone(),
@@ -461,9 +511,11 @@ impl Actions {
     }
 
     /// A session is gone: its actions leave the list, the runs it was doing end as failed,
-    /// and the runs it asked for are cancelled unless they are detached.
+    /// the runs it asked for are cancelled unless they are detached, and every program that
+    /// was given a run from it is told.
     pub fn gone(&mut self, session: u32, now_ms: u64, out: &mut dyn Out) {
         self.listed.retain(|listed| listed.owner != session);
+        self.given.retain(|(owner, _)| *owner != session);
         let mut at = 0;
         while at < self.running.len() {
             if self.running[at].owner == session {
@@ -491,6 +543,14 @@ impl Actions {
                 }
             }
             at += 1;
+        }
+        // After its runs are dealt with: then the session itself.
+        if let Some(at) = self.tokens.iter().position(|(known, _)| *known == session) {
+            let (_, token) = self.tokens.swap_remove(at);
+            for (owner, _) in self.given.iter().filter(|(_, given)| *given == token) {
+                let _ = out.send(*owner, &CallerGone { session: token });
+            }
+            self.given.retain(|(_, given)| *given != token);
         }
     }
 

@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_msg_actions::{
-    ActionResult, Attach, Cancel, Claim, Progress, Register, Registered, Run as RunMessage,
+    ActionResult, Attach, CallerGone, Cancel, Claim, Progress, Register, Registered,
+    Run as RunMessage,
 };
 use orion_wire::{Bytes, kind};
 
@@ -110,6 +111,11 @@ pub enum Request {
         /// that does not say. A run forwarded from another node was asked for by that node:
         /// `peer:<node>`.
         caller: String,
+        /// The token of the session that asked: never the same for two sessions while the
+        /// node runs, also when one identity connects twice. [`Request::CallerGone`] names
+        /// it when that session ends. Zero from a node that does not say. A run forwarded
+        /// from another node was asked for by that node's session.
+        session: u64,
     },
     /// Stop this run. Finish it as [`Outcome::Cancelled`], or as whatever it had become.
     Cancel {
@@ -118,6 +124,13 @@ pub enum Request {
         /// Why: asked, its caller gone, its deadline passed, node logic stopping. `Unsaid`
         /// from a host that does not say.
         reason: CancelReason,
+    },
+    /// The session with this token ended, for whatever cause. Said once to each program that
+    /// was given a run from it, whether its runs are still going or not: a detached run goes
+    /// on until its deadline. Let go of whatever is held for that caller.
+    CallerGone {
+        /// The session's token, as [`Request::Run`] gave it.
+        session: u64,
     },
 }
 
@@ -168,6 +181,7 @@ impl Handler for State {
             kind::ACTION_CLAIM,
             kind::ACTION_CANCEL,
             kind::ACTION_REGISTERED,
+            kind::ACTION_CALLER_GONE,
         ]
     }
 
@@ -214,6 +228,7 @@ impl Handler for State {
                     args: claim.args.0.to_vec(),
                     deadline_ms: claim.deadline_ms,
                     caller: claim.caller.to_owned(),
+                    session: claim.session,
                 });
             }
             kind::ACTION_CANCEL => {
@@ -221,6 +236,12 @@ impl Handler for State {
                 self.requests.push_back(Request::Cancel {
                     call: cancel.call,
                     reason: cancel.reason,
+                });
+            }
+            kind::ACTION_CALLER_GONE => {
+                let gone: CallerGone = frame.body()?;
+                self.requests.push_back(Request::CallerGone {
+                    session: gone.session,
                 });
             }
             _ => {

@@ -6,7 +6,7 @@ use orion_device_actions::{
 };
 use orion_device_core::Link;
 use orion_device_host::{Drive, Rig, Sent};
-use orion_msg_actions::{ActionResult, Cancel, Claim, Progress, Register, Registered};
+use orion_msg_actions::{ActionResult, CallerGone, Cancel, Claim, Progress, Register, Registered};
 use orion_msg_session::Refusal;
 use orion_wire::{Bytes, FrameView};
 
@@ -62,6 +62,7 @@ fn claim(call: u64, name: &str, target: orion_msg_actions::Target, args: &[u8]) 
         args: Bytes(args),
         deadline_ms: 2_000,
         caller: "operator:9f3c",
+        session: 5,
     };
     orion_device_host::Host::default().frame(&claim)
 }
@@ -102,6 +103,7 @@ fn a_run_is_handed_over_and_its_result_reaches_the_host() {
         call: 41,
         args: b"now",
         deadline_ms: 2_000,
+        session: 5,
     };
     assert_eq!(rig.last_heard(), Some(format!("{want:?}").as_str()));
 
@@ -239,4 +241,13 @@ fn answering_runs_allocates_nothing() {
         while rig.device.transmit(&mut out) != 0 {}
     }
     assert_eq!(orion_measure::thread_counts().allocs, before);
+}
+
+#[test]
+fn a_caller_gone_names_the_session_its_runs_came_from() {
+    let mut rig = ready();
+    rig.feed(&claim(41, "zero", on_imu(), b""));
+    rig.feed(&orion_device_host::Host::default().frame(&CallerGone { session: 5 }));
+    let want = Heard::CallerGone { session: 5 };
+    assert_eq!(rig.last_heard(), Some(format!("{want:?}").as_str()));
 }

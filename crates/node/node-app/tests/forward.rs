@@ -144,7 +144,7 @@ impl Driver {
                             &format!("stopped: {reason:?}"),
                         );
                     }
-                    None => {}
+                    Some(Request::CallerGone { .. }) | None => {}
                 }
             }
         });

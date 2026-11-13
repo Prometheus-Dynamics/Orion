@@ -142,6 +142,7 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         args: Bytes(b"now"),
         deadline_ms: 0,
         caller: "",
+        session: 0,
     });
     feed(&claim);
     // A second while the first waits is turned away at once.
@@ -152,6 +153,7 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         args: Bytes(&[]),
         deadline_ms: 0,
         caller: "",
+        session: 0,
     });
     feed(&second);
     exchange(&mut peer, &mut reader);

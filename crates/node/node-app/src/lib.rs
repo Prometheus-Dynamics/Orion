@@ -77,6 +77,9 @@ pub struct NodeSettings {
     /// `workloads.placement_grace_ms`: how long a node that would take over a workload whose
     /// node can no longer run it waits for that node first.
     pub placement_grace: Duration,
+    /// `actions.max_detached_ms`: the longest deadline a detached run may have. A detached
+    /// run must have one, so that it ends without its caller.
+    pub max_detached_ms: u64,
     /// `audit.file`: the audit log. `audit.log` in the state directory unless it is said;
     /// `off` for none.
     pub audit: Option<AuditConfig>,
@@ -119,6 +122,10 @@ impl NodeSettings {
             placement_grace: Duration::from_millis(
                 source.get("workloads.placement_grace_ms", 10_000_u64)?,
             ),
+            max_detached_ms: source.get(
+                "actions.max_detached_ms",
+                orion_action_list::MAX_DETACHED_MS,
+            )?,
             save_after: Duration::from_millis(source.get("records.save_after_ms", 500_u64)?),
             max_drift_ms: source.get("records.max_drift_ms", defaults.max_drift_ms)?,
         })
@@ -227,6 +234,7 @@ impl Node {
         logic
             .workloads
             .set_placement_grace(settings.placement_grace.as_millis() as u64);
+        logic.actions.set_max_detached(settings.max_detached_ms);
         Ok(Self {
             settings,
             logic: Rc::new(RefCell::new(logic)),

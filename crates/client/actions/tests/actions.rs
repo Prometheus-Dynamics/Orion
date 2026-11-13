@@ -158,6 +158,7 @@ impl Service for Router {
                         args: run.args,
                         deadline_ms: run.deadline_ms,
                         caller: &caller,
+                        session: 0,
                     },
                     Delivery::Must,
                 )
@@ -338,7 +339,7 @@ fn owner_process() {
                 runs.finish(call, Outcome::Cancelled, &[], "stopped half way")
                     .expect("finish");
             }
-            None => {}
+            Some(Request::CallerGone { .. }) | None => {}
         }
     }
     panic!("never told to stop");

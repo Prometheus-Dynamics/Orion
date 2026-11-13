@@ -158,7 +158,7 @@ fn fan(socket: &Path) -> Beside {
                         .expect("progress");
                     slow = Some((call, std::time::Instant::now()));
                 }
-                Some(Request::Cancel { .. }) | None => {}
+                Some(Request::Cancel { .. } | Request::CallerGone { .. }) | None => {}
             }
         }
     });
@@ -493,10 +493,18 @@ fn action_run_and_attach() {
     assert_eq!((code, out.as_str()), (1, ""));
     assert!(err.contains("refused"), "{err}");
 
+    // Detached, it needs a deadline: it must end even if nobody comes back.
+    let (code, _, err) = ctl(
+        &board,
+        "action run fan.left.calibrate --resource fan.left --detached",
+    );
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("--detached needs --deadline MS"), "{err}");
+
     // A long one, started detached and not waited for: the tool says how to come back.
     let (code, out, _) = ctl(
         &board,
-        "action run fan.left.calibrate --resource fan.left --detached --for 100",
+        "action run fan.left.calibrate --resource fan.left --deadline 60000 --detached --for 100",
     );
     assert_eq!(code, 1);
     let lines: Vec<&str> = out.lines().collect();

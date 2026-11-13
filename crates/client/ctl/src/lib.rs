@@ -17,7 +17,8 @@
 //! topic     read TOPIC                the newest value of each field
 //! topic     watch TOPIC [--count N] [--for MS]
 //! topic     publish TOPIC NAME:TYPE=VALUE... [--hold MS]
-//! action    run NAME [--node N | --resource R] [--args TEXT] [--detached] [--for MS]
+//! action    run NAME [--node N | --resource R] [--args TEXT]
+//!                    [--deadline MS [--detached]] [--for MS]
 //! action    attach CALL [--for MS]
 //! workload  put NAME --kind K [--spec TEXT | --spec-file PATH] [--node N]
 //!                    [--restart always|on-failure|never] [--for MS]
@@ -58,7 +59,8 @@ usage: orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <ver
   resource  list [PREFIX] | show NAME
   topic     read TOPIC | watch TOPIC [--count N] [--for MS]
             publish TOPIC NAME:TYPE=VALUE... [--hold MS]
-  action    run NAME [--node N | --resource R] [--args TEXT] [--detached] [--for MS]
+  action    run NAME [--node N | --resource R] [--args TEXT]
+            [--deadline MS [--detached]] [--for MS]
             attach CALL [--for MS]
   workload  put NAME --kind K [--spec TEXT | --spec-file PATH] [--node N]
             [--restart always|on-failure|never] [--for MS]
@@ -534,8 +536,13 @@ fn action_run(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
     let on_resource = args.option("--resource")?;
     let text = args.option("--args")?.unwrap_or_default();
     let detached = args.flag("--detached");
+    let deadline_ms = args.number("--deadline")?.unwrap_or(0);
     let wait = wait_option(args, 30_000)?;
     args.done()?;
+    if detached && deadline_ms == 0 {
+        // The board would refuse it: a run that outlives its caller must end by itself.
+        return Err(Failed::Usage("--detached needs --deadline MS".into()));
+    }
     let not_a_name = |what: &str| Failed::Usage(format!("{what:?} is not a name"));
     let target = match (on_node, on_resource) {
         (Some(_), Some(_)) => {
@@ -554,7 +561,7 @@ fn action_run(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         name: &name,
         target,
         args: text.as_bytes(),
-        deadline_ms: 0,
+        deadline_ms,
         detached,
     })?;
     if detached {

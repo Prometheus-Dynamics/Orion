@@ -83,6 +83,10 @@ body! {
         /// `operator:<key>`, `peer:<node>`, `device:<name>` or `anonymous`. Empty from a host
         /// that does not say.
         pub caller: &'a str,
+        /// The session that asked, as an opaque token: never the same for two sessions while
+        /// node logic runs, also when one identity connects twice. [`CallerGone`] names it
+        /// when that session ends. Zero from a host that does not say.
+        pub session: u64,
     }
 }
 
@@ -158,5 +162,15 @@ body! {
     pub struct Registered = kind::ACTION_REGISTERED {
         /// The `seq` of the [`Register`].
         pub request_seq: u16,
+    }
+}
+
+body! {
+    /// The session named by `session` in a [`Claim`] ended, for whatever cause. Sent once to
+    /// each program that was given a run from it, whether its runs are still going or not. A
+    /// detached run goes on; what a program holds for that caller is its own business.
+    pub struct CallerGone = kind::ACTION_CALLER_GONE {
+        /// The session's token.
+        pub session: u64,
     }
 }

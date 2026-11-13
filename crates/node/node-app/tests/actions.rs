@@ -112,12 +112,29 @@ fn provider_process() {
     let _wipe = register("wipe", Admits::OPERATOR);
     println!("provider ready");
     let mut long = None;
+    // The sessions it was told have ended.
+    let mut gone = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         match open.wait(Duration::from_millis(100)).expect("connected") {
             Some(Request::Run {
-                call, args, caller, ..
+                call,
+                args,
+                caller,
+                session,
+                ..
             }) => {
+                if args == b"session" {
+                    open.finish(call, Outcome::Succeeded, session.to_string().as_bytes(), "")
+                        .expect("finish");
+                    continue;
+                }
+                if args == b"gone" {
+                    let said = format!("{gone:?}");
+                    open.finish(call, Outcome::Succeeded, said.as_bytes(), "")
+                        .expect("finish");
+                    continue;
+                }
                 if args == b"who" {
                     open.finish(call, Outcome::Succeeded, caller.as_bytes(), "")
                         .expect("finish");
@@ -157,6 +174,7 @@ fn provider_process() {
                 open.finish(call, Outcome::Cancelled, b"", "stopped")
                     .expect("finish");
             }
+            Some(Request::CallerGone { session }) => gone.push(session),
             None => {}
         }
     }
@@ -392,6 +410,7 @@ fn a_caller_disconnects_mid_action_and_reattaches_to_the_progress() {
     let _provider = Provider::start(board.socket());
     let detached = |args: &'static [u8]| ActionCall {
         detached: true,
+        deadline_ms: 60_000,
         ..call("open", args)
     };
 
@@ -464,5 +483,62 @@ fn a_caller_disconnects_mid_action_and_reattaches_to_the_progress() {
     match none.wait(Duration::from_secs(5)) {
         Err(ClientError::Refused(Error::NotFound)) => {}
         other => panic!("expected not found, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_program_hears_once_a_callers_session_ends() {
+    let dir = dir("actions-caller-gone");
+    let board = Board::start_for_node_with(&dir, Security::On);
+    let address = Address::Local(board.socket().to_owned());
+    let _logic = Logic::start(settings(&dir));
+    let _provider = Provider::start(board.socket());
+    let token = |orion: &Orion| -> String {
+        let finished = orion
+            .run(&call("open", b"session"))
+            .expect("run")
+            .finish(Duration::from_secs(5))
+            .expect("ends");
+        String::from_utf8(finished.output).expect("text")
+    };
+
+    // The same program twice: two sessions, a token each.
+    let first = Orion::connect(&address, "dashboard").expect("connect");
+    let second = Orion::connect(&address, "dashboard").expect("connect");
+    let (one, two) = (token(&first), token(&second));
+    assert_ne!(one, two);
+    assert_ne!(one, "0");
+
+    // The first goes: the program is told of it by its token, and not of the second.
+    drop(first);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let told = loop {
+        let finished = second
+            .run(&call("open", b"gone"))
+            .expect("run")
+            .finish(Duration::from_secs(5))
+            .expect("ends");
+        let told = String::from_utf8(finished.output).expect("text");
+        if told != "[]" || Instant::now() > deadline {
+            break told;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(told, format!("[{one}]"));
+
+    // A detached run without a deadline, or with one longer than the node takes, is refused
+    // by name.
+    for (deadline_ms, refused) in [(0, Error::NoDeadline), (u64::MAX, Error::DeadlineTooLong)] {
+        let mut run = second
+            .run(&ActionCall {
+                detached: true,
+                deadline_ms,
+                ..call("open", b"abc")
+            })
+            .expect("sent");
+        match run.wait(Duration::from_secs(5)) {
+            Err(ClientError::Refused(error)) => assert_eq!(error, refused),
+            other => panic!("expected {refused:?}, got {other:?}"),
+        }
     }
 }

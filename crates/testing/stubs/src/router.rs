@@ -140,6 +140,8 @@ impl Service for Router {
                         args: run.args,
                         deadline_ms: run.deadline_ms,
                         caller: &caller,
+                        // The stub does not say whose session it was.
+                        session: 0,
                     },
                     Delivery::Must,
                 )

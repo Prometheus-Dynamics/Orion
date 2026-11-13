@@ -74,6 +74,7 @@ fn claim(peer: &mut Peer) -> Vec<u8> {
         args: Bytes(&[]),
         deadline_ms: 0,
         caller: "",
+        session: 0,
     })
 }
 

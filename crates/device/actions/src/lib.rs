@@ -123,6 +123,9 @@ pub enum Heard<'a> {
         /// When the host gives up on it, in milliseconds from when it was asked. Zero for
         /// never.
         deadline_ms: u64,
+        /// The token of the session that asked, never reused, or zero from a host that does
+        /// not say. [`Heard::CallerGone`] names it when that session ends.
+        session: u64,
     },
     /// Stop run `call`. The host ends it as cancelled; a result sent after is dropped.
     Cancel {
@@ -131,6 +134,12 @@ pub enum Heard<'a> {
         /// Why, as the wire numbers it: 1 asked, 2 its caller gone, 3 its deadline passed,
         /// 4 node logic stopping, 0 not said.
         reason: u8,
+    },
+    /// The session with this token, which asked for runs of this device, ended. Said once,
+    /// whether its runs are still going or not.
+    CallerGone {
+        /// Its token, as [`Heard::Run`] gave it.
+        session: u64,
     },
 }
 
@@ -177,7 +186,7 @@ impl<const N: usize> Actions<N> {
     }
 
     /// Reads a frame the session did not take: the answer to a registration, a refusal of
-    /// one, a run or a cancel.
+    /// one, a run, a cancel, or a caller gone.
     pub fn handle<'a>(&mut self, frame: &FrameView<'a>) -> Heard<'a> {
         let mut r = Reader::new(frame.payload());
         match frame.kind() {
@@ -204,6 +213,8 @@ impl<const N: usize> Actions<N> {
                 let (Some(args), Some(deadline_ms)) = (r.bytes(), r.varint()) else {
                     return Heard::Other;
                 };
+                // Who asked, then the session's token: both appended, so a host may not say.
+                let session = r.bytes().and_then(|_| r.varint()).unwrap_or(0);
                 let registered = &self.registered;
                 let found = self.specs.iter().enumerate().position(|(action, spec)| {
                     registered.get(action) == Some(Request::Answered)
@@ -216,6 +227,7 @@ impl<const N: usize> Actions<N> {
                         call,
                         args,
                         deadline_ms,
+                        session,
                     },
                     None => Heard::Other,
                 }
@@ -225,6 +237,10 @@ impl<const N: usize> Actions<N> {
                     call,
                     reason: r.u8().unwrap_or(0),
                 },
+                None => Heard::Other,
+            },
+            kind::ACTION_CALLER_GONE => match r.varint() {
+                Some(session) => Heard::CallerGone { session },
                 None => Heard::Other,
             },
             _ => Heard::Other,
