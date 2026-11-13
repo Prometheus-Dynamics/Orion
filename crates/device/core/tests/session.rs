@@ -59,6 +59,7 @@ impl Host {
             heartbeat_ms,
             max_frame,
             revision: 1,
+            idle_ms: 0,
         })
     }
 }
@@ -371,6 +372,7 @@ fn the_same_session_over_can_classic_and_fd() {
             heartbeat_ms: 100,
             max_frame: 512,
             revision: 1,
+            idle_ms: 0,
         };
         let len = encode_body(&welcome, 1, &mut frame).expect("encode");
         to_device(&mut device, &frame[..len], &mut seen);

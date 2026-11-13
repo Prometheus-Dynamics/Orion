@@ -63,6 +63,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C18](docs/prs/C18.md) The caller in a claim (wave 18)
 - [x] [C20](docs/prs/C20.md) Adopted topics, as their first consumer found them (wave 18; needs C16)
 - [x] [C21](docs/prs/C21.md) Orion's reader slots in an adopted table (wave 18; needs C16)
+- [x] [C22](docs/prs/C22.md) How long a session may go quiet, settable (wave 18)
 
 ## D. Client
 

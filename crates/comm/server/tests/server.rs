@@ -239,8 +239,13 @@ fn a_session_opens_pings_and_reaches_a_service() {
         let mut client = Client::new(&board, USER);
         let welcome: Welcome = client.hello(Roles::CLIENT).await.expect("welcome");
         assert_eq!(
-            (welcome.heartbeat_ms, welcome.max_frame, welcome.revision),
-            (2000, 4096, 1)
+            (
+                welcome.heartbeat_ms,
+                welcome.max_frame,
+                welcome.revision,
+                welcome.idle_ms
+            ),
+            (2000, 4096, 1, 6000)
         );
         let session = SessionId(welcome.session);
 
@@ -412,6 +417,32 @@ fn deadlines_close_sessions_that_go_quiet() {
             assert_eq!(alive.recv::<Pong>().await.expect("pong").now_ms, round);
         }
         assert_eq!(board.comm.stats().dropped, 2);
+    });
+}
+
+#[test]
+fn comm_idle_ms_sets_how_long_a_session_may_go_quiet() {
+    run(async {
+        let limits = Limits {
+            idle_ms: 20_000,
+            ..Limits::default()
+        };
+        let board = board(Security::Off, limits);
+
+        // The client is told, so it waits as long for the comm core.
+        let mut client = Client::new(&board, USER);
+        let welcome: Welcome = client.hello(Roles::CLIENT).await.expect("welcome");
+        assert_eq!((welcome.heartbeat_ms, welcome.idle_ms), (2000, 20_000));
+
+        // Quiet past three heartbeats, and still there; gone at `comm.idle_ms`.
+        let opened = tokio::time::Instant::now();
+        tokio::time::sleep(Duration::from_millis(19_000)).await;
+        client.send(&Ping { now_ms: 1 }).await;
+        assert_eq!(client.recv::<Pong>().await.expect("pong").now_ms, 1);
+        let heard = tokio::time::Instant::now();
+        assert!(client.is_closed().await);
+        assert_eq!(heard.elapsed(), Duration::from_millis(20_000));
+        assert!(opened.elapsed() > Duration::from_millis(6000));
     });
 }
 

@@ -217,6 +217,7 @@ impl Server {
             heartbeat_ms: limits.heartbeat_ms,
             max_frame: info.max_frame,
             revision: INTERFACE_REVISION,
+            idle_ms: u32::try_from(limits.idle_ms()).unwrap_or(u32::MAX),
         };
         self.send(session, &welcome);
         Flow::Continue

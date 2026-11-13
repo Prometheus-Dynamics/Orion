@@ -139,11 +139,20 @@ fn a_program_s_own_ring_and_pool_become_a_buffer_topic() {
             }
         }
         let _ = frames.wait(Duration::from_millis(5)).expect("wait");
-        while let NextBatch::Batch(frame) = frames.next() {
-            let meta = u64::from_le_bytes(frame.meta.try_into().expect("number"));
-            let bytes = frame.held.bytes(0).expect("mapped");
-            assert_eq!(bytes[..8], meta.to_le_bytes(), "the program's own bytes");
-            seen.push(meta);
+        loop {
+            match frames.next() {
+                NextBatch::Batch(frame) => {
+                    let meta = u64::from_le_bytes(frame.meta.try_into().expect("number"));
+                    let bytes = frame.held.bytes(0).expect("mapped");
+                    assert_eq!(bytes[..8], meta.to_le_bytes(), "the program's own bytes");
+                    seen.push(meta);
+                }
+                // Frames gone before this reader got to them: read on to the ones still
+                // there. Stopping here leaves a reader one behind for good, as the publisher
+                // takes back each buffer before it is read.
+                NextBatch::Skipped(_) => {}
+                _ => break,
+            }
         }
     }
     adopted.with_request(|request| assert_eq!(request, b"720p"));

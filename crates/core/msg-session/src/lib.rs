@@ -79,6 +79,10 @@ body! {
         pub max_frame: u32,
         /// The highest interface revision this side speaks.
         pub revision: u16,
+        ;
+        /// How long either side may go unheard before the session is over. Zero from a host
+        /// that does not say: three heartbeats.
+        pub idle_ms: u32,
     }
 }
 

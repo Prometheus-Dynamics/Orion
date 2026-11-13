@@ -16,7 +16,10 @@ travel on it, and moves whole frames. The server knows nothing else about it.
 
 - a bounded outbox (`comm.outbox_bytes`, 256 KiB): what waits to be sent to it;
 - a deadline to say hello (`comm.hello_ms`, 5 s);
-- a deadline to be heard from: three heartbeats (`comm.heartbeat_ms`, 2 s);
+- a heartbeat (`comm.heartbeat_ms`, 2 s), and a deadline to be heard from (`comm.idle_ms`; zero,
+  the default, is three heartbeats, otherwise at least two). `Welcome` carries both, and a client
+  gives up on a comm core it has not heard from for as long. A slow link, or a test on a loaded
+  machine, sets them longer;
 - a deadline for each frame to be taken (`comm.write_ms`, 5 s).
 
 There can be `comm.max_sessions` (256) at once. One more is told `Busy` and let go.
@@ -37,7 +40,7 @@ A frame of a kind no service answers is ignored, so an older comm core can talk 
 | Floods requests | Its reader is one task taking turns: it yields every 32 frames |
 | Does not read its answers | Its outbox fills. An answer that cannot be queued closes it |
 | Does not read a stream | Frames marked droppable are dropped and counted. It is closed at its write deadline |
-| Goes quiet | Closed after three heartbeats |
+| Goes quiet | Closed at `comm.idle_ms` (three heartbeats) |
 | Never says hello | Closed at the hello deadline |
 | Sends a frame that makes a service panic | That session is closed. The service keeps serving |
 | Sends a bad frame, a second hello, another protocol version | Closed, with a `Reject` where one applies |

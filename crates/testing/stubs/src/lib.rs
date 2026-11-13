@@ -33,6 +33,44 @@ use orion_unix::UnixCarrier;
 pub use orion_server::Security;
 pub use receiver::Shelf;
 
+/// How a [`Board`] starts: [`Board::start_with`].
+#[derive(Clone, Debug)]
+pub struct Options {
+    /// The security switch. Off by default.
+    pub security: Security,
+    /// The board's name. `board` by default.
+    pub name: String,
+    /// The network port, if it is to come back where it was. Any free one by default.
+    pub port: Option<u16>,
+    /// No stand-ins for node logic: the test runs node logic, or is refused. Off by default:
+    /// the store, router, receiver and tracker are stood in for, as [`Board::start`] does.
+    pub for_node: bool,
+    /// Serial links: a device on the other end of one is a resource of the board.
+    pub links: Vec<PathBuf>,
+    /// The board's key and trust file kept in `dir/state`, where node logic reads them.
+    pub on_disk: bool,
+    /// `comm.heartbeat_ms`: how often a session is asked to ping. 2000 by default.
+    pub heartbeat_ms: u32,
+    /// `comm.idle_ms`: how long a session may go unheard, either way, before it is over. Zero,
+    /// the default, is three heartbeats; otherwise at least two.
+    pub idle_ms: u32,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            security: Security::Off,
+            name: "board".to_owned(),
+            port: None,
+            for_node: false,
+            links: Vec::new(),
+            on_disk: false,
+            heartbeat_ms: Limits::default().heartbeat_ms,
+            idle_ms: 0,
+        }
+    }
+}
+
 /// A comm core running in its own thread until it is dropped.
 #[derive(Debug)]
 pub struct Board {
@@ -102,7 +140,29 @@ impl Board {
     /// If the board cannot start.
     #[must_use]
     pub fn start_named(dir: &Path, security: Security, name: &str, port: Option<u16>) -> Self {
-        Self::start_all(dir, security, port, true, name, Vec::new(), true)
+        Self::start_with(
+            dir,
+            Options {
+                security,
+                name: name.to_owned(),
+                port,
+                for_node: true,
+                on_disk: true,
+                ..Options::default()
+            },
+        )
+    }
+
+    /// Starts a board in `dir` as `options` say: any of the others, with the heartbeat and how
+    /// long a session may go unheard set too. A test on a loaded machine sets these long, so a
+    /// slow moment is not taken for a lost session.
+    ///
+    /// # Panics
+    ///
+    /// If the board cannot start.
+    #[must_use]
+    pub fn start_with(dir: &Path, options: Options) -> Self {
+        Self::start_all(dir, options)
     }
 
     /// As [`Board::start_for_node`], with a serial link on each of `links`: a device on the
@@ -115,29 +175,37 @@ impl Board {
     pub fn start_for_node_with_links(dir: &Path, links: &[PathBuf]) -> Self {
         Self::start_all(
             dir,
-            Security::Off,
-            None,
-            true,
-            "board",
-            links.to_vec(),
-            false,
+            Options {
+                links: links.to_vec(),
+                for_node: true,
+                ..Options::default()
+            },
         )
     }
 
     fn start_as(dir: &Path, security: Security, port: Option<u16>, for_node: bool) -> Self {
-        Self::start_all(dir, security, port, for_node, "board", Vec::new(), false)
+        Self::start_all(
+            dir,
+            Options {
+                security,
+                port,
+                for_node,
+                ..Options::default()
+            },
+        )
     }
 
-    fn start_all(
-        dir: &Path,
-        security: Security,
-        port: Option<u16>,
-        for_node: bool,
-        name: &str,
-        links: Vec<PathBuf>,
-        on_disk: bool,
-    ) -> Self {
-        let name = name.to_owned();
+    fn start_all(dir: &Path, options: Options) -> Self {
+        let Options {
+            security,
+            name,
+            port,
+            for_node,
+            links,
+            on_disk,
+            heartbeat_ms,
+            idle_ms,
+        } = options;
         use std::os::unix::fs::MetadataExt;
         // Whoever owns the directory runs the test, and may be the node logic.
         let node_uids: Vec<u32> = std::fs::metadata(dir)
@@ -167,6 +235,8 @@ impl Board {
                 let node: orion_types::NodeName = name.parse().expect("name");
                 let limits = Limits {
                     outbox_bytes: 8 << 20,
+                    heartbeat_ms,
+                    idle_ms,
                     ..Limits::default()
                 };
                 let comm = Comm::new(

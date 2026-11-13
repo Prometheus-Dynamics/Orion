@@ -79,6 +79,8 @@ pub struct Welcomed {
     pub session: u32,
     /// How often each side pings.
     pub heartbeat: Duration,
+    /// How long either side may go unheard before the session is over.
+    pub idle: Duration,
     /// The largest frame either side sends.
     pub max_frame: u32,
     /// The interface revision the session runs at: the lower of both sides'.
@@ -265,10 +267,16 @@ impl Session {
                 kind::WELCOME => {
                     let welcome = Welcome::decode(view.payload())
                         .map_err(|_| ClientError::Protocol("welcome"))?;
+                    let heartbeat = Duration::from_millis(u64::from(welcome.heartbeat_ms.max(1)));
                     break Welcomed {
                         node: welcome.node,
                         session: welcome.session,
-                        heartbeat: Duration::from_millis(u64::from(welcome.heartbeat_ms.max(1))),
+                        heartbeat,
+                        // A comm core that does not say gives up after three heartbeats.
+                        idle: match welcome.idle_ms {
+                            0 => heartbeat * 3,
+                            ms => Duration::from_millis(u64::from(ms)).max(heartbeat),
+                        },
                         max_frame: welcome.max_frame,
                         revision: welcome.revision,
                     };
@@ -540,7 +548,7 @@ impl Session {
     }
 
     fn silent_at(&self) -> Instant {
-        self.last_heard + self.welcomed.heartbeat * 3
+        self.last_heard + self.welcomed.idle
     }
 
     /// Sends a ping if one is due, and fails if the comm core has been silent too long.

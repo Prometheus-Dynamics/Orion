@@ -11,9 +11,11 @@ pub struct Limits {
     pub max_frame: u32,
     /// `comm.outbox_bytes`: how much may wait to be sent to one session.
     pub outbox_bytes: u32,
-    /// `comm.heartbeat_ms`: how often a session is asked to ping. A session not heard from
-    /// for three of these is closed.
+    /// `comm.heartbeat_ms`: how often a session is asked to ping.
     pub heartbeat_ms: u32,
+    /// `comm.idle_ms`: how long a session may go unheard before it is closed, and the comm core
+    /// before a client gives up on it. Zero is three heartbeats; otherwise at least two.
+    pub idle_ms: u32,
     /// `comm.hello_ms`: how long a new connection has to say hello.
     pub hello_ms: u32,
     /// `comm.write_ms`: how long one frame may take to be taken by the other side.
@@ -27,6 +29,7 @@ impl Default for Limits {
             max_frame: 64 * 1024,
             outbox_bytes: 256 * 1024,
             heartbeat_ms: 2000,
+            idle_ms: 0,
             hello_ms: 5000,
             write_ms: 5000,
         }
@@ -46,6 +49,7 @@ impl Limits {
             max_frame: source.get("comm.max_frame", default.max_frame)?,
             outbox_bytes: source.get("comm.outbox_bytes", default.outbox_bytes)?,
             heartbeat_ms: source.get("comm.heartbeat_ms", default.heartbeat_ms)?,
+            idle_ms: source.get("comm.idle_ms", default.idle_ms)?,
             hello_ms: source.get("comm.hello_ms", default.hello_ms)?,
             write_ms: source.get("comm.write_ms", default.write_ms)?,
         };
@@ -65,12 +69,23 @@ impl Limits {
         if limits.heartbeat_ms == 0 || limits.hello_ms == 0 || limits.write_ms == 0 {
             return Err(bad("comm", "deadlines must be above zero"));
         }
+        if limits.idle_ms != 0 && u64::from(limits.idle_ms) < u64::from(limits.heartbeat_ms) * 2 {
+            return Err(bad(
+                "comm.idle_ms",
+                "must be zero or at least two heartbeats",
+            ));
+        }
         Ok(limits)
     }
 
-    /// How long a session may go unheard before it is closed.
+    /// How long a session may go unheard before it is closed: `comm.idle_ms`, or three
+    /// heartbeats.
     #[must_use]
     pub const fn idle_ms(&self) -> u64 {
-        self.heartbeat_ms as u64 * 3
+        if self.idle_ms == 0 {
+            self.heartbeat_ms as u64 * 3
+        } else {
+            self.idle_ms as u64
+        }
     }
 }

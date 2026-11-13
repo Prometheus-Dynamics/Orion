@@ -9,7 +9,7 @@ use orion::records::{RecordClass, RecordEntry};
 use orion::topics::{FieldId, Next, SampleTime, Status, TopicDecl};
 use orion::types::HlcTimestamp;
 use orion::{Address, Orion, fields};
-use orion_stubs::Board;
+use orion_stubs::{Board, Options};
 
 #[test]
 fn the_example_uses_each_role_through_the_facade_alone() {
@@ -205,4 +205,25 @@ fn a_camera_offers_its_pool_again_to_a_comm_core_that_restarts() {
     }
     drop(board);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_comm_core_set_to_wait_longer_is_waited_for_as_long() {
+    let dir = std::env::temp_dir().join(format!("orion-facade-idle-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    let options = Options {
+        heartbeat_ms: 5000,
+        idle_ms: 60_000,
+        ..Options::default()
+    };
+    let board = Board::start_with(&dir, options);
+    let orion =
+        Orion::connect(&Address::Local(board.socket().to_owned()), "slow").expect("connect");
+    let welcomed = orion.welcomed();
+    assert_eq!(welcomed.heartbeat, Duration::from_secs(5));
+    assert_eq!(welcomed.idle, Duration::from_secs(60));
+    drop(orion);
+    drop(board);
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -105,6 +105,7 @@ impl Host {
             heartbeat_ms: 100,
             max_frame: 4096,
             revision: 1,
+            idle_ms: 0,
         })
     }
 

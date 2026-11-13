@@ -139,7 +139,8 @@ fn session(out: &mut Vec<Sample>) {
             session: 42,
             heartbeat_ms: 1000,
             max_frame: 4096,
-            revision: 1
+            revision: 1,
+            idle_ms: 3000
         }
     );
     sample!(
