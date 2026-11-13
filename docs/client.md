@@ -200,6 +200,12 @@ A run handed to the program says who asked for it (`caller`), as the audit log n
 from another node was asked for by that node. The check has already decided; `caller` is for a
 program that answers different callers differently, or keeps its own log.
 
+A request to stop a run says why (`reason`): `Asked` (its caller asked), `CallerGone` (its
+caller's session ended first, and it was not detached), `Deadline` (its deadline passed; the
+caller has already been told it timed out), or `Stopping` (node logic is stopping; the caller is
+told it was cancelled). Node logic sets it. What a caller says of why is not kept. A run carried
+from another node keeps the reason that node gave. `Unsaid` comes from a host that does not say.
+
 A program that is not taking its runs does not have them pile up: 64 wait, and the next is
 answered as rejected, busy, at once.
 

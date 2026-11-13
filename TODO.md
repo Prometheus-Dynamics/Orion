@@ -70,6 +70,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C27](docs/prs/C27.md) A shell on the board over the session (wave 18)
 - [x] [C26](docs/prs/C26.md) A USB link outlives the host going away (wave 18)
 - [x] [C23](docs/prs/C23.md) A resource is said again only once its actions are back (wave 18)
+- [x] [C28](docs/prs/C28.md) A cancel says why (wave 18)
 
 ## D. Client
 

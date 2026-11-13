@@ -2,7 +2,7 @@
 //! each decided by the policy it was registered with.
 
 use orion_msg_actions::{
-    ActionResult, Attach, Cancel, Claim, Outcome, Progress, Register, Registered, Run,
+    ActionResult, Attach, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered, Run,
 };
 use orion_server::{
     Admits, Checked, Cx, Delivery, Error, Incoming, Policy, Service, SessionId, Sessions, What,
@@ -182,8 +182,14 @@ impl Service for Router {
                     .iter()
                     .find(|run| run.caller == Some((from, cancel.call)))
                     .ok_or(Error::NotFound)?;
-                cx.sessions()
-                    .send(run.owner, &Cancel { call: run.id }, Delivery::Must)
+                cx.sessions().send(
+                    run.owner,
+                    &Cancel {
+                        call: run.id,
+                        reason: CancelReason::Asked,
+                    },
+                    Delivery::Must,
+                )
             }
             _ => {
                 let attach: Attach = incoming.body()?;
@@ -207,7 +213,14 @@ impl Service for Router {
                 if run.detached {
                     run.caller = run.caller.map(|(_, call)| (SessionId(u32::MAX), call));
                 } else if run.finished.is_none() {
-                    let _ = sessions.send(run.owner, &Cancel { call: run.id }, Delivery::Must);
+                    let _ = sessions.send(
+                        run.owner,
+                        &Cancel {
+                            call: run.id,
+                            reason: CancelReason::CallerGone,
+                        },
+                        Delivery::Must,
+                    );
                 }
             }
         }

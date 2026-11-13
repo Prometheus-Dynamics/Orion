@@ -128,6 +128,9 @@ pub enum Heard<'a> {
     Cancel {
         /// The run.
         call: u64,
+        /// Why, as the wire numbers it: 1 asked, 2 its caller gone, 3 its deadline passed,
+        /// 4 node logic stopping, 0 not said.
+        reason: u8,
     },
 }
 
@@ -218,7 +221,10 @@ impl<const N: usize> Actions<N> {
                 }
             }
             kind::ACTION_CANCEL => match r.varint() {
-                Some(call) => Heard::Cancel { call },
+                Some(call) => Heard::Cancel {
+                    call,
+                    reason: r.u8().unwrap_or(0),
+                },
                 None => Heard::Other,
             },
             _ => Heard::Other,

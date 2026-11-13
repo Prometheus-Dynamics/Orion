@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{ClientError, Roles, Session};
 use orion_dial::Dialer;
-use orion_msg_actions::{ActionResult, Cancel, Outcome, Progress, Run, Target};
+use orion_msg_actions::{ActionResult, Cancel, CancelReason, Outcome, Progress, Run, Target};
 use orion_msg_session::Refusal;
 use orion_types::{ActionName, Error, NodeName};
 use orion_wire::{Bytes, kind};
@@ -33,6 +33,8 @@ pub(crate) enum Command {
     },
     Cancel {
         id: u64,
+        /// Why, for the other node to pass on.
+        reason: CancelReason,
     },
 }
 
@@ -176,10 +178,10 @@ impl Helper {
                     None => {}
                 }
             }
-            Command::Cancel { id } => {
+            Command::Cancel { id, reason } => {
                 if self.running.contains_key(&id)
                     && let Some(session) = &mut self.session
-                    && let Err(error) = session.send(&Cancel { call: id })
+                    && let Err(error) = session.send(&Cancel { call: id, reason })
                 {
                     self.lost(&error);
                 }

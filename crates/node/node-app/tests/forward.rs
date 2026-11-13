@@ -84,6 +84,8 @@ fn right() -> Target {
 /// `wipe`, which only programs on its own board may.
 struct Driver {
     stop: Arc<AtomicBool>,
+    /// Why each run it was told to stop was stopped, in order.
+    heard: Arc<std::sync::Mutex<Vec<String>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -91,6 +93,8 @@ impl Driver {
     fn start(socket: &Path) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let (socket, stopping) = (socket.to_owned(), stop.clone());
+        let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let hearing = heard.clone();
         let (ready, started) = std::sync::mpsc::channel();
         let thread = std::thread::spawn(move || {
             let orion = Orion::connect(&Address::Local(socket), "light-driver").expect("connect");
@@ -131,8 +135,14 @@ impl Driver {
                         output.make_ascii_uppercase();
                         let _ = blink.finish(call, Outcome::Succeeded, &output, "");
                     }
-                    Some(Request::Cancel { call }) => {
-                        let _ = blink.finish(call, Outcome::Cancelled, b"", "stopped");
+                    Some(Request::Cancel { call, reason }) => {
+                        hearing.lock().expect("heard").push(format!("{reason:?}"));
+                        let _ = blink.finish(
+                            call,
+                            Outcome::Cancelled,
+                            b"",
+                            &format!("stopped: {reason:?}"),
+                        );
                     }
                     None => {}
                 }
@@ -143,6 +153,7 @@ impl Driver {
             .expect("the driver registers its actions");
         Self {
             stop,
+            heard,
             thread: Some(thread),
         }
     }
@@ -186,7 +197,7 @@ fn finish(
 
 /// The right node: its comm core, its node logic and the program with the actions.
 struct Right {
-    _driver: Driver,
+    driver: Driver,
     _logic: Logic,
     board: Board,
 }
@@ -204,7 +215,7 @@ impl Right {
         let logic = Logic::start(settings(dir, "right"));
         let driver = Driver::start(board.socket());
         Self {
-            _driver: driver,
+            driver,
             _logic: logic,
             board,
         }
@@ -339,7 +350,28 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
     let cancelled = slow.finish(Duration::from_secs(10)).expect("it ends");
     assert_eq!(
         (cancelled.outcome, cancelled.detail.as_str()),
-        (Outcome::Cancelled, "stopped")
+        (Outcome::Cancelled, "stopped: Asked"),
+        "why crosses to the other node"
+    );
+
+    // A caller that goes with a run under way on the other node: the program there is told
+    // why it is to stop, as the node that carried the run said it.
+    let brief =
+        Orion::connect(&Address::Local(left.socket().to_owned()), "brief").expect("connect");
+    let mut orphan = brief.run(&call("blink", b"slow")).expect("run");
+    assert!(matches!(
+        orphan.wait(Duration::from_secs(10)).expect("run"),
+        Some(Update::Doing(_))
+    ));
+    drop(orphan);
+    drop(brief);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while right_node.driver.heard.lock().expect("heard").len() < 2 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        *right_node.driver.heard.lock().expect("heard"),
+        ["Asked", "CallerGone"]
     );
 
     // The owner goes away with a run under way: the caller is told, and does not wait.

@@ -5,7 +5,9 @@
 use std::ffi::CStr;
 
 use orion_mcu_template::ffi::*;
-use orion_msg_actions::{ActionResult, Cancel, Claim, Outcome, Progress, Register, Target};
+use orion_msg_actions::{
+    ActionResult, Cancel, CancelReason, Claim, Outcome, Progress, Register, Target,
+};
 use orion_msg_topics::Sample;
 use orion_wire::{Bytes, kind};
 
@@ -208,7 +210,10 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
     );
 
     // A cancel names the run.
-    let cancel = peer.raw(&Cancel { call: 77 });
+    let cancel = peer.raw(&Cancel {
+        call: 77,
+        reason: CancelReason::Asked,
+    });
     feed(&cancel);
     assert_ne!(orion_poll(now) & ORION_EVENT_CANCEL, 0);
     assert_eq!(orion_cancelled(), 77);

@@ -4,7 +4,8 @@
 use orion_action_list::{Actions, ENDED_FOR_MS, Event, MAX_ENDED, MAX_RUNS};
 use orion_check::{Admits, Policy};
 use orion_msg_actions::{
-    ActionResult, Attach, Cancel, Claim, Outcome, Progress, Register, Registered, Run, Target,
+    ActionResult, Attach, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered,
+    Run, Target,
 };
 use orion_reply::{Asked, Out};
 use orion_types::Error;
@@ -66,6 +67,11 @@ impl Bench {
     }
 
     fn ask<B: Body>(&mut self, from: u32, body: &B) -> Result<(), Error> {
+        self.ask_class(from, 4, body)
+    }
+
+    /// As [`Bench::ask`], from a caller of `class`.
+    fn ask_class<B: Body>(&mut self, from: u32, class: u8, body: &B) -> Result<(), Error> {
         self.seq += 1;
         let mut payload = [0_u8; 1024];
         let len = encode_fields(body, &mut payload).expect("encode");
@@ -73,7 +79,7 @@ impl Bench {
             session: from,
             seq: self.seq,
             kind: B::KIND,
-            class: 4,
+            class,
             uid: 1000,
             caller: "",
             payload: &payload[..len],
@@ -258,9 +264,14 @@ fn a_callers_number_is_used_once_at_a_time() {
 #[test]
 fn cancel_reaches_the_program_under_the_lists_number() {
     let (mut bench, id) = Bench::running(false);
-    bench.ask(CALLER, &Cancel { call: 7 }).expect("cancel");
+    // What a caller says of why is not kept: it asked.
+    let cancel = Cancel {
+        call: 7,
+        reason: CancelReason::Deadline,
+    };
+    bench.ask(CALLER, &cancel).expect("cancel");
     let cancel: Cancel = bench.take(OWNER);
-    assert_eq!(cancel.call, id);
+    assert_eq!((cancel.call, cancel.reason), (id, CancelReason::Asked));
     // The run goes on until the program says how it ended.
     assert_eq!(bench.actions.running(), 1);
     bench
@@ -280,7 +291,52 @@ fn cancel_reaches_the_program_under_the_lists_number() {
         (Outcome::Cancelled, "stopped")
     );
     // Someone else's cancel is of a run they do not have.
-    assert_eq!(bench.ask(OTHER, &Cancel { call: 7 }), Err(Error::NotFound));
+    let cancel = Cancel {
+        call: 7,
+        reason: CancelReason::Asked,
+    };
+    assert_eq!(bench.ask(OTHER, &cancel), Err(Error::NotFound));
+}
+
+#[test]
+fn another_nodes_reason_for_a_run_it_carried_is_passed_on() {
+    const PEER: u8 = orion_check::PrincipalClass::Peer as u8;
+    let (mut bench, id) = Bench::running(false);
+    let gone = Cancel {
+        call: 7,
+        reason: CancelReason::CallerGone,
+    };
+    bench.ask_class(CALLER, PEER, &gone).expect("cancel");
+    let cancel: Cancel = bench.take(OWNER);
+    assert_eq!((cancel.call, cancel.reason), (id, CancelReason::CallerGone));
+    // A node that does not say is taken to have asked.
+    let unsaid = Cancel {
+        call: 7,
+        reason: CancelReason::Unsaid,
+    };
+    bench.ask_class(CALLER, PEER, &unsaid).expect("cancel");
+    let cancel: Cancel = bench.take(OWNER);
+    assert_eq!(cancel.reason, CancelReason::Asked);
+}
+
+#[test]
+fn node_logic_stopping_cancels_every_run_and_says_why() {
+    let (mut bench, first) = Bench::running(false);
+    bench.run(CALLER, 8, 0, true).expect("run");
+    let detached: Claim<'_> = bench.take(OWNER);
+    let detached = detached.call;
+    bench.actions.stopping(bench.now, &mut bench.sent);
+    for id in [first, detached] {
+        let cancel: Cancel = bench.take(OWNER);
+        assert_eq!((cancel.call, cancel.reason), (id, CancelReason::Stopping));
+        let result: ActionResult<'_> = bench.take(CALLER);
+        assert_eq!(
+            (result.outcome, result.detail),
+            (Outcome::Cancelled, "node logic is stopping")
+        );
+    }
+    assert_eq!((bench.actions.running(), bench.actions.ended()), (0, 0));
+    assert!(bench.sent.frames.is_empty());
 }
 
 #[test]
@@ -308,7 +364,7 @@ fn a_caller_that_goes_has_its_run_cancelled_unless_it_is_detached() {
     let (mut bench, id) = Bench::running(false);
     bench.actions.gone(CALLER, bench.now, &mut bench.sent);
     let cancel: Cancel = bench.take(OWNER);
-    assert_eq!(cancel.call, id);
+    assert_eq!((cancel.call, cancel.reason), (id, CancelReason::CallerGone));
     // The program's last word about it goes nowhere, and is not an error.
     bench
         .ask(
@@ -366,7 +422,10 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
     assert!(bench.sent.frames.is_empty());
     bench.actions.tick(bench.now + 500, &mut bench.sent);
     let cancel: Cancel = bench.take(OWNER);
-    assert_eq!(cancel.call, claim.call);
+    assert_eq!(
+        (cancel.call, cancel.reason),
+        (claim.call, CancelReason::Deadline)
+    );
     let result: ActionResult<'_> = bench.take(CALLER);
     assert_eq!((result.call, result.outcome), (7, Outcome::TimedOut));
     assert_eq!(bench.actions.next_deadline(), None);
@@ -566,9 +625,26 @@ fn a_detached_run_is_cancelled_from_the_session_that_came_back() {
     let (mut bench, id) = Bench::running(true);
     bench.actions.gone(CALLER, bench.now, &mut bench.sent);
     // Nobody is attached: there is nobody whose cancel it would be.
-    assert_eq!(bench.ask(BACK, &Cancel { call: 7 }), Err(Error::NotFound));
+    assert_eq!(
+        bench.ask(
+            BACK,
+            &Cancel {
+                call: 7,
+                reason: CancelReason::Asked
+            }
+        ),
+        Err(Error::NotFound)
+    );
     bench.ask(BACK, &Attach { call: 7 }).expect("attach");
-    bench.ask(BACK, &Cancel { call: 7 }).expect("cancel");
+    bench
+        .ask(
+            BACK,
+            &Cancel {
+                call: 7,
+                reason: CancelReason::Asked,
+            },
+        )
+        .expect("cancel");
     let cancel: Cancel = bench.take(OWNER);
     assert_eq!(cancel.call, id);
 }

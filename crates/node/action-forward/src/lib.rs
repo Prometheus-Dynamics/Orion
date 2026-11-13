@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use orion_dial::Dialer;
-use orion_msg_actions::{ActionResult, Outcome, Progress, Run};
+use orion_msg_actions::{ActionResult, CancelReason, Outcome, Progress, Run};
 use orion_reply::{Asked, Out};
 use orion_types::{Error, NodeName};
 use orion_wire::Bytes;
@@ -140,7 +140,10 @@ impl Forwards {
             return false;
         };
         if let Some(link) = self.links.get(&forwarded.node) {
-            link.send(Command::Cancel { id: *id });
+            link.send(Command::Cancel {
+                id: *id,
+                reason: CancelReason::Asked,
+            });
         }
         true
     }
@@ -154,7 +157,10 @@ impl Forwards {
                 if !forwarded.detached
                     && let Some(link) = self.links.get(&forwarded.node)
                 {
-                    link.send(Command::Cancel { id: *id });
+                    link.send(Command::Cancel {
+                        id: *id,
+                        reason: CancelReason::CallerGone,
+                    });
                 }
             }
         }
@@ -165,7 +171,10 @@ impl Forwards {
     pub fn forget_sessions(&mut self) {
         for (id, forwarded) in std::mem::take(&mut self.forwarded) {
             if let Some(link) = self.links.get(&forwarded.node) {
-                link.send(Command::Cancel { id });
+                link.send(Command::Cancel {
+                    id,
+                    reason: CancelReason::CallerGone,
+                });
             }
         }
     }

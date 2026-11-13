@@ -26,7 +26,7 @@ use orion_msg_actions::{
 use orion_wire::{Bytes, kind};
 
 pub use orion_check::{Admits, Policy};
-pub use orion_msg_actions::{Outcome, Target};
+pub use orion_msg_actions::{CancelReason, Outcome, Target};
 
 /// How many runs wait for a program to take them before more are turned away as busy.
 pub const CLAIM_QUEUE: usize = 64;
@@ -115,6 +115,9 @@ pub enum Request {
     Cancel {
         /// The run.
         call: u64,
+        /// Why: asked, its caller gone, its deadline passed, node logic stopping. `Unsaid`
+        /// from a host that does not say.
+        reason: CancelReason,
     },
 }
 
@@ -215,8 +218,10 @@ impl Handler for State {
             }
             kind::ACTION_CANCEL => {
                 let cancel: Cancel = frame.body()?;
-                self.requests
-                    .push_back(Request::Cancel { call: cancel.call });
+                self.requests.push_back(Request::Cancel {
+                    call: cancel.call,
+                    reason: cancel.reason,
+                });
             }
             _ => {
                 let registered: Registered = frame.body()?;
@@ -459,7 +464,10 @@ impl Run {
     ///
     /// If the connection broke.
     pub fn cancel(&mut self) -> Result<(), ClientError> {
-        self.client.send(&Cancel { call: self.call })?;
+        self.client.send(&Cancel {
+            call: self.call,
+            reason: CancelReason::Asked,
+        })?;
         Ok(())
     }
 }

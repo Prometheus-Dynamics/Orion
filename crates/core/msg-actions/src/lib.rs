@@ -114,11 +114,34 @@ body! {
     }
 }
 
+open_enum! {
+    /// Why a run is stopped. Set by whoever passes the [`Cancel`] to the program that runs it,
+    /// never taken from the caller as it is.
+    #[derive(Default)]
+    pub enum CancelReason: u8 {
+        /// Not said: a host that does not say.
+        #[default]
+        Unsaid = 0,
+        /// Its caller asked.
+        Asked = 1,
+        /// Its caller's session ended before the run did.
+        CallerGone = 2,
+        /// Its deadline passed.
+        Deadline = 3,
+        /// Node logic is stopping.
+        Stopping = 4,
+    }
+}
+
 body! {
     /// Stops a run.
     pub struct Cancel = kind::ACTION_CANCEL {
         /// The run.
         pub call: u64,
+        ;
+        /// Why. A caller's own is not kept: node logic says [`CancelReason::Asked`] for it,
+        /// and passes on what another node's node logic said for a run it carried.
+        pub reason: CancelReason,
     }
 }
 

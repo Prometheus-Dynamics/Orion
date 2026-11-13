@@ -30,6 +30,7 @@ mod send;
 use std::cell::RefCell;
 use std::io;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -330,8 +331,25 @@ impl Node {
         Ok(())
     }
 
-    /// Serves one session until it is lost.
-    async fn serve(&mut self, session: Session) -> ClientError {
+    /// Node logic is stopping: every run is cancelled where it runs, saying so.
+    fn stopping(&mut self, client: &Client) {
+        let mut direct = Direct::new(client, &mut self.scratch);
+        {
+            let mut logic = self.logic.borrow_mut();
+            let now = logic.now_ms();
+            logic.actions.stopping(now, &mut direct);
+        }
+        if let Err(error) = direct.result() {
+            warn!("runs were not all told node logic is stopping: {error}");
+        }
+    }
+
+    /// Serves one session until it is lost, or `stop` is done (`None`).
+    async fn serve<S: Future<Output = ()>>(
+        &mut self,
+        session: Session,
+        stop: &mut Pin<&mut S>,
+    ) -> Option<ClientError> {
         // Tokio waits on a duplicate of the session's descriptor. It is only ever asked
         // whether there is something to read.
         let waiter = session
@@ -341,7 +359,7 @@ impl Node {
             .and_then(UnixDatagram::from_std);
         let waiter = match waiter {
             Ok(waiter) => waiter,
-            Err(error) => return error.into(),
+            Err(error) => return Some(error.into()),
         };
         // Rung when a link to another node heard something.
         let bell = self
@@ -353,21 +371,21 @@ impl Node {
             .and_then(UnixDatagram::from_std);
         let bell = match bell {
             Ok(bell) => bell,
-            Err(error) => return error.into(),
+            Err(error) => return Some(error.into()),
         };
         let client = Client::new(session);
         client.add(self.logic.clone());
         if let Err(error) = client.send(&NodeAttach {
             kinds: Bytes(Logic::KINDS),
         }) {
-            return error;
+            return Some(error);
         }
         // Node logic's own action, registered as any program's is: the relay then checks
         // each run against its policy.
         if let Some(register) = send::register(&self.settings.config.node_name)
             && let Err(error) = client.send(&register)
         {
-            return error;
+            return Some(error);
         }
         let mut progress = match Topics::new(&client).declare(&TopicDecl {
             name: ACTIONS_TOPIC,
@@ -384,10 +402,10 @@ impl Node {
         };
         loop {
             if let Err(error) = client.drain() {
-                return error;
+                return Some(error);
             }
             if let Err(error) = self.turn(&client, progress.as_mut()) {
-                return error;
+                return Some(error);
             }
             let now = Instant::now();
             self.save_if_due(now);
@@ -435,13 +453,23 @@ impl Node {
                     });
                 }
             };
-            if let Some(saving) = &mut self.saving {
-                tokio::select! {
-                    done = saving => self.saved(done),
-                    () = readable => {}
+            let waiting = async {
+                if let Some(saving) = &mut self.saving {
+                    tokio::select! {
+                        done = saving => self.saved(done),
+                        () = readable => {}
+                    }
+                } else {
+                    readable.await;
                 }
-            } else {
-                readable.await;
+            };
+            let stopped = tokio::select! {
+                () = stop.as_mut() => true,
+                () = waiting => false,
+            };
+            if stopped {
+                self.stopping(&client);
+                return None;
             }
         }
     }
@@ -466,9 +494,8 @@ impl Node {
                     // Whatever was watching, or had an action, came through a comm core that
                     // is gone, or is passed again by the one that stayed.
                     self.logic.borrow_mut().forget_sessions();
-                    let lost = tokio::select! {
-                        () = &mut stop => break 'run,
-                        lost = self.serve(session) => lost,
+                    let Some(lost) = self.serve(session, &mut stop).await else {
+                        break 'run;
                     };
                     warn!("the comm core is gone: {lost}");
                 }

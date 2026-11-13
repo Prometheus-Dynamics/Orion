@@ -2,7 +2,8 @@
 
 use orion_check::{Admits, Policy};
 use orion_msg_actions::{
-    ActionResult, Attach, Cancel, Claim, Outcome, Progress, Register, Registered, Run, Target,
+    ActionResult, Attach, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered,
+    Run, Target,
 };
 use orion_msg_files::{
     FileBegin, FileChunk, FileCommit, FilePull, FileSink, FileSinkReady, FileState, FileStatus,
@@ -383,7 +384,13 @@ fn actions(out: &mut Vec<Sample>) {
             detail: ""
         }
     );
-    sample!(out, Cancel { call: 7 });
+    sample!(
+        out,
+        Cancel {
+            call: 7,
+            reason: CancelReason::CallerGone
+        }
+    );
     sample!(out, Attach { call: 7 });
     sample!(out, Registered { request_seq: 9 });
 }

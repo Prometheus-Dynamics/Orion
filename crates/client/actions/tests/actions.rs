@@ -200,8 +200,14 @@ impl Service for Router {
                     .iter()
                     .find(|run| run.caller == Some((from, cancel.call)))
                     .ok_or(Error::NotFound)?;
-                cx.sessions()
-                    .send(run.owner, &Cancel { call: run.id }, Delivery::Must)
+                cx.sessions().send(
+                    run.owner,
+                    &Cancel {
+                        call: run.id,
+                        reason: orion_msg_actions::CancelReason::Asked,
+                    },
+                    Delivery::Must,
+                )
             }
             _ => {
                 // Coming back to a detached run: by the number the first caller knew it by.
@@ -227,7 +233,14 @@ impl Service for Router {
                 if run.detached {
                     run.caller = run.caller.map(|(_, call)| (SessionId(u32::MAX), call));
                 } else if run.finished.is_none() {
-                    let _ = sessions.send(run.owner, &Cancel { call: run.id }, Delivery::Must);
+                    let _ = sessions.send(
+                        run.owner,
+                        &Cancel {
+                            call: run.id,
+                            reason: orion_msg_actions::CancelReason::Asked,
+                        },
+                        Delivery::Must,
+                    );
                 }
             }
         }
@@ -316,7 +329,7 @@ fn owner_process() {
                     }
                 }
             }
-            Some(Request::Cancel { call }) => {
+            Some(Request::Cancel { call, .. }) => {
                 assert_eq!(
                     cancelled,
                     Some(call),

@@ -494,7 +494,7 @@ fn heard(
                 running.events |= ORION_EVENT_RUN;
             }
         }
-        Run::Cancel { call } => {
+        Run::Cancel { call, .. } => {
             if running.run.is_some_and(|run| run.call == call) {
                 running.run = None;
             }

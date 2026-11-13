@@ -22,7 +22,8 @@
 use std::collections::VecDeque;
 
 use orion_msg_actions::{
-    ActionResult, Attach, Cancel, Claim, Outcome, Progress, Register, Registered, Run, Target,
+    ActionResult, Attach, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered,
+    Run, Target,
 };
 use orion_reply::{Asked, Out};
 use orion_types::{ActionName, Error, NodeName};
@@ -435,7 +436,13 @@ impl Actions {
                     .iter()
                     .find(|run| run.caller == Some(from) && run.call == cancel.call)
                     .ok_or(Error::NotFound)?;
-                out.send(run.owner, &Cancel { call: run.id })
+                out.send(
+                    run.owner,
+                    &Cancel {
+                        call: run.id,
+                        reason: reason_of(asked, cancel.reason),
+                    },
+                )
             }
             kind::ACTION_ATTACH => self.attach(asked, now_ms, out),
             _ => Err(Error::Unsupported),
@@ -474,11 +481,40 @@ impl Actions {
             if run.caller == Some(session) {
                 run.caller = None;
                 if !run.detached {
-                    let _ = out.send(run.owner, &Cancel { call: run.id });
+                    let _ = out.send(
+                        run.owner,
+                        &Cancel {
+                            call: run.id,
+                            reason: CancelReason::CallerGone,
+                        },
+                    );
                 }
             }
             at += 1;
         }
+    }
+
+    /// Node logic is stopping: every run is cancelled where it runs, and ends for its caller
+    /// as cancelled. Nothing is kept for a starter to come back to.
+    pub fn stopping(&mut self, now_ms: u64, out: &mut dyn Out) {
+        while let Some(run) = self.running.first() {
+            let _ = out.send(
+                run.owner,
+                &Cancel {
+                    call: run.id,
+                    reason: CancelReason::Stopping,
+                },
+            );
+            self.end(
+                0,
+                Outcome::Cancelled,
+                &[],
+                "node logic is stopping",
+                now_ms,
+                out,
+            );
+        }
+        self.ended.clear();
     }
 
     /// Ends the runs whose deadline has passed at `now_ms`.
@@ -487,7 +523,13 @@ impl Actions {
         while at < self.running.len() {
             if self.running[at].deadline.is_some_and(|due| due <= now_ms) {
                 let (owner, id) = (self.running[at].owner, self.running[at].id);
-                let _ = out.send(owner, &Cancel { call: id });
+                let _ = out.send(
+                    owner,
+                    &Cancel {
+                        call: id,
+                        reason: CancelReason::Deadline,
+                    },
+                );
                 self.end(
                     at,
                     Outcome::TimedOut,
@@ -500,5 +542,15 @@ impl Actions {
                 at += 1;
             }
         }
+    }
+}
+
+/// Why a run is stopped at `asked`'s word: [`CancelReason::Asked`], unless `asked` is another
+/// node's node logic passing on why it stopped a run it carried here.
+fn reason_of(asked: &Asked<'_>, said: CancelReason) -> CancelReason {
+    if asked.class == orion_check::PrincipalClass::Peer as u8 && said != CancelReason::Unsaid {
+        said
+    } else {
+        CancelReason::Asked
     }
 }

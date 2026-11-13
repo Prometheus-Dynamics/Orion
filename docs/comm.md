@@ -864,6 +864,11 @@ run is let through for anyone this node knows, and node logic carries it to the 
 the action, where that node's door decides by the policy it was registered with, or answers
 `not found`.
 
+A `Cancel` that node logic passes to the program that runs it says why: the caller asked, the
+caller's session ended, the deadline passed, or node logic is stopping. Node logic sets the
+reason. What a caller says is not kept, except from a peer passing on why it stopped a run it
+carried. Older bodies without the byte read as "not said".
+
 ## The comm core as a program
 
 `orion-comm-app` puts the parts together. It needs nothing else on the board: no node logic, no

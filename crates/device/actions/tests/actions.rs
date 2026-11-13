@@ -169,8 +169,12 @@ fn a_run_before_registration_is_not_taken() {
 #[test]
 fn a_cancel_is_passed_on() {
     let mut rig = ready();
-    rig.send(&Cancel { call: 9 });
-    assert_eq!(rig.last_heard(), Some("Cancel { call: 9 }"));
+    rig.send(&Cancel {
+        call: 9,
+        reason: orion_msg_actions::CancelReason::Deadline,
+    });
+    // With why, as the wire numbers it.
+    assert_eq!(rig.last_heard(), Some("Cancel { call: 9, reason: 3 }"));
 }
 
 #[test]

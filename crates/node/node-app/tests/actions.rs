@@ -35,7 +35,8 @@ fn settings(dir: &Path) -> NodeSettings {
     settings
 }
 
-/// Node logic in a thread of its own, until dropped.
+/// Node logic in a thread of its own, until dropped: then it is told to stop, as a signal
+/// would.
 struct Logic {
     kill: Option<oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -51,10 +52,10 @@ impl Logic {
                 .expect("runtime");
             runtime.block_on(async move {
                 let mut node = Node::load(settings).expect("node logic starts");
-                tokio::select! {
-                    () = node.run(std::future::pending()) => {}
-                    _ = killed => {}
-                }
+                node.run(async {
+                    let _ = killed.await;
+                })
+                .await;
             });
         });
         Self {
@@ -152,7 +153,7 @@ fn provider_process() {
                 open.finish(call, Outcome::Succeeded, &output, "")
                     .expect("finish");
             }
-            Some(Request::Cancel { call }) => {
+            Some(Request::Cancel { call, .. }) => {
                 open.finish(call, Outcome::Cancelled, b"", "stopped")
                     .expect("finish");
             }
@@ -343,9 +344,21 @@ fn actions_are_still_there_after_node_logic_restarts() {
         b"eno"
     );
 
-    // Node logic is killed and started again. The provider never notices, and its action is
-    // on the new list.
+    // Node logic stops with a run under way: the run is cancelled where it runs, and its
+    // caller is told why.
+    let mut slow = caller.run(&call("open", b"long")).expect("run");
+    assert!(matches!(
+        slow.wait(Duration::from_secs(5)).expect("run"),
+        Some(Update::Doing(_))
+    ));
     drop(logic);
+    let stopped = slow.finish(Duration::from_secs(5)).expect("it ends");
+    assert_eq!(
+        (stopped.outcome, stopped.detail.as_str()),
+        (Outcome::Cancelled, "node logic is stopping")
+    );
+
+    // It starts again. The provider never notices, and its action is on the new list.
     let mut away = caller.run(&call("open", b"two")).expect("sent");
     match away.wait(Duration::from_secs(5)) {
         Err(ClientError::Refused(Error::Unavailable)) => {}
