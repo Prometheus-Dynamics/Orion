@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use orion_connect::{Address, Client, ClientError, Options, Session};
-use orion_files::{FileState, Files, Pull, digest};
+use orion_files::{FileState, Files, Known, Pull, Step, digest};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_msg_files::{FileBegin, FileChunk, FileCommit, FilePull, FileStatus};
 use orion_server::{
@@ -580,4 +580,184 @@ fn a_file_that_takes_long_to_hash_does_not_cost_the_session() {
         .expect("the session was kept while the file was hashed");
     assert_eq!(done.state, FileState::Committed, "{}", done.detail);
     assert_eq!(done.received, data.len() as u64);
+}
+
+/// A source that counts the bytes read from it.
+struct Counted {
+    inner: Cursor<Vec<u8>>,
+    read: Rc<std::cell::Cell<u64>>,
+}
+
+impl std::io::Read for Counted {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let len = self.inner.read(buf)?;
+        self.read.set(self.read.get() + len as u64);
+        Ok(len)
+    }
+}
+
+impl std::io::Seek for Counted {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+fn tool(board: &Board) -> Files {
+    let client = Client::new(
+        Session::connect(
+            &Address::Local(board.socket.clone()),
+            "tool",
+            Options::default(),
+        )
+        .expect("connect"),
+    );
+    Files::new(&client)
+}
+
+#[test]
+fn a_known_digest_is_not_read_for_again_and_a_wrong_one_is_rejected() {
+    let board = Board::start("known");
+    let files = tool(&board);
+    let data = contents(5);
+    let size = data.len() as u64;
+    let read = Rc::new(std::cell::Cell::new(0));
+
+    // Pushed once, read twice: to hash it, and to send it. The digest comes back.
+    let mut source = Counted {
+        inner: Cursor::new(data.clone()),
+        read: read.clone(),
+    };
+    let first = files
+        .push("known.first", &mut source, |_, _| {})
+        .expect("push");
+    assert_eq!(first.state, FileState::Committed);
+    assert_eq!(read.get(), 2 * size);
+    assert_eq!(
+        first.digest,
+        digest(&mut Cursor::new(data.clone())).expect("digest").0
+    );
+
+    // Given what is known, it is read once: only to send it.
+    read.set(0);
+    let known = Known {
+        digest: first.digest,
+        size,
+    };
+    let mut source = Counted {
+        inner: Cursor::new(data.clone()),
+        read: read.clone(),
+    };
+    let second = files
+        .push_with("known.second", &mut source, known, |_, _| {})
+        .expect("push");
+    assert_eq!(second.state, FileState::Committed);
+    assert_eq!(read.get(), size);
+
+    // What is "known" is wrong: the board's check finds it, and nothing is put in place.
+    let wrong = Known {
+        digest: [7; 32],
+        size,
+    };
+    let rejected = files
+        .push_with("known.wrong", &mut Cursor::new(data), wrong, |_, _| {})
+        .expect("push");
+    assert_eq!(rejected.state, FileState::Rejected);
+    assert!(
+        !board
+            .outside
+            .committed
+            .lock()
+            .expect("lock")
+            .contains_key("known.wrong")
+    );
+}
+
+#[test]
+fn two_pushes_are_stepped_together_on_one_session() {
+    let board = Board::start("stepped");
+    let files = tool(&board);
+    let (a, b) = (contents(6), contents(7));
+    let mut first = files
+        .start_push("stepped.a", Cursor::new(a.clone()), None)
+        .expect("start");
+    let mut second = files
+        .start_push("stepped.b", Cursor::new(b.clone()), None)
+        .expect("start");
+    assert_ne!(first.transfer(), second.transfer());
+    let mut done = [None, None];
+    let mut seen = [Vec::new(), Vec::new()];
+    let mut steps = 0;
+    while done.iter().any(Option::is_none) {
+        steps += 1;
+        assert!(steps < 10_000, "the pushes do not end");
+        for (at, pushing) in [&mut first, &mut second].into_iter().enumerate() {
+            if done[at].is_some() {
+                continue;
+            }
+            match pushing.step(Duration::from_millis(5)).expect("step") {
+                Step::Done(transfer) => done[at] = Some(transfer),
+                Step::Progress { received, .. } => seen[at].push(received),
+                Step::Waiting => {}
+            }
+        }
+    }
+    for (at, data) in [&a, &b].into_iter().enumerate() {
+        let transfer = done[at].take().expect("ended");
+        assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
+        assert!(seen[at].windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(seen[at].len() > 2, "{at} took {} steps", seen[at].len());
+        let name = if at == 0 { "stepped.a" } else { "stepped.b" };
+        assert_eq!(
+            board.outside.committed.lock().expect("lock").get(name),
+            Some(data)
+        );
+    }
+    // A push that is over says so.
+    assert!(first.step(Duration::ZERO).is_err());
+}
+
+#[test]
+fn a_file_that_changes_while_it_is_pushed_is_not_committed() {
+    let board = Board::start("changed");
+    let files = tool(&board);
+    let path = board.dir.join("changing.bin");
+    std::fs::write(&path, contents(8)).expect("write");
+
+    // Unchanged, it goes through.
+    let done = files
+        .push_file("file.same", &path, None, |_, _| {})
+        .expect("push");
+    assert_eq!(done.state, FileState::Committed);
+
+    // Changed part way: the push stops before the commit.
+    let mut changed = false;
+    let error = files
+        .push_file(
+            "file.changed",
+            &path,
+            Some(Known {
+                digest: done.digest,
+                size: done.received,
+            }),
+            |received, _| {
+                if received > 0 && !changed {
+                    changed = true;
+                    let file = std::fs::OpenOptions::new()
+                        .append(true)
+                        .open(&path)
+                        .expect("open");
+                    file.set_len(done.received + 1).expect("grow");
+                }
+            },
+        )
+        .expect_err("the file changed");
+    assert!(error.to_string().contains("changed"), "{error}");
+    assert!(
+        !board
+            .outside
+            .committed
+            .lock()
+            .expect("lock")
+            .contains_key("file.changed")
+    );
 }

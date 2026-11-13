@@ -89,7 +89,9 @@ pub mod actions {
 /// Files, pushed or pulled.
 #[cfg(feature = "files")]
 pub mod files {
-    pub use orion_files::{FileState, Files, Handed, Pull, Sink, Transfer, digest};
+    pub use orion_files::{
+        FileState, Files, Handed, Known, Pull, Pushing, Sink, Step, Transfer, digest,
+    };
 }
 
 /// Running workloads for Orion.

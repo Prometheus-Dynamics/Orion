@@ -8,7 +8,11 @@
 //! connection broke or the program was restarted, is answered with how many bytes the board
 //! already has, and the push carries on from there. [`Files::push`] takes the number from the
 //! file's digest, so the same file to the same place is the same transfer without the caller
-//! keeping anything.
+//! keeping anything. A program that keeps the digest ([`Transfer::digest`]) gives it back
+//! ([`Files::push_with`]) and the file is not read through to hash it again.
+//!
+//! **A push can be stepped.** [`Files::start_push`] begins one and [`Pushing::step`] moves it
+//! on, so a program does its other work on the same session between steps.
 //!
 //! **A pull** asks the board to fetch the file itself, from a URL, and reports how it goes.
 //! Nothing but the request crosses this connection.
@@ -23,6 +27,10 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
+
+mod push;
+
+pub use push::{Known, Pushing, Step};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -30,7 +38,7 @@ use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_msg_files::{
     FileBegin, FileChunk, FileCommit, FilePull, FileSink, FileSinkReady, FileStatus,
 };
-use orion_wire::{Bytes, kind};
+use orion_wire::kind;
 use sha2::{Digest, Sha256};
 
 pub use orion_msg_files::FileState;
@@ -38,9 +46,9 @@ pub use orion_msg_files::FileState;
 /// The most bytes of a file in one message.
 pub const CHUNK: usize = 32 * 1024;
 /// How many chunks may be on their way without an answer.
-const WINDOW: u64 = 8;
+pub(crate) const WINDOW: u64 = 8;
 /// The bytes of a chunk's message that are not the file's.
-const CHUNK_OVERHEAD: usize = 64;
+pub(crate) const CHUNK_OVERHEAD: usize = 64;
 
 /// Where a transfer is, as the board last said.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,6 +61,8 @@ pub struct Transfer {
     pub state: FileState,
     /// Why, if it was rejected.
     pub detail: String,
+    /// The file's SHA-256: for a push of it later ([`Known`]), or as a pull asked for it.
+    pub digest: [u8; 32],
 }
 
 #[derive(Default)]
@@ -236,7 +246,7 @@ pub fn digest(source: &mut (impl Read + Seek)) -> std::io::Result<([u8; 32], u64
 /// As [`digest`], calling `between` every quarter of a second: hashing a large file, or one
 /// on a slow disk, takes long enough that a session left alone meanwhile would be given up
 /// on.
-fn digest_while(
+pub(crate) fn digest_while(
     source: &mut (impl Read + Seek),
     mut between: impl FnMut() -> Result<(), ClientError>,
 ) -> Result<([u8; 32], u64), ClientError> {
@@ -321,7 +331,7 @@ impl Files {
         })
     }
 
-    fn follow(&self, transfer: u64) {
+    pub(crate) fn follow(&self, transfer: u64, digest: [u8; 32]) {
         let mut state = self.state.borrow_mut();
         state.transfers.retain(|known| known.transfer != transfer);
         state.transfers.push(Transfer {
@@ -330,10 +340,11 @@ impl Files {
             // Not a state the board sends: nothing has been heard yet.
             state: FileState::Unknown(0),
             detail: String::new(),
+            digest,
         });
     }
 
-    fn status(&self, transfer: u64) -> Transfer {
+    pub(crate) fn status(&self, transfer: u64) -> Transfer {
         let state = self.state.borrow();
         state
             .transfers
@@ -343,136 +354,11 @@ impl Files {
             .unwrap_or_else(|| unreachable!("a transfer is followed until it is forgotten"))
     }
 
-    fn forget(&self, transfer: u64) {
+    pub(crate) fn forget(&self, transfer: u64) {
         self.state
             .borrow_mut()
             .transfers
             .retain(|known| known.transfer != transfer);
-    }
-
-    /// Waits until the board says something new about `transfer`, for the session's timeout.
-    fn heard(&self, seq: u16, transfer: u64, before: &Transfer) -> Result<Transfer, ClientError> {
-        self.client
-            .answered(seq, || self.status(transfer) != *before)?;
-        Ok(self.status(transfer))
-    }
-
-    /// Pushes everything `source` holds to `destination`, and returns how it ended:
-    /// committed, or rejected with why. `progress` is told how many bytes the board has, of
-    /// how many, as it goes.
-    ///
-    /// The transfer's number comes from the file's digest and its destination. If the same
-    /// file was part way there, from this program or another, this carries on from where it
-    /// stopped: call it again after reconnecting and nothing already sent is sent again.
-    ///
-    /// # Errors
-    ///
-    /// If the source can't be read, the board refuses the transfer, or the connection broke.
-    /// After a broken connection, reconnect and push again.
-    pub fn push(
-        &self,
-        destination: &str,
-        source: &mut (impl Read + Seek),
-        mut progress: impl FnMut(u64, u64),
-    ) -> Result<Transfer, ClientError> {
-        // The session is looked after while the file is hashed: its pings are answered and
-        // sent, so the board does not give it up for silent.
-        let (digest, size) = digest_while(source, || self.client.drain())?;
-        let name = destination
-            .parse()
-            .map_err(|_| ClientError::Protocol("a destination that is not a name"))?;
-        // The same bytes to the same place are the same transfer, whoever sends them.
-        let mut hasher = Sha256::new();
-        hasher.update(digest);
-        hasher.update(destination.as_bytes());
-        let number: [u8; 32] = hasher.finalize().into();
-        let transfer = u64::from_le_bytes([
-            number[0], number[1], number[2], number[3], number[4], number[5], number[6], number[7],
-        ]);
-
-        self.follow(transfer);
-        let result = self.push_followed(transfer, name, size, digest, source, &mut progress);
-        self.forget(transfer);
-        result
-    }
-
-    fn push_followed(
-        &self,
-        transfer: u64,
-        destination: orion_types::FileName,
-        size: u64,
-        digest: [u8; 32],
-        source: &mut (impl Read + Seek),
-        progress: &mut impl FnMut(u64, u64),
-    ) -> Result<Transfer, ClientError> {
-        let nothing = self.status(transfer);
-        let seq = self.client.send(&FileBegin {
-            transfer,
-            destination,
-            size,
-            digest,
-        })?;
-        let mut status = self.heard(seq, transfer, &nothing)?;
-        // Where the board says to go on from: zero for a new transfer.
-        let mut sent = status.received.min(size);
-        source.seek(SeekFrom::Start(sent))?;
-        let limit = self
-            .client
-            .session(|session| session.welcomed().max_frame as usize);
-        let chunk = CHUNK.min(limit.saturating_sub(CHUNK_OVERHEAD)).max(1);
-        let mut buffer = vec![0_u8; chunk];
-        let timeout = self.client.session(|session| session.timeout());
-        let mut last_heard = Instant::now();
-        progress(status.received, size);
-
-        while status.state == FileState::Receiving && status.received < size {
-            // A few chunks on their way, and no more: the board's answers pace the sender.
-            while sent < size && sent - status.received < WINDOW * chunk as u64 {
-                let want = ((size - sent) as usize).min(chunk);
-                source.read_exact(&mut buffer[..want])?;
-                self.client.send(&FileChunk {
-                    transfer,
-                    offset: sent,
-                    data: Bytes(&buffer[..want]),
-                })?;
-                sent += want as u64;
-            }
-            self.client.pump(Duration::from_millis(200))?;
-            let now = self.status(transfer);
-            if now != status {
-                if now.received < status.received || now.received > sent {
-                    return Err(ClientError::Protocol("a transfer that went backwards"));
-                }
-                if now.received != status.received {
-                    progress(now.received, size);
-                }
-                status = now;
-                last_heard = Instant::now();
-            } else if last_heard.elapsed() > timeout {
-                return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
-            }
-        }
-        if status.state != FileState::Receiving {
-            // Rejected part way, or already complete from an earlier try.
-            return Ok(status);
-        }
-        let seq = self.client.send(&FileCommit { transfer })?;
-        // Checking the digest of a large file takes the board a while.
-        let deadline = Instant::now() + timeout * 12;
-        loop {
-            let before = self.status(transfer);
-            if matches!(before.state, FileState::Committed | FileState::Rejected) {
-                return Ok(before);
-            }
-            if let Some(error) = self.client.refusal(seq) {
-                return Err(ClientError::Refused(error));
-            }
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
-            }
-            self.client.pump(left.min(Duration::from_millis(200)))?;
-        }
     }
 
     /// Asks the board to fetch a file itself and put it where it belongs, and waits up to
@@ -499,7 +385,7 @@ impl Files {
         let destination = destination
             .parse()
             .map_err(|_| ClientError::Protocol("a destination that is not a name"))?;
-        self.follow(transfer);
+        self.follow(transfer, digest);
         let seq = self.client.send(&FilePull {
             transfer,
             url,

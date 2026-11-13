@@ -229,6 +229,20 @@ way at once, so a push neither fills the connection nor waits for an answer to e
 file is hashed before anything is sent; the session is looked after meanwhile, however long
 that takes.
 
+How it ended carries the file's SHA-256 (`transfer.digest`). A program that keeps it, with the
+size, pushes the same file later with `files.push_with(destination, source, Known { digest,
+size }, progress)`, and the file is not read through to hash it again. A wrong `Known` is found
+by the board's check, and the push ends rejected. `files.push_file(destination, path, known,
+progress)` pushes a file by its path. It looks at the file's size and change time when it begins
+and again before it commits: a file that changed meanwhile is not committed, and the push fails
+saying so.
+
+A push can be stepped. `files.start_push(destination, source, known)` begins it, and
+`pushing.step(wait)` moves it on, sending what the window has room for and taking what the board
+said. It returns `Waiting` (the board has not said how much it has), `Progress { received, size
+}`, or `Done(transfer)`. Between steps the program makes its other calls on the same session,
+including other pushes. `push` is `start_push` stepped to the end.
+
 `files.pull(..)` asks the board to fetch the file itself from a URL, check it and put it in
 place. Only the request and the board's reports cross the connection.
 
