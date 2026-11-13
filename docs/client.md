@@ -80,6 +80,7 @@ session in each; sessions are cheap.
 | `publisher.publish(field, time, payload)` | One sample of a field, belonging to a time |
 | `publisher.subscribers()` | How many are listening. With none, a publisher may as well not sample |
 | `publisher.with_request(..)` | What the newest subscriber asked for |
+| `publisher.withdraw()`, `topics.withdraw(name)` | Ends the topic while the session goes on: subscribers hear the publisher is gone, and it is not declared again after a reconnect. Another program may then declare it |
 | `subscriber.next()` | The next sample in the order published, or how many were lost |
 | `subscriber.latest(field)` | The newest sample of a field |
 | `subscriber.at_or_before(field, time)` | The sample that belongs to a time: hit, lagged or missing |
@@ -122,6 +123,9 @@ handed the same ring and pool, and the program keeps writing with its own writer
 marks in the program's table, in the reader slots it lets Orion use (`reader_slots`, a bit
 each); its own readers keep the rest. A ring of another shape than the declaration is refused.
 A comm core that restarts is handed the same ring and pool again.
+
+`withdraw` on a buffer publisher, adopted or not, ends a buffer topic the same way. A provider's
+`resource.withdraw()` withdraws the resource's topics with it.
 
 Buffer topics are between programs on one board: there is no memory to share across a network,
 and the calls say so there. The comm core sets the two sides up and then sees no frame.

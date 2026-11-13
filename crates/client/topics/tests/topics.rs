@@ -429,3 +429,79 @@ fn what_the_comm_core_refuses_is_an_error_where_it_was_asked() {
     subscriber.with_declaration(|declaration| assert!(declaration.is_some()));
     assert!(matches!(subscriber.next(), Next::Empty));
 }
+
+/// Waits, reading what arrives, until `subscriber` is `status`.
+fn until_status(subscriber: &mut orion_topics::Subscriber, status: Status) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while subscriber.status() != status {
+        assert!(Instant::now() < deadline, "never {status:?}");
+        subscriber.wait(Duration::from_millis(20)).expect("wait");
+    }
+}
+
+#[test]
+fn a_publisher_withdraws_one_topic_and_keeps_its_session() {
+    let board = Board::start("withdraw");
+    let client =
+        Client::new(Session::connect(&board.local(), "arm", Options::default()).expect("connect"));
+    let arm = Topics::new(&client);
+    let mut published = arm.declare(&decl("arm.angle")).expect("declare");
+    let mut state = arm.declare(&decl("arm.state")).expect("declare");
+    published
+        .publish(ANGLE, SampleTime::from_nanos(5), &1.5_f64.to_le_bytes())
+        .expect("publish");
+    let near = topics(&board.local(), "near");
+    let far = topics(&board.network(), "far");
+    let mut on_board = near.subscribe("arm.angle", &[]).expect("subscribe");
+    let mut across = far.subscribe("arm.angle", &[]).expect("subscribe");
+    assert_eq!(on_board.status(), Status::Live);
+    assert_eq!(across.status(), Status::Live);
+
+    // Its subscribers, here and across the network, hear the publisher is gone, and keep
+    // what it published.
+    published.withdraw().expect("withdraw");
+    until_status(&mut on_board, Status::PublisherGone);
+    until_status(&mut across, Status::PublisherGone);
+    let last = on_board.latest(ANGLE).map(angle).expect("the last value");
+    assert_eq!(last, (1.5, 5));
+
+    // By name, as a resource does. A withdrawn publisher cannot publish, and a name withdrawn
+    // is not one this session publishes any more.
+    assert!(arm.withdraw("arm.state").expect("withdraw"));
+    assert!(state.withdrawn());
+    assert!(matches!(
+        state.publish(STATE, SampleTime::from_nanos(6), &[1]),
+        Err(TopicError::Withdrawn)
+    ));
+    assert!(!arm.withdraw("arm.state").expect("withdraw"));
+
+    // The session goes on: it subscribes to what it withdrew. A reconnect does not declare
+    // the withdrawn topics again, so another program may: one declared again would be refused
+    // to it, or to `restore`.
+    let mut own = arm.subscribe("arm.angle", &[]).expect("subscribe");
+    until_status(&mut own, Status::PublisherGone);
+    client
+        .session(|session| session.reconnect(|_| true))
+        .expect("reconnect");
+    arm.restore().expect("restore");
+    let other = topics(&board.local(), "other");
+    let _angle = other.declare(&decl("arm.angle")).expect("free again");
+    let _state = other.declare(&decl("arm.state")).expect("free again");
+    until_status(&mut on_board, Status::Live);
+    until_status(&mut own, Status::Live);
+
+    // Only a topic's publisher withdraws it.
+    let handle = _angle.handle();
+    let stranger = Client::new(
+        Session::connect(&board.local(), "stranger", Options::default()).expect("connect"),
+    );
+    let seq = stranger
+        .send(&orion_msg_topics::TopicWithdraw { handle })
+        .expect("send");
+    let refused = stranger.answered(seq, || false).expect_err("not its topic");
+    assert!(
+        matches!(refused, ClientError::Refused(Error::NotFound)),
+        "{refused}"
+    );
+    assert_eq!(on_board.status(), Status::Live);
+}

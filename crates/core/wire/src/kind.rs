@@ -105,6 +105,7 @@ kinds! {
         TOPIC_BELL = 0x49,
         TOPIC_STATE = 0x4A,
         TOPIC_HOLDS = 0x4B,
+        TOPIC_WITHDRAW = 0x4C,
     }
     Workloads {
         WORKLOAD_PUT = 0x50,

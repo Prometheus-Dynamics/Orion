@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{Client, ClientError};
 use orion_msg_topics::{
-    Declare, Field, Sample as SampleMessage, SampleFlags, Subscribe, TopicStatus,
+    Declare, Field, Sample as SampleMessage, SampleFlags, Subscribe, TopicStatus, TopicWithdraw,
 };
 use orion_types::TopicRef;
 use orion_wire::body::encode_fields;
@@ -52,6 +52,8 @@ pub enum TopicError {
     Ring(RingError),
     /// The name or the declaration is not one.
     Invalid(String),
+    /// The publisher withdrew the topic.
+    Withdrawn,
 }
 
 impl fmt::Display for TopicError {
@@ -61,6 +63,7 @@ impl fmt::Display for TopicError {
             Self::Publish(error) => write!(f, "the sample does not fit the topic: {error:?}"),
             Self::Ring(error) => write!(f, "ring: {error:?}"),
             Self::Invalid(what) => f.write_str(what),
+            Self::Withdrawn => f.write_str("the topic was withdrawn"),
         }
     }
 }
@@ -173,6 +176,22 @@ impl Topics {
         self.declare_in(topic, Some(fd.as_fd()))
     }
 
+    /// Withdraws this session's topic `name`: its subscribers are told the publisher is gone,
+    /// and it is not declared again after a reconnect. Its [`Publisher`], if still held, can
+    /// no longer publish. `false` if this session publishes no topic of that name.
+    ///
+    /// # Errors
+    ///
+    /// If the comm core refuses, or the connection broke. Either way the topic is not
+    /// declared again after a reconnect.
+    pub fn withdraw(&self, name: &str) -> Result<bool, ClientError> {
+        let Some(index) = self.state.borrow().publisher_named(name) else {
+            return Ok(false);
+        };
+        withdraw(&self.client, &self.state, index)?;
+        Ok(true)
+    }
+
     /// Declares `topic`, in `ring` if the program brings its own.
     fn declare_in(
         &self,
@@ -196,7 +215,10 @@ impl Topics {
         let seq = self
             .client
             .send_frame(kind::TOPIC_DECLARE, &raw, ring.as_slice())?;
-        let index = self.state.borrow_mut().add_publisher(seq, raw);
+        let index = self
+            .state
+            .borrow_mut()
+            .add_publisher(seq, topic.name.to_owned(), raw);
         // The program writes its ring itself: the answer's descriptor is kept to hand back to
         // a comm core that restarts, and no second writer is made on it.
         self.state.borrow_mut().publisher_mut(index).taken = ring.is_some();
@@ -366,6 +388,33 @@ impl Topics {
     }
 }
 
+/// Withdraws the publisher at `index`.
+fn withdraw(client: &Client, state: &Rc<RefCell<State>>, index: usize) -> Result<(), ClientError> {
+    let (handle, open) = {
+        let mut state = state.borrow_mut();
+        let publisher = state.publisher_mut(index);
+        if publisher.withdrawn {
+            return Ok(());
+        }
+        publisher.withdrawn = true;
+        publisher.writer = None;
+        publisher.bells.clear();
+        publisher.subscribers = 0;
+        (publisher.handle, std::mem::take(&mut publisher.open))
+    };
+    // Not declared on this connection yet, after a reconnect: not declaring it is enough.
+    if !open {
+        return Ok(());
+    }
+    let seq = client.send(&TopicWithdraw { handle })?;
+    state.borrow_mut().publisher_mut(index).withdrawing = Some(seq);
+    let answered = client.answered(seq, || {
+        state.borrow().publisher(index).withdrawing.is_none()
+    });
+    state.borrow_mut().publisher_mut(index).withdrawing = None;
+    answered
+}
+
 /// The publisher of one topic.
 pub struct Publisher {
     client: Client,
@@ -412,6 +461,9 @@ impl Publisher {
         let handle = {
             let mut state = self.state.borrow_mut();
             let publisher = state.publisher_mut(self.index);
+            if publisher.withdrawn {
+                return Err(TopicError::Withdrawn);
+            }
             if let Some(writer) = &mut publisher.writer {
                 writer
                     .publish(field, time, flags, payload)
@@ -433,6 +485,23 @@ impl Publisher {
         };
         self.client.send(&sample)?;
         Ok(())
+    }
+
+    /// Withdraws the topic: its subscribers are told the publisher is gone, and it is not
+    /// declared again after a reconnect. Another program may then declare it.
+    ///
+    /// # Errors
+    ///
+    /// If the comm core refuses, or the connection broke. Either way the topic is not
+    /// declared again after a reconnect.
+    pub fn withdraw(self) -> Result<(), ClientError> {
+        withdraw(&self.client, &self.state, self.index)
+    }
+
+    /// Whether the topic was withdrawn, by [`Publisher::withdraw`] or [`Topics::withdraw`].
+    #[must_use]
+    pub fn withdrawn(&self) -> bool {
+        self.state.borrow().publisher(self.index).withdrawn
     }
 
     /// The topic's number on this session.

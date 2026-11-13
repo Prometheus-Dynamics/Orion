@@ -22,7 +22,7 @@ use orion_msg_session::{
 use orion_msg_topics::{
     BatchSample, Bell, BufferInfo, BufferOffer, Declare, Demand, Field, FieldType, Holds, Open,
     Opened, Sample as TopicSample, SampleBatch, SampleFlags, Subscribe, TopicState, TopicStatus,
-    Unsubscribe,
+    TopicWithdraw, Unsubscribe,
 };
 use orion_msg_workloads::{
     ExecutorAsk, ExecutorInventory, ExecutorKill, ExecutorOffer, ExecutorReport, ExecutorStart,
@@ -523,6 +523,7 @@ fn topics(out: &mut Vec<Sample>) {
             present: true
         }
     );
+    sample!(out, TopicWithdraw { handle: 2 });
 }
 
 fn workloads(out: &mut Vec<Sample>) {

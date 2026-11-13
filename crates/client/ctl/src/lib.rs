@@ -343,6 +343,9 @@ fn topic_read(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
             None => writeln!(out, "{name} has no value yet")?,
         }
     }
+    // A topic with no publisher is answered with its ring and then a word that the publisher
+    // is gone: take in what has already come before saying which it is.
+    subscriber.wait(Duration::ZERO)?;
     if subscriber.status() == Status::PublisherGone {
         writeln!(out, "(its publisher is gone; these are the last values)")?;
     }

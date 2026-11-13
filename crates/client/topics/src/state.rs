@@ -14,7 +14,7 @@ pub(crate) struct PublisherState {
     /// The `seq` of the declaration, which its answer names.
     seq: u16,
     pub(crate) handle: u32,
-    open: bool,
+    pub(crate) open: bool,
     /// The declaration as it was sent, to say it again after a reconnect.
     pub(crate) declaration: Vec<u8>,
     /// The ring's write end, kept so a comm core that restarts can be handed the ring back.
@@ -29,6 +29,12 @@ pub(crate) struct PublisherState {
     pub(crate) subscribers: u32,
     /// What the newest subscriber asked for.
     pub(crate) request: Vec<u8>,
+    /// The topic's name, from the declaration.
+    pub(crate) name: String,
+    /// Withdrawn: not published to, and not declared again after a reconnect.
+    pub(crate) withdrawn: bool,
+    /// The `seq` of the withdrawal, until the comm core answers it.
+    pub(crate) withdrawing: Option<u16>,
 }
 
 /// What a subscription was made with, to make it again after a reconnect.
@@ -77,8 +83,11 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub(crate) fn add_publisher(&mut self, seq: u16, declaration: Vec<u8>) -> usize {
+    pub(crate) fn add_publisher(&mut self, seq: u16, name: String, declaration: Vec<u8>) -> usize {
         self.publishers.push(Some(PublisherState {
+            name,
+            withdrawn: false,
+            withdrawing: None,
             seq,
             handle: 0,
             open: false,
@@ -129,13 +138,25 @@ impl State {
         self.subscribers.len() - 1
     }
 
-    /// Every publisher there is: its index, its declaration and its ring's write end.
+    /// The publisher of `name` that has not been withdrawn, by index.
+    pub(crate) fn publisher_named(&self, name: &str) -> Option<usize> {
+        self.publishers.iter().position(|publisher| {
+            publisher
+                .as_ref()
+                .is_some_and(|publisher| !publisher.withdrawn && publisher.name == name)
+        })
+    }
+
+    /// Every publisher there is, but those withdrawn: its index, its declaration and its
+    /// ring's write end.
     pub(crate) fn publishers_to_restore(&self) -> Vec<(usize, Vec<u8>, Option<OwnedFd>)> {
         self.publishers
             .iter()
             .enumerate()
             .filter_map(|(index, publisher)| {
-                let publisher = publisher.as_ref()?;
+                let publisher = publisher
+                    .as_ref()
+                    .filter(|publisher| !publisher.withdrawn)?;
                 let ring = publisher
                     .ring
                     .as_ref()
@@ -201,20 +222,14 @@ impl State {
             .find(|publisher| publisher.open && publisher.handle == handle)
     }
 
-    fn subscriber_of(&mut self, handle: u32) -> Option<&mut SubscriberState> {
-        self.subscribers
-            .iter_mut()
-            .flatten()
-            .find(|subscriber| subscriber.handle == Some(handle))
-    }
-
     fn opened(&mut self, opened: &Opened, cx: &mut Cx<'_>) -> Result<(), ClientError> {
         let ring = |_| ClientError::Protocol("a ring that cannot be mapped");
         if let Some(publisher) = self
             .publishers
             .iter_mut()
             .flatten()
-            .find(|publisher| publisher.seq == opened.request_seq)
+            // A withdrawn publisher's `seq` may be a new request's after a reconnect.
+            .find(|publisher| !publisher.withdrawn && publisher.seq == opened.request_seq)
         {
             publisher.handle = opened.handle;
             publisher.open = true;
@@ -284,11 +299,13 @@ impl State {
         flags: u8,
         payload: &[u8],
     ) {
-        if let Some(subscriber) = self.subscriber_of(handle)
-            && let Some((_, writer)) = &mut subscriber.mirror
-        {
-            // One that does not fit the declaration is dropped: the comm core checked it.
-            let _ = writer.publish(FieldId(field), time, Flags(flags), payload);
+        for subscriber in self.subscribers.iter_mut().flatten() {
+            if subscriber.handle == Some(handle)
+                && let Some((_, writer)) = &mut subscriber.mirror
+            {
+                // One that does not fit the declaration is dropped: the comm core checked it.
+                let _ = writer.publish(FieldId(field), time, Flags(flags), payload);
+            }
         }
     }
 }
@@ -315,17 +332,29 @@ impl Handler for State {
             kind::TOPIC_OPENED => self.opened(&frame.body()?, cx)?,
             kind::TOPIC_STATE => {
                 let state: TopicState = frame.body()?;
-                let subscriber = if state.request_seq == 0 {
-                    self.subscriber_of(state.handle)
-                } else {
-                    self.subscribers
+                // The answer to a withdrawal.
+                if state.request_seq != 0
+                    && let Some(publisher) = self
+                        .publishers
                         .iter_mut()
                         .flatten()
-                        .find(|subscriber| subscriber.seq == state.request_seq)
-                };
-                if let Some(subscriber) = subscriber {
-                    subscriber.handle = Some(state.handle);
-                    subscriber.status = state.status;
+                        .find(|publisher| publisher.withdrawing == Some(state.request_seq))
+                {
+                    publisher.withdrawing = None;
+                    return Ok(());
+                }
+                // News of the topic is for every subscriber of it this session has: the comm
+                // core keeps one subscription a session, however often it subscribed.
+                for subscriber in self.subscribers.iter_mut().flatten() {
+                    let this = if state.request_seq == 0 {
+                        subscriber.handle == Some(state.handle)
+                    } else {
+                        subscriber.seq == state.request_seq
+                    };
+                    if this {
+                        subscriber.handle = Some(state.handle);
+                        subscriber.status = state.status;
+                    }
                 }
             }
             kind::TOPIC_BELL => {

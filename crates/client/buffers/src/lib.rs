@@ -455,6 +455,22 @@ impl BufferPublisher {
         self.offer()
     }
 
+    /// Withdraws the topic: its subscribers are told the publisher is gone, and it is not
+    /// declared or offered again after a reconnect. Subscribers keep what they hold until they
+    /// let it go.
+    ///
+    /// # Errors
+    ///
+    /// As [`Publisher::withdraw`].
+    pub fn withdraw(self) -> Result<(), ClientError> {
+        let handle = self.handle;
+        self.state
+            .borrow_mut()
+            .publishers
+            .retain(|side| side.handle != handle);
+        self.publisher.withdraw()
+    }
+
     /// How many subscribers the topic has. With none, a publisher may as well not capture.
     #[must_use]
     pub fn subscribers(&self) -> u32 {

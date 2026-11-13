@@ -156,6 +156,16 @@ body! {
 }
 
 body! {
+    /// Ends a publisher's topic, while its session goes on. Its subscribers are told the
+    /// publisher is gone, as when its session ends; the publisher is answered with the same
+    /// [`TopicState`].
+    pub struct TopicWithdraw = kind::TOPIC_WITHDRAW {
+        /// The handle from [`Opened`].
+        pub handle: u32,
+    }
+}
+
+body! {
     /// One sample, for a publisher or subscriber without shared memory.
     pub struct Sample<'a> = kind::TOPIC_SAMPLE {
         /// The handle from [`Opened`].

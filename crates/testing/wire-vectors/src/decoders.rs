@@ -80,6 +80,7 @@ decoders! {
     TOPIC_BELL => topics::Bell,
     TOPIC_STATE => topics::TopicState,
     TOPIC_HOLDS => topics::Holds,
+    TOPIC_WITHDRAW => topics::TopicWithdraw,
     WORKLOAD_PUT => workloads::WorkloadPut,
     WORKLOAD_REMOVE => workloads::WorkloadRemove,
     WORKLOAD_STATUS => workloads::WorkloadStatus,

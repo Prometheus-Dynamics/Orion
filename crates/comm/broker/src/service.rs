@@ -5,7 +5,8 @@ use std::os::fd::OwnedFd;
 use std::rc::Rc;
 
 use orion_msg_topics::{
-    Bell, Declare, Demand, Open, Opened, Subscribe, TopicState, TopicStatus, Unsubscribe,
+    Bell, Declare, Demand, Open, Opened, Subscribe, TopicState, TopicStatus, TopicWithdraw,
+    Unsubscribe,
 };
 use orion_server::{
     Checked, Cx, Delivery, Error, Incoming, Policy, Service, SessionId, Sessions, What,
@@ -59,6 +60,7 @@ impl Service for Broker {
             kind::TOPIC_OPEN,
             kind::TOPIC_SUBSCRIBE,
             kind::TOPIC_UNSUBSCRIBE,
+            kind::TOPIC_WITHDRAW,
         ]
     }
 
@@ -67,6 +69,9 @@ impl Service for Broker {
         let config = self.topics.borrow().config;
         Ok(match frame.kind() {
             kind::TOPIC_DECLARE => (What::Write(name), config.declare),
+            // Only the topic's publisher may, which the handler checks: it declared the topic
+            // under this same check.
+            kind::TOPIC_WITHDRAW => (What::Write(name), config.declare.without_grant()),
             _ => (What::Open(name), config.subscribe),
         })
     }
@@ -90,6 +95,10 @@ impl Service for Broker {
                 let marks = incoming.take_fd(2);
                 self::subscribe(topics, cx, &subscribe, bell, marks)
             }
+            kind::TOPIC_WITHDRAW => {
+                let withdraw: TopicWithdraw = incoming.body()?;
+                self::withdraw(topics, cx, TopicId(withdraw.handle))
+            }
             kind::TOPIC_UNSUBSCRIBE => {
                 let unsubscribe: Unsubscribe = incoming.body()?;
                 let id = TopicId(unsubscribe.handle);
@@ -111,16 +120,7 @@ impl Service for Broker {
                 continue;
             };
             if topic.publisher == Some(session) {
-                topic.publisher = None;
-                topic.epoch += 1;
-                for subscription in &topic.subscribers {
-                    let state = TopicState {
-                        request_seq: 0,
-                        handle: id.0,
-                        status: TopicStatus::PublisherGone,
-                    };
-                    let _ = sessions.send(subscription.session, &state, Delivery::Must);
-                }
+                publisher_gone(topic, sessions);
             }
             if leave(topics, sessions, id, session).is_err() {
                 topics.remove_if_unused(id);
@@ -214,6 +214,39 @@ pub(crate) fn mirror_declared(topic: &Topic, resumed: bool, sessions: &mut Sessi
             let _ = hand_ring(sessions, topic.id, &topic.declare, ring, subscription);
         }
     }
+}
+
+/// Takes a topic from its publisher and tells its subscribers. They keep the ring and what
+/// was published, and carry on if a publisher declares the topic again.
+fn publisher_gone(topic: &mut Topic, sessions: &mut Sessions) {
+    topic.publisher = None;
+    topic.epoch += 1;
+    for subscription in &topic.subscribers {
+        let state = TopicState {
+            request_seq: 0,
+            handle: topic.id.0,
+            status: TopicStatus::PublisherGone,
+        };
+        let _ = sessions.send(subscription.session, &state, Delivery::Must);
+    }
+}
+
+/// Ends the caller's topic `id` while its session goes on, as if the session had ended for
+/// that one topic.
+fn withdraw(topics: &mut Topics, cx: &mut Cx<'_>, id: TopicId) -> Result<(), Error> {
+    let from = cx.from();
+    let topic = topics.get_mut(id).ok_or(Error::NotFound)?;
+    if topic.publisher != Some(from) {
+        return Err(Error::NotFound);
+    }
+    publisher_gone(topic, cx.sessions());
+    cx.reply(&TopicState {
+        request_seq: cx.request_seq(),
+        handle: id.0,
+        status: TopicStatus::PublisherGone,
+    })?;
+    topics.remove_if_unused(id);
+    Ok(())
 }
 
 /// Tells everyone who subscribes to another node's topic that its publisher is gone.

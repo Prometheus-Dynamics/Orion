@@ -77,6 +77,7 @@ programs, and the broker handles no request until someone connects, subscribes o
 | `Subscribe` before the topic exists | Answers `TopicState: Waiting`. The declaration and `Opened` follow when someone declares it |
 | `Unsubscribe`, or the subscriber's connection closing | Tells the publisher to drop that doorbell, and the new count |
 | `Open` | A read end without subscribing, for a look. The write end again, for the publisher only |
+| `TopicWithdraw` | From the topic's publisher only (anyone else is `not found`): ends its topic while its session goes on. Subscribers are told `PublisherGone`, as when the session ends, and the publisher is answered with the same `TopicState` |
 
 - **Start order does not matter.** A subscriber that comes first waits and is given the ring when
   the topic is declared.

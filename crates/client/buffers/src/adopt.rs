@@ -22,7 +22,8 @@ use shm_ring_holds::{HoldTable, Limits};
 use crate::{Buffers, ENTRY_OVERHEAD, PublisherSide, offer, shared_only};
 
 /// A buffer topic whose ring, pool and hold table belong to the program. Dropping it leaves
-/// the topic until the session ends.
+/// the topic until the session ends; [`AdoptedBuffers::withdraw`] ends it now. The program's
+/// own readers go on reading either way.
 pub struct AdoptedBuffers {
     client: orion_connect::Client,
     state: std::rc::Rc<std::cell::RefCell<crate::State>>,
@@ -181,6 +182,22 @@ impl AdoptedBuffers {
     /// for one that is awake.
     pub fn wake(&mut self) {
         self.publisher.wake();
+    }
+
+    /// Withdraws the topic: its subscribers are told the publisher is gone, and it is not
+    /// declared or offered again after a reconnect. Subscribers keep what they hold until they
+    /// let it go.
+    ///
+    /// # Errors
+    ///
+    /// As [`Publisher::withdraw`].
+    pub fn withdraw(self) -> Result<(), orion_connect::ClientError> {
+        let handle = self.handle;
+        self.state
+            .borrow_mut()
+            .publishers
+            .retain(|side| side.handle != handle);
+        self.publisher.withdraw()
     }
 
     /// How many of Orion's subscribers the topic has.

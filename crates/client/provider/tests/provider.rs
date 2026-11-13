@@ -8,7 +8,7 @@ use orion_msg_topics::{Declare, Field, FieldType};
 use orion_provider::{Found, Provider, ResourceState, resources};
 use orion_records::Records;
 use orion_stubs::Board;
-use orion_topics::{Publisher, Topics};
+use orion_topics::{Publisher, Status, Topics};
 use orion_wire::Decode;
 use shm_ring::{FieldId, SampleTime};
 
@@ -253,8 +253,19 @@ fn a_providers_device_appears_with_no_device_code_on_the_reading_side() {
     assert_eq!(names(""), ["camera.front", "fan.left"]);
     assert_eq!(names("camera."), ["camera.front"]);
 
-    // Gone is gone.
+    // Gone is gone, and so are its topics: their readers hear the publisher is gone, and the
+    // provider's publisher of them can publish no more.
+    let mut speed = reader
+        .topics
+        .subscribe("fan.left.speed", &[])
+        .expect("subscribe");
     resource.withdraw().expect("withdraw");
     assert_eq!(names(""), ["camera.front"]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while speed.status() != Status::PublisherGone {
+        assert!(Instant::now() < deadline, "the reader never heard");
+        speed.wait(Duration::from_millis(20)).expect("wait");
+    }
+    assert!(fan.speed.withdrawn());
     assert!(provider.resource("not a name", "fan").is_err());
 }

@@ -244,12 +244,17 @@ impl Resource {
         self.requests.as_mut()
     }
 
-    /// Says the resource is gone.
+    /// Says the resource is gone, and withdraws its topics: their subscribers are told the
+    /// publisher is gone, and they are not declared again after a reconnect. Its actions stay
+    /// registered until their registration is dropped.
     ///
     /// # Errors
     ///
-    /// If the store refuses, or the connection broke.
+    /// If the comm core or the store refuses, or the connection broke.
     pub fn withdraw(mut self) -> Result<(), ClientError> {
+        for topic in &self.topics {
+            self.provider.topics.withdraw(topic)?;
+        }
         self.write(ResourceState::Lost, true)
     }
 }
