@@ -13,6 +13,9 @@ pub struct CommSettings {
     /// What every build needs: the node's name, the security switch, the socket, the state
     /// directory and where other nodes connect.
     pub config: Config,
+    /// `state.require_mount`: refuse to start when `state.dir` or `keys.dir` would be on the
+    /// root file system, as on a board updated by slot whose state partition is not mounted.
+    pub state_require_mount: bool,
     /// `comm.*`: the server's limits.
     pub limits: Limits,
     /// `topics.*`: the broker's limits.
@@ -169,6 +172,7 @@ impl CommSettings {
             ));
         }
         Ok(Self {
+            state_require_mount: source.get("state.require_mount", false)?,
             limits: Limits::from_source(source)?,
             broker: BrokerConfig::from_source(source)?,
             #[cfg(feature = "outbound")]

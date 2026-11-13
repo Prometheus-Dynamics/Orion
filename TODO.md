@@ -65,6 +65,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C21](docs/prs/C21.md) Orion's reader slots in an adopted table (wave 18; needs C16)
 - [x] [C22](docs/prs/C22.md) How long a session may go quiet, settable (wave 18)
 - [x] [C24](docs/prs/C24.md) SSH on one interface (wave 18)
+- [x] [C25](docs/prs/C25.md) State directories made and tried before the start (wave 18)
 
 ## D. Client
 

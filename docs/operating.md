@@ -76,6 +76,19 @@ away. `orion node sync` on either says so. Once whoever runs the cluster accepts
 Replace `/usr/bin/orion` and restart both services: workloads keep running through it and are
 taken back, and programs on the board connect again by themselves.
 
+## Boards updated by slot
+
+A board whose system is replaced whole (an A/B image, a read-only root) keeps its state on a
+partition of its own, mounted at, say, `/data`. If that partition is not mounted, a state
+directory under `/data` would be made on the root file system, and the board would come up as
+a new node with no records, then lose all of it at the next update. Set
+`state.dir = /data/orion` (and node logic's under it) with `state.require_mount = true`: the
+comm core then refuses a `state.dir` or `keys.dir` that would be on the root file system and
+goes to recovery with `state.require_mount` in the reason, having made and written nothing
+there. Recovery's own SSH host key is kept in `/run` for that boot. With systemd,
+`RequiresMountsFor=/data` in a drop-in for both services also keeps them from starting before
+the mount; `state.require_mount` is what catches a mount that failed.
+
 ## What is kept
 
 - `/var/lib/orion`: the comm core's identity, trust store and SSH host key. Node logic reads

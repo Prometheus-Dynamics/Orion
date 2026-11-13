@@ -12,6 +12,7 @@
 
 #![cfg(target_os = "linux")]
 
+mod error;
 #[cfg(feature = "ssh")]
 mod helper;
 #[cfg(feature = "nt4")]
@@ -19,6 +20,7 @@ mod nt4_ws;
 #[cfg(feature = "recovery")]
 mod recover;
 mod settings;
+mod state_dirs;
 #[cfg(feature = "systemd")]
 pub mod systemd;
 
@@ -46,21 +48,8 @@ pub use settings::CommSettings;
 #[cfg(feature = "link-sealed")]
 pub use settings::SealedLink;
 
-/// Why the comm core could not start.
-#[derive(Debug)]
-pub struct StartError(String);
-
-impl fmt::Display for StartError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for StartError {}
-
-fn failed(what: impl fmt::Display, why: impl fmt::Display) -> StartError {
-    StartError(format!("{what}: {why}"))
-}
+pub use error::StartError;
+use error::failed;
 
 /// A running comm core. Dropping it stops it.
 pub struct CommCore {
@@ -121,6 +110,13 @@ impl CommCore {
     /// The first part that could not start, and why. Nothing is left running.
     #[allow(clippy::too_many_lines)]
     pub async fn start(settings: CommSettings) -> Result<Self, StartError> {
+        let config = &settings.config;
+        let dirs = [
+            ("state.dir", &*config.state_dir),
+            ("keys.dir", &*config.keys_dir),
+        ];
+        state_dirs::prepare(&dirs, settings.state_require_mount, Path::new("/"))
+            .map_err(StartError)?;
         let node = settings.config.node_name.clone();
         let security = settings.config.security;
         let keys = SharedKeys::new(

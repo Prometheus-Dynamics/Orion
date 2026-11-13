@@ -13,6 +13,9 @@ use tracing::info;
 
 use crate::{CommCore, CommSettings, StartError, systemd};
 
+/// Recovery's host key when the state directory must not be written: in /run, for one boot.
+const RUN_HOST_KEY: &str = "/run/orion-recovery/ssh_host_ed25519_key";
+
 /// What recovery falls back on when the settings say nothing it can use.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecoverWith {
@@ -112,15 +115,23 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         || PathBuf::from("/var/lib/orion"),
         |settings| settings.config.state_dir.clone(),
     );
+    let mut host_key = ssh.map_or_else(
+        || state_dir.join("ssh_host_ed25519_key"),
+        |ssh| ssh.host_key.clone(),
+    );
+    // A state partition that is not mounted is not written to, not even for the host key:
+    // recovery keeps one in /run, for this boot.
+    if settings.is_some_and(|settings| settings.state_require_mount)
+        && crate::state_dirs::on_root(&host_key, std::path::Path::new("/"))
+    {
+        host_key = PathBuf::from(RUN_HOST_KEY);
+    }
     Recovery::start(RecoveryConfig {
         listen,
         // Only from settings that were read: ones that could not be say nothing.
         interface: ssh.and_then(|ssh| ssh.interface.clone()),
         keys_file: settings.map_or(with.keys_file, |settings| settings.recovery_keys.clone()),
-        host_key: ssh.map_or_else(
-            || state_dir.join("ssh_host_ed25519_key"),
-            |ssh| ssh.host_key.clone(),
-        ),
+        host_key,
         helper,
         subsystems,
         etc: "/etc".into(),

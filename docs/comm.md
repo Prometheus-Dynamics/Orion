@@ -409,7 +409,8 @@ Recovery keeps to the same interface when the settings were read.
 `crates/comm/recovery` (`orion-recovery`). A board is repaired by logging in to it, so a comm
 core that cannot start as it was told to does not end: it opens the recovery way in and stays
 up (`run_or_recover`). That happens when the settings cannot be read, and when the comm core
-cannot start as they say: a state directory that is broken or cannot be written, a trust store
+cannot start as they say: a state directory that cannot be made or written to (tried before
+anything is kept in it), or one on the root file system with `state.require_mount` on, a trust store
 or identity that cannot be read, an address that cannot be listened on.
 
 - **Nothing from the state directory.** Who may log in is `recovery.keys`

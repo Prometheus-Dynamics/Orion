@@ -203,7 +203,10 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
         std::fs::write(dir.join("not-a-directory"), "x").expect("write");
         let started = start_or_recover(settings(&good(&dir.join("not-a-directory"))), with()).await;
         let (addr, why) = in_recovery(&started).await;
-        assert!(why.contains("keys"), "{why}");
+        assert!(
+            why.starts_with("state.dir ") && why.contains("cannot be made"),
+            "{why}"
+        );
         assert_eq!(
             said(&ssh(&dir, addr, Some(&repairer), "echo in").await),
             "in\n"
@@ -228,7 +231,8 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
             std::fs::set_permissions(dir.join("full"), std::fs::Permissions::from_mode(0o555))
                 .expect("mode");
             let started = start_or_recover(settings(&good(&dir.join("full"))), with()).await;
-            let (addr, _) = in_recovery(&started).await;
+            let (addr, why) = in_recovery(&started).await;
+            assert!(why.contains("cannot be written to"), "{why}");
             assert_eq!(
                 said(&ssh(&dir, addr, Some(&repairer), "echo in").await),
                 "in\n"
@@ -254,6 +258,30 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
             drop(started);
             std::fs::set_permissions(dir.join("full"), std::fs::Permissions::from_mode(0o755))
                 .expect("mode");
+        }
+
+        // A state partition that is not mounted: the directory would be on the root file
+        // system. Only where the test's directory is on it (not where /tmp is its own).
+        let device = |path: &Path| {
+            std::os::unix::fs::MetadataExt::dev(&std::fs::metadata(path).expect("stat"))
+        };
+        if device(&dir) == device(Path::new("/")) {
+            let text = format!(
+                "{}state.require_mount = true\n",
+                good(&dir.join("data/orion"))
+            );
+            let started = start_or_recover(settings(&text), with()).await;
+            let (addr, why) = in_recovery(&started).await;
+            assert!(why.contains("state.require_mount"), "{why}");
+            assert!(
+                !dir.join("data").exists(),
+                "nothing made on the root file system"
+            );
+            assert_eq!(
+                said(&ssh(&dir, addr, Some(&repairer), "echo in").await),
+                "in\n"
+            );
+            drop(started);
         }
         let _ = std::fs::remove_dir_all(dir);
     });
