@@ -61,6 +61,27 @@ pub enum ClientError {
         /// The node's level.
         node: u16,
     },
+    /// Shared memory from the comm core is of another layout than this client reads, so
+    /// neither can read the other's rings. Both layouts are here, so a tool can say which side
+    /// to update.
+    Layout {
+        /// What the memory was for: "a publisher's ring", "a buffer pool".
+        what: &'static str,
+        /// The layout the comm core's memory is in.
+        found: u64,
+        /// The layout this client reads.
+        reads: u64,
+        /// The node's additive level, from hello. A node at level 0 is from before levels,
+        /// and every ring it shares is layout 1.
+        level: u16,
+    },
+    /// Shared memory from the comm core, or a ring of this client's own, could not be used.
+    Memory {
+        /// What the memory was for.
+        what: &'static str,
+        /// Why, as the shared-memory crate said it.
+        why: String,
+    },
 }
 
 impl ClientError {
@@ -121,8 +142,44 @@ impl fmt::Display for ClientError {
                 f,
                 "{feature} needs a node at level {needs} or above, and this node is at level {node}"
             ),
+            Self::Layout {
+                what,
+                found,
+                reads,
+                level,
+            } => layout(f, what, *found, *reads, *level),
+            Self::Memory { what, why } => write!(f, "{what} cannot be used: {why}"),
         }
     }
+}
+
+/// The words for [`ClientError::Layout`]: which side is older, and what to update.
+fn layout(
+    f: &mut fmt::Formatter<'_>,
+    what: &str,
+    found: u64,
+    reads: u64,
+    level: u16,
+) -> fmt::Result {
+    write!(
+        f,
+        "{what} from the comm core is shared-memory layout {found}, and this client reads layout {reads}: "
+    )?;
+    if found > reads {
+        return f.write_str("this client is older; rebuild it against the comm core's version");
+    }
+    f.write_str("the comm core is older")?;
+    if found == 1 {
+        // Layout 2 came with the device library's ad5bf930.
+        f.write_str(", built against the device library from before ad5bf930")?;
+    }
+    f.write_str("; update it")?;
+    if level == 0 {
+        f.write_str(
+            " (it said level 0 at hello: it is from before levels, and every ring it shares is layout 1)",
+        )?;
+    }
+    Ok(())
 }
 
 fn hex(key: &[u8; 32]) -> String {
@@ -170,5 +227,50 @@ mod tests {
         assert_eq!(bare.to_string(), "refused: busy");
         assert_eq!(bare.refusal(), Some(Error::Busy));
         assert_eq!(ClientError::Lost.refusal(), None);
+    }
+
+    fn layout(found: u64, reads: u64, level: u16) -> String {
+        ClientError::Layout {
+            what: "a publisher's ring",
+            found,
+            reads,
+            level,
+        }
+        .to_string()
+    }
+
+    #[test]
+    fn a_layout_says_which_side_is_older_and_what_to_update() {
+        // The comm core of the last lock revision, at level 0.
+        assert_eq!(
+            layout(1, 2, 0),
+            "a publisher's ring from the comm core is shared-memory layout 1, and this client \
+             reads layout 2: the comm core is older, built against the device library from \
+             before ad5bf930; update it (it said level 0 at hello: it is from before levels, \
+             and every ring it shares is layout 1)"
+        );
+        // A comm core with levels that still shares layout 1: no word about level 0.
+        assert_eq!(
+            layout(1, 2, 2),
+            "a publisher's ring from the comm core is shared-memory layout 1, and this client \
+             reads layout 2: the comm core is older, built against the device library from \
+             before ad5bf930; update it"
+        );
+        // A later layout than this client's: the client is the one behind.
+        assert_eq!(
+            layout(3, 2, 2),
+            "a publisher's ring from the comm core is shared-memory layout 3, and this client \
+             reads layout 2: this client is older; rebuild it against the comm core's version"
+        );
+        // Another older layout: no commit is named that is not its own.
+        assert!(layout(2, 3, 3).ends_with("the comm core is older; update it"));
+        assert_eq!(
+            ClientError::Memory {
+                what: "a buffer pool",
+                why: "not a ring: no magic".into()
+            }
+            .to_string(),
+            "a buffer pool cannot be used: not a ring: no magic"
+        );
     }
 }

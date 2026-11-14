@@ -10,6 +10,7 @@ use shm_ring::{FieldId, Flags, Spec, Writer};
 use shm_ring_doorbell::{Bell, Doorbell};
 
 use crate::copy;
+use crate::shared::from_ring;
 
 use crate::mirror::{Mirror, RingReader};
 
@@ -239,7 +240,7 @@ impl State {
     }
 
     fn opened(&mut self, opened: &Opened, cx: &mut Cx<'_>) -> Result<(), ClientError> {
-        let ring = |_| ClientError::Protocol("a ring that cannot be mapped");
+        let level = cx.level();
         // A ring comes with the answer only on the board's own socket.
         let fd = cx.take_fd(0).filter(|_| opened.shared_memory);
         if let Some(publisher) = self
@@ -259,7 +260,10 @@ impl State {
                 // A publisher that writes the ring itself already has its writer, on this
                 // same memory if the comm core took the ring back.
                 if !publisher.taken {
-                    publisher.writer = Some(Writer::attach(fd).map_err(ring)?);
+                    publisher.writer = Some(
+                        Writer::attach(fd)
+                            .map_err(|error| from_ring("a publisher's ring", level, error))?,
+                    );
                 }
             }
             #[cfg(not(target_os = "linux"))]
@@ -287,7 +291,10 @@ impl State {
             let which = identity(&fd);
             if which.is_none() || which != subscriber.ring {
                 subscriber.ring = which;
-                subscriber.arrived = Some(shm_ring::Reader::attach(fd).map_err(ring)?);
+                subscriber.arrived = Some(
+                    shm_ring::Reader::attach(fd)
+                        .map_err(|error| from_ring("a subscriber's ring", level, error))?,
+                );
             }
             return Ok(());
         }
@@ -303,7 +310,7 @@ impl State {
             max_payload: declare.max_payload,
             expiry_ms: declare.expiry_ms,
         })
-        .map_err(ring)?;
+        .map_err(|error| from_ring("a subscriber's ring of its own", level, error))?;
         subscriber.arrived = Some(reader);
         subscriber.mirror = Some(mirror);
         Ok(())

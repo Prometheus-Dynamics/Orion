@@ -112,6 +112,7 @@ impl From<Error> for Failed {
                 | ClientError::Denied(_)
                 | ClientError::OtherKey { .. }
                 | ClientError::Revision { .. }
+                | ClientError::Layout { .. }
                 | ClientError::Level { .. },
             ) => ORION_E_REFUSED,
             Error::Topic(TopicError::Invalid(_) | TopicError::Publish(_)) => ORION_E_ARGUMENT,

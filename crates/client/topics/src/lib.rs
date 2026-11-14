@@ -23,6 +23,7 @@
 
 mod mirror;
 mod platform;
+mod shared;
 mod state;
 
 use std::cell::RefCell;
@@ -43,6 +44,7 @@ use shm_ring_time::Lookup;
 
 pub use mirror::RingReader;
 use platform::{copy, keep, lend};
+pub use shared::from_ring;
 use state::State;
 
 /// Why a call on a topic failed.

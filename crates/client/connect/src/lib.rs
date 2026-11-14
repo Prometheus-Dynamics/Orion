@@ -128,6 +128,7 @@ pub struct Cx<'a> {
     seq: &'a mut u16,
     fds: &'a mut FdSet,
     limit: usize,
+    level: u16,
 }
 
 impl std::fmt::Debug for Cx<'_> {
@@ -137,6 +138,12 @@ impl std::fmt::Debug for Cx<'_> {
 }
 
 impl Cx<'_> {
+    /// The node's additive level, as it said at hello.
+    #[must_use]
+    pub const fn level(&self) -> u16 {
+        self.level
+    }
+
     /// Sends `body`. As [`Session::send`].
     ///
     /// # Errors
@@ -518,6 +525,7 @@ impl Session {
                 seq,
                 fds,
                 limit: welcomed.max_frame as usize,
+                level: welcomed.level,
             },
         )))
     }

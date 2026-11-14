@@ -3,7 +3,9 @@
 
 #![cfg(target_os = "linux")]
 
+use std::cell::{Cell, RefCell};
 use std::os::unix::net::UnixStream;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use orion_connect::{Address, ClientError, Feature, Identity, Options, Session};
@@ -107,4 +109,48 @@ fn a_signed_link_to_a_board_from_before_them_says_so_with_both_levels() {
     // welcomed; nothing else was sent.
     assert_eq!(node.heard(), [kind::LINK_SIGN_HELLO]);
     assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+/// Records the level a handler is told, with the first frame of its kind.
+struct Told(Rc<Cell<Option<u16>>>);
+
+impl orion_connect::Handler for Told {
+    fn kinds(&self) -> &'static [u8] {
+        &[kind::IDENTITY]
+    }
+
+    fn handle(
+        &mut self,
+        _frame: &orion_connect::Incoming<'_>,
+        cx: &mut orion_connect::Cx<'_>,
+    ) -> Result<(), ClientError> {
+        self.0.set(Some(cx.level()));
+        Ok(())
+    }
+}
+
+#[test]
+fn a_handler_is_told_the_level_the_node_said_at_hello() {
+    let board = Board::start("told");
+    let session = Session::connect(
+        &Address::Local(board.socket().to_owned()),
+        "tool",
+        Options::default(),
+    )
+    .expect("board");
+    let client = orion_connect::Client::new(session);
+    let told = Rc::new(Cell::new(None));
+    client.add(Rc::new(RefCell::new(Told(Rc::clone(&told)))));
+    let nonce = [7u8; 16];
+    client
+        .send(&orion_msg_session::Identify {
+            nonce: orion_wire::Bytes(&nonce),
+        })
+        .expect("asked");
+    let until = Instant::now() + Duration::from_secs(5);
+    while told.get().is_none() && Instant::now() < until {
+        client.pump(Duration::from_millis(50)).expect("pump");
+    }
+    assert_eq!(told.get(), Some(INTERFACE_LEVEL));
+    assert_ne!(INTERFACE_LEVEL, 0, "a level 0 would not tell this apart");
 }

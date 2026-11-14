@@ -196,6 +196,7 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [J8b](docs/prs/J8b.md) The shm-* pins at the device library's bded77a0 (wave 18)
 - [x] [J9](docs/prs/J9.md) The lock revision's words: refusals, the node's key, layout, hello facts, leases (wave 18)
 - [x] [J10](docs/prs/J10.md) The lock revision declared (wave 18)
+- [x] [J11](docs/prs/J11.md) A layout that is not this client's keeps its words (wave 18)
 
 ## Open
 

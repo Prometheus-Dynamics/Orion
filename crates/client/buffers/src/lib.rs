@@ -27,7 +27,9 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_msg_topics::{BufferInfo, BufferOffer, Field, FieldType, Holds};
-use orion_topics::{Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics};
+use orion_topics::{
+    Holding, Publisher, Status, Subscriber, TopicDecl, TopicError, Topics, from_ring,
+};
 use orion_wire::{List, kind};
 use shm_ring::{FieldId, SampleTime};
 use shm_ring_buffers::{BufferReader, BufferWriter};
@@ -134,7 +136,7 @@ impl Handler for State {
             .collect();
         // Nothing in an offer is trusted: every buffer is checked against its descriptor.
         let view = PoolView::attach(page, fds, &buffers)
-            .map_err(|_| ClientError::Protocol("a pool that does not check"))?;
+            .map_err(|error| from_ring("a buffer pool", cx.level(), error))?;
         subscriber.pool = Some(view);
         Ok(())
     }
