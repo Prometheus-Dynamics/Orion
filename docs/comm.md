@@ -460,7 +460,9 @@ core that cannot start as it was told to does not end: it opens the recovery way
 up (`run_or_recover`). That happens when the settings cannot be read, and when the comm core
 cannot start as they say: a state directory that cannot be made or written to (tried before
 anything is kept in it), or one on the root file system with `state.require_mount` on, a trust store
-or identity that cannot be read, an address that cannot be listened on.
+or identity that cannot be read, an address for the WebSocket, SSH or NT4 way in that cannot be
+listened on. The network way in (`peer.listen`) is not among them: it tries again (see the
+network carrier).
 
 - **Nothing from the state directory.** Who may log in is `recovery.keys`
   (`/etc/orion/recovery_keys`): OpenSSH public keys, one a line, in the image. It is read
@@ -613,6 +615,15 @@ be forged.
   its peers.
 - Each handshake is its own task with its own deadline (`comm.hello_ms`). A connection that says
   nothing, or something else, holds up nobody.
+
+**Where it listens.** `peer.listen` is the address. `peer.interface` keeps it to one network
+interface (`SO_BINDTODEVICE`), as `ssh.interface` does for SSH: a connection that arrives on any
+other is not taken. A way in that cannot open (an interface not up yet, such as a USB gadget's
+network that comes up after the comm core, an address the board does not have yet, a port
+another program still holds) does not stop the comm core: everything else starts, the reason is
+logged once at warn with the address, and the listener is tried again every 5 seconds, then
+every 10, until it opens, which is logged too. Only the comm core itself failing to start means
+recovery. Discovery announces the address as it was given meanwhile.
 
 **With security off** a plain session is accepted: no keys, no MAC, and the other end is nobody in
 particular. A node with security on refuses a plain session and says so, so a tool can report "this
@@ -931,7 +942,8 @@ status line saying what it serves, `WATCHDOG=1` every half of the watchdog timeo
 one that no longer turns stops saying so, and is restarted.
 
 A part that cannot start stops the start, and the error names the part: the socket another
-comm core holds, an address that is taken, a bus whose identifiers cannot work. A link with
-nothing on it is not such a failure: it starts, keeps trying, and says so in
-`orion.state.link.<name>`.
+comm core holds, a WebSocket, SSH or NT4 address that is taken, a bus whose identifiers cannot
+work. A link with nothing on it is not such a failure: it starts, keeps trying, and says so in
+`orion.state.link.<name>`. Nor is a network way in that cannot open: it is tried again until it
+does.
 

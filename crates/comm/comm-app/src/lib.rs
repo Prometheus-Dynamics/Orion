@@ -315,18 +315,38 @@ impl CommCore {
             orion_topic_peers::TopicPeers::start(&comm, &topics, tcp_options.clone(), table)
         };
         #[cfg(feature = "tcp")]
-        if let Some(listen) = settings.config.peer_listen {
+        if let Some(addr) = settings.config.peer_listen {
             parts.push("network");
-            let carrier = orion_tcp::TcpCarrier::bind(listen, tcp_options.clone())
-                .await
-                .map_err(|error| failed(format!("peer.listen {listen}"), error))?;
-            peer_addr = carrier.local_addr().ok();
-            serve(&mut tasks, Carriers::Tcp(carrier));
+            let listen = orion_tcp::Listen {
+                addr,
+                interface: settings.peer_interface.clone(),
+            };
+            match orion_tcp::TcpCarrier::listen(&listen, tcp_options.clone()) {
+                Ok(carrier) => {
+                    peer_addr = carrier.local_addr().ok();
+                    serve(&mut tasks, Carriers::Tcp(carrier));
+                }
+                // A way in that cannot open is not a comm core that cannot start: it tries
+                // again, and the rest runs meanwhile. It is announced at the address it was
+                // given.
+                Err(_) => {
+                    peer_addr = Some(addr);
+                    let (comm, options, retry) =
+                        (comm.clone(), tcp_options.clone(), settings.peer_retry);
+                    tasks.push(tokio::task::spawn_local(async move {
+                        let carrier =
+                            orion_tcp::TcpCarrier::listen_retrying(&listen, options, retry).await;
+                        comm.serve(Carriers::Tcp(carrier)).await;
+                    }));
+                }
+            }
         }
         #[cfg(not(feature = "tcp"))]
         if settings.config.peer_listen.is_some() {
             return Err(failed("peer.listen", "this build has no network way in"));
         }
+        #[cfg(not(feature = "tcp"))]
+        let _ = &settings.peer_interface;
 
         #[cfg(all(feature = "ws", feature = "nt4"))]
         let mut nt4_on_ws: Option<nt4_ws::Nt4OnWs> = None;

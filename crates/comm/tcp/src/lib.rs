@@ -48,6 +48,10 @@ use orion_net_handshake::{
     hello, preamble,
 };
 
+mod listen;
+
+pub use listen::{Listen, Retry};
+
 /// The roles a connection over the network may ask for.
 const NETWORK_ROLES: Roles = Roles::CLIENT.and(Roles::PEER);
 /// Connections that have finished their handshake and wait to be accepted.
@@ -385,13 +389,17 @@ impl TcpCarrier {
     ///
     /// Anything `bind` fails with.
     pub async fn bind(addr: SocketAddr, options: TcpOptions) -> io::Result<Self> {
+        Ok(Self::on(TcpListener::bind(addr).await?, options))
+    }
+
+    fn on(listener: TcpListener, options: TcpOptions) -> Self {
         let (done, ready) = mpsc::channel(READY);
-        Ok(Self {
-            listener: TcpListener::bind(addr).await?,
+        Self {
+            listener,
             options,
             ready,
             done,
-        })
+        }
     }
 
     /// The address it listens at, with the port it was given if it asked for any.

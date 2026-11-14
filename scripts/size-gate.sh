@@ -26,10 +26,12 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # Bytes. Each is what was measured when it was last set, and a tenth more.
 #                         this machine (x86_64 gnu)
 #   orion-recovery        2,973,432
-#   orion                 5,936,216
+#   orion                 6,534,400   (C39; 5,936,216 at I6: the comm core and node logic
+#                                      grew by a tenth across waves 15-18, and C39's retrying
+#                                      listener took it 4 KB past the old limit)
 #   liborion_c.so           670,696
 RECOVERY_HOST=3270000
-ORION_HOST=6530000
+ORION_HOST=7190000
 CAPI_HOST=740000
 # A board's files, static musl, as measured (orion-recovery with the USB link, C13/J6):
 #                                   orion-recovery   orion

@@ -41,6 +41,7 @@ The name in brackets is the cargo feature that carries the part.
 | `socket.mode` | `0660` | its permission bits: who on the board can connect at all |
 | `socket.node_uids` | none | users whose programs may be the node logic, besides root |
 | `peer.listen` | off | where other nodes and people's tools connect (`tcp`) |
+| `peer.interface` | any | the one network interface `peer.listen` takes connections from (`eth0`, `usb0`); needs `peer.listen` |
 | `comm.*`, `topics.*` | | the server's and the broker's limits |
 | `outbound.max_bytes` | 131072 | what may wait to be sent to one subscriber without a ring (`outbound`) |
 | `ws.listen` | off | where browsers connect (`ws`) |

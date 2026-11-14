@@ -345,7 +345,7 @@ fn the_service_manager_is_told_ready_alive_and_stopping() {
 }
 
 #[test]
-fn a_comm_core_that_cannot_start_says_which_part_and_leaves_the_running_one_alone() {
+fn a_comm_core_that_cannot_start_says_which_part_and_one_whose_network_address_is_taken_starts() {
     run(async {
         let dir = temp("twice");
         let first = CommCore::start(settings(&dir, "peer.listen = 127.0.0.1:0\n"))
@@ -356,15 +356,32 @@ fn a_comm_core_that_cannot_start_says_which_part_and_leaves_the_running_one_alon
             .await
             .expect_err("refused");
         assert!(error.to_string().starts_with("socket "), "{error}");
-        // A network address that is taken.
+        // A network address that is taken: the comm core starts all the same, serves its
+        // socket, and its network way in opens once the address is free.
         let taken = first.peer_addr().expect("addr");
         let other = temp("twice-b");
-        let error = CommCore::start(settings(&other, &format!("peer.listen = {taken}\n")))
+        let mut later = settings(&other, &format!("peer.listen = {taken}\n"));
+        later.peer_retry = orion_tcp::Retry {
+            first: Duration::from_millis(50),
+            most: Duration::from_millis(100),
+        };
+        let second = CommCore::start(later)
             .await
-            .expect_err("refused");
-        assert!(error.to_string().starts_with("peer.listen "), "{error}");
+            .expect("starts without its network way in");
+        assert_eq!(second.peer_addr(), Some(taken));
+        let mut on_second = Client::open(
+            Wire::Unix(
+                UnixConnection::connect(second.socket())
+                    .await
+                    .expect("connect"),
+            ),
+            "tool",
+        )
+        .await;
+        let _topic = on_second.declare("served.meanwhile", 2).await;
         // A bus whose identifiers cannot work.
-        let error = CommCore::start(settings(&other, "links.can = can0=can0:0x7FF:0x100:1\n"))
+        let third = temp("twice-c");
+        let error = CommCore::start(settings(&third, "links.can = can0=can0:0x7FF:0x100:1\n"))
             .await
             .expect_err("refused");
         assert!(error.to_string().starts_with("links.can"), "{error}");
@@ -380,8 +397,73 @@ fn a_comm_core_that_cannot_start_says_which_part_and_leaves_the_running_one_alon
         )
         .await;
         let _topic = client.declare("still.here", 2).await;
+
+        // The first goes, and with it the address: the second's network way in opens there.
+        drop(client);
+        drop(first);
+        // A hello over it is welcomed, once the first's listener has gone and the second's
+        // has opened.
+        let options = orion_tcp_options(&second);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut remote = loop {
+            match orion_tcp::connect(taken, &options, None).await {
+                Ok(remote) => break remote,
+                Err(error) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "never opened: {error}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        };
+        let hello = Hello {
+            name: "tool",
+            roles: Roles::CLIENT,
+            max_frame: 4096,
+            revision: 1,
+            level: 0,
+        };
+        let mut out = [0_u8; 256];
+        let len = encode_body(&hello, 1, &mut out).expect("encode");
+        remote.send(&out[..len]).await.expect("send");
+        let mut buf = [0_u8; 4096];
+        let len = remote.recv(&mut buf).await.expect("recv").expect("open");
+        assert_eq!(
+            frame::decode(&buf[..len]).expect("frame").kind(),
+            kind::WELCOME
+        );
+        drop(second);
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(other);
+        let _ = std::fs::remove_dir_all(third);
+    });
+}
+
+#[test]
+fn a_network_way_in_kept_to_an_interface_not_there_yet_waits_and_the_rest_runs() {
+    run(async {
+        let dir = temp("interface");
+        let core = CommCore::start(settings(
+            &dir,
+            "peer.listen = 127.0.0.1:0\npeer.interface = orion-none0\n",
+        ))
+        .await
+        .expect("starts");
+        // Not open: the address is as it was given, with no port chosen yet.
+        assert_eq!(core.peer_addr(), Some("127.0.0.1:0".parse().expect("addr")));
+        let mut client = Client::open(
+            Wire::Unix(
+                UnixConnection::connect(core.socket())
+                    .await
+                    .expect("connect"),
+            ),
+            "tool",
+        )
+        .await;
+        let _topic = client.declare("served.meanwhile", 2).await;
+        drop((client, core));
+        let _ = std::fs::remove_dir_all(dir);
     });
 }
 

@@ -39,6 +39,12 @@ pub struct CommSettings {
     /// `time.*`: time sync.
     #[cfg(feature = "time")]
     pub time: orion_time::TimeConfig,
+    /// `peer.interface`: the one network interface the network way in takes connections
+    /// from (`eth0`, `usb0`). Any unless it is said.
+    pub peer_interface: Option<String>,
+    /// How long the network way in waits before it tries again when it cannot open.
+    #[cfg(feature = "tcp")]
+    pub peer_retry: orion_tcp::Retry,
     /// `discovery`: `off` or `mdns`.
     #[cfg(feature = "discovery")]
     pub discovery: bool,
@@ -178,6 +184,25 @@ impl CommSettings {
                 "needs peer.listen: that is what is announced".into(),
             ));
         }
+        let peer_interface = match source.text("peer.interface") {
+            None | Some("") => None,
+            Some(_) if config.peer_listen.is_none() => {
+                return Err(error(
+                    "peer.interface",
+                    "needs peer.listen: it says which interface that listens on".into(),
+                ));
+            }
+            // As the kernel takes an interface's name: 1 to 15 bytes, no `/` or space.
+            Some(name)
+                if name.len() > 15 || name.contains(|ch: char| ch == '/' || ch.is_whitespace()) =>
+            {
+                return Err(error(
+                    "peer.interface",
+                    format!("{name:?} is not an interface name"),
+                ));
+            }
+            Some(name) => Some(name.to_owned()),
+        };
         let board_state = match source.text("hello.state") {
             None | Some("running") => orion_hello::BoardState::Running,
             Some("flasher") => orion_hello::BoardState::Flasher,
@@ -199,6 +224,9 @@ impl CommSettings {
             socket_mode,
             node_uids: source.list("socket.node_uids")?,
             status_interval,
+            peer_interface,
+            #[cfg(feature = "tcp")]
+            peer_retry: orion_tcp::Retry::default(),
             #[cfg(feature = "time")]
             time: orion_time::TimeConfig::from_source(source)?,
             #[cfg(feature = "discovery")]
@@ -364,6 +392,22 @@ mod tests {
         assert_eq!(settings.keys.cluster, "lab");
         assert_eq!(unknown.len(), 1, "{unknown:?}");
         assert!(unknown[0].contains("topcis.max"), "{unknown:?}");
+    }
+
+    #[test]
+    fn the_network_way_in_may_be_kept_to_one_interface() {
+        let (settings, _) =
+            parse("peer.listen = 0.0.0.0:9200\npeer.interface = usb0\n").expect("settings");
+        assert_eq!(settings.peer_interface.as_deref(), Some("usb0"));
+        assert_eq!(parse("").expect("settings").0.peer_interface, None);
+        // Nothing to keep to an interface, and names the kernel would not take.
+        for bad in [
+            "peer.interface = usb0\n",
+            "peer.listen = 0.0.0.0:9200\npeer.interface = a-name-of-16-byt\n",
+            "peer.listen = 0.0.0.0:9200\npeer.interface = ../eth0\n",
+        ] {
+            assert_eq!(parse(bad).expect_err(bad).key, "peer.interface");
+        }
     }
 
     #[test]
