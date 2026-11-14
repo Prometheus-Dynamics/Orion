@@ -84,7 +84,7 @@ pub fn read(path: &Path) -> Option<CommSettings> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut source = Source::parse(&text, Vec::new()).ok()?;
     let mut settings = CommSettings::from_source(&mut source).ok()?;
-    settings.config.security = orion_check::Security::On;
+    settings.config.security = orion_config::Security::On;
     Some(settings)
 }
 

@@ -88,7 +88,7 @@ impl RecoveryComm {
             .push(admit(keys.clone(), recovery_keys.to_owned()));
         let serve = {
             let (comm, tasks) = (comm.clone(), tasks.clone());
-            move |carrier| {
+            move |carrier: Carriers| {
                 let comm = comm.clone();
                 tasks
                     .borrow_mut()
