@@ -113,9 +113,10 @@ impl Driver {
                 loop {
                     match orion.register_action(&decl, Policy::new(admits)) {
                         Ok(registration) => return registration,
-                        Err(orion::Error::Client(ClientError::Refused(Error::Unavailable)))
-                            if Instant::now() < deadline =>
-                        {
+                        Err(orion::Error::Client(ClientError::Refused {
+                            error: Error::Unavailable,
+                            ..
+                        })) if Instant::now() < deadline => {
                             std::thread::sleep(Duration::from_millis(10));
                         }
                         Err(error) => panic!("register {name}: {error}"),
@@ -202,7 +203,10 @@ fn finish(
     loop {
         let mut run = caller.run(action).expect("sent");
         match run.finish(Duration::from_secs(10)) {
-            Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+            Err(ClientError::Refused {
+                error: Error::Unavailable,
+                ..
+            }) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(20));
             }
             other => return other,
@@ -277,7 +281,10 @@ fn point(caller: &Orion, port: u16) {
         }]);
         match put {
             Ok(_) => break,
-            Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+            Err(ClientError::Refused {
+                error: Error::Unavailable,
+                ..
+            }) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(error) => panic!("put: {error}"),
@@ -315,7 +322,10 @@ fn a_run_is_not_carried_to_an_older_node_for_a_caller_it_could_not_tell_apart() 
 
     // Refused at once, as something the other node does not take, and never sent there.
     match finish(&caller, &call("blink", b"")) {
-        Err(ClientError::Refused(Error::Unsupported)) => {}
+        Err(ClientError::Refused {
+            error: Error::Unsupported,
+            ..
+        }) => {}
         other => panic!("expected unsupported, got {other:?}"),
     }
     std::thread::sleep(Duration::from_millis(100));
@@ -341,7 +351,10 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
     // The left node forwards only to a node its trust file pins, and only once that node has
     // proved it holds the pinned key.
     match finish(&caller, &call("blink", b"")) {
-        Err(ClientError::Refused(Error::Denied)) => {}
+        Err(ClientError::Refused {
+            error: Error::Denied,
+            ..
+        }) => {}
         other => panic!("expected denied with no pin, got {other:?}"),
     }
     let wrong = Identity::load_or_create(&left_dir.join("wrong.ed25519"))
@@ -355,7 +368,10 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
             .expect("trust")
     );
     match finish(&caller, &call("blink", b"")) {
-        Err(ClientError::Refused(Error::Denied)) => {}
+        Err(ClientError::Refused {
+            error: Error::Denied,
+            ..
+        }) => {}
         other => panic!("expected denied with the wrong pin, got {other:?}"),
     }
     left.keys().lock().revoke(wrong).expect("revoke");
@@ -389,11 +405,17 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
     // The check runs where the action runs: the right node's door refuses a peer what is
     // for programs on its own board, and its node logic knows no such action as `none`.
     match finish(&caller, &call("wipe", b"")) {
-        Err(ClientError::Refused(Error::Denied)) => {}
+        Err(ClientError::Refused {
+            error: Error::Denied,
+            ..
+        }) => {}
         other => panic!("expected denied, got {other:?}"),
     }
     match finish(&caller, &call("none", b"")) {
-        Err(ClientError::Refused(Error::NotFound)) => {}
+        Err(ClientError::Refused {
+            error: Error::NotFound,
+            ..
+        }) => {}
         other => panic!("expected not found, got {other:?}"),
     }
     // A node nobody knows the address of.
@@ -402,7 +424,10 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
         ..call("blink", b"")
     };
     match finish(&caller, &nowhere) {
-        Err(ClientError::Refused(Error::NotFound)) => {}
+        Err(ClientError::Refused {
+            error: Error::NotFound,
+            ..
+        }) => {}
         other => panic!("expected not found, got {other:?}"),
     }
 
@@ -489,7 +514,10 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
     // While it is away, a run is refused and not left waiting.
     let mut away = caller.run(&call("blink", b"x")).expect("sent");
     match away.finish(Duration::from_secs(10)) {
-        Err(ClientError::Refused(Error::Unavailable)) => {}
+        Err(ClientError::Refused {
+            error: Error::Unavailable,
+            ..
+        }) => {}
         other => panic!("expected unavailable, got {other:?}"),
     }
 

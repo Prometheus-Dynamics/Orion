@@ -289,7 +289,7 @@ impl<S: Read + Seek> Pushing<S> {
                     return Ok(self.progress(received));
                 }
                 if let Some(error) = self.files.client.refusal(*seq) {
-                    return Err(ClientError::Refused(error));
+                    return Err(error);
                 }
                 quiet_too_long(self.last_heard, self.timeout)?;
                 self.files.client.pump(wait)?;
@@ -336,7 +336,7 @@ impl<S: Read + Seek> Pushing<S> {
                     return Ok(Step::Done(now));
                 }
                 if let Some(error) = self.files.client.refusal(*seq) {
-                    return Err(ClientError::Refused(error));
+                    return Err(error);
                 }
                 let left = until.saturating_duration_since(Instant::now());
                 if left.is_zero() {

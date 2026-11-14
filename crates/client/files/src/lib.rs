@@ -406,7 +406,7 @@ impl Files {
                     return Ok(status);
                 }
                 if let Some(error) = self.client.refusal(seq) {
-                    return Err(ClientError::Refused(error));
+                    return Err(error);
                 }
                 let left = deadline.saturating_duration_since(Instant::now());
                 if left.is_zero() {

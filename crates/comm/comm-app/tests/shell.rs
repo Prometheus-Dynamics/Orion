@@ -160,7 +160,13 @@ fn a_tool_gets_a_shell_on_the_board_and_in_recovery() {
         .expect("asked");
         // Told at once, not left to wait.
         assert!(
-            format!("{refused:?}").contains("Refused(Unsupported)"),
+            matches!(
+                &refused,
+                Err(orion::Error::Client(orion::ClientError::Refused {
+                    error: orion::types::Error::Unsupported,
+                    ..
+                }))
+            ),
             "{refused:?}"
         );
         drop(off);

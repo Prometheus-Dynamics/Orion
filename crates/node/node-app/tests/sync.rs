@@ -123,7 +123,10 @@ impl Side {
             }]);
             match put {
                 Ok(_) => return,
-                Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+                Err(ClientError::Refused {
+                    error: Error::Unavailable,
+                    ..
+                }) if Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 Err(error) => panic!("put: {error}"),
@@ -254,7 +257,10 @@ fn a_stale_peer_is_not_synced_with_until_both_forgive_it() {
     // Forgiving a node that is not a peer is refused.
     assert!(matches!(
         left.caller.forgive("nobody"),
-        Err(orion::Error::Client(ClientError::Refused(Error::NotFound)))
+        Err(orion::Error::Client(ClientError::Refused {
+            error: Error::NotFound,
+            ..
+        }))
     ));
 
     // One side forgiving is not enough: the other still refuses.

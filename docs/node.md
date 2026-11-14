@@ -424,6 +424,12 @@ its topics and runs its actions. The records are the store's and reach every nod
   is lost, and may renew. A lease that has ended holds nothing. A resource that is taken away
   takes its lease with it. Node logic binds with `bind` and `release`; a program binds by
   writing the lease record, under the same rules.
+- **Only its holder frees a lease.** Deleting a lease record is allowed to the session that
+  wrote it, a caller whose principal (as the audit log names it, `local:1000` say) is the
+  lease's holder, and root. Anyone else is `denied`, with "<resource> is held by <holder>: only
+  its holder or root frees it". A lease that has ended holds nothing, and anyone may clear it.
+  A holder whose session ended (or whom a restart of node logic forgot) writes its lease again,
+  which renews it, and then frees it.
 - **A refusal as busy says who.** It names the holder and since when (the lease's stamp), and
   why the lease could not be taken: its holder is answering, has not been quiet long enough,
   has a run under way, or its lease ends on its own.

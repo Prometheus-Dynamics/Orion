@@ -3,8 +3,11 @@
 
 use std::rc::Rc;
 
-use orion_broker::{Broker, BrokerConfig};
-use orion_hello::{BoardState, Hello as HelloService, MAX_FACT_BYTES, SharedState, verify};
+use orion_broker::{Broker, BrokerConfig, NODE_FACTS};
+use orion_hello::{
+    BoardState, FACT_PREFIX, Hello as HelloService, MAX_FACT_BYTES, RECOVERY_WHY_FACT, STATE_FACT,
+    SharedState, verify,
+};
 use orion_keys::{Identity as Key, Keys, KeysConfig, SharedKeys, random};
 use orion_msg_session::{Hello, Identify, Identity, Refusal, Welcome};
 use orion_msg_topics::{Declare, Field, FieldType, Opened};
@@ -116,7 +119,12 @@ impl Client {
     }
 
     /// Publishes one board fact as a topic and returns the writer that keeps it.
-    async fn publish_fact(&mut self, name: &str, ty: FieldType, value: &[u8]) -> Writer {
+    /// Declares the topic of a text fact, and leaves the answer to be read.
+    async fn declare_fact(&mut self, name: &str) {
+        self.declare_typed(name, FieldType::Text).await;
+    }
+
+    async fn declare_typed(&mut self, name: &str, ty: FieldType) {
         let fields = [Field {
             name: "value",
             ty,
@@ -132,6 +140,10 @@ impl Client {
             on_subscribe: Default::default(),
         };
         self.send(&declare).await;
+    }
+
+    async fn publish_fact(&mut self, name: &str, ty: FieldType, value: &[u8]) -> Writer {
+        self.declare_typed(name, ty).await;
         assert_eq!(self.next().await, kind::TOPIC_OPENED);
         let _: Opened = Opened::decode(self.payload()).expect("opened");
         let mut writer = Writer::attach(self.fds.take(0).expect("write end")).expect("writer");
@@ -226,6 +238,40 @@ fn a_signed_hello_verifies_and_answers_only_the_question_it_was_asked() {
 }
 
 #[test]
+fn the_broker_reserves_the_names_of_the_nodes_own_facts() {
+    assert_eq!(
+        NODE_FACTS,
+        [
+            format!("{FACT_PREFIX}{STATE_FACT}").as_str(),
+            format!("{FACT_PREFIX}{RECOVERY_WHY_FACT}").as_str(),
+        ]
+    );
+}
+
+#[test]
+fn with_security_off_the_hello_is_signed_all_the_same() {
+    run(async {
+        let (keys, connector) = board(Security::Off);
+        let board_key = keys.lock().identity().public();
+        // A nonce on the board's socket: signed by the board's key, over that nonce.
+        let mut asker = Client::open(connector.connect(USER)).await;
+        let nonce: [u8; 32] = random();
+        let payload = asker.identify(&nonce).await.to_vec();
+        let identity = verify(&payload, &nonce).expect("signed");
+        assert_eq!(identity.public_key.0, board_key);
+        assert!(verify(&payload, &random::<32>()).is_none());
+        // Off the board, signed even with no nonce.
+        let mut tool =
+            Client::open(connector.connect_without_descriptors(Principal::Anonymous)).await;
+        let payload = tool.identify(&[]).await.to_vec();
+        assert_eq!(
+            verify(&payload, &[]).expect("signed").public_key.0,
+            board_key
+        );
+    });
+}
+
+#[test]
 fn facts_other_programs_publish_are_in_the_document_and_go_when_they_go() {
     run(async {
         let (_keys, connector) = board(Security::Off);
@@ -248,10 +294,17 @@ fn facts_other_programs_publish_are_in_the_document_and_go_when_they_go() {
         let _empty = driver
             .publish_fact("hello.empty", FieldType::Bytes, b"")
             .await;
-        // A program's fact by one of Orion's names is left out.
-        let _state = driver
-            .publish_fact("hello.state", FieldType::Text, b"fine")
-            .await;
+        // A program may not publish a fact by one of the node's own names: it is told why.
+        for name in NODE_FACTS {
+            driver.declare_fact(name).await;
+            assert_eq!(driver.next().await, kind::REFUSAL);
+            let refusal = Refusal::decode(driver.payload()).expect("refusal");
+            assert_eq!(refusal.error(), Some(Error::Denied));
+            assert_eq!(
+                refusal.detail,
+                format!("{name} is the node's own hello fact: a program cannot publish it")
+            );
+        }
         let _long = driver
             .publish_fact("hello.long", FieldType::Bytes, &[7; 300])
             .await;
@@ -333,7 +386,6 @@ fn the_document_says_what_the_board_is_doing_and_why_it_is_in_recovery() {
 
         for (set, word) in [
             (BoardState::Flasher, &b"flasher"[..]),
-            (BoardState::Updating, b"updating"),
             (BoardState::Running, b"running"),
         ] {
             state.set(set);

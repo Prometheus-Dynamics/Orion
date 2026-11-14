@@ -449,7 +449,10 @@ fn a_file_is_checked_before_it_is_in_place_and_refusals_are_heard() {
     assert!(
         matches!(
             refused,
-            Err(ClientError::Refused(orion_types::Error::Denied))
+            Err(ClientError::Refused {
+                error: orion_types::Error::Denied,
+                ..
+            })
         ),
         "{refused:?}"
     );

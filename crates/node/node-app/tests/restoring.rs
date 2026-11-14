@@ -86,7 +86,10 @@ fn provide(orion: &Orion) -> Resource {
         match acted.and_then(|()| describing.publish(ResourceState::Ready)) {
             Ok(resource) => return resource,
             // Node logic is not there yet.
-            Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+            Err(ClientError::Refused {
+                error: Error::Unavailable,
+                ..
+            }) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(error) => panic!("provide: {error}"),
@@ -125,7 +128,7 @@ fn run_refused(orion: &Orion, name: &str) -> Option<ClientError> {
         })
         .expect("sent");
     match run.finish(Duration::from_millis(200)) {
-        Err(ClientError::Refused(error)) => Some(ClientError::Refused(error)),
+        Err(refused @ ClientError::Refused { .. }) => Some(refused),
         // Taken by the driver, which this test never has answer.
         _ => None,
     }
@@ -133,7 +136,7 @@ fn run_refused(orion: &Orion, name: &str) -> Option<ClientError> {
 
 fn refused(orion: &Orion, name: &str) -> Error {
     match run_refused(orion, name) {
-        Some(ClientError::Refused(error)) => error,
+        Some(ClientError::Refused { error, .. }) => error,
         other => panic!("expected a refusal, got {other:?}"),
     }
 }
@@ -256,7 +259,10 @@ fn a_whole_node_that_restarts_knows_what_it_served_from_its_state_directory() {
             found.iter().all(|arm| arm.state != ResourceState::Ready),
             "{found:?}"
         ),
-        Err(orion::Error::Client(ClientError::Refused(Error::Restoring))) => {}
+        Err(orion::Error::Client(ClientError::Refused {
+            error: Error::Restoring,
+            ..
+        })) => {}
         Err(other) => panic!("{other}"),
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -292,7 +298,10 @@ fn a_read_of_one_resource_served_before_that_has_no_record_yet_is_restoring() {
     let dash = dashboard(&address);
     let records = dash.records();
     match records.get(RecordClass::Resource, "arm") {
-        Err(ClientError::Refused(Error::Restoring)) => {}
+        Err(ClientError::Refused {
+            error: Error::Restoring,
+            ..
+        }) => {}
         other => panic!("expected restoring, got {other:?}"),
     }
     // A read of many, or of one never served, is answered as it is.

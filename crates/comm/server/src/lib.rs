@@ -41,4 +41,4 @@ pub use server::{DroppedSession, Stats};
 pub use service::{Cx, Incoming, Service};
 pub use sessions::{Delivery, Dropped, SessionId, SessionInfo, Sessions};
 pub use shm_fdpass::FdSet;
-pub use spoken::{LEASE_LOST_LEVEL, RESTORING_LEVEL, spoken};
+pub use spoken::{LAYOUT_LEVEL, LEASE_LOST_LEVEL, RESTORING_LEVEL, spoken};

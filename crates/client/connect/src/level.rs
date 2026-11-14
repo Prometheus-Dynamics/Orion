@@ -122,6 +122,8 @@ mod tests {
             max_frame: 4096,
             revision: orion_wire::INTERFACE_REVISION,
             level,
+            signed: false,
+            node_key: None,
         }
     }
 

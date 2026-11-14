@@ -246,10 +246,14 @@ fn exercise(mut session: Session, descriptors: bool) {
 fn the_same_calls_work_on_the_boards_socket_the_network_and_a_link() {
     let mut board = Board::start("same", Security::Off);
     let local = Address::Local(board.socket.clone());
-    exercise(
-        Session::connect(&local, "tool", options(None)).expect("local"),
-        true,
-    );
+    // A plain session is not signed and has no key at hello. Asked, the node proves its key
+    // over a fresh nonce, and it is kept.
+    let mut session = Session::connect(&local, "tool", options(None)).expect("local");
+    assert!(!session.welcomed().signed);
+    assert_eq!(session.welcomed().node_key, None);
+    assert_eq!(session.node_key().expect("the key"), board.key);
+    assert_eq!(session.welcomed().node_key, Some(board.key));
+    exercise(session, true);
 
     let network: Address = format!("orion+tcp://{}", board.network)
         .parse()
@@ -281,10 +285,19 @@ fn a_signed_network_session_is_the_same_again_and_checks_who_is_there() {
         host: board.network.to_string(),
         key: Some(board.key),
     };
-    exercise(
-        Session::connect(&pinned, "tool", options(copy())).expect("signed"),
-        false,
-    );
+    // Signed: the key the node proved at connect is there, with no question asked.
+    let session = Session::connect(&pinned, "tool", options(copy())).expect("signed");
+    assert!(session.welcomed().signed);
+    assert_eq!(session.welcomed().node_key, Some(board.key));
+    exercise(session, false);
+    // With no pin, the key proved is how a tool learns which to pin.
+    let unpinned = Address::Network {
+        host: board.network.to_string(),
+        key: None,
+    };
+    let session = Session::connect(&unpinned, "tool", options(copy())).expect("unpinned");
+    assert_eq!(session.welcomed().node_key, Some(board.key));
+    drop(session);
 
     // A node that is not the one that was meant.
     let wrong = Address::Network {
@@ -349,6 +362,8 @@ fn a_tool_with_a_key_signs_its_session_on_a_link() {
     // Signed: the same calls, sealed, in a frame a little shorter than a plain link's.
     let session = Session::over_link(end(), "tool", options(copy())).expect("signed");
     assert!(session.welcomed().max_frame <= 8192 - 32);
+    assert!(session.welcomed().signed);
+    assert_eq!(session.welcomed().node_key, Some(board.key));
     exercise(session, false);
     gone();
 
@@ -361,11 +376,11 @@ fn a_tool_with_a_key_signs_its_session_on_a_link() {
         "{error}"
     );
 
-    // No key, with security on: the link's device, as before.
-    exercise(
-        Session::over_link(end(), "device", options(None)).expect("plain"),
-        false,
-    );
+    // No key, with security on: the link's device, as before, and not signed.
+    let session = Session::over_link(end(), "device", options(None)).expect("plain");
+    assert!(!session.welcomed().signed);
+    assert_eq!(session.welcomed().node_key, None);
+    exercise(session, false);
     gone();
     // And signed again after it.
     exercise(

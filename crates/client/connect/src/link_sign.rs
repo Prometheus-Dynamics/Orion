@@ -128,7 +128,11 @@ impl Transport {
         }
         match LinkSignAnswer::decode(view.payload()) {
             Ok(answer) if answer.status == LINK_SIGN_OK => {
-                self.seal_link(Seal::new(to_client), Seal::new(to_board));
+                self.seal_link(
+                    Seal::new(to_client),
+                    Seal::new(to_board),
+                    transcript.server_key(),
+                );
                 Ok(())
             }
             _ => Err(refused(view.payload())),

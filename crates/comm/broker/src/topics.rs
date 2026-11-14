@@ -344,24 +344,17 @@ impl Topics {
         Ok(id)
     }
 
-    /// Gives `id` a ring: a new one of shape `spec`, or `offered`, a ring its publisher kept.
-    /// Any ring it had is dropped.
+    /// Gives `id` a ring: a new one of shape `spec`, or `offered`, a ring its publisher kept
+    /// (checked with [`adopt`]). Any ring it had is dropped.
     pub(crate) fn set_ring(
         &mut self,
         id: TopicId,
         spec: &Spec,
-        offered: Option<OwnedFd>,
+        offered: Option<Ring>,
     ) -> Result<(), Error> {
         let had = self.get(id).ok_or(Error::NotFound)?.bytes();
         let ring = match offered {
-            Some(fd) => {
-                let ring = Ring::adopt(fd).map_err(|_| Error::Malformed)?;
-                let wanted = shm_ring::Geometry::for_spec(spec).map_err(|_| Error::Unsupported)?;
-                if *ring.geometry() != wanted {
-                    return Err(Error::Malformed);
-                }
-                ring
-            }
+            Some(ring) => ring,
             None => {
                 let wanted = shm_ring::Geometry::for_spec(spec).map_err(|_| Error::Unsupported)?;
                 // Rounded to pages, as it will be mapped: checked before it is made.
@@ -471,4 +464,32 @@ impl Topics {
             self.bytes -= topic.bytes();
         }
     }
+}
+
+/// The words a publisher is refused with when the ring it offers is laid out as another build
+/// lays it out.
+pub const REBUILD: &str = "rebuild the publisher at or after the device library's ad5bf930";
+
+/// The ring a publisher offers on `fd`, if it is one this build reads and of the shape `spec`
+/// says. Refused with [`Error::Layout`] and words naming both layouts if it is of another
+/// layout, otherwise `malformed` (no words of its own).
+///
+/// # Errors
+///
+/// As above.
+pub(crate) fn adopt(fd: OwnedFd, spec: &Spec) -> Result<Ring, (Error, Option<String>)> {
+    let ring = Ring::adopt(fd).map_err(|error| match error {
+        shm_ring::RingError::Layout { what, found, reads } => (
+            Error::Layout,
+            Some(format!(
+                "{what} is layout {found}; this build reads layout {reads}: {REBUILD}"
+            )),
+        ),
+        _ => (Error::Malformed, None),
+    })?;
+    let wanted = shm_ring::Geometry::for_spec(spec).map_err(|_| (Error::Unsupported, None))?;
+    if *ring.geometry() != wanted {
+        return Err((Error::Malformed, None));
+    }
+    Ok(ring)
 }

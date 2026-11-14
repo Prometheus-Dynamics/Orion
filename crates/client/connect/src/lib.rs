@@ -33,12 +33,12 @@ mod level;
 mod link_sign;
 mod piped;
 mod transport;
+mod welcomed;
 
 use std::time::{Duration, Instant};
 
 use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, RejectReason, Welcome};
 use orion_supervise::{Decision, Path, Supervisor};
-use orion_types::NodeName;
 use orion_wire::{
     Body, Decode, FrameView, INTERFACE_LEVEL, INTERFACE_REVISION, encode_body, frame, kind,
 };
@@ -52,6 +52,7 @@ pub use orion_identity::Identity;
 pub use orion_msg_session::Roles;
 pub use orion_supervise::Status;
 pub use piped::{LinkRead, LinkWrite};
+pub use welcomed::Welcomed;
 
 use fd::FdSet;
 use transport::{Step, Transport};
@@ -80,26 +81,6 @@ impl Default for Options {
             timeout: Duration::from_secs(5),
         }
     }
-}
-
-/// What the comm core said at hello. [`Welcomed::needs`] says whether its node may be asked for
-/// a [`Feature`].
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Welcomed {
-    /// The node.
-    pub node: NodeName,
-    /// This session's number there.
-    pub session: u32,
-    /// How often each side pings.
-    pub heartbeat: Duration,
-    /// How long either side may go unheard before the session is over.
-    pub idle: Duration,
-    /// The largest frame either side sends.
-    pub max_frame: u32,
-    /// The wire revision: always this client's own, since another is turned away.
-    pub revision: u16,
-    /// The node's additive level: 0 from a node that does not say.
-    pub level: u16,
 }
 
 /// One frame from the comm core. Its descriptors, if any, are taken with
@@ -376,6 +357,8 @@ impl Session {
                         max_frame: welcome.max_frame,
                         revision: welcome.revision,
                         level: welcome.level,
+                        signed: transport.signed(),
+                        node_key: transport.node_key(),
                     };
                 }
                 kind::REJECT => {
@@ -569,8 +552,9 @@ impl Session {
             if incoming.kind() == kind::REFUSAL {
                 let refusal: Refusal<'_> = incoming.body()?;
                 if refusal.request_seq == seq {
-                    return Err(ClientError::Refused(
+                    return Err(ClientError::refused(
                         refusal.error().unwrap_or(orion_types::Error::Internal),
+                        refusal.detail,
                     ));
                 }
             } else if incoming.kind() == want {

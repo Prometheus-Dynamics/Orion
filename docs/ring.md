@@ -1,10 +1,16 @@
 # The topic ring
 
-`shm-ring`, with the rest of the shared-memory family (`shm-ring-buffers`, `shm-ring-holds`,
-`shm-ring-doorbell`, `shm-ring-latest`, `shm-ring-time`, `shm-fdpass`, `shm-sample-time`): leaf
+`shm-ring`, with the rest of the shared-memory family Orion uses (`shm-ring-buffers`,
+`shm-ring-holds`, `shm-ring-doorbell`, `shm-ring-time`, `shm-fdpass`, `shm-sample-time`): leaf
 crates hosted with the device library, under `shm/`, and pinned by revision in the workspace
 `Cargo.toml`. Orion has no copy. One writer, many readers, in shared memory. This page pins the
-layout: layout number 1. A change to anything here needs a new layout number.
+layout: layout number 2, from the device library's `ad5bf930`. A change to anything here needs
+a new layout number.
+
+A ring of another layout is refused by name. A publisher that offers one to the broker is
+refused `layout` (21), with words naming both numbers and saying to rebuild it at or after
+`ad5bf930` (`malformed` to a session below level 2). Every publisher that keeps its ring across
+a comm core restart must be built against layout 2.
 
 ## What it gives
 
@@ -39,14 +45,15 @@ the same way by every party, so there is no stored offset to point somewhere els
 | Word | Holds | Written by |
 | --- | --- | --- |
 | 0 | Magic: `SHMRING1` | Owner, once, last |
-| 1 | Layout number: 1 | Owner, once |
+| 1 | Layout number: 2 | Owner, once |
 | 2 | Fields (low 32 bits), history (high 32 bits) | Owner, once |
 | 3 | Largest payload in bytes (low 32), expiry in ms (high 32) | Owner, once |
 | 4 | Total words in the ring | Owner, once |
 | 5 to 7 | Reserved, zero | |
 | 8 | Head: how many samples were ever published | Writer |
 | 9 | Subscriber count (low 32) | Owner |
-| 10 to 15 | Reserved, zero | |
+| 10 | End code: zero while the topic runs, nonzero once its owner says it ended (layout 2) | Owner |
+| 11 to 15 | Reserved, zero | |
 | 16 | Lane heads: one word per field, how many samples that field ever had | Writer |
 | 16 + fields | Index: `index_slots` words | Writer |
 | 16 + fields + index_slots | Slots: `fields × history` slots of `slot_words` words | Writer |
@@ -172,7 +179,7 @@ subscriber that does not look again, and a publisher that does not fence.
 
 ## Latest values
 
-`shm-ring-latest`. The newest sample of a field is the slot before its lane head, so
+The newest sample of a field is the slot before its lane head, so
 reading it does not depend on how many fields there are. A value is expired when the reader's
 clock is more than the declaration's expiry past the sample's time; it is still returned, marked
 expired.

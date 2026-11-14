@@ -408,7 +408,10 @@ fn what_the_comm_core_refuses_is_an_error_where_it_was_asked() {
     assert!(
         matches!(
             refused,
-            TopicError::Client(ClientError::Refused(Error::AlreadyExists))
+            TopicError::Client(ClientError::Refused {
+                error: Error::AlreadyExists,
+                ..
+            })
         ),
         "{refused}"
     );
@@ -503,7 +506,13 @@ fn a_publisher_withdraws_one_topic_and_keeps_its_session() {
         .expect("send");
     let refused = stranger.answered(seq, || false).expect_err("not its topic");
     assert!(
-        matches!(refused, ClientError::Refused(Error::NotFound)),
+        matches!(
+            refused,
+            ClientError::Refused {
+                error: Error::NotFound,
+                ..
+            }
+        ),
         "{refused}"
     );
     assert_eq!(on_board.status(), Status::Live);

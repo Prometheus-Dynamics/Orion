@@ -87,7 +87,13 @@ impl Drop for Logic {
 }
 
 fn unavailable<T: std::fmt::Debug>(result: Result<T, ClientError>) -> bool {
-    matches!(result, Err(ClientError::Refused(Error::Unavailable)))
+    matches!(
+        result,
+        Err(ClientError::Refused {
+            error: Error::Unavailable,
+            ..
+        })
+    )
 }
 
 /// Reads until node logic answers.
@@ -96,7 +102,10 @@ fn answered(records: &Records, class: RecordClass, prefix: &str) -> Vec<Record> 
     loop {
         match records.get(class, prefix) {
             Ok(found) => return found,
-            Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+            Err(ClientError::Refused {
+                error: Error::Unavailable,
+                ..
+            }) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(5));
             }
             Err(error) => panic!("records: {error}"),

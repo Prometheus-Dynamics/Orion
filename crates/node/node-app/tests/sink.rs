@@ -124,7 +124,10 @@ impl Manager {
             let mut sink = loop {
                 match orion.files().sink("slots/") {
                     Ok(sink) => break sink,
-                    Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+                    Err(ClientError::Refused {
+                        error: Error::Unavailable,
+                        ..
+                    }) if Instant::now() < deadline => {
                         std::thread::sleep(Duration::from_millis(10));
                     }
                     Err(error) => panic!("sink: {error}"),

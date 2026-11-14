@@ -47,7 +47,7 @@ pub struct Node {
 }
 
 impl Node {
-    /// What the board says it is doing: `running`, `recovery`, `flasher` or `updating`.
+    /// What the board says it is doing: `running`, `recovery` or `flasher`.
     /// `None` from a board too old to say.
     #[must_use]
     pub fn state(&self) -> Option<&str> {

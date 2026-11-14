@@ -283,6 +283,44 @@ fn a_comm_core_set_to_wait_longer_is_waited_for_as_long() {
 }
 
 #[test]
+fn the_nodes_key_is_asked_once_on_a_plain_session_and_kept() {
+    let board = Board::start("facade-node-key");
+    let address = Address::Local(board.socket().to_owned());
+    // Asked through the shared session: checked against a fresh nonce, then kept.
+    let orion = Orion::connect(&address, "tool").expect("connect");
+    assert!(!orion.welcomed().signed);
+    assert_eq!(orion.welcomed().node_key, None);
+    let key = orion.node_key().expect("the key");
+    assert_eq!(orion.welcomed().node_key, Some(key));
+    assert_eq!(key, orion.node().expect("node").public_key);
+    // `node` proves the same key, and keeps it too.
+    let other = Orion::connect(&address, "other").expect("connect");
+    let node = other.node().expect("node");
+    assert_eq!(other.welcomed().node_key, Some(node.public_key));
+    assert_eq!(node.public_key, key);
+
+    // A refusal through the shared session keeps the node's words.
+    let refused = orion.declare(&TopicDecl {
+        name: "hello.state",
+        fields: &fields![value: Text ""],
+        history: 2,
+        expiry_ms: 0,
+        max_payload: 64,
+        on_subscribe: Default::default(),
+    });
+    match refused {
+        Err(orion::Error::Client(orion::ClientError::Refused { error, detail })) => {
+            assert_eq!(error, orion::types::Error::Denied);
+            assert_eq!(
+                detail,
+                "hello.state is the node's own hello fact: a program cannot publish it"
+            );
+        }
+        other => panic!("{:?}", other.map(drop)),
+    }
+}
+
+#[test]
 fn an_operator_asks_to_be_enrolled_and_proves_the_enrollment_key() {
     let dir = std::env::temp_dir().join(format!("orion-facade-enroll-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -332,9 +370,10 @@ fn an_operator_asks_to_be_enrolled_and_proves_the_enrollment_key() {
     assert!(
         matches!(
             other,
-            Err(orion::Error::Client(orion::ClientError::Refused(
-                orion::types::Error::Denied
-            )))
+            Err(orion::Error::Client(orion::ClientError::Refused {
+                error: orion::types::Error::Denied,
+                ..
+            }))
         ),
         "{other:?}"
     );

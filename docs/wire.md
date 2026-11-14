@@ -93,16 +93,19 @@ safely ignore have no level.
 | 1 | `SignedLink`: `LINK_SIGN_HELLO` on a serial or USB link | Not answer; the client then says hello plainly to read the level |
 | 1 | `DetachedRun`: `Run.detached` | Run it with no deadline and no limit, and never tell its program the caller went |
 | 1 | `RunOnBehalf`: `Run.on_behalf`, from a node | Take every caller behind the link as one, and never hear one of them end |
-
 | 2 | The error `restoring` (20) | (told to a session, not asked of a node: see below) |
+| 2 | The error `layout` (21) | (told to a session: see below) |
 | 2 | The error `lease lost` (22) | (told to a session: see below) |
 
 **Errors have levels too.** An error code added after level 1 is told only to a session that said
 it is at that code's level or above. A session below it is told what it was told before the code
 existed. `restoring` (20) is level 2: a session at level 0 or 1 is told `not found` in its place,
 so a client of an older build never meets a code it does not know. `lease lost` (22) is level 2
-too, and a session below it is told `busy`. Code 21 is kept for the layout refusal. `orion_server::spoken` is the
-one place this is decided, for the comm core's own refusals and for node logic's.
+too, and a session below it is told `busy`. `layout` (21), a ring offered by a publisher built
+against another shared-memory layout, is level 2, and a session below it is told `malformed`.
+`orion_server::spoken` is the one place this is decided, for the comm core's own refusals and
+for node logic's. Words sent with a refusal go only with the code they were written for: a
+session told the older code is told that code's own words.
 
 Additions with no level, because an older side ignores them and does nothing different that
 matters: `Cancel.reason`, `Claim.session`, `ACTION_CALLER_GONE` to a program, the hello document's

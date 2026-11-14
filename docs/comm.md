@@ -635,7 +635,7 @@ a nonce) and is answered (`Identity`):
 | --- | --- |
 | Node name, cluster, public key, interface revision | Orion |
 | Clock, milliseconds since 1970 | Orion |
-| `state`: `running`, `recovery`, `flasher` or `updating`; in recovery, `recovery_why` | Orion |
+| `state`: `running`, `recovery` or `flasher`; in recovery, `recovery_why` | Orion |
 | Facts about the board: name, type, value | Other programs |
 | The asker's nonce | The question |
 | Signature | The node's key, over a fixed label and everything before this field |
@@ -648,10 +648,12 @@ a nonce) and is answered (`Identity`):
   `hello.<fact>`; the document carries the newest value of each, in name order, up to 64 facts of
   256 bytes. When that program goes, its facts go.
 - **What the board is doing is Orion's own,** as two text facts among the rest, signed with
-  them: `state` (`running`; `flasher` when `hello.state = flasher`; `recovery`; `updating`, set by
-  whatever updates the board through `Hello::state()`) and, in recovery, `recovery_why`, the
-  reason, cut to 256 bytes. A program's fact by either name is left out. A tool knows a board
-  in recovery, and why, from its first question (`Node::state`, `Node::recovery_why`).
+  them: `state` (`running`; `flasher` when `hello.state = flasher`; `recovery`) and, in
+  recovery, `recovery_why`, the reason, cut to 256 bytes. A program that declares the topic
+  `hello.state` or `hello.recovery_why` is refused, `denied`, with words that say these are the
+  node's own; a fact by either name that reaches the document another way is left out. A tool
+  knows a board in recovery, and why, from its first question (`Node::state`,
+  `Node::recovery_why`).
 - **Anyone may ask**, a key that has been granted nothing included.
 - **Always answers.** It is in the comm core and needs nothing else running.
 - Someone on the board who gives no nonce is not checking a signature and gets the document

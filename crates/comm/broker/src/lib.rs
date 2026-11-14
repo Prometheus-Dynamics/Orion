@@ -32,5 +32,6 @@ mod service;
 mod topics;
 
 pub use local::{LocalPublisher, Writing};
-pub use service::{Broker, RESTORE_MS, STALE_ID};
+pub use service::{Broker, NODE_FACTS, RESTORE_MS, STALE_ID};
+pub use topics::REBUILD;
 pub use topics::{BrokerConfig, Subscription, Topic, TopicId, TopicWatch, Topics};

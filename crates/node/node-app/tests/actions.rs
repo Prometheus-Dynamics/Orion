@@ -97,9 +97,10 @@ fn provider_process() {
             match orion.register_action(&decl, Policy::new(admits)) {
                 Ok(registration) => return registration,
                 // Node logic is not there yet.
-                Err(orion::Error::Client(ClientError::Refused(Error::Unavailable)))
-                    if Instant::now() < deadline =>
-                {
+                Err(orion::Error::Client(ClientError::Refused {
+                    error: Error::Unavailable,
+                    ..
+                })) if Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 Err(error) => panic!("register {name}: {error}"),
@@ -260,13 +261,19 @@ fn an_action_from_another_process_runs_and_is_refused_by_its_policy() {
     // The one for operators is refused, and the other process never hears of it.
     let mut refused = caller.run(&call("wipe", b"everything")).expect("sent");
     match refused.wait(Duration::from_secs(5)) {
-        Err(ClientError::Refused(Error::Denied)) => {}
+        Err(ClientError::Refused {
+            error: Error::Denied,
+            ..
+        }) => {}
         other => panic!("expected a refusal, got {other:?}"),
     }
     // One that is not on the list is not found.
     let mut missing = caller.run(&call("explode", b"")).expect("sent");
     match missing.wait(Duration::from_secs(5)) {
-        Err(ClientError::Refused(Error::NotFound)) => {}
+        Err(ClientError::Refused {
+            error: Error::NotFound,
+            ..
+        }) => {}
         other => panic!("expected not found, got {other:?}"),
     }
 
@@ -341,7 +348,10 @@ fn an_action_from_another_process_runs_and_is_refused_by_its_policy() {
     loop {
         let mut gone = caller.run(&call("open", b"abc")).expect("sent");
         match gone.wait(Duration::from_secs(5)) {
-            Err(ClientError::Refused(Error::NotFound)) => break,
+            Err(ClientError::Refused {
+                error: Error::NotFound,
+                ..
+            }) => break,
             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
             other => panic!("the action stayed on the list: {other:?}"),
         }
@@ -379,7 +389,10 @@ fn actions_are_still_there_after_node_logic_restarts() {
     // It starts again. The provider never notices, and its action is on the new list.
     let mut away = caller.run(&call("open", b"two")).expect("sent");
     match away.wait(Duration::from_secs(5)) {
-        Err(ClientError::Refused(Error::Unavailable)) => {}
+        Err(ClientError::Refused {
+            error: Error::Unavailable,
+            ..
+        }) => {}
         other => panic!("expected unavailable, got {other:?}"),
     }
     let _logic = Logic::start(settings(&dir));
@@ -391,9 +404,10 @@ fn actions_are_still_there_after_node_logic_restarts() {
                 assert_eq!(finished.output, b"owt");
                 break;
             }
-            Err(ClientError::Refused(Error::Unavailable | Error::NotFound))
-                if Instant::now() < deadline =>
-            {
+            Err(ClientError::Refused {
+                error: Error::Unavailable | Error::NotFound,
+                ..
+            }) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(error) => panic!("the run after the restart: {error}"),
@@ -465,7 +479,10 @@ fn a_caller_disconnects_mid_action_and_reattaches_to_the_progress() {
     assert_eq!(ended.output, b"long done");
     let mut again = caller.attach(number).expect("sent");
     match again.wait(Duration::from_secs(5)) {
-        Err(ClientError::Refused(Error::NotFound)) => {}
+        Err(ClientError::Refused {
+            error: Error::NotFound,
+            ..
+        }) => {}
         other => panic!("expected not found, got {other:?}"),
     }
 
@@ -481,7 +498,10 @@ fn a_caller_disconnects_mid_action_and_reattaches_to_the_progress() {
     };
     let mut none = caller.attach(number).expect("sent");
     match none.wait(Duration::from_secs(5)) {
-        Err(ClientError::Refused(Error::NotFound)) => {}
+        Err(ClientError::Refused {
+            error: Error::NotFound,
+            ..
+        }) => {}
         other => panic!("expected not found, got {other:?}"),
     }
 }
@@ -537,7 +557,7 @@ fn a_program_hears_once_a_callers_session_ends() {
             })
             .expect("sent");
         match run.wait(Duration::from_secs(5)) {
-            Err(ClientError::Refused(error)) => assert_eq!(error, refused),
+            Err(ClientError::Refused { error, .. }) => assert_eq!(error, refused),
             other => panic!("expected {refused:?}, got {other:?}"),
         }
     }

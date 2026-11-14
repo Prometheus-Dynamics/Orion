@@ -120,7 +120,9 @@ impl UsbLinks {
         *self.any_name.borrow_mut() = Some(Box::new(serve));
     }
 
-    fn offer(&self, name: &str, stream: UsbStream, root: bool) -> Result<(), Error> {
+    /// Gives the link `name` the handle `stream`. A name with no link is refused `not found`,
+    /// with words that name the links there are.
+    fn offer(&self, name: &str, stream: UsbStream, root: bool) -> Result<(), (Error, String)> {
         let known = self.slots.borrow().iter().any(|slot| slot.name == name);
         if !known
             && root
@@ -130,10 +132,19 @@ impl UsbLinks {
             serve(name, self.link(name));
         }
         let mut slots = self.slots.borrow_mut();
-        let slot = slots
-            .iter_mut()
-            .find(|slot| slot.name == name)
-            .ok_or(Error::NotFound)?;
+        let Some(slot) = slots.iter_mut().find(|slot| slot.name == name) else {
+            let known: Vec<&str> = slots.iter().map(|slot| slot.name.as_str()).collect();
+            let known = if known.is_empty() {
+                "none".to_owned()
+            } else {
+                known.join(", ")
+            };
+            warn!(link = name, known = %known, "a handle offered for a link this board does not have");
+            return Err((
+                Error::NotFound,
+                format!("no USB link named {name} here; known: {known}"),
+            ));
+        };
         // The device this link ran over is gone: its stream ends, and the link takes this one.
         if let Some(current) = slot.current.take() {
             current.ended.set(true);
@@ -221,7 +232,9 @@ impl Service for UsbLinkService {
             Error::Malformed
         })?;
         let root = matches!(cx.caller().principal, Principal::Local { uid: 0, .. });
-        self.0.offer(offer.link, stream, root)?;
+        if let Err((error, words)) = self.0.offer(offer.link, stream, root) {
+            return cx.refuse(error, &words);
+        }
         info!(link = offer.link, transport = ?offer.transport, "link handle taken");
         cx.reply(&LinkTaken {
             request_seq: cx.request_seq(),

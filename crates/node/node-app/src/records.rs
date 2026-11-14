@@ -6,7 +6,7 @@ use orion_types::{Error, HlcTimestamp};
 use orion_wire::{List, kind};
 
 use orion_reply::{Asked, Out};
-use orion_resources::{Resources, Taken};
+use orion_resources::{Caller, Resources, Taken};
 
 /// About how many bytes of records go in one message. A record larger than this goes alone.
 const PAGE_BYTES: usize = 24 * 1024;
@@ -214,6 +214,12 @@ impl Records {
                 let put: Put<'_> = asked.body()?;
                 // All of a write or none of it: every entry is looked at before any is made.
                 let mut taken: Vec<Taken> = Vec::new();
+                let principal = asked.principal();
+                let caller = Caller {
+                    session,
+                    principal: &principal,
+                    root: asked.class == orion_check::PrincipalClass::Root as u8,
+                };
                 for entry in put.records.iter() {
                     let entry = entry?;
                     if entry.class == RecordClass::Workload {
@@ -222,7 +228,7 @@ impl Records {
                     }
                     match self
                         .resources
-                        .check(&self.store, session, &entry, clock, in_flight)
+                        .check(&self.store, &caller, &entry, clock, in_flight)
                     {
                         Ok(took) => taken.extend(took),
                         Err(refused) => {

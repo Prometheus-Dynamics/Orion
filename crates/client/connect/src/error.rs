@@ -6,7 +6,10 @@ use std::io;
 use orion_msg_session::RejectReason;
 
 /// Why a call on a session failed.
+///
+/// More cases may come in a later release, so a `match` on it needs a `_` arm.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ClientError {
     /// The connection could not be made, or broke.
     Io(io::Error),
@@ -25,8 +28,14 @@ pub enum ClientError {
         /// The key the node proved it holds.
         answered: [u8; 32],
     },
-    /// The comm core answered a request with a refusal.
-    Refused(orion_types::Error),
+    /// The comm core, or node logic, answered a request with a refusal.
+    Refused {
+        /// What kind of refusal.
+        error: orion_types::Error,
+        /// The node's words, as it sent them. Never empty: a refusal sent with no words has
+        /// the error's own name here.
+        detail: String,
+    },
     /// The comm core said nothing for three heartbeats, or closed the session.
     Lost,
     /// Something arrived that is not the wire.
@@ -54,6 +63,32 @@ pub enum ClientError {
     },
 }
 
+impl ClientError {
+    /// A refusal of kind `error` with the node's words, or the error's own name when it sent
+    /// none.
+    #[must_use]
+    pub fn refused(error: orion_types::Error, detail: &str) -> Self {
+        let detail = if detail.is_empty() {
+            error.as_str()
+        } else {
+            detail
+        };
+        Self::Refused {
+            error,
+            detail: detail.to_owned(),
+        }
+    }
+
+    /// The kind of refusal, if this is one.
+    #[must_use]
+    pub fn refusal(&self) -> Option<orion_types::Error> {
+        match self {
+            Self::Refused { error, .. } => Some(*error),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -66,7 +101,10 @@ impl fmt::Display for ClientError {
                 hex(asked),
                 hex(answered)
             ),
-            Self::Refused(error) => write!(f, "refused: {error}"),
+            Self::Refused { error, detail } if detail == error.as_str() => {
+                write!(f, "refused: {error}")
+            }
+            Self::Refused { error, detail } => write!(f, "refused: {error}: {detail}"),
             Self::Lost => f.write_str("the connection was lost"),
             Self::Protocol(what) => write!(f, "not the wire: {what}"),
             Self::TooLarge => f.write_str("the frame is larger than both sides agreed to"),
@@ -105,5 +143,32 @@ impl ClientError {
     #[must_use]
     pub const fn is_lost(&self) -> bool {
         matches!(self, Self::Io(_) | Self::Lost)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orion_types::Error;
+
+    #[test]
+    fn a_refusal_keeps_the_nodes_words_and_is_never_without_any() {
+        let worded = ClientError::refused(Error::Busy, "cam.front is held by workload:a");
+        assert!(matches!(
+            &worded,
+            ClientError::Refused { error: Error::Busy, detail } if detail == "cam.front is held by workload:a"
+        ));
+        assert_eq!(
+            worded.to_string(),
+            "refused: busy: cam.front is held by workload:a"
+        );
+        let bare = ClientError::refused(Error::Busy, "");
+        assert!(matches!(
+            &bare,
+            ClientError::Refused { error: Error::Busy, detail } if detail == "busy"
+        ));
+        assert_eq!(bare.to_string(), "refused: busy");
+        assert_eq!(bare.refusal(), Some(Error::Busy));
+        assert_eq!(ClientError::Lost.refusal(), None);
     }
 }

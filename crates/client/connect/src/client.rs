@@ -35,16 +35,19 @@ pub trait Handler {
     fn handle(&mut self, frame: &Incoming<'_>, cx: &mut Cx<'_>) -> Result<(), ClientError>;
 }
 
-struct Inner {
+pub(crate) struct Inner {
     session: RefCell<Session>,
     handlers: RefCell<Vec<Rc<RefCell<dyn Handler>>>>,
-    refusals: RefCell<[Option<(u16, orion_types::Error)>; REFUSALS]>,
+    refusals: RefCell<[Option<(u16, ClientError)>; REFUSALS]>,
     next_refusal: Cell<usize>,
+    /// Whether [`Client::node_key`] waits for the node's answer to Identify, and the answer.
+    pub(crate) asking: Cell<bool>,
+    pub(crate) identity: RefCell<Option<Vec<u8>>>,
 }
 
 /// One session, shared. Cloning gives another handle on the same one.
 #[derive(Clone)]
-pub struct Client(Rc<Inner>);
+pub struct Client(pub(crate) Rc<Inner>);
 
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -62,8 +65,10 @@ impl Client {
         Self(Rc::new(Inner {
             session: RefCell::new(session),
             handlers: RefCell::new(Vec::new()),
-            refusals: RefCell::new([None; REFUSALS]),
+            refusals: RefCell::new(std::array::from_fn(|_| None)),
             next_refusal: Cell::new(0),
+            asking: Cell::new(false),
+            identity: RefCell::new(None),
         }))
     }
 
@@ -126,9 +131,16 @@ impl Client {
             let at = self.0.next_refusal.get();
             self.0.refusals.borrow_mut()[at] = Some((
                 refusal.request_seq,
-                refusal.error().unwrap_or(orion_types::Error::Internal),
+                ClientError::refused(
+                    refusal.error().unwrap_or(orion_types::Error::Internal),
+                    refusal.detail,
+                ),
             ));
             self.0.next_refusal.set((at + 1) % REFUSALS);
+            return Ok(true);
+        }
+        if frame.kind() == kind::IDENTITY && self.0.asking.get() {
+            self.0.identity.replace(Some(frame.payload().to_vec()));
             return Ok(true);
         }
         let handlers = self.0.handlers.borrow();
@@ -152,13 +164,14 @@ impl Client {
         Ok(())
     }
 
-    /// The refusal of the request sent as `seq`, if one came. It is given once.
+    /// The refusal of the request sent as `seq`, if one came, as a
+    /// [`ClientError::Refused`] with the node's words. It is given once.
     #[must_use]
-    pub fn refusal(&self, seq: u16) -> Option<orion_types::Error> {
+    pub fn refusal(&self, seq: u16) -> Option<ClientError> {
         let mut refusals = self.0.refusals.borrow_mut();
         let slot = refusals
             .iter_mut()
-            .find(|slot| slot.is_some_and(|(refused, _)| refused == seq))?;
+            .find(|slot| slot.as_ref().is_some_and(|(refused, _)| *refused == seq))?;
         slot.take().map(|(_, error)| error)
     }
 
@@ -175,8 +188,8 @@ impl Client {
             if done() {
                 return Ok(());
             }
-            if let Some(error) = self.refusal(seq) {
-                return Err(ClientError::Refused(error));
+            if let Some(refused) = self.refusal(seq) {
+                return Err(refused);
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {

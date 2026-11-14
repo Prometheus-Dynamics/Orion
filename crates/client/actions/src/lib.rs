@@ -439,7 +439,7 @@ impl Run {
     pub fn poll(&mut self) -> Result<Option<Update>, ClientError> {
         self.client.drain()?;
         if let Some(error) = self.client.refusal(self.seq) {
-            return Err(ClientError::Refused(error));
+            return Err(error);
         }
         let mut state = self.state.borrow_mut();
         let Some(run) = state.runs.iter_mut().find(|run| run.call == self.call) else {

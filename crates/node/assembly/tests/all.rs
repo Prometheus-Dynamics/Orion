@@ -102,7 +102,10 @@ fn answered<T>(mut ask: impl FnMut() -> Result<T, ClientError>) -> T {
     loop {
         match ask() {
             Ok(value) => return value,
-            Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+            Err(ClientError::Refused {
+                error: Error::Unavailable,
+                ..
+            }) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(error) => panic!("{error}"),

@@ -140,6 +140,8 @@ pub(crate) enum Transport {
     Network {
         io: Io,
         seals: Option<(Seal, Seal)>,
+        /// The key the node proved it holds, on a signed session.
+        node_key: Option<[u8; 32]>,
         /// Bytes read and not yet a whole frame.
         partial: Vec<u8>,
     },
@@ -153,6 +155,8 @@ pub(crate) enum Transport {
         seals: Option<(Seal, Seal)>,
         /// Room for one sealed frame, on a signed link.
         sealed: Vec<u8>,
+        /// The key the board proved it holds, once the link is signed.
+        node_key: Option<[u8; 32]>,
     },
 }
 
@@ -249,14 +253,41 @@ impl Transport {
             len: 0,
             seals: None,
             sealed: Vec::new(),
+            node_key: None,
         }
     }
 
-    /// Seals every frame on this link from now on (`sign_link`).
-    pub(crate) fn seal_link(&mut self, from_board: Seal, to_board: Seal) {
-        if let Self::Link { seals, sealed, .. } = self {
+    /// Seals every frame on this link from now on (`sign_link`), with the board that proved
+    /// it holds `key`.
+    pub(crate) fn seal_link(&mut self, from_board: Seal, to_board: Seal, key: [u8; 32]) {
+        if let Self::Link {
+            seals,
+            sealed,
+            node_key,
+            ..
+        } = self
+        {
             *seals = Some((from_board, to_board));
             *sealed = vec![0; LINK_FRAME];
+            *node_key = Some(key);
+        }
+    }
+
+    /// Whether this session's frames are signed.
+    pub(crate) const fn signed(&self) -> bool {
+        match self {
+            Self::Network { seals, .. } | Self::Link { seals, .. } => seals.is_some(),
+            #[cfg(target_os = "linux")]
+            Self::Local(_) => false,
+        }
+    }
+
+    /// The key the node proved it holds when this session was signed.
+    pub(crate) const fn node_key(&self) -> Option<[u8; 32]> {
+        match self {
+            Self::Network { node_key, .. } | Self::Link { node_key, .. } => *node_key,
+            #[cfg(target_os = "linux")]
+            Self::Local(_) => None,
         }
     }
 
@@ -331,8 +362,15 @@ impl Transport {
                 if status[0] != STATUS_OK {
                     return Err(ClientError::Denied("the node refused this client's key"));
                 }
-                Some((Seal::new(to_client), Seal::new(to_server)))
+                Some((
+                    (Seal::new(to_client), Seal::new(to_server)),
+                    transcript.server_key(),
+                ))
             }
+        };
+        let (seals, node_key) = match seals {
+            Some((seals, key)) => (Some(seals), Some(key)),
+            None => (None, None),
         };
         stream.set_read_timeout(None)?;
         #[cfg(target_os = "linux")]
@@ -350,6 +388,7 @@ impl Transport {
         Ok(Self::Network {
             io,
             seals,
+            node_key,
             partial: Vec::with_capacity(4096),
         })
     }
@@ -468,7 +507,9 @@ impl Transport {
                 Err(RecvError::TooLarge { .. }) => Err(ClientError::TooLarge),
                 Err(_) => Err(ClientError::Protocol("a frame arrived damaged")),
             },
-            Self::Network { io, seals, partial } => {
+            Self::Network {
+                io, seals, partial, ..
+            } => {
                 let tag = if seals.is_some() { TAG_LEN } else { 0 };
                 loop {
                     if partial.len() >= 4 {

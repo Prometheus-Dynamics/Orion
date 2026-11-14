@@ -28,7 +28,7 @@ use orion_types::{Error, HlcTimestamp, NodeName, ResourceName};
 use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, Decode};
 
-pub use contest::{Contest, QUIET_MS, Refused, Taken};
+pub use contest::{Caller, Contest, QUIET_MS, Refused, Taken};
 
 /// A resource, as it is listed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -303,8 +303,10 @@ impl Resources {
     /// [`Error::Malformed`] for a record that is not what its class says or is under another
     /// name than its own, [`Error::Denied`] for a resource on another node or one that
     /// another program provides, what [`bind`] refuses a lease for, and
-    /// [`Error::LeaseLost`] for a lease this session lost while quiet. A refusal as busy says
-    /// who holds the lease and since when.
+    /// [`Error::LeaseLost`] for a lease this session lost while quiet, and [`Error::Denied`]
+    /// for freeing a lease held by another: only the session that wrote it, a caller whose
+    /// principal is its holder, or root frees it. A refusal as busy says who holds the lease
+    /// and since when.
     ///
     /// `Ok(Some)`: the write takes a lease from a quiet holder. Call [`Resources::taken`] once
     /// it is made. `now_ms` is node logic's clock, and `in_flight` says whether a session has a
@@ -312,14 +314,28 @@ impl Resources {
     pub fn check(
         &self,
         store: &Store,
-        session: u32,
+        caller: &Caller<'_>,
         entry: &RecordEntry<'_>,
         (wall_ms, now_ms): (u64, u64),
         in_flight: &dyn Fn(u32, &[String]) -> bool,
     ) -> Result<Option<Taken>, Refused> {
+        let session = caller.session;
         self.check_entry(store, session, entry, wall_ms)?;
-        if entry.class != RecordClass::Lease || entry.deleted {
+        if entry.class != RecordClass::Lease {
             return Ok(None);
+        }
+        if entry.deleted {
+            // A lease that has ended, or is not there, holds nothing: anyone may clear it.
+            return match holder(store, entry.key, wall_ms) {
+                Some(held) if !self.contest.may_free(caller, entry.key, &held) => Err(Refused {
+                    error: Error::Denied,
+                    words: Some(format!(
+                        "{} is held by {held}: only its holder or root frees it",
+                        entry.key
+                    )),
+                }),
+                _ => Ok(None),
+            };
         }
         let lease = LeaseRecord::decode(entry.value.0)?;
         match may_hold(store, entry.key, lease.holder, wall_ms) {

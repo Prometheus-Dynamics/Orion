@@ -6,7 +6,7 @@ pub use orion_msg_records::{
     Label, LeaseRecord, Offered, RecordClass, RecordEntry, ResourceDescription, ResourceRecord,
     ResourceState,
 };
-pub use orion_resources::{Resources, find, holder};
+pub use orion_resources::{Caller, Resources, find, holder};
 pub use orion_store::{Store, StoreConfig};
 pub use orion_types::{Error, HlcTimestamp, NodeName, ResourceName};
 pub use orion_wire::body::encode_fields;
@@ -100,7 +100,21 @@ impl Bench {
     }
 
     /// Writes as node logic does: checked first, then stored, then noted.
+    /// As a program of user 1000.
     pub fn write(&mut self, session: u32, entry: &RecordEntry<'_>) -> Result<(), Error> {
+        self.write_as(
+            &Caller {
+                session,
+                principal: "local:1000",
+                root: false,
+            },
+            entry,
+        )
+    }
+
+    /// Writes as `caller`.
+    pub fn write_as(&mut self, caller: &Caller<'_>, entry: &RecordEntry<'_>) -> Result<(), Error> {
+        let session = caller.session;
         let running = &self.running;
         let in_flight = |asker: u32, names: &[String]| {
             running
@@ -109,7 +123,7 @@ impl Bench {
         };
         let taken = self
             .resources
-            .check(&self.store, session, entry, (NOW, self.now), &in_flight)
+            .check(&self.store, caller, entry, (NOW, self.now), &in_flight)
             .map_err(|refused| {
                 self.said = refused.words;
                 refused.error

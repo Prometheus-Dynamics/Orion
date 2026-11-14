@@ -77,8 +77,10 @@ errors! {
     /// The node restarted a moment ago and what was asked for was there before it: the
     /// program that serves it has not come back yet. Asking again shortly may find it.
     Restoring = 20, "not back yet after a restart: ask again";
+    /// Shared memory offered is laid out as another build lays it out: its publisher must be
+    /// rebuilt.
+    Layout = 21, "shared memory is of another layout";
     /// A lease this session held was taken by another claimant while the session was quiet.
-    /// Code 21 is kept for the layout refusal.
     LeaseLost = 22, "lease lost while quiet";
 }
 
@@ -112,6 +114,7 @@ mod tests {
         assert_eq!(Error::Denied.code(), 10);
         assert_eq!(Error::OutOfOrder.code(), 17);
         assert_eq!(Error::Restoring.code(), 20);
+        assert_eq!(Error::Layout.code(), 21);
         assert_eq!(Error::LeaseLost.code(), 22);
     }
 }

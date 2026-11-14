@@ -412,7 +412,10 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
     let mut run = loop {
         let mut run = side.run(&call(b"40", false)).expect("run");
         match run.wait(Duration::from_millis(100)) {
-            Err(ClientError::Refused(Error::NotFound)) => {
+            Err(ClientError::Refused {
+                error: Error::NotFound,
+                ..
+            }) => {
                 assert!(
                     waiting.elapsed() < Duration::from_secs(20),
                     "the action was never registered"
@@ -514,7 +517,13 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
         eprintln!("running as root: the refusal of a root-only action is not tested here");
     } else {
         assert!(
-            matches!(refused, Err(ClientError::Refused(Error::Denied))),
+            matches!(
+                refused,
+                Err(ClientError::Refused {
+                    error: Error::Denied,
+                    ..
+                })
+            ),
             "{refused:?}"
         );
     }
@@ -527,7 +536,10 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
         .expect("run");
     assert!(matches!(
         missing.wait(Duration::from_secs(2)),
-        Err(ClientError::Refused(Error::NotFound))
+        Err(ClientError::Refused {
+            error: Error::NotFound,
+            ..
+        })
     ));
     // A name that is taken.
     let taken = side.register(
@@ -539,7 +551,13 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
         Policy::new(Admits::ANYONE),
     );
     assert!(
-        matches!(taken, Err(ClientError::Refused(Error::AlreadyExists))),
+        matches!(
+            taken,
+            Err(ClientError::Refused {
+                error: Error::AlreadyExists,
+                ..
+            })
+        ),
         "{taken:?}"
     );
 

@@ -15,7 +15,6 @@ homepage = "https://github.com/Prometheus-Dynamics/Orion"
 # The shared-memory ring family, hosted with the device library (J2).
 shm-sample-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
 shm-ring = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
-shm-ring-latest = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
 shm-ring-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
 shm-ring-doorbell = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
 shm-ring-buffers = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }

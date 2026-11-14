@@ -107,7 +107,7 @@ impl From<Error> for Failed {
             }
             _ if error.is_lost() => ORION_E_LOST,
             Error::Client(
-                ClientError::Refused(_)
+                ClientError::Refused { .. }
                 | ClientError::Rejected(_)
                 | ClientError::Denied(_)
                 | ClientError::OtherKey { .. }

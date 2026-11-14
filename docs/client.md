@@ -81,6 +81,20 @@ address is pinned to (`#<key>`) is refused with `ClientError::OtherKey { asked, 
 keys, so a tool can show the two fingerprints and let a person decide whether the board was
 replaced or is not the one they meant.
 
+**Which node, and whether signed.** `Welcomed::signed` says whether the session's frames are
+signed. `Welcomed::node_key` is the key the node proved: set at connect on a signed session, so
+a tool that connected with no pin learns the key to pin. On a plain session it is `None` until
+asked: `Session::node_key()`, `Client::node_key()` or `Orion::node_key()` asks the node once
+(`Identify`, with a fresh nonce), checks the signed answer, and keeps the key; an answer not
+signed by the key it names is `ClientError::Denied`. `Orion::node()` keeps the key it proves too.
+The hello answer is signed whenever the asker gives a nonce, with security on or off.
+
+**Refusals carry the node's words.** `ClientError::Refused { error, detail }`: the code, and the
+node's words verbatim ("cam.front is held by workload:detector since ... ms: its holder is
+answering"), or the code's own name when it sent none, never empty. `ClientError` and
+`Welcomed` are `#[non_exhaustive]`: a `match` on `ClientError` needs a `_` arm, and `Welcomed` is
+read, not built.
+
 **A node that is not this client's wire, or not its level.** A node of another wire revision is
 turned away at hello with `ClientError::Revision { node, client }`, whichever side says it first.
 A node at the same revision names its additive level in `Welcomed::level` (0 if it names none).

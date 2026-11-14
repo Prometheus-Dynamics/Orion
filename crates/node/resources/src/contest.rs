@@ -45,6 +45,17 @@ impl From<Error> for Refused {
     }
 }
 
+/// Who writes: the session, and the principal behind it.
+#[derive(Clone, Copy, Debug)]
+pub struct Caller<'a> {
+    /// The session.
+    pub session: u32,
+    /// As the audit log names it: `local:<uid>`, `operator:<key>` and so on.
+    pub principal: &'a str,
+    /// Whether it is root on this board.
+    pub root: bool,
+}
+
 /// A lease a write takes from a quiet holder, to be made so once the write is made.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Taken {
@@ -139,6 +150,14 @@ impl Contest {
         self.writers.clear();
         self.quiet.clear();
         self.lost.clear();
+    }
+
+    /// Whether `caller` may free the lease of `resource`, which `holder` holds: only the
+    /// session that wrote it, a caller whose principal is the holder, or root.
+    pub(crate) fn may_free(&self, caller: &Caller<'_>, resource: &str, holder: &str) -> bool {
+        caller.root
+            || caller.principal == holder
+            || self.writers.get(resource) == Some(&caller.session)
     }
 
     /// The words for `session`, if the lease of `resource` was taken from it and its taker

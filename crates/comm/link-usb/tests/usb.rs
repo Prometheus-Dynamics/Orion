@@ -71,11 +71,17 @@ fn board() -> Board {
 struct Owner {
     connection: MemConnection,
     seq: u16,
+    /// The words of the last refusal.
+    detail: String,
 }
 
 impl Owner {
     async fn open(connection: MemConnection) -> Self {
-        let mut owner = Self { connection, seq: 0 };
+        let mut owner = Self {
+            connection,
+            seq: 0,
+            detail: String::new(),
+        };
         let hello = Hello {
             name: "hardware",
             roles: Roles::CLIENT,
@@ -105,7 +111,9 @@ impl Owner {
             match view.kind() {
                 kind::PING | kind::PONG => {}
                 kind::REFUSAL => {
-                    return Err(Refusal::decode(view.payload()).expect("refusal").error());
+                    let refusal = Refusal::decode(view.payload()).expect("refusal");
+                    self.detail = refusal.detail.to_owned();
+                    return Err(refusal.error());
                 }
                 kind::LINK_TAKEN => {
                     assert_eq!(
@@ -415,6 +423,8 @@ fn only_a_program_on_the_board_hands_over_a_device_and_only_a_whole_one() {
                 .await,
             Err(Some(Error::NotFound))
         );
+        // Told which links there are, so a misspelt name is plain.
+        assert_eq!(owner.detail, "no USB link named usb9 here; known: usb0");
         // The wrong number of descriptors for what they are said to be.
         let (_device, handles) = Device::endpoints();
         assert_eq!(
@@ -491,6 +501,7 @@ fn with_no_list_of_links_root_may_hand_over_a_link_by_any_name() {
                 .await,
             Err(Some(Error::NotFound))
         );
+        assert_eq!(someone.detail, "no USB link named gadget here; known: none");
         assert!(made.borrow().is_empty());
 
         // Root may: the link is made, served, and runs.

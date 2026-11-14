@@ -390,7 +390,7 @@ impl Watch {
             (record, watch.seq, catch_up)
         };
         if let Some(error) = self.client.refusal(seq) {
-            return Err(ClientError::Refused(error));
+            return Err(error);
         }
         if let Some((class, prefix, after)) = catch_up {
             let seq = self.client.send(&WatchRequest {

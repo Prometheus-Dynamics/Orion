@@ -67,7 +67,7 @@ impl Via<'_, '_> {
     fn refused(&self, seq: u16) -> Option<orion_types::Error> {
         match self {
             Self::Cx(_) => None,
-            Self::Client(client) => client.refusal(seq),
+            Self::Client(client) => client.refusal(seq).and_then(|refused| refused.refusal()),
         }
     }
 }

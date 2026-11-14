@@ -17,9 +17,10 @@
 //! the fact is gone from the document; Orion's own part is unchanged.
 //!
 //! **Orion's own facts.** Two names are Orion's and a program's fact by either name is left
-//! out: `state`, what the board is doing (`running`, `recovery`, `flasher` or `updating`), and,
-//! in recovery, `recovery_why`, why. Both are text, and signed with the rest, so a tool knows a
-//! board in recovery from one that is up before it asks for anything else.
+//! out: `state`, what the board is doing (`running`, `recovery` or `flasher`), and, in
+//! recovery, `recovery_why`, why. Both are text, and signed with the rest, so a tool knows a
+//! board in recovery from one that is up before it asks for anything else. The broker refuses a
+//! program that declares either topic ([`orion_broker::NODE_FACTS`]).
 //!
 //! **Always answers.** This lives in the comm core and needs nothing else to be running, and
 //! in recovery too.
@@ -67,8 +68,6 @@ pub enum BoardState {
     Recovery(String),
     /// A flasher image: up to be written to, not to run anything (`hello.state = flasher`).
     Flasher,
-    /// Being updated: what runs now is about to be replaced.
-    Updating,
 }
 
 impl BoardState {
@@ -79,7 +78,6 @@ impl BoardState {
             Self::Running => "running",
             Self::Recovery(_) => "recovery",
             Self::Flasher => "flasher",
-            Self::Updating => "updating",
         }
     }
 }

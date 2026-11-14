@@ -297,7 +297,21 @@ impl Orion {
     ///
     /// If the answer does not check, or the connection broke.
     pub fn node(&self) -> Result<node::Node, Error> {
-        Ok(node::node(&self.client, &self.node)?)
+        let node = node::node(&self.client, &self.node)?;
+        // The answer proved the key: kept, so `node_key` and `welcomed` have it.
+        let key = node.public_key;
+        self.client.session(|session| session.node_proved(key));
+        Ok(node)
+    }
+
+    /// The key the node proves it holds: the one proved at connect on a signed session,
+    /// otherwise asked once, checked and kept. See [`orion_connect::Session::node_key`].
+    ///
+    /// # Errors
+    ///
+    /// If the answer is not signed by the key it names, or the connection broke.
+    pub fn node_key(&self) -> Result<[u8; 32], Error> {
+        Ok(self.client.node_key()?)
     }
 
     /// How the board's clock compares with this program's.

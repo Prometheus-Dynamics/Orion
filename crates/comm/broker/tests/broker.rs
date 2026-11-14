@@ -691,3 +691,63 @@ fn a_topic_id_from_before_a_restart_is_told_as_that_for_a_while_after_the_start(
         assert_eq!(error, Some(Error::NotFound));
     });
 }
+
+/// A ring laid out as an older build lays it out: a ring of this shape with its layout word set
+/// to 1.
+fn older_layout_ring() -> std::os::fd::OwnedFd {
+    use std::os::unix::fs::FileExt;
+    let ring = shm_ring::Ring::create(&shm_ring::Spec {
+        fields: FIELDS.len() as u32,
+        history: 8,
+        max_payload: 64,
+        expiry_ms: 0,
+    })
+    .expect("ring");
+    let fd = ring.write_fd().expect("fd");
+    let file = std::fs::File::from(fd.try_clone().expect("dup"));
+    // Word 1 is the layout.
+    file.write_at(&1_u64.to_le_bytes(), 8).expect("write");
+    fd
+}
+
+#[test]
+fn a_ring_of_another_layout_is_refused_with_both_layouts_and_what_to_do() {
+    run(async {
+        let board = board(Security::Off, BrokerConfig::default());
+        let level = orion_server::LAYOUT_LEVEL;
+        let mut newer =
+            Client::open_at(Wire::Mem(board.connector.connect(USER)), "newer", level).await;
+        let declare = Client::declaration("cpu.temp", &FIELDS, 8);
+        let seq = newer.send(&declare, &[older_layout_ring()]).await;
+        match newer.next().await {
+            Event::Refused {
+                request_seq,
+                error,
+                detail,
+            } if request_seq == seq => {
+                assert_eq!(error, Some(Error::Layout));
+                assert_eq!(
+                    detail,
+                    format!(
+                        "this ring is layout 1; this build reads layout 2: {}",
+                        orion_broker::REBUILD
+                    )
+                );
+            }
+            _ => panic!("expected a refusal"),
+        }
+        // A client from before the code is told malformed, in its own words.
+        let mut older =
+            Client::open_at(Wire::Mem(board.connector.connect(USER)), "older", level - 1).await;
+        let seq = older.send(&declare, &[older_layout_ring()]).await;
+        assert!(matches!(
+            older.next().await,
+            Event::Refused { request_seq, error: Some(Error::Malformed), detail }
+                if request_seq == seq && detail == Error::Malformed.as_str()
+        ));
+        // Nothing was declared, and the name is free for a ring that reads right.
+        assert_eq!(board.topics.borrow().len(), 0);
+        let mut publisher = board.client("sensor").await;
+        publisher.declare("cpu.temp", 8).await;
+    });
+}

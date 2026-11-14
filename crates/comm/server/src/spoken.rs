@@ -10,6 +10,8 @@ use orion_types::Error;
 pub const RESTORING_LEVEL: u16 = 2;
 /// The level from which a session is told [`Error::LeaseLost`].
 pub const LEASE_LOST_LEVEL: u16 = 2;
+/// The level from which a session is told [`Error::Layout`].
+pub const LAYOUT_LEVEL: u16 = 2;
 
 /// `error` as a session at `level` is told it.
 #[must_use]
@@ -19,6 +21,8 @@ pub const fn spoken(error: Error, level: u16) -> Error {
         Error::Restoring if level < RESTORING_LEVEL => Error::NotFound,
         // Before the level, a lease another holds was only ever busy.
         Error::LeaseLost if level < LEASE_LOST_LEVEL => Error::Busy,
+        // Before the level, a ring that does not read right was only ever malformed.
+        Error::Layout if level < LAYOUT_LEVEL => Error::Malformed,
         other => other,
     }
 }
@@ -41,7 +45,7 @@ mod tests {
         assert_eq!(spoken(Error::Restoring, 0), Error::NotFound);
         // Nothing else changes.
         for error in Error::ALL {
-            if !matches!(error, Error::Restoring | Error::LeaseLost) {
+            if !matches!(error, Error::Restoring | Error::LeaseLost | Error::Layout) {
                 assert_eq!(spoken(*error, 0), *error);
             }
         }
@@ -55,8 +59,16 @@ mod tests {
     }
 
     #[test]
+    fn another_layout_is_told_from_its_level_and_malformed_below_it() {
+        assert_eq!(spoken(Error::Layout, LAYOUT_LEVEL), Error::Layout);
+        assert_eq!(spoken(Error::Layout, LAYOUT_LEVEL - 1), Error::Malformed);
+        assert_eq!(spoken(Error::Layout, 0), Error::Malformed);
+    }
+
+    #[test]
     fn the_level_is_one_this_build_speaks() {
         const { assert!(RESTORING_LEVEL <= orion_wire::INTERFACE_LEVEL) }
         const { assert!(LEASE_LOST_LEVEL <= orion_wire::INTERFACE_LEVEL) }
+        const { assert!(LAYOUT_LEVEL <= orion_wire::INTERFACE_LEVEL) }
     }
 }

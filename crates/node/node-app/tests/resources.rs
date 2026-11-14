@@ -100,7 +100,10 @@ fn provide(orion: &Orion) -> Resource {
         match published {
             Ok(resource) => return resource,
             // Node logic is not there yet.
-            Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+            Err(ClientError::Refused {
+                error: Error::Unavailable,
+                ..
+            }) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(error) => panic!("provide: {error}"),
@@ -181,7 +184,9 @@ fn a_device_from_a_provider_is_listed_and_bound() {
         .expect("bind");
     let other = lease("workload:recorder");
     match records.put(&[put(RecordClass::Lease, &other)]) {
-        Err(ClientError::Refused(Error::Busy)) => {}
+        Err(ClientError::Refused {
+            error: Error::Busy, ..
+        }) => {}
         result => panic!("expected busy, got {result:?}"),
     }
     let leases = records.get(RecordClass::Lease, "").expect("leases");
@@ -201,14 +206,20 @@ fn a_device_from_a_provider_is_listed_and_bound() {
         .records()
         .put(&[put(RecordClass::Resource, &theirs[0].value)])
     {
-        Err(ClientError::Refused(Error::Denied)) => {}
+        Err(ClientError::Refused {
+            error: Error::Denied,
+            ..
+        }) => {}
         result => panic!("expected denied, got {result:?}"),
     }
     match impostor.records().put(&[RecordEntry {
         deleted: true,
         ..put(RecordClass::Resource, &[])
     }]) {
-        Err(ClientError::Refused(Error::Denied)) => {}
+        Err(ClientError::Refused {
+            error: Error::Denied,
+            ..
+        }) => {}
         result => panic!("expected denied, got {result:?}"),
     }
 

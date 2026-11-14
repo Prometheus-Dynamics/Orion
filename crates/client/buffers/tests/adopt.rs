@@ -100,7 +100,10 @@ fn a_program_s_own_ring_and_pool_become_a_buffer_topic() {
     assert!(
         matches!(
             wrong,
-            Err(TopicError::Client(ClientError::Refused(Error::Malformed)))
+            Err(TopicError::Client(ClientError::Refused {
+                error: Error::Malformed,
+                ..
+            }))
         ),
         "{wrong:?}"
     );
@@ -255,9 +258,10 @@ fn a_program_s_own_value_ring_becomes_a_topic() {
     assert!(
         matches!(
             refused,
-            orion_topics::TopicError::Client(orion_connect::ClientError::Refused(
-                orion_types::Error::Malformed
-            ))
+            orion_topics::TopicError::Client(orion_connect::ClientError::Refused {
+                error: orion_types::Error::Malformed,
+                ..
+            })
         ),
         "{refused}"
     );

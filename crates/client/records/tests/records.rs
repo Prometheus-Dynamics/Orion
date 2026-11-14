@@ -328,7 +328,10 @@ fn records_are_written_read_and_gone() {
     };
     assert!(matches!(
         records.put(&[lease]),
-        Err(ClientError::Refused(orion_types::Error::Denied))
+        Err(ClientError::Refused {
+            error: orion_types::Error::Denied,
+            ..
+        })
     ));
     assert_eq!(
         records
@@ -455,7 +458,13 @@ fn a_watch_delivers_every_change_in_order() {
         }
     };
     assert!(
-        matches!(error, ClientError::Refused(orion_types::Error::Denied)),
+        matches!(
+            error,
+            ClientError::Refused {
+                error: orion_types::Error::Denied,
+                ..
+            }
+        ),
         "{error}"
     );
 }

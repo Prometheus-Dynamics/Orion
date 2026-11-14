@@ -90,7 +90,10 @@ fn provide(orion: &Orion) -> Resource {
         match acted.and_then(|()| describing.publish(ResourceState::Ready)) {
             Ok(resource) => return resource,
             // Node logic is not there yet.
-            Err(ClientError::Refused(Error::Unavailable)) if Instant::now() < deadline => {
+            Err(ClientError::Refused {
+                error: Error::Unavailable,
+                ..
+            }) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(error) => panic!("provide: {error}"),
@@ -238,4 +241,42 @@ fn a_program_that_stops_answering_loses_its_lease_to_a_claimant_and_is_told_by_w
     );
     // The recorder holds it, and renews it as its own.
     assert_eq!(claim(&mut recorder, "workload:recorder"), Answer::Done);
+
+    // Another program may not free it, and is told who holds it (root may, so not when the
+    // test runs as root). The recorder frees its own.
+    let mut bystander = connect(&address, "bystander");
+    if !as_root() {
+        assert_eq!(
+            free(&mut bystander),
+            Answer::Refused(
+                Error::Denied.code(),
+                "cam.front is held by workload:recorder: only its holder or root frees it"
+                    .to_owned()
+            )
+        );
+    }
+    assert_eq!(free(&mut recorder), Answer::Done);
+}
+
+/// Whether this test runs as root: `/proc/self` belongs to the process's user.
+fn as_root() -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata("/proc/self").is_ok_and(|meta| meta.uid() == 0)
+}
+
+/// Deletes the camera's lease.
+fn free(session: &mut Session) -> Answer {
+    let entries = [RecordEntry {
+        class: RecordClass::Lease,
+        key: "cam.front",
+        stamp: HlcTimestamp::ZERO,
+        deleted: true,
+        value: Bytes(&[]),
+    }];
+    let seq = session
+        .send(&Put {
+            records: List::new(&entries),
+        })
+        .expect("send");
+    answer(session, seq)
 }

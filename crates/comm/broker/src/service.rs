@@ -15,7 +15,7 @@ use orion_types::NodeName;
 use orion_wire::{Bytes, FrameView, body, kind};
 use shm_ring::{Ring, Spec};
 
-use crate::topics::{BrokerConfig, Subscription, Topic, TopicId, Topics};
+use crate::topics::{BrokerConfig, Subscription, Topic, TopicId, Topics, adopt};
 
 /// The broker. Add it to the server; share [`Broker::topics`] with what builds on it.
 #[derive(Debug)]
@@ -137,6 +137,15 @@ impl Service for Broker {
 /// How long after the comm core starts a topic number it never gave out is taken for one from
 /// before the start: what a program that kept its numbers across the restart would send.
 pub const RESTORE_MS: u64 = 2_000;
+
+/// The topics that carry the node's own hello facts (`hello.state`, `hello.recovery_why`). The
+/// hello document makes them itself, and a program that declares one is refused.
+pub const NODE_FACTS: [&str; 2] = ["hello.state", "hello.recovery_why"];
+
+/// The words a program that declares one of [`NODE_FACTS`] is refused with.
+fn node_fact(topic: &str) -> String {
+    format!("{topic} is the node's own hello fact: a program cannot publish it")
+}
 
 /// What a program is told of a topic number from before the comm core started.
 pub const STALE_ID: &str = "topic ids do not survive a restart: this one is from before it. \
@@ -316,6 +325,9 @@ fn declare(
         max_payload: declare.max_payload,
         expiry_ms: declare.expiry_ms,
     };
+    if NODE_FACTS.contains(&declare.topic.as_str()) {
+        return cx.refuse(Error::Denied, &node_fact(declare.topic.as_str()));
+    }
     let from = cx.from();
     let shared = shares(cx);
     let id = topics.find_or_add(&declare.topic)?;
@@ -335,9 +347,21 @@ fn declare(
                 .as_ref()
                 .is_some_and(|ring| same_memory(offered, ring))
         });
-    if !resumed && let Err(error) = topics.set_ring(id, &spec, offered) {
-        topics.remove_if_unused(id);
-        return Err(error);
+    if !resumed {
+        let offered = match offered.map(|fd| adopt(fd, &spec)).transpose() {
+            Ok(ring) => ring,
+            Err((error, words)) => {
+                topics.remove_if_unused(id);
+                return match words {
+                    Some(words) => cx.refuse(error, &words),
+                    None => Err(error),
+                };
+            }
+        };
+        if let Err(error) = topics.set_ring(id, &spec, offered) {
+            topics.remove_if_unused(id);
+            return Err(error);
+        }
     }
     let topic = topics.get_mut(id).ok_or(Error::NotFound)?;
     topic.declare.clear();
