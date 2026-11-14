@@ -20,6 +20,8 @@
 - [node.md](node.md): node logic: records, workloads, actions, files and resources.
 - [wire.md](wire.md): the one wire every carrier speaks.
 - [ring.md](ring.md): the topic ring in shared memory.
+- [lock.md](lock.md): the lock revision: what changed since the last one everyone held, the
+  levels, and the known limits.
 
 ## Why it is this way
 
