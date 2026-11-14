@@ -109,7 +109,12 @@ impl Gateway {
             ..ServerConfig::default()
         })
         .await
-        .map_err(std::io::Error::other)?;
+        // The socket's own error, so a caller can tell an address that is taken from
+        // anything else.
+        .map_err(|error| match error {
+            orion_nt4::Error::Io(error) => error,
+            other => std::io::Error::other(other),
+        })?;
         let local_addr = server.local_addr();
         let host = server.handle();
         let mut events = host.events();

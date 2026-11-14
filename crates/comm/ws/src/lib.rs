@@ -27,7 +27,9 @@ use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use orion_server::{Carrier, Connection, FdSet, FrameRead, FrameWrite, Principal, Roles};
+use orion_server::{
+    Carrier, Connection, FdSet, FrameRead, FrameWrite, Principal, Retry, Roles, open_retrying,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -73,9 +75,16 @@ impl Default for WsOptions {
 /// subprotocol.
 #[derive(Debug)]
 pub struct WsListener {
-    listener: TcpListener,
+    listener: Socket,
     options: WsOptions,
     protocols: BTreeMap<String, mpsc::Sender<WsSocket>>,
+}
+
+/// The listening socket: open, or to be opened when the listener runs.
+#[derive(Debug)]
+enum Socket {
+    Open(TcpListener),
+    Later(SocketAddr, Retry),
 }
 
 /// The connections of one subprotocol, as they are made.
@@ -160,19 +169,37 @@ impl WsListener {
     /// If the address can't be bound.
     pub async fn bind(addr: SocketAddr, options: WsOptions) -> io::Result<Self> {
         Ok(Self {
-            listener: TcpListener::bind(addr).await?,
+            listener: Socket::Open(TcpListener::bind(addr).await?),
             options,
             protocols: BTreeMap::new(),
         })
+    }
+
+    /// A listener on `addr` that opens its socket when it runs, trying again as `retry` says
+    /// for as long as it cannot: for an address that is taken, or not on this machine yet.
+    /// Protocols are said and carriers made on it as on one that is open.
+    #[must_use]
+    pub fn opening(addr: SocketAddr, options: WsOptions, retry: Retry) -> Self {
+        Self {
+            listener: Socket::Later(addr, retry),
+            options,
+            protocols: BTreeMap::new(),
+        }
     }
 
     /// The address it listens on.
     ///
     /// # Errors
     ///
-    /// If the socket can't say.
+    /// If the socket can't say, or is not open yet.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.listener.local_addr()
+        match &self.listener {
+            Socket::Open(listener) => listener.local_addr(),
+            Socket::Later(..) => Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the WebSocket way in is not open yet",
+            )),
+        }
     }
 
     /// Says who takes the connections that speak `protocol`. Call it before
@@ -191,6 +218,15 @@ impl WsListener {
             options,
             protocols,
         } = self;
+        let listener = match listener {
+            Socket::Open(listener) => listener,
+            Socket::Later(addr, retry) => {
+                open_retrying("the WebSocket way in", &addr, retry, async || {
+                    TcpListener::bind(addr).await
+                })
+                .await
+            }
+        };
         let (options, protocols) = (std::rc::Rc::new(options), std::rc::Rc::new(protocols));
         loop {
             let (stream, from) = match listener.accept().await {

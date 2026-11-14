@@ -277,11 +277,15 @@ pub struct Found {
     pub actions: Vec<String>,
     /// Whatever else its provider said about it.
     pub labels: Vec<(String, String)>,
+    /// Why what its provider wrote about it does not decode, if it does not: then its
+    /// topics, actions and labels are empty because they could not be read, not because it
+    /// has none. `None` for a resource with no description, and for one that decodes.
+    pub broken: Option<String>,
 }
 
 /// Reads a resource's record. `None` if it is not one, or is one that is gone. A resource
 /// whose provider wrote nothing this build understands about what it offers is still found,
-/// with no topics and no actions.
+/// with no topics and no actions, and [`Found::broken`] saying why.
 #[must_use]
 pub fn describe(record: &Record) -> Option<Found> {
     if record.class != RecordClass::Resource || record.deleted {
@@ -294,7 +298,10 @@ pub fn describe(record: &Record) -> Option<Found> {
             .map(|offered| offered.name.to_owned())
             .collect()
     };
+    let mut broken = None;
     let (topics, actions, labels) = match ResourceDescription::decode(resource.attributes.0) {
+        // Nothing written is no description, not a broken one.
+        _ if resource.attributes.0.is_empty() => (Vec::new(), Vec::new(), Vec::new()),
         Ok(description) => (
             names(description.topics),
             names(description.actions),
@@ -305,7 +312,10 @@ pub fn describe(record: &Record) -> Option<Found> {
                 .map(|label| (label.key.to_owned(), label.value.to_owned()))
                 .collect(),
         ),
-        Err(_) => (Vec::new(), Vec::new(), Vec::new()),
+        Err(error) => {
+            broken = Some(format!("description does not decode: {error}"));
+            (Vec::new(), Vec::new(), Vec::new())
+        }
     };
     Some(Found {
         name: resource.name.to_string(),
@@ -315,6 +325,7 @@ pub fn describe(record: &Record) -> Option<Found> {
         topics,
         actions,
         labels,
+        broken,
     })
 }
 
@@ -330,4 +341,56 @@ pub fn resources(records: &Records, prefix: &str) -> Result<Vec<Found>, ClientEr
         .iter()
         .filter_map(describe)
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orion_msg_records::ResourceState;
+
+    fn record(attributes: &[u8]) -> Record {
+        let resource = ResourceRecord {
+            name: "arm".parse().expect("name"),
+            kind: "servo",
+            node: "board".parse().expect("node"),
+            state: ResourceState::Ready,
+            attributes: Bytes(attributes),
+        };
+        let mut value = vec![0_u8; 512];
+        let len = encode_fields(&resource, &mut value).expect("encode");
+        value.truncate(len);
+        Record {
+            class: RecordClass::Resource,
+            key: "arm".into(),
+            stamp: HlcTimestamp::default(),
+            deleted: false,
+            value,
+        }
+    }
+
+    #[test]
+    fn a_description_that_does_not_decode_is_told_from_none() {
+        let none = describe(&record(&[])).expect("found");
+        assert_eq!(none.broken, None);
+        assert!(none.topics.is_empty() && none.labels.is_empty());
+
+        let broken = describe(&record(&[0xff; 7])).expect("found");
+        let why = broken.broken.as_deref().expect("broken");
+        assert!(why.starts_with("description does not decode: "), "{why}");
+        assert!(broken.topics.is_empty() && broken.actions.is_empty());
+
+        let mut attributes = vec![0_u8; 256];
+        let description = ResourceDescription {
+            topics: List::new(&[]),
+            actions: List::new(&[]),
+            labels: List::new(&[Label {
+                key: "bus",
+                value: "can0",
+            }]),
+        };
+        let len = encode_fields(&description, &mut attributes).expect("encode");
+        let read = describe(&record(&attributes[..len])).expect("found");
+        assert_eq!(read.broken, None);
+        assert_eq!(read.labels, [("bus".to_owned(), "can0".to_owned())]);
+    }
 }

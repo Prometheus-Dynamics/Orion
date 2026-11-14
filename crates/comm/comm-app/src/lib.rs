@@ -27,6 +27,8 @@ mod settings;
 mod state_dirs;
 #[cfg(feature = "systemd")]
 pub mod systemd;
+#[cfg(any(feature = "ssh", feature = "nt4"))]
+mod ways;
 
 use std::cell::RefCell;
 use std::fmt;
@@ -326,19 +328,20 @@ impl CommCore {
                     peer_addr = carrier.local_addr().ok();
                     serve(&mut tasks, Carriers::Tcp(carrier));
                 }
-                // A way in that cannot open is not a comm core that cannot start: it tries
-                // again, and the rest runs meanwhile. It is announced at the address it was
-                // given.
-                Err(_) => {
+                // A way in that cannot open yet is not a comm core that cannot start: it
+                // tries again, and the rest runs meanwhile. It is announced at the address it
+                // was given.
+                Err(error) if orion_server::may_clear(&error) => {
                     peer_addr = Some(addr);
                     let (comm, options, retry) =
-                        (comm.clone(), tcp_options.clone(), settings.peer_retry);
+                        (comm.clone(), tcp_options.clone(), settings.listen_retry);
                     tasks.push(tokio::task::spawn_local(async move {
                         let carrier =
                             orion_tcp::TcpCarrier::listen_retrying(&listen, options, retry).await;
                         comm.serve(Carriers::Tcp(carrier)).await;
                     }));
                 }
+                Err(error) => return Err(failed(format!("peer.listen {listen}"), error)),
             }
         }
         #[cfg(not(feature = "tcp"))]
@@ -366,10 +369,16 @@ impl CommCore {
                 handshake: Duration::from_millis(u64::from(settings.limits.hello_ms)),
                 send_buffer: settings.ws_send_buffer,
             };
-            let mut listener = orion_ws::WsListener::bind(listen, options)
-                .await
-                .map_err(|error| failed(format!("ws.listen {listen}"), error))?;
-            ws_addr = listener.local_addr().ok();
+            // Taken, or not on this machine yet: it opens when it can, announced meanwhile at
+            // the address it was given. Protocols are taken from it as from one that is open.
+            let mut listener = match orion_ws::WsListener::bind(listen, options.clone()).await {
+                Ok(listener) => listener,
+                Err(error) if orion_server::may_clear(&error) => {
+                    orion_ws::WsListener::opening(listen, options, settings.listen_retry)
+                }
+                Err(error) => return Err(failed(format!("ws.listen {listen}"), error)),
+            };
+            ws_addr = Some(listener.local_addr().unwrap_or(listen));
             let carrier = orion_ws::WsCarrier::on(&mut listener);
             #[cfg(feature = "nt4")]
             if nt4_wants_ws {
@@ -385,44 +394,28 @@ impl CommCore {
             Some(config) => {
                 parts.push("ssh");
                 let listen = config.listen;
-                // In a child for each connection, unless that is turned off.
                 #[cfg(feature = "ssh-sandbox")]
-                let server = match settings.ssh_sandbox.clone() {
-                    Some(sandbox) => {
-                        let sandboxed = orion_ssh_sandbox::SandboxedSsh::start(
+                let sandbox = settings.ssh_sandbox.clone();
+                let keys = keys.clone();
+                ways::now_or_later(
+                    "the SSH way in",
+                    listen,
+                    settings.listen_retry,
+                    &mut tasks,
+                    async move || {
+                        ways::ssh(
                             config.clone(),
-                            sandbox,
+                            #[cfg(feature = "ssh-sandbox")]
+                            sandbox.clone(),
                             security,
                             keys.clone(),
                         )
-                        .await;
-                        match sandboxed {
-                            Ok(server) => Ok(SshServer::Sandboxed(server)),
-                            // An image with no account for the children to become.
-                            // Reading in this process lets in nobody it would not have:
-                            // a way in is worth more than none. An address that cannot
-                            // be listened on is not helped by trying again without.
-                            Err(error) if error.kind() == std::io::ErrorKind::Other => {
-                                tracing::warn!(
-                                    "ssh: no child processes for connections ({error}): they \
-                                     are read in the comm core itself"
-                                );
-                                orion_ssh::Ssh::start(config, security, keys.clone())
-                                    .await
-                                    .map(SshServer::Plain)
-                            }
-                            Err(error) => Err(error),
-                        }
-                    }
-                    None => orion_ssh::Ssh::start(config, security, keys.clone())
                         .await
-                        .map(SshServer::Plain),
-                };
-                #[cfg(not(feature = "ssh-sandbox"))]
-                let server = orion_ssh::Ssh::start(config, security, keys.clone())
-                    .await
-                    .map(SshServer::Plain);
-                Some(server.map_err(|error| failed(format!("ssh.listen {listen}"), error))?)
+                    },
+                    |_| None,
+                )
+                .await
+                .map_err(|error| failed(format!("ssh.listen {listen}"), error))?
             }
             None => None,
         };
@@ -433,15 +426,31 @@ impl CommCore {
             Some(config) => {
                 parts.push("nt4");
                 let listen = config.listen;
-                let gateway = orion_nt4_gateway::Gateway::start(&topics, config)
-                    .await
-                    .map_err(|error| failed(format!("nt4.listen {listen:?}"), error))?;
                 #[cfg(feature = "ws")]
-                if let Some(incoming) = nt4_on_ws.take() {
+                let incoming = nt4_on_ws.take();
+                #[cfg(feature = "ws")]
+                if incoming.is_some() {
                     parts.push("nt4 on the websocket");
-                    tasks.push(nt4_ws::forward(&gateway, incoming));
                 }
-                Some(gateway)
+                let on = topics.clone();
+                ways::now_or_later(
+                    "the NT4 way in",
+                    format!("{listen:?}"),
+                    settings.listen_retry,
+                    &mut tasks,
+                    async move || orion_nt4_gateway::Gateway::start(&on, config.clone()).await,
+                    move |gateway| {
+                        #[cfg(feature = "ws")]
+                        return incoming.map(|incoming| nt4_ws::forward(gateway, incoming));
+                        #[cfg(not(feature = "ws"))]
+                        {
+                            let _ = gateway;
+                            None
+                        }
+                    },
+                )
+                .await
+                .map_err(|error| failed(format!("nt4.listen {listen:?}"), error))?
             }
             None => None,
         };

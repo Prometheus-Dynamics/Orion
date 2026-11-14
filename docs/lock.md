@@ -28,6 +28,10 @@ talks to this one.
   | 21 | `layout` | `malformed` |
   | 22 | `lease lost` | `busy` |
 
+- The error codes 18 (`no deadline`) and 19 (`deadline too long`) are new since `455a956e` too.
+  They are reachable only through level-1 `DetachedRun` (`Run.detached`): a node answers them
+  only to a detached run, which a client asks only of a node at level 1 or above.
+
 **The hello document.**
 
 - The node owns the facts `state` and `recovery_why`. A program can no longer publish them: a
@@ -121,13 +125,33 @@ with `ClientError::Level` and sends nothing. `docs/wire.md` is the reference.
 ## Known limits
 
 - With security on, a lease holder is not yet bound to a principal (C32).
-- Only the network way in tries again when it cannot open. The WebSocket, SSH and NT4 ways in
-  still mean recovery when their address cannot be listened on.
 - Every build takes the shared-memory crates from the device library's repository
   (`shm-sample-time`, and on Linux `shm-fdpass`, for the smallest client). At run time the client
   needs nothing of the device library: no daemon running, no library loaded. Those crates make
   system calls only on descriptors the client hands them, and to read the clock.
 - armv7 and riscv64 board files build and pass the size gate, and have not run on a board.
+
+## Since the lock revision
+
+Additive changes on `next` after the lock revision. Nothing here breaks a consumer of the lock
+revision.
+
+- **J11.** New `ClientError` cases (it is `#[non_exhaustive]`):
+  - `Layout { what, found, reads, level }`: shared memory from the comm core in another layout.
+    Its words say which side is older and what to update. A client of this revision on a comm
+    core of `455a956e` gets it for every topic, where it got `Protocol("a ring that cannot be
+    mapped")`;
+  - `Memory { what, why }`: any other shared-memory error, with its words.
+
+  Also new: `orion_topics::from_ring`, `Cx::level()`. The C library returns `ORION_E_REFUSED` for
+  `Layout`.
+- **C40.** The WebSocket, SSH and NT4 ways in try again as the network way in does (5 s, then
+  10 s), when their address is taken, not on the board yet, needs a capability, or is on an
+  interface not there yet. Settings that cannot work still mean recovery.
+  - `orion_server::Retry`, `may_clear` and `open_retrying` are new; `orion_tcp::Retry` is the
+    same type.
+  - `orion_ws::WsListener::opening` is new.
+  - `CommSettings::peer_retry` is now `listen_retry`, for every way in.
 
 ## Builds
 

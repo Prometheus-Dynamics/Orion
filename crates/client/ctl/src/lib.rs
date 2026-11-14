@@ -281,11 +281,15 @@ fn resource_list(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
     let prefix = args.maybe_word().unwrap_or_default();
     args.done()?;
     for found in orion.resources(&prefix)? {
-        writeln!(
+        write!(
             out,
             "{}  {}  {:?}  on {}",
             found.name, found.kind, found.state, found.node
         )?;
+        match &found.broken {
+            Some(why) => writeln!(out, "  ({why})")?,
+            None => writeln!(out)?,
+        }
     }
     Ok(())
 }
@@ -306,6 +310,9 @@ fn resource_show(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         "{}  {}  {:?}  on {}",
         found.name, found.kind, found.state, found.node
     )?;
+    if let Some(why) = &found.broken {
+        writeln!(out, "  {why}")?;
+    }
     for (key, value) in &found.labels {
         writeln!(out, "  {key} = {value}")?;
     }

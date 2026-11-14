@@ -348,6 +348,8 @@ fn a_subscriber_may_come_before_the_topic_and_outlives_the_other_node_restarting
 fn sample_times_arrive_in_this_boards_time() {
     // The left board's clock is five seconds ahead of the right's: they are not synced.
     const AHEAD: u64 = 5_000_000_000;
+    // Every clock comparison this test can see starts after this.
+    let began = monotonic_ns();
     let map = Map::default();
     let left = Node::start("clock", "left", &map, AHEAD, None);
     let right = Node::start("clock", "right", &map, 0, None);
@@ -360,21 +362,36 @@ fn sample_times_arrive_in_this_boards_time() {
         reading.status() == Status::Live
     });
     until("the publisher knows of it", || subscribers(&mut level) == 1);
-    // The clocks are compared as soon as the link is up; give the answer time to arrive.
-    std::thread::sleep(Duration::from_millis(300));
 
-    // A sample stamped on the right board with the right board's monotonic time. Were the
-    // right board answering with its wall clock, the two would be decades apart, not five
-    // seconds.
-    let stamped = monotonic_ns();
-    publish(&mut level, stamped, 1.0);
-    let (arrived, _) = read(&mut reading, 1)[0];
-    // On the left board it carries the left board's time for the same moment.
-    let moved = arrived as i128 - stamped as i128;
+    // Samples stamped on the right board with the right board's monotonic time, until one
+    // arrives moved: the clocks have been compared. Were the right board answering with its
+    // wall clock, the move would be decades, not about five seconds.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let (stamped, moved) = loop {
+        let stamped = monotonic_ns();
+        publish(&mut level, stamped, 1.0);
+        let (arrived, _) = read(&mut reading, 1)[0];
+        let moved = arrived as i128 - stamped as i128;
+        if moved.abs() > i128::from(AHEAD / 2) {
+            break (stamped, moved);
+        }
+        assert!(Instant::now() < deadline, "the clocks were never compared");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // What the comparison guarantees: the offset is wrong by at most half its round trip,
+    // and that round trip fell between `began` and the sample that showed it. However long
+    // a loaded machine made that, the bound grows with it; it is never a fixed tolerance.
+    let window = i128::from(stamped - began);
     let off_by = (moved - i128::from(AHEAD)).abs();
     assert!(
-        off_by < 20_000_000,
-        "moved by {moved} ns, {off_by} ns from the five seconds between the clocks"
+        off_by <= window / 2,
+        "moved by {moved} ns: {off_by} ns from the five seconds between the clocks, more than \
+         half of the {window} ns any comparison could have taken"
+    );
+    // And the bound says something: it is narrower than the difference being measured.
+    assert!(
+        window / 2 < i128::from(AHEAD),
+        "the test took {window} ns: too long to tell a compared clock from another"
     );
 }
 

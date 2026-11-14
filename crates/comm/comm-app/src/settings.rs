@@ -42,9 +42,9 @@ pub struct CommSettings {
     /// `peer.interface`: the one network interface the network way in takes connections
     /// from (`eth0`, `usb0`). Any unless it is said.
     pub peer_interface: Option<String>,
-    /// How long the network way in waits before it tries again when it cannot open.
-    #[cfg(feature = "tcp")]
-    pub peer_retry: orion_tcp::Retry,
+    /// How long a way in that listens on an address of its own (network, WebSocket, SSH,
+    /// NT4) waits before it tries again when it cannot open.
+    pub listen_retry: orion_server::Retry,
     /// `discovery`: `off` or `mdns`.
     #[cfg(feature = "discovery")]
     pub discovery: bool,
@@ -225,8 +225,7 @@ impl CommSettings {
             node_uids: source.list("socket.node_uids")?,
             status_interval,
             peer_interface,
-            #[cfg(feature = "tcp")]
-            peer_retry: orion_tcp::Retry::default(),
+            listen_retry: orion_server::Retry::default(),
             #[cfg(feature = "time")]
             time: orion_time::TimeConfig::from_source(source)?,
             #[cfg(feature = "discovery")]

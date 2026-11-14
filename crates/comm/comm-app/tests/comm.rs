@@ -361,7 +361,7 @@ fn a_comm_core_that_cannot_start_says_which_part_and_one_whose_network_address_i
         let taken = first.peer_addr().expect("addr");
         let other = temp("twice-b");
         let mut later = settings(&other, &format!("peer.listen = {taken}\n"));
-        later.peer_retry = orion_tcp::Retry {
+        later.listen_retry = orion_server::Retry {
             first: Duration::from_millis(50),
             most: Duration::from_millis(100),
         };

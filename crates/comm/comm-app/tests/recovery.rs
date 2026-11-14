@@ -476,15 +476,14 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
         // Aborted tasks are dropped, and let go of the socket, when the runtime next runs.
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // A start that fails after the board's socket is already served: a WebSocket address
-        // another program holds. Nothing of the failed start is left serving, and recovery has
-        // the socket. (A network address that is taken is not such a failure: it is tried
-        // again, and the comm core starts.)
-        let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let busy = format!("{good}ws.listen = {}\n", taken.local_addr().expect("addr"));
-        let started = start_or_recover(settings(&busy), with()).await;
+        // A start that fails after the board's socket is already served: an NT4 gateway told
+        // to share a WebSocket listener there is none of. Nothing of the failed start is left
+        // serving, and recovery has the socket. (An address that is taken is not such a
+        // failure: it is tried again, and the comm core starts.)
+        let broken = format!("{good}nt4.listen = ws\n");
+        let started = start_or_recover(settings(&broken), with()).await;
         let (_, why) = in_recovery(&started).await;
-        assert!(why.contains("ws.listen"), "{why}");
+        assert!(why.contains("nt4.listen"), "{why}");
         let (state, _) = board_state(&socket).await;
         assert_eq!(state.as_deref(), Some("recovery"));
         drop(started);

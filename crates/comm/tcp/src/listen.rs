@@ -3,31 +3,13 @@
 
 use std::io;
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use tokio::net::{TcpListener, TcpSocket};
 
+pub use orion_server::Retry;
+use orion_server::open_retrying;
+
 use crate::{TcpCarrier, TcpOptions};
-
-/// How long a way in that could not open waits before it tries again: the first wait, and the
-/// most it waits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Retry {
-    /// The first wait.
-    pub first: Duration,
-    /// The longest wait: each wait is twice the last, up to this.
-    pub most: Duration,
-}
-
-impl Default for Retry {
-    /// Five seconds, then ten.
-    fn default() -> Self {
-        Self {
-            first: Duration::from_secs(5),
-            most: Duration::from_secs(10),
-        }
-    }
-}
 
 /// Where a carrier listens: an address, and the one network interface it takes connections
 /// from, if it is to take them from one only.
@@ -80,31 +62,10 @@ impl TcpCarrier {
     /// still has. What went wrong is logged once, as a warning, and that it opened once it
     /// does.
     pub async fn listen_retrying(listen: &Listen, options: TcpOptions, retry: Retry) -> Self {
-        let mut wait = retry.first;
-        let mut warned = false;
-        loop {
-            match listener(listen) {
-                Ok(socket) => {
-                    if warned {
-                        tracing::info!(listen = %listen, "the network way in is open");
-                    }
-                    return Self::on(socket, options);
-                }
-                Err(error) if !warned => {
-                    tracing::warn!(
-                        listen = %listen,
-                        %error,
-                        "the network way in cannot open: trying again every {}-{} s, \
-                         and the rest of the comm core runs meanwhile",
-                        retry.first.as_secs(),
-                        retry.most.as_secs()
-                    );
-                    warned = true;
-                }
-                Err(_) => {}
-            }
-            tokio::time::sleep(wait).await;
-            wait = (wait * 2).min(retry.most);
-        }
+        let socket = open_retrying("the network way in", listen, retry, async || {
+            listener(listen)
+        })
+        .await;
+        Self::on(socket, options)
     }
 }

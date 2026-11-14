@@ -122,7 +122,11 @@ required-features = ["shell", "recovery", "link-usb"]
 
 [[test]]
 name = "recovery"
-required-features = ["recovery", "ssh-sftp", "ssh-sandbox"]
+required-features = ["recovery", "ssh-sftp", "ssh-sandbox", "nt4"]
+
+[[test]]
+name = "ways"
+required-features = ["ws", "ssh", "nt4"]
 
 [lints]
 workspace = true
