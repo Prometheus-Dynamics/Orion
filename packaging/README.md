@@ -143,7 +143,9 @@ The same for `armv7-unknown-linux-musleabihf` and `riscv64gc-unknown-linux-musl`
 pass the size gate but have not run on a board. The SSH way in (`russh`) brings `ring`, which
 compiles C: name a C compiler for the target, `CC_<triple>`. `scripts/zigcc/<triple>` is one,
 `zig cc` from `PATH`, with `scripts/zigcc/<triple>-ar` for archives; zig carries musl for every
-target, so it is the only C toolchain needed. Rust links with `rust-lld`
+target, so it is the only C toolchain needed. It must be zig 0.15.2: the wrappers and the size
+gate refuse another version, with what to do, since the board files' sizes are measured with
+it. Rust links with `rust-lld`
 (`CARGO_TARGET_<TRIPLE>_LINKER=rust-lld`). `.cargo/config.toml` makes the riscv64 build static
 (`+crt-static`: that target links dynamically otherwise, and fails); keep its flags when setting
 your own (`CARGO_TARGET_<TRIPLE>_RUSTFLAGS` adds to them, `RUSTFLAGS` replaces them).

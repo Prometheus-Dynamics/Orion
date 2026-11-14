@@ -4,6 +4,13 @@
 # Drops the target and code-generation flags the cc crate adds for gcc, which zig takes from
 # -target instead.
 set -eu
+# Built with zig 0.15.2 and no other: another version builds C differently.
+found=$(zig version 2>/dev/null || echo none)
+if [ "$found" != 0.15.2 ]; then
+  echo "$0: zig $found is on PATH; Orion's board files are built with zig 0.15.2 only." >&2
+  echo "$0: install zig 0.15.2, or set CC_<target> to another C compiler for this target." >&2
+  exit 1
+fi
 n=$#
 while [ "$n" -gt 0 ]; do
   a=$1; shift; n=$((n - 1))

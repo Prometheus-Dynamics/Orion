@@ -179,6 +179,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I7](docs/prs/I7.md) End-to-end proof on the test board (wave 15; needs I1, I2, I4, F1, F5, F7, G6; board run)
 - [x] [I8](docs/prs/I8.md) User documentation (wave 14; needs I1)
 - [x] [I9](docs/prs/I9.md) Clean up the plan (wave 16; needs I5, I6, I7, I8)
+- [x] [I10](docs/prs/I10.md) The board files are built with zig 0.15.2 only (wave 18; needs J6)
 
 ## J. The stack around Orion
 
