@@ -39,8 +39,9 @@ ssh-forward = ["ssh", "orion-ssh/forward", "orion-ssh-sandbox?/forward"]
 ssh-sandbox = ["ssh", "dep:orion-ssh-sandbox"]
 # A shell on the board over an Orion session, as the account asked for.
 shell = ["ssh", "dep:orion-shell"]
-# The recovery way in: what is started when the comm core cannot be.
-recovery = ["ssh", "dep:orion-recovery", "dep:orion-check"]
+# The recovery way in: what is started when the comm core cannot be. It tells systemd how the
+# start went, so it brings that with it.
+recovery = ["ssh", "systemd", "dep:orion-recovery", "dep:orion-check"]
 # The NT4 gateway: mapped topics as an NT4 server.
 nt4 = ["dep:orion-nt4-gateway"]
 # The NT4 gateway as a client of an NT4 server somewhere else.

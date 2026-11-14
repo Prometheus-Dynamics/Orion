@@ -282,6 +282,7 @@ impl CommSettings {
                 return Err(error("shell", format!("expected on or off, got {other:?}")));
             }
         };
+        #[cfg(feature = "shell")]
         if shell {
             settings.shell = Some(match &settings.ssh {
                 Some(ssh) => ssh.clone(),
