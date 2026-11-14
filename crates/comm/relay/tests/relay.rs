@@ -33,12 +33,17 @@ fn board() -> MemConnector {
 }
 
 fn board_with(security: Security) -> MemConnector {
+    board_and_comm(security).0
+}
+
+fn board_and_comm(security: Security) -> (MemConnector, Comm) {
     let node: orion_types::NodeName = "board".parse().expect("name");
     let comm = Comm::new(node, security, None, Limits::default());
     comm.add_service(Relay::new(&routes()));
     let (carrier, connector) = mem::carrier(Roles::CLIENT.and(Roles::NODE), 64 * 1024);
-    tokio::task::spawn_local(async move { comm.serve(carrier).await });
-    connector
+    let serving = comm.clone();
+    tokio::task::spawn_local(async move { serving.serve(carrier).await });
+    (connector, comm)
 }
 
 struct Client {
@@ -312,13 +317,23 @@ fn a_watch_made_while_node_logic_is_away_waits_for_it() {
 #[test]
 fn a_second_node_logic_takes_over_from_the_first() {
     run(async {
-        let board = board();
+        let (board, comm) = board_and_comm(Security::Off);
         let mut first = node(&board).await;
         let mut second = node(&board).await;
         let mut client = Client::open(board.connect(USER), Roles::CLIENT).await;
         let seq = client.send(&GET).await;
         let (_, passed, ..) = second.passed().await;
         assert_eq!(passed, seq);
+        // And the comm core says why it ended it.
+        let whys: Vec<String> = comm
+            .drops()
+            .iter()
+            .map(|drop| drop.why.to_string())
+            .collect();
+        assert_eq!(
+            whys,
+            ["another node logic attached, and there is one at a time"]
+        );
         // The first was closed.
         let mut fds = FdSet::default();
         let mut buf = [0_u8; 256];

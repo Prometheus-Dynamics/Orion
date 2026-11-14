@@ -148,6 +148,7 @@ pub struct MemConnection {
     principal: Principal,
     offers: Roles,
     descriptors: bool,
+    local: bool,
 }
 
 impl MemConnection {
@@ -186,6 +187,10 @@ impl Connection for MemConnection {
         self.descriptors
     }
 
+    fn local(&self) -> bool {
+        self.local
+    }
+
     fn split(self) -> (MemRead, MemWrite) {
         (self.read, self.write)
     }
@@ -207,6 +212,7 @@ pub fn pair(
         principal,
         offers,
         descriptors: true,
+        local: false,
     };
     let client = MemConnection {
         read: MemRead(to_client),
@@ -214,6 +220,7 @@ pub fn pair(
         principal: Principal::Anonymous,
         offers: Roles(0),
         descriptors: true,
+        local: false,
     };
     (server, client)
 }
@@ -255,6 +262,17 @@ impl MemConnector {
     pub fn connect_without_descriptors(&self, principal: Principal) -> MemConnection {
         let (mut server, client) = pair(principal, self.offers, self.capacity);
         server.descriptors = false;
+        self.waiting.connections.borrow_mut().push_back(server);
+        self.waiting.arrived.notify_one();
+        client
+    }
+
+    /// Connects as `principal` the way a program on the board does over its socket: a session
+    /// that is not ended for being quiet. Returns the client's end.
+    #[must_use]
+    pub fn connect_local(&self, principal: Principal) -> MemConnection {
+        let (mut server, client) = pair(principal, self.offers, self.capacity);
+        server.local = true;
         self.waiting.connections.borrow_mut().push_back(server);
         self.waiting.arrived.notify_one();
         client

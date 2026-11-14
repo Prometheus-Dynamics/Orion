@@ -337,3 +337,38 @@ fn a_reader_that_falls_behind_gets_every_frame_whole() {
         }
     });
 }
+
+#[test]
+fn a_program_on_the_socket_is_kept_while_it_is_quiet_and_gone_when_it_hangs_up() {
+    run(async {
+        let path = directory("quiet").join("orion.sock");
+        // Real time: the shortest deadlines a test may build.
+        let limits = Limits {
+            heartbeat_ms: 20,
+            idle_ms: 60,
+            ..Limits::default()
+        };
+        let (comm, _seen) = serve(&path, limits);
+        let mut client = Client::open(&path, Roles::CLIENT).await;
+
+        // Five idle times with nothing said: still there, seen as quiet, and not a drop.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let quiet = comm.with(|sessions, _| {
+            sessions
+                .iter()
+                .map(|info| (info.local, info.quiet_since.is_some()))
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(quiet, [(true, true)]);
+        assert_eq!((comm.drops(), comm.stats().dropped), (vec![], 0));
+        // It still answers.
+        client.send(&Ping { now_ms: 3 }).await;
+        assert_eq!(client.recv::<Pong>().await.expect("pong").now_ms, 3);
+
+        // Every holder of the socket has closed it: gone at once.
+        drop(client);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(comm.with(|sessions, _| sessions.is_empty()));
+        assert_eq!(comm.drops(), vec![]);
+    });
+}

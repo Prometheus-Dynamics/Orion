@@ -40,6 +40,89 @@ pub enum Delivery {
     MayDrop,
 }
 
+/// Why the comm core ended a session. A session its own program closed has none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Dropped {
+    /// It did not say hello in time.
+    NoHello {
+        /// How long it had, in milliseconds.
+        limit_ms: u64,
+    },
+    /// Nothing was heard from it for the idle time.
+    Quiet {
+        /// How long it was quiet, in milliseconds.
+        quiet_ms: u64,
+        /// How long it may be, in milliseconds.
+        limit_ms: u64,
+    },
+    /// Its connection failed while reading.
+    ReadFailed(std::io::ErrorKind),
+    /// A frame from it could not be read, or its hello could not.
+    Damaged,
+    /// It sent a frame only the comm core sends, or said hello twice.
+    OutOfTurn {
+        /// The kind of the frame.
+        kind: u8,
+    },
+    /// Its hello was turned away.
+    Rejected(orion_msg_session::RejectReason),
+    /// It was not reading: a frame it had to have did not fit its outbox.
+    OutboxFull {
+        /// The kind of the frame.
+        kind: u8,
+        /// The frame's size, in bytes.
+        frame: usize,
+        /// How many bytes were waiting for it.
+        waiting: usize,
+        /// How many may wait.
+        limit: usize,
+    },
+    /// It did not take a frame within the write deadline, or its connection failed while
+    /// writing.
+    WriteStalled {
+        /// The write deadline, in milliseconds.
+        limit_ms: u64,
+    },
+    /// A request of its made a service panic.
+    Panicked,
+    /// A service ended it, and says why.
+    Ended(&'static str),
+}
+
+impl std::fmt::Display for Dropped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoHello { limit_ms } => write!(f, "no hello within {limit_ms} ms"),
+            Self::Quiet { quiet_ms, limit_ms } => write!(
+                f,
+                "quiet for {quiet_ms} ms, and the idle time is {limit_ms} ms: is its program \
+                 still pumping the session?"
+            ),
+            Self::ReadFailed(kind) => write!(f, "its connection failed: {kind}"),
+            Self::Damaged => f.write_str("a frame from it could not be read"),
+            Self::OutOfTurn { kind } => {
+                write!(f, "it sent a frame of kind {kind:#04x} out of turn")
+            }
+            Self::Rejected(reason) => write!(f, "its hello was turned away: {reason:?}"),
+            Self::OutboxFull {
+                kind,
+                frame,
+                waiting,
+                limit,
+            } => write!(
+                f,
+                "it was not reading: a frame of kind {kind:#04x} and {frame} bytes did not fit, \
+                 with {waiting} of {limit} bytes waiting"
+            ),
+            Self::WriteStalled { limit_ms } => {
+                write!(f, "it did not take a frame within {limit_ms} ms")
+            }
+            Self::Panicked => f.write_str("a request of its made a service panic"),
+            Self::Ended(why) => f.write_str(why),
+        }
+    }
+}
+
 /// What the server knows about a session.
 #[derive(Clone, Debug)]
 pub struct SessionInfo {
@@ -61,6 +144,12 @@ pub struct SessionInfo {
     pub open: bool,
     /// Frames dropped because its outbox was full.
     pub dropped: u64,
+    /// Whether it is a program on this board over a socket that reports a hang-up: never
+    /// ended for being quiet.
+    pub local: bool,
+    /// Since when, in milliseconds on the server's clock, nothing has been heard from it for
+    /// longer than the idle time. Only a local session stays to be seen like this.
+    pub quiet_since: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -70,6 +159,8 @@ pub(crate) struct Entry {
     pub(crate) outbox: Outbox,
     out_seq: u16,
     pub(crate) closing: bool,
+    /// Why the comm core is ending it: the first reason given.
+    pub(crate) why: Option<Dropped>,
     /// Wakes the session's writer: something to send, or closing.
     pub(crate) wake: Rc<Notify>,
     /// Stops the session's reader.
@@ -152,6 +243,7 @@ impl Sessions {
         principal: Principal,
         offers: Roles,
         passes_descriptors: bool,
+        local: bool,
     ) -> Option<SessionId> {
         if self.live >= self.limits.max_sessions {
             return None;
@@ -177,11 +269,14 @@ impl Sessions {
                 passes_descriptors,
                 open: false,
                 dropped: 0,
+                local,
+                quiet_since: None,
             },
             offers,
             outbox: Outbox::default(),
             out_seq: 0,
             closing: false,
+            why: None,
             wake: Rc::new(Notify::new()),
             stop: Rc::new(Notify::new()),
         });
@@ -273,6 +368,12 @@ impl Sessions {
             match delivery {
                 Delivery::MayDrop => entry.info.dropped += 1,
                 Delivery::Must => {
+                    entry.why.get_or_insert(Dropped::OutboxFull {
+                        kind,
+                        frame: len,
+                        waiting: entry.outbox.pending(),
+                        limit,
+                    });
                     entry.closing = true;
                     entry.stop.notify_one();
                 }
@@ -288,7 +389,26 @@ impl Sessions {
     /// Closes `session`: what is already queued for it is still sent, then its connection is
     /// dropped.
     pub fn close(&mut self, session: SessionId) {
+        self.end(session, None);
+    }
+
+    /// Closes `session` as [`Sessions::close`] does, and has the log say `why`.
+    pub fn close_because(&mut self, session: SessionId, why: &'static str) {
+        self.end(session, Some(Dropped::Ended(why)));
+    }
+
+    /// Notes why `session` is being ended, unless a reason was given already.
+    pub(crate) fn dropped(&mut self, session: SessionId, why: Dropped) {
         if let Some(entry) = self.entry_mut(session) {
+            entry.why.get_or_insert(why);
+        }
+    }
+
+    pub(crate) fn end(&mut self, session: SessionId, why: Option<Dropped>) {
+        if let Some(entry) = self.entry_mut(session) {
+            if let Some(why) = why {
+                entry.why.get_or_insert(why);
+            }
             entry.closing = true;
             entry.wake.notify_one();
             entry.stop.notify_one();

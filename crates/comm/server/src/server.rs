@@ -11,11 +11,27 @@ use orion_wire::{Body, Decode, FrameView, INTERFACE_LEVEL, INTERFACE_REVISION, k
 use shm_fdpass::FdSet;
 
 use crate::service::{Cx, Incoming, Service};
-use crate::sessions::{Delivery, SessionId, Sessions};
+use crate::sessions::{Delivery, Dropped, SessionId, Sessions};
 use crate::{Connection, Limits};
 
 /// No service answers this kind.
 const NO_ROUTE: u8 = u8::MAX;
+
+/// How many ended sessions are remembered.
+pub(crate) const DROPS_KEPT: usize = 16;
+
+/// A session the comm core ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DroppedSession {
+    /// The name it gave in its hello. Empty if it never said hello.
+    pub name: String,
+    /// Who it was, as the audit log names them.
+    pub principal: String,
+    /// When, in milliseconds on the server's clock.
+    pub at_ms: u64,
+    /// Why.
+    pub why: Dropped,
+}
 
 /// Counts of what the server has seen, for its own state topic.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -51,6 +67,8 @@ pub(crate) struct Server {
     services: Vec<Box<dyn Service>>,
     routes: [u8; 256],
     pub(crate) stats: Stats,
+    /// The last sessions the comm core ended, oldest first: who, and why.
+    pub(crate) drops: std::collections::VecDeque<DroppedSession>,
 }
 
 impl Server {
@@ -68,6 +86,7 @@ impl Server {
             services: Vec::new(),
             routes: [NO_ROUTE; 256],
             stats: Stats::default(),
+            drops: std::collections::VecDeque::new(),
         }
     }
 
@@ -101,6 +120,7 @@ impl Server {
             connection.principal(),
             connection.offers(),
             connection.passes_descriptors(),
+            connection.local(),
         );
         match id {
             Some(_) => self.stats.opened += 1,
@@ -126,6 +146,7 @@ impl Server {
 
     fn reject(&mut self, session: SessionId, reason: RejectReason) -> Flow {
         self.stats.rejected += 1;
+        self.sessions.dropped(session, Dropped::Rejected(reason));
         self.send(
             session,
             &Reject {
@@ -162,6 +183,7 @@ impl Server {
         let Ok(frame) = frame::decode(bytes) else {
             // A carrier delivers whole frames, so a bad one is not line noise.
             self.stats.dropped += 1;
+            self.sessions.dropped(session, Dropped::Damaged);
             return Flow::Close;
         };
         if !frame.header().is_current_version() {
@@ -190,8 +212,9 @@ impl Server {
             }
             kind::PONG => Flow::Continue,
             // A second hello, or the server's own answers sent back at it.
-            kind::HELLO | kind::WELCOME | kind::REJECT => {
+            kind @ (kind::HELLO | kind::WELCOME | kind::REJECT) => {
                 self.stats.dropped += 1;
+                self.sessions.dropped(session, Dropped::OutOfTurn { kind });
                 Flow::Close
             }
             _ => self.dispatch(session, frame, fds, now_ms),
@@ -201,12 +224,15 @@ impl Server {
     fn hello(&mut self, session: SessionId, frame: &FrameView<'_>) -> Flow {
         let Ok(hello) = orion_wire::decode_body::<Hello<'_>>(frame) else {
             self.stats.dropped += 1;
+            self.sessions.dropped(session, Dropped::Damaged);
             return Flow::Close;
         };
         if hello.revision != INTERFACE_REVISION {
             // Another wire: nothing after this could be read right. Both numbers go back, so
             // whoever is told can say which side is behind.
             self.stats.rejected += 1;
+            self.sessions
+                .dropped(session, Dropped::Rejected(RejectReason::RevisionMismatch));
             self.send(
                 session,
                 &Reject {
@@ -307,6 +333,7 @@ impl Server {
                     panic = panic.message(),
                     "a request made a service panic"
                 );
+                self.sessions.dropped(session, Dropped::Panicked);
                 Flow::Close
             }
         }

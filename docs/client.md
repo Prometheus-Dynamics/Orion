@@ -91,9 +91,14 @@ A request for something the node does not serve at all is refused as `unsupporte
 are `ORION_E_REFUSED`, with the words in `orion_last_error`. See `docs/wire.md` for the table.
 
 **The session is blocking and owns no thread and no timer.** `next(wait)` waits for the next
-frame and, while it waits, answers the comm core's pings, sends its own, and notices when the
-comm core has said nothing for as long as it allows (`Welcomed::idle`, three heartbeats unless
-the comm core sets `comm.idle_ms`). A program with nothing to wait for calls it
+frame and, while it waits, sends a ping twice a heartbeat and notices when the comm core has said
+nothing for as long as it allows (`Welcomed::idle`, three heartbeats unless the comm core sets
+`comm.idle_ms`). **A session is only as alive as its program**: no ping is sent while the
+program neither waits on the session nor calls into it, and a comm core at the far end of a
+network or a link ends a session it has not heard from for the idle time. On the board's own
+socket neither side ends the session for silence: the comm core keeps a quiet program and logs
+it, and the client keeps a silent comm core, because that socket reports the other end closing
+at once. A program with nothing to wait for calls `next`
 with a zero wait from its own loop; one that waits on other things too gives `as_fd` to `poll`.
 With feature `tokio`, `next_async` waits inside a runtime instead.
 

@@ -6,7 +6,7 @@
 //! | Topic | Fields |
 //! | --- | --- |
 //! | `orion.host` | `uptime_s`, `mem_total_kb`, `mem_available_kb`, `cpu_percent`, `temperature_c` |
-//! | `orion.comm` | `sessions`, `opened`, `rejected`, `requests`, `refused`, `unknown`, `dropped`, `panics`, `topics`, `ring_bytes` |
+//! | `orion.comm` | `sessions`, `opened`, `rejected`, `requests`, `refused`, `unknown`, `dropped`, `panics`, `topics`, `ring_bytes`, `quiet` (local sessions kept though unheard past the idle time) |
 //! | `orion.state.<part>` | `state`, `failures`, `restarts`, `retry_at_ms` |
 //!
 //! **Nothing is sampled while nobody watches.** `orion.host` and `orion.comm` are read only
@@ -49,7 +49,7 @@ const HOST_FIELDS: [(&str, FieldType, &str); 5] = [
     ("cpu_percent", FieldType::Float, "%"),
     ("temperature_c", FieldType::Float, "C"),
 ];
-const COMM_FIELDS: [&str; 10] = [
+const COMM_FIELDS: [&str; 11] = [
     "sessions",
     "opened",
     "rejected",
@@ -60,6 +60,7 @@ const COMM_FIELDS: [&str; 10] = [
     "panics",
     "topics",
     "ring_bytes",
+    "quiet",
 ];
 const STATE_FIELDS: [&str; 4] = ["state", "failures", "restarts", "retry_at_ms"];
 
@@ -229,7 +230,10 @@ impl SelfStatus {
                 }
                 if comm_watched {
                     let stats = comm.stats();
-                    let sessions = comm.with(|sessions, _| sessions.len());
+                    let (sessions, quiet) = comm.with(|sessions, _| {
+                        let quiet = sessions.iter().filter(|info| info.quiet_since.is_some());
+                        (sessions.len(), quiet.count())
+                    });
                     let (count, bytes) = {
                         let topics = table.borrow();
                         (topics.len(), topics.bytes())
@@ -245,6 +249,7 @@ impl SelfStatus {
                         int(stats.panics),
                         int(count as u64),
                         int(bytes as u64),
+                        int(quiet as u64),
                     ]);
                 }
                 tokio::select! {

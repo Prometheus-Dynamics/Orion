@@ -2,6 +2,9 @@
 
 use orion_config::{ConfigError, Source};
 
+/// No idle time is shorter than this, however short the heartbeat.
+pub const IDLE_FLOOR_MS: u64 = 1000;
+
 /// What a session may use and how long it may take.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -13,8 +16,10 @@ pub struct Limits {
     pub outbox_bytes: u32,
     /// `comm.heartbeat_ms`: how often a session is asked to ping.
     pub heartbeat_ms: u32,
-    /// `comm.idle_ms`: how long a session may go unheard before it is closed, and the comm core
-    /// before a client gives up on it. Zero is three heartbeats; otherwise at least two.
+    /// `comm.idle_ms`: how long a session that is not a program on this board may go unheard
+    /// before it is closed, and the comm core before a client gives up on it. In settings, zero
+    /// is three heartbeats or [`IDLE_FLOOR_MS`], whichever is longer, and anything else must be
+    /// at least that.
     pub idle_ms: u32,
     /// `comm.hello_ms`: how long a new connection has to say hello.
     pub hello_ms: u32,
@@ -74,17 +79,29 @@ impl Limits {
         if limits.heartbeat_ms == 0 || limits.hello_ms == 0 || limits.write_ms == 0 {
             return Err(bad("comm", "deadlines must be above zero"));
         }
-        if limits.idle_ms != 0 && u64::from(limits.idle_ms) < u64::from(limits.heartbeat_ms) * 2 {
+        if limits.idle_ms != 0 && u64::from(limits.idle_ms) < limits.idle_floor() {
+            // A client pings twice a heartbeat. Less than three heartbeats leaves no room for
+            // one late ping, and under a second a busy board's scheduler alone can use up.
             return Err(bad(
                 "comm.idle_ms",
-                "must be zero or at least two heartbeats",
+                &format!(
+                    "must be zero or at least {} (three heartbeats, and no less than \
+                     {IDLE_FLOOR_MS} ms)",
+                    limits.idle_floor()
+                ),
             ));
+        }
+        // With none said and heartbeats this short, three of them would be under the floor.
+        let mut limits = limits;
+        if limits.idle_ms == 0 && limits.idle_ms() < IDLE_FLOOR_MS {
+            limits.idle_ms = IDLE_FLOOR_MS as u32;
         }
         Ok(limits)
     }
 
     /// How long a session may go unheard before it is closed: `comm.idle_ms`, or three
-    /// heartbeats.
+    /// heartbeats. Limits read from settings are never under [`Limits::idle_floor`]; ones a
+    /// test builds itself are what it says.
     #[must_use]
     pub const fn idle_ms(&self) -> u64 {
         if self.idle_ms == 0 {
@@ -92,5 +109,57 @@ impl Limits {
         } else {
             self.idle_ms as u64
         }
+    }
+
+    /// The shortest idle time these heartbeats allow: three of them, and never under
+    /// [`IDLE_FLOOR_MS`].
+    #[must_use]
+    pub const fn idle_floor(&self) -> u64 {
+        let three = self.heartbeat_ms as u64 * 3;
+        if three < IDLE_FLOOR_MS {
+            IDLE_FLOOR_MS
+        } else {
+            three
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn limits(text: &str) -> Result<Limits, ConfigError> {
+        let mut source = Source::parse(text, []).expect("settings");
+        Limits::from_source(&mut source)
+    }
+
+    #[test]
+    fn the_idle_time_is_never_under_three_heartbeats_or_a_second() {
+        // None said: three heartbeats, or the floor when those are shorter.
+        assert_eq!(limits("").expect("defaults").idle_ms(), 6000);
+        let short = limits("comm.heartbeat_ms = 100\n").expect("short heartbeats");
+        assert_eq!(short.idle_ms(), IDLE_FLOOR_MS);
+        // Said: refused under three heartbeats, with the number it must reach.
+        let refused = limits("comm.idle_ms = 5999\n").expect_err("under three heartbeats");
+        assert_eq!(refused.key, "comm.idle_ms");
+        assert!(
+            refused.message.contains("at least 6000"),
+            "{}",
+            refused.message
+        );
+        assert_eq!(
+            limits("comm.idle_ms = 6000\n").expect("three").idle_ms(),
+            6000
+        );
+        // And under a second, however short the heartbeats.
+        let text = "comm.heartbeat_ms = 100\ncomm.idle_ms = 999\n";
+        let refused = limits(text).expect_err("under a second");
+        assert!(
+            refused.message.contains("at least 1000"),
+            "{}",
+            refused.message
+        );
+        let text = "comm.heartbeat_ms = 100\ncomm.idle_ms = 1000\n";
+        assert_eq!(limits(text).expect("a second").idle_ms(), 1000);
     }
 }

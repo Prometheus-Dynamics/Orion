@@ -33,12 +33,12 @@ mod spoken;
 
 pub use carrier::{Carrier, Connection, FrameRead, FrameWrite};
 pub use driver::{Comm, WeakComm};
-pub use limits::Limits;
+pub use limits::{IDLE_FLOOR_MS, Limits};
 pub use orion_check::{Admits, Checked, Grants, Policy, Principal, Security, What};
 pub use orion_msg_session::Roles;
 pub use orion_types::Error;
-pub use server::Stats;
+pub use server::{DroppedSession, Stats};
 pub use service::{Cx, Incoming, Service};
-pub use sessions::{Delivery, SessionId, SessionInfo, Sessions};
+pub use sessions::{Delivery, Dropped, SessionId, SessionInfo, Sessions};
 pub use shm_fdpass::FdSet;
 pub use spoken::{RESTORING_LEVEL, spoken};

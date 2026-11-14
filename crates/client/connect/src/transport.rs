@@ -211,6 +211,15 @@ fn open_serial(path: &Path, baud: u32) -> io::Result<File> {
 }
 
 impl Transport {
+    /// Whether this is the board's own socket, which says when the comm core's end is closed.
+    pub(crate) const fn is_local(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        if matches!(self, Self::Local(_)) {
+            return true;
+        }
+        false
+    }
+
     #[cfg(target_os = "linux")]
     pub(crate) fn local(path: &Path) -> Result<Self, ClientError> {
         let stream = UnixStream::connect(path)?;

@@ -16,13 +16,44 @@ travel on it, and moves whole frames. The server knows nothing else about it.
 
 - a bounded outbox (`comm.outbox_bytes`, 256 KiB): what waits to be sent to it;
 - a deadline to say hello (`comm.hello_ms`, 5 s);
-- a heartbeat (`comm.heartbeat_ms`, 2 s), and a deadline to be heard from (`comm.idle_ms`; zero,
-  the default, is three heartbeats, otherwise at least two). `Welcome` carries both, and a client
-  gives up on a comm core it has not heard from for as long. A slow link, or a test on a loaded
-  machine, sets them longer;
+- a heartbeat (`comm.heartbeat_ms`, 2 s), and a deadline to be heard from (`comm.idle_ms`). Zero,
+  the default, is three heartbeats, and never under one second. A value that is set must be at
+  least that, or the settings are refused at load with the number it must reach: a client pings
+  twice a heartbeat, less than three heartbeats leaves no room for one late ping, and under a
+  second a loaded board's scheduler alone can use up. `Welcome` carries both, and a client gives
+  up on a comm core it has not heard from for as long. A slow link sets them longer;
 - a deadline for each frame to be taken (`comm.write_ms`, 5 s).
 
 There can be `comm.max_sessions` (256) at once. One more is told `Busy` and let go.
+
+**A session lives only while its program pumps it.** The comm core sends no pings. It hears a
+session when the program's client sends one, and the client sends one only while the program
+waits on the session or calls into it. A program that stops doing that, for longer than the idle
+time, is quiet, however alive its process is.
+
+**What being quiet does depends on how the session came in.**
+
+- *Over a network, a link, CAN or a WebSocket* the other end can be gone without a word, so a
+  session quiet for the idle time is ended.
+- *A program on the board, over the Unix socket* (node logic's session too) is never ended for
+  being quiet. Its socket says so the moment the other end is closed, so a quiet one is a
+  program that is busy or stopped, not one that is gone, and dropping it would take down its
+  topics, actions and leases for nothing. Once quiet past the idle time it is logged once
+  ("has been quiet for N ms ... its program is not pumping it"), it is seen as quiet
+  (`SessionInfo::quiet_since`, and the count `quiet` on the `orion.comm` topic), and when it
+  speaks again that is logged ("is heard again after N ms"). It ends when its socket is closed,
+  when it does not take a frame within the write deadline, or on a damaged frame.
+- *A session ends when every process holding its socket has closed it.* A child the program
+  forked, or a process it passed the descriptor to, holds it open, and the comm core sees no
+  hang-up until they are gone too.
+
+**Every session the comm core ends is logged at `warn`** with its name, who it was, and why, with
+the numbers: no hello within the deadline; quiet for how long against which idle time; a damaged
+frame; a frame sent out of turn; a hello turned away; an outbox that was full (the frame's kind
+and size, and how much was waiting of how much); a frame not taken within the write deadline; a
+request that made a service panic; or the reason a service gave (the relay: another node logic
+attached). A session its own program closed is not logged. The last 16 are kept
+(`Comm::drops`).
 
 **Services** answer kinds. A service is three functions that return at once:
 
@@ -43,7 +74,7 @@ turned away with both revisions, and every `Welcome` names this build's additive
 | Floods requests | Its reader is one task taking turns: it yields every 32 frames |
 | Does not read its answers | Its outbox fills. An answer that cannot be queued closes it |
 | Does not read a stream | Frames marked droppable are dropped and counted. It is closed at its write deadline |
-| Goes quiet | Closed at `comm.idle_ms` (three heartbeats) |
+| Goes quiet | Closed at `comm.idle_ms` (three heartbeats), unless it is a program on the board's socket: that one is kept, logged and seen as quiet |
 | Never says hello | Closed at the hello deadline |
 | Sends a frame that makes a service panic | That session is closed. The service keeps serving |
 | Sends a bad frame, a second hello, another protocol version | Closed, with a `Reject` where one applies |

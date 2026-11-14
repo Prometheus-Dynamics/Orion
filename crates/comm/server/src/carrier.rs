@@ -46,6 +46,14 @@ pub trait Connection {
     /// Whether descriptors can travel with frames.
     fn passes_descriptors(&self) -> bool;
 
+    /// Whether the other end is a program on this board, over a socket that says so the
+    /// moment every holder of it has closed it. Such a session is not ended for being quiet:
+    /// a hang-up, the write deadline or a damaged frame end it. Anything else (a network, a
+    /// link) can lose the other end without a word, and is ended at the idle deadline.
+    fn local(&self) -> bool {
+        false
+    }
+
     /// Splits into the two halves, which are driven by separate tasks.
     fn split(self) -> (Self::Read, Self::Write);
 }

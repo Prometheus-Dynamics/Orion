@@ -515,7 +515,10 @@ impl Relay {
         let node = cx.from();
         if let Some(old) = self.node.filter(|old| *old != node) {
             // One node logic at a time. The one that just came is the one that is alive.
-            cx.sessions().close(old);
+            cx.sessions().close_because(
+                old,
+                "another node logic attached, and there is one at a time",
+            );
             self.fail_waiting(cx.sessions());
         }
         self.answers = [0; 4];

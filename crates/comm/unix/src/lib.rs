@@ -179,6 +179,10 @@ impl Connection for UnixConnection {
         true
     }
 
+    fn local(&self) -> bool {
+        true
+    }
+
     fn split(self) -> (UnixRead, UnixWrite) {
         (UnixRead(self.stream.clone()), UnixWrite(self.stream))
     }

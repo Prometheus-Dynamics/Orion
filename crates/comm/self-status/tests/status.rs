@@ -274,3 +274,26 @@ fn a_part_says_how_it_is_doing_when_that_changes() {
         assert_eq!(reads.get(), 0);
     });
 }
+
+#[test]
+fn a_program_on_the_board_that_has_gone_quiet_is_counted() {
+    run(async {
+        let (_status, _reads, connector) = board();
+        let mut client = Client::open(Wire::Mem(connector.connect_local(USER)), "dashboard").await;
+        let (_, mut comm) = watch(&mut client, COMM_TOPIC).await;
+        assert_eq!(int(&mut comm, 10), Some(0));
+        // A second program says hello and then nothing, for longer than the idle time.
+        let _quiet = Client::open(Wire::Mem(connector.connect_local(USER)), "stuck").await;
+        let idle = Duration::from_millis(Limits::default().idle_ms());
+        // The dashboard keeps speaking, so only the second is quiet.
+        let mut waited = Duration::ZERO;
+        while waited <= idle + INTERVAL * 2 {
+            tokio::time::sleep(INTERVAL).await;
+            waited += INTERVAL;
+            client
+                .send(&orion_msg_session::Ping { now_ms: 0 }, &[])
+                .await;
+        }
+        assert_eq!(int(&mut comm, 10), Some(1));
+    });
+}

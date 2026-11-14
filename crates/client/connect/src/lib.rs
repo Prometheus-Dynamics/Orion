@@ -25,6 +25,7 @@
 //! blocking a thread.
 
 mod address;
+mod alive;
 mod client;
 mod error;
 mod fd;
@@ -398,7 +399,7 @@ impl Session {
             link_key: None,
             name: name.to_owned(),
             options,
-            next_ping: now + welcomed.heartbeat,
+            next_ping: now + welcomed.heartbeat / 2,
             last_heard: now,
             welcomed,
             seq: 1,
@@ -494,7 +495,7 @@ impl Session {
             }
             let now = Instant::now();
             self.keep_alive(now)?;
-            let until = deadline.min(self.next_ping).min(self.silent_at());
+            let until = self.wake_at(deadline);
             if now >= deadline {
                 return Ok(None);
             }
@@ -642,23 +643,6 @@ impl Session {
         }
     }
 
-    fn silent_at(&self) -> Instant {
-        self.last_heard + self.welcomed.idle
-    }
-
-    /// Sends a ping if one is due, and fails if the comm core has been silent too long.
-    fn keep_alive(&mut self, now: Instant) -> Result<(), ClientError> {
-        if now >= self.silent_at() {
-            return Err(ClientError::Lost);
-        }
-        if now >= self.next_ping {
-            self.next_ping = now + self.welcomed.heartbeat;
-            let now_ms = self.started.elapsed().as_millis() as u64;
-            self.send(&Ping { now_ms })?;
-        }
-        Ok(())
-    }
-
     /// Takes frames until one is the program's. `false` if nothing whole is there.
     fn take(&mut self) -> Result<bool, ClientError> {
         loop {
@@ -778,7 +762,7 @@ mod wait {
                 if now >= deadline {
                     return Ok(None);
                 }
-                let until = deadline.min(self.next_ping).min(self.silent_at());
+                let until = self.wake_at(deadline);
                 let ready = tokio::time::timeout(
                     until.saturating_duration_since(now),
                     waiter.ready(Interest::READABLE),
