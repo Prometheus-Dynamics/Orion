@@ -13,14 +13,14 @@ homepage = "https://github.com/Prometheus-Dynamics/Orion"
 
 [workspace.dependencies]
 # The shared-memory ring family, hosted with the device library (J2).
-shm-sample-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "d1a8939a4f428575e20797e8c5eebee8de7a7942" }
-shm-ring = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "d1a8939a4f428575e20797e8c5eebee8de7a7942" }
-shm-ring-latest = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "d1a8939a4f428575e20797e8c5eebee8de7a7942" }
-shm-ring-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "d1a8939a4f428575e20797e8c5eebee8de7a7942" }
-shm-ring-doorbell = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "d1a8939a4f428575e20797e8c5eebee8de7a7942" }
-shm-ring-buffers = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "d1a8939a4f428575e20797e8c5eebee8de7a7942" }
-shm-ring-holds = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "d1a8939a4f428575e20797e8c5eebee8de7a7942" }
-shm-fdpass = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "d1a8939a4f428575e20797e8c5eebee8de7a7942" }
+shm-sample-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
+shm-ring = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
+shm-ring-latest = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
+shm-ring-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
+shm-ring-doorbell = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
+shm-ring-buffers = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
+shm-ring-holds = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
+shm-fdpass = { git = "https://github.com/Prometheus-Dynamics/Lemnos", rev = "bded77a096ce48cf00d686ceb8f3a41286ea871e" }
 libc = "0.2"
 postcard = { version = "1.1.3", default-features = false }
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }

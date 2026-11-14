@@ -190,6 +190,7 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [J6](docs/prs/J6.md) Small boards: three targets, BusyBox init, a flasher's recovery (wave 18)
 - [x] [J7](docs/prs/J7.md) The shm-* pins at the revision everyone holds (wave 18)
 - [x] [J8](docs/prs/J8.md) The shm-* pins at the device library's d6b9361d (wave 18)
+- [x] [J8b](docs/prs/J8b.md) The shm-* pins at the device library's bded77a0 (wave 18)
 
 ## Open
 
