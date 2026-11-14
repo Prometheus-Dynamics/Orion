@@ -119,6 +119,11 @@ impl Records {
         &self.store
     }
 
+    /// Who provides which of this node's resources now.
+    pub const fn resources(&self) -> &Resources {
+        &self.resources
+    }
+
     /// The store, to write to. Call [`Records::publish`] afterwards.
     pub const fn store_mut(&mut self) -> &mut Store {
         &mut self.store
@@ -139,9 +144,14 @@ impl Records {
     /// or node logic was away. A provider that is still there writes its resources again
     /// (the comm core tells it to); the ones nobody has written by `now_ms` and
     /// [`RECLAIM_MS`] are lost.
-    pub fn forget_sessions(&mut self, now_ms: u64) {
+    pub fn forget_sessions(&mut self, now_ms: u64, wall_ms: u64) {
         self.watchers.clear();
         self.resources.forget_sessions();
+        // What the records say of this node's resources is not true until their providers
+        // say it again. Watchers, and peers, see the record restoring and then what it is.
+        if self.resources.restoring(&mut self.store, wall_ms) != 0 {
+            self.dirty = true;
+        }
         self.reclaim_at = Some(now_ms + RECLAIM_MS);
     }
 

@@ -26,6 +26,7 @@ mod peers;
 mod pull;
 pub mod records;
 mod send;
+mod served;
 
 use std::cell::RefCell;
 use std::io;
@@ -154,6 +155,8 @@ pub struct Node {
     /// `None` while a helper is writing with it.
     persist: Option<Persist>,
     saving: Option<tokio::task::JoinHandle<(Persist, io::Result<()>)>>,
+    /// The list of what is served, being written.
+    served_writing: Option<tokio::task::JoinHandle<()>>,
     /// When the oldest change not yet saved was made.
     unsaved_since: Option<Instant>,
     scratch: Vec<u8>,
@@ -231,6 +234,9 @@ impl Node {
         )?;
         let peers = peers::Peers::new(name.clone(), links, settings.config.state_dir.clone());
         let mut logic = Logic::new(store, name, files, audit, dialer, stop_grace, peers);
+        let (served, said) = served::Served::load(&settings.config.state_dir);
+        info!("{said}");
+        logic.served = served;
         logic
             .workloads
             .set_placement_grace(settings.placement_grace.as_millis() as u64);
@@ -240,6 +246,7 @@ impl Node {
             logic: Rc::new(RefCell::new(logic)),
             persist: Some(persist),
             saving: None,
+            served_writing: None,
             unsaved_since: None,
             scratch: vec![0; 64 * 1024],
         })
@@ -254,6 +261,7 @@ impl Node {
     /// Starts a save if there is something to save, it has waited long enough, and no save
     /// is under way.
     fn save_if_due(&mut self, now: Instant) {
+        self.write_served();
         if self.logic.borrow_mut().records.take_dirty() && self.unsaved_since.is_none() {
             self.unsaved_since = Some(now);
         }
@@ -271,6 +279,25 @@ impl Node {
         self.saving = Some(tokio::task::spawn_blocking(move || {
             let result = persist.save(records.into_iter());
             (persist, result)
+        }));
+    }
+
+    /// Writes the list of what is served, off this thread, if it changed. One write at a time.
+    fn write_served(&mut self) {
+        if self
+            .served_writing
+            .as_ref()
+            .is_some_and(|writing| !writing.is_finished())
+        {
+            return;
+        }
+        let Some((path, text)) = self.logic.borrow_mut().served_due() else {
+            return;
+        };
+        self.served_writing = Some(tokio::task::spawn_blocking(move || {
+            if let Err(error) = served::write(&path, &text) {
+                warn!("{} was not written: {error}", path.display());
+            }
         }));
     }
 
@@ -292,6 +319,15 @@ impl Node {
 
     /// Saves now, on this thread: at the end.
     async fn save_now(&mut self) {
+        if let Some(writing) = self.served_writing.take() {
+            let _ = writing.await;
+        }
+        let due = self.logic.borrow_mut().served_due();
+        if let Some((path, text)) = due
+            && let Err(error) = served::write(&path, &text)
+        {
+            warn!("{} was not written: {error}", path.display());
+        }
         if let Some(saving) = self.saving.take() {
             let done = saving.await;
             self.saved(done);

@@ -432,6 +432,39 @@ and a program's client writes its resources again then, and after it reconnects.
 after node logic connects, a resource of this node that nobody has written again is `Lost`.
 A provider that died while node logic was away is noticed that way.
 
+**Restoring.** In those two seconds nothing a record says of this node's resources is known to
+be true, and the records say so:
+
+- When node logic connects to a comm core, every resource of this node that is not `Lost`
+  is written as `Restoring`. It becomes what its provider writes when the provider is back, and
+  `Lost` if it is not back in the two seconds. A watcher sees both edges, and so do the other
+  nodes. A program that waits for `Ready` and then runs is therefore right: `Ready` is only
+  ever said by a provider that is there.
+- A run of an action that was registered before the restart, and is not again yet, is refused
+  `restoring` (20, "not back yet after a restart: ask again"), not `not found`. So is a read of
+  exactly one resource that was provided before and has no record. This is the backstop for a
+  caller that did not look at the record first. After the two seconds, and for any name that
+  was not served before, the answer is `not found` as always.
+- What "before" means is kept in `<state dir>/served`: the actions and resources programs
+  served, at most 1024 names. Node logic looks at what is served once a second, and writes
+  the file from a helper thread only when it changed, so nothing on the path of a request
+  waits for a disk. A name stays on the list for a minute after its program left, so a node
+  being shut down, its programs first, still knows what it served. When only the comm core
+  restarted, node logic also counts what it was serving the moment before.
+- **First boot.** With no list (a fresh flash, a wiped state directory) nothing is restoring
+  and a lookup that misses is `not found` at once. The node served nothing before, so there
+  is nothing for it to be coming back to, and a caller is not made to wait two seconds for a
+  name no program ever offered. A list that cannot be read is the same case and is logged.
+  It never stops the node from starting.
+- **Topic ids.** A topic's id is given out by the comm core and does not survive its restart.
+  A request on an id the new comm core never gave out (an unsubscribe, a withdraw), in its
+  first two seconds, is refused `restoring` with the words "topic ids do not survive a restart:
+  this one is from before it. A client that reconnects declares and subscribes again, under
+  new ids". The Rust client does exactly that in `Topics::restore`, and a program that uses it
+  never holds a stale id.
+- `restoring` is told to sessions at level 2 or above. An older client is told `not found`,
+  as before (see `docs/wire.md`).
+
 ## Placement
 
 `orion-placement` decides which node runs a workload, without a leader. Every node holds the

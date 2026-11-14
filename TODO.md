@@ -78,6 +78,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [F12a](docs/prs/F12a.md) The client on Windows and macOS (wave 18)
 - [x] [C35](docs/prs/C35.md) One wire revision checked at hello, an additive level, and no silent answers (wave 18)
 - [x] [C35a](docs/prs/C35a.md) Every feature set builds, and the gate checks it (wave 18)
+- [x] [C36](docs/prs/C36.md) After a restart, what was served is restoring, not ready and not missing (wave 18)
 
 ## D. Client
 

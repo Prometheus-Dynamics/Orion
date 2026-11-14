@@ -169,6 +169,23 @@ impl<'a> Cx<'a> {
             .send_with_fds(self.from, body, fds, Delivery::Must)
     }
 
+    /// Refuses the caller's request with `error` and words of the service's own, in place of
+    /// the error's usual ones. Told as the caller's level hears it ([`crate::spoken`]); words
+    /// for an error the caller is not told are not sent either.
+    ///
+    /// # Errors
+    ///
+    /// As [`Cx::reply`].
+    pub fn refuse(&mut self, error: Error, detail: &str) -> Result<(), Error> {
+        let told = crate::spoken(error, self.caller().level);
+        let refusal = orion_msg_session::Refusal {
+            request_seq: self.request_seq,
+            code: told.code(),
+            detail: if told == error { detail } else { told.as_str() },
+        };
+        self.reply(&refusal)
+    }
+
     /// Every session, to send to others.
     pub const fn sessions(&mut self) -> &mut Sessions {
         self.sessions

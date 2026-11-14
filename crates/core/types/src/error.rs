@@ -74,6 +74,9 @@ errors! {
     NoDeadline = 18, "a detached run needs a deadline";
     /// A deadline was longer than the node takes.
     DeadlineTooLong = 19, "deadline is longer than allowed";
+    /// The node restarted a moment ago and what was asked for was there before it: the
+    /// program that serves it has not come back yet. Asking again shortly may find it.
+    Restoring = 20, "not back yet after a restart: ask again";
 }
 
 impl fmt::Display for Error {
@@ -105,5 +108,6 @@ mod tests {
         assert_eq!(Error::EmptyName.code(), 1);
         assert_eq!(Error::Denied.code(), 10);
         assert_eq!(Error::OutOfOrder.code(), 17);
+        assert_eq!(Error::Restoring.code(), 20);
     }
 }

@@ -93,9 +93,19 @@ safely ignore have no level.
 | 1 | `DetachedRun`: `Run.detached` | Run it with no deadline and no limit, and never tell its program the caller went |
 | 1 | `RunOnBehalf`: `Run.on_behalf`, from a node | Take every caller behind the link as one, and never hear one of them end |
 
+| 2 | The error `restoring` (20) | (told to a session, not asked of a node: see below) |
+
+**Errors have levels too.** An error code added after level 1 is told only to a session that said
+it is at that code's level or above. A session below it is told what it was told before the code
+existed. `restoring` (20) is level 2: a session at level 0 or 1 is told `not found` in its place,
+so a client of an older build never meets a code it does not know. `orion_server::spoken` is the
+one place this is decided, for the comm core's own refusals and for node logic's.
+
 Additions with no level, because an older side ignores them and does nothing different that
 matters: `Cancel.reason`, `Claim.session`, `ACTION_CALLER_GONE` to a program, the hello document's
-`state` and `recovery_why` facts, and `Reject`'s two revisions.
+`state` and `recovery_why` facts, `Reject`'s two revisions, and the resource state `Restoring` (4).
+An older program reads that state as one it does not know, which is not `Ready`, so it waits as
+it should.
 
 Level 1 is the first level. A node at Orion `next` before this change (R2 at `dbd5fc0`) sends no
 level, so it is at 0, though it knows every level-1 feature.

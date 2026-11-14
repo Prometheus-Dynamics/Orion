@@ -244,6 +244,13 @@ impl Actions {
         self.running.len()
     }
 
+    /// The actions listed now: each one's name and what it is on.
+    pub fn actions(&self) -> impl Iterator<Item = (&ActionName, &Target)> {
+        self.listed
+            .iter()
+            .map(|listed| (&listed.name, &listed.target))
+    }
+
     /// Forgets every action and run: the comm core they came through is gone, and so are the
     /// sessions that had them.
     pub fn forget_sessions(&mut self) {

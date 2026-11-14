@@ -31,6 +31,10 @@ open_enum! {
         Failed = 2,
         /// Its provider went away.
         Lost = 3,
+        /// Kept across a restart of the node or its comm core, and its provider has not
+        /// written it again yet. It turns to what the provider writes when it is back, or to
+        /// `Lost` if it is not back soon.
+        Restoring = 4,
     }
 }
 

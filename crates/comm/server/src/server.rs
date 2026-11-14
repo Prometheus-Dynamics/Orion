@@ -139,6 +139,8 @@ impl Server {
 
     fn refuse(&mut self, session: SessionId, request_seq: u16, error: Error) {
         self.stats.refused += 1;
+        let level = self.sessions.get(session).map_or(0, |info| info.level);
+        let error = crate::spoken(error, level);
         self.send(
             session,
             &Refusal {

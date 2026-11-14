@@ -204,7 +204,9 @@ fn the_comm_core_counts_itself_without_reading_the_host() {
         let seq = second.send(&declare, &[]).await;
         loop {
             match second.next().await {
-                Event::Refused { request_seq, error } if request_seq == seq => {
+                Event::Refused {
+                    request_seq, error, ..
+                } if request_seq == seq => {
                     assert_eq!(error, Some(Error::AlreadyExists));
                     break;
                 }

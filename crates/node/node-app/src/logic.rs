@@ -28,6 +28,7 @@ use shm_ring::FieldId;
 use crate::peers::Peers;
 use crate::records::Records;
 use crate::send::{Sends, Via};
+use crate::served::Served;
 
 /// The fields of the topic of action runs.
 ///
@@ -120,6 +121,8 @@ pub(crate) struct Logic {
     pub(crate) forwards: Forwards,
     pub(crate) peers: Peers,
     audit: Option<Audit>,
+    /// What was served at the last good run, and the window after a restart.
+    pub(crate) served: Served,
     started: Instant,
     scratch: Vec<u8>,
 }
@@ -219,6 +222,7 @@ impl Logic {
             #[cfg(feature = "pull")]
             pulling: crate::pull::Pulling::default(),
             audit,
+            served: Served::none(),
             started: Instant::now(),
             scratch: vec![0; 64 * 1024],
         }
@@ -300,9 +304,12 @@ impl Logic {
 
     pub(crate) fn forget_sessions(&mut self) {
         let now = self.now_ms();
+        // What was served a moment ago is coming back, as is what the list says.
+        let serving = self.serving();
+        self.served.restart(serving, now);
         self.peers
             .forget_sessions(self.records.store_mut(), wall().as_millis() as u64);
-        self.records.forget_sessions(now);
+        self.records.forget_sessions(now, wall().as_millis() as u64);
         self.actions.forget_sessions();
         self.forwards.forget_sessions();
         self.sinks.forget_sessions();
@@ -390,7 +397,9 @@ impl Logic {
                     "ok: nothing was running".to_owned()
                 })
             });
-        let answered = if Records::KINDS.contains(&asked.kind) {
+        let answered = if let Some(restoring) = self.restoring_read(asked) {
+            Err(restoring)
+        } else if Records::KINDS.contains(&asked.kind) {
             self.records.request(asked, wall().as_millis() as u64, out)
         } else if Workloads::KINDS.contains(&asked.kind) {
             let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
@@ -436,6 +445,7 @@ impl Logic {
                 answered => answered,
             }
         };
+        let answered = self.restoring_run(asked, answered);
         self.pass_ended();
         if let Some(audit) = &self.audit
             && let Some((did, what)) = done(asked)

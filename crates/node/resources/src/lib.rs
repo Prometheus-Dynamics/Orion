@@ -195,6 +195,17 @@ impl Resources {
         self.providers.len()
     }
 
+    /// The names of the resources that have a provider here now.
+    pub fn providing(&self) -> impl Iterator<Item = &str> {
+        self.providers.keys().map(String::as_str)
+    }
+
+    /// Whether `resource` has a provider here now.
+    #[must_use]
+    pub fn provides(&self, resource: &str) -> bool {
+        self.providers.contains_key(resource)
+    }
+
     /// Forgets who provides what: the sessions are gone with the comm core they came
     /// through, or node logic was away. A provider that is still there writes its resources
     /// again; [`Resources::lose_unprovided`] marks the rest lost.
@@ -202,9 +213,19 @@ impl Resources {
         self.providers.clear();
     }
 
-    /// Marks lost every resource of this node that nobody provides now. How many that was.
-    pub fn lose_unprovided(&mut self, store: &mut Store, wall_ms: u64) -> usize {
-        let names: Vec<String> = store
+    /// Marks restoring every resource of this node that is not lost: kept across a restart,
+    /// and nobody has written it again yet. Call it after [`Resources::forget_sessions`].
+    /// How many that was.
+    pub fn restoring(&mut self, store: &mut Store, wall_ms: u64) -> usize {
+        self.mine(store)
+            .iter()
+            .filter(|name| set_state(store, name, ResourceState::Restoring, wall_ms))
+            .count()
+    }
+
+    /// The names of this node's resources that nobody provides now.
+    fn mine(&self, store: &Store) -> Vec<String> {
+        store
             .list(RecordClass::Resource, "")
             .filter(|record| !self.providers.contains_key(&record.key))
             .filter(|record| {
@@ -212,8 +233,12 @@ impl Resources {
                     .is_ok_and(|resource| resource.node == self.me)
             })
             .map(|record| record.key)
-            .collect();
-        names
+            .collect()
+    }
+
+    /// Marks lost every resource of this node that nobody provides now. How many that was.
+    pub fn lose_unprovided(&mut self, store: &mut Store, wall_ms: u64) -> usize {
+        self.mine(store)
             .iter()
             .filter(|name| lose(store, name, wall_ms))
             .count()
@@ -309,6 +334,12 @@ impl Resources {
 
 /// Marks a resource lost. Whether there was one to mark.
 fn lose(store: &mut Store, name: &str, wall_ms: u64) -> bool {
+    set_state(store, name, ResourceState::Lost, wall_ms)
+}
+
+/// Writes `state` into the resource record `name`, unless it is lost or already says so.
+/// Whether it did.
+fn set_state(store: &mut Store, name: &str, state: ResourceState, wall_ms: u64) -> bool {
     let Some(version) = store.get(RecordClass::Resource, name) else {
         return false;
     };
@@ -316,11 +347,11 @@ fn lose(store: &mut Store, name: &str, wall_ms: u64) -> bool {
     let Ok(resource) = ResourceRecord::decode(&value) else {
         return false;
     };
-    if resource.state == ResourceState::Lost {
+    if resource.state == ResourceState::Lost || resource.state == state {
         return false;
     }
     let lost = ResourceRecord {
-        state: ResourceState::Lost,
+        state,
         attributes: Bytes(resource.attributes.0),
         ..resource
     };

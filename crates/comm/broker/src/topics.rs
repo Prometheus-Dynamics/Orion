@@ -19,6 +19,10 @@ impl TopicId {
     const fn slot(self) -> usize {
         ((self.0 & 0xFFFF) as usize).wrapping_sub(1)
     }
+
+    const fn generation(self) -> u16 {
+        (self.0 >> 16) as u16
+    }
 }
 
 /// What the broker allows.
@@ -246,6 +250,15 @@ impl Topics {
             .get(id.slot())?
             .as_ref()
             .filter(|topic| topic.id == id)
+    }
+
+    /// Whether this table ever gave out `id`. One it did not came from before the comm core
+    /// started, or was made up.
+    #[must_use]
+    pub fn issued(&self, id: TopicId) -> bool {
+        self.generations
+            .get(id.slot())
+            .is_some_and(|newest| (1..=*newest).contains(&id.generation()))
     }
 
     /// The topic with this number, to change.

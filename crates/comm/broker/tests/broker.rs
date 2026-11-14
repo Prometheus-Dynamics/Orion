@@ -250,7 +250,7 @@ fn a_publisher_that_leaves_is_seen_and_one_that_returns_carries_on_in_the_same_r
         let refused = other.send(&declare, &[]).await;
         assert!(matches!(
             other.next().await,
-            Event::Refused { request_seq, error: Some(Error::AlreadyExists) } if request_seq == refused
+            Event::Refused { request_seq, error: Some(Error::AlreadyExists), .. } if request_seq == refused
         ));
 
         // The same publisher declaring it differently replaces the ring. Subscribers are sent
@@ -370,7 +370,7 @@ fn one_cap_bounds_all_ring_memory() {
             .await;
         assert!(matches!(
             publisher.next().await,
-            Event::Refused { request_seq, error: Some(Error::Busy) } if request_seq == over
+            Event::Refused { request_seq, error: Some(Error::Busy), .. } if request_seq == over
         ));
         // One ring far larger than the cap is refused before any memory is made for it.
         let huge = publisher
@@ -378,7 +378,7 @@ fn one_cap_bounds_all_ring_memory() {
             .await;
         assert!(matches!(
             publisher.next().await,
-            Event::Refused { request_seq, error: Some(Error::Busy) } if request_seq == huge
+            Event::Refused { request_seq, error: Some(Error::Busy), .. } if request_seq == huge
         ));
         assert_eq!(
             (board.topics.borrow().len(), board.topics.borrow().bytes()),
@@ -390,7 +390,7 @@ fn one_cap_bounds_all_ring_memory() {
             .await;
         assert!(matches!(
             publisher.next().await,
-            Event::Refused { request_seq, error: Some(Error::Unsupported) } if request_seq == bad
+            Event::Refused { request_seq, error: Some(Error::Unsupported), .. } if request_seq == bad
         ));
         // And the number of topics is bounded too, waited-for ones included.
         let mut waiter = board.client("waiter").await;
@@ -476,7 +476,7 @@ fn a_restarted_comm_core_adopts_the_rings_its_publishers_kept() {
             .await;
         assert!(matches!(
             liar.next().await,
-            Event::Refused { request_seq, error: Some(Error::Malformed) } if request_seq == seq
+            Event::Refused { request_seq, error: Some(Error::Malformed), .. } if request_seq == seq
         ));
         assert_eq!(second.topics.borrow().len(), 1);
     });
@@ -639,5 +639,55 @@ fn with_security_on_the_policy_decides_and_a_program_without_descriptors_is_told
                 .subscribers[0]
                 .shared
         );
+    });
+}
+
+/// What a request on a topic number this comm core never gave out is refused with: a number a
+/// program kept from the last one.
+async fn stale_id(client: &mut Client) -> (Option<Error>, String) {
+    client.unsubscribe(0x0003_0007).await;
+    match client.next().await {
+        Event::Refused { error, detail, .. } => (error, detail),
+        _ => panic!("expected a refusal"),
+    }
+}
+
+#[test]
+fn a_topic_id_from_before_a_restart_is_told_as_that_for_a_while_after_the_start() {
+    run(async {
+        let board = board(Security::Off, BrokerConfig::default());
+        let level = orion_server::RESTORING_LEVEL;
+        let mut newer =
+            Client::open_at(Wire::Mem(board.connector.connect(USER)), "newer", level).await;
+        let mut older =
+            Client::open_at(Wire::Mem(board.connector.connect(USER)), "older", level - 1).await;
+
+        // Right after the start: restoring, in words that say what to do about it.
+        let (error, detail) = stale_id(&mut newer).await;
+        assert_eq!(error, Some(Error::Restoring));
+        assert_eq!(detail, orion_broker::STALE_ID);
+        // A client from before the code is told what it was told then.
+        let (error, detail) = stale_id(&mut older).await;
+        assert_eq!(error, Some(Error::NotFound));
+        assert_eq!(detail, Error::NotFound.as_str());
+
+        // A number this comm core did give out, whose topic is gone, is just not found.
+        let mut publisher = board.client("sensor").await;
+        let (handle, writer, keep) = publisher.declare("cpu.temp", 8).await;
+        drop((writer, keep, publisher));
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        newer.unsubscribe(handle).await;
+        assert!(matches!(
+            newer.next().await,
+            Event::Refused {
+                error: Some(Error::NotFound),
+                ..
+            }
+        ));
+
+        // Later, a number nobody was given is a mistake, not a restart.
+        tokio::time::sleep(Duration::from_millis(orion_broker::RESTORE_MS)).await;
+        let (error, _) = stale_id(&mut newer).await;
+        assert_eq!(error, Some(Error::NotFound));
     });
 }

@@ -97,13 +97,16 @@ impl Service for Broker {
             }
             kind::TOPIC_WITHDRAW => {
                 let withdraw: TopicWithdraw = incoming.body()?;
-                self::withdraw(topics, cx, TopicId(withdraw.handle))
+                let id = TopicId(withdraw.handle);
+                let done = self::withdraw(topics, cx, id);
+                stale(topics, cx, id, done)
             }
             kind::TOPIC_UNSUBSCRIBE => {
                 let unsubscribe: Unsubscribe = incoming.body()?;
                 let id = TopicId(unsubscribe.handle);
                 let from = cx.from();
-                leave(topics, cx.sessions(), id, from)
+                let done = leave(topics, cx.sessions(), id, from);
+                stale(topics, cx, id, done)
             }
             _ => {
                 let open: Open = incoming.body()?;
@@ -126,6 +129,30 @@ impl Service for Broker {
                 topics.remove_if_unused(id);
             }
         }
+    }
+}
+
+/// How long after the comm core starts a topic number it never gave out is taken for one from
+/// before the start: what a program that kept its numbers across the restart would send.
+pub const RESTORE_MS: u64 = 2_000;
+
+/// What a program is told of a topic number from before the comm core started.
+pub const STALE_ID: &str = "topic ids do not survive a restart: this one is from before it. \
+    A client that reconnects declares and subscribes again, under new ids";
+
+/// A request on topic `id` that found nothing, told as one on a number from before the start
+/// when it is that: [`Error::Restoring`], with words of its own.
+fn stale(
+    topics: &Topics,
+    cx: &mut Cx<'_>,
+    id: TopicId,
+    done: Result<(), Error>,
+) -> Result<(), Error> {
+    match done {
+        Err(Error::NotFound) if cx.now_ms() < RESTORE_MS && !topics.issued(id) => {
+            cx.refuse(Error::Restoring, STALE_ID)
+        }
+        done => done,
     }
 }
 

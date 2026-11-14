@@ -21,7 +21,7 @@ pub const INTERFACE_REVISION: u16 = 1;
 /// side that says none is at 0. It goes up by one for every addition whose meaning an older side
 /// would change by ignoring it, and a client asks for such a thing only of a node at its level or
 /// above. Additions an older side may safely ignore need no level. See `docs/wire.md`.
-pub const INTERFACE_LEVEL: u16 = 1;
+pub const INTERFACE_LEVEL: u16 = 2;
 
 /// Header length: version, kind, and the little-endian sequence number.
 pub const HEADER_LEN: usize = 4;

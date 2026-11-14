@@ -32,6 +32,13 @@ name while the comm core was away), `reconnect` fails and the resource is not sa
 going from one to the other while the comm core was away, and it takes the same ring back when
 it returns. Nothing that was flowing stops.
 
+**When another program is not back yet.** After the node or its comm core restarts, a resource
+whose provider has not said it again has the state `Restoring`, never `Ready`. Wait for `Ready`
+(a watch tells both changes) and then call it. A run sent in the gap anyway is refused
+`Error::Restoring`: ask again shortly. After two seconds what has not come back is `Lost`, and
+its actions are `NotFound`. A node below level 2 says `NotFound` throughout, and a client built
+before level 2 is told `NotFound` by any node.
+
 The sections below are the crates the handle is made of.
 
 ## Connecting

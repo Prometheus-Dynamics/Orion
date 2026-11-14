@@ -71,6 +71,7 @@ pub enum Event {
     Refused {
         request_seq: u16,
         error: Option<Error>,
+        detail: String,
     },
     Other(u8),
     Closed,
@@ -99,6 +100,11 @@ pub const FIELDS: [Field<'static>; 2] = [
 
 impl Client {
     pub async fn open(wire: Wire, name: &str) -> Self {
+        Self::open_at(wire, name, 0).await
+    }
+
+    /// As [`Client::open`], saying it is at the additive level `level`.
+    pub async fn open_at(wire: Wire, name: &str, level: u16) -> Self {
         let mut client = Self {
             wire,
             buf: vec![0; 64 * 1024],
@@ -109,7 +115,7 @@ impl Client {
             roles: Roles::CLIENT.and(Roles::PROVIDER),
             max_frame: 64 * 1024,
             revision: 1,
-            level: 0,
+            level,
         };
         client.send(&hello, &[]).await;
         let mut fds = FdSet::default();
@@ -182,6 +188,7 @@ impl Client {
                 Event::Refused {
                     request_seq: refusal.request_seq,
                     error: refusal.error(),
+                    detail: refusal.detail.to_owned(),
                 }
             }
             other => Event::Other(other),

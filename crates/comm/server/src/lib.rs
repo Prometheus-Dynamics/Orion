@@ -29,6 +29,7 @@ mod outbox;
 mod server;
 mod service;
 mod sessions;
+mod spoken;
 
 pub use carrier::{Carrier, Connection, FrameRead, FrameWrite};
 pub use driver::{Comm, WeakComm};
@@ -40,3 +41,4 @@ pub use server::Stats;
 pub use service::{Cx, Incoming, Service};
 pub use sessions::{Delivery, SessionId, SessionInfo, Sessions};
 pub use shm_fdpass::FdSet;
+pub use spoken::{RESTORING_LEVEL, spoken};
