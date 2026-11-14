@@ -50,6 +50,14 @@ impl Service for Probe {
             now_ms: request.get().frame().payload().len() as u64,
         })
     }
+
+    fn quiet(
+        &mut self,
+        _session: orion_server::SessionId,
+        _quiet_ms: u64,
+        _sessions: &mut orion_server::Sessions,
+    ) {
+    }
 }
 
 /// One comm core: its keys, its server on a loopback port, and who its service has seen.

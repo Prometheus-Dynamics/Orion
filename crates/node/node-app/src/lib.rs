@@ -81,6 +81,9 @@ pub struct NodeSettings {
     /// `actions.max_detached_ms`: the longest deadline a detached run may have. A detached
     /// run must have one, so that it ends without its caller.
     pub max_detached_ms: u64,
+    /// `leases.quiet_ms`: how long a program on the board that holds a lease with no end must
+    /// be quiet before another claimant may take it.
+    pub lease_quiet_ms: u64,
     /// `audit.file`: the audit log. `audit.log` in the state directory unless it is said;
     /// `off` for none.
     pub audit: Option<AuditConfig>,
@@ -127,6 +130,7 @@ impl NodeSettings {
                 "actions.max_detached_ms",
                 orion_action_list::MAX_DETACHED_MS,
             )?,
+            lease_quiet_ms: source.get("leases.quiet_ms", orion_resources::QUIET_MS)?,
             save_after: Duration::from_millis(source.get("records.save_after_ms", 500_u64)?),
             max_drift_ms: source.get("records.max_drift_ms", defaults.max_drift_ms)?,
         })
@@ -241,6 +245,10 @@ impl Node {
             .workloads
             .set_placement_grace(settings.placement_grace.as_millis() as u64);
         logic.actions.set_max_detached(settings.max_detached_ms);
+        logic
+            .records
+            .resources_mut()
+            .set_quiet_ms(settings.lease_quiet_ms);
         Ok(Self {
             settings,
             logic: Rc::new(RefCell::new(logic)),

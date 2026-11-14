@@ -244,6 +244,14 @@ impl Actions {
         self.running.len()
     }
 
+    /// Whether `session` asked for a run of one of `names` that is still under way.
+    #[must_use]
+    pub fn asked_by(&self, session: u32, names: &[String]) -> bool {
+        self.running.iter().any(|run| {
+            run.caller == Some(session) && names.iter().any(|name| name == run.name.as_str())
+        })
+    }
+
     /// The actions listed now: each one's name and what it is on.
     pub fn actions(&self) -> impl Iterator<Item = (&ActionName, &Target)> {
         self.listed

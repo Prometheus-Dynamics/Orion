@@ -451,6 +451,11 @@ impl<I: CanIo + 'static> Connection for CanConnection<I> {
             },
         )
     }
+
+    /// Not a program on this board: a peer that goes quiet may be gone.
+    fn local(&self) -> bool {
+        false
+    }
 }
 
 /// The reading half.

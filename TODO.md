@@ -80,6 +80,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C35a](docs/prs/C35a.md) Every feature set builds, and the gate checks it (wave 18)
 - [x] [C36](docs/prs/C36.md) After a restart, what was served is restoring, not ready and not missing (wave 18)
 - [x] [C37](docs/prs/C37.md) Why a session ended is said, and a program on the board is not dropped for being quiet (wave 18)
+- [x] [C38](docs/prs/C38.md) A lease held by a program that stopped answering can be taken, and it is told by whom (wave 18)
 
 ## D. Client
 

@@ -110,13 +110,17 @@ impl dyn Out + '_ {
 
     /// Refuses a request.
     pub fn refuse(&mut self, asked: &Asked<'_>, error: Error) {
-        let detail = error.to_string();
+        self.refuse_with(asked, error, &error.to_string());
+    }
+
+    /// Refuses a request, saying `detail` besides the code.
+    pub fn refuse_with(&mut self, asked: &Asked<'_>, error: Error, detail: &str) {
         let _ = self.send(
             asked.session,
             &Refusal {
                 request_seq: asked.seq,
                 code: error.code(),
-                detail: &detail,
+                detail,
             },
         );
     }

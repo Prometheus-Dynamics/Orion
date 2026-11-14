@@ -14,6 +14,9 @@
 //! - **A binding is a lease.** Whoever is to use a resource alone, a workload above all,
 //!   holds it: a lease record under the resource's name, with the holder and when the lease
 //!   ends. A resource has one holder at a time. A lease that has ended holds nothing.
+//! - **A lease with no end can be contested** when its holder is quiet: see [`Contest`].
+
+mod contest;
 
 use std::collections::BTreeMap;
 
@@ -24,6 +27,8 @@ use orion_store::Store;
 use orion_types::{Error, HlcTimestamp, NodeName, ResourceName};
 use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, Decode};
+
+pub use contest::{Contest, QUIET_MS, Refused, Taken};
 
 /// A resource, as it is listed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,6 +57,8 @@ pub struct Resources {
     me: NodeName,
     /// Resource name to the session that provides it.
     providers: BTreeMap<String, u32>,
+    /// Who wrote which lease, who is quiet, and what was taken from whom.
+    contest: Contest,
 }
 
 /// Who holds `resource` at `wall_ms`, by its lease.
@@ -183,10 +190,53 @@ impl Resources {
     /// The resources of the node `me`.
     #[must_use]
     pub const fn new(me: NodeName) -> Self {
+        Self::with_quiet_ms(me, QUIET_MS)
+    }
+
+    /// The resources of the node `me`, whose leases can be taken from a holder quiet for
+    /// `quiet_ms` (`leases.quiet_ms`).
+    #[must_use]
+    pub const fn with_quiet_ms(me: NodeName, quiet_ms: u64) -> Self {
         Self {
             me,
             providers: BTreeMap::new(),
+            contest: Contest::new(quiet_ms),
         }
+    }
+
+    /// How long a holder must be quiet before its lease can be taken (`leases.quiet_ms`).
+    pub const fn set_quiet_ms(&mut self, quiet_ms: u64) {
+        self.contest.set_quiet_ms(quiet_ms);
+    }
+
+    /// `session` went quiet `quiet_ms` before `now_ms`, or with `quiet_ms` zero is heard again.
+    pub fn quiet(&mut self, session: u32, quiet_ms: u64, now_ms: u64) {
+        self.contest.quiet(session, quiet_ms, now_ms);
+    }
+
+    /// The words `session` is refused with for running `action`, if it lost the lease of the
+    /// resource the action is offered by and the lease's taker still holds it.
+    #[must_use]
+    pub fn lost_action(
+        &self,
+        store: &Store,
+        session: u32,
+        action: &str,
+        wall_ms: u64,
+    ) -> Option<String> {
+        self.contest
+            .lost_by(store, session, wall_ms)
+            .into_iter()
+            .find(|(resource, _)| {
+                find(store, resource, wall_ms)
+                    .is_some_and(|found| found.actions.iter().any(|offered| offered == action))
+            })
+            .map(|(_, words)| words)
+    }
+
+    /// `taken` was written by `session`: the lease is its now.
+    pub fn taken(&mut self, taken: Taken, session: u32) {
+        self.contest.taken(taken, session);
     }
 
     /// How many resources have a provider here now.
@@ -211,6 +261,7 @@ impl Resources {
     /// again; [`Resources::lose_unprovided`] marks the rest lost.
     pub fn forget_sessions(&mut self) {
         self.providers.clear();
+        self.contest.forget_sessions();
     }
 
     /// Marks restoring every resource of this node that is not lost: kept across a restart,
@@ -251,14 +302,42 @@ impl Resources {
     ///
     /// [`Error::Malformed`] for a record that is not what its class says or is under another
     /// name than its own, [`Error::Denied`] for a resource on another node or one that
-    /// another program provides, and what [`bind`] refuses a lease for.
+    /// another program provides, what [`bind`] refuses a lease for, and
+    /// [`Error::LeaseLost`] for a lease this session lost while quiet. A refusal as busy says
+    /// who holds the lease and since when.
+    ///
+    /// `Ok(Some)`: the write takes a lease from a quiet holder. Call [`Resources::taken`] once
+    /// it is made. `now_ms` is node logic's clock, and `in_flight` says whether a session has a
+    /// run of one of the given actions under way.
     pub fn check(
         &self,
         store: &Store,
         session: u32,
         entry: &RecordEntry<'_>,
+        (wall_ms, now_ms): (u64, u64),
+        in_flight: &dyn Fn(u32, &[String]) -> bool,
+    ) -> Result<Option<Taken>, Refused> {
+        self.check_entry(store, session, entry, wall_ms)?;
+        if entry.class != RecordClass::Lease || entry.deleted {
+            return Ok(None);
+        }
+        let lease = LeaseRecord::decode(entry.value.0)?;
+        match may_hold(store, entry.key, lease.holder, wall_ms) {
+            Err(Error::Busy) => self
+                .contest
+                .contest(store, session, entry.key, lease.holder, now_ms, in_flight)
+                .map(Some),
+            other => other.map(|()| None).map_err(Refused::from),
+        }
+    }
+
+    fn check_entry(
+        &self,
+        store: &Store,
+        session: u32,
+        entry: &RecordEntry<'_>,
         wall_ms: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refused> {
         match entry.class {
             RecordClass::Resource => {
                 if self
@@ -266,29 +345,35 @@ impl Resources {
                     .get(entry.key)
                     .is_some_and(|provider| *provider != session)
                 {
-                    return Err(Error::Denied);
+                    return Err(Error::Denied.into());
                 }
                 if entry.deleted {
                     return Ok(());
                 }
                 let resource = ResourceRecord::decode(entry.value.0)?;
                 if resource.name.as_str() != entry.key {
-                    return Err(Error::Malformed);
+                    return Err(Error::Malformed.into());
                 }
                 if resource.node != self.me {
-                    return Err(Error::Denied);
+                    return Err(Error::Denied.into());
                 }
                 Ok(())
             }
             RecordClass::Lease => {
+                if let Some(words) = self.contest.lost_here(store, session, entry.key, wall_ms) {
+                    return Err(Refused {
+                        error: Error::LeaseLost,
+                        words: Some(words),
+                    });
+                }
                 if entry.deleted {
                     return Ok(());
                 }
                 let lease = LeaseRecord::decode(entry.value.0)?;
                 if lease.resource.as_str() != entry.key || lease.holder.is_empty() {
-                    return Err(Error::Malformed);
+                    return Err(Error::Malformed.into());
                 }
-                may_hold(store, entry.key, lease.holder, wall_ms)
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -303,11 +388,16 @@ impl Resources {
         entry: &RecordEntry<'_>,
         wall_ms: u64,
     ) {
+        if entry.class == RecordClass::Lease {
+            self.contest.wrote(entry.key, session, entry.deleted);
+            return;
+        }
         if entry.class != RecordClass::Resource {
             return;
         }
         if entry.deleted {
             self.providers.remove(entry.key);
+            self.contest.wrote(entry.key, session, true);
             store.delete(RecordClass::Lease, entry.key, wall_ms);
         } else {
             self.providers.insert(entry.key.to_owned(), session);
@@ -316,6 +406,7 @@ impl Resources {
 
     /// A session is gone. What it provided is lost. How many resources that was.
     pub fn gone(&mut self, store: &mut Store, session: u32, wall_ms: u64) -> usize {
+        self.contest.gone(session);
         let names: Vec<String> = self
             .providers
             .iter()

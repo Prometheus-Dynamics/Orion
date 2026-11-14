@@ -207,6 +207,14 @@ impl Service for Receiver {
             }
         }
     }
+
+    fn quiet(
+        &mut self,
+        _session: orion_server::SessionId,
+        _quiet_ms: u64,
+        _sessions: &mut orion_server::Sessions,
+    ) {
+    }
 }
 
 struct Board {

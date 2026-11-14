@@ -130,6 +130,8 @@ impl Service for Broker {
             }
         }
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }
 
 /// How long after the comm core starts a topic number it never gave out is taken for one from

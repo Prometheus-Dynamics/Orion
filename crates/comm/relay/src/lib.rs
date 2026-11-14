@@ -22,7 +22,9 @@ use std::collections::{HashSet, VecDeque};
 use std::fmt::Write as _;
 
 use orion_msg_actions::{Register, Target};
-use orion_msg_session::{NodeAnswer, NodeAttach, NodeBack, NodeGone, NodeRequest, Refusal};
+use orion_msg_session::{
+    NodeAnswer, NodeAttach, NodeBack, NodeGone, NodeQuiet, NodeRequest, Refusal,
+};
 use orion_server::{
     Admits, Checked, Cx, Delivery, Error, Incoming, Policy, Principal, Roles, Service, SessionId,
     Sessions, What,
@@ -679,6 +681,19 @@ impl Service for Relay {
             && let Some(node) = self.node
         {
             let _ = sessions.send(node, &NodeGone { session: session.0 }, Delivery::Must);
+        }
+    }
+
+    fn quiet(&mut self, session: SessionId, quiet_ms: u64, sessions: &mut Sessions) {
+        // Only node logic's own clients: what it holds for a session is what it was passed.
+        if self.passed.contains(&session)
+            && let Some(node) = self.node
+        {
+            let quiet = NodeQuiet {
+                session: session.0,
+                quiet_ms,
+            };
+            let _ = sessions.send(node, &quiet, Delivery::Must);
         }
     }
 }

@@ -6,7 +6,7 @@ use orion_types::{Error, HlcTimestamp};
 use orion_wire::{List, kind};
 
 use orion_reply::{Asked, Out};
-use orion_resources::Resources;
+use orion_resources::{Resources, Taken};
 
 /// About how many bytes of records go in one message. A record larger than this goes alone.
 const PAGE_BYTES: usize = 24 * 1024;
@@ -36,6 +36,8 @@ pub struct Records {
     for_sync: Option<Vec<Change>>,
     /// A record placement reads changed: a node, a workload, a resource, anyone's.
     placement_due: bool,
+    /// What the last refusal says besides its code.
+    detail: Option<String>,
 }
 
 /// Sends `records` to `session` as answers to `seq`, in as many messages as it takes. With
@@ -96,6 +98,7 @@ impl Records {
             reclaim_at: None,
             for_sync: Some(Vec::new()),
             placement_due: false,
+            detail: None,
         }
     }
 
@@ -122,6 +125,16 @@ impl Records {
     /// Who provides which of this node's resources now.
     pub const fn resources(&self) -> &Resources {
         &self.resources
+    }
+
+    /// Who provides which of this node's resources, and who holds their leases, to change.
+    pub const fn resources_mut(&mut self) -> &mut Resources {
+        &mut self.resources
+    }
+
+    /// What the last refusal says besides its code, once.
+    pub const fn take_detail(&mut self) -> Option<String> {
+        self.detail.take()
     }
 
     /// The store, to write to. Call [`Records::publish`] afterwards.
@@ -185,25 +198,38 @@ impl Records {
     /// # Errors
     ///
     /// [`Error`] for the caller, as a refusal.
+    /// `clock` is the wall clock and node logic's own, and `in_flight` says whether a session
+    /// has a run of one of the given actions under way: a lease is not taken from it then.
     pub fn request(
         &mut self,
         asked: &Asked<'_>,
-        wall_ms: u64,
+        clock: (u64, u64),
+        in_flight: &dyn Fn(u32, &[String]) -> bool,
         out: &mut dyn Out,
     ) -> Result<(), Error> {
         let (session, seq) = (asked.session, asked.seq);
+        let wall_ms = clock.0;
         match asked.kind {
             kind::PUT => {
                 let put: Put<'_> = asked.body()?;
                 // All of a write or none of it: every entry is looked at before any is made.
+                let mut taken: Vec<Taken> = Vec::new();
                 for entry in put.records.iter() {
                     let entry = entry?;
                     if entry.class == RecordClass::Workload {
                         // What should run is said with `WorkloadPut`, which also starts it.
                         return Err(Error::Denied);
                     }
-                    self.resources
-                        .check(&self.store, session, &entry, wall_ms)?;
+                    match self
+                        .resources
+                        .check(&self.store, session, &entry, clock, in_flight)
+                    {
+                        Ok(took) => taken.extend(took),
+                        Err(refused) => {
+                            self.detail = refused.words;
+                            return Err(refused.error);
+                        }
+                    }
                 }
                 let mut stored = Vec::new();
                 for entry in put.records.iter() {
@@ -226,6 +252,15 @@ impl Records {
                             version: version.clone(),
                         });
                     }
+                }
+                for took in taken {
+                    tracing::warn!(
+                        "the lease of {} was taken from session {}, quiet past the time, by {}",
+                        took.resource,
+                        took.from,
+                        took.by
+                    );
+                    self.resources.taken(took, session);
                 }
                 let answered = send(out, session, seq, &stored, true);
                 self.publish(out);

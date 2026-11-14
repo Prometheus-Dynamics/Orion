@@ -153,4 +153,6 @@ impl Service for Store {
     fn closed(&mut self, session: SessionId, _sessions: &mut Sessions) {
         self.watchers.retain(|(watcher, ..)| *watcher != session);
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }

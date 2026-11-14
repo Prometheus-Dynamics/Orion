@@ -144,4 +144,6 @@ impl Service for BrokerProxy {
                 .is_some_and(|topic| topic.epoch == writing.epoch)
         });
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }

@@ -41,8 +41,16 @@ time, is quiet, however alive its process is.
   topics, actions and leases for nothing. Once quiet past the idle time it is logged once
   ("has been quiet for N ms ... its program is not pumping it"), it is seen as quiet
   (`SessionInfo::quiet_since`, and the count `quiet` on the `orion.comm` topic), and when it
-  speaks again that is logged ("is heard again after N ms"). It ends when its socket is closed,
+  speaks again that is logged ("is heard again after N ms"). Every service is told both edges
+  (`Service::quiet`), and the relay passes them to node logic as `NodeQuiet` for a session it
+  was passed a request from: that is how a lease the program holds can be taken by another while
+  it is quiet (see leases in `node.md`). It ends when its socket is closed,
   when it does not take a frame within the write deadline, or on a damaged frame.
+- *Whether a session is a program on the board* is the connection's own say
+  (`Connection::local`), with no default: a type that wraps connections, like the comm core's
+  own list of carriers, has to say what its inner one says, and the compiler holds it to that.
+  `Service::quiet` has no default for the same reason: a service that wraps another (the device
+  gateway's watch over the relay) passes it on.
 - *A session ends when every process holding its socket has closed it.* A child the program
   forked, or a process it passed the descriptor to, holds it open, and the comm core sees no
   hang-up until they are gone too.
@@ -863,6 +871,8 @@ others.
 - Node logic answers with `NodeAnswer`: a session, a kind and a payload. The relay sends that
   frame to that session as it is. A session that is gone is not node logic's failure.
 - When a session ends that node logic was passed a request from, it is told with `NodeGone`.
+  When such a session on the board's socket goes quiet past the idle time, or is heard again,
+  node logic is told with `NodeQuiet` (how long it has been quiet; zero when heard again).
 - When node logic attaches after one before it, every session that one was passed a request
   from, and every session refused while it was away, is sent `NodeBack`: node logic knows
   nothing of it now. The client writes the program's resources again on it.

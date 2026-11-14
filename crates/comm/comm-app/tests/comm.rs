@@ -384,3 +384,40 @@ fn a_comm_core_that_cannot_start_says_which_part_and_leaves_the_running_one_alon
         let _ = std::fs::remove_dir_all(other);
     });
 }
+
+#[test]
+fn a_program_on_the_socket_that_goes_quiet_is_kept_by_the_comm_core() {
+    run(async {
+        let dir = temp("quiet");
+        // The idle time is the floor, a second: three heartbeats are less.
+        let core = CommCore::start(settings(&dir, "comm.heartbeat_ms = 100\n"))
+            .await
+            .expect("start");
+        let mut program = UnixConnection::connect(core.socket())
+            .await
+            .expect("connect");
+        let hello = Hello {
+            name: "debugged",
+            roles: Roles::CLIENT,
+            max_frame: 16 * 1024,
+            revision: orion_wire::INTERFACE_REVISION,
+            level: 0,
+        };
+        send(&mut program, &hello, 1).await;
+        expect(&mut program, kind::WELCOME).await;
+        // Stopped in a debugger for more than twice the idle time: it says nothing.
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        // Its session is still there, and answers when it speaks again.
+        let nonce = [9_u8; 16];
+        send(
+            &mut program,
+            &Identify {
+                nonce: Bytes(&nonce),
+            },
+            2,
+        )
+        .await;
+        let answer = expect(&mut program, kind::IDENTITY).await;
+        assert!(orion_hello::verify(&answer, &nonce).is_some());
+    });
+}

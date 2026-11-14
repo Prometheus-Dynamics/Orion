@@ -252,6 +252,7 @@ impl Comm {
                 entry.info.principal,
                 limits.idle_ms()
             );
+            core.quiet(session, quiet_ms.max(1));
             return true;
         } else {
             Dropped::Quiet {
@@ -277,6 +278,7 @@ impl Comm {
                 entry.info.principal,
                 now_ms.saturating_sub(since)
             );
+            core.quiet(session, 0);
         }
     }
 

@@ -227,4 +227,12 @@ impl Service for UsbLinkService {
             request_seq: cx.request_seq(),
         })
     }
+
+    fn quiet(
+        &mut self,
+        _session: orion_server::SessionId,
+        _quiet_ms: u64,
+        _sessions: &mut orion_server::Sessions,
+    ) {
+    }
 }

@@ -50,9 +50,10 @@ pub trait Connection {
     /// moment every holder of it has closed it. Such a session is not ended for being quiet:
     /// a hang-up, the write deadline or a damaged frame end it. Anything else (a network, a
     /// link) can lose the other end without a word, and is ended at the idle deadline.
-    fn local(&self) -> bool {
-        false
-    }
+    ///
+    /// No default: a type that wraps another connection says what its inner one says, and
+    /// the compiler is what makes sure it does.
+    fn local(&self) -> bool;
 
     /// Splits into the two halves, which are driven by separate tasks.
     fn split(self) -> (Self::Read, Self::Write);

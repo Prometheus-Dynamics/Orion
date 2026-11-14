@@ -49,6 +49,7 @@ without a word.) A client ignores kinds it doesn't know.
 | `0x70` to `0x7F` | Time |
 | `0x80` to `0x8F` | Shell |
 | `0x90` to `0x9F` | Link: a signed session on a link, and its sealed frames |
+| `0xA0` to `0xAF` | Node: what the comm core tells node logic of a session, beyond the full session range (`NODE_QUIET`) |
 
 ## Bodies
 
@@ -94,11 +95,13 @@ safely ignore have no level.
 | 1 | `RunOnBehalf`: `Run.on_behalf`, from a node | Take every caller behind the link as one, and never hear one of them end |
 
 | 2 | The error `restoring` (20) | (told to a session, not asked of a node: see below) |
+| 2 | The error `lease lost` (22) | (told to a session: see below) |
 
 **Errors have levels too.** An error code added after level 1 is told only to a session that said
 it is at that code's level or above. A session below it is told what it was told before the code
 existed. `restoring` (20) is level 2: a session at level 0 or 1 is told `not found` in its place,
-so a client of an older build never meets a code it does not know. `orion_server::spoken` is the
+so a client of an older build never meets a code it does not know. `lease lost` (22) is level 2
+too, and a session below it is told `busy`. Code 21 is kept for the layout refusal. `orion_server::spoken` is the
 one place this is decided, for the comm core's own refusals and for node logic's.
 
 Additions with no level, because an older side ignores them and does nothing different that

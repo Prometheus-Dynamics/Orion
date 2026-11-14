@@ -139,6 +139,13 @@ impl Server {
         }
     }
 
+    /// Tells every service that `session` went quiet `quiet_ms` ago, or is heard again.
+    pub(crate) fn quiet(&mut self, session: SessionId, quiet_ms: u64) {
+        for service in &mut self.services {
+            service.quiet(session, quiet_ms, &mut self.sessions);
+        }
+    }
+
     fn send<B: Body>(&mut self, session: SessionId, body: &B) {
         // A session that can't take the server's own answers is closed by `Delivery::Must`.
         let _ = self.sessions.send(session, body, Delivery::Must);

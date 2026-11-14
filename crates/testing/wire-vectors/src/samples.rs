@@ -17,8 +17,8 @@ use orion_msg_peers::{
 use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, RecordEntry, Watch};
 use orion_msg_session::{
     Hello, Identify, Identity, IdentityField, LinkOffer, LinkTaken, LinkTransport, NodeAnswer,
-    NodeAttach, NodeBack, NodeGone, NodeRequest, Ping, Pong, Refusal, Reject, RejectReason, Roles,
-    Welcome,
+    NodeAttach, NodeBack, NodeGone, NodeQuiet, NodeRequest, Ping, Pong, Refusal, Reject,
+    RejectReason, Roles, Welcome,
 };
 use orion_msg_topics::{
     BatchSample, Bell, BufferInfo, BufferOffer, Declare, Demand, Field, FieldType, Holds, Open,
@@ -218,6 +218,13 @@ fn session(out: &mut Vec<Sample>) {
         }
     );
     sample!(out, NodeBack { attach: 2 });
+    sample!(
+        out,
+        NodeQuiet {
+            session: 0x0001_0002,
+            quiet_ms: 12_000
+        }
+    );
     let fields = [IdentityField {
         name: "model",
         ty: 4,

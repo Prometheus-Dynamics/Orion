@@ -41,6 +41,8 @@ pub struct Seen {
     pub callers: Vec<Principal>,
     pub fds: usize,
     pub watcher: Option<SessionId>,
+    /// What it was told of sessions going quiet: how long, or zero when heard again.
+    pub quiet: Vec<(SessionId, u64)>,
 }
 
 /// A service on the record kinds, one behaviour each.
@@ -105,6 +107,11 @@ impl Service for Probe {
     fn closed(&mut self, session: SessionId, sessions: &mut Sessions) {
         assert!(sessions.get(session).is_none(), "already out of the table");
         self.0.borrow_mut().closed.push(session);
+    }
+
+    fn quiet(&mut self, session: SessionId, quiet_ms: u64, sessions: &mut Sessions) {
+        assert!(sessions.get(session).is_some(), "still in the table");
+        self.0.borrow_mut().quiet.push((session, quiet_ms));
     }
 }
 

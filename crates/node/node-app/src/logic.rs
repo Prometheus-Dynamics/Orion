@@ -15,7 +15,7 @@ use orion_msg_actions::{Cancel, Claim, Register, Run, Target};
 use orion_msg_files::{FileBegin, FileCommit, FileStatus};
 use orion_msg_peers::PeerForgive;
 use orion_msg_records::{NodeRecord, Put, RecordClass, ResourceRecord};
-use orion_msg_session::{NodeAnswer, NodeGone, NodeRequest};
+use orion_msg_session::{NodeAnswer, NodeGone, NodeQuiet, NodeRequest};
 use orion_msg_topics::{Field, FieldType};
 use orion_msg_workloads::{WorkloadPut, WorkloadRemove};
 use orion_reply::{Asked, Out};
@@ -125,6 +125,8 @@ pub(crate) struct Logic {
     pub(crate) served: Served,
     started: Instant,
     scratch: Vec<u8>,
+    /// What the refusal being made says besides its code.
+    said: Option<String>,
 }
 
 impl Logic {
@@ -225,6 +227,7 @@ impl Logic {
             served: Served::none(),
             started: Instant::now(),
             scratch: vec![0; 64 * 1024],
+            said: None,
         }
     }
 
@@ -400,7 +403,10 @@ impl Logic {
         let answered = if let Some(restoring) = self.restoring_read(asked) {
             Err(restoring)
         } else if Records::KINDS.contains(&asked.kind) {
-            self.records.request(asked, wall().as_millis() as u64, out)
+            let clock = (wall().as_millis() as u64, self.now_ms());
+            let actions = &self.actions;
+            let in_flight = |session, names: &[String]| actions.asked_by(session, names);
+            self.records.request(asked, clock, &in_flight, out)
         } else if Workloads::KINDS.contains(&asked.kind) {
             let (now, wall_ms) = (self.now_ms(), wall().as_millis() as u64);
             let answered = self.workloads.request(
@@ -431,6 +437,9 @@ impl Logic {
                 Ok(false) => self.files.request(asked, out),
                 Err(error) => Err(error),
             }
+        } else if let Some(words) = self.lost_action(asked) {
+            self.said = Some(words);
+            Err(Error::LeaseLost)
         } else {
             let now = self.now_ms();
             match self.actions.request(asked, now, out) {
@@ -463,8 +472,26 @@ impl Logic {
             });
         }
         if let Err(error) = answered {
-            out.refuse(asked, error);
+            match self.said.take().or_else(|| self.records.take_detail()) {
+                Some(words) => out.refuse_with(asked, error, &words),
+                None => out.refuse(asked, error),
+            }
         }
+    }
+
+    /// The words a run is refused with when its session lost the lease of the resource that
+    /// offers the action while it was quiet.
+    fn lost_action(&self, asked: &Asked<'_>) -> Option<String> {
+        if asked.kind != kind::ACTION_RUN {
+            return None;
+        }
+        let run: Run<'_> = asked.body().ok()?;
+        self.records.resources().lost_action(
+            self.records.store(),
+            asked.session,
+            run.name.as_str(),
+            wall().as_millis() as u64,
+        )
     }
 }
 
@@ -557,6 +584,7 @@ impl Handler for Logic {
         &[
             kind::NODE_REQUEST,
             kind::NODE_GONE,
+            kind::NODE_QUIET,
             kind::ACTION_CLAIM,
             kind::ACTION_CANCEL,
             kind::FILE_STATUS,
@@ -579,6 +607,13 @@ impl Handler for Logic {
             kind::FILE_STATUS => {
                 let status: FileStatus<'_> = frame.body()?;
                 return self.sends.status(&status, now, &mut Via::Cx(cx));
+            }
+            kind::NODE_QUIET => {
+                let quiet: NodeQuiet = frame.body()?;
+                self.records
+                    .resources_mut()
+                    .quiet(quiet.session, quiet.quiet_ms, now);
+                return Ok(());
             }
             _ => {}
         }

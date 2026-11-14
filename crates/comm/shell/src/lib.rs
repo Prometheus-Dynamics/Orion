@@ -346,6 +346,8 @@ impl Service for ShellService {
             .open
             .retain(|(of, _), _| *of != session);
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }
 
 /// What answers when shells are off (`shell = off`): every open is refused `unsupported` at
@@ -365,6 +367,8 @@ impl Service for ShellOff {
     fn handle(&mut self, _request: Checked<Incoming<'_>>, _cx: &mut Cx<'_>) -> Result<(), Error> {
         Err(Error::Unsupported)
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }
 
 fn winsize(cols: u32, rows: u32) -> rustix::termios::Winsize {

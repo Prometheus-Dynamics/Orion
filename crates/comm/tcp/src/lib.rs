@@ -198,6 +198,11 @@ impl Connection for TcpConnection {
     fn split(self) -> (TcpRead, TcpWrite) {
         (self.read, self.write)
     }
+
+    /// Not a program on this board: a peer that goes quiet may be gone.
+    fn local(&self) -> bool {
+        false
+    }
 }
 
 fn connection(

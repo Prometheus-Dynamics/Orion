@@ -66,6 +66,14 @@ impl Service for Probe {
             .map_err(|_| Error::Internal)?;
         cx.reply_with_fds(&Pong { now_ms: 2 }, [OwnedFd::from(ours)])
     }
+
+    fn quiet(
+        &mut self,
+        _session: orion_server::SessionId,
+        _quiet_ms: u64,
+        _sessions: &mut orion_server::Sessions,
+    ) {
+    }
 }
 
 /// An unnamed file to pass around.

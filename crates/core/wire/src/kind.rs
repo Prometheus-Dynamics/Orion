@@ -26,6 +26,9 @@ pub enum Concept {
     Shell = 0x8,
     /// `0x90` to `0x9F`: what a link says about itself, below the session.
     Link = 0x9,
+    /// `0xA0` to `0xAF`: what the comm core tells node logic about a session, beyond the
+    /// session range, which is full.
+    Node = 0xA,
 }
 
 /// One row of the table.
@@ -161,6 +164,9 @@ kinds! {
         LINK_SIGN_PROVE = 0x92,
         LINK_SIGN_ANSWER = 0x93,
         LINK_SEALED = 0x94,
+    }
+    Node {
+        NODE_QUIET = 0xA0,
     }
 }
 

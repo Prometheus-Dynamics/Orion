@@ -447,6 +447,11 @@ impl<S: ByteStream + 'static> Connection for StreamConnection<S> {
             },
         )
     }
+
+    /// Not a program on this board: a peer that goes quiet may be gone.
+    fn local(&self) -> bool {
+        false
+    }
 }
 
 /// The reading half.

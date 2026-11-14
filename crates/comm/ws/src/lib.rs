@@ -481,6 +481,11 @@ impl Connection for WsConnection {
     fn split(self) -> (WsFrameRead, WsFrameWrite) {
         (WsFrameRead(self.0.read), WsFrameWrite(self.0.write))
     }
+
+    /// Not a program on this board: a peer that goes quiet may be gone.
+    fn local(&self) -> bool {
+        false
+    }
 }
 
 impl Carrier for WsCarrier {

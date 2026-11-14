@@ -86,6 +86,7 @@ The name in brackets is the cargo feature that carries the part.
 | `workloads.stop_grace_ms` | 10000 | how long a run asked to stop is given before it is told to end |
 | `workloads.placement_grace_ms` | 10000 | how long a node that would take over a workload waits for its node to come back |
 | `actions.max_detached_ms` | 3600000 | the longest deadline a detached run may have; a detached run must have one |
+| `leases.quiet_ms` | 10000 | how long a program on the board that holds a lease with no end must be quiet before another claimant may take it |
 | `audit.file` | `audit.log` in `state.dir` | the audit log; `off` for none |
 | `audit.max_bytes` | 1 MiB | the most the file holds before it is rotated |
 | `audit.keep` | 3 | how many files from before are kept |

@@ -291,4 +291,6 @@ impl Service for Hello {
     }
 
     fn closed(&mut self, _session: SessionId, _sessions: &mut Sessions) {}
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }

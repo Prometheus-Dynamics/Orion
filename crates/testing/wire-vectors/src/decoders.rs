@@ -60,6 +60,7 @@ decoders! {
     NODE_ANSWER => session::NodeAnswer,
     NODE_GONE => session::NodeGone,
     NODE_BACK => session::NodeBack,
+    NODE_QUIET => session::NodeQuiet,
     IDENTITY => session::Identity,
     REFUSAL => session::Refusal,
     PUT => records::Put,
@@ -156,7 +157,8 @@ fn decode_elements(concept: Concept, bytes: &[u8]) {
         | Concept::Actions
         | Concept::Time
         | Concept::Shell
-        | Concept::Link => {}
+        | Concept::Link
+        | Concept::Node => {}
     }
 }
 

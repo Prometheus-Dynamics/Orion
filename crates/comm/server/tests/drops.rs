@@ -120,10 +120,15 @@ fn a_program_on_the_board_is_not_dropped_for_being_quiet_and_is_seen_to_be() {
         tokio::time::sleep(Duration::from_secs(3600)).await;
         assert_eq!(quiet_since(&board), [Some(0)]);
         assert_eq!((whys(&board), board.comm.stats().dropped), (vec![], 0));
-        // It speaks: answered, and no longer quiet.
+        // Every service is told once, with how long it had been quiet: the idle time.
+        let told = |board: &Board| board.seen.borrow().quiet.clone();
+        let session = told(&board).first().expect("told").0;
+        assert_eq!(told(&board), [(session, 6000)]);
+        // It speaks: answered, no longer quiet, and the services are told so.
         local.send(&Ping { now_ms: 5 }).await;
         assert_eq!(local.recv::<Pong>().await.expect("pong").now_ms, 5);
         assert_eq!(quiet_since(&board), [None]);
+        assert_eq!(told(&board), [(session, 6000), (session, 0)]);
         // Quiet again, it is seen again, from when it last spoke.
         tokio::time::sleep(Duration::from_millis(6001)).await;
         assert!(matches!(quiet_since(&board).as_slice(), [Some(since)] if *since > 3_600_000));

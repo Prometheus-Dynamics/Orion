@@ -416,4 +416,6 @@ impl Service for BrokerBuffers {
             .frames
             .retain(|frames| topics.get(frames.topic).is_some());
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }

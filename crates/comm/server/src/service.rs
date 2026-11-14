@@ -90,6 +90,13 @@ pub trait Service {
     fn closed(&mut self, session: SessionId, sessions: &mut Sessions) {
         let _ = (session, sessions);
     }
+
+    /// A program on the board's own socket has gone quiet past its idle time, `quiet_ms` ago
+    /// it was last heard, and is kept; or, with `quiet_ms` zero, it is heard again.
+    ///
+    /// No default: a service that wraps another passes this on, and the compiler is what
+    /// makes sure it does. A service with nothing to do about it says so in an empty body.
+    fn quiet(&mut self, session: SessionId, quiet_ms: u64, sessions: &mut Sessions);
 }
 
 /// What a service can do while it handles a request.

@@ -249,6 +249,8 @@ impl Service for Router {
         }
         self.listed.retain(|listed| listed.owner != session);
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }
 
 fn actions(socket: &Path, name: &str) -> Actions {

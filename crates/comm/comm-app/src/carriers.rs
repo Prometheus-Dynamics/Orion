@@ -69,6 +69,10 @@ macro_rules! carriers {
                 match self { $( $(#[$cfg])* Self::$variant(connection) => connection.passes_descriptors(), )* }
             }
 
+            fn local(&self) -> bool {
+                match self { $( $(#[$cfg])* Self::$variant(connection) => connection.local(), )* }
+            }
+
             fn split(self) -> (Reads, Writes) {
                 match self {
                     $( $(#[$cfg])* Self::$variant(connection) => {

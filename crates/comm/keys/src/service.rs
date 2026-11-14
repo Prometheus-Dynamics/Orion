@@ -274,4 +274,6 @@ impl Service for KeysService {
     fn closed(&mut self, session: SessionId, _sessions: &mut Sessions) {
         self.waiting.retain(|waiting| waiting.session != session);
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }

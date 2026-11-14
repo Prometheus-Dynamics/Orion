@@ -71,4 +71,8 @@ impl<S: Service> Service for Watch<S> {
         self.inner.closed(session, sessions);
         self.gateway.gone(session);
     }
+
+    fn quiet(&mut self, session: SessionId, quiet_ms: u64, sessions: &mut Sessions) {
+        self.inner.quiet(session, quiet_ms, sessions);
+    }
 }

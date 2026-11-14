@@ -424,6 +424,20 @@ its topics and runs its actions. The records are the store's and reach every nod
   is lost, and may renew. A lease that has ended holds nothing. A resource that is taken away
   takes its lease with it. Node logic binds with `bind` and `release`; a program binds by
   writing the lease record, under the same rules.
+- **A refusal as busy says who.** It names the holder and since when (the lease's stamp), and
+  why the lease could not be taken: its holder is answering, has not been quiet long enough,
+  has a run under way, or its lease ends on its own.
+- **A lease with no end can be contested.** It is never freed by time alone. But when the
+  program holding it is quiet (on the board's socket, past the idle time, so the comm core
+  keeps its session and tells node logic: `NodeQuiet`) for `leases.quiet_ms` (ten seconds unless
+  said), another claimant's claim succeeds. Work in flight is not quiet: while a run of one of
+  the resource's actions that the holder's session asked for is under way, the lease is not
+  taken. With no claimant nothing is lost, however long the holder is quiet. When the old holder
+  speaks again, whatever it asks under the lease while the new holder keeps it (writing or
+  freeing the lease, running one of the resource's actions) is refused `lease lost` (22), with
+  "lease lost while quiet: taken by <holder>". Once the new holder lets go, the old one may
+  claim it like anyone. A session from anywhere but the board's socket ends when it goes quiet,
+  as before, so its lease is never contested this way.
 
 **After a restart.** Who provides what is not kept: when node logic starts again, or the comm
 core does, node logic knows no provider. The comm core tells every session that node logic

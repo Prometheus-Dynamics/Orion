@@ -380,6 +380,17 @@ body! {
 }
 
 body! {
+    /// A session that node logic was passed requests from has gone quiet past its idle time,
+    /// or is heard again. Only a program on the board's own socket is kept while quiet.
+    pub struct NodeQuiet = kind::NODE_QUIET {
+        /// The session.
+        pub session: u32,
+        /// How long it has been quiet, in milliseconds. Zero: it is heard again.
+        pub quiet_ms: u64,
+    }
+}
+
+body! {
     /// To a session node logic had been passed requests from: node logic is back after
     /// being away, and remembers nothing of this session. What the session had written as
     /// its own (its resources) is to be written again.

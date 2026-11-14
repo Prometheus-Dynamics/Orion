@@ -97,6 +97,8 @@ impl Service for Tracker {
             self.executor.set(None);
         }
     }
+
+    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
 }
 
 struct Board {
