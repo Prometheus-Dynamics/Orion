@@ -6,12 +6,15 @@ use std::time::{Duration, Instant};
 
 use orion_identity::Identity;
 use orion_msg_session::{
-    LINK_SIGN_OK, LINK_SIGN_UNSUPPORTED, LinkSignAnswer, LinkSignChallenge, LinkSignHello,
-    LinkSignProve,
+    Hello, LINK_SIGN_OK, LINK_SIGN_UNSUPPORTED, LinkSignAnswer, LinkSignChallenge, LinkSignHello,
+    LinkSignProve, Roles, Welcome,
 };
 use orion_net_handshake::{Fresh, SIGNATURE_LEN, Seal, Transcript, hello};
-use orion_wire::{Body, Bytes, Decode, encode_body, frame, kind};
+use orion_wire::{
+    Body, Bytes, Decode, INTERFACE_LEVEL, INTERFACE_REVISION, encode_body, frame, kind,
+};
 
+use crate::Feature;
 use crate::error::ClientError;
 use crate::fd::FdSet;
 use crate::transport::{Step, Transport};
@@ -75,16 +78,20 @@ impl Transport {
         )?;
 
         let mut buf = [0_u8; 1024];
-        let len = next(self, &mut buf, deadline)?;
+        let len = match next(self, &mut buf, deadline) {
+            Ok(len) => len,
+            Err(error) if is_timeout(&error) => return Err(self.older(error, timeout)),
+            Err(error) => return Err(error),
+        };
         let view = frame::decode(&buf[..len]).map_err(|_| DAMAGED)?;
         match view.kind() {
             kind::LINK_SIGN_CHALLENGE => {}
             kind::LINK_SIGN_ANSWER => return Err(refused(view.payload())),
             // A board from before signed links takes this for a device that did not say hello.
             _ => {
-                return Err(ClientError::Denied(
-                    "the board does not take a signed session on a link",
-                ));
+                let error =
+                    ClientError::Denied("the board does not take a signed session on a link");
+                return Err(self.older(error, timeout));
             }
         }
         let challenge = LinkSignChallenge::decode(view.payload()).map_err(|_| DAMAGED)?;
@@ -127,4 +134,48 @@ impl Transport {
             _ => Err(refused(view.payload())),
         }
     }
+
+    /// Why a board did not take a signed session: `error`, unless a plain hello shows it is at
+    /// a level below signed links, and then that, with both levels. Nothing is signed, and the
+    /// plain session is let go.
+    fn older(&mut self, error: ClientError, timeout: Duration) -> ClientError {
+        match self.level(timeout) {
+            Some(level) if level < Feature::SignedLink.level() => ClientError::Level {
+                feature: Feature::SignedLink,
+                needs: Feature::SignedLink.level(),
+                node: level,
+            },
+            _ => error,
+        }
+    }
+
+    /// The level a plain `Welcome` names, if one comes within `timeout`.
+    fn level(&mut self, timeout: Duration) -> Option<u16> {
+        let deadline = Instant::now() + timeout;
+        send(
+            self,
+            &Hello {
+                name: "probe",
+                roles: Roles::CLIENT,
+                max_frame: 1024,
+                revision: INTERFACE_REVISION,
+                level: INTERFACE_LEVEL,
+            },
+        )
+        .ok()?;
+        let mut buf = [0_u8; 1024];
+        loop {
+            let len = next(self, &mut buf, deadline).ok()?;
+            let view = frame::decode(&buf[..len]).ok()?;
+            match view.kind() {
+                kind::WELCOME => return Welcome::decode(view.payload()).ok().map(|w| w.level),
+                kind::REJECT => return None,
+                _ => {}
+            }
+        }
+    }
+}
+
+fn is_timeout(error: &ClientError) -> bool {
+    matches!(error, ClientError::Io(io) if io.kind() == std::io::ErrorKind::TimedOut)
 }

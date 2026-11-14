@@ -61,6 +61,8 @@ open_enum! {
         Busy = 3,
         /// A role was asked for that this carrier doesn't offer.
         RoleNotOffered = 4,
+        /// The `Hello` named another wire revision: [`Reject`] carries both.
+        RevisionMismatch = 5,
     }
 }
 
@@ -73,8 +75,11 @@ body! {
         pub roles: Roles,
         /// The largest frame it can receive.
         pub max_frame: u32,
-        /// The highest interface revision it speaks.
+        /// The wire revision it speaks. The comm core takes only its own.
         pub revision: u16,
+        ;
+        /// The additive level it speaks. Zero from a client that does not say.
+        pub level: u16,
     }
 }
 
@@ -89,12 +94,15 @@ body! {
         pub heartbeat_ms: u32,
         /// The largest frame to send: the smaller of both sides' limits.
         pub max_frame: u32,
-        /// The highest interface revision this side speaks.
+        /// The wire revision this side speaks. A client takes only its own.
         pub revision: u16,
         ;
         /// How long either side may go unheard before the session is over. Zero from a host
         /// that does not say: three heartbeats.
         pub idle_ms: u32,
+        /// The additive level this side speaks. Zero from a host that does not say: one that
+        /// knows nothing added since the level was introduced.
+        pub level: u16,
     }
 }
 
@@ -103,6 +111,11 @@ body! {
     pub struct Reject = kind::REJECT {
         /// Why.
         pub reason: RejectReason,
+        ;
+        /// For [`RejectReason::RevisionMismatch`], the comm core's wire revision; else zero.
+        pub node_revision: u16,
+        /// For [`RejectReason::RevisionMismatch`], the revision the `Hello` named; else zero.
+        pub peer_revision: u16,
     }
 }
 
@@ -189,23 +202,45 @@ impl Refusal<'_> {
     }
 }
 
-/// The revision a session runs at: the lower of both sides'.
-#[must_use]
-pub const fn session_revision(own: u16, peer: u16) -> u16 {
-    if own < peer { own } else { peer }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orion_wire::{Decode, INTERFACE_REVISION, body::encode_fields};
+    use orion_wire::{Decode, body::encode_fields};
+
+    /// What a side that predates the level sends: everything up to the revision, nothing after.
+    #[test]
+    fn a_hello_and_a_welcome_with_no_level_are_at_level_0() {
+        let hello = Hello {
+            name: "cam",
+            roles: Roles::CLIENT,
+            max_frame: 4096,
+            revision: 1,
+            level: 3,
+        };
+        let mut buf = [0; 64];
+        let len = encode_fields(&hello, &mut buf).unwrap();
+        // The level is the last byte: an older side never wrote it.
+        assert_eq!(Hello::decode(&buf[..len - 1]).unwrap().level, 0);
+        assert_eq!(Hello::decode(&buf[..len]).unwrap().level, 3);
+
+        let welcome = Welcome {
+            node: "board".parse().unwrap(),
+            session: 4,
+            heartbeat_ms: 1000,
+            max_frame: 4096,
+            revision: 1,
+            idle_ms: 0,
+            level: 3,
+        };
+        let len = encode_fields(&welcome, &mut buf).unwrap();
+        let older = Welcome::decode(&buf[..len - 1]).unwrap();
+        assert_eq!((older.level, older.revision), (0, 1));
+    }
 
     #[test]
-    fn a_newer_and_an_older_peer_both_negotiate() {
-        let own = INTERFACE_REVISION;
-        assert_eq!(session_revision(own, own + 4), own);
-        assert_eq!(session_revision(own + 4, own), own);
-        assert_eq!(session_revision(own, 0), 0);
+    fn a_reject_from_an_older_side_names_no_revisions() {
+        let reject = Reject::decode(&[RejectReason::Busy.code()]).unwrap();
+        assert_eq!((reject.node_revision, reject.peer_revision), (0, 0));
     }
 
     /// A newer peer's `Hello` has more on the end, and is still understood.
@@ -216,6 +251,7 @@ mod tests {
             roles: Roles::CLIENT.and(Roles::PROVIDER),
             max_frame: 4096,
             revision: 9,
+            level: 2,
         };
         let mut buf = [0; 64];
         let len = encode_fields(&hello, &mut buf).unwrap();

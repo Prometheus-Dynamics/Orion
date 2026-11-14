@@ -57,6 +57,7 @@ impl Peer {
                     max_frame: 4096,
                     revision: 1,
                     idle_ms: 0,
+                    level: orion_wire::INTERFACE_LEVEL,
                 };
                 vec![self.raw(&welcome)]
             }

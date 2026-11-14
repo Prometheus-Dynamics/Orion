@@ -6,12 +6,14 @@ use std::time::Duration;
 
 use orion_broker::{TopicId, Writing};
 use orion_msg_peers::{CLOCK_MONOTONIC, TimeReply, TimeRequest};
-use orion_msg_session::{Hello, Ping, Pong, Reject, Roles, Welcome};
+use orion_msg_session::{Hello, Ping, Pong, Reject, RejectReason, Roles, Welcome};
 use orion_msg_topics::{Declare, Opened, Sample, Subscribe, TopicState, TopicStatus, Unsubscribe};
 use orion_server::{Connection, Error, FdSet, FrameRead, FrameWrite};
 use orion_tcp::{TcpRead, TcpWrite};
 use orion_types::{NodeName, SampleTime, TopicName, TopicRef};
-use orion_wire::{Body, Bytes, Decode, INTERFACE_REVISION, encode_body, frame, kind};
+use orion_wire::{
+    Body, Bytes, Decode, INTERFACE_LEVEL, INTERFACE_REVISION, encode_body, frame, kind,
+};
 use shm_ring::{FieldId, Flags, Spec};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -201,6 +203,7 @@ async fn serve(
             roles: Roles::CLIENT,
             max_frame: shared.options.max_frame,
             revision: INTERFACE_REVISION,
+            level: INTERFACE_LEVEL,
         },
     )
     .await?;
@@ -215,6 +218,13 @@ async fn serve(
         kind::WELCOME => {
             let welcome = Welcome::decode(view.payload())
                 .map_err(|_| std::io::Error::other("a welcome that does not decode"))?;
+            if welcome.revision != INTERFACE_REVISION {
+                warn!(
+                    "{node} speaks wire revision {} and this node {INTERFACE_REVISION}",
+                    welcome.revision
+                );
+                return Err(std::io::Error::other("another wire revision"));
+            }
             if welcome.node != *node {
                 warn!("the node at {node}'s address says it is {}", welcome.node);
                 return Err(std::io::Error::other("another node answered"));
@@ -222,7 +232,13 @@ async fn serve(
             Duration::from_millis(u64::from(welcome.heartbeat_ms.max(100)))
         }
         kind::REJECT => {
-            let why = Reject::decode(view.payload()).map(|reject| format!("{:?}", reject.reason));
+            let why = Reject::decode(view.payload()).map(|reject| match reject.reason {
+                RejectReason::RevisionMismatch => format!(
+                    "it speaks wire revision {} and this node {}",
+                    reject.node_revision, reject.peer_revision
+                ),
+                reason => format!("{reason:?}"),
+            });
             warn!("{node} turned this node away: {}", why.unwrap_or_default());
             return Err(std::io::Error::other("rejected"));
         }

@@ -73,6 +73,7 @@ impl Client {
             roles: Roles::CLIENT,
             max_frame: 16 * 1024,
             revision: 1,
+            level: 0,
         };
         client.send(&hello).await;
         let _: Welcome = client.recv().await.expect("welcome");

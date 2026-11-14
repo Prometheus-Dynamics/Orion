@@ -33,6 +33,7 @@ orion-keys = { path = "../../comm/keys" }
 orion-link-serial = { path = "../../comm/link-serial" }
 orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
 orion-server = { path = "../../comm/server" }
+orion-stubs = { path = "../../testing/stubs" }
 orion-tcp = { path = "../../comm/tcp" }
 orion-unix = { path = "../../comm/unix" }
 rustix = { version = "1", default-features = false, features = ["std", "pty"] }

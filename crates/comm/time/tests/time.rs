@@ -137,6 +137,7 @@ impl Client {
                 roles: Roles::CLIENT,
                 max_frame: 4096,
                 revision: 1,
+                level: 0,
             })
             .await;
         assert_eq!(client.next().await, kind::WELCOME);

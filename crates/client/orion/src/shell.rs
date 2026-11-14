@@ -11,7 +11,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
+use orion_connect::{Client, ClientError, Cx, Feature, Handler, Incoming};
 use orion_msg_session::{
     ShellClose, ShellCredit, ShellData, ShellEof, ShellExit, ShellOpen, ShellOpened, ShellResize,
 };
@@ -109,6 +109,8 @@ pub(crate) fn open(
     command: Option<&[u8]>,
     terminal: Option<&Terminal>,
 ) -> Result<Shell, ClientError> {
+    // An older node would not answer at all.
+    client.needs(Feature::Shell)?;
     let seq = client.send(&ShellOpen {
         account,
         command: Bytes(command.unwrap_or_default()),

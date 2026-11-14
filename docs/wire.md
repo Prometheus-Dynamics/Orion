@@ -32,7 +32,10 @@ Details of COBS and segmentation:
 ## Kinds
 
 The whole table is in `crates/core/wire/src/kind.rs`. A number is never reused, and a build fails if
-one is repeated or sits outside its range. A receiver ignores kinds it doesn't know.
+one is repeated or sits outside its range. A comm core answers a kind it does not serve with a
+`Refusal` of `unsupported` under the frame's `seq`, so a newer client's request to an older node
+fails at once, not by a timeout. (A node from before revision 1's level 1 drops such a frame
+without a word.) A client ignores kinds it doesn't know.
 
 | Range | Concept |
 | --- | --- |
@@ -59,17 +62,43 @@ rules are what keep old and new builds talking:
 3. **Long is fine.** A reader ignores trailing bytes it doesn't understand.
 4. **Enums that may grow are open.** They travel as a number, and a value the reader doesn't know
    arrives as `Unknown(n)` rather than failing the body. Enums with data inside are closed: a new
-   variant is appended and sent only when the session's revision includes it.
+   variant is appended and sent only to a side at the level that has it.
 5. **Lists carry lengths.** A list is a total byte length, then each element with its own length in
    front. An element can grow by the same rules, and a reader can skip one it can't decode.
 6. **The version stays 1.** A bump would stop every deployed peer, so it is reserved for a change
-   to the framing itself. Additions use revisions.
+   to the framing itself. Other changes use the revision and the level.
 
-## Revisions
+## Revision and level
 
-`Hello` and `Welcome` each carry the highest interface revision their side speaks. A session uses
-the lower of the two, and a side sends a kind only when that revision includes it. `Hello` and
-`Reject` keep their existing fields first, so a version mismatch can always be reported.
+`Hello` and `Welcome` each carry two numbers: the wire revision and, appended, the additive level.
 
-Every kind in the table belongs to revision 1 so far. The recorded bytes in
-`crates/testing/wire-vectors` pin every kind, so any change to a body fails a test.
+**The revision** (`INTERFACE_REVISION`, 1) goes up only for a change an older side would misread.
+Both sides must speak the same one. A comm core turns a `Hello` of another revision away with
+`Reject { RevisionMismatch, node_revision, peer_revision }`, on every carrier, recovery's
+included. A client turns away a `Welcome` of another revision, and reports either as
+`ClientError::Revision { node, client }`. A node from before the check never compares, so the
+client's own check is what stops a session with one.
+
+**The level** (`INTERFACE_LEVEL`) goes up by one for every addition whose meaning an older side
+would change by ignoring it, or would not answer at all. A side that sends none is at level 0. A
+client asks for such a feature only of a node at its level or above: below it, the call fails
+with `ClientError::Level { feature, needs, node }` and sends nothing. Additions an older side may
+safely ignore have no level.
+
+| Level | Feature (`orion_connect::Feature`) | What an older node would do |
+| --- | --- | --- |
+| 1 | `SubscribeFromLatest`: `Declare.on_subscribe = Latest` | Start every subscriber from now, silently |
+| 1 | `Shell`: `SHELL_OPEN` | Not answer |
+| 1 | `SignedLink`: `LINK_SIGN_HELLO` on a serial or USB link | Not answer; the client then says hello plainly to read the level |
+| 1 | `DetachedRun`: `Run.detached` | Run it with no deadline and no limit, and never tell its program the caller went |
+| 1 | `RunOnBehalf`: `Run.on_behalf`, from a node | Take every caller behind the link as one, and never hear one of them end |
+
+Additions with no level, because an older side ignores them and does nothing different that
+matters: `Cancel.reason`, `Claim.session`, `ACTION_CALLER_GONE` to a program, the hello document's
+`state` and `recovery_why` facts, and `Reject`'s two revisions.
+
+Level 1 is the first level. A node at Orion `next` before this change (R2 at `dbd5fc0`) sends no
+level, so it is at 0, though it knows every level-1 feature.
+
+The recorded bytes in `crates/testing/wire-vectors` pin every kind, so any change to a body fails a
+test.

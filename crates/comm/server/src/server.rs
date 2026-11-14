@@ -3,13 +3,11 @@
 use std::rc::Rc;
 
 use orion_check::{Check, Grants, Refused, Security};
-use orion_msg_session::{
-    Hello, Ping, Pong, Refusal, Reject, RejectReason, Welcome, session_revision,
-};
+use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, RejectReason, Welcome};
 use orion_supervise::contain;
 use orion_types::{Error, NodeName};
 use orion_wire::frame;
-use orion_wire::{Body, Decode, FrameView, INTERFACE_REVISION, kind};
+use orion_wire::{Body, Decode, FrameView, INTERFACE_LEVEL, INTERFACE_REVISION, kind};
 use shm_fdpass::FdSet;
 
 use crate::service::{Cx, Incoming, Service};
@@ -128,7 +126,14 @@ impl Server {
 
     fn reject(&mut self, session: SessionId, reason: RejectReason) -> Flow {
         self.stats.rejected += 1;
-        self.send(session, &Reject { reason });
+        self.send(
+            session,
+            &Reject {
+                reason,
+                node_revision: 0,
+                peer_revision: 0,
+            },
+        );
         Flow::Close
     }
 
@@ -196,6 +201,20 @@ impl Server {
             self.stats.dropped += 1;
             return Flow::Close;
         };
+        if hello.revision != INTERFACE_REVISION {
+            // Another wire: nothing after this could be read right. Both numbers go back, so
+            // whoever is told can say which side is behind.
+            self.stats.rejected += 1;
+            self.send(
+                session,
+                &Reject {
+                    reason: RejectReason::RevisionMismatch,
+                    node_revision: INTERFACE_REVISION,
+                    peer_revision: hello.revision,
+                },
+            );
+            return Flow::Close;
+        }
         let limits = self.sessions.limits;
         let Some(entry) = self.sessions.entry_mut(session) else {
             return Flow::Close;
@@ -207,7 +226,7 @@ impl Server {
         info.name.clear();
         info.name.extend(hello.name.chars().take(64));
         info.roles = hello.roles;
-        info.revision = session_revision(INTERFACE_REVISION, hello.revision);
+        info.level = hello.level;
         // Never below what the server's own answers need.
         info.max_frame = hello.max_frame.clamp(256, limits.max_frame);
         info.open = true;
@@ -218,6 +237,7 @@ impl Server {
             max_frame: info.max_frame,
             revision: INTERFACE_REVISION,
             idle_ms: u32::try_from(limits.idle_ms()).unwrap_or(u32::MAX),
+            level: limits.level.min(INTERFACE_LEVEL),
         };
         self.send(session, &welcome);
         Flow::Continue
@@ -232,8 +252,10 @@ impl Server {
     ) -> Flow {
         let route = self.routes[usize::from(frame.kind())];
         let Some(service) = self.services.get_mut(usize::from(route)) else {
-            // Unknown kinds are ignored, so an older comm core can talk to a newer client.
+            // A kind this comm core does not serve: a newer client's, or one whose service is
+            // not built in. Said at once, so the asker is not left waiting.
             self.stats.unknown += 1;
+            self.refuse(session, frame.seq(), Error::Unsupported);
             return Flow::Continue;
         };
         let seq = frame.seq();

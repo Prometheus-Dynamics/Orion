@@ -39,6 +39,7 @@ fn page(ws: SocketAddr) -> String {
             roles: Roles::CLIENT,
             max_frame: 64 * 1024,
             revision: INTERFACE_REVISION,
+            level: 0,
         },
         1,
     );

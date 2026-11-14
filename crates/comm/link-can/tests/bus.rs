@@ -157,6 +157,7 @@ impl Device {
             roles: Roles::DEVICE,
             max_frame: 1024,
             revision: 1,
+            level: 0,
         });
         assert_eq!(self.next().await, kind::WELCOME);
     }
@@ -285,7 +286,7 @@ fn every_device_on_a_bus_is_its_own_session() {
                 name: "a message long enough to need several segments on any bus, classic or FD alike",
                 roles: Roles::DEVICE,
                 max_frame: 1024,
-                revision: 1,
+                revision: 1, level: 0,
             });
             arm.ping(7).await;
             assert_eq!((board.stats)().broken, 1);

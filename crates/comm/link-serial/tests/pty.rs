@@ -10,7 +10,7 @@ use std::time::Duration;
 use orion_link_serial::{LinkStats, Serial, StreamCarrier};
 use orion_measure::sched::thread_cpu_ns;
 use orion_measure::{CountingAlloc, thread_counts};
-use orion_msg_session::{Hello, Ping, Pong, Welcome};
+use orion_msg_session::{Hello, Ping, Pong, Reject, RejectReason, Welcome};
 use orion_server::{Comm, Limits, Roles, Security};
 use orion_supervise::{Report, State, Status};
 use orion_wire::{Body, Decode, StreamDecoder, encode_body, encode_frame, kind};
@@ -114,6 +114,7 @@ impl Device {
             roles: Roles::DEVICE,
             max_frame: 512,
             revision: 1,
+            level: 0,
         })
         .await;
         assert_eq!(self.next().await, kind::WELCOME);
@@ -222,6 +223,35 @@ fn the_wire_crosses_a_serial_port_and_noise_does_not_stop_it() {
         assert_eq!(
             board.states.0.borrow().last().map(|status| status.state),
             Some(State::Running)
+        );
+    });
+}
+
+#[test]
+fn a_device_of_another_wire_revision_is_told_both_numbers() {
+    run(async {
+        let (mut device, path) = Device::pty();
+        let board = board(path, 2000);
+        until("the port opens", || (board.stats)().opens == 1).await;
+        let other = orion_wire::INTERFACE_REVISION + 1;
+        device
+            .send(&Hello {
+                name: "sensor",
+                roles: Roles::DEVICE,
+                max_frame: 512,
+                revision: other,
+                level: 0,
+            })
+            .await;
+        assert_eq!(device.next().await, kind::REJECT);
+        let reject: Reject = device.body();
+        assert_eq!(
+            (reject.reason, reject.node_revision, reject.peer_revision),
+            (
+                RejectReason::RevisionMismatch,
+                orion_wire::INTERFACE_REVISION,
+                other
+            )
         );
     });
 }

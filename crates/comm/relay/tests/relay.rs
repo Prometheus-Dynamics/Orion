@@ -61,6 +61,7 @@ impl Client {
             roles,
             max_frame: 32 * 1024,
             revision: 1,
+            level: 0,
         };
         client.send(&hello).await;
         assert_eq!(client.next().await, kind::WELCOME);

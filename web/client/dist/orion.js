@@ -16,6 +16,8 @@
 export const PROTOCOL = "orion.v1";
 const PROTOCOL_VERSION = 1;
 const INTERFACE_REVISION = 1;
+/** The `Reject` reason for a `Hello` of another wire revision. */
+const REVISION_MISMATCH = 5;
 const MAX_FRAME = 64 * 1024;
 /** The roles a page asks for: a client, and a provider so that it may publish. */
 const ROLES = (1 << 0) | (1 << 1);
@@ -312,6 +314,13 @@ export class Orion {
                     orion.node = welcome.str();
                     welcome.uint();
                     const heartbeatMs = welcome.uint();
+                    welcome.uint();
+                    const revision = welcome.uint();
+                    if (revision !== INTERFACE_REVISION) {
+                        orion.close();
+                        reject(new Error(`the board speaks wire revision ${revision} and this page ${INTERFACE_REVISION}`));
+                        return;
+                    }
                     // Heard from at least twice in every heartbeat, so the board never gives up on a
                     // page that is merely quiet.
                     orion.heartbeat = setInterval(() => orion.send(4 /* Kind.Ping */, new Writer().uint(Date.now()).done()), Math.max(100, heartbeatMs / 2));
@@ -319,7 +328,15 @@ export class Orion {
                     resolve(orion);
                 }
                 else if (message.kind === 3 /* Kind.Reject */) {
-                    reject(new Error(`the comm core turned the session away (${message.payload[0]})`));
+                    const turned = new Reader(message.payload);
+                    const reason = turned.u8();
+                    if (reason === REVISION_MISMATCH) {
+                        const board = turned.uint();
+                        reject(new Error(`the board speaks wire revision ${board} and this page ${INTERFACE_REVISION}`));
+                    }
+                    else {
+                        reject(new Error(`the comm core turned the session away (${reason})`));
+                    }
                 }
             };
         });

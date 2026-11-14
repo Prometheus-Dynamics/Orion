@@ -11,9 +11,17 @@ use crate::crc::{Crc32c, crc32c};
 /// a change here is reserved for a framing change.
 pub const PROTOCOL_VERSION: u8 = 1;
 
-/// The interface revision this build speaks, announced in `Hello` and `Welcome`. A session uses the
-/// lower of both sides' revisions, and sends a kind only when that revision includes it.
+/// The wire revision this build speaks, announced in `Hello` and `Welcome`. Both sides must speak
+/// the same one: a comm core turns a `Hello` of another revision away with
+/// `Reject { RevisionMismatch }`, and a client turns away a `Welcome` of another. It goes up only for
+/// a change an older side would misread; an addition it can ignore or refuse leaves it alone.
 pub const INTERFACE_REVISION: u16 = 1;
+
+/// The additive level this build speaks, announced after the revision in `Hello` and `Welcome`; a
+/// side that says none is at 0. It goes up by one for every addition whose meaning an older side
+/// would change by ignoring it, and a client asks for such a thing only of a node at its level or
+/// above. Additions an older side may safely ignore need no level. See `docs/wire.md`.
+pub const INTERFACE_LEVEL: u16 = 1;
 
 /// Header length: version, kind, and the little-endian sequence number.
 pub const HEADER_LEN: usize = 4;

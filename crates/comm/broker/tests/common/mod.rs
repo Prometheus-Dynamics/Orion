@@ -109,6 +109,7 @@ impl Client {
             roles: Roles::CLIENT.and(Roles::PROVIDER),
             max_frame: 64 * 1024,
             revision: 1,
+            level: 0,
         };
         client.send(&hello, &[]).await;
         let mut fds = FdSet::default();

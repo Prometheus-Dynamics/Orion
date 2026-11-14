@@ -219,7 +219,23 @@ struct Right {
 
 impl Right {
     fn start(dir: &Path, port: Option<u16>, left_key: [u8; 32]) -> Self {
-        let board = Board::start_named(dir, Security::On, "right", port);
+        Self::at_level(dir, port, left_key, orion_wire::INTERFACE_LEVEL)
+    }
+
+    /// One whose comm core names `level` in its welcome: an older node, below this build's.
+    fn at_level(dir: &Path, port: Option<u16>, left_key: [u8; 32], level: u16) -> Self {
+        let board = Board::start_with(
+            dir,
+            orion_stubs::Options {
+                security: Security::On,
+                name: "right".to_owned(),
+                port,
+                for_node: true,
+                on_disk: true,
+                level,
+                ..orion_stubs::Options::default()
+            },
+        );
         // The right node knows the left node's key: it is a peer.
         let trusted = board
             .keys()
@@ -237,27 +253,8 @@ impl Right {
     }
 }
 
-#[test]
-fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
-    let (left_dir, right_dir) = (dir("forward-left"), dir("forward-right"));
-    // The left node's key, as its comm core would have made it.
-    std::fs::create_dir_all(left_dir.join("state")).expect("state");
-    let left_key = Identity::load_or_create(&left_dir.join("state/node-identity.ed25519"))
-        .expect("key")
-        .public();
-    std::fs::create_dir_all(right_dir.join("state")).expect("state");
-    let right_key = Identity::load_or_create(&right_dir.join("state/node-identity.ed25519"))
-        .expect("key")
-        .public();
-
-    let left = Board::start_named(&left_dir, Security::On, "left", None);
-    let _left_logic = Logic::start(settings(&left_dir, "left"));
-    let right_node = Right::start(&right_dir, None, left_key);
-    let port = right_node.board.network().port();
-
-    // The left node knows where the right node is.
-    let caller =
-        Orion::connect(&Address::Local(left.socket().to_owned()), "dashboard").expect("connect");
+/// Tells the left node, through `caller`, that the right node is at `port`.
+fn point(caller: &Orion, port: u16) {
     let address = format!("127.0.0.1:{port}");
     let mut value = vec![0_u8; 128];
     let len = encode_fields(
@@ -286,6 +283,60 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
             Err(error) => panic!("put: {error}"),
         }
     }
+}
+
+/// Both nodes' keys, made where their comm cores would make them.
+fn keys(left_dir: &Path, right_dir: &Path) -> ([u8; 32], [u8; 32]) {
+    let key = |dir: &Path| {
+        std::fs::create_dir_all(dir.join("state")).expect("state");
+        Identity::load_or_create(&dir.join("state/node-identity.ed25519"))
+            .expect("key")
+            .public()
+    };
+    (key(left_dir), key(right_dir))
+}
+
+#[test]
+fn a_run_is_not_carried_to_an_older_node_for_a_caller_it_could_not_tell_apart() {
+    let (left_dir, right_dir) = (dir("older-left"), dir("older-right"));
+    let (left_key, right_key) = keys(&left_dir, &right_dir);
+    let left = Board::start_named(&left_dir, Security::On, "left", None);
+    let _left_logic = Logic::start(settings(&left_dir, "left"));
+    let right_node = Right::at_level(&right_dir, None, left_key, 0);
+    let caller =
+        Orion::connect(&Address::Local(left.socket().to_owned()), "dashboard").expect("connect");
+    point(&caller, right_node.board.network().port());
+    assert!(
+        left.keys()
+            .lock()
+            .trust_peer(&"right".parse().expect("name"), right_key)
+            .expect("trust")
+    );
+
+    // Refused at once, as something the other node does not take, and never sent there.
+    match finish(&caller, &call("blink", b"")) {
+        Err(ClientError::Refused(Error::Unsupported)) => {}
+        other => panic!("expected unsupported, got {other:?}"),
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    let (ran, gone) = right_node.driver.sessions.lock().expect("sessions").clone();
+    assert!(ran.is_empty() && gone.is_empty(), "{ran:?} {gone:?}");
+}
+
+#[test]
+fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
+    let (left_dir, right_dir) = (dir("forward-left"), dir("forward-right"));
+    let (left_key, right_key) = keys(&left_dir, &right_dir);
+
+    let left = Board::start_named(&left_dir, Security::On, "left", None);
+    let _left_logic = Logic::start(settings(&left_dir, "left"));
+    let right_node = Right::start(&right_dir, None, left_key);
+    let port = right_node.board.network().port();
+
+    // The left node knows where the right node is.
+    let caller =
+        Orion::connect(&Address::Local(left.socket().to_owned()), "dashboard").expect("connect");
+    point(&caller, port);
 
     // The left node forwards only to a node its trust file pins, and only once that node has
     // proved it holds the pinned key.

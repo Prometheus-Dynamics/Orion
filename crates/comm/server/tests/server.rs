@@ -170,11 +170,20 @@ impl Client {
     }
 
     async fn hello<'a, B: Body + Decode<'a>>(&'a mut self, roles: Roles) -> Option<B> {
+        self.hello_at(roles, orion_wire::INTERFACE_REVISION).await
+    }
+
+    async fn hello_at<'a, B: Body + Decode<'a>>(
+        &'a mut self,
+        roles: Roles,
+        revision: u16,
+    ) -> Option<B> {
         let hello = Hello {
             name: "test",
             roles,
             max_frame: 4096,
-            revision: 1,
+            revision,
+            level: 0,
         };
         self.send(&hello).await;
         self.recv().await
@@ -243,9 +252,16 @@ fn a_session_opens_pings_and_reaches_a_service() {
                 welcome.heartbeat_ms,
                 welcome.max_frame,
                 welcome.revision,
-                welcome.idle_ms
+                welcome.idle_ms,
+                welcome.level,
             ),
-            (2000, 4096, 1, 6000)
+            (
+                2000,
+                4096,
+                orion_wire::INTERFACE_REVISION,
+                6000,
+                orion_wire::INTERFACE_LEVEL
+            )
         );
         let session = SessionId(welcome.session);
 
@@ -254,9 +270,15 @@ fn a_session_opens_pings_and_reaches_a_service() {
         assert_eq!(client.round_trip(9).await, 9);
         assert_eq!(board.seen.borrow().callers, [USER]);
 
-        // A kind nobody answers is ignored, and the session carries on.
-        client.ask(kind::EXECUTOR_OFFER, 0, &[]).await;
-        client.ask(0xEE, 0, &[]).await;
+        // A kind nobody answers is refused at once, and the session carries on.
+        for unknown in [kind::EXECUTOR_OFFER, 0xEE] {
+            let seq = client.ask(unknown, 0, &[]).await;
+            let refusal: Refusal = client.recv().await.expect("refusal");
+            assert_eq!(
+                (refusal.request_seq, refusal.error()),
+                (seq, Some(Error::Unsupported))
+            );
+        }
         assert_eq!(client.round_trip(10).await, 10);
 
         let info = board
@@ -270,7 +292,7 @@ fn a_session_opens_pings_and_reaches_a_service() {
         let stats = board.comm.stats();
         assert_eq!(
             (stats.opened, stats.requests, stats.unknown, stats.refused),
-            (1, 2, 2, 0)
+            (1, 2, 2, 2)
         );
 
         // Closing the connection closes the session and tells the service.
@@ -353,6 +375,27 @@ fn connections_that_break_the_protocol_are_turned_away() {
             RejectReason::VersionMismatch
         );
         assert!(old.is_closed().await);
+
+        // Another wire revision, newer or older: told so with both numbers, then closed.
+        for other in [
+            orion_wire::INTERFACE_REVISION + 1,
+            orion_wire::INTERFACE_REVISION - 1,
+        ] {
+            let mut stranger = Client::new(&board, USER);
+            let reject: Reject = stranger
+                .hello_at(Roles::CLIENT, other)
+                .await
+                .expect("reject");
+            assert_eq!(
+                (reject.reason, reject.node_revision, reject.peer_revision),
+                (
+                    RejectReason::RevisionMismatch,
+                    orion_wire::INTERFACE_REVISION,
+                    other
+                )
+            );
+            assert!(stranger.is_closed().await);
+        }
 
         // A role this carrier does not offer.
         let mut node = Client::new(&board, USER);

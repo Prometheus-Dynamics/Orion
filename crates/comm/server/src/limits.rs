@@ -20,6 +20,9 @@ pub struct Limits {
     pub hello_ms: u32,
     /// `comm.write_ms`: how long one frame may take to be taken by the other side.
     pub write_ms: u32,
+    /// Not a setting: the additive level the comm core names in its `Welcome`. This build's
+    /// own; set lower only to stand in for an older node, in a test. Never above this build's.
+    pub level: u16,
 }
 
 impl Default for Limits {
@@ -32,6 +35,7 @@ impl Default for Limits {
             idle_ms: 0,
             hello_ms: 5000,
             write_ms: 5000,
+            level: orion_wire::INTERFACE_LEVEL,
         }
     }
 }
@@ -52,6 +56,7 @@ impl Limits {
             idle_ms: source.get("comm.idle_ms", default.idle_ms)?,
             hello_ms: source.get("comm.hello_ms", default.hello_ms)?,
             write_ms: source.get("comm.write_ms", default.write_ms)?,
+            level: default.level,
         };
         let bad = |key: &str, message: &str| ConfigError {
             key: key.into(),

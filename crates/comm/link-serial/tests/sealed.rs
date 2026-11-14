@@ -131,6 +131,7 @@ impl Device {
             roles: Roles::DEVICE,
             max_frame: 512,
             revision: 1,
+            level: 0,
         })
         .await;
         assert_eq!(self.next().await, kind::WELCOME);

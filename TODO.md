@@ -76,6 +76,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C33](docs/prs/C33.md) A program hears that a caller's session ended (wave 18)
 - [x] [C34](docs/prs/C34.md) A caller's session and its end follow a run to another node (wave 18; needs C33)
 - [x] [F12a](docs/prs/F12a.md) The client on Windows and macOS (wave 18)
+- [x] [C35](docs/prs/C35.md) One wire revision checked at hello, an additive level, and no silent answers (wave 18)
 
 ## D. Client
 

@@ -350,13 +350,22 @@ impl<const TX: usize> Link<TX> {
     pub(crate) fn handle(&mut self, frame: &FrameView<'_>) -> bool {
         match (frame.kind(), self.state) {
             (kind::WELCOME, State::Connecting) => {
-                // Welcome: node, session, heartbeat, the longest frame to send, revision.
+                // Welcome: node, session, heartbeat, the longest frame to send, revision; then what a
+                // newer host adds, unread.
                 let mut fields = Reader::new(frame.payload());
                 let (Some(node), Some(session), Some(heartbeat_ms), Some(max_frame)) =
                     (fields.bytes(), fields.u32(), fields.u32(), fields.u32())
                 else {
                     return true;
                 };
+                // Another wire revision: nothing it says could be read right. Turned away as
+                // if the host had said so, and hello is said again later.
+                if fields.varint() != Some(u64::from(frame::INTERFACE_REVISION)) {
+                    self.state = State::Rejected;
+                    self.turned_away = true;
+                    self.emit(Event::Rejected(RejectReason::RevisionMismatch));
+                    return true;
+                }
                 let kept = node.len().min(NODE_MAX);
                 for (to, from) in self.node.iter_mut().zip(node) {
                     *to = *from;

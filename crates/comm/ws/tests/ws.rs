@@ -8,7 +8,7 @@ use std::time::Duration;
 use orion_broker::{Broker, BrokerConfig};
 use orion_hello::Hello as HelloService;
 use orion_keys::{Keys, KeysConfig, SharedKeys};
-use orion_msg_session::{Hello, Identify, Identity, Welcome};
+use orion_msg_session::{Hello, Identify, Identity, Reject, RejectReason, Welcome};
 use orion_server::{Comm, Limits, Roles, Security};
 use orion_wire::{Body, Bytes, Decode, INTERFACE_REVISION, encode_body, frame, kind};
 use orion_ws::{Message, ORION, WsCarrier, WsListener, WsOptions, WsSocket, connect};
@@ -63,6 +63,7 @@ fn hello() -> Vec<u8> {
             roles: Roles::CLIENT,
             max_frame: 64 * 1024,
             revision: INTERFACE_REVISION,
+            level: 0,
         },
         1,
     )
@@ -251,6 +252,33 @@ impl Raw {
             Ok(Ok(_))
         )
     }
+}
+
+#[test]
+fn a_page_of_another_wire_revision_is_told_both_numbers() {
+    run(async {
+        let (addr, _echo) = board(WsOptions::default()).await;
+        let mut socket = connect(addr, "/orion", ORION, None).await.expect("connect");
+        let other = INTERFACE_REVISION + 1;
+        let hello = encode(
+            &Hello {
+                name: "page",
+                roles: Roles::CLIENT,
+                max_frame: 64 * 1024,
+                revision: other,
+                level: 0,
+            },
+            1,
+        );
+        socket.write.send_binary(&hello).await.expect("send");
+        let (kind, payload) = next(&mut socket).await;
+        assert_eq!(kind, kind::REJECT);
+        let reject = Reject::decode(&payload).expect("reject");
+        assert_eq!(
+            (reject.reason, reject.node_revision, reject.peer_revision),
+            (RejectReason::RevisionMismatch, INTERFACE_REVISION, other)
+        );
+    });
 }
 
 #[test]

@@ -162,6 +162,7 @@ fn two_comm_cores_find_each_other_and_enroll_with_the_shared_key() {
             roles: Roles::PEER,
             max_frame: 4096,
             revision: INTERFACE_REVISION,
+            level: 0,
         };
         let mut out = [0_u8; 256];
         let len = encode_body(&hello, 1, &mut out).expect("encode");

@@ -68,6 +68,7 @@ async fn run(
             roles: Roles::PROVIDER,
             max_frame: MAX_FRAME as u32,
             revision: frame::INTERFACE_REVISION,
+            level: frame::INTERFACE_LEVEL,
         })
         .await?;
     let heartbeat = loop {
@@ -78,6 +79,13 @@ async fn run(
         if view.kind() == kind::WELCOME {
             let welcome = Welcome::decode(view.payload())
                 .map_err(|_| std::io::Error::other("a bad welcome"))?;
+            if welcome.revision != frame::INTERFACE_REVISION {
+                return Err(std::io::Error::other(format!(
+                    "the comm core speaks wire revision {} and the gateway {}",
+                    welcome.revision,
+                    frame::INTERFACE_REVISION
+                )));
+            }
             break Duration::from_millis(u64::from(welcome.heartbeat_ms.max(1)));
         }
     };

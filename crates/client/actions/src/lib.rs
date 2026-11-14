@@ -19,7 +19,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
+use orion_connect::{Client, ClientError, Cx, Feature, Handler, Incoming};
 use orion_msg_actions::{
     ActionResult, Attach, CallerGone, Cancel, Claim, Progress, Register, Registered,
     Run as RunMessage,
@@ -297,8 +297,14 @@ impl Actions {
     ///
     /// # Errors
     ///
-    /// If the name is not one, or the connection broke.
+    /// If the name is not one, or the connection broke. [`ClientError::Level`] for a detached run
+    /// on a node below [`Feature::DetachedRun`]'s level: nothing is sent.
     pub fn run(&self, action: &ActionCall<'_>) -> Result<Run, ClientError> {
+        // An older node takes a detached run with no deadline and no limit, and never tells
+        // its program the caller has gone.
+        if action.detached {
+            self.client.needs(Feature::DetachedRun)?;
+        }
         let call = {
             let mut state = self.state.borrow_mut();
             state.next_call += 1;

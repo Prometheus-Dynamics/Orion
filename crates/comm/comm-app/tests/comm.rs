@@ -143,6 +143,7 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
             roles: Roles::CLIENT,
             max_frame: 16 * 1024,
             revision: 1,
+            level: 0,
         };
         send(&mut asker, &hello, 1).await;
         expect(&mut asker, kind::WELCOME).await;

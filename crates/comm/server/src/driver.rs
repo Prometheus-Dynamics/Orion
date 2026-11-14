@@ -143,6 +143,8 @@ impl Comm {
             let mut frame = [0_u8; 32];
             let reject = Reject {
                 reason: RejectReason::Busy,
+                node_revision: 0,
+                peer_revision: 0,
             };
             if let Ok(len) = encode_body(&reject, 0, &mut frame) {
                 let write_ms = Duration::from_millis(u64::from(limits.write_ms));

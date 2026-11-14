@@ -23,8 +23,8 @@ pub mod stream;
 pub use body::{Body, Bytes, Decode, List, decode_body, encode_body};
 pub use crc::{Crc32c, crc32c};
 pub use frame::{
-    CRC_LEN, FRAME_OVERHEAD, FrameError, FrameHeader, FrameView, HEADER_LEN, INTERFACE_REVISION,
-    PROTOCOL_VERSION, frame_len, seq_newer,
+    CRC_LEN, FRAME_OVERHEAD, FrameError, FrameHeader, FrameView, HEADER_LEN, INTERFACE_LEVEL,
+    INTERFACE_REVISION, PROTOCOL_VERSION, frame_len, seq_newer,
 };
 pub use orion_types as types;
 pub use packet::{CanLinkIds, Reassembler, Segment, SegmentMtu, Segmenter};

@@ -9,6 +9,7 @@
 
 #![cfg(target_os = "linux")]
 
+pub mod older;
 pub mod receiver;
 pub mod router;
 pub mod store;
@@ -57,6 +58,9 @@ pub struct Options {
     /// `enrollment.key`: what an operator or a node proves it knows to enroll itself. None by
     /// default: only someone on the board enrolls anyone.
     pub enrollment_key: Option<Vec<u8>>,
+    /// The additive level its welcome names: this build's by default, lower to stand in for
+    /// an older node.
+    pub level: u16,
 }
 
 impl Default for Options {
@@ -71,6 +75,7 @@ impl Default for Options {
             heartbeat_ms: Limits::default().heartbeat_ms,
             idle_ms: 0,
             enrollment_key: None,
+            level: Limits::default().level,
         }
     }
 }
@@ -210,6 +215,7 @@ impl Board {
             heartbeat_ms,
             idle_ms,
             enrollment_key,
+            level,
         } = options;
         use std::os::unix::fs::MetadataExt;
         // Whoever owns the directory runs the test, and may be the node logic.
@@ -243,6 +249,7 @@ impl Board {
                     outbox_bytes: 8 << 20,
                     heartbeat_ms,
                     idle_ms,
+                    level,
                     ..Limits::default()
                 };
                 let comm = Comm::new(

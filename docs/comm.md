@@ -31,7 +31,10 @@ There can be `comm.max_sessions` (256) at once. One more is told `Busy` and let 
   no service can be reached around it.
 - `closed` is told when a session is gone.
 
-A frame of a kind no service answers is ignored, so an older comm core can talk to a newer client.
+A frame of a kind no service answers is refused as `unsupported`, so a newer client asking an older
+comm core for something it does not serve hears so at once. A `Hello` of another wire revision is
+turned away with both revisions, and every `Welcome` names this build's additive level
+(`docs/wire.md`).
 
 **What a session that misbehaves does to the others: nothing.**
 

@@ -8,7 +8,9 @@ use std::time::Duration;
 use orion_link_serial::{LinkStats, StreamCarrier};
 use orion_link_usb::UsbLinks;
 use orion_measure::{CountingAlloc, thread_counts};
-use orion_msg_session::{Hello, LinkOffer, LinkTaken, LinkTransport, Ping, Pong, Refusal};
+use orion_msg_session::{
+    Hello, LinkOffer, LinkTaken, LinkTransport, Ping, Pong, Refusal, Reject, RejectReason,
+};
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Grants, Limits, Principal, Roles, Security, What};
 use orion_types::KeyId;
@@ -79,6 +81,7 @@ impl Owner {
             roles: Roles::CLIENT,
             max_frame: 4096,
             revision: 1,
+            level: 0,
         };
         assert_eq!(owner.ask(&hello, Vec::new()).await, Ok(kind::WELCOME));
         owner
@@ -232,6 +235,7 @@ impl Device {
             roles: Roles::DEVICE,
             max_frame: 512,
             revision: 1,
+            level: 0,
         })
         .await;
         assert_eq!(self.next().await, Some(kind::WELCOME));
@@ -270,6 +274,42 @@ fn device_sessions(board: &Board) -> usize {
             .filter(|session| session.open && matches!(session.principal, Principal::Device(_)))
             .count()
     })
+}
+
+#[test]
+fn a_device_of_another_wire_revision_on_a_handed_over_link_is_told_both_numbers() {
+    run(async {
+        let board = board();
+        let mut owner = Owner::open(board.connector.connect(ROOT)).await;
+        let (mut device, handle) = Device::stream();
+        assert_eq!(
+            owner
+                .offer("usb0", LinkTransport::Stream, vec![handle])
+                .await,
+            Ok(kind::LINK_TAKEN)
+        );
+        until("the link takes the handle", || (board.stats)().opens == 1).await;
+        let other = orion_wire::INTERFACE_REVISION + 1;
+        device
+            .send(&Hello {
+                name: "sensor",
+                roles: Roles::DEVICE,
+                max_frame: 512,
+                revision: other,
+                level: 0,
+            })
+            .await;
+        assert_eq!(device.next().await, Some(kind::REJECT));
+        let reject = Reject::decode(&device.payload[..device.payload_len]).expect("reject");
+        assert_eq!(
+            (reject.reason, reject.node_revision, reject.peer_revision),
+            (
+                RejectReason::RevisionMismatch,
+                orion_wire::INTERFACE_REVISION,
+                other
+            )
+        );
+    });
 }
 
 #[test]

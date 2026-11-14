@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use orion_connect::{ClientError, Roles, Session};
+use orion_connect::{ClientError, Feature, Roles, Session};
 use orion_dial::Dialer;
 use orion_msg_actions::{
     ActionResult, CallerGone, Cancel, CancelReason, Outcome, Progress, Run, Target,
@@ -155,9 +155,26 @@ impl Helper {
                     // A node that is not the one pinned is refused as such, not as away.
                     let error = match error {
                         ClientError::Denied(_) | ClientError::OtherKey { .. } => Error::Denied,
+                        // Another wire: no run of any kind can be asked there.
+                        ClientError::Revision { .. } => Error::Unsupported,
                         _ => Error::Unavailable,
                     };
                     self.tell(Event::Refused { id, error });
+                    return;
+                }
+                // An older node would take every caller behind this one as one caller, and
+                // never hear that one of them ended: the run is not asked for there.
+                if on_behalf != 0
+                    && let Some(Err(error)) = self
+                        .session
+                        .as_ref()
+                        .map(|session| session.needs(Feature::RunOnBehalf))
+                {
+                    warn!("a run is not forwarded to {}: {error}", self.node);
+                    self.tell(Event::Refused {
+                        id,
+                        error: Error::Unsupported,
+                    });
                     return;
                 }
                 let run = Run {

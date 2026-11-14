@@ -51,8 +51,8 @@ pub struct SessionInfo {
     pub name: String,
     /// The roles it asked for.
     pub roles: Roles,
-    /// The interface revision the session runs at.
-    pub revision: u16,
+    /// The additive level its hello named: 0 if it named none.
+    pub level: u16,
     /// The largest frame it takes.
     pub max_frame: u32,
     /// Whether descriptors can be sent to it.
@@ -172,7 +172,7 @@ impl Sessions {
                 principal,
                 name: String::new(),
                 roles: Roles(0),
-                revision: 0,
+                level: 0,
                 max_frame: self.limits.max_frame,
                 passes_descriptors,
                 open: false,

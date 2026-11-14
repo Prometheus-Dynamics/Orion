@@ -361,6 +361,31 @@ async fn board_state(socket: &Path) -> (Option<String>, Option<String>) {
     .expect("asked")
 }
 
+/// A raw hello at `revision` on the board's socket, and the kind and body of the answer.
+async fn hello_at(socket: &Path, revision: u16) -> (u8, Vec<u8>) {
+    let connection = orion_unix::UnixConnection::connect(socket)
+        .await
+        .expect("connect");
+    let mut out = [0_u8; 128];
+    let hello = orion_msg_session::Hello {
+        name: "test",
+        roles: orion_msg_session::Roles::CLIENT,
+        max_frame: 4096,
+        revision,
+        level: 0,
+    };
+    let len = orion_wire::encode_body(&hello, 1, &mut out).expect("hello");
+    connection.send(&out[..len], &[]).await.expect("send");
+    let mut buf = vec![0_u8; 4096];
+    let len = connection
+        .recv(&mut buf, &mut orion_server::FdSet::default())
+        .await
+        .expect("recv")
+        .expect("an answer");
+    let frame = orion_wire::frame::decode(&buf[..len]).expect("frame");
+    (frame.kind(), frame.payload().to_vec())
+}
+
 #[test]
 fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
     run(async {
@@ -411,6 +436,25 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
             said_why.contains("the settings cannot be read"),
             "{said_why}"
         );
+        // Recovery speaks the same wire, and turns another revision away with both numbers.
+        let other = orion_wire::INTERFACE_REVISION + 1;
+        let (kind, body) = hello_at(&socket, other).await;
+        assert_eq!(kind, orion_wire::kind::REJECT);
+        let reject =
+            <orion_msg_session::Reject as orion_wire::Decode>::decode(&body).expect("reject");
+        assert_eq!(
+            (reject.reason, reject.node_revision, reject.peer_revision),
+            (
+                orion_msg_session::RejectReason::RevisionMismatch,
+                orion_wire::INTERFACE_REVISION,
+                other
+            )
+        );
+        let (kind, body) = hello_at(&socket, orion_wire::INTERFACE_REVISION).await;
+        assert_eq!(kind, orion_wire::kind::WELCOME);
+        let welcome =
+            <orion_msg_session::Welcome as orion_wire::Decode>::decode(&body).expect("welcome");
+        assert_eq!(welcome.level, orion_wire::INTERFACE_LEVEL);
         drop(started);
         // Aborted tasks are dropped, and let go of the socket, when the runtime next runs.
         tokio::time::sleep(Duration::from_millis(50)).await;

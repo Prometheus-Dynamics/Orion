@@ -62,5 +62,9 @@ required-features = ["full"]
 name = "facade"
 required-features = ["full"]
 
+[[test]]
+name = "older"
+required-features = ["full"]
+
 [lints]
 workspace = true

@@ -74,6 +74,15 @@ address is pinned to (`#<key>`) is refused with `ClientError::OtherKey { asked, 
 keys, so a tool can show the two fingerprints and let a person decide whether the board was
 replaced or is not the one they meant.
 
+**A node that is not this client's wire, or not its level.** A node of another wire revision is
+turned away at hello with `ClientError::Revision { node, client }`, whichever side says it first.
+A node at the same revision names its additive level in `Welcomed::level` (0 if it names none).
+A call that needs a later level than the node's (`Feature`: a topic whose subscribers start from
+its newest values, a shell, a signed link, a detached run) fails with
+`ClientError::Level { feature, needs, node }` and sends nothing; `needs(feature)` asks first.
+A request for something the node does not serve at all is refused as `unsupported`. In C both
+are `ORION_E_REFUSED`, with the words in `orion_last_error`. See `docs/wire.md` for the table.
+
 **The session is blocking and owns no thread and no timer.** `next(wait)` waits for the next
 frame and, while it waits, answers the comm core's pings, sends its own, and notices when the
 comm core has said nothing for as long as it allows (`Welcomed::idle`, three heartbeats unless

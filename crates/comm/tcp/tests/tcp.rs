@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use orion_keys::{Keys, KeysConfig, SharedKeys};
-use orion_msg_session::{Hello, Ping, Pong, Refusal, Welcome};
+use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, RejectReason, Welcome};
 use orion_server::{
     Admits, Checked, Comm, Cx, Error, Incoming, Limits, Policy, Principal, Roles, Security,
     Service, What,
@@ -135,6 +135,7 @@ impl Session {
             roles,
             max_frame: 64 * 1024,
             revision: 1,
+            level: 0,
         };
         session.send(&hello).await;
         let welcome: Welcome = session.recv().await.expect("welcome");
@@ -205,6 +206,42 @@ fn two_comm_cores_talk_each_way_and_know_each_other_by_their_keys() {
         // Each server knows the other end as the peer pinned to the key it proved.
         assert_eq!(right.seen.borrow()[0], Principal::Peer(left.name.clone()));
         assert_eq!(left.seen.borrow()[0], Principal::Peer(right.name.clone()));
+    });
+}
+
+#[test]
+fn a_peer_of_another_wire_revision_is_told_both_numbers() {
+    run(async {
+        let left = Node::start("left", Security::On).await;
+        let right = Node::start("right", Security::On).await;
+        left.pair(&right);
+        let connection = connect(right.addr, &left.options, Some(right.public()))
+            .await
+            .expect("left dials right");
+        let mut session = Session {
+            connection,
+            buf: vec![0; 64 * 1024],
+            len: 0,
+        };
+        let other = orion_wire::INTERFACE_REVISION + 1;
+        session
+            .send(&Hello {
+                name: "test",
+                roles: Roles::PEER,
+                max_frame: 64 * 1024,
+                revision: other,
+                level: 0,
+            })
+            .await;
+        let reject: Reject = session.recv().await.expect("reject");
+        assert_eq!(
+            (reject.reason, reject.node_revision, reject.peer_revision),
+            (
+                RejectReason::RevisionMismatch,
+                orion_wire::INTERFACE_REVISION,
+                other
+            )
+        );
     });
 }
 
@@ -344,6 +381,7 @@ fn a_frame_changed_in_flight_ends_the_session() {
                     roles: Roles::PEER,
                     max_frame: 64 * 1024,
                     revision: 1,
+                    level: 0,
                 };
                 encode_body(&hello, 1, &mut out).expect("encode")
             } + 16;

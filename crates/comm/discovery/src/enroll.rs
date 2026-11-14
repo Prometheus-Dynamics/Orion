@@ -7,10 +7,12 @@ use std::net::SocketAddr;
 use orion_keys::enroll::{NONCE_LEN, Side, Transcript, proof, verify_proof};
 use orion_keys::{random, verify};
 use orion_msg_peers::{EnrollChallenge, EnrollConfirm, EnrollHello, EnrollRole};
-use orion_msg_session::{Hello, Refusal, Roles};
+use orion_msg_session::{Hello, Refusal, Reject, RejectReason, Roles, Welcome};
 use orion_tcp::{TcpConnection, TcpOptions};
 use orion_types::NodeName;
-use orion_wire::{Body, Bytes, Decode, INTERFACE_REVISION, encode_body, frame, kind};
+use orion_wire::{
+    Body, Bytes, Decode, INTERFACE_LEVEL, INTERFACE_REVISION, encode_body, frame, kind,
+};
 
 use crate::advert::Advertisement;
 
@@ -43,7 +45,17 @@ async fn expect(connection: &mut TcpConnection, buf: &mut [u8], want: u8) -> Res
                     None => "the peer refused".into(),
                 });
             }
-            kind::REJECT => return Err("the peer rejected the session".into()),
+            kind::REJECT => {
+                let reject = Reject::decode(view.payload()).map_err(|error| error.to_string())?;
+                return Err(if reject.reason == RejectReason::RevisionMismatch {
+                    format!(
+                        "the peer speaks wire revision {} and this node {}",
+                        reject.node_revision, reject.peer_revision
+                    )
+                } else {
+                    format!("the peer rejected the session: {:?}", reject.reason)
+                });
+            }
             _ => {}
         }
     }
@@ -72,9 +84,18 @@ pub(crate) async fn enroll(
         roles: Roles::CLIENT,
         max_frame: BUF as u32,
         revision: INTERFACE_REVISION,
+        level: INTERFACE_LEVEL,
     };
     send(&mut connection, &hello, 1).await?;
-    expect(&mut connection, &mut buf, kind::WELCOME).await?;
+    let len = expect(&mut connection, &mut buf, kind::WELCOME).await?;
+    let view = frame::decode(&buf[..len]).map_err(|error| error.to_string())?;
+    let welcome = Welcome::decode(view.payload()).map_err(|error| error.to_string())?;
+    if welcome.revision != INTERFACE_REVISION {
+        return Err(format!(
+            "the peer speaks wire revision {} and this node {INTERFACE_REVISION}",
+            welcome.revision
+        ));
+    }
 
     let nonce: [u8; NONCE_LEN] = random();
     let ask = EnrollHello {

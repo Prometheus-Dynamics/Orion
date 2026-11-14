@@ -143,7 +143,9 @@ are each shown to be contained.
 One wire on every carrier, using the rules the link protocol already has:
 
 - `[version][kind][seq][payload][crc]`, with postcard bodies.
-- Stable kind numbers. Bodies are append-only. Unknown kinds are ignored.
+- Stable kind numbers. Bodies are append-only. A comm core refuses a kind it does not serve; a
+  client ignores one. One wire revision, checked at hello; an additive level for what an older
+  side would get wrong.
 - One revision number agreed at hello.
 - Recorded bytes in tests pin every kind.
 - Protocol version 1.

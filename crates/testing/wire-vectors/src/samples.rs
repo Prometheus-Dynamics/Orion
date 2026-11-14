@@ -132,7 +132,8 @@ fn session(out: &mut Vec<Sample>) {
             name: "tool",
             roles: Roles::CLIENT.and(Roles::PROVIDER),
             max_frame: 65_536,
-            revision: 1
+            revision: 1,
+            level: 1
         }
     );
     sample!(
@@ -143,13 +144,16 @@ fn session(out: &mut Vec<Sample>) {
             heartbeat_ms: 1000,
             max_frame: 4096,
             revision: 1,
-            idle_ms: 3000
+            idle_ms: 3000,
+            level: 1
         }
     );
     sample!(
         out,
         Reject {
-            reason: RejectReason::Busy
+            reason: RejectReason::RevisionMismatch,
+            node_revision: 1,
+            peer_revision: 2
         }
     );
     sample!(out, Ping { now_ms: 123_456 });

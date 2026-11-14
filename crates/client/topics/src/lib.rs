@@ -30,7 +30,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use orion_connect::{BorrowedFd, Client, ClientError};
+use orion_connect::{BorrowedFd, Client, ClientError, Feature};
 use orion_msg_topics::{
     Declare, Field, OnSubscribe, Sample as SampleMessage, SampleFlags, Subscribe, TopicStatus,
     TopicWithdraw,
@@ -156,7 +156,9 @@ impl Topics {
     ///
     /// # Errors
     ///
-    /// If the comm core refuses: another program publishes it, or there is no room.
+    /// If the comm core refuses: another program publishes it, or there is no room. A topic
+    /// whose subscribers start from its newest values, on a node below that feature's level, is
+    /// not declared: `ClientError::Level`.
     pub fn declare(&self, topic: &TopicDecl<'_>) -> Result<Publisher, TopicError> {
         self.declare_in(topic, None)
     }
@@ -211,6 +213,10 @@ impl Topics {
         topic: &TopicDecl<'_>,
         ring: Option<BorrowedFd<'_>>,
     ) -> Result<Publisher, TopicError> {
+        // An older node would take the topic and quietly start every subscriber from now.
+        if topic.on_subscribe == OnSubscribe::Latest {
+            self.client.needs(Feature::SubscribeFromLatest)?;
+        }
         let declare = Declare {
             topic: topic
                 .name

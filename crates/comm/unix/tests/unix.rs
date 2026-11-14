@@ -117,11 +117,16 @@ impl Client {
     }
 
     async fn hello<'a, B: Body + Decode<'a>>(&'a mut self, roles: Roles) -> B {
+        self.hello_at(roles, orion_wire::INTERFACE_REVISION).await
+    }
+
+    async fn hello_at<'a, B: Body + Decode<'a>>(&'a mut self, roles: Roles, revision: u16) -> B {
         let hello = Hello {
             name: "test",
             roles,
             max_frame: 64 * 1024,
-            revision: 1,
+            revision,
+            level: 0,
         };
         self.send(&hello).await;
         self.recv().await.expect("an answer to hello")
@@ -211,6 +216,25 @@ fn descriptors_travel_both_ways() {
         theirs.rewind().expect("rewind");
         theirs.read_to_string(&mut text).expect("read");
         assert_eq!(text, "made by the server");
+    });
+}
+
+#[test]
+fn a_client_of_another_wire_revision_is_told_both_numbers() {
+    run(async {
+        let path = directory("revision").join("orion.sock");
+        let _server = serve(&path, Limits::default());
+        let other = orion_wire::INTERFACE_REVISION + 1;
+        let mut client = Client::connect(&path).await;
+        let reject: Reject = client.hello_at(Roles::CLIENT, other).await;
+        assert_eq!(
+            (reject.reason, reject.node_revision, reject.peer_revision),
+            (
+                RejectReason::RevisionMismatch,
+                orion_wire::INTERFACE_REVISION,
+                other
+            )
+        );
     });
 }
 

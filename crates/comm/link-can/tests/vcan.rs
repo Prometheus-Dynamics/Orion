@@ -78,6 +78,7 @@ fn the_wire_crosses_a_virtual_can_bus() {
                         roles: Roles::DEVICE,
                         max_frame: 1024,
                         revision: 1,
+                        level: 0,
                     };
                     encode_body(&hello, seq, &mut frame)
                 } else {

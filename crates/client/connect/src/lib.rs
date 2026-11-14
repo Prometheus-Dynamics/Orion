@@ -28,21 +28,25 @@ mod address;
 mod client;
 mod error;
 mod fd;
+mod level;
 mod link_sign;
 mod piped;
 mod transport;
 
 use std::time::{Duration, Instant};
 
-use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, Welcome};
+use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, RejectReason, Welcome};
 use orion_supervise::{Decision, Path, Supervisor};
 use orion_types::NodeName;
-use orion_wire::{Body, Decode, FrameView, INTERFACE_REVISION, encode_body, frame, kind};
+use orion_wire::{
+    Body, Decode, FrameView, INTERFACE_LEVEL, INTERFACE_REVISION, encode_body, frame, kind,
+};
 
 pub use address::{Address, DEFAULT_PORT, DEFAULT_SOCKET};
 pub use client::{Client, Handler};
 pub use error::ClientError;
 pub use fd::{BorrowedFd, OwnedFd};
+pub use level::Feature;
 pub use orion_identity::Identity;
 pub use orion_msg_session::Roles;
 pub use orion_supervise::Status;
@@ -77,7 +81,8 @@ impl Default for Options {
     }
 }
 
-/// What the comm core said at hello.
+/// What the comm core said at hello. [`Welcomed::needs`] says whether its node may be asked for
+/// a [`Feature`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Welcomed {
     /// The node.
@@ -90,8 +95,10 @@ pub struct Welcomed {
     pub idle: Duration,
     /// The largest frame either side sends.
     pub max_frame: u32,
-    /// The interface revision the session runs at: the lower of both sides'.
+    /// The wire revision: always this client's own, since another is turned away.
     pub revision: u16,
+    /// The node's additive level: 0 from a node that does not say.
+    pub level: u16,
 }
 
 /// One frame from the comm core. Its descriptors, if any, are taken with
@@ -325,6 +332,7 @@ impl Session {
             roles: options.roles,
             max_frame: max_frame as u32,
             revision: INTERFACE_REVISION,
+            level: INTERFACE_LEVEL,
         };
         let len = encode_body(&hello, 1, &mut outbox).map_err(|_| ClientError::TooLarge)?;
         transport.send(&outbox[..len], &[])?;
@@ -348,6 +356,12 @@ impl Session {
                 kind::WELCOME => {
                     let welcome = Welcome::decode(view.payload())
                         .map_err(|_| ClientError::Protocol("welcome"))?;
+                    if welcome.revision != INTERFACE_REVISION {
+                        return Err(ClientError::Revision {
+                            node: welcome.revision,
+                            client: INTERFACE_REVISION,
+                        });
+                    }
                     let heartbeat = Duration::from_millis(u64::from(welcome.heartbeat_ms.max(1)));
                     break Welcomed {
                         node: welcome.node,
@@ -360,11 +374,18 @@ impl Session {
                         },
                         max_frame: welcome.max_frame,
                         revision: welcome.revision,
+                        level: welcome.level,
                     };
                 }
                 kind::REJECT => {
                     let reject = Reject::decode(view.payload())
                         .map_err(|_| ClientError::Protocol("reject"))?;
+                    if reject.reason == RejectReason::RevisionMismatch {
+                        return Err(ClientError::Revision {
+                            node: reject.node_revision,
+                            client: INTERFACE_REVISION,
+                        });
+                    }
                     return Err(ClientError::Rejected(reject.reason));
                 }
                 _ => {}

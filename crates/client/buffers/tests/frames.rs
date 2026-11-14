@@ -301,6 +301,7 @@ fn a_buffer_topic_needs_the_boards_own_socket() {
             max_frame: 4096,
             revision: 1,
             idle_ms: 0,
+            level: orion_wire::INTERFACE_LEVEL,
         };
         let (mut frame, mut wire) = ([0_u8; 128], [0_u8; 160]);
         let len = encode_body(&welcome, 1, &mut frame).expect("encode");

@@ -113,6 +113,7 @@ impl Client {
                 roles: Roles::CLIENT,
                 max_frame: 32 * 1024,
                 revision: 1,
+                level: 0,
             })
             .await;
         let (kind, payload) = client.recv().await.expect("an answer");

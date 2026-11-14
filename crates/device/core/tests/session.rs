@@ -60,6 +60,7 @@ impl Host {
             max_frame,
             revision: 1,
             idle_ms: 0,
+            level: orion_wire::INTERFACE_LEVEL,
         })
     }
 }
@@ -185,6 +186,8 @@ fn a_session_pings_answers_pings_and_carries_frames() {
     let mut wire = vec![0x55, 0xAA, 0x00, 0x13];
     wire.extend(host.frame(&Reject {
         reason: RejectReason::Busy,
+        node_revision: 0,
+        peer_revision: 0,
     }));
     let request = host.frame(&orion_msg_session::Refusal {
         request_seq: 9,
@@ -294,6 +297,8 @@ fn a_host_that_says_no_is_left_alone_for_a_while() {
     host.take(&mut device);
     let no = host.frame(&Reject {
         reason: RejectReason::Denied,
+        node_revision: 0,
+        peer_revision: 0,
     });
     device.receive(&no, nothing);
     assert_eq!(
@@ -310,6 +315,32 @@ fn a_host_that_says_no_is_left_alone_for_a_while() {
     }
     // Five seconds from when the clock was next read, then hello at its pace.
     assert_eq!(hellos, [5_001, 5_251, 5_501, 5_751]);
+}
+
+#[test]
+fn a_host_of_another_wire_revision_is_taken_as_one_that_said_no() {
+    let mut device = Device::new(DeviceConfig::new("imu-board"));
+    let mut host = Host::default();
+    device.link.poll(0);
+    host.take(&mut device);
+    let other = host.frame(&Welcome {
+        node: "board".parse().expect("name"),
+        session: 7,
+        heartbeat_ms: 100,
+        max_frame: 4096,
+        revision: orion_wire::INTERFACE_REVISION + 1,
+        idle_ms: 0,
+        level: 0,
+    });
+    device.receive(&other, nothing);
+    assert_eq!(
+        device.link.next_event(),
+        Some(Event::Rejected(RejectReason::RevisionMismatch))
+    );
+    assert_eq!(
+        (device.link.state(), device.link.session()),
+        (State::Rejected, None)
+    );
 }
 
 #[test]
@@ -373,6 +404,7 @@ fn the_same_session_over_can_classic_and_fd() {
             max_frame: 512,
             revision: 1,
             idle_ms: 0,
+            level: orion_wire::INTERFACE_LEVEL,
         };
         let len = encode_body(&welcome, 1, &mut frame).expect("encode");
         to_device(&mut device, &frame[..len], &mut seen);

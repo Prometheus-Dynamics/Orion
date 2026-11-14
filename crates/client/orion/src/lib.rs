@@ -52,9 +52,11 @@
 use std::fmt;
 use std::time::Duration;
 
-use orion_connect::{Client, Session};
+use orion_connect::Client;
 
-pub use orion_connect::{Address, ClientError, Identity, Options, Roles, Welcomed};
+pub use orion_connect::{
+    Address, ClientError, Feature, Identity, LinkRead, LinkWrite, Options, Roles, Session, Welcomed,
+};
 pub use orion_types as types;
 
 /// Publish and subscribe.
@@ -401,7 +403,9 @@ impl Orion {
     ///
     /// # Errors
     ///
-    /// If the comm core refuses: another program publishes it, or there is no room.
+    /// If the comm core refuses: another program publishes it, or there is no room. A topic
+    /// whose subscribers start from its newest values, on a node below that feature's level, is
+    /// not declared: `ClientError::Level`.
     #[cfg(feature = "topics")]
     pub fn declare(&self, topic: &topics::TopicDecl<'_>) -> Result<topics::Publisher, Error> {
         Ok(self.topics.declare(topic)?)
@@ -549,7 +553,8 @@ impl Orion {
     /// # Errors
     ///
     /// Refused (`denied` for an account the caller may not be), the board has no shell
-    /// service, or the session broke.
+    /// service (`unsupported`), the node is below the shell's level (`ClientError::Level`,
+    /// nothing sent), or the session broke.
     #[cfg(feature = "shell")]
     pub fn shell(
         &self,

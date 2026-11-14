@@ -35,6 +35,23 @@ pub enum ClientError {
     TooLarge,
     /// Descriptors cannot travel on this kind of address.
     NoDescriptors,
+    /// The node speaks another wire revision: neither side could read the other right. Both
+    /// are here, so a tool can say which side is behind.
+    Revision {
+        /// The node's.
+        node: u16,
+        /// This client's.
+        client: u16,
+    },
+    /// The node is at an additive level below what was asked for. Nothing was sent.
+    Level {
+        /// What was asked for.
+        feature: crate::Feature,
+        /// The level that has it.
+        needs: u16,
+        /// The node's level.
+        node: u16,
+    },
 }
 
 impl fmt::Display for ClientError {
@@ -54,6 +71,18 @@ impl fmt::Display for ClientError {
             Self::Protocol(what) => write!(f, "not the wire: {what}"),
             Self::TooLarge => f.write_str("the frame is larger than both sides agreed to"),
             Self::NoDescriptors => f.write_str("descriptors do not travel on this address"),
+            Self::Revision { node, client } => write!(
+                f,
+                "the node speaks wire revision {node} and this client {client}: update the older"
+            ),
+            Self::Level {
+                feature,
+                needs,
+                node,
+            } => write!(
+                f,
+                "{feature} needs a node at level {needs} or above, and this node is at level {node}"
+            ),
         }
     }
 }
