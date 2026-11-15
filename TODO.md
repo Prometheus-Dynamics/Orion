@@ -90,6 +90,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C44](docs/prs/C44.md) A run's end carries the action's own status code (wave 18)
 - [x] [C45](docs/prs/C45.md) Only what the gate passed is pushed (wave 18)
 - [x] [C46](docs/prs/C46.md) A whole board in a consumer's test, real comm core and node logic (wave 18)
+- [x] [C48](docs/prs/C48.md) next on the test board after wave 18 (wave 18; board run)
 
 ## D. Client
 

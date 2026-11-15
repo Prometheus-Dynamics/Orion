@@ -35,6 +35,11 @@ fn next(
 ) -> Result<usize, ClientError> {
     loop {
         match transport.take(buf, &mut FdSet::default())? {
+            // A link is a stream that outlives its sessions: the board's answer to the last
+            // session's heartbeat may still be in it, unread. It is nobody's now.
+            Step::Frame(len)
+                if frame::decode(&buf[..len])
+                    .is_ok_and(|view| matches!(view.kind(), kind::PING | kind::PONG)) => {}
             Step::Frame(len) => return Ok(len),
             Step::Closed => return Err(ClientError::Lost),
             Step::Nothing => {
