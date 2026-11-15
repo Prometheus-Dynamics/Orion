@@ -131,10 +131,15 @@ body! {
     pub struct LeaseRecord<'a> {
         /// The resource.
         pub resource: ResourceName,
-        /// Its holder.
+        /// Its holder. With security on, the writer's principal as the node names it
+        /// (`operator:<key>`, `local:<uid>`), whatever the writer said.
         pub holder: &'a str,
         /// When the lease ends, in hybrid-clock milliseconds.
         pub expires_ms: u64,
+        ;
+        /// What the writer called the holder, for people, when the node put its principal in
+        /// `holder` instead. Empty otherwise.
+        pub label: &'a str,
     }
 }
 

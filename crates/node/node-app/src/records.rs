@@ -3,7 +3,7 @@
 use orion_msg_records::{Changed, Get, Put, RecordClass, RecordEntry, Watch};
 use orion_store::{Change, Record, Scope, Store};
 use orion_types::{Error, HlcTimestamp};
-use orion_wire::{List, kind};
+use orion_wire::{Bytes, List, kind};
 
 use orion_reply::{Asked, Out};
 use orion_resources::{Caller, Resources, Taken};
@@ -220,8 +220,16 @@ impl Records {
                     principal: &principal,
                     root: asked.class == orion_check::PrincipalClass::Root as u8,
                 };
+                // With security on, a lease is its writer's: each entry as it is to be stored.
+                let mut written: Vec<Option<Vec<u8>>> = Vec::new();
                 for entry in put.records.iter() {
-                    let entry = entry?;
+                    written.push(self.resources.as_written(&caller, &entry?)?);
+                }
+                for (entry, value) in put.records.iter().zip(&written) {
+                    let mut entry = entry?;
+                    if let Some(value) = value {
+                        entry.value = Bytes(value);
+                    }
                     if entry.class == RecordClass::Workload {
                         // What should run is said with `WorkloadPut`, which also starts it.
                         return Err(Error::Denied);
@@ -238,8 +246,11 @@ impl Records {
                     }
                 }
                 let mut stored = Vec::new();
-                for entry in put.records.iter() {
-                    let entry = entry?;
+                for (entry, value) in put.records.iter().zip(&written) {
+                    let mut entry = entry?;
+                    if let Some(value) = value {
+                        entry.value = Bytes(value);
+                    }
                     if entry.deleted {
                         if self.store.delete(entry.class, entry.key, wall_ms).is_none() {
                             continue;

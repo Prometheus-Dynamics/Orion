@@ -436,3 +436,20 @@ fn without_an_enrollment_key_nobody_enrolls_themselves() {
         assert_eq!(keys.lock().peers().count(), 0);
     });
 }
+
+#[test]
+fn an_operator_asking_when_too_many_wait_is_told_busy() {
+    run(async {
+        let (keys, connector) = board(Security::On, None);
+        let node: NodeName = "board".parse().expect("name");
+        for _ in 0..orion_keys::MAX_PENDING {
+            keys.lock()
+                .operator_asks(&node, Identity::generate().public(), "desk", b"")
+                .expect("waits");
+        }
+        let late = Identity::generate().public();
+        let mut operator = Client::open(&connector, Principal::Operator(KeyId(late))).await;
+        assert_eq!(operator.enroll(&late, b"").await, Err(Some(Error::Busy)));
+        assert!(keys.lock().operator(&KeyId(late)).is_none());
+    });
+}

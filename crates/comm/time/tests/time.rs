@@ -303,7 +303,16 @@ fn an_operator_with_the_grant_gives_the_board_its_clock() {
         let mut local = Client::open(board.connector.connect(USER)).await;
         local.send(&TimeOffer { stratum: 1 }).await;
         assert_eq!(local.refused().await, Some(Error::Denied));
-        // But anyone may ask what time the board has.
+        // But anyone may ask what time the board has: an operator the board has never heard
+        // of, with security on, too.
+        other
+            .send(&TimeRequest {
+                sent_ns: 41,
+                clock: CLOCK_REALTIME,
+            })
+            .await;
+        assert_eq!(other.next().await, kind::TIME_REPLY);
+        assert_eq!(other.body::<TimeReply>().sent_ns, 41);
         local
             .send(&TimeRequest {
                 sent_ns: 42,

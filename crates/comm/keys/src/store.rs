@@ -16,6 +16,12 @@ use orion_identity::Identity;
 
 const IDENTITY_FILE: &str = "node-identity.ed25519";
 const TRUST_FILE: &str = "trust";
+/// What a flash writes beside the trust store: one operator key (the flashing computer's), so
+/// a fresh board is reachable with security on and no step at its console.
+pub const SEED_FILE: &str = "operator.seed";
+/// How many operators may wait for an administrator at once. A further one is refused; none
+/// waiting is ever dropped to make room.
+pub const MAX_PENDING: usize = 32;
 const HEADER: &str =
     "# Orion trust store. One entry per line; lines this build does not know are kept.";
 
@@ -70,11 +76,21 @@ impl KeysConfig {
 
 /// Why the trust store couldn't be opened or saved.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum KeysError {
     /// The node's key is there but can't be used. It is never replaced.
     Identity(io::Error),
     /// The trust store can't be read or written.
     Store(io::Error),
+    /// The seed a flash left is there and is not one key: it is left as it was.
+    Seed {
+        /// Where it is.
+        path: PathBuf,
+        /// What is wrong with it.
+        fault: String,
+    },
+    /// [`MAX_PENDING`] operators are already waiting for an administrator.
+    Waiting,
 }
 
 impl fmt::Display for KeysError {
@@ -82,6 +98,17 @@ impl fmt::Display for KeysError {
         match self {
             Self::Identity(error) => write!(f, "node identity: {error}"),
             Self::Store(error) => write!(f, "trust store: {error}"),
+            Self::Seed { path, fault } => write!(
+                f,
+                "trust store: the operator seed {} is not one key ({fault}); it was not enrolled, \
+                 and is left there to be fixed or removed",
+                path.display()
+            ),
+            Self::Waiting => write!(
+                f,
+                "{MAX_PENDING} operators are already waiting for an administrator: ask again once \
+                 one of them is approved or refused"
+            ),
         }
     }
 }
@@ -211,11 +238,29 @@ impl Keys {
             revoked: BTreeSet::new(),
             unknown: Vec::new(),
         };
-        if let Some(dir) = &keys.config.state_dir {
+        if let Some(dir) = keys.config.state_dir.clone() {
             match std::fs::read_to_string(dir.join(TRUST_FILE)) {
                 Ok(text) => keys.parse(&text),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => return Err(KeysError::Store(error)),
+            }
+            let seed = dir.join(SEED_FILE);
+            if let Some(key) = read_seed(&seed)? {
+                keys.revoked.remove(&key);
+                let mut operator = keys.new_operator(key, "flashed", OperatorState::Enrolled);
+                operator.read = true;
+                operator.all_actions = true;
+                if let Some(had) = keys.operators.get(&key) {
+                    operator.name.clone_from(&had.name);
+                }
+                keys.operators.insert(key, operator);
+                keys.save()?;
+                // Taken once: the store has it now, and the file is not a standing grant.
+                std::fs::remove_file(&seed).map_err(KeysError::Store)?;
+                tracing::info!(
+                    "enrolled the operator key a flash left in {}",
+                    seed.display()
+                );
             }
         }
         Ok(keys)
@@ -457,7 +502,8 @@ impl Keys {
     ///
     /// # Errors
     ///
-    /// [`KeysError::Store`] if it can't be saved.
+    /// [`KeysError::Store`] if it can't be saved. [`KeysError::Waiting`] if it would wait and
+    /// [`MAX_PENDING`] others already are.
     pub fn operator_asks(
         &mut self,
         node: &NodeName,
@@ -473,11 +519,20 @@ impl Keys {
         {
             return Ok(operator.clone());
         }
+        let asking = self.operators.contains_key(&key);
+        let waiting = self
+            .operators
+            .values()
+            .filter(|operator| operator.state == OperatorState::Pending)
+            .count();
         let proven = self.enrollment_key().is_some_and(|secret| {
             verify_proof(secret, &operator_proof(node.as_str(), &key), proof)
         });
         let state = if proven {
             OperatorState::Enrolled
+        } else if !asking && waiting >= MAX_PENDING {
+            // A key already waiting may ask again; a new one waits for room.
+            return Err(KeysError::Waiting);
         } else {
             OperatorState::Pending
         };
@@ -543,6 +598,39 @@ impl Keys {
         }
         self.save()
     }
+}
+
+/// The one key in a flash's seed: a line of 64 hex digits (comments and blank lines aside).
+/// `None` when there is no seed.
+fn read_seed(path: &Path) -> Result<Option<[u8; 32]>, KeysError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(KeysError::Seed {
+                path: path.to_owned(),
+                fault: format!("it cannot be read: {error}"),
+            });
+        }
+    };
+    let fault = |fault: &str| KeysError::Seed {
+        path: path.to_owned(),
+        fault: fault.to_owned(),
+    };
+    let mut lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'));
+    let line = lines.next().ok_or_else(|| fault("it is empty"))?;
+    if lines.next().is_some() {
+        return Err(fault("it holds more than one line"));
+    }
+    if line.len() != 64 {
+        return Err(fault("a key is 64 hex digits"));
+    }
+    unhex(line)
+        .map(Some)
+        .ok_or_else(|| fault("a key is 64 hex digits"))
 }
 
 /// The trust store, shared between the server's check and the services that change it.

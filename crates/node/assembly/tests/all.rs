@@ -239,6 +239,7 @@ fn every_part_of_node_logic_runs_together_and_again_after_a_restart() {
             resource: "cam.front".parse().expect("name"),
             holder: "board/detector",
             expires_ms: 0,
+            label: "",
         },
         &mut lease,
     )

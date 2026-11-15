@@ -289,6 +289,7 @@ fn a_lease_written_as_a_record_follows_the_same_rules() {
                 resource: name(resource),
                 holder,
                 expires_ms: 0,
+                label: "",
             },
             &mut value,
         )

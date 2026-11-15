@@ -118,6 +118,7 @@ fn lease(holder: &str) -> Vec<u8> {
             resource: "cam.front".parse().expect("name"),
             holder,
             expires_ms: 0,
+            label: "",
         },
         &mut value,
     )

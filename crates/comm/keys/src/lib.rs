@@ -31,7 +31,7 @@ mod store;
 pub use orion_identity::{Identity, fingerprint, hello, random, verify};
 pub use orion_msg_peers::OperatorState;
 pub use service::KeysService;
-pub use store::{Keys, KeysConfig, KeysError, Operator, SharedKeys};
+pub use store::{Keys, KeysConfig, KeysError, MAX_PENDING, Operator, SEED_FILE, SharedKeys};
 
 /// The shared-key enrollment handshake between two nodes.
 pub mod enroll {

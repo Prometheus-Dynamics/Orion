@@ -628,6 +628,17 @@ impl CommCore {
     }
 }
 
+/// What the board's security record makes of the switch: loudly when it is damaged, since the
+/// switch is then on whatever the record meant.
+#[cfg(any(feature = "systemd", feature = "recovery"))]
+pub(crate) fn say_security(view: &orion_config::SecurityView) {
+    if view.fault.is_some() {
+        tracing::warn!("{view}");
+    } else {
+        tracing::info!("{view}");
+    }
+}
+
 /// Where a link's state goes.
 #[cfg(any(feature = "link-serial", feature = "link-can"))]
 enum LinkState {
@@ -722,6 +733,7 @@ pub fn run(settings: CommSettings, unknown: &[orion_config::Warning]) -> Result<
     for warning in unknown {
         tracing::warn!("{warning}");
     }
+    say_security(&settings.config.security_view);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -124,7 +124,8 @@ with `ClientError::Level` and sends nothing. `docs/wire.md` is the reference.
 
 ## Known limits
 
-- With security on, a lease holder is not yet bound to a principal (C32).
+- With security on, a lease written through another node is held by that node (`peer:<name>`),
+  not by the operator behind it, as with `Run.on_behalf`.
 - Every build takes the shared-memory crates from the device library's repository
   (`shm-sample-time`, and on Linux `shm-fdpass`, for the smallest client). At run time the client
   needs nothing of the device library: no daemon running, no library loaded. Those crates make
@@ -133,8 +134,8 @@ with `ClientError::Level` and sends nothing. `docs/wire.md` is the reference.
 
 ## Since the lock revision
 
-Additive changes on `next` after the lock revision. Nothing here breaks a consumer of the lock
-revision.
+Changes on `next` after the lock revision. Each is additive unless it is marked **Break**, with
+what to change.
 
 - **J11.** New `ClientError` cases (it is `#[non_exhaustive]`):
   - `Layout { what, found, reads, level }`: shared memory from the comm core in another layout.
@@ -152,6 +153,29 @@ revision.
     same type.
   - `orion_ws::WsListener::opening` is new.
   - `CommSettings::peer_retry` is now `listen_retry`, for every way in.
+- **C32a.** The security switch is the board's record, and trust follows it.
+  - **Break: `security` is no longer a setting.** Both services read the switch from
+    `/etc/board/security` (`on` or `off`, then `generation <n>`). No file is off; a file that
+    cannot be read or says anything else is on, with words naming it. A `security` line in
+    `orion.conf` (or `ORION_SECURITY`) is ignored, with a warning. Migration: a board that had
+    `security = on` writes `/etc/board/security` with `on` and `generation 1`, and drops the
+    line.
+  - `orion_config::Config` gains `security_view` (the record as read) and
+    `from_source_with_view`; `orion_config::SecurityView` and `SECURITY_VIEW` are new.
+    `orion_config::Warning` gains `retired` and is `#[non_exhaustive]` (**Break** only for code
+    that builds one: it is read, not built), and `Source::retire` is new.
+  - With security on, a lease's holder is the principal of the caller that wrote it; what the
+    caller put there is kept in `LeaseRecord.label`, an appended field. **Break** for Rust code
+    that builds a `LeaseRecord`: it names `label` (`""` for none). On the wire the field is
+    appended: an older reader ignores it.
+  - At most 32 operators wait for an administrator. One more that asks is refused `busy`, with
+    words; nobody waiting is dropped. `orion_keys::MAX_PENDING` and `KeysError::Waiting` are new.
+    **Break:** `KeysError` is `#[non_exhaustive]`, so a `match` on it needs a `_` arm.
+  - A flash may leave one key in `operator.seed` in `keys.dir`. The comm core enrolls it with
+    everything and removes the file; a seed that is not one key stops the start, with words
+    (`KeysError::Seed`). `orion_keys::SEED_FILE` is new.
+  - The hello document and the time stay readable by a key the board does not know, with
+    security on.
 
 ## Builds
 

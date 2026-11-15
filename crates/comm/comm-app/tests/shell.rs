@@ -42,7 +42,14 @@ fn orion_ssh_users(uid: u32) -> String {
 
 fn settings(text: &str) -> Result<CommSettings, ConfigError> {
     let mut source = Source::parse(text, Vec::new())?;
-    CommSettings::from_source(&mut source)
+    CommSettings::from_source_with_view(&mut source, &secured())
+}
+
+/// The board's security record, as a board with security on has it.
+fn secured() -> PathBuf {
+    let path = std::env::temp_dir().join(format!("orion-comm-security-{}", std::process::id()));
+    std::fs::write(&path, "on\ngeneration 1\n").expect("security record");
+    path
 }
 
 fn run(test: impl Future<Output = ()>) {
@@ -106,7 +113,7 @@ fn a_tool_gets_a_shell_on_the_board_and_in_recovery() {
         let dir = temp("e2e");
         let socket = dir.join("board.sock");
         let good = format!(
-            "node.name = board\nsocket = {}\nstate.dir = {}/state\nsecurity = on\n\
+            "node.name = board\nsocket = {}\nstate.dir = {}/state\n\
              ssh.helper = {}\nrecovery.keys = {}/recovery_keys\n",
             socket.display(),
             dir.display(),

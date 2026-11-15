@@ -249,6 +249,7 @@ impl Node {
             .records
             .resources_mut()
             .set_quiet_ms(settings.lease_quiet_ms);
+        logic.records.resources_mut().bind_holders(check);
         Ok(Self {
             settings,
             logic: Rc::new(RefCell::new(logic)),
@@ -596,6 +597,12 @@ pub fn run(settings: NodeSettings, unknown: &[orion_config::Warning]) -> Result<
     use tokio::signal::unix::{SignalKind, signal};
     for warning in unknown {
         warn!("{warning}");
+    }
+    let view = &settings.config.security_view;
+    if view.fault.is_some() {
+        warn!("{view}");
+    } else {
+        info!("{view}");
     }
     let failed = |what| move |error| StartError { what, error };
     let runtime = tokio::runtime::Builder::new_current_thread()

@@ -15,6 +15,7 @@ fn lease(holder: &str, expires_ms: u64) -> Vec<u8> {
             resource: name("cam.front"),
             holder,
             expires_ms,
+            label: "",
         },
         &mut value,
     )

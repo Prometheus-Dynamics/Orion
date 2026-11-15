@@ -12,7 +12,7 @@ use orion_types::NodeName;
 use orion_wire::{Bytes, FrameView, List, kind};
 
 use crate::enroll_impl::{NONCE_LEN, Side, Transcript, proof, verify_proof};
-use crate::store::{Operator, SharedKeys};
+use crate::store::{KeysError, Operator, SharedKeys};
 use orion_identity::{random, verify};
 
 /// A handshake this node has answered and is waiting to see confirmed.
@@ -131,9 +131,16 @@ impl Service for KeysService {
                             .map_err(store)?
                             .clone(),
                         // The operator itself, on a connection that proved it holds the key.
-                        Principal::Operator(own) if own.0 == key => keys
-                            .operator_asks(&self.node, key, enroll.name, &enroll.proof)
-                            .map_err(store)?,
+                        Principal::Operator(own) if own.0 == key => {
+                            match keys.operator_asks(&self.node, key, enroll.name, &enroll.proof) {
+                                Ok(operator) => operator,
+                                Err(error @ KeysError::Waiting) => {
+                                    drop(keys);
+                                    return cx.refuse(Error::Busy, &error.to_string());
+                                }
+                                Err(_) => return Err(Error::Internal),
+                            }
+                        }
                         // Anyone else may not speak for a key.
                         _ => return Err(Error::Denied),
                     }

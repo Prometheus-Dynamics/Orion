@@ -17,7 +17,6 @@ the recovery way in (`docs/comm.md`, "Recovery").
 | Setting | Default | What it is |
 | --- | --- | --- |
 | `node.name` | `node.local` | this node's name |
-| `security` | `off` | the one switch |
 | `socket` | `/run/orion/orion.sock` | the board's socket |
 | `state.dir` | `/var/lib/orion` | the identity, the trust store, the saved time |
 | `keys.dir` | `state.dir` | where the node's key and the trust file are |
@@ -31,6 +30,22 @@ two have different state directories and one `keys.dir`, the comm core's
 (`packaging/README.md`). The comm core makes `state.dir` and `keys.dir` if they are not there,
 and writes and removes a file in each before it starts: a directory it cannot make or write
 puts it in recovery, with the setting and the reason as the status line.
+
+## The security switch
+
+The switch is not a setting. Both services read it from the board's record,
+`/etc/board/security`, when they start, and log what it says:
+
+```
+on
+generation 3
+```
+
+The first line is `on` or `off`; the second is the record's generation, which its writer raises
+each time. No file means off.
+A file that is there and cannot be read, or says anything else, means **on**, and both services
+say loudly which file and what is wrong with it. A `security` line in this file is ignored, with
+a warning that says where the switch is.
 
 ## The comm core
 

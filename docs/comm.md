@@ -379,11 +379,23 @@ accounts only.
 | An administrator on the board enrolls it (`OperatorEnroll` from root on the local socket) | Enrolled, whatever it was before |
 | An operator proves it knows `enrollment.key` (a MAC over the node's name and its own key) | Enrolled |
 | An operator asks with no proof | Pending, for an administrator |
+| A flash leaves its key in `operator.seed` in `keys.dir` | Enrolled, with everything |
 | A node proves it knows `enrollment.key` (the three-step handshake) | Pinned as a peer |
 
 The handshake is dev's: each side proves it knows the key with a MAC and that it holds its identity
 with a signature, both bound to the role, both names, both keys and two fresh nonces. The key never
 crosses the wire. A handshake is used up by its first confirm, right or wrong.
+
+**At most 32 wait.** With 32 operators pending, a new one that asks with no proof is refused
+`busy`, with words saying to ask again once one of them is approved or refused. Nobody waiting
+is dropped to make room, and one already waiting may ask again.
+
+**A flash seeds one operator.** So that a fresh board with security on is reached with no step
+at its console, whatever writes the board's image may leave one key, the flashing computer's, in
+`operator.seed` beside the trust store: a line of 64 hex digits (`#` lines aside). The comm core
+enrolls it with everything when it opens the trust store, then removes the file: it is not a
+standing grant. A seed that is not one key stops the start, naming the file and what is wrong,
+and is left there.
 
 **A refused operator stays refused.** A revoked key, or a pending one that was turned down, is not
 enrolled again by asking or by proof. Only an administrator brings it back. A peer's name stays
@@ -471,8 +483,8 @@ listened on yet is not among them: the network, WebSocket, SSH and NT4 ways in e
   A line that is not a plain ed25519 key lets nobody in. The trust store is not opened.
 - **Nothing from a config that could not be read.** Then nothing in it is believed: security
   is on, the addresses are port 22 and then 2222, the keys file is the usual one. If the
-  settings were read, their SSH address is tried first and their security switch holds: a
-  board that says security is off is as open in recovery as it always is.
+  settings were read, their SSH address is tried first and the board's security record holds:
+  a board whose record says security is off is as open in recovery as it always is.
 - **Never wider.** With security on and no recovery keys, nobody gets in, and that is logged.
   Settings that were read and name `ssh.interface` keep every address recovery tries to that
   interface.

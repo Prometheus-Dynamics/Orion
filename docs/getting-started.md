@@ -63,7 +63,8 @@ The verbs are in [client.md](client.md), "The command line". Across a network th
 
 ## The first connection to a board with security on
 
-A board with `security = on` answers a network session only if it is signed, and does for an
+A board with security on (its record `/etc/board/security` says `on`; see
+[settings.md](settings.md), "The security switch") answers a network session only if it is signed, and does for an
 operator only what its trust store grants. A tool's key is a file of its own (`--key`, made the
 first time it is named). To be let in:
 

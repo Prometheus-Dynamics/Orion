@@ -315,3 +315,93 @@ fn with_no_state_directory_nothing_is_kept() {
         .expect("ask");
     assert_eq!(asked.state, OperatorState::Pending);
 }
+
+#[test]
+fn at_most_so_many_wait_and_none_waiting_is_dropped_for_another() {
+    let dir = directory("waiting");
+    let mut keys = open(&dir);
+    let waiting: Vec<[u8; 32]> = (0..orion_keys::MAX_PENDING)
+        .map(|_| Identity::generate().public())
+        .collect();
+    for key in &waiting {
+        let asked = keys
+            .operator_asks(&node(), *key, "desk", b"")
+            .expect("waits");
+        assert_eq!(asked.state, OperatorState::Pending);
+    }
+    // One more is refused, with words saying why and what to do.
+    let late = Identity::generate().public();
+    let refused = keys
+        .operator_asks(&node(), late, "late", b"")
+        .expect_err("full");
+    assert!(matches!(refused, KeysError::Waiting), "{refused}");
+    assert!(refused.to_string().contains("ask again"), "{refused}");
+    assert!(keys.operator(&KeyId(late)).is_none());
+    // Everyone waiting is still there, and one of them may ask again.
+    assert_eq!(
+        keys.operators()
+            .filter(|operator| operator.state == OperatorState::Pending)
+            .count(),
+        orion_keys::MAX_PENDING
+    );
+    let again = keys
+        .operator_asks(&node(), waiting[0], "desk", b"")
+        .expect("again");
+    assert_eq!(again.state, OperatorState::Pending);
+    // A proof still enrolls, full or not.
+    let secret = b"correct horse";
+    let proven = keys
+        .operator_asks(
+            &node(),
+            late,
+            "late",
+            &proof(secret, &operator_proof("board", &late)),
+        )
+        .expect("proven");
+    assert_eq!(proven.state, OperatorState::Enrolled);
+    // Room again once root has seen one of them.
+    keys.approve_operator(waiting[1], "desk").expect("approve");
+    let next = Identity::generate().public();
+    let asked = keys
+        .operator_asks(&node(), next, "next", b"")
+        .expect("room");
+    assert_eq!(asked.state, OperatorState::Pending);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_flash_seeds_one_operator_who_may_do_everything_once() {
+    let dir = directory("seed");
+    let _ = open(&dir);
+    let flashing = Identity::generate().public();
+    let seed = dir.join(orion_keys::SEED_FILE);
+    let hex: String = flashing.iter().map(|byte| format!("{byte:02x}")).collect();
+    std::fs::write(&seed, format!("# the flashing computer\n{hex}\n")).expect("seed");
+    let keys = open(&dir);
+    let operator = keys.operator(&KeyId(flashing)).expect("enrolled");
+    assert_eq!(operator.state, OperatorState::Enrolled);
+    assert!(operator.read && operator.all_actions);
+    assert!(operator.may(What::Run("anything")));
+    // Taken once: the file is gone, and the store keeps the operator.
+    assert!(!seed.exists());
+    assert!(open(&dir).operator(&KeyId(flashing)).is_some());
+
+    // A seed that is not one key stops the open, names the file, and is left there.
+    for (text, fault) in [
+        ("", "empty"),
+        ("not a key\n", "64 hex"),
+        (&format!("{hex}\n{hex}\n") as &str, "more than one"),
+    ] {
+        std::fs::write(&seed, text).expect("seed");
+        let error = Keys::open(config(&dir), Security::On).expect_err("damaged seed");
+        let words = error.to_string();
+        assert!(
+            matches!(error, KeysError::Seed { .. })
+                && words.contains(fault)
+                && words.contains(&seed.display().to_string()),
+            "{words}"
+        );
+        assert_eq!(std::fs::read_to_string(&seed).expect("left"), text);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

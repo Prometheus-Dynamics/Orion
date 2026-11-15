@@ -38,18 +38,24 @@ impl std::error::Error for ConfigError {}
 
 /// Something worth telling the operator that doesn't stop startup.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Warning {
     /// The key.
     pub key: String,
     /// Where it came from.
     pub from: Origin,
+    /// For a key that was once read and no longer is: what to say instead of "unknown".
+    pub retired: Option<&'static str>,
 }
 
 impl fmt::Display for Warning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.from {
-            Origin::File => write!(f, "unknown key in the config file: {}", self.key),
-            Origin::Environment => write!(f, "unknown variable in the environment: {}", self.key),
+        match (self.retired, self.from) {
+            (Some(words), _) => f.write_str(words),
+            (None, Origin::File) => write!(f, "unknown key in the config file: {}", self.key),
+            (None, Origin::Environment) => {
+                write!(f, "unknown variable in the environment: {}", self.key)
+            }
         }
     }
 }
@@ -70,6 +76,8 @@ struct Entry {
     /// The name to report if nobody reads it.
     name: String,
     read: bool,
+    /// Once read, now ignored, with these words.
+    retired: Option<&'static str>,
 }
 
 /// The raw settings, before anything is typed.
@@ -144,11 +152,20 @@ impl Source {
                 from,
                 name,
                 read: false,
+                retired: None,
             },
         );
     }
 
     /// The text of `key`, marking it as read.
+    /// Marks `key`, if it is set, as one that is no longer read: it never takes effect, and
+    /// [`Source::warnings`] says `words` about it.
+    pub fn retire(&mut self, key: &str, words: &'static str) {
+        if let Some(entry) = self.entries.get_mut(&canonical(key)) {
+            entry.retired = Some(words);
+        }
+    }
+
     pub fn text(&mut self, key: &str) -> Option<&str> {
         let entry = self.entries.get_mut(&canonical(key))?;
         entry.read = true;
@@ -224,10 +241,11 @@ impl Source {
     pub fn warnings(&self) -> Vec<Warning> {
         self.entries
             .values()
-            .filter(|entry| !entry.read)
+            .filter(|entry| !entry.read || entry.retired.is_some())
             .map(|entry| Warning {
                 key: entry.name.clone(),
                 from: entry.from,
+                retired: entry.retired,
             })
             .collect()
     }
@@ -259,22 +277,25 @@ fn unquote(value: &str) -> String {
         .to_owned()
 }
 
-/// Reads the security switch: `on` or `off`.
-fn parse_security(text: &str) -> Result<Security, String> {
-    match text {
-        "on" | "true" => Ok(Security::On),
-        "off" | "false" => Ok(Security::Off),
-        other => Err(format!("expected on or off, got {other:?}")),
-    }
-}
+mod security_view;
+
+pub use security_view::{SECURITY_VIEW, SecurityView};
+
+/// What is said about `security` in a config file, which no longer sets it.
+const SECURITY_RETIRED: &str = "security is no longer set in orion.conf; it is ignored; the \
+     switch is /etc/board/security (the device library's control tool / orion node security \
+     on|off)";
 
 /// What every build needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     /// `node.name`: this node's name.
     pub node_name: NodeName,
-    /// `security`: the one switch. Off unless someone turns it on.
+    /// The one switch, as the board's security record says ([`SecurityView`]). Off when
+    /// there is none, on when it cannot be read.
     pub security: Security,
+    /// The record it was read from, to say at start what the switch is and why.
+    pub security_view: SecurityView,
     /// `socket`: the Unix socket programs on this board connect to.
     pub socket: PathBuf,
     /// `state.dir`: where the node keeps its state.
@@ -302,16 +323,40 @@ impl Config {
                 key: "node.name".into(),
                 message: err.to_string(),
             })?;
-        let security = match source.text("security").map(str::to_owned) {
-            Some(text) => parse_security(&text).map_err(|message| ConfigError {
-                key: "security".into(),
-                message,
-            })?,
-            None => Security::Off,
-        };
+        Self::with_view(
+            source,
+            SecurityView::read(std::path::Path::new(SECURITY_VIEW)),
+            default_name,
+        )
+    }
+
+    /// As [`Config::from_source`], with the security record read from `view` in place of the
+    /// board's. For tests: a board has one record, where its owner says.
+    ///
+    /// # Errors
+    ///
+    /// As [`Config::from_source`].
+    #[doc(hidden)]
+    pub fn from_source_with_view(source: &mut Source, view: &Path) -> Result<Self, ConfigError> {
+        let default_name = "node.local"
+            .parse()
+            .map_err(|err: orion_types::Error| ConfigError {
+                key: "node.name".into(),
+                message: err.to_string(),
+            })?;
+        Self::with_view(source, SecurityView::read(view), default_name)
+    }
+
+    fn with_view(
+        source: &mut Source,
+        security_view: SecurityView,
+        default_name: NodeName,
+    ) -> Result<Self, ConfigError> {
+        source.retire("security", SECURITY_RETIRED);
         Ok(Self {
             node_name: source.get("node.name", default_name)?,
-            security,
+            security: security_view.security,
+            security_view,
             socket: source.get("socket", PathBuf::from("/run/orion/orion.sock"))?,
             state_dir: source.get("state.dir", PathBuf::from("/var/lib/orion"))?,
             keys_dir: PathBuf::new(),
@@ -329,6 +374,11 @@ impl Config {
 mod tests {
     use super::*;
 
+    /// As the board would read it with no security record: tests never read this machine's.
+    fn config(source: &mut Source) -> Result<Config, ConfigError> {
+        Config::from_source_with_view(source, Path::new("/nonexistent/orion-test/security"))
+    }
+
     fn env(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs
             .iter()
@@ -339,7 +389,7 @@ mod tests {
     #[test]
     fn nothing_set_gives_the_defaults_with_security_off() {
         let mut source = Source::parse("", env(&[])).unwrap();
-        let config = Config::from_source(&mut source).unwrap();
+        let config = config(&mut source).unwrap();
         assert_eq!(config.node_name.as_str(), "node.local");
         assert_eq!(config.security, Security::Off);
         assert_eq!(config.socket, PathBuf::from("/run/orion/orion.sock"));
@@ -353,15 +403,14 @@ mod tests {
         let text = r#"
             # A comment.
             node.name = left        # trailing
-            security = on
             socket = "/tmp/o#1.sock"
             peer.listen = 0.0.0.0:9200
             peer.connect = 10.0.0.1:9200, 10.0.0.2:9200
         "#;
         let mut source = Source::parse(text, env(&[])).unwrap();
-        let config = Config::from_source(&mut source).unwrap();
+        let config = config(&mut source).unwrap();
         assert_eq!(config.node_name.as_str(), "left");
-        assert_eq!(config.security, Security::On);
+        assert_eq!(config.security, Security::Off);
         assert_eq!(config.socket, PathBuf::from("/tmp/o#1.sock"));
         assert_eq!(config.peer_listen.unwrap().port(), 9200);
         assert_eq!(config.peer_connect.len(), 2);
@@ -371,30 +420,57 @@ mod tests {
     #[test]
     fn the_environment_overrides_the_file() {
         let mut source = Source::parse(
-            "node.name = left\nsecurity = on",
-            env(&[
-                ("ORION_NODE_NAME", "right"),
-                ("ORION_SECURITY", "off"),
-                ("PATH", "/bin"),
-            ]),
+            "node.name = left",
+            env(&[("ORION_NODE_NAME", "right"), ("PATH", "/bin")]),
         )
         .unwrap();
-        let config = Config::from_source(&mut source).unwrap();
+        let config = config(&mut source).unwrap();
         assert_eq!(config.node_name.as_str(), "right");
-        assert_eq!(config.security, Security::Off);
         assert!(source.warnings().is_empty());
+    }
+
+    #[test]
+    fn security_in_the_config_file_is_ignored_and_said_so_loudly() {
+        // The board's record says off (there is none); the file and the environment say on.
+        let mut source = Source::parse("security = on", env(&[("ORION_SECURITY", "on")])).unwrap();
+        let config = config(&mut source).unwrap();
+        assert_eq!(config.security, Security::Off);
+        let warnings = source.warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(
+            warnings[0].to_string(),
+            "security is no longer set in orion.conf; it is ignored; the switch is \
+             /etc/board/security (the device library's control tool / orion node security \
+             on|off)"
+        );
+        // A part that reads the key anyway does not quiet it.
+        let _ = source.text("security");
+        assert_eq!(source.warnings().len(), 1);
+    }
+
+    #[test]
+    fn the_switch_is_the_boards_record() {
+        let dir = std::env::temp_dir().join(format!("orion-config-view-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("security");
+        std::fs::write(&path, "on\ngeneration 3\n").expect("write");
+        let mut source = Source::parse("security = off", env(&[])).unwrap();
+        let config = Config::from_source_with_view(&mut source, &path).unwrap();
+        assert_eq!(config.security, Security::On);
+        assert_eq!(config.security_view.generation, Some(3));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn peer_listen_can_be_off() {
         let mut source = Source::parse("peer.listen = off", env(&[])).unwrap();
-        assert_eq!(Config::from_source(&mut source).unwrap().peer_listen, None);
+        assert_eq!(config(&mut source).unwrap().peer_listen, None);
     }
 
     #[test]
     fn unknown_keys_warn_and_do_not_fail() {
         let mut source = Source::parse("secuirty = on", env(&[("ORION_TYPO", "1")])).unwrap();
-        let config = Config::from_source(&mut source).unwrap();
+        let config = config(&mut source).unwrap();
         assert_eq!(config.security, Security::Off);
         let warnings = source.warnings();
         assert_eq!(warnings.len(), 2);
@@ -413,7 +489,7 @@ mod tests {
     #[test]
     fn a_part_reading_its_own_setting_clears_the_warning() {
         let mut source = Source::parse("ssh.port = 22", env(&[])).unwrap();
-        Config::from_source(&mut source).unwrap();
+        config(&mut source).unwrap();
         assert_eq!(source.warnings().len(), 1);
         assert_eq!(source.get("ssh.port", 0_u16).unwrap(), 22);
         assert!(source.warnings().is_empty());
@@ -422,13 +498,12 @@ mod tests {
     #[test]
     fn a_bad_value_is_an_error_naming_the_key() {
         for (text, key) in [
-            ("security = maybe", "security"),
             ("node.name = a b", "node.name"),
             ("peer.listen = nowhere", "peer.listen"),
             ("peer.connect = 1.2.3.4:5, x", "peer.connect"),
         ] {
             let mut source = Source::parse(text, env(&[])).unwrap();
-            let err = Config::from_source(&mut source).unwrap_err();
+            let err = config(&mut source).unwrap_err();
             assert_eq!(err.key, key, "{text}");
         }
     }

@@ -59,6 +59,8 @@ pub struct Resources {
     providers: BTreeMap<String, u32>,
     /// Who wrote which lease, who is quiet, and what was taken from whom.
     contest: Contest,
+    /// Whether a lease's holder is its writer's principal (security on), not what it says.
+    bind_holders: bool,
 }
 
 /// Who holds `resource` at `wall_ms`, by its lease.
@@ -152,6 +154,7 @@ pub fn bind(
         resource: resource.clone(),
         holder,
         expires_ms,
+        label: "",
     };
     let mut value = vec![0_u8; 256 + holder.len()];
     let len = encode_fields(&lease, &mut value)?;
@@ -201,7 +204,44 @@ impl Resources {
             me,
             providers: BTreeMap::new(),
             contest: Contest::new(quiet_ms),
+            bind_holders: false,
         }
+    }
+
+    /// With security on, a lease's holder is the principal of the caller that writes it: what
+    /// the caller put there is kept as the lease's `label`. See [`Resources::as_written`].
+    pub const fn bind_holders(&mut self, bind: bool) {
+        self.bind_holders = bind;
+    }
+
+    /// The value `entry` is to be checked and stored as: with holders bound, a lease whose
+    /// holder is not `caller`'s principal is written with the principal as its holder, and the
+    /// holder it said as its label. `None`: as it is.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Malformed`] for a lease that does not decode.
+    pub fn as_written(
+        &self,
+        caller: &Caller<'_>,
+        entry: &RecordEntry<'_>,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        if !self.bind_holders || entry.class != RecordClass::Lease || entry.deleted {
+            return Ok(None);
+        }
+        let lease = LeaseRecord::decode(entry.value.0)?;
+        if lease.holder == caller.principal {
+            return Ok(None);
+        }
+        let bound = LeaseRecord {
+            holder: caller.principal,
+            label: lease.holder,
+            ..lease
+        };
+        let mut value = vec![0_u8; 256 + caller.principal.len() + lease.holder.len()];
+        let len = encode_fields(&bound, &mut value)?;
+        value.truncate(len);
+        Ok(Some(value))
     }
 
     /// How long a holder must be quiet before its lease can be taken (`leases.quiet_ms`).

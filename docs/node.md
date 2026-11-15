@@ -424,6 +424,9 @@ its topics and runs its actions. The records are the store's and reach every nod
   is lost, and may renew. A lease that has ended holds nothing. A resource that is taken away
   takes its lease with it. Node logic binds with `bind` and `release`; a program binds by
   writing the lease record, under the same rules.
+- **With security on, a lease is its writer's.** Its holder is the principal of the caller that
+  wrote it (as the audit log names it), whatever the caller put there; what it put there is kept
+  as the lease's `label`, for people. With security off the holder is what the writer says.
 - **Only its holder frees a lease.** Deleting a lease record is allowed to the session that
   wrote it, a caller whose principal (as the audit log names it, `local:1000` say) is the
   lease's holder, and root. Anyone else is `denied`, with "<resource> is held by <holder>: only

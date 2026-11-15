@@ -14,5 +14,6 @@ socket.node_uids = 901
 # peer.listen = 0.0.0.0:9200
 # peer.connect = 192.168.1.20:9200
 
-# Who may do what. Off: anyone who can reach the socket may do anything.
-# security = on
+# Who may do what is not set here: the switch is the board's record, /etc/board/security
+# (docs/settings.md, "The security switch"). With no record, security is off: anyone who can
+# reach the socket may do anything.

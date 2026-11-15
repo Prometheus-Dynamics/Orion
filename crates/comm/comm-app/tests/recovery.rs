@@ -76,7 +76,20 @@ fn keygen(dir: &Path, name: &str) -> (PathBuf, String) {
 
 fn settings(text: &str) -> Result<CommSettings, ConfigError> {
     let mut source = Source::parse(text, Vec::new())?;
-    CommSettings::from_source(&mut source)
+    CommSettings::from_source_with_view(&mut source, Path::new("/nonexistent/orion-test/security"))
+}
+
+/// As [`settings`], on a board whose security record says on.
+fn settings_on(text: &str) -> Result<CommSettings, ConfigError> {
+    let mut source = Source::parse(text, Vec::new())?;
+    CommSettings::from_source_with_view(&mut source, &secured())
+}
+
+/// The board's security record, as a board with security on has it.
+fn secured() -> PathBuf {
+    let path = std::env::temp_dir().join(format!("orion-comm-security-{}", std::process::id()));
+    std::fs::write(&path, "on\ngeneration 1\n").expect("security record");
+    path
 }
 
 fn options(
@@ -162,7 +175,7 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
         };
         let good = |state: &Path| {
             format!(
-                "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {1}\nsecurity = on\n\
+                "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {1}\n\
                  recovery.keys = {0}/recovery_keys\nssh.helper = {2}\n",
                 dir.display(),
                 state.display(),
@@ -173,14 +186,14 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
         // A broken config: a setting that is not one. Nothing in the file is believed,
         // so security is on, and only the repairer gets in.
         let broken = settings(&format!(
-            "{}security = sometimes\n",
+            "{}comm.max_sessions = many\n",
             good(&dir.join("state"))
         ));
         assert!(broken.is_err());
         let started = start_or_recover(broken, with()).await;
         let (addr, why) = in_recovery(&started).await;
         assert!(
-            why.contains("the settings cannot be read") && why.contains("security"),
+            why.contains("the settings cannot be read") && why.contains("comm.max_sessions"),
             "{why}"
         );
         assert_eq!(
@@ -202,7 +215,8 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
 
         // A broken state directory: it is a file.
         std::fs::write(dir.join("not-a-directory"), "x").expect("write");
-        let started = start_or_recover(settings(&good(&dir.join("not-a-directory"))), with()).await;
+        let started =
+            start_or_recover(settings_on(&good(&dir.join("not-a-directory"))), with()).await;
         let (addr, why) = in_recovery(&started).await;
         assert!(
             why.starts_with("state.dir ") && why.contains("cannot be made"),
@@ -218,7 +232,7 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
         // A trust store that is rubbish.
         std::fs::create_dir(dir.join("rubbish")).expect("dir");
         std::fs::write(dir.join("rubbish/node-identity.ed25519"), [1_u8; 7]).expect("write");
-        let started = start_or_recover(settings(&good(&dir.join("rubbish"))), with()).await;
+        let started = start_or_recover(settings_on(&good(&dir.join("rubbish"))), with()).await;
         let (addr, _) = in_recovery(&started).await;
         assert_eq!(
             said(&ssh(&dir, addr, Some(&repairer), "echo in").await),
@@ -231,7 +245,7 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
             std::fs::create_dir(dir.join("full")).expect("dir");
             std::fs::set_permissions(dir.join("full"), std::fs::Permissions::from_mode(0o555))
                 .expect("mode");
-            let started = start_or_recover(settings(&good(&dir.join("full"))), with()).await;
+            let started = start_or_recover(settings_on(&good(&dir.join("full"))), with()).await;
             let (addr, why) = in_recovery(&started).await;
             assert!(why.contains("cannot be written to"), "{why}");
             assert_eq!(
@@ -271,7 +285,7 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
                 "{}state.require_mount = true\n",
                 good(&dir.join("data/orion"))
             );
-            let started = start_or_recover(settings(&text), with()).await;
+            let started = start_or_recover(settings_on(&text), with()).await;
             let (addr, why) = in_recovery(&started).await;
             assert!(why.contains("state.require_mount"), "{why}");
             assert!(

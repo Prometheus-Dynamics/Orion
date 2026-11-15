@@ -144,11 +144,30 @@ impl CommSettings {
     ///
     /// A value that doesn't parse, or settings that cannot work together.
     pub fn from_source(source: &mut Source) -> Result<Self, ConfigError> {
+        let config = Config::from_source(source)?;
+        Self::with_config(source, config)
+    }
+
+    /// As [`CommSettings::from_source`], with the board's security record read from `view`
+    /// instead of its fixed place. For tests.
+    ///
+    /// # Errors
+    ///
+    /// As [`CommSettings::from_source`].
+    #[doc(hidden)]
+    pub fn from_source_with_view(
+        source: &mut Source,
+        view: &std::path::Path,
+    ) -> Result<Self, ConfigError> {
+        let config = Config::from_source_with_view(source, view)?;
+        Self::with_config(source, config)
+    }
+
+    fn with_config(source: &mut Source, config: Config) -> Result<Self, ConfigError> {
         let error = |key: &str, message: String| ConfigError {
             key: key.into(),
             message,
         };
-        let config = Config::from_source(source)?;
         let socket_mode = match source.text("socket.mode") {
             Some(mode) => u32::from_str_radix(mode.trim_start_matches("0o"), 8)
                 .ok()
@@ -376,7 +395,7 @@ mod tests {
     #[test]
     fn every_part_reads_its_own_settings_and_a_typo_is_seen() {
         let (settings, unknown) = parse(
-            "node.name = left\nsecurity = on\nsocket.mode = 0600\nsocket.node_uids = 990, 991\ntopics.max = 64\ncomm.max_sessions = 32\ncluster = lab\nstatus.interval_ms = 250\npeer.listen = 0.0.0.0:9200\ntopcis.max = 3\n",
+            "node.name = left\nsocket.mode = 0600\nsocket.node_uids = 990, 991\ntopics.max = 64\ncomm.max_sessions = 32\ncluster = lab\nstatus.interval_ms = 250\npeer.listen = 0.0.0.0:9200\ntopcis.max = 3\n",
         )
         .expect("settings");
         assert_eq!(settings.config.node_name.as_str(), "left");

@@ -254,6 +254,9 @@ pub fn run_or_recover(
     for warning in unknown {
         tracing::warn!("{warning}");
     }
+    if let Ok(settings) = &settings {
+        crate::say_security(&settings.config.security_view);
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
