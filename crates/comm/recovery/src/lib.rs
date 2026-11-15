@@ -9,8 +9,9 @@
 //!   it runs. The trust store is not opened: it may be what is broken. The host key is the
 //!   board's if it can be read, and one for the run if not.
 //! - **Nothing from the config.** If the settings could not be read, nothing in them is
-//!   believed: the addresses are the usual ones and security is on. A board whose settings
-//!   were read and say security is off is as open here as it always is.
+//!   believed: the addresses are the usual ones. The switch is the board's security record
+//!   either way: a board whose record says off is as open here as it always is, and a
+//!   damaged record is on.
 //! - **Nothing written.** A full disk is not a reason to keep someone out: nothing is
 //!   saved, and a session needs no home directory and no shell but `/bin/sh`.
 //! - **Never wider.** Recovery lets in who the recovery keys say and nobody else. A board

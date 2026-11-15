@@ -166,13 +166,15 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
         let (repairer, public) = keygen(&dir, "repairer");
         let (stranger, _) = keygen(&dir, "stranger");
         std::fs::write(dir.join("recovery_keys"), &public).expect("keys");
-        let with = || RecoverWith {
+        let with_view = |security_view: PathBuf| RecoverWith {
             listen: vec!["127.0.0.1:0".parse().expect("addr")],
             keys_file: dir.join("recovery_keys"),
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("no-record"),
+            security_view,
         };
+        let with = || with_view(secured());
         let good = |state: &Path| {
             format!(
                 "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {1}\n\
@@ -202,6 +204,32 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
         );
         assert_eq!(said(&ssh(&dir, addr, Some(&stranger), "echo in").await), "");
         assert_eq!(said(&ssh(&dir, addr, None, "echo in").await), "");
+        drop(started);
+
+        // The broken file decides nothing: the switch is the board's record. Off, and recovery
+        // is as open as the board always is.
+        let off = dir.join("security-off");
+        std::fs::write(&off, "off\ngeneration 2\n").expect("record");
+        let broken = || {
+            settings(&format!(
+                "{}comm.max_sessions = many\n",
+                good(&dir.join("state"))
+            ))
+        };
+        let started = start_or_recover(broken(), with_view(off)).await;
+        let (addr, _) = in_recovery(&started).await;
+        assert_eq!(said(&ssh(&dir, addr, None, "echo in").await), "in\n");
+        drop(started);
+        // A record that is damaged is on, whatever it was meant to say.
+        let damaged = dir.join("security-damaged");
+        std::fs::write(&damaged, "of\n").expect("record");
+        let started = start_or_recover(broken(), with_view(damaged)).await;
+        let (addr, _) = in_recovery(&started).await;
+        assert_eq!(said(&ssh(&dir, addr, None, "echo in").await), "");
+        assert_eq!(
+            said(&ssh(&dir, addr, Some(&repairer), "echo in").await),
+            "in\n"
+        );
         drop(started);
 
         // A config that is not even text of the right shape.
@@ -410,6 +438,7 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("state/last-good.carriers"),
+            security_view: dir.join("no-security-record"),
         };
         let socket = dir.join("board.sock");
         let good = format!(

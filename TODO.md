@@ -85,6 +85,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C40](docs/prs/C40.md) Every way in that cannot open tries again (wave 18)
 - [x] [C41](docs/prs/C41.md) Where the bytes went since I6, what was cut, and limits held tight (wave 18)
 - [x] [C32a](docs/prs/C32a.md) The security switch is the board's record, and trust follows it (wave 18)
+- [x] [C42](docs/prs/C42.md) Recovery's switch is the board's record too (wave 18)
 
 ## D. Client
 

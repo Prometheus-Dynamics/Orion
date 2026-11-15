@@ -43,12 +43,14 @@ pub struct RecoveryComm {
 
 impl RecoveryComm {
     /// Serves `settings`' socket and USB links, if they were read; else the usual socket, and
-    /// a USB link for any name root offers. `why` is what the hello document says. With
+    /// a USB link for any name root offers. `security` is the board's switch, from its record.
+    /// `why` is what the hello document says. With
     /// `shell`, a shell may be opened over the session, by whom the check lets. The keys in
     /// `recovery_keys` may prove themselves on its links and log in.
     #[must_use]
     pub fn start(
         settings: Option<&CommSettings>,
+        security: Security,
         why: &str,
         shell: Option<orion_ssh::SshConfig>,
         recovery_keys: &Path,
@@ -57,7 +59,6 @@ impl RecoveryComm {
             || "node.local".parse().expect("a node name"),
             |settings| settings.config.node_name.clone(),
         );
-        let security = settings.map_or(Security::On, |settings| settings.config.security);
         let cluster = settings.map_or("default", |settings| settings.keys.cluster.as_str());
         let keys = SharedKeys::new(
             Keys::open(KeysConfig::in_memory(cluster), security).expect("a key kept nowhere"),

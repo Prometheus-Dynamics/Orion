@@ -126,6 +126,7 @@ fn a_tool_gets_a_shell_on_the_board_and_in_recovery() {
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("state/last-good.carriers"),
+            security_view: secured(),
         };
 
         // Up as told: a command with its output, errors and code, input and its end.

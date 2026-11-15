@@ -187,6 +187,7 @@ fn a_tool_with_a_key_gets_a_shell_over_a_usb_link_with_security_on_and_in_recove
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("state/last-good.carriers"),
+            security_view: secured(),
         };
         let operator = Identity::generate();
         let stranger = Identity::generate();

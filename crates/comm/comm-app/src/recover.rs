@@ -6,7 +6,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use orion_check::Security;
 use orion_config::ConfigError;
 use orion_recovery::{Recovery, RecoveryConfig};
 use tracing::info;
@@ -29,6 +28,9 @@ pub struct RecoverWith {
     pub retry: Duration,
     /// The record of the last good start, opened when the settings cannot be read.
     pub last_good: PathBuf,
+    /// The board's security record, read when the settings cannot be: the switch is the
+    /// record's in recovery too. [`orion_config::SECURITY_VIEW`] but in tests.
+    pub security_view: PathBuf,
 }
 
 impl Default for RecoverWith {
@@ -42,6 +44,7 @@ impl Default for RecoverWith {
             helper: None,
             retry: Duration::from_secs(1),
             last_good: crate::last_good::USUAL.into(),
+            security_view: orion_config::SECURITY_VIEW.into(),
         }
     }
 }
@@ -103,11 +106,23 @@ impl std::ops::Deref for InRecovery {
 /// are the board's, if they could be read: only then is anything in them believed. If they
 /// could not, the ways in of the last good start are opened, from its record, if there is
 /// one; with neither, the usual socket, and a USB link for any name root hands over.
+///
+/// The switch is the board's security record whether or not the settings could be read: a
+/// broken settings file decides nothing, and a damaged record means security is on.
 #[must_use]
 pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) -> InRecovery {
+    let view = settings.map_or_else(
+        || {
+            let view = orion_config::SecurityView::read(&with.security_view);
+            crate::say_security(&view);
+            view
+        },
+        |settings| settings.config.security_view.clone(),
+    );
+    let security = view.security;
     let record = settings
         .is_none()
-        .then(|| crate::last_good::read(&with.last_good))
+        .then(|| crate::last_good::read(&with.last_good, &view))
         .flatten();
     let why = match &record {
         Some(_) => format!(
@@ -161,7 +176,7 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         || with.keys_file.clone(),
         |settings| settings.recovery_keys.clone(),
     );
-    let comm = RecoveryComm::start(settings, &why, shell, &recovery_keys);
+    let comm = RecoveryComm::start(settings, security, &why, shell, &recovery_keys);
     #[allow(unused_mut)]
     let mut subsystems = ssh.map(|ssh| ssh.subsystems.clone()).unwrap_or_default();
     #[cfg(feature = "ssh-sftp")]
@@ -207,8 +222,8 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         helper,
         subsystems,
         etc: "/etc".into(),
-        // Settings that could not be read say nothing: security is on.
-        security: settings.map_or(Security::On, |settings| settings.config.security),
+        // The board's record, whether or not the settings could be read.
+        security,
         retry: with.retry,
         why,
     });

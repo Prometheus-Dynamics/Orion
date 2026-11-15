@@ -481,10 +481,13 @@ listened on yet is not among them: the network, WebSocket, SSH and NT4 ways in e
   (`/etc/orion/recovery_keys`): OpenSSH public keys, one a line, in the image. It is read
   again every couple of seconds, so a key written from the console works without a restart.
   A line that is not a plain ed25519 key lets nobody in. The trust store is not opened.
-- **Nothing from a config that could not be read.** Then nothing in it is believed: security
-  is on, the addresses are port 22 and then 2222, the keys file is the usual one. If the
-  settings were read, their SSH address is tried first and the board's security record holds:
-  a board whose record says security is off is as open in recovery as it always is.
+- **Nothing from a config that could not be read.** Then nothing in it is believed: the
+  addresses are port 22 and then 2222, the keys file is the usual one. If the settings were
+  read, their SSH address is tried first.
+- **The switch is the board's record, in recovery too.** A broken settings file decides
+  nothing: `/etc/board/security` is read as it always is. A board whose record says off is as
+  open in recovery as it always is, so it can be fixed over the network; a record that is
+  damaged or cannot be read is on.
 - **Never wider.** With security on and no recovery keys, nobody gets in, and that is logged.
   Settings that were read and name `ssh.interface` keep every address recovery tries to that
   interface.
@@ -509,7 +512,7 @@ pinned the board's key is told it is another.
   `last-good.carriers` to the state directory: its socket, USB links, SSH address and
   interface and recovery addresses, in the settings' own words, nothing secret. When the
   settings cannot be read, recovery opens those ways in from it (`ORION_RECOVERY_LAST_GOOD`
-  names another place), with security on, and says so in its reason. A broken settings file is
+  names another place), with the switch the record says, and says so in its reason. A broken settings file is
   the likeliest reason for recovery, and the board is still reached the way it was before.
 - **With neither,** recovery serves `/run/orion/orion.sock`, and makes a USB link for any
   name root hands a handle over for: the program that sets up the gadget needs no list.

@@ -176,6 +176,10 @@ what to change.
     (`KeysError::Seed`). `orion_keys::SEED_FILE` is new.
   - The hello document and the time stay readable by a key the board does not know, with
     security on.
+- **C42.** Recovery takes the switch from the board's record too, when the settings cannot be
+  read (it was on whatever the record said). `RecoverWith` gains `security_view` (**Break** for
+  code that builds one by its fields: add `security_view: orion_config::SECURITY_VIEW.into()`),
+  and `RecoveryComm::start` takes the switch.
 
 ## Builds
 

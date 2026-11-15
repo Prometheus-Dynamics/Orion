@@ -78,13 +78,15 @@ pub fn write(settings: &CommSettings) {
 }
 
 /// The settings the record at `path` holds, if there is one that reads. Anything else in
-/// the file is left out: only the ways in are believed, and security is on.
+/// the file is left out: only the ways in are believed, and the switch is the board's
+/// security record, `view`.
 #[must_use]
-pub fn read(path: &Path) -> Option<CommSettings> {
+pub fn read(path: &Path, view: &orion_config::SecurityView) -> Option<CommSettings> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut source = Source::parse(&text, Vec::new()).ok()?;
     let mut settings = CommSettings::from_source(&mut source).ok()?;
-    settings.config.security = orion_config::Security::On;
+    settings.config.security = view.security;
+    settings.config.security_view = view.clone();
     Some(settings)
 }
 
