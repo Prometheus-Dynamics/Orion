@@ -90,6 +90,7 @@ try {{
     "steady=" + steady,
     "request=" + new TextDecoder().decode(clicks.request),
     "outcome=" + (result.outcome === Outcome.Succeeded ? "succeeded" : result.outcome),
+    "code=" + result.code,
     "output=" + output,
     "progress=" + progress.join("|"),
     "refused=" + refused,
@@ -244,7 +245,7 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
                 let mut output = b"started ".to_vec();
                 output.extend_from_slice(&args);
                 start
-                    .finish(call, Outcome::Succeeded, &output, "")
+                    .finish_with_code(call, Outcome::Succeeded, 7, &output, "")
                     .expect("finish");
             }
         }
@@ -297,7 +298,7 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
     assert_eq!(
         result,
         "check=e3069283&node=board&declared=tank.level:litres:3:l:64&status=live&steady=true\
-         &request=every%20click&outcome=succeeded&output=started%20gently&progress=50:priming\
+         &request=every%20click&outcome=succeeded&code=7&output=started%20gently&progress=50:priming\
          &refused=Refused:8"
             .replace("%20", " ")
             .replace(' ', "%20"),

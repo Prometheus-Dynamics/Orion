@@ -103,6 +103,9 @@ for (;;) {
 }
 ```
 
+- `orion_finish_code(call, outcome, code, output, len, detail)` ends a run with the action's own
+  status code as well, which the caller reads as `Finished.code`. `orion_finish` gives none
+  (zero).
 - The first `orion_poll` fixes the tables: up to 8 topics and 8 actions, added before it.
 - Every string the tables are given stays where it is for as long as the firmware runs: a string
   literal. Nothing is copied.

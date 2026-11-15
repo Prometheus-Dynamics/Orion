@@ -196,6 +196,12 @@ what to change.
   (`finish` gives zero). Node logic passes the code on to the caller, on attach, and across
   nodes. The microcontroller library and the C library do not set it (zero); the web client
   does not read it yet.
+- **C47.** The code reaches the other clients. Additive:
+  - `orion_device_actions::Actions::finish_with_code` sends it. `finish` sends the result as
+    before, with no code, which reads as zero.
+  - The MCU template's C API gains `orion_finish_code`.
+  - The web client's `Result` gains `code`, zero from a board that did not send one.
+  - The C library has no actions, so there is nothing for it to read or set.
 
 ## Builds
 

@@ -259,7 +259,9 @@ by. A run the check refuses never reaches the program that owns the action: the 
 people (`detail`) and the action's own status `code`: a number whose meaning the action defines
 and documents (a service's `BUSY`, say), so a caller branches on it, not on the words. Zero is
 none given, and is what a node too old to pass one on gives. A program sets it with
-`registration.finish_with_code`; `finish` gives zero. The words stay in `detail`. Node logic
+`registration.finish_with_code`; `finish` gives zero. A microcontroller sets it with
+`Actions::finish_with_code`, or `orion_finish_code` in the C API, and a web page reads it as
+`result.code`. The words stay in `detail`. Node logic
 passes the code on as the program gave it: to the caller, to whoever attaches to a detached run
 later, and back across nodes. Orion's own ends (a deadline, a program that went, node logic
 stopping) give zero.

@@ -27,6 +27,8 @@ int firmware_main(uint32_t now_ms) {
         size_t len;
         if (orion_run(&call, args, sizeof args, &len) == zero) {
             (void)orion_finish(call, ORION_OUTCOME_SUCCEEDED, NULL, 0, NULL);
+        } else {
+            (void)orion_finish_code(call, ORION_OUTCOME_FAILED, 11, NULL, 0, "jammed");
         }
     }
     if (orion_subscribers((uint32_t)yaw) > 0) {

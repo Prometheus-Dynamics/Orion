@@ -117,6 +117,11 @@ int32_t orion_progress(uint64_t call, uint8_t percent, const char *message);
 int32_t orion_finish(uint64_t call, uint8_t outcome, const uint8_t *output, size_t len,
                      const char *detail);
 
+/* As orion_finish, with the action's own status code, which the caller reads as
+ * Finished.code. */
+int32_t orion_finish_code(uint64_t call, uint8_t outcome, uint32_t code, const uint8_t *output,
+                          size_t len, const char *detail);
+
 /* This library's ORION_MCU_API_VERSION. */
 uint32_t orion_api_version(void);
 

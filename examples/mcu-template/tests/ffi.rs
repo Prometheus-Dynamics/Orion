@@ -189,6 +189,21 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         0
     );
     exchange(&mut peer, &mut reader);
+    // SAFETY: the output is null with no length; the detail is a literal.
+    assert_eq!(
+        unsafe {
+            orion_finish_code(
+                44,
+                ORION_OUTCOME_FAILED,
+                300,
+                std::ptr::null(),
+                0,
+                c"jammed".as_ptr(),
+            )
+        },
+        0
+    );
+    exchange(&mut peer, &mut reader);
     let progress = peer.take(kind::ACTION_PROGRESS);
     let progress: Progress = progress[0].body();
     assert_eq!(
@@ -196,18 +211,24 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         (41, 50, "halfway")
     );
     let results = peer.take(kind::ACTION_RESULT);
-    let results: Vec<(u64, Outcome, Vec<u8>)> = results
+    let results: Vec<(u64, Outcome, u32, Vec<u8>)> = results
         .iter()
         .map(|sent| {
             let result: ActionResult = sent.body();
-            (result.call, result.outcome, result.output.0.to_vec())
+            (
+                result.call,
+                result.outcome,
+                result.code,
+                result.output.0.to_vec(),
+            )
         })
         .collect();
     assert_eq!(
         results,
         [
-            (42, Outcome::Rejected, Vec::new()),
-            (41, Outcome::Succeeded, b"ok".to_vec())
+            (42, Outcome::Rejected, 0, Vec::new()),
+            (41, Outcome::Succeeded, 0, b"ok".to_vec()),
+            (44, Outcome::Failed, 300, Vec::new())
         ]
     );
 

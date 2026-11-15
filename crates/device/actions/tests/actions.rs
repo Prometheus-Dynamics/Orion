@@ -126,6 +126,13 @@ fn a_run_is_handed_over_and_its_result_reaches_the_host() {
     assert_eq!(result.call, 41);
     assert_eq!(result.outcome, Outcome::Succeeded);
     assert_eq!(result.output, Bytes(&[7, 8]));
+    // Without a code, the result has the shape it always had, and reads as code 0.
+    assert_eq!(result.code, 0);
+    assert_eq!(
+        sent[0].view().payload(),
+        [41, 1, 2, 7, 8, 0],
+        "call, outcome, output, detail, and nothing after"
+    );
 
     let link = &mut rig.device.link;
     rig.layer
@@ -136,6 +143,24 @@ fn a_run_is_handed_over_and_its_result_reaches_the_host() {
     assert_eq!(
         (result.outcome, result.detail),
         (Outcome::Failed, "no sensor")
+    );
+
+    // With the action's own code: the caller reads it as `Finished.code`.
+    let link = &mut rig.device.link;
+    rig.layer
+        .finish_with_code(link, 43, (Outcome::Failed, 300), &[1], "jammed")
+        .expect("taken");
+    let sent = rig.drain();
+    let result: ActionResult<'_> = sent[0].body();
+    assert_eq!(
+        (
+            result.call,
+            result.outcome,
+            result.code,
+            result.output,
+            result.detail
+        ),
+        (43, Outcome::Failed, 300, Bytes(&[1][..]), "jammed")
     );
 }
 

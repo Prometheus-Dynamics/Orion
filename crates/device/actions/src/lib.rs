@@ -3,7 +3,8 @@
 //! A firmware describes its actions once, as constants, and [`Actions`] registers each when
 //! a session starts, says it again if the answer does not come, and from then on hands the
 //! firmware every run the host claims for it. The firmware answers a run with
-//! [`Actions::progress`] and [`Actions::finish`], when it likes: a run is a number and its
+//! [`Actions::progress`] and [`Actions::finish`] (or [`Actions::finish_with_code`], with the
+//! action's own status code), when it likes: a run is a number and its
 //! arguments, and nothing about it is kept here.
 //!
 //! The link takes one frame at a time. A result it has no room for comes back as
@@ -289,6 +290,32 @@ impl<const N: usize> Actions<N> {
                 .u8(outcome.code())
                 .bytes(output)
                 .bytes(detail.as_bytes())
+                .finish()
+        })
+    }
+
+    /// As [`Actions::finish`], with the action's own status `code` as well: a number the
+    /// action and its callers agree on, which the caller reads as `Finished.code`. A run
+    /// finished without one has code 0.
+    ///
+    /// # Errors
+    ///
+    /// [`SendError`]. Nothing was sent: send it again when the link has room.
+    pub fn finish_with_code<const TX: usize>(
+        &mut self,
+        link: &mut Link<TX>,
+        call: u64,
+        (outcome, code): (Outcome, u32),
+        output: &[u8],
+        detail: &str,
+    ) -> Result<u16, SendError> {
+        link.send_with(kind::ACTION_RESULT, |out| {
+            Writer::new(out)
+                .varint(call)
+                .u8(outcome.code())
+                .bytes(output)
+                .bytes(detail.as_bytes())
+                .varint(u64::from(code))
                 .finish()
         })
     }

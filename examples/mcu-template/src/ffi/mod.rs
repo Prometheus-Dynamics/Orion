@@ -726,6 +726,38 @@ pub unsafe extern "C" fn orion_finish(
     len: usize,
     detail: *const c_char,
 ) -> i32 {
+    // SAFETY: the caller's promises, passed on.
+    unsafe { finish(call, outcome, None, output, len, detail) }
+}
+
+/// As [`orion_finish`], with the action's own status `code`, which the caller reads as
+/// `Finished.code`.
+///
+/// # Safety
+///
+/// As [`orion_finish`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn orion_finish_code(
+    call: u64,
+    outcome: u8,
+    code: u32,
+    output: *const u8,
+    len: usize,
+    detail: *const c_char,
+) -> i32 {
+    // SAFETY: the caller's promises, passed on.
+    unsafe { finish(call, outcome, Some(code), output, len, detail) }
+}
+
+/// Both of them: without a code, the result has the shape it always had.
+unsafe fn finish(
+    call: u64,
+    outcome: u8,
+    code: Option<u32>,
+    output: *const u8,
+    len: usize,
+    detail: *const c_char,
+) -> i32 {
     let outcome = match outcome {
         ORION_OUTCOME_SUCCEEDED => Outcome::Succeeded,
         ORION_OUTCOME_FAILED => Outcome::Failed,
@@ -735,12 +767,11 @@ pub unsafe extern "C" fn orion_finish(
     // SAFETY: the caller's promises.
     let (output, detail) = unsafe { (bytes(output, len), borrowed(detail)) };
     PORT.running(|running| {
-        sent(
-            running
-                .layers
-                .actions
-                .finish(&mut running.device.link, call, outcome, output, detail),
-        )
+        let (actions, link) = (&mut running.layers.actions, &mut running.device.link);
+        sent(match code {
+            None => actions.finish(link, call, outcome, output, detail),
+            Some(code) => actions.finish_with_code(link, call, (outcome, code), output, detail),
+        })
     })
     .unwrap_or(ORION_ERR_STATE)
 }

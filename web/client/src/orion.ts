@@ -120,6 +120,8 @@ export interface Progress {
 /** How an action ended. */
 export interface Result {
   outcome: Outcome;
+  /** The action's own status code, as it and its callers agree; 0 if it gave none. */
+  code: number;
   output: Uint8Array;
   detail: string;
 }
@@ -622,7 +624,12 @@ export class Orion {
         const run = this.runs.get(call);
         if (run !== undefined) {
           this.runs.delete(call);
-          run.resolve({ outcome: reader.u8() as Outcome, output: reader.blob().slice(), detail: reader.str() });
+          const outcome = reader.u8() as Outcome;
+          const output = reader.blob().slice();
+          const detail = reader.str();
+          // Appended: a board too old to send it said nothing, which is 0.
+          const code = reader.rest > 0 ? reader.uint() : 0;
+          run.resolve({ outcome, code, output, detail });
         }
         break;
       }

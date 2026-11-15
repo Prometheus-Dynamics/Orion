@@ -504,7 +504,12 @@ export class Orion {
                 const run = this.runs.get(call);
                 if (run !== undefined) {
                     this.runs.delete(call);
-                    run.resolve({ outcome: reader.u8(), output: reader.blob().slice(), detail: reader.str() });
+                    const outcome = reader.u8();
+                    const output = reader.blob().slice();
+                    const detail = reader.str();
+                    // Appended: a board too old to send it said nothing, which is 0.
+                    const code = reader.rest > 0 ? reader.uint() : 0;
+                    run.resolve({ outcome, code, output, detail });
                 }
                 break;
             }

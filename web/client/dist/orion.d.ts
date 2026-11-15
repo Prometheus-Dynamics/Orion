@@ -67,6 +67,8 @@ export interface Progress {
 /** How an action ended. */
 export interface Result {
     outcome: Outcome;
+    /** The action's own status code, as it and its callers agree; 0 if it gave none. */
+    code: number;
     output: Uint8Array;
     detail: string;
 }
