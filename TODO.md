@@ -92,6 +92,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C46](docs/prs/C46.md) A whole board in a consumer's test, real comm core and node logic (wave 18)
 - [x] [C48](docs/prs/C48.md) next on the test board after wave 18 (wave 18; board run)
 - [x] [C47](docs/prs/C47.md) A run's code from a microcontroller and in a web page (wave 18; needs C44)
+- [x] [C49](docs/prs/C49.md) A session dropped for its writes says whether they stalled or failed, and on what (wave 18; needs C48)
 
 ## D. Client
 

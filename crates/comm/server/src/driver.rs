@@ -330,21 +330,35 @@ impl Comm {
                 Popped::Frame => {
                     let sent = timeout(write_ms, write.send(&frame, &fds)).await;
                     fds.clear();
-                    if !matches!(sent, Ok(Ok(()))) {
-                        // It is not taking what it is sent. Stop the reader too.
-                        let mut core = self.core.borrow_mut();
-                        core.stats.dropped += 1;
-                        let limit_ms = write_ms.as_millis() as u64;
-                        core.sessions
-                            .end(session, Some(Dropped::WriteStalled { limit_ms }));
-                        return;
-                    }
+                    let why = match sent {
+                        Ok(Ok(())) => continue,
+                        // It is not taking what it is sent.
+                        Err(_) => Dropped::WriteStalled {
+                            kind: frame_kind(&frame),
+                            waiting: self.core.borrow().sessions.pending(session),
+                            limit_ms: write_ms.as_millis() as u64,
+                        },
+                        Ok(Err(error)) => Dropped::WriteFailed {
+                            kind: frame_kind(&frame),
+                            error: error.kind(),
+                        },
+                    };
+                    // Stop the reader too.
+                    let mut core = self.core.borrow_mut();
+                    core.stats.dropped += 1;
+                    core.sessions.end(session, Some(why));
+                    return;
                 }
                 Popped::Empty => wake.notified().await,
                 Popped::Closed => return,
             }
         }
     }
+}
+
+/// The kind of an encoded frame, for saying which one was not taken.
+fn frame_kind(frame: &[u8]) -> u8 {
+    orion_wire::frame::decode(frame).map_or(0, |view| view.kind())
 }
 
 /// `read`, given up at `deadline` if there is one.

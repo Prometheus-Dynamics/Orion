@@ -144,3 +144,73 @@ fn a_program_on_the_board_is_not_dropped_for_being_quiet_and_is_seen_to_be() {
         assert_eq!(whys(&board), [Dropped::NoHello { limit_ms: 5000 }]);
     });
 }
+
+#[test]
+fn a_session_whose_writes_stall_or_fail_is_dropped_saying_which_and_on_what() {
+    run(async {
+        // Room in its outbox, so it is the writes that wait, not the outbox that fills.
+        let limits = Limits {
+            outbox_bytes: 1 << 20,
+            ..Limits::default()
+        };
+        let board = board(Security::Off, limits);
+
+        // It asks, and never reads: more answers than the connection holds (16 KiB), far
+        // fewer than the outbox does. Once the connection is full, a write waits out the
+        // deadline.
+        let mut deaf = Client::open(&board, USER).await;
+        for number in 0..4000 {
+            deaf.connection
+                .send(&ask_frame(kind::GET, number), &[])
+                .await
+                .expect("the board reads");
+            if number % 64 == 0 {
+                tokio::task::yield_now().await;
+            }
+        }
+        while whys(&board).is_empty() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let whys_now = whys(&board);
+        assert!(
+            matches!(
+                whys_now.as_slice(),
+                [Dropped::WriteStalled { kind: kind::PONG, limit_ms: 5000, waiting }]
+                    if *waiting > 0
+            ),
+            "{whys_now:?}"
+        );
+        assert!(
+            whys_now[0]
+                .to_string()
+                .starts_with("it did not take a frame of kind 0x05 within 5000 ms, with "),
+            "{}",
+            whys_now[0]
+        );
+
+        // Its reading end is gone while it still asks: the answer cannot be written.
+        let gone = Client::open(&board, USER).await;
+        let (read, mut write) = orion_server::Connection::split(gone.connection);
+        use orion_server::FrameWrite as _;
+        drop(read);
+        write
+            .send(&ask_frame(kind::GET, 1), &[])
+            .await
+            .expect("the board's end still reads");
+        while whys(&board).len() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let whys_now = whys(&board);
+        assert_eq!(
+            whys_now[1],
+            Dropped::WriteFailed {
+                kind: kind::PONG,
+                error: std::io::ErrorKind::BrokenPipe
+            }
+        );
+        assert_eq!(
+            whys_now[1].to_string(),
+            "its connection failed while it was sent a frame of kind 0x05: broken pipe"
+        );
+    });
+}

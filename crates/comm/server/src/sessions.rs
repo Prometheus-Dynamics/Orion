@@ -77,11 +77,21 @@ pub enum Dropped {
         /// How many may wait.
         limit: usize,
     },
-    /// It did not take a frame within the write deadline, or its connection failed while
-    /// writing.
+    /// It did not take a frame within the write deadline: its program was not reading.
     WriteStalled {
+        /// The kind of the frame it did not take.
+        kind: u8,
+        /// How many bytes waited behind that frame.
+        waiting: usize,
         /// The write deadline, in milliseconds.
         limit_ms: u64,
+    },
+    /// Its connection failed while it was being sent a frame.
+    WriteFailed {
+        /// The kind of the frame.
+        kind: u8,
+        /// The error.
+        error: std::io::ErrorKind,
     },
     /// A request of its made a service panic.
     Panicked,
@@ -114,9 +124,19 @@ impl std::fmt::Display for Dropped {
                 "it was not reading: a frame of kind {kind:#04x} and {frame} bytes did not fit, \
                  with {waiting} of {limit} bytes waiting"
             ),
-            Self::WriteStalled { limit_ms } => {
-                write!(f, "it did not take a frame within {limit_ms} ms")
-            }
+            Self::WriteStalled {
+                kind,
+                waiting,
+                limit_ms,
+            } => write!(
+                f,
+                "it did not take a frame of kind {kind:#04x} within {limit_ms} ms, with \
+                 {waiting} bytes waiting behind it: is its program still reading?"
+            ),
+            Self::WriteFailed { kind, error } => write!(
+                f,
+                "its connection failed while it was sent a frame of kind {kind:#04x}: {error}"
+            ),
             Self::Panicked => f.write_str("a request of its made a service panic"),
             Self::Ended(why) => f.write_str(why),
         }

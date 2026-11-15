@@ -196,6 +196,10 @@ what to change.
   (`finish` gives zero). Node logic passes the code on to the caller, on attach, and across
   nodes. The microcontroller library and the C library do not set it (zero); the web client
   does not read it yet.
+- **C49.** `orion_server::Dropped::WriteStalled` gains `kind` and `waiting` (**Break** for code
+  that builds or matches it by its fields: add them, or match with `..`), and
+  `Dropped::WriteFailed { kind, error }` is new. A write that fails is no longer called a
+  stall.
 - **C47.** The code reaches the other clients. Additive:
   - `orion_device_actions::Actions::finish_with_code` sends it. `finish` sends the result as
     before, with no code, which reads as zero.

@@ -22,7 +22,10 @@ travel on it, and moves whole frames. The server knows nothing else about it.
   twice a heartbeat, less than three heartbeats leaves no room for one late ping, and under a
   second a loaded board's scheduler alone can use up. `Welcome` carries both, and a client gives
   up on a comm core it has not heard from for as long. A slow link sets them longer;
-- a deadline for each frame to be taken (`comm.write_ms`, 5 s).
+- a deadline for each frame to be taken (`comm.write_ms`, 5 s). A session that misses it is
+  dropped with the frame's kind and the bytes waiting behind it. A session whose connection
+  fails while a frame is written to it is dropped with that error instead: the two are told
+  apart.
 
 There can be `comm.max_sessions` (256) at once. One more is told `Busy` and let go.
 
