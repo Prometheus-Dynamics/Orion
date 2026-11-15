@@ -221,11 +221,20 @@ async fn recv(stream: &UnixStream, buf: &mut [u8], fds: &mut FdSet) -> io::Resul
                 *fds = received.fds;
                 return Ok(Some(received.len));
             }
+            // The peer went away with frames it had not read: on a Unix socket that is a reset,
+            // and it is still the peer closing.
+            Ok(Err(RecvError::Io(error))) if error.kind() == io::ErrorKind::ConnectionReset => {
+                return Ok(None);
+            }
+            Ok(Err(RecvError::Io(error))) => return Err(error),
             Ok(Err(error)) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("{error:?}"),
-                ));
+                let why = match error {
+                    RecvError::TooLarge { .. } => "a frame larger than the buffer",
+                    RecvError::TruncatedControl => "more descriptors than allowed",
+                    RecvError::ShortRead => "the peer closed inside a frame",
+                    _ => "a malformed control message",
+                };
+                return Err(io::Error::new(io::ErrorKind::InvalidData, why));
             }
         }
     }
@@ -285,4 +294,72 @@ async fn send(stream: &UnixStream, frame: &[u8], fds: &[OwnedFd]) -> io::Result<
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(test: impl Future<Output = ()>) {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(test);
+    }
+
+    /// A peer killed with frames it never read resets the socket. That reads as the peer
+    /// closing, not as a broken frame.
+    #[test]
+    fn a_peer_gone_with_frames_unread_reads_as_closed() {
+        run(async {
+            let (ours, theirs) = UnixStream::pair().expect("pair");
+            send(&ours, b"never read", &[]).await.expect("send");
+            drop(theirs);
+            let mut buf = [0_u8; 64];
+            let mut fds = FdSet::default();
+            let got = recv(&ours, &mut buf, &mut fds).await;
+            assert!(matches!(got, Ok(None)), "{got:?}");
+        });
+    }
+
+    /// A frame larger than the buffer is damage, and says what was wrong with it.
+    #[test]
+    fn a_frame_too_large_is_invalid_data_saying_so() {
+        run(async {
+            let (ours, theirs) = UnixStream::pair().expect("pair");
+            theirs.try_write(&[200, 0, 0, 0, 1, 2]).expect("write");
+            let mut buf = [0_u8; 64];
+            let mut fds = FdSet::default();
+            let error = recv(&ours, &mut buf, &mut fds)
+                .await
+                .expect_err("too large");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(error.to_string(), "a frame larger than the buffer");
+        });
+    }
+
+    /// Any other failure of the socket keeps its own kind: reading from a listening socket is
+    /// refused by the kernel as an invalid argument, not as damage.
+    #[test]
+    fn a_socket_failure_keeps_its_kind() {
+        run(async {
+            let dir = std::env::temp_dir().join(format!("orion-unix-kind-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("directory");
+            let path = dir.join("s");
+            let listener = std::os::unix::net::UnixListener::bind(&path).expect("bind");
+            listener.set_nonblocking(true).expect("nonblocking");
+            let listening = UnixStream::from_std(OwnedFd::from(listener).into()).expect("stream");
+            // A waiting connection makes the listening socket readable.
+            let _waiting = std::os::unix::net::UnixStream::connect(&path).expect("connect");
+            let mut buf = [0_u8; 64];
+            let mut fds = FdSet::default();
+            let error = recv(&listening, &mut buf, &mut fds)
+                .await
+                .expect_err("listening");
+            let _ = std::fs::remove_dir_all(&dir);
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{error}");
+        });
+    }
 }

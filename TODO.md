@@ -93,6 +93,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C48](docs/prs/C48.md) next on the test board after wave 18 (wave 18; board run)
 - [x] [C47](docs/prs/C47.md) A run's code from a microcontroller and in a web page (wave 18; needs C44)
 - [x] [C49](docs/prs/C49.md) A session dropped for its writes says whether they stalled or failed, and on what (wave 18; needs C48)
+- [x] [C50](docs/prs/C50.md) A program killed with frames unread is a peer closing, not a broken connection (wave 18; needs C49)
 
 ## D. Client
 
