@@ -88,6 +88,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C42](docs/prs/C42.md) Recovery's switch is the board's record too (wave 18)
 - [x] [C43](docs/prs/C43.md) The hello document says the board's security switch (wave 18)
 - [x] [C44](docs/prs/C44.md) A run's end carries the action's own status code (wave 18)
+- [x] [C45](docs/prs/C45.md) Only what the gate passed is pushed (wave 18)
 
 ## D. Client
 

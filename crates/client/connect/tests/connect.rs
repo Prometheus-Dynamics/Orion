@@ -33,6 +33,8 @@ struct Board {
     key: [u8; 32],
     link: Option<OwnedFd>,
     keys: SharedKeys,
+    /// How many sessions the board has open, as of a moment ago.
+    live: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
     dir: PathBuf,
@@ -65,6 +67,8 @@ impl Board {
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let (for_board, path) = (keys.clone(), socket.clone());
         let for_link = keys.clone();
+        let live = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counting = live.clone();
         let thread = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -121,6 +125,16 @@ impl Board {
                 ] {
                     drop(carrier);
                 }
+                tokio::task::spawn_local({
+                    let comm = comm.clone();
+                    async move {
+                        loop {
+                            let open = comm.with(|sessions, _| sessions.iter().count());
+                            counting.store(open, std::sync::atomic::Ordering::Relaxed);
+                            tokio::time::sleep(Duration::from_millis(2)).await;
+                        }
+                    }
+                });
                 // The link is raw only once the board has opened it.
                 while opened().opens == 0 {
                     tokio::time::sleep(Duration::from_millis(2)).await;
@@ -136,6 +150,7 @@ impl Board {
             key,
             link: Some(master),
             keys,
+            live,
             stop: Some(stop),
             thread: Some(thread),
             dir,
@@ -356,8 +371,19 @@ fn a_tool_with_a_key_signs_its_session_on_a_link() {
     let copy = || Some(Identity::from_secret(&me.secret()));
     let link = board.link.take().expect("link");
     let end = || link.try_clone().expect("the link again");
-    // The board's last session on the link has to be over before the next one is heard.
-    let gone = || std::thread::sleep(HEARTBEAT * 8);
+    // The board's last session on the link has to be over before the next one is heard: it
+    // ends when the board finds it quiet, which takes longer the busier the machine is.
+    let live = board.live.clone();
+    let gone = || {
+        let began = std::time::Instant::now();
+        while live.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+            assert!(
+                began.elapsed() < Duration::from_secs(20),
+                "the session never ended"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
 
     // Signed: the same calls, sealed, in a frame a little shorter than a plain link's.
     let session = Session::over_link(end(), "tool", options(copy())).expect("signed");

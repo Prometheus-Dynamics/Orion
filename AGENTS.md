@@ -31,6 +31,9 @@ The work is a pre-planned list of PRs into `next`.
   in the design change only through A-series or B-series PRs.
 - A PR merges when `scripts/gate.sh` passes. Paste the proof named in the brief into the PR
   description.
+- Push with `scripts/push.sh REMOTE BRANCH`, never `git push`. A gate that passes stamps the
+  exact tree it checked, and the script refuses any new commit whose tree has no stamp: run the
+  gate on the tree you will commit, and change nothing until it ends.
 
 ## Rules
 

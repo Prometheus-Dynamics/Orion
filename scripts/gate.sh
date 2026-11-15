@@ -20,6 +20,23 @@ lockfile() {
   cargo metadata --locked --format-version 1 > /dev/null
 }
 
+# The tree this gate checks, as `git add -A` would commit it: stamped at the end if it passed and
+# nothing changed while it ran, so scripts/push.sh pushes only what passed.
+tree_now() {
+  local index
+  index="$(mktemp)"
+  cp "$(git rev-parse --git-dir)/index" "$index" 2> /dev/null || true
+  GIT_INDEX_FILE="$index" git add -A > /dev/null 2>&1
+  GIT_INDEX_FILE="$index" git write-tree
+  rm -f "$index"
+}
+checked_tree=""
+if git rev-parse --git-dir > /dev/null 2>&1; then
+  checked_tree="$(tree_now)"
+fi
+
+step "push guard" scripts/push.sh --self-test
+
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   step lockfile lockfile
@@ -86,4 +103,14 @@ if [ -d testing/fuzz ] && command -v cargo-fuzz > /dev/null && rustup toolchain 
   step "fuzz, short budget" scripts/fuzz-short.sh
 fi
 
+if [ -n "$checked_tree" ]; then
+  if [ "$(tree_now)" = "$checked_tree" ]; then
+    stamps="$(git rev-parse --git-dir)/orion-gate-passed"
+    mkdir -p "$stamps"
+    touch "$stamps/$checked_tree"
+  else
+    echo "the tree changed while the gate ran: not stamped, so it cannot be pushed" >&2
+    exit 1
+  fi
+fi
 echo "gate passed"
