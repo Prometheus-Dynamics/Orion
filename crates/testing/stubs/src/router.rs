@@ -23,7 +23,7 @@ struct Running {
     owner: SessionId,
     detached: bool,
     doing: Option<(u8, String, Vec<u8>)>,
-    finished: Option<(Outcome, Vec<u8>, String)>,
+    finished: Option<(Outcome, Vec<u8>, String, u32)>,
 }
 
 /// The router.
@@ -47,12 +47,13 @@ fn tell(sessions: &mut Sessions, run: &Running) {
         };
         let _ = sessions.send(caller, &progress, Delivery::MayDrop);
     }
-    if let Some((outcome, output, detail)) = &run.finished {
+    if let Some((outcome, output, detail, code)) = &run.finished {
         let result = ActionResult {
             call,
             outcome: *outcome,
             output: Bytes(output),
             detail,
+            code: *code,
         };
         let _ = sessions.send(caller, &result, Delivery::Must);
     }
@@ -173,6 +174,7 @@ impl Service for Router {
                     result.outcome,
                     result.output.0.to_vec(),
                     result.detail.to_owned(),
+                    result.code,
                 ));
                 tell(cx.sessions(), run);
                 Ok(())

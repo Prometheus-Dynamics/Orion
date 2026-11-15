@@ -70,6 +70,7 @@ struct Ended {
     call: u64,
     starter: Starter,
     outcome: Outcome,
+    code: u32,
     output: Vec<u8>,
     detail: String,
     at_ms: u64,
@@ -303,7 +304,7 @@ impl Actions {
     fn end(
         &mut self,
         at: usize,
-        outcome: Outcome,
+        (outcome, code): (Outcome, u32),
         output: &[u8],
         detail: &str,
         now_ms: u64,
@@ -319,6 +320,7 @@ impl Actions {
                     outcome,
                     output: Bytes(output),
                     detail,
+                    code,
                 },
             );
         }
@@ -334,6 +336,7 @@ impl Actions {
                 call: run.call,
                 starter: run.starter,
                 outcome,
+                code,
                 output: output.to_vec(),
                 detail: detail.to_owned(),
                 at_ms: now_ms,
@@ -390,6 +393,7 @@ impl Actions {
                 outcome: ended.outcome,
                 output: Bytes(&ended.output),
                 detail: &ended.detail,
+                code: ended.code,
             },
         )
     }
@@ -536,7 +540,7 @@ impl Actions {
                 };
                 self.end(
                     at,
-                    result.outcome,
+                    (result.outcome, result.code),
                     result.output.0,
                     result.detail,
                     now_ms,
@@ -601,7 +605,7 @@ impl Actions {
             if self.running[at].owner == session {
                 self.end(
                     at,
-                    Outcome::Failed,
+                    (Outcome::Failed, 0),
                     &[],
                     "the program that runs it went away",
                     now_ms,
@@ -648,7 +652,7 @@ impl Actions {
             );
             self.end(
                 0,
-                Outcome::Cancelled,
+                (Outcome::Cancelled, 0),
                 &[],
                 "node logic is stopping",
                 now_ms,
@@ -673,7 +677,7 @@ impl Actions {
                 );
                 self.end(
                     at,
-                    Outcome::TimedOut,
+                    (Outcome::TimedOut, 0),
                     &[],
                     "it ran out of time",
                     now_ms,

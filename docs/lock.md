@@ -189,6 +189,14 @@ what to change.
   `orion_hello::Hello::with_security` is new, and `RecoveryComm::start` takes the record as
   read.
 
+- **C44.** `ActionResult` gains an appended `code: u32`: the action's own status code, for a
+  caller to branch on. Zero is none, and is what an older node or program gives; the words stay
+  in `detail`. `orion_actions::Finished` gains `code` (**Break** for code that builds a
+  `Finished` by its fields: add `code: 0`), and `Registration::finish_with_code` is new
+  (`finish` gives zero). Node logic passes the code on to the caller, on attach, and across
+  nodes. The microcontroller library and the C library do not set it (zero); the web client
+  does not read it yet.
+
 ## Builds
 
 The gate checks, at this revision:

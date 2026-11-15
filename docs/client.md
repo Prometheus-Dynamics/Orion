@@ -249,10 +249,20 @@ any program that connects adds its own.
 | `actions.register(decl, policy)` | Adds an action. The policy is required |
 | `registration.poll()`, `.wait(for)` | The next run handed to this program, a request to stop one, or a caller gone |
 | `registration.progress(..)`, `.finish(..)` | Says how a run is doing, and how it ended |
+| `registration.finish_with_code(call, outcome, code, ..)` | The same, with the action's own status code |
 
 Registering an action needs a policy, and that policy is what the one check decides every run
 by. A run the check refuses never reaches the program that owns the action: the caller is told
 `Denied` and the owner hears nothing.
+
+**A code to branch on.** How a run ended (`Finished`) has its outcome, its output, words for
+people (`detail`) and the action's own status `code`: a number whose meaning the action defines
+and documents (a service's `BUSY`, say), so a caller branches on it, not on the words. Zero is
+none given, and is what a node too old to pass one on gives. A program sets it with
+`registration.finish_with_code`; `finish` gives zero. The words stay in `detail`. Node logic
+passes the code on as the program gave it: to the caller, to whoever attaches to a detached run
+later, and back across nodes. Orion's own ends (a deadline, a program that went, node logic
+stopping) give zero.
 
 A run handed to the program says who asked for it (`caller`), as the audit log names them:
 `local:<uid>`, `operator:<key>`, `peer:<node>`, `device:<name>` or `anonymous`. A run forwarded

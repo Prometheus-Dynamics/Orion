@@ -217,7 +217,7 @@ impl Forwards {
     fn finish(
         &mut self,
         id: u64,
-        outcome: Outcome,
+        (outcome, code): (Outcome, u32),
         output: &[u8],
         detail: &str,
         out: &mut dyn Out,
@@ -232,6 +232,7 @@ impl Forwards {
                     outcome,
                     output: Bytes(output),
                     detail,
+                    code,
                 },
             );
         }
@@ -264,9 +265,10 @@ impl Forwards {
                 Event::Result {
                     id,
                     outcome,
+                    code,
                     output,
                     detail,
-                } => self.finish(id, outcome, &output, &detail, out),
+                } => self.finish(id, (outcome, code), &output, &detail, out),
                 Event::Refused { id, error } => {
                     // The other node said no, or could not be reached: the caller hears it
                     // as the answer to its own request.
@@ -295,7 +297,7 @@ impl Forwards {
                     for id in lost {
                         self.finish(
                             id,
-                            Outcome::Failed,
+                            (Outcome::Failed, 0),
                             &[],
                             "the node that runs it went away",
                             out,

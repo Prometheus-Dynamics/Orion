@@ -90,6 +90,7 @@ fn each_program_given_a_run_from_a_session_is_told_once_when_it_ends() {
                 outcome: orion_msg_actions::Outcome::Succeeded,
                 output: Bytes(&[]),
                 detail: "",
+                code: 0,
             },
         )
         .expect("result");

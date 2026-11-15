@@ -41,7 +41,7 @@ struct Running {
     owner: SessionId,
     detached: bool,
     doing: Option<(u8, String, Vec<u8>)>,
-    finished: Option<(Outcome, Vec<u8>, String)>,
+    finished: Option<(Outcome, Vec<u8>, String, u32)>,
 }
 
 /// The open list of actions and the runs under way: what node logic keeps.
@@ -67,12 +67,13 @@ fn tell(sessions: &mut Sessions, run: &Running) {
         };
         let _ = sessions.send(caller, &progress, Delivery::MayDrop);
     }
-    if let Some((outcome, output, detail)) = &run.finished {
+    if let Some((outcome, output, detail, code)) = &run.finished {
         let result = ActionResult {
             call,
             outcome: *outcome,
             output: Bytes(output),
             detail,
+            code: *code,
         };
         let _ = sessions.send(caller, &result, Delivery::Must);
     }
@@ -192,6 +193,7 @@ impl Service for Router {
                     result.outcome,
                     result.output.0.to_vec(),
                     result.detail.to_owned(),
+                    result.code,
                 ));
                 tell(cx.sessions(), run);
                 Ok(())
@@ -320,7 +322,7 @@ fn owner_process() {
                         slow = Some((call, Instant::now()));
                     }
                     b"badly" => runs
-                        .finish(call, Outcome::Failed, &[], "the bulb is gone")
+                        .finish_with_code(call, Outcome::Failed, 11, &[], "the bulb is gone")
                         .expect("finish"),
                     level => {
                         for percent in [25, 50, 75] {
@@ -463,8 +465,8 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
         .finish(Duration::from_secs(5))
         .expect("ended");
     assert_eq!(
-        (failed.outcome, failed.detail.as_str()),
-        (Outcome::Failed, "the bulb is gone")
+        (failed.outcome, failed.code, failed.detail.as_str()),
+        (Outcome::Failed, 11, "the bulb is gone")
     );
 
     // A run can be stopped.

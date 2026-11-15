@@ -394,7 +394,8 @@ fn actions(out: &mut Vec<Sample>) {
             call: 7,
             outcome: Outcome::Succeeded,
             output: Bytes(b"o"),
-            detail: ""
+            detail: "",
+            code: 11,
         }
     );
     sample!(

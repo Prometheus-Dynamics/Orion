@@ -211,7 +211,8 @@ actions; any program on the board adds its own.
   own, which is the one in `Claim`. Each side only ever sees its own. `Claim.caller` names who
   asked, as the audit log does. `Progress` (which may be
   dropped if the caller is not reading) and `ActionResult` from the program go to the caller
-  under the caller's number. `Cancel` from the caller reaches the program; the run ends when
+  under the caller's number, its `code` (the action's own status code, appended) as the program
+  gave it. `Cancel` from the caller reaches the program; the run ends when
   the program says how.
 - **Who may run it** is not decided here. The policy the action was registered with is what
   the check is told at the door, so only a run that passed arrives.

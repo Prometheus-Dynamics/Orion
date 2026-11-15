@@ -100,6 +100,7 @@ fn a_run_is_handed_to_whoever_registered_it_and_its_result_comes_back() {
                 outcome: Outcome::Succeeded,
                 output: Bytes(b"ok"),
                 detail: "",
+                code: 0,
             },
         )
         .expect("result");
@@ -163,6 +164,7 @@ fn cancel_reaches_the_program_under_the_lists_number() {
                 outcome: Outcome::Cancelled,
                 output: Bytes(&[]),
                 detail: "stopped",
+                code: 0,
             },
         )
         .expect("result");
@@ -228,6 +230,7 @@ fn only_the_program_that_runs_it_speaks_for_a_run() {
         outcome: Outcome::Succeeded,
         output: Bytes(&[]),
         detail: "",
+        code: 0,
     };
     assert_eq!(bench.ask(OTHER, &result), Err(Error::Denied));
     assert_eq!(bench.ask(CALLER, &result), Err(Error::Denied));
@@ -255,6 +258,7 @@ fn a_caller_that_goes_has_its_run_cancelled_unless_it_is_detached() {
                 outcome: Outcome::Cancelled,
                 output: Bytes(&[]),
                 detail: "",
+                code: 0,
             },
         )
         .expect("result");
@@ -319,6 +323,7 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
                 outcome: Outcome::Succeeded,
                 output: Bytes(&[]),
                 detail: "",
+                code: 0,
             },
         )
         .expect("late");
@@ -364,6 +369,8 @@ impl Bench {
                 outcome,
                 output: Bytes(b"out"),
                 detail: "",
+                // The program's own code, passed on as it is.
+                code: 11,
             },
         )
         .expect("result");
@@ -424,12 +431,15 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
     assert_eq!(progress.percent, 90);
     bench.result(id, Outcome::Succeeded);
     let result: ActionResult<'_> = bench.take(BACK);
-    assert_eq!((result.call, result.outcome), (7, Outcome::Succeeded));
+    assert_eq!(
+        (result.call, result.outcome, result.code),
+        (7, Outcome::Succeeded, 11)
+    );
     // It is kept all the same, in case the session it was sent to had just ended.
     assert_eq!(bench.actions.ended(), 1);
     bench.ask(BACK, &Attach { call: 7 }).expect("attach");
     let again: ActionResult<'_> = bench.take(BACK);
-    assert_eq!(again.outcome, Outcome::Succeeded);
+    assert_eq!((again.outcome, again.code), (Outcome::Succeeded, 11));
     assert_eq!(bench.actions.ended(), 0);
 }
 

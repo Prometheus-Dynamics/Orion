@@ -132,6 +132,7 @@ fn end(
         outcome,
         output: Bytes(&[]),
         detail,
+        code: 0,
     })
     .map(|_| ())
 }

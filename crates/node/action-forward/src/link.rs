@@ -56,6 +56,7 @@ pub(crate) enum Event {
     Result {
         id: u64,
         outcome: Outcome,
+        code: u32,
         output: Vec<u8>,
         detail: String,
     },
@@ -252,6 +253,7 @@ impl Helper {
                         .map(|result| Event::Result {
                             id: result.call,
                             outcome: result.outcome,
+                            code: result.code,
                             output: result.output.0.to_vec(),
                             detail: result.detail.to_owned(),
                         })

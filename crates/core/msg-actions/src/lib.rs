@@ -120,6 +120,11 @@ body! {
         pub output: Bytes<'a>,
         /// A description for people if it didn't succeed.
         pub detail: &'a str,
+        ;
+        /// The action's own status code, for a caller to branch on: what it means is the
+        /// action's to say (a service's `BUSY`, say). Zero: none given. The words stay in
+        /// `detail`.
+        pub code: u32,
     }
 }
 

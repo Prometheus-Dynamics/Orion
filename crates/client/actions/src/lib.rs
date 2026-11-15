@@ -78,6 +78,9 @@ pub struct Finished {
     pub output: Vec<u8>,
     /// A description for people if it did not succeed.
     pub detail: String,
+    /// The action's own status code, for branching on: what it means is the action's to
+    /// say. Zero: none given, or a node too old to pass one on.
+    pub code: u32,
 }
 
 /// News of a run.
@@ -205,6 +208,7 @@ impl Handler for State {
                         outcome: result.outcome,
                         output: result.output.0.to_vec(),
                         detail: result.detail.to_owned(),
+                        code: result.code,
                     });
                 }
             }
@@ -218,6 +222,7 @@ impl Handler for State {
                         outcome: Outcome::Rejected,
                         output: Bytes(&[]),
                         detail: "the action's program is busy",
+                        code: 0,
                     })?;
                     return Ok(());
                 }
@@ -587,11 +592,30 @@ impl Registration {
         output: &[u8],
         detail: &str,
     ) -> Result<(), ClientError> {
+        self.finish_with_code(call, outcome, 0, output, detail)
+    }
+
+    /// Says how a run ended, with the action's own status `code` for the caller to branch on
+    /// (zero for none). What a code means is the action's to define and document; the words
+    /// for people still go in `detail`.
+    ///
+    /// # Errors
+    ///
+    /// If the connection broke.
+    pub fn finish_with_code(
+        &mut self,
+        call: u64,
+        outcome: Outcome,
+        code: u32,
+        output: &[u8],
+        detail: &str,
+    ) -> Result<(), ClientError> {
         self.client.send(&ActionResult {
             call,
             outcome,
             output: Bytes(output),
             detail,
+            code,
         })?;
         Ok(())
     }

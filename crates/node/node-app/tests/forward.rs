@@ -145,7 +145,7 @@ impl Driver {
                         }
                         let mut output = args.clone();
                         output.make_ascii_uppercase();
-                        let _ = blink.finish(call, Outcome::Succeeded, &output, "");
+                        let _ = blink.finish_with_code(call, Outcome::Succeeded, 7, &output, "");
                     }
                     Some(Request::Cancel { call, reason }) => {
                         hearing.lock().expect("heard").push(format!("{reason:?}"));
@@ -393,8 +393,8 @@ fn an_action_on_another_node_runs_there_and_the_owner_may_restart() {
         }
     };
     assert_eq!(
-        (ended.outcome, ended.output.as_slice()),
-        (Outcome::Succeeded, &b"TWICE"[..])
+        (ended.outcome, ended.code, ended.output.as_slice()),
+        (Outcome::Succeeded, 7, &b"TWICE"[..])
     );
     assert!(
         steps
