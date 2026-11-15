@@ -88,6 +88,7 @@ impl RecoveryComm {
         tasks
             .borrow_mut()
             .push(admit(keys.clone(), recovery_keys.to_owned()));
+        #[cfg(feature = "link-usb")]
         let serve = {
             let (comm, tasks) = (comm.clone(), tasks.clone());
             move |carrier: Carriers| {

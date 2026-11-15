@@ -8,6 +8,8 @@
   frames, records, actions, files, executors, providers, workloads; from a web page, from C,
   and the command line.
 - [settings.md](settings.md): every setting of both services.
+- [testing.md](testing.md): testing a program against a whole board in the test's own
+  process, `orion-test-board`.
 - [operating.md](operating.md): running a board: systemd, getting in, what to watch, what
   happens when something dies.
 - [`../packaging/README.md`](../packaging/README.md): the systemd units and where each file

@@ -2281,6 +2281,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "orion-test-board"
+version = "1.0.1-dev"
+dependencies = [
+ "orion",
+ "orion-comm-app",
+ "orion-config",
+ "orion-node-app",
+ "tokio",
+]
+
+[[package]]
 name = "orion-time"
 version = "1.0.1-dev"
 dependencies = [

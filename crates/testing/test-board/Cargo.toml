@@ -1,0 +1,19 @@
+[package]
+name = "orion-test-board"
+description = "A whole board for a consumer's tests: the real comm core and real node logic, in the test's own process."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+orion = { path = "../../client/orion" }
+orion-comm-app = { path = "../../comm/comm-app" }
+orion-config = { path = "../../core/config" }
+orion-node-app = { path = "../../node/node-app" }
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
+
+[lints]
+workspace = true
