@@ -243,9 +243,21 @@ fn with_a_broken_settings_file_it_stays_up_in_recovery() {
             ),
         ],
     );
-    // It did not end; who the recovery keys name gets a shell, and nobody else does.
+    // It did not end, and who the recovery keys name gets a shell. Anyone else does only if
+    // the board's security record says off: the broken file decides nothing. A machine with
+    // no record is off; with one, it says.
     assert_eq!(said(&running.ssh(&dir, Some(&key), "echo in")), "in\n");
-    assert_eq!(said(&running.ssh(&dir, None, "echo in")), "");
+    let record =
+        orion_config::SecurityView::read(std::path::Path::new(orion_config::SECURITY_VIEW));
+    let anyone = match record.security {
+        orion_config::Security::Off => "in\n",
+        orion_config::Security::On => "",
+    };
+    assert_eq!(
+        said(&running.ssh(&dir, None, "echo in")),
+        anyone,
+        "{record}"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
