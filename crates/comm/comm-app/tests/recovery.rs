@@ -382,6 +382,15 @@ fn a_comm_core_that_can_start_is_reached_with_ssh_through_a_child() {
 
 /// What the board on `socket` says it is doing, and why if it is in recovery.
 async fn board_state(socket: &Path) -> (Option<String>, Option<String>) {
+    let node = board_node(socket).await;
+    (
+        node.state().map(str::to_owned),
+        node.recovery_why().map(str::to_owned),
+    )
+}
+
+/// The board's hello document, on its socket.
+async fn board_node(socket: &Path) -> orion::node::Node {
     let address: orion::Address = socket.display().to_string().parse().expect("address");
     tokio::task::spawn_blocking(move || {
         // Recovery opens the socket once whatever held it has let go: a moment, at most.
@@ -393,11 +402,7 @@ async fn board_state(socket: &Path) -> (Option<String>, Option<String>) {
             }
             std::thread::sleep(Duration::from_millis(20));
         };
-        let node = orion.node().expect("hello");
-        (
-            node.state().map(str::to_owned),
-            node.recovery_why().map(str::to_owned),
-        )
+        orion.node().expect("hello")
     })
     .await
     .expect("asked")
@@ -438,7 +443,7 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("state/last-good.carriers"),
-            security_view: dir.join("no-security-record"),
+            security_view: secured(),
         };
         let socket = dir.join("board.sock");
         let good = format!(
@@ -450,9 +455,14 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
         );
 
         // A good start: the board says it is running, and its ways in are recorded.
-        let started = start_or_recover(settings(&good), with()).await;
+        let started = start_or_recover(settings_on(&good), with()).await;
         assert!(matches!(started, Started::Core(_)), "{started:?}");
         assert_eq!(board_state(&socket).await, (Some("running".into()), None));
+        // The hello says the switch, as the board's record has it.
+        let on = orion::node::Security::On {
+            generation: Some(1),
+        };
+        assert_eq!(board_node(&socket).await.security(), on);
         let record =
             std::fs::read_to_string(dir.join("state/last-good.carriers")).expect("recorded");
         assert!(
@@ -474,6 +484,8 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
         assert!(why.contains("the last good start's"), "{why}");
         let (state, said_why) = board_state(&socket).await;
         assert_eq!(state.as_deref(), Some("recovery"));
+        // Recovery says the record's switch too.
+        assert_eq!(board_node(&socket).await.security(), on);
         let said_why = said_why.expect("why");
         assert!(
             said_why.contains("the settings cannot be read"),

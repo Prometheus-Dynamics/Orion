@@ -27,6 +27,26 @@ pub struct Fact {
     pub value: Vec<u8>,
 }
 
+/// A board's security switch, as its hello document says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Security {
+    /// A board too old to say.
+    NotTold,
+    /// On, with the generation of the record that says so.
+    On {
+        /// The record's generation, if the board gave it.
+        generation: Option<u64>,
+    },
+    /// Off: its record says so, or it has none (then no generation).
+    Off {
+        /// The record's generation, if there is a record.
+        generation: Option<u64>,
+    },
+    /// Its record cannot be read or is not one, so security is on.
+    Damaged,
+}
+
 /// Who a board says it is, checked against its own signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
@@ -58,6 +78,21 @@ impl Node {
     #[must_use]
     pub fn recovery_why(&self) -> Option<&str> {
         self.fact_text("recovery_why")
+    }
+
+    /// The board's security switch, from its record: [`Security::NotTold`] from a board too
+    /// old to say, and for a word this build does not know.
+    #[must_use]
+    pub fn security(&self) -> Security {
+        let generation = self
+            .fact_text("security_generation")
+            .and_then(|text| text.parse().ok());
+        match self.fact_text("security") {
+            Some("on") => Security::On { generation },
+            Some("off") => Security::Off { generation },
+            Some("damaged") => Security::Damaged,
+            _ => Security::NotTold,
+        }
     }
 
     fn fact_text(&self, name: &str) -> Option<&str> {
@@ -293,4 +328,57 @@ pub(crate) fn enroll(
     })?;
     client.answered(seq, || state.borrow().welcome.is_some())?;
     state.borrow_mut().welcome.take().ok_or(ClientError::Lost)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(facts: &[(&str, &str)]) -> Node {
+        Node {
+            name: "board".into(),
+            cluster: "lab".into(),
+            public_key: [0; 32],
+            fingerprint: String::new(),
+            revision: 1,
+            time_ms: 0,
+            facts: facts
+                .iter()
+                .map(|(name, value)| Fact {
+                    name: (*name).into(),
+                    ty: 4,
+                    value: value.as_bytes().to_vec(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn the_security_switch_is_read_from_the_boards_facts() {
+        let both =
+            |word, generation| node(&[("security", word), ("security_generation", generation)]);
+        assert_eq!(
+            both("on", "7").security(),
+            Security::On {
+                generation: Some(7)
+            }
+        );
+        assert_eq!(
+            both("off", "2").security(),
+            Security::Off {
+                generation: Some(2)
+            }
+        );
+        assert_eq!(
+            node(&[("security", "off")]).security(),
+            Security::Off { generation: None }
+        );
+        assert_eq!(
+            node(&[("security", "damaged")]).security(),
+            Security::Damaged
+        );
+        // An older board, or a word this build does not know: not told.
+        assert_eq!(node(&[("state", "running")]).security(), Security::NotTold);
+        assert_eq!(node(&[("security", "maybe")]).security(), Security::NotTold);
+    }
 }

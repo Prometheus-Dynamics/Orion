@@ -214,7 +214,8 @@ impl CommCore {
         } else {
             comm.add_service(orion_shell::ShellOff);
         }
-        let hello = Hello::new(node.clone(), keys.clone(), Some(topics.clone()));
+        let hello = Hello::new(node.clone(), keys.clone(), Some(topics.clone()))
+            .with_security(&settings.config.security_view);
         comm.add_service(hello.in_state(settings.board_state.clone()));
         comm.add_service(KeysService::new(node.clone(), keys.clone()));
         #[cfg(feature = "devices")]

@@ -16,7 +16,6 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use orion_check::Security;
 use orion_hello::{BoardState, Hello, SharedState};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_server::{Comm, Limits};
@@ -43,14 +42,14 @@ pub struct RecoveryComm {
 
 impl RecoveryComm {
     /// Serves `settings`' socket and USB links, if they were read; else the usual socket, and
-    /// a USB link for any name root offers. `security` is the board's switch, from its record.
+    /// a USB link for any name root offers. `view` is the board's security record, as read.
     /// `why` is what the hello document says. With
     /// `shell`, a shell may be opened over the session, by whom the check lets. The keys in
     /// `recovery_keys` may prove themselves on its links and log in.
     #[must_use]
     pub fn start(
         settings: Option<&CommSettings>,
-        security: Security,
+        view: &orion_config::SecurityView,
         why: &str,
         shell: Option<orion_ssh::SshConfig>,
         recovery_keys: &Path,
@@ -59,6 +58,7 @@ impl RecoveryComm {
             || "node.local".parse().expect("a node name"),
             |settings| settings.config.node_name.clone(),
         );
+        let security = view.security;
         let cluster = settings.map_or("default", |settings| settings.keys.cluster.as_str());
         let keys = SharedKeys::new(
             Keys::open(KeysConfig::in_memory(cluster), security).expect("a key kept nowhere"),
@@ -69,8 +69,9 @@ impl RecoveryComm {
             Some(Rc::new(keys.clone())),
             settings.map_or_else(Limits::default, |settings| settings.limits),
         );
-        let hello =
-            Hello::new(node, keys.clone(), None).in_state(BoardState::Recovery(why.to_owned()));
+        let hello = Hello::new(node, keys.clone(), None)
+            .in_state(BoardState::Recovery(why.to_owned()))
+            .with_security(view);
         let state = hello.state();
         comm.add_service(hello);
         #[cfg(feature = "shell")]

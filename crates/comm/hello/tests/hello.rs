@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use orion_broker::{Broker, BrokerConfig, NODE_FACTS};
 use orion_hello::{
-    BoardState, FACT_PREFIX, Hello as HelloService, MAX_FACT_BYTES, RECOVERY_WHY_FACT, STATE_FACT,
-    SharedState, verify,
+    BoardState, FACT_PREFIX, Hello as HelloService, MAX_FACT_BYTES, RECOVERY_WHY_FACT,
+    SECURITY_FACT, SECURITY_GENERATION_FACT, STATE_FACT, SharedState, verify,
 };
 use orion_keys::{Identity as Key, Keys, KeysConfig, SharedKeys, random};
 use orion_msg_session::{Hello, Identify, Identity, Refusal, Welcome};
@@ -39,6 +39,14 @@ fn board(security: Security) -> (SharedKeys, MemConnector) {
 }
 
 fn board_in(security: Security) -> (SharedKeys, MemConnector, SharedState) {
+    board_told(security, None)
+}
+
+/// A board whose hello says its security record as `view`, if given.
+fn board_told(
+    security: Security,
+    view: Option<&orion_config::SecurityView>,
+) -> (SharedKeys, MemConnector, SharedState) {
     let keys = SharedKeys::new(Keys::open(KeysConfig::in_memory("lab"), security).expect("keys"));
     let node: orion_types::NodeName = "board".parse().expect("name");
     let comm = Comm::new(
@@ -48,7 +56,10 @@ fn board_in(security: Security) -> (SharedKeys, MemConnector, SharedState) {
         Limits::default(),
     );
     let broker = Broker::new(node.clone(), BrokerConfig::default());
-    let hello = HelloService::new(node, keys.clone(), Some(broker.topics()));
+    let mut hello = HelloService::new(node, keys.clone(), Some(broker.topics()));
+    if let Some(view) = view {
+        hello = hello.with_security(view);
+    }
     let state = hello.state();
     comm.add_service(hello);
     comm.add_service(broker);
@@ -244,6 +255,8 @@ fn the_broker_reserves_the_names_of_the_nodes_own_facts() {
         [
             format!("{FACT_PREFIX}{STATE_FACT}").as_str(),
             format!("{FACT_PREFIX}{RECOVERY_WHY_FACT}").as_str(),
+            format!("{FACT_PREFIX}{SECURITY_FACT}").as_str(),
+            format!("{FACT_PREFIX}{SECURITY_GENERATION_FACT}").as_str(),
         ]
     );
 }
@@ -396,4 +409,54 @@ fn the_document_says_what_the_board_is_doing_and_why_it_is_in_recovery() {
             );
         }
     });
+}
+
+#[test]
+fn the_document_says_the_boards_security_switch_as_its_record_has_it() {
+    let dir = std::env::temp_dir().join(format!("orion-hello-security-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let record = dir.join("security");
+    let text = FieldType::Text.code();
+    for (written, said) in [
+        (
+            Some("on\ngeneration 7\n"),
+            vec![
+                ("security", text, &b"on"[..]),
+                ("security_generation", text, b"7"),
+            ],
+        ),
+        (
+            Some("off\ngeneration 2\n"),
+            vec![
+                ("security", text, &b"off"[..]),
+                ("security_generation", text, b"2"),
+            ],
+        ),
+        // No record: off, and no generation.
+        (None, vec![("security", text, &b"off"[..])]),
+        // A record that is not one: damaged, which is on, and no generation.
+        (Some("of\n"), vec![("security", text, &b"damaged"[..])]),
+    ] {
+        match written {
+            Some(written) => std::fs::write(&record, written).expect("record"),
+            None => {
+                let _ = std::fs::remove_file(&record);
+            }
+        }
+        let view = orion_config::SecurityView::read(&record);
+        run(async {
+            let (_keys, connector, _) = board_told(view.security, Some(&view));
+            let mut tool =
+                Client::open(connector.connect_without_descriptors(Principal::Anonymous)).await;
+            let nonce: [u8; 32] = random();
+            let payload = tool.identify(&nonce).await.to_vec();
+            let identity = verify(&payload, &nonce).expect("signed with the rest");
+            let facts: Vec<_> = facts(&identity)
+                .into_iter()
+                .filter(|(name, _, _)| name.starts_with("security"))
+                .collect();
+            assert_eq!(facts, said, "{view}");
+        });
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }

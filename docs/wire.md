@@ -109,7 +109,7 @@ session told the older code is told that code's own words.
 
 Additions with no level, because an older side ignores them and does nothing different that
 matters: `Cancel.reason`, `Claim.session`, `ACTION_CALLER_GONE` to a program, the hello document's
-`state` and `recovery_why` facts, `Reject`'s two revisions, and the resource state `Restoring` (4).
+`state`, `recovery_why`, `security` and `security_generation` facts, `Reject`'s two revisions, and the resource state `Restoring` (4).
 An older program reads that state as one it does not know, which is not `Ready`, so it waits as
 it should.
 

@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 orion-broker = { path = "../broker" }
+orion-config = { path = "../../core/config" }
 orion-keys = { path = "../keys" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }

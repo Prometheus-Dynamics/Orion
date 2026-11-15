@@ -140,7 +140,12 @@ pub const RESTORE_MS: u64 = 2_000;
 
 /// The topics that carry the node's own hello facts (`hello.state`, `hello.recovery_why`). The
 /// hello document makes them itself, and a program that declares one is refused.
-pub const NODE_FACTS: [&str; 2] = ["hello.state", "hello.recovery_why"];
+pub const NODE_FACTS: [&str; 4] = [
+    "hello.state",
+    "hello.recovery_why",
+    "hello.security",
+    "hello.security_generation",
+];
 
 /// The words a program that declares one of [`NODE_FACTS`] is refused with.
 fn node_fact(topic: &str) -> String {

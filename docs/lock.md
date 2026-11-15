@@ -181,6 +181,14 @@ what to change.
   code that builds one by its fields: add `security_view: orion_config::SECURITY_VIEW.into()`),
   and `RecoveryComm::start` takes the switch.
 
+- **C43.** The hello document says the board's security switch, from its record: the node's own
+  facts `security` (`on`, `off`, `damaged`) and `security_generation`, signed with the rest. An
+  older node lacks them. `orion::node::Node::security` returns `orion::node::Security`
+  (`#[non_exhaustive]`): `NotTold` from an older node. A program may no longer publish
+  `hello.security` or `hello.security_generation` (refused `denied`, as `hello.state` is).
+  `orion_hello::Hello::with_security` is new, and `RecoveryComm::start` takes the record as
+  read.
+
 ## Builds
 
 The gate checks, at this revision:

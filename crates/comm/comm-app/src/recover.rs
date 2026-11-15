@@ -176,7 +176,7 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         || with.keys_file.clone(),
         |settings| settings.recovery_keys.clone(),
     );
-    let comm = RecoveryComm::start(settings, security, &why, shell, &recovery_keys);
+    let comm = RecoveryComm::start(settings, &view, &why, shell, &recovery_keys);
     #[allow(unused_mut)]
     let mut subsystems = ssh.map(|ssh| ssh.subsystems.clone()).unwrap_or_default();
     #[cfg(feature = "ssh-sftp")]

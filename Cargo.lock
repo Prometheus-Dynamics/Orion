@@ -1677,6 +1677,7 @@ name = "orion-hello"
 version = "1.0.1-dev"
 dependencies = [
  "orion-broker",
+ "orion-config",
  "orion-keys",
  "orion-msg-session",
  "orion-msg-topics",

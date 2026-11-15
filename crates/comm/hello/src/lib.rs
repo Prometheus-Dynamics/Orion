@@ -16,11 +16,14 @@
 //! `hello.<fact>`, and the document carries the newest value of each. Remove the program and
 //! the fact is gone from the document; Orion's own part is unchanged.
 //!
-//! **Orion's own facts.** Two names are Orion's and a program's fact by either name is left
-//! out: `state`, what the board is doing (`running`, `recovery` or `flasher`), and, in
-//! recovery, `recovery_why`, why. Both are text, and signed with the rest, so a tool knows a
-//! board in recovery from one that is up before it asks for anything else. The broker refuses a
-//! program that declares either topic ([`orion_broker::NODE_FACTS`]).
+//! **Orion's own facts.** Four names are Orion's and a program's fact by any of them is left
+//! out: `state`, what the board is doing (`running`, `recovery` or `flasher`); in recovery,
+//! `recovery_why`, why; `security`, the board's switch as its record says (`on`, `off`, or
+//! `damaged` for a record that cannot be read or is not one, which is on); and
+//! `security_generation`, the record's generation, when it was read. All are text, and signed
+//! with the rest, so a tool knows a board in recovery from one that is up, and a secured board
+//! from an open one, before it asks for anything else. The broker refuses a program that
+//! declares any of them ([`orion_broker::NODE_FACTS`]).
 //!
 //! **Always answers.** This lives in the comm core and needs nothing else to be running, and
 //! in recovery too.
@@ -56,6 +59,17 @@ pub use orion_keys::hello::{MAX_NONCE, verify};
 pub const STATE_FACT: &str = "state";
 /// Orion's fact, in recovery: why.
 pub const RECOVERY_WHY_FACT: &str = "recovery_why";
+/// Orion's fact: the board's security switch, `on`, `off` or `damaged`.
+pub const SECURITY_FACT: &str = "security";
+/// Orion's fact: the generation of the board's security record, when it was read.
+pub const SECURITY_GENERATION_FACT: &str = "security_generation";
+/// Orion's own facts: a program's fact by one of these names is left out.
+const OWN_FACTS: [&str; 4] = [
+    STATE_FACT,
+    RECOVERY_WHY_FACT,
+    SECURITY_FACT,
+    SECURITY_GENERATION_FACT,
+];
 /// The number of the text field type, as facts carry it.
 const TEXT: u8 = 4;
 
@@ -116,6 +130,8 @@ pub struct Hello {
     topics: Option<Rc<RefCell<Topics>>>,
     facts: Vec<Fact>,
     state: SharedState,
+    /// The `security` fact, and `security_generation`, if told.
+    security: Option<(&'static str, Option<String>)>,
     payload: Vec<u8>,
 }
 
@@ -136,6 +152,7 @@ impl Hello {
             topics,
             facts: Vec::new(),
             state: SharedState(Rc::new(RefCell::new(BoardState::Running))),
+            security: None,
             payload: Vec::new(),
         }
     }
@@ -144,6 +161,23 @@ impl Hello {
     #[must_use]
     pub fn in_state(self, state: BoardState) -> Self {
         self.state.set(state);
+        self
+    }
+
+    /// The same, saying the board's security switch as `view`, its record, has it. Without
+    /// this the document says nothing of it, and a tool reads "not told".
+    #[must_use]
+    pub fn with_security(mut self, view: &orion_config::SecurityView) -> Self {
+        let word = match (view.fault.is_some(), view.security) {
+            (true, _) => "damaged",
+            (false, orion_config::Security::On) => "on",
+            (false, orion_config::Security::Off) => "off",
+        };
+        let generation = view
+            .generation
+            .filter(|_| view.fault.is_none())
+            .map(|generation| generation.to_string());
+        self.security = Some((word, generation));
         self
     }
 
@@ -170,7 +204,7 @@ impl Hello {
             let Some(name) = topic.name.as_str().strip_prefix(FACT_PREFIX) else {
                 continue;
             };
-            if name == STATE_FACT || name == RECOVERY_WHY_FACT {
+            if OWN_FACTS.contains(&name) {
                 continue;
             }
             let known = self.facts.iter().any(|fact| fact.topic == topic.id);
@@ -243,6 +277,20 @@ impl Service for Hello {
                 ty: TEXT,
                 value: Bytes(&why.as_bytes()[..end]),
             });
+        }
+        if let Some((word, generation)) = &self.security {
+            fields.push(IdentityField {
+                name: SECURITY_FACT,
+                ty: TEXT,
+                value: Bytes(word.as_bytes()),
+            });
+            if let Some(generation) = generation {
+                fields.push(IdentityField {
+                    name: SECURITY_GENERATION_FACT,
+                    ty: TEXT,
+                    value: Bytes(generation.as_bytes()),
+                });
+            }
         }
         fields.extend(
             self.facts

@@ -672,6 +672,7 @@ a nonce) and is answered (`Identity`):
 | Node name, cluster, public key, interface revision | Orion |
 | Clock, milliseconds since 1970 | Orion |
 | `state`: `running`, `recovery` or `flasher`; in recovery, `recovery_why` | Orion |
+| `security`: `on`, `off` or `damaged`; `security_generation` | Orion, from the board's record |
 | Facts about the board: name, type, value | Other programs |
 | The asker's nonce | The question |
 | Signature | The node's key, over a fixed label and everything before this field |
@@ -690,6 +691,12 @@ a nonce) and is answered (`Identity`):
   node's own; a fact by either name that reaches the document another way is left out. A tool
   knows a board in recovery, and why, from its first question (`Node::state`,
   `Node::recovery_why`).
+- **So is its security switch,** from the board's record, as two more text facts: `security`
+  (`on`, `off`, or `damaged` for a record that cannot be read or is not one, which is on) and,
+  when the record was read, `security_generation`, its generation in decimal. No record is
+  `off` with no generation. Recovery says them too. The broker reserves `hello.security` and
+  `hello.security_generation` as it does `hello.state`. A tool reads them with `Node::security`,
+  which is `Security::NotTold` from an older board.
 - **Anyone may ask**, a key that has been granted nothing included.
 - **Always answers.** It is in the comm core and needs nothing else running.
 - Someone on the board who gives no nonce is not checking a signature and gets the document
