@@ -584,8 +584,9 @@ orion-recovery [settings file]
 - It logs to standard error, one line an event; `ORION_LOG` says how much (`info`).
 
 **Size gate.** `scripts/size-gate.sh`, part of the gate, builds it as it ships and fails if
-it has grown past a limit set a tenth above its last measured size: 2,634,088 bytes for a
-board, static. A change that needs the bytes raises the limit in the same commit and says why.
+it has grown past a limit set a small margin (20-30 KB) above its last measured size:
+2,870,824 bytes for an aarch64 board, static, at C41. A change that needs the bytes cuts what
+it can first, then raises the limit in the same commit and says why.
 
 ## The network carrier
 

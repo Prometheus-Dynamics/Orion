@@ -24,25 +24,25 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# Bytes. Each is what was measured when it was last set, and a tenth more.
-#                         this machine (x86_64 gnu)
-#   orion-recovery        2,973,432
-#   orion                 6,534,400   (C39; 5,936,216 at I6: the comm core and node logic
-#                                      grew by a tenth across waves 15-18, and C39's retrying
-#                                      listener took it 4 KB past the old limit)
-#   liborion_c.so           670,696
+# Bytes. Each is what was measured when it was last set, and a small margin: 20-30 KB, rounded
+# to 10,000. A limit is raised only with the reason, in docs/prs, and what was cut first.
+#                         this machine (x86_64 gnu), C40 after its cut
+#   orion-recovery        3,255,208
+#   orion                 6,560,752   (5,936,216 at I6: +624,536, a tenth; by crate and
+#                                      symbol in docs/prs/C41.md)
+#   liborion_c.so           735,656
 RECOVERY_HOST=3270000
-ORION_HOST=7190000
+ORION_HOST=6590000
 CAPI_HOST=740000
-# A board's files, static musl, as measured (orion-recovery with the USB link, C13/J6):
+# A board's files, static musl, as measured at C41:
 #                                   orion-recovery   orion
-#   aarch64-unknown-linux-musl      2,698,416        5,237,912
-#   armv7-unknown-linux-musleabihf  2,606,688        5,020,784   (never run on a board)
-#   riscv64gc-unknown-linux-musl    2,821,472        5,351,312   (never run on a board)
+#   aarch64-unknown-linux-musl      2,870,824        5,528,072
+#   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
+#   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
 BOARDS=(
-    "aarch64-unknown-linux-musl     2970000          5770000"
-    "armv7-unknown-linux-musleabihf 2870000          5530000"
-    "riscv64gc-unknown-linux-musl   3110000          5890000"
+    "aarch64-unknown-linux-musl     2900000          5550000"
+    "armv7-unknown-linux-musleabihf 2810000          5350000"
+    "riscv64gc-unknown-linux-musl   3040000          5690000"
 )
 
 target_dir="${CARGO_TARGET_DIR:-target}"

@@ -46,29 +46,55 @@ pub async fn open_retrying<T>(
     retry: Retry,
     mut open: impl AsyncFnMut() -> io::Result<T>,
 ) -> T {
-    let mut wait = retry.first;
-    let mut warned = false;
+    let mut tries = Tries {
+        way,
+        at,
+        retry,
+        wait: retry.first,
+        warned: false,
+    };
     loop {
         match open().await {
             Ok(opened) => {
-                if warned {
-                    tracing::info!("{way} is open on {at}");
-                }
+                tries.opened();
                 return opened;
             }
-            Err(error) if !warned => {
-                tracing::warn!(
-                    "{way} cannot open on {at}: {error}; trying again every {}-{} s, and the \
-                     rest of the comm core runs meanwhile",
-                    retry.first.as_secs(),
-                    retry.most.as_secs()
-                );
-                warned = true;
-            }
-            Err(_) => {}
+            Err(error) => tries.failed(&error).await,
         }
-        tokio::time::sleep(wait).await;
-        wait = (wait * 2).min(retry.most);
+    }
+}
+
+/// The waiting and the words of [`open_retrying`], kept out of it so that each kind of way in
+/// does not carry its own copy.
+struct Tries<'a> {
+    way: &'a str,
+    at: &'a dyn Display,
+    retry: Retry,
+    wait: Duration,
+    warned: bool,
+}
+
+impl Tries<'_> {
+    fn opened(&self) {
+        if self.warned {
+            tracing::info!("{} is open on {}", self.way, self.at);
+        }
+    }
+
+    async fn failed(&mut self, error: &io::Error) {
+        if !self.warned {
+            tracing::warn!(
+                "{} cannot open on {}: {error}; trying again every {}-{} s, and the rest of the \
+                 comm core runs meanwhile",
+                self.way,
+                self.at,
+                self.retry.first.as_secs(),
+                self.retry.most.as_secs()
+            );
+            self.warned = true;
+        }
+        tokio::time::sleep(self.wait).await;
+        self.wait = (self.wait * 2).min(self.retry.most);
     }
 }
 

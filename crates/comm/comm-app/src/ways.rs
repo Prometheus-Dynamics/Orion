@@ -2,8 +2,9 @@
 //! address is taken or not on this machine, is tried again, and the rest of the comm core runs
 //! meanwhile. Settings that cannot work are not tried again: they are the start's error.
 
-use std::fmt::Display;
+use std::any::Any;
 use std::io;
+use std::pin::Pin;
 
 use orion_server::{Retry, may_clear, open_retrying};
 use tokio::task::JoinHandle;
@@ -14,14 +15,47 @@ use crate::carriers::Tasks;
 /// task in `tasks` that tries again as `retry` says, calls `then` once it opens, and keeps
 /// both for as long as the comm core runs. An error that trying again does not help is
 /// returned.
-pub(crate) async fn now_or_later<T: 'static>(
+pub(crate) async fn now_or_later<T: 'static, F>(
     way: &'static str,
-    at: impl Display + 'static,
+    at: String,
     retry: Retry,
     tasks: &mut Tasks,
-    mut start: impl AsyncFnMut() -> io::Result<T> + 'static,
+    mut start: impl FnMut() -> F + 'static,
     then: impl FnOnce(&T) -> Option<JoinHandle<()>> + 'static,
-) -> io::Result<Option<T>> {
+) -> io::Result<Option<T>>
+where
+    F: Future<Output = io::Result<T>> + 'static,
+{
+    // Each kind of way in only boxes its own: the trying is the same code for all of them.
+    let start: Start = Box::new(move || {
+        let opening = start();
+        Box::pin(async move { opening.await.map(|opened| Box::new(opened) as Opened) })
+    });
+    let then: Then = Box::new(move |opened| then(itself(opened)));
+    Ok(erased(way, at, retry, tasks, start, then)
+        .await?
+        .map(|opened| *opened.downcast::<T>().unwrap_or_else(|_| unreachable!())))
+}
+
+type Opened = Box<dyn Any>;
+type Start = Box<dyn FnMut() -> Pin<Box<dyn Future<Output = io::Result<Opened>>>>>;
+type Then = Box<dyn FnOnce(&Opened) -> Option<JoinHandle<()>>>;
+
+/// What `start` made, as the type it made.
+fn itself<T: 'static>(opened: &Opened) -> &T {
+    opened
+        .downcast_ref::<T>()
+        .unwrap_or_else(|| unreachable!("a way in is opened as its own type"))
+}
+
+async fn erased(
+    way: &'static str,
+    at: String,
+    retry: Retry,
+    tasks: &mut Tasks,
+    mut start: Start,
+    then: Then,
+) -> io::Result<Option<Opened>> {
     match start().await {
         Ok(server) => {
             tasks.extend(then(&server));
@@ -29,7 +63,7 @@ pub(crate) async fn now_or_later<T: 'static>(
         }
         Err(error) if may_clear(&error) => {
             tasks.push(tokio::task::spawn_local(async move {
-                let server = open_retrying(way, &at, retry, start).await;
+                let server = open_retrying(way, &at, retry, async || start().await).await;
                 let task = then(&server).map(Abort);
                 // Held until the comm core's tasks are aborted, which drops them.
                 let _kept = (server, task);

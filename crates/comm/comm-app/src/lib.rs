@@ -399,10 +399,10 @@ impl CommCore {
                 let keys = keys.clone();
                 ways::now_or_later(
                     "the SSH way in",
-                    listen,
+                    listen.to_string(),
                     settings.listen_retry,
                     &mut tasks,
-                    async move || {
+                    move || {
                         ways::ssh(
                             config.clone(),
                             #[cfg(feature = "ssh-sandbox")]
@@ -410,7 +410,6 @@ impl CommCore {
                             security,
                             keys.clone(),
                         )
-                        .await
                     },
                     |_| None,
                 )
@@ -438,7 +437,10 @@ impl CommCore {
                     format!("{listen:?}"),
                     settings.listen_retry,
                     &mut tasks,
-                    async move || orion_nt4_gateway::Gateway::start(&on, config.clone()).await,
+                    move || {
+                        let (on, config) = (on.clone(), config.clone());
+                        async move { orion_nt4_gateway::Gateway::start(&on, config).await }
+                    },
                     move |gateway| {
                         #[cfg(feature = "ws")]
                         return incoming.map(|incoming| nt4_ws::forward(gateway, incoming));
