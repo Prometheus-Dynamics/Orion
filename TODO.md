@@ -226,3 +226,4 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [C55](docs/prs/C55.md) A socket path too long is said, and never tried again (wave 18; needs C54)
 - [x] [C56](docs/prs/C56.md) The microcontroller side hears what a host program hears (wave 18; needs C54)
 - [x] [C57](docs/prs/C57.md) A hello on a link always begins a session (wave 19; needs C54)
+- [x] [C58](docs/prs/C58.md) A USB reader that is let go hands on what it reads (wave 19; needs C57)

@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 use crate::Ended;
-use crate::blocking::Blocking;
+use crate::blocking::{Blocking, Reader};
 
 enum Over {
     /// One descriptor that can be waited on.
@@ -110,6 +110,14 @@ impl UsbStream {
 
     pub(crate) fn ended(&self) -> Rc<Ended> {
         self.ended.clone()
+    }
+
+    /// The reading side of endpoints, whose thread may outlive the stream.
+    pub(crate) fn reader(&self) -> Option<Reader> {
+        match &self.over {
+            Over::Blocking(blocking) => Some(blocking.reader()),
+            _ => None,
+        }
     }
 }
 

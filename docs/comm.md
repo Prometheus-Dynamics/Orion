@@ -958,6 +958,13 @@ one, the device was unplugged and is back: the old stream ends and the link goes
   written meanwhile are lost, not the link. The session running over it ends at its own
   deadline, or at the host's next hello, which starts another, with no new offer. Any other
   error, or the end of a file, ends the link.
+- **A reader let go hands on what it reads.** A read already in flight cannot be taken back,
+  and the holder may offer the same endpoint files again (it keeps them open through the host
+  going away). The old stream's thread may then still be in its read when the host comes back,
+  and the host's next bytes come to it. So the stream that took over is told: what the old one
+  still held when it was let go, and whatever its thread reads after, go to the new stream
+  ahead of the new stream's own bytes, in the order they came. The old thread checks before
+  every read whether it was let go, and ends after handing on.
 - **Taking endpoints back.** An offer of endpoints may carry a third descriptor, the end (a
   pipe, an eventfd, a socket). When it becomes readable or its other end is closed, the link
   lets go of all three and waits for the next offer. The holder needs this to take the function

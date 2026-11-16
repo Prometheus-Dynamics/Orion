@@ -9,6 +9,15 @@
 //! stays down, and bytes being written then are lost, not the link (the next frame's leading
 //! delimiter puts the far end back in step). What runs over the link notices by its own
 //! deadlines. Any other error, or the end of a file, ends the link. [`verdict`] is that rule.
+//!
+//! **A reader let go hands on what it reads.** A call already waiting in `read` cannot be
+//! taken back, only outlived. When the same endpoint is offered again (whoever holds the
+//! gadget keeps its files open through the host going away), the old thread may still be in
+//! that call when the host comes back, and it is the one the host's next bytes come to. So a
+//! stream that is taken over is told what took it over ([`Blocking::hand_to`]): what it still
+//! holds, and anything its thread reads after it was let go, goes to the stream that took
+//! over, ahead of that stream's own bytes, in the order it came. Nothing the host sends is
+//! lost to a stream nobody reads.
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
@@ -52,6 +61,9 @@ pub(crate) fn verdict(error: &io::Error) -> Verdict {
 #[derive(Default)]
 struct Incoming {
     bytes: VecDeque<u8>,
+    /// How many bytes at the front came from a stream this one took over: what those handed on
+    /// later goes after them, and ahead of what this stream's own thread read.
+    handed: usize,
     /// The descriptor reached its end or failed.
     closed: bool,
     /// Nobody wants the bytes any more.
@@ -79,6 +91,38 @@ struct Shared {
     work: Condvar,
     /// The bytes were written, or the descriptor failed.
     written: Notify,
+    /// The stream that took this one over, which gets what this one reads from now on.
+    next: Mutex<Option<Arc<Shared>>>,
+}
+
+/// Gives `bytes`, read by a stream that was let go, to the stream that took it over, or to the
+/// one that took that over in turn. Nobody to give them to: the link is over, and they go too.
+fn hand_on(from: &Shared, bytes: impl ExactSizeIterator<Item = u8>) {
+    let Some(mut to) = lock(&from.next).clone() else {
+        return;
+    };
+    loop {
+        let mut incoming = lock(&to.incoming);
+        if incoming.stop {
+            let next = lock(&to.next).clone();
+            drop(incoming);
+            match next {
+                Some(next) => to = next,
+                None => return,
+            }
+            continue;
+        }
+        let at = incoming.handed.min(incoming.bytes.len());
+        let len = bytes.len();
+        // After what was handed on before, ahead of this stream's own.
+        let own: Vec<u8> = incoming.bytes.drain(at..).collect();
+        incoming.bytes.extend(bytes);
+        incoming.bytes.extend(own);
+        incoming.handed = at + len;
+        drop(incoming);
+        to.arrived.notify_one();
+        return;
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -93,6 +137,9 @@ fn reading(mut read: impl Read, shared: &Shared) {
     let mut wait = DOWN_FIRST;
     let mut down = false;
     loop {
+        if lock(&shared.incoming).stop {
+            return;
+        }
         let len = match read.read(&mut chunk) {
             Ok(len) => len,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -133,6 +180,9 @@ fn reading(mut read: impl Read, shared: &Shared) {
                 .unwrap_or_else(PoisonError::into_inner);
         }
         if incoming.stop {
+            // Let go while it was reading: what it read is the host's, for whoever took over.
+            // Handed on under this stream's lock, so it goes after what it still held.
+            hand_on(shared, chunk[..len].iter().copied());
             return;
         }
         incoming.bytes.extend(&chunk[..len]);
@@ -221,6 +271,7 @@ impl Blocking {
                     for (to, from) in buf.iter_mut().zip(incoming.bytes.drain(..len)) {
                         *to = from;
                     }
+                    incoming.handed = incoming.handed.saturating_sub(len);
                     drop(incoming);
                     self.0.room.notify_one();
                     return Ok(len);
@@ -265,11 +316,35 @@ impl Blocking {
     }
 }
 
+/// A stream's reading side, kept by its link to say what took the stream over.
+pub(crate) struct Reader(Arc<Shared>);
+
+impl Reader {
+    /// `next` takes this stream over: what this one still holds when it is let go, and what
+    /// its thread reads after, are `next`'s.
+    pub(crate) fn hand_to(&self, next: &Self) {
+        *lock(&self.0.next) = Some(next.0.clone());
+    }
+}
+
+impl Blocking {
+    pub(crate) fn reader(&self) -> Reader {
+        Reader(self.0.clone())
+    }
+}
+
 impl Drop for Blocking {
     fn drop(&mut self) {
         // The writing thread ends now. The reading one ends when its call returns: a blocked
-        // read cannot be taken back, only outlived, and its descriptor closes with it.
-        lock(&self.0.incoming).stop = true;
+        // read cannot be taken back, only outlived, and its descriptor closes with it. What
+        // was read and not taken goes to whoever took over, under the lock the thread hands
+        // on under, so it stays ahead of anything the thread reads after.
+        {
+            let mut incoming = lock(&self.0.incoming);
+            incoming.stop = true;
+            let held = std::mem::take(&mut incoming.bytes);
+            hand_on(&self.0, held.into_iter());
+        }
         lock(&self.0.outgoing).stop = true;
         self.0.room.notify_one();
         self.0.work.notify_one();
@@ -410,6 +485,61 @@ mod tests {
                 write_closed.load(Ordering::SeqCst)
             })
             .await;
+        });
+    }
+
+    /// An endpoint whose reads wait for the test to give them bytes, as a host's do. Its
+    /// sender dropped is the end.
+    struct Gated(std::sync::mpsc::Receiver<Vec<u8>>);
+
+    impl Read for Gated {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            Ok(self.0.recv().map_or(0, |bytes| {
+                buf[..bytes.len()].copy_from_slice(&bytes);
+                bytes.len()
+            }))
+        }
+    }
+
+    #[test]
+    fn a_reader_let_go_inside_a_read_hands_what_it_reads_to_the_stream_that_took_over() {
+        run(async {
+            let (old_host, old_endpoint) = std::sync::mpsc::channel();
+            let (new_host, new_endpoint) = std::sync::mpsc::channel();
+            let old = Blocking::start(Gated(old_endpoint), Script::new(Vec::new()).0).expect("old");
+            let next =
+                Blocking::start(Gated(new_endpoint), Script::new(Vec::new()).0).expect("next");
+            // The old stream has read something nobody took.
+            old_host.send(b"he".to_vec()).expect("send");
+            until("the old stream holds it", || {
+                lock(&old.0.incoming).bytes.len() == 2
+            })
+            .await;
+
+            // The same endpoint is offered again. The new stream takes over while the old
+            // thread is still waiting in its read, which cannot be taken back.
+            old.reader().hand_to(&next.reader());
+            drop(old);
+            until("what it held is handed on", || {
+                lock(&next.0.incoming).bytes.len() == 2
+            })
+            .await;
+            // The new thread reads what came after...
+            new_host.send(b" after".to_vec()).expect("send");
+            until("the new stream reads", || {
+                lock(&next.0.incoming).bytes.len() == 8
+            })
+            .await;
+            // ...and the host's bytes that came before it land on the old thread, which hands
+            // them on, after what it held and ahead of the new thread's.
+            old_host.send(b"llo".to_vec()).expect("send");
+            until("the old thread hands them on", || {
+                lock(&next.0.incoming).bytes.len() == 11
+            })
+            .await;
+            let mut buf = [0_u8; 64];
+            let len = next.read(&mut buf).await.expect("read");
+            assert_eq!(&buf[..len], b"hello after");
         });
     }
 

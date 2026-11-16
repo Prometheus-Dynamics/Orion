@@ -231,6 +231,8 @@ what to change.
   ends it and begins the next, and an ended session's late frames never reach the next.
   `RejectReason::NoSession` (6) answers a frame where a hello was due (**Add**; an open enum).
   The device library takes `NoSession` mid-session as gone and says hello at once.
+- **C58.** A USB link's reader that is let go hands what it reads to the stream that took over.
+  Nothing a consumer calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

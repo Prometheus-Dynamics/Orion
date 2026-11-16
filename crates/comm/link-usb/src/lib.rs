@@ -41,6 +41,8 @@ use tracing::{info, warn};
 
 pub use stream::UsbStream;
 
+use crate::blocking::Reader;
+
 /// What ends a stream when its link is offered another handle.
 #[derive(Debug, Default)]
 pub(crate) struct Ended {
@@ -54,8 +56,15 @@ struct Slot {
     offered: Option<UsbStream>,
     /// Told when a handle is offered.
     arrived: Rc<Notify>,
-    /// The stream the link is running over now.
-    current: Option<Rc<Ended>>,
+    /// The stream the link is running over now, and its reading side if a thread reads it.
+    current: Option<(Rc<Ended>, Option<Reader>)>,
+}
+
+/// `next` takes over from `old`, if both are read by threads.
+fn hand_over(old: Option<&Reader>, next: &UsbStream) {
+    if let (Some(old), Some(next)) = (old, next.reader()) {
+        old.hand_to(&next);
+    }
 }
 
 /// The USB links of a comm core, and where their handles arrive.
@@ -146,9 +155,16 @@ impl UsbLinks {
             ));
         };
         // The device this link ran over is gone: its stream ends, and the link takes this one.
-        if let Some(current) = slot.current.take() {
-            current.ended.set(true);
-            current.wake.notify_one();
+        // A thread still reading the old one hands on what it reads: the same endpoint may
+        // have been offered again, and the host's next bytes may come to that thread.
+        if let Some((ended, reader)) = slot.current.take() {
+            hand_over(reader.as_ref(), &stream);
+            ended.ended.set(true);
+            ended.wake.notify_one();
+        }
+        // One offered and never taken is let go the same way.
+        if let Some(waiting) = slot.offered.take() {
+            hand_over(waiting.reader().as_ref(), &stream);
         }
         slot.offered = Some(stream);
         slot.arrived.notify_one();
@@ -179,7 +195,7 @@ impl Open for UsbLink {
                 if let Some(slot) = slots.iter_mut().find(|slot| slot.name == self.name)
                     && let Some(stream) = slot.offered.take()
                 {
-                    slot.current = Some(stream.ended());
+                    slot.current = Some((stream.ended(), stream.reader()));
                     return Ok(stream);
                 }
             }
