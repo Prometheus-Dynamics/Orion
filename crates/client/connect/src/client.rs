@@ -179,11 +179,10 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// [`ClientError::Refused`] if the comm core refused the request, a timed-out
-    /// [`ClientError::Io`] if nothing came within the session's timeout, and as
-    /// [`Client::pump`].
+    /// [`ClientError::Refused`] if the comm core refused the request, as
+    /// [`Session::reply_left`] when the wait is over, and as [`Client::pump`].
     pub fn answered(&self, seq: u16, mut done: impl FnMut() -> bool) -> Result<(), ClientError> {
-        let deadline = Instant::now() + self.0.session.borrow().timeout();
+        let since = Instant::now();
         loop {
             if done() {
                 return Ok(());
@@ -191,12 +190,36 @@ impl Client {
             if let Some(refused) = self.refusal(seq) {
                 return Err(refused);
             }
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
-            }
+            let left = self.0.session.borrow().reply_left(since)?;
             self.pump(left)?;
         }
+    }
+
+    /// As [`Session::silent_for`].
+    #[must_use]
+    pub fn silent_for(&self) -> Duration {
+        self.0.session.borrow().silent_for()
+    }
+
+    /// As [`Session::set_reply`]: how every later wait for an answer is bounded, the
+    /// helpers' included, until this is called again.
+    pub fn set_reply(&self, reply: crate::Reply) {
+        self.0.session.borrow_mut().set_reply(reply);
+    }
+
+    /// As [`Session::reply`].
+    #[must_use]
+    pub fn reply(&self) -> crate::Reply {
+        self.0.session.borrow().reply()
+    }
+
+    /// As [`Session::reply_left`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::reply_left`].
+    pub fn reply_left(&self, since: Instant) -> Result<Duration, ClientError> {
+        self.0.session.borrow().reply_left(since)
     }
 
     /// Does something with the session itself. Not from inside a handler.

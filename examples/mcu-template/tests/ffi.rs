@@ -236,6 +236,8 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
     let cancel = peer.raw(&Cancel {
         call: 77,
         reason: CancelReason::Asked,
+        instance: 0,
+        run: 0,
     });
     feed(&cancel);
     assert_ne!(orion_poll(now) & ORION_EVENT_CANCEL, 0);

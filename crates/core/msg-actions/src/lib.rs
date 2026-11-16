@@ -106,6 +106,12 @@ body! {
         pub message: &'a str,
         /// Whatever else the action reports.
         pub data: Bytes<'a>,
+        ;
+        /// To a caller: the run's [`RunHandle`], its node-logic instance. Zero from a node
+        /// that does not say, and from a program.
+        pub instance: u64,
+        /// To a caller: the run's [`RunHandle`], its number in that instance.
+        pub run: u64,
     }
 }
 
@@ -125,6 +131,96 @@ body! {
         /// action's to say (a service's `BUSY`, say). Zero: none given. The words stay in
         /// `detail`.
         pub code: u32,
+        /// To a caller: the run's [`RunHandle`], its node-logic instance. Zero from a node
+        /// that does not say, and from a program.
+        pub instance: u64,
+        /// To a caller: the run's [`RunHandle`], its number in that instance.
+        pub run: u64,
+        /// To a caller: the action the run was started as. Empty from a node that does not
+        /// say.
+        pub action: &'a str,
+    }
+}
+
+body! {
+    /// Tells a caller a run it started, or came back to, is under way here, and what to call
+    /// it from now on: its [`RunHandle`], which no other run is ever given.
+    pub struct Started<'a> = kind::ACTION_STARTED {
+        /// The caller's number for the run, as it started it or came back to it.
+        pub call: u64,
+        /// The run's node-logic instance.
+        pub instance: u64,
+        /// The run's number in that instance.
+        pub run: u64,
+        /// The action it was started as.
+        pub action: &'a str,
+    }
+}
+
+/// A run, as the node names it: no other run is ever given the same handle. `instance` is
+/// drawn at random each time node logic starts, and `run` counts up within it, so a handle
+/// from before a restart names nothing afterwards, never another run.
+///
+/// Its encodings are stable: [`RunHandle::to_bytes`] (sixteen bytes, each number
+/// little-endian) and the text form `<instance>-<run>`, each sixteen lowercase hex digits. A
+/// client may keep either and give it back after any reconnect or restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RunHandle {
+    /// The node-logic instance that started the run. Never zero.
+    pub instance: u64,
+    /// The run's number in that instance. Never zero.
+    pub run: u64,
+}
+
+impl RunHandle {
+    /// A handle from what a node said, if it said one.
+    #[must_use]
+    pub const fn said(instance: u64, run: u64) -> Option<Self> {
+        if instance == 0 || run == 0 {
+            None
+        } else {
+            Some(Self { instance, run })
+        }
+    }
+
+    /// The sixteen bytes it is kept as.
+    #[must_use]
+    pub fn to_bytes(&self) -> [u8; 16] {
+        let mut bytes = [0; 16];
+        bytes[..8].copy_from_slice(&self.instance.to_le_bytes());
+        bytes[8..].copy_from_slice(&self.run.to_le_bytes());
+        bytes
+    }
+
+    /// The handle kept as `bytes`, if they are one.
+    #[must_use]
+    pub fn from_bytes(bytes: &[u8; 16]) -> Option<Self> {
+        let mut instance = [0; 8];
+        let mut run = [0; 8];
+        instance.copy_from_slice(&bytes[..8]);
+        run.copy_from_slice(&bytes[8..]);
+        Self::said(u64::from_le_bytes(instance), u64::from_le_bytes(run))
+    }
+}
+
+impl core::fmt::Display for RunHandle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:016x}-{:016x}", self.instance, self.run)
+    }
+}
+
+impl core::str::FromStr for RunHandle {
+    type Err = &'static str;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        const NOT: &str = "a run handle is <instance>-<run>, each sixteen hex digits";
+        let (instance, run) = text.split_once('-').ok_or(NOT)?;
+        if instance.len() != 16 || run.len() != 16 {
+            return Err(NOT);
+        }
+        let instance = u64::from_str_radix(instance, 16).map_err(|_| NOT)?;
+        let run = u64::from_str_radix(run, 16).map_err(|_| NOT)?;
+        Self::said(instance, run).ok_or(NOT)
     }
 }
 
@@ -156,14 +252,27 @@ body! {
         /// Why. A caller's own is not kept: node logic says [`CancelReason::Asked`] for it,
         /// and passes on what another node's node logic said for a run it carried.
         pub reason: CancelReason,
+        /// From a caller: the run's [`RunHandle`], its instance. With it, the run that handle
+        /// names and no other; zero, a run this same session started under `call`.
+        pub instance: u64,
+        /// From a caller: the run's [`RunHandle`], its number.
+        pub run: u64,
     }
 }
 
 body! {
     /// Reattaches to a detached run. The latest progress or the result follows.
     pub struct Attach = kind::ACTION_ATTACH {
-        /// The run.
+        /// The run, by the number its starter gave it. Without a handle, it is found by this
+        /// only if it is the one run of the starter's with that number; with one, it is what
+        /// this session will call the run.
         pub call: u64,
+        ;
+        /// The run's [`RunHandle`], its instance: the run that handle names and no other. Zero
+        /// when not said.
+        pub instance: u64,
+        /// The run's [`RunHandle`], its number.
+        pub run: u64,
     }
 }
 

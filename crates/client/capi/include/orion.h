@@ -83,9 +83,32 @@ const char *orion_last_error(void);
 /*
  * Connects to the comm core at `address` as the program `name`. An address is a socket path
  * ("/run/orion/orion.sock"), "orion+tcp://host[:port]" or "serial:<path>[@baud]"; null is the
- * board's own socket. `timeout_ms` is how long connecting and each request may take.
+ * board's own socket. `timeout_ms` is how long connecting may take, and each request unless
+ * orion_set_reply says otherwise.
  */
 int32_t orion_connect(const char *address, const char *name, uint32_t timeout_ms, Orion **out);
+
+/* How a wait for an answer is bounded: orion_set_reply. */
+typedef enum OrionReply {
+  /* Each answer within the connect timeout. The default. */
+  ORION_REPLY_TIMEOUT = 0,
+  /*
+   * For as long as the node is heard from: ORION_E_LOST when nothing at all has come from it
+   * for the idle time it declared when it welcomed this program (comm.idle_ms, three heartbeats
+   * unless set), and ORION_E_TIMEOUT at the ceiling, if one is given.
+   */
+  ORION_REPLY_ALIVE = 1
+} OrionReply;
+
+/*
+ * Sets how every later wait for an answer is bounded, until it is set again: `mode` is an
+ * OrionReply, and `ceiling_ms` the longest one wait may take with ORION_REPLY_ALIVE, 0 for no
+ * ceiling. Set it back after a request that needed a longer ceiling.
+ */
+int32_t orion_set_reply(Orion *orion, int32_t mode, uint32_t ceiling_ms);
+
+/* Milliseconds since anything at all came from the node; 0 for a null handle. */
+uint64_t orion_silent_for_ms(const Orion *orion);
 
 /* Connects again after ORION_E_LOST, trying for up to `timeout_ms`, and says everything again. */
 int32_t orion_reconnect(Orion *orion, uint32_t timeout_ms);

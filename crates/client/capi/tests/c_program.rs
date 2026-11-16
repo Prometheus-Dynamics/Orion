@@ -8,11 +8,13 @@ use std::process::Command;
 use orion_stubs::Board;
 
 /// The functions the library exports, which must be exactly the header's.
-const SURFACE: [&str; 15] = [
+const SURFACE: [&str; 17] = [
     "orion_check_version",
     "orion_last_error",
     "orion_connect",
     "orion_reconnect",
+    "orion_set_reply",
+    "orion_silent_for_ms",
     "orion_pump",
     "orion_close",
     "orion_declare",

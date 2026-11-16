@@ -82,6 +82,9 @@ errors! {
     Layout = 21, "shared memory is of another layout";
     /// A lease this session held was taken by another claimant while the session was quiet.
     LeaseLost = 22, "lease lost while quiet";
+    /// A run handle from before node logic last started: the run it named is gone with that
+    /// start, and the handle names nothing now. Whatever the run did is not known here.
+    RunGone = 23, "the node restarted since: that run is gone";
 }
 
 impl fmt::Display for Error {
@@ -116,5 +119,6 @@ mod tests {
         assert_eq!(Error::Restoring.code(), 20);
         assert_eq!(Error::Layout.code(), 21);
         assert_eq!(Error::LeaseLost.code(), 22);
+        assert_eq!(Error::RunGone.code(), 23);
     }
 }

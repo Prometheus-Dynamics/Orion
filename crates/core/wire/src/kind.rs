@@ -99,6 +99,7 @@ kinds! {
         ACTION_ATTACH = 0x36,
         ACTION_REGISTERED = 0x37,
         ACTION_CALLER_GONE = 0x38,
+        ACTION_STARTED = 0x39,
     }
     Topics {
         TOPIC_DECLARE = 0x40,

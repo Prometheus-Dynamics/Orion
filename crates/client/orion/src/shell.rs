@@ -216,7 +216,6 @@ impl Shell {
     /// The shell has ended, or the session broke, or the board took nothing for as long as a
     /// session may go unheard.
     pub fn write(&mut self, mut bytes: &[u8]) -> Result<(), ClientError> {
-        let timeout = self.client.session(|session| session.timeout());
         let mut waited_since = Instant::now();
         while !bytes.is_empty() {
             if self.ended {
@@ -229,9 +228,7 @@ impl Shell {
                 .get(&self.number)
                 .map_or(0, |one| one.credit) as usize;
             if credit == 0 {
-                if waited_since.elapsed() > timeout {
-                    return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
-                }
+                self.client.reply_left(waited_since)?;
                 self.client.pump(Duration::from_millis(200))?;
                 continue;
             }

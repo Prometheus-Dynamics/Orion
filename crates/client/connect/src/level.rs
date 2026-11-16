@@ -26,16 +26,19 @@ pub enum Feature {
     DetachedRun,
     /// A run carried for a caller on another node, whose end is told on its own.
     RunOnBehalf,
+    /// A run come back to or cancelled by the handle node logic gave it.
+    RunHandle,
 }
 
 impl Feature {
     /// Every feature, for tables and tests.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::SubscribeFromLatest,
         Self::Shell,
         Self::SignedLink,
         Self::DetachedRun,
         Self::RunOnBehalf,
+        Self::RunHandle,
     ];
 
     /// The lowest level that has it.
@@ -47,6 +50,7 @@ impl Feature {
             | Self::SignedLink
             | Self::DetachedRun
             | Self::RunOnBehalf => 1,
+            Self::RunHandle => 3,
         }
     }
 
@@ -59,6 +63,7 @@ impl Feature {
             Self::SignedLink => "a signed session on a link",
             Self::DetachedRun => "a detached run",
             Self::RunOnBehalf => "a run carried for another node's caller",
+            Self::RunHandle => "a run named by its handle",
         }
     }
 }

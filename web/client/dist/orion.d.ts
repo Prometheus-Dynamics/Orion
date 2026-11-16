@@ -77,6 +77,29 @@ export declare class Refused extends Error {
     readonly code: number;
     constructor(code: number, detail: string);
 }
+/**
+ * A wait that ran past the ceiling `setReply` gave it. The connection is fine: the answer was
+ * slow.
+ */
+export declare class TimedOut extends Error {
+    readonly ceilingMs: number;
+    constructor(ceilingMs: number);
+}
+/**
+ * How a wait for an answer is bounded, from `setReply` on. `{ alive: false }`, the default,
+ * waits until the answer comes or the connection ends. `{ alive: true }` also ends the
+ * connection when nothing at all has come from the board for its idle time: the window the
+ * board declared when it welcomed this page (`comm.idle_ms`, three heartbeats unless set), not
+ * a number of this page's. The page pings every half heartbeat and the board answers each, so
+ * a board that is running is never silent that long. With `ceilingMs`, each wait begun from
+ * then on also fails with `TimedOut` that long after it began.
+ */
+export type Reply = {
+    alive: false;
+} | {
+    alive: true;
+    ceilingMs?: number;
+};
 /** CRC-32C, as every frame ends with. */
 export declare function crc32c(bytes: Uint8Array): number;
 /** A subscription to a topic. */
@@ -127,6 +150,12 @@ export declare class Orion {
     private seq;
     private nextCall;
     private heartbeat;
+    private reply;
+    private lastHeard;
+    /** The board's idle time, from its welcome. */
+    private idleMs;
+    /** Ended for being silent too long. */
+    private silent;
     /** Requests waiting for the frame that answers them, by their sequence number. */
     private readonly waiting;
     private readonly subscriptions;
@@ -141,6 +170,13 @@ export declare class Orion {
     static connect(url: string, name: string): Promise<Orion>;
     /** Ends the connection. */
     close(): void;
+    /** Milliseconds since anything at all, a ping's answer included, came from the board. */
+    silentFor(): number;
+    /**
+     * How every wait for an answer begun from now on is bounded, until this is called again.
+     * Set it back after a request that needed a longer ceiling.
+     */
+    setReply(reply: Reply): void;
     /**
      * Subscribes to `topic`, or to `node/topic` for another board's. `onsample` is given each
      * sample as it arrives. Resolves when the board has taken the subscription; the topic
@@ -164,8 +200,15 @@ export declare class Orion {
      * meanwhile. Rejects with `Refused` if the board would not run it.
      */
     run(action: Action, onprogress?: (progress: Progress) => void): Promise<Result>;
+    /**
+     * The run a frame is about: by the handle it names, else by its number. A run whose handle
+     * is known is never matched by number.
+     */
+    private about;
     private send;
     private request;
+    /** Rejects a wait with `TimedOut` at the ceiling, if there is one and it still waits. */
+    private ceiling;
     private answered;
     private receive;
     private status;

@@ -3,17 +3,15 @@
 
 mod common;
 
-use common::{Bench, CALLER, HOUR, OTHER, OWNER, fan};
+use common::{Bench, CALLER, HOUR, OTHER, OWNER, bare, by, fan};
 use orion_action_list::{ENDED_FOR_MS, Event, MAX_ENDED, MAX_RUNS};
 use orion_check::{Admits, Policy};
 use orion_msg_actions::{
-    ActionResult, Attach, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered,
-    Target,
+    ActionResult, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered, Target,
 };
 use orion_reply::Asked;
 use orion_types::Error;
-use orion_wire::body::encode_fields;
-use orion_wire::{Body, Bytes, kind};
+use orion_wire::{Bytes, kind};
 
 #[test]
 fn an_action_is_registered_once() {
@@ -70,6 +68,9 @@ fn a_run_is_handed_to_whoever_registered_it_and_its_result_comes_back() {
     assert_eq!(claim.target, fan());
     assert_eq!(claim.args.0, b"1500");
     assert_ne!(claim.call, 7, "the program sees the list's number");
+    // The caller is told the run's handle, which names it whatever its number.
+    let handle = bench.handle(CALLER, 7);
+    assert_eq!(handle.run, claim.call);
     assert_eq!(bench.actions.running(), 1);
 
     bench
@@ -80,6 +81,8 @@ fn a_run_is_handed_to_whoever_registered_it_and_its_result_comes_back() {
                 percent: 40,
                 message: "spinning up",
                 data: Bytes(b"d"),
+                instance: 0,
+                run: 0,
             },
         )
         .expect("progress");
@@ -91,6 +94,10 @@ fn a_run_is_handed_to_whoever_registered_it_and_its_result_comes_back() {
         (progress.message, progress.data.0),
         ("spinning up", &b"d"[..])
     );
+    assert_eq!(
+        (progress.instance, progress.run),
+        (handle.instance, handle.run)
+    );
 
     bench
         .ask(
@@ -101,12 +108,19 @@ fn a_run_is_handed_to_whoever_registered_it_and_its_result_comes_back() {
                 output: Bytes(b"ok"),
                 detail: "",
                 code: 0,
+                instance: 0,
+                run: 0,
+                action: "",
             },
         )
         .expect("result");
     let result: ActionResult<'_> = bench.take(CALLER);
     assert_eq!((result.call, result.outcome), (7, Outcome::Succeeded));
     assert_eq!(result.output.0, b"ok");
+    assert_eq!(
+        (result.instance, result.run, result.action),
+        (handle.instance, handle.run, "set")
+    );
     assert_eq!(bench.actions.running(), 0);
 
     let events = bench.actions.take_events();
@@ -150,6 +164,8 @@ fn cancel_reaches_the_program_under_the_lists_number() {
     let cancel = Cancel {
         call: 7,
         reason: CancelReason::Deadline,
+        instance: 0,
+        run: 0,
     };
     bench.ask(CALLER, &cancel).expect("cancel");
     let cancel: Cancel = bench.take(OWNER);
@@ -165,6 +181,9 @@ fn cancel_reaches_the_program_under_the_lists_number() {
                 output: Bytes(&[]),
                 detail: "stopped",
                 code: 0,
+                instance: 0,
+                run: 0,
+                action: "",
             },
         )
         .expect("result");
@@ -177,6 +196,8 @@ fn cancel_reaches_the_program_under_the_lists_number() {
     let cancel = Cancel {
         call: 7,
         reason: CancelReason::Asked,
+        instance: 0,
+        run: 0,
     };
     assert_eq!(bench.ask(OTHER, &cancel), Err(Error::NotFound));
 }
@@ -188,6 +209,8 @@ fn another_nodes_reason_for_a_run_it_carried_is_passed_on() {
     let gone = Cancel {
         call: 7,
         reason: CancelReason::CallerGone,
+        instance: 0,
+        run: 0,
     };
     bench.ask_class(CALLER, PEER, &gone).expect("cancel");
     let cancel: Cancel = bench.take(OWNER);
@@ -196,6 +219,8 @@ fn another_nodes_reason_for_a_run_it_carried_is_passed_on() {
     let unsaid = Cancel {
         call: 7,
         reason: CancelReason::Unsaid,
+        instance: 0,
+        run: 0,
     };
     bench.ask_class(CALLER, PEER, &unsaid).expect("cancel");
     let cancel: Cancel = bench.take(OWNER);
@@ -231,6 +256,9 @@ fn only_the_program_that_runs_it_speaks_for_a_run() {
         output: Bytes(&[]),
         detail: "",
         code: 0,
+        instance: 0,
+        run: 0,
+        action: "",
     };
     assert_eq!(bench.ask(OTHER, &result), Err(Error::Denied));
     assert_eq!(bench.ask(CALLER, &result), Err(Error::Denied));
@@ -259,6 +287,9 @@ fn a_caller_that_goes_has_its_run_cancelled_unless_it_is_detached() {
                 output: Bytes(&[]),
                 detail: "",
                 code: 0,
+                instance: 0,
+                run: 0,
+                action: "",
             },
         )
         .expect("result");
@@ -277,6 +308,8 @@ fn a_caller_that_goes_has_its_run_cancelled_unless_it_is_detached() {
                 percent: 10,
                 message: "",
                 data: Bytes(&[]),
+                instance: 0,
+                run: 0,
             },
         )
         .expect("progress");
@@ -301,6 +334,7 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
     let mut bench = Bench::with_action();
     bench.run(CALLER, 7, 500, false).expect("run");
     let claim: Claim<'_> = bench.take(OWNER);
+    bench.handle(CALLER, 7);
     assert_eq!(claim.deadline_ms, 500);
     assert_eq!(bench.actions.next_deadline(), Some(bench.now + 500));
     bench.actions.tick(bench.now + 499, &mut bench.sent);
@@ -324,6 +358,9 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
                 output: Bytes(&[]),
                 detail: "",
                 code: 0,
+                instance: 0,
+                run: 0,
+                action: "",
             },
         )
         .expect("late");
@@ -344,39 +381,6 @@ fn more_runs_than_there_is_room_for_are_refused_as_busy() {
     assert_eq!((bench.actions.listed(), bench.actions.running()), (0, 0));
 }
 
-impl Bench {
-    fn ask_as<B: Body>(&mut self, from: u32, uid: u32, body: &B) -> Result<(), Error> {
-        self.seq += 1;
-        let mut payload = [0_u8; 1024];
-        let len = encode_fields(body, &mut payload).expect("encode");
-        let asked = Asked {
-            session: from,
-            seq: self.seq,
-            kind: B::KIND,
-            class: 4,
-            uid,
-            caller: "",
-            payload: &payload[..len],
-        };
-        self.actions.request(&asked, self.now, &mut self.sent)
-    }
-
-    fn result(&mut self, id: u64, outcome: Outcome) {
-        self.ask(
-            OWNER,
-            &ActionResult {
-                call: id,
-                outcome,
-                output: Bytes(b"out"),
-                detail: "",
-                // The program's own code, passed on as it is.
-                code: 11,
-            },
-        )
-        .expect("result");
-    }
-}
-
 /// The caller's next session.
 const BACK: u32 = 21;
 
@@ -391,6 +395,8 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
                 percent: 30,
                 message: "working",
                 data: Bytes(b"d"),
+                instance: 0,
+                run: 0,
             },
         )
         .expect("progress");
@@ -405,13 +411,15 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
                 percent: 60,
                 message: "still working",
                 data: Bytes(&[]),
+                instance: 0,
+                run: 0,
             },
         )
         .expect("progress");
     assert!(bench.sent.frames.is_empty());
 
     // Back, on another session: the latest progress, at once.
-    bench.ask(BACK, &Attach { call: 7 }).expect("attach");
+    bench.ask(BACK, &bare(7)).expect("attach");
     let progress: Progress<'_> = bench.take(BACK);
     assert_eq!((progress.call, progress.percent), (7, 60));
     assert_eq!(progress.message, "still working");
@@ -424,6 +432,8 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
                 percent: 90,
                 message: "nearly",
                 data: Bytes(&[]),
+                instance: 0,
+                run: 0,
             },
         )
         .expect("progress");
@@ -437,7 +447,7 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
     );
     // It is kept all the same, in case the session it was sent to had just ended.
     assert_eq!(bench.actions.ended(), 1);
-    bench.ask(BACK, &Attach { call: 7 }).expect("attach");
+    bench.ask(BACK, &bare(7)).expect("attach");
     let again: ActionResult<'_> = bench.take(BACK);
     assert_eq!((again.outcome, again.code), (Outcome::Succeeded, 11));
     assert_eq!(bench.actions.ended(), 0);
@@ -451,40 +461,61 @@ fn a_detached_run_that_ended_with_nobody_there_is_kept_for_its_starter() {
     assert!(bench.sent.frames.is_empty());
     assert_eq!(bench.actions.ended(), 1);
     bench.now += 60_000;
-    bench.ask(BACK, &Attach { call: 7 }).expect("attach");
+    bench.ask(BACK, &bare(7)).expect("attach");
     let result: ActionResult<'_> = bench.take(BACK);
     assert_eq!((result.call, result.outcome), (7, Outcome::Failed));
     assert_eq!(result.output.0, b"out");
     // Told once.
-    assert_eq!(bench.ask(BACK, &Attach { call: 7 }), Err(Error::NotFound));
+    assert_eq!(bench.ask(BACK, &bare(7)), Err(Error::NotFound));
 
     // Kept for ten minutes and no longer.
     let (mut bench, id) = Bench::running(true);
     bench.gone(CALLER);
     bench.result(id, Outcome::Succeeded);
     bench.now += ENDED_FOR_MS + 1;
-    assert_eq!(bench.ask(BACK, &Attach { call: 7 }), Err(Error::NotFound));
+    assert_eq!(bench.ask(BACK, &bare(7)), Err(Error::NotFound));
     assert_eq!(bench.actions.ended(), 0);
 }
 
 #[test]
-fn a_new_run_under_a_number_replaces_what_was_kept_under_it() {
+fn a_new_run_under_a_number_takes_it_and_the_earlier_end_is_reached_by_its_handle() {
     // A caller's numbers start over with each session: its second session's run 7 is not
     // its first session's.
-    let (mut bench, id) = Bench::running(true);
-    bench.result(id, Outcome::Failed);
+    let mut bench = Bench::with_action();
+    bench.run(CALLER, 7, HOUR, true).expect("run");
+    let first: Claim<'_> = bench.take(OWNER);
+    let first = (first.call, bench.handle(CALLER, 7));
+    bench.result(first.0, Outcome::Failed);
     let _: ActionResult<'_> = bench.take(CALLER);
     assert_eq!(bench.actions.ended(), 1);
     bench.gone(CALLER);
     bench.run(BACK, 7, HOUR, true).expect("run");
     let claim: Claim<'_> = bench.take(OWNER);
-    assert_eq!(bench.actions.ended(), 0);
+    let second = bench.handle(BACK, 7);
+    assert_ne!(second, first.1);
+    assert_eq!(bench.actions.ended(), 1, "the earlier end is still kept");
     bench.gone(BACK);
     bench.result(claim.call, Outcome::Succeeded);
-    bench.ask(30, &Attach { call: 7 }).expect("attach");
+    // By its number: the newer run's end, once.
+    bench.ask(30, &bare(7)).expect("attach");
+    assert_eq!(bench.handle(30, 7), second);
     let result: ActionResult<'_> = bench.take(30);
-    assert_eq!(result.outcome, Outcome::Succeeded, "the newer run's end");
-    assert_eq!(bench.ask(30, &Attach { call: 7 }), Err(Error::NotFound));
+    assert_eq!(
+        (result.outcome, result.run),
+        (Outcome::Succeeded, second.run)
+    );
+    // The earlier one is not reached by the number, and the refusal says how it is.
+    assert_eq!(bench.ask(30, &bare(7)), Err(Error::NotFound));
+    let said = bench.actions.take_said().expect("words");
+    assert!(said.contains("by its handle"), "{said}");
+    bench.ask(30, &by(9, first.1)).expect("attach");
+    assert_eq!(bench.handle(30, 9), first.1);
+    let result: ActionResult<'_> = bench.take(30);
+    assert_eq!(
+        (result.call, result.outcome, result.run),
+        (7, Outcome::Failed, first.0)
+    );
+    assert_eq!(bench.actions.ended(), 0);
 }
 
 #[test]
@@ -492,15 +523,9 @@ fn only_whoever_started_it_comes_back_to_a_run() {
     let (mut bench, id) = Bench::running(true);
     bench.gone(CALLER);
     // Another user on the board, with the right number.
-    assert_eq!(
-        bench.ask_as(OTHER, 1001, &Attach { call: 7 }),
-        Err(Error::NotFound)
-    );
+    assert_eq!(bench.ask_as(OTHER, 1001, &bare(7)), Err(Error::NotFound));
     bench.result(id, Outcome::Succeeded);
-    assert_eq!(
-        bench.ask_as(OTHER, 1001, &Attach { call: 7 }),
-        Err(Error::NotFound)
-    );
+    assert_eq!(bench.ask_as(OTHER, 1001, &bare(7)), Err(Error::NotFound));
     assert_eq!(
         bench.actions.ended(),
         1,
@@ -508,36 +533,35 @@ fn only_whoever_started_it_comes_back_to_a_run() {
     );
     // A run that was not detached is not come back to, even by its starter.
     let (mut bench, _) = Bench::running(false);
-    assert_eq!(bench.ask(BACK, &Attach { call: 7 }), Err(Error::NotFound));
+    assert_eq!(bench.ask(BACK, &bare(7)), Err(Error::NotFound));
 }
 
 #[test]
-fn a_detached_run_is_cancelled_from_the_session_that_came_back() {
+fn a_detached_run_is_cancelled_by_its_handle_from_the_session_that_came_back() {
     let (mut bench, id) = Bench::running(true);
     bench.gone(CALLER);
-    // Nobody is attached: there is nobody whose cancel it would be.
-    assert_eq!(
-        bench.ask(
-            BACK,
-            &Cancel {
-                call: 7,
-                reason: CancelReason::Asked
-            }
-        ),
-        Err(Error::NotFound)
-    );
-    bench.ask(BACK, &Attach { call: 7 }).expect("attach");
-    bench
-        .ask(
-            BACK,
-            &Cancel {
-                call: 7,
-                reason: CancelReason::Asked,
-            },
-        )
-        .expect("cancel");
+    let bare_cancel = Cancel {
+        call: 7,
+        reason: CancelReason::Asked,
+        instance: 0,
+        run: 0,
+    };
+    // A number alone is only ever the session's own: this one started nothing.
+    assert_eq!(bench.ask(BACK, &bare_cancel), Err(Error::NotFound));
+    bench.ask(BACK, &bare(7)).expect("attach");
+    let handle = bench.handle(BACK, 7);
+    // Coming back does not make the number its own.
+    assert_eq!(bench.ask(BACK, &bare_cancel), Err(Error::NotFound));
+    let by_handle = Cancel {
+        instance: handle.instance,
+        run: handle.run,
+        ..bare_cancel
+    };
+    bench.ask(BACK, &by_handle).expect("cancel");
     let cancel: Cancel = bench.take(OWNER);
-    assert_eq!(cancel.call, id);
+    assert_eq!((cancel.call, cancel.reason), (id, CancelReason::Asked));
+    // Someone else with the handle is not its starter.
+    assert_eq!(bench.ask_as(OTHER, 1001, &by_handle), Err(Error::NotFound));
 }
 
 #[test]
@@ -550,14 +574,14 @@ fn a_detached_run_still_has_its_deadline_and_its_program() {
     bench.actions.tick(bench.now, &mut bench.sent);
     let cancel: Cancel = bench.take(OWNER);
     assert_eq!(cancel.call, claim.call);
-    bench.ask(BACK, &Attach { call: 7 }).expect("attach");
+    bench.ask(BACK, &bare(7)).expect("attach");
     let result: ActionResult<'_> = bench.take(BACK);
     assert_eq!(result.outcome, Outcome::TimedOut);
 
     let (mut bench, _) = Bench::running(true);
     bench.gone(CALLER);
     bench.gone(OWNER);
-    bench.ask(BACK, &Attach { call: 7 }).expect("attach");
+    bench.ask(BACK, &bare(7)).expect("attach");
     let result: ActionResult<'_> = bench.take(BACK);
     assert_eq!(result.outcome, Outcome::Failed);
 }
@@ -573,8 +597,8 @@ fn only_so_many_ended_runs_are_kept() {
     }
     assert_eq!(bench.actions.ended(), MAX_ENDED);
     // The oldest went first.
-    assert_eq!(bench.ask(BACK, &Attach { call: 0 }), Err(Error::NotFound));
-    bench.ask(BACK, &Attach { call: 20 }).expect("attach");
+    assert_eq!(bench.ask(BACK, &bare(0)), Err(Error::NotFound));
+    bench.ask(BACK, &bare(20)).expect("attach");
 }
 
 #[test]

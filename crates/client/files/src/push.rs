@@ -5,7 +5,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use orion_connect::ClientError;
+use orion_connect::{ClientError, Reply};
 use orion_msg_files::{FileBegin, FileChunk, FileCommit};
 use orion_wire::Bytes;
 use sha2::{Digest, Sha256};
@@ -45,7 +45,7 @@ enum Phase {
     /// Sending chunks, a few at a time.
     Sending { status: Transfer, sent: u64 },
     /// Every byte is there: waiting for the board's check.
-    Commit { seq: u16, until: Instant },
+    Commit { seq: u16, since: Instant },
     /// Said how it ended.
     Over,
 }
@@ -82,14 +82,6 @@ fn number(digest: &[u8; 32], destination: &str) -> u64 {
     u64::from_le_bytes([
         number[0], number[1], number[2], number[3], number[4], number[5], number[6], number[7],
     ])
-}
-
-/// An error if the board has not been heard about the transfer for `timeout`.
-fn quiet_too_long(last_heard: Instant, timeout: Duration) -> Result<(), ClientError> {
-    if last_heard.elapsed() > timeout {
-        return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
-    }
-    Ok(())
 }
 
 /// A file's size and when it last changed.
@@ -291,7 +283,8 @@ impl<S: Read + Seek> Pushing<S> {
                 if let Some(error) = self.files.client.refusal(*seq) {
                     return Err(error);
                 }
-                quiet_too_long(self.last_heard, self.timeout)?;
+                // Heard about the transfer last then: a wait for an answer since.
+                self.files.client.reply_left(self.last_heard)?;
                 self.files.client.pump(wait)?;
                 Ok(Step::Waiting)
             }
@@ -325,12 +318,12 @@ impl<S: Read + Seek> Pushing<S> {
                     *status = now;
                     self.last_heard = Instant::now();
                 } else {
-                    quiet_too_long(self.last_heard, self.timeout)?;
+                    self.files.client.reply_left(self.last_heard)?;
                 }
                 let received = status.received;
                 Ok(self.progress(received))
             }
-            Phase::Commit { seq, until } => {
+            Phase::Commit { seq, since } => {
                 let now = self.files.status(self.transfer);
                 if matches!(now.state, FileState::Committed | FileState::Rejected) {
                     return Ok(Step::Done(now));
@@ -338,10 +331,19 @@ impl<S: Read + Seek> Pushing<S> {
                 if let Some(error) = self.files.client.refusal(*seq) {
                     return Err(error);
                 }
-                let left = until.saturating_duration_since(Instant::now());
-                if left.is_zero() {
-                    return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
-                }
+                // Checking the digest of a large file takes the board a while: twelve
+                // timeouts, or for as long as the node is heard from.
+                let left = match self.files.client.reply() {
+                    Reply::Timeout => {
+                        let left =
+                            (*since + self.timeout * 12).saturating_duration_since(Instant::now());
+                        if left.is_zero() {
+                            return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
+                        }
+                        left
+                    }
+                    Reply::Alive { .. } => self.files.client.reply_left(*since)?,
+                };
                 self.files.client.pump(left.min(wait))?;
                 Ok(self.progress(size))
             }
@@ -360,10 +362,9 @@ impl<S: Read + Seek> Pushing<S> {
         let seq = self.files.client.send(&FileCommit {
             transfer: self.transfer,
         })?;
-        // Checking the digest of a large file takes the board a while.
         self.phase = Phase::Commit {
             seq,
-            until: Instant::now() + self.timeout * 12,
+            since: Instant::now(),
         };
         Ok(())
     }

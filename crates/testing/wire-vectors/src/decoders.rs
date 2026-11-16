@@ -83,6 +83,7 @@ decoders! {
     ACTION_ATTACH => actions::Attach,
     ACTION_REGISTERED => actions::Registered,
     ACTION_CALLER_GONE => actions::CallerGone,
+    ACTION_STARTED => actions::Started,
     TOPIC_DECLARE => topics::Declare,
     TOPIC_OPEN => topics::Open,
     TOPIC_OPENED => topics::Opened,

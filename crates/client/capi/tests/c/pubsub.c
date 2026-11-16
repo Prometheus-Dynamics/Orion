@@ -47,6 +47,18 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  /* Answers bounded by the node's liveness: kept while it is heard from. */
+  CHECK(orion_set_reply(reader, ORION_REPLY_ALIVE, 0));
+  if (orion_set_reply(reader, 7, 0) != ORION_E_ARGUMENT) {
+    fprintf(stderr, "a mode that is not one was taken\n");
+    return 1;
+  }
+  CHECK(orion_pump(reader, 50));
+  if (orion_silent_for_ms(reader) > 10000 || orion_silent_for_ms(NULL) != 0) {
+    fprintf(stderr, "silent for %llu ms\n", (unsigned long long)orion_silent_for_ms(reader));
+    return 1;
+  }
+
   const OrionField fields[] = {
       {.name = "count", .type = ORION_INT, .unit = NULL},
       {.name = "label", .type = ORION_TEXT, .unit = ""},

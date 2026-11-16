@@ -11,13 +11,87 @@
 //! is closed, so silence there is a comm core that is busy or stopped, not one that is gone,
 //! and the session is kept. Neither side of a local session ends it for being quiet.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use orion_msg_session::Ping;
 
 use crate::{ClientError, Session};
 
+/// How long a wait for an answer may go on: [`crate::Options::reply`], or
+/// [`Session::set_reply`] for every wait after it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Reply {
+    /// Each answer within [`crate::Options::timeout`], however long the node takes to send
+    /// it. A busy node or a starved machine can make a healthy answer late.
+    #[default]
+    Timeout,
+    /// For as long as the node is heard from. The wait ends when nothing at all has come from
+    /// it for its idle time, the window the node declared in its welcome (`comm.idle_ms`,
+    /// three heartbeats unless set): that is [`ClientError::Lost`]. Any frame renews the
+    /// window, and the answers to the pings this client sends every half heartbeat while it
+    /// waits are frames, so a node that is running is never silent that long. With a
+    /// `ceiling`, the wait also ends that long after it began, as a timed-out
+    /// [`ClientError::Io`]: the session is fine, the answer was slow.
+    Alive {
+        /// The longest one wait may take, if any.
+        ceiling: Option<Duration>,
+    },
+}
+
+/// A wait that ran out of time, with the session still good.
+pub(crate) fn timed_out() -> ClientError {
+    ClientError::Io(std::io::ErrorKind::TimedOut.into())
+}
+
 impl Session {
+    /// How long since anything at all, a ping's answer included, came from the node.
+    #[must_use]
+    pub fn silent_for(&self) -> Duration {
+        self.last_heard.elapsed()
+    }
+
+    /// How every wait for an answer from now on is bounded, until this is called again:
+    /// [`Session::answer`] and everything that waits on one. Set it back after a request
+    /// that needed a longer ceiling. Kept when the session connects again.
+    pub fn set_reply(&mut self, reply: Reply) {
+        self.options.reply = reply;
+    }
+
+    /// How waits for an answer are bounded now.
+    #[must_use]
+    pub const fn reply(&self) -> Reply {
+        self.options.reply
+    }
+
+    /// How much longer a wait for an answer that began at `since` may go on, as
+    /// [`Session::reply`] says; never zero.
+    ///
+    /// # Errors
+    ///
+    /// [`ClientError::Lost`] if the node has been silent for its idle time ([`Reply::Alive`]),
+    /// and a timed-out [`ClientError::Io`] if the wait has had its time.
+    pub fn reply_left(&self, since: Instant) -> Result<Duration, ClientError> {
+        let now = Instant::now();
+        let (limit, silent) = match self.options.reply {
+            Reply::Timeout => (Some(self.options.timeout), None),
+            Reply::Alive { ceiling } => (ceiling, Some(self.last_heard + self.welcomed.idle)),
+        };
+        let mut left = Duration::MAX;
+        if let Some(silent) = silent {
+            left = silent.saturating_duration_since(now);
+            if left.is_zero() {
+                return Err(ClientError::Lost);
+            }
+        }
+        if let Some(limit) = limit {
+            left = left.min((since + limit).saturating_duration_since(now));
+            if left.is_zero() {
+                return Err(timed_out());
+            }
+        }
+        Ok(left)
+    }
+
     /// When the comm core will have been silent too long, if silence ends this session.
     fn silent_at(&self) -> Option<Instant> {
         (!self.transport.is_local()).then(|| self.last_heard + self.welcomed.idle)

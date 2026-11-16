@@ -96,6 +96,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C50](docs/prs/C50.md) A program killed with frames unread is a peer closing, not a broken connection (wave 18; needs C49)
 - [x] [C51](docs/prs/C51.md) What the code grew by from I6, measured on the board, and whether it is needed (wave 18; needs C50)
 - [x] [C52](docs/prs/C52.md) The login helper, so the comm core is never root (wave 18; needs C51)
+- [x] [C53](docs/prs/C53.md) Replies bounded by the node's liveness, and a run named by its handle (wave 18; needs C52)
 
 ## D. Client
 

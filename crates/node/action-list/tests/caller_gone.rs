@@ -91,6 +91,9 @@ fn each_program_given_a_run_from_a_session_is_told_once_when_it_ends() {
                 output: Bytes(&[]),
                 detail: "",
                 code: 0,
+                instance: 0,
+                run: 0,
+                action: "",
             },
         )
         .expect("result");
@@ -202,6 +205,7 @@ impl Bench {
         )
         .expect("run");
         let claim: Claim<'_> = self.take(OWNER);
+        self.handle(from, call);
         claim.session
     }
 }

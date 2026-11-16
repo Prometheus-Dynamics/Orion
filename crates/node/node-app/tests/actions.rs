@@ -113,6 +113,8 @@ fn provider_process() {
     let _wipe = register("wipe", Admits::OPERATOR);
     println!("provider ready");
     let mut long = None;
+    // Runs held by a tag until `end:<tag>`.
+    let mut held: Vec<(Vec<u8>, u64)> = Vec::new();
     // The sessions it was told have ended.
     let mut gone = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -146,6 +148,22 @@ fn provider_process() {
                         .expect("finish");
                     return;
                 }
+                if let Some(tag) = args.strip_prefix(b"hold:") {
+                    open.progress(call, 30, "working", b"").expect("progress");
+                    held.push((tag.to_vec(), call));
+                    continue;
+                }
+                if let Some(tag) = args.strip_prefix(b"end:") {
+                    if let Some(at) = held.iter().position(|(held, _)| held == tag) {
+                        let (tag, long) = held.remove(at);
+                        let output = [tag.as_slice(), b" done"].concat();
+                        open.finish(long, Outcome::Succeeded, &output, "")
+                            .expect("finish");
+                    }
+                    open.finish(call, Outcome::Succeeded, b"", "")
+                        .expect("finish");
+                    continue;
+                }
                 if args == b"slow" {
                     // Left running: it ends when it is cancelled.
                     continue;
@@ -172,6 +190,7 @@ fn provider_process() {
                     .expect("finish");
             }
             Some(Request::Cancel { call, .. }) => {
+                held.retain(|(_, held)| *held != call);
                 open.finish(call, Outcome::Cancelled, b"", "stopped")
                     .expect("finish");
             }
@@ -503,6 +522,104 @@ fn a_caller_disconnects_mid_action_and_reattaches_to_the_progress() {
             ..
         }) => {}
         other => panic!("expected not found, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_run_handle_names_one_run_across_sessions_and_restarts() {
+    let dir = dir("actions-handles");
+    let board = Board::start_for_node_with(&dir, Security::On);
+    let address = Address::Local(board.socket().to_owned());
+    let logic = Logic::start(settings(&dir));
+    let _provider = Provider::start(board.socket());
+    let detached = |args: &'static [u8]| ActionCall {
+        detached: true,
+        deadline_ms: 60_000,
+        ..call("open", args)
+    };
+    let ender = Orion::connect(&address, "ender").expect("connect");
+    let end = |tag: &'static [u8]| {
+        let args: &'static [u8] = Box::leak([b"end:".as_slice(), tag].concat().into_boxed_slice());
+        let mut run = ender.run(&call("open", args)).expect("run");
+        run.finish(Duration::from_secs(5)).expect("ended");
+    };
+    let under_way = |run: &mut orion::actions::Run| {
+        assert!(matches!(
+            run.wait(Duration::from_secs(5)).expect("run"),
+            Some(Update::Doing(_))
+        ));
+        run.handle().expect("the node said its handle")
+    };
+    let refused = |run: &mut orion::actions::Run| match run.wait(Duration::from_secs(5)) {
+        Err(ClientError::Refused { error, .. }) => error,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+
+    // Session one starts a detached run and is lost.
+    let (number, old) = {
+        let caller = Orion::connect(&address, "dashboard").expect("connect");
+        let mut run = caller.run(&detached(b"hold:old")).expect("run");
+        (run.call(), under_way(&mut run))
+    };
+    // Session two starts another under the same number while the old one still runs.
+    let caller = Orion::connect(&address, "dashboard").expect("connect");
+    let mut new = caller.run(&detached(b"hold:new")).expect("run");
+    assert_eq!(new.call(), number, "a session's numbers start over");
+    let new_handle = under_way(&mut new);
+    assert_ne!(new_handle, old);
+    // The old one ends first. Session two's follow is its own run's end, never the old one's.
+    end(b"old");
+    end(b"new");
+    let ended = new.finish(Duration::from_secs(5)).expect("ends");
+    assert_eq!(ended.output, b"new done");
+    drop(new);
+    // The number reaches the newer run's end, kept once...
+    let mut back = caller.attach(number).expect("attach");
+    assert_eq!(
+        back.finish(Duration::from_secs(5)).expect("ended").output,
+        b"new done"
+    );
+    assert_eq!(back.handle(), Some(new_handle));
+    drop(back);
+    // ...and never the old one's.
+    let mut again = caller.attach(number).expect("sent");
+    assert_eq!(refused(&mut again), Error::NotFound);
+    // The old answer is reached by its handle alone, once.
+    let mut old_back = caller.attach_handle(old).expect("attach");
+    let ended = old_back.finish(Duration::from_secs(5)).expect("ended");
+    assert_eq!(ended.output, b"old done");
+    let mut stale = caller.attach_handle(old).expect("sent");
+    assert_eq!(refused(&mut stale), Error::NotFound);
+
+    // Cancel after coming back by the handle reaches the run come back to.
+    let third = {
+        let caller = Orion::connect(&address, "dashboard").expect("connect");
+        let mut run = caller.run(&detached(b"hold:third")).expect("run");
+        under_way(&mut run)
+    };
+    let mut third_back = caller.attach_handle(third).expect("attach");
+    third_back.cancel().expect("cancel");
+    let ended = third_back.finish(Duration::from_secs(5)).expect("ended");
+    assert_eq!(
+        (ended.outcome, ended.detail.as_str()),
+        (Outcome::Cancelled, "stopped")
+    );
+
+    // Node logic starts again: a handle from before reaches nothing, and is told so.
+    drop(logic);
+    let _logic = Logic::start(settings(&dir));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut gone = caller.attach_handle(new_handle).expect("sent");
+        match refused(&mut gone) {
+            Error::Unavailable if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            error => {
+                assert_eq!(error, Error::RunGone);
+                break;
+            }
+        }
     }
 }
 

@@ -9,8 +9,15 @@
 //! what the one check is told at the door, so a `Run` only arrives here if it passed. The
 //! list routes, and keeps track of runs:
 //!
-//! - A run has two numbers. The caller's `call` is the caller's own, unique on its session.
-//!   The number in `Claim` is the list's, unique here. Each side only ever sees its own.
+//! - A run has two numbers. The caller's `call` is the caller's own, unique on its session,
+//!   and starts over with each session. The number in `Claim` is the list's, unique here.
+//! - What identifies a run across sessions is the list's: a [`RunHandle`], this list's
+//!   instance (drawn at random when node logic starts) and its number here. `Started` gives it
+//!   to the caller, and `Attach` and `Cancel` take it. No other run is ever given the same
+//!   handle; one from before node logic started names nothing, and is refused as such.
+//! - Without a handle, a caller's number reaches only what it can name without doubt: a cancel,
+//!   a run this same session started; an attach, the one run of the starter's with that number.
+//!   A new run under a number makes the starter's older runs under it reachable by handle only.
 //! - A caller that goes away has its run cancelled, unless the run is detached. A detached
 //!   run carries on, and whoever started it can come back to it with `Attach`, from any
 //!   session: it is then told the latest progress, or how the run ended. A detached run must
@@ -26,12 +33,16 @@
 use std::collections::VecDeque;
 
 use orion_msg_actions::{
-    ActionResult, Attach, CallerGone, Cancel, CancelReason, Claim, Outcome, Progress, Register,
-    Registered, Run, Target,
+    ActionResult, CallerGone, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered,
+    Run, RunHandle, Started, Target,
 };
 use orion_reply::{Asked, Out};
 use orion_types::{ActionName, Error, NodeName};
 use orion_wire::{Bytes, kind};
+
+mod attach;
+
+use attach::fresh_instance;
 
 /// The most runs under way at once. More are refused as busy.
 pub const MAX_RUNS: usize = 4096;
@@ -67,8 +78,12 @@ impl Starter {
 /// A detached run that ended while nobody was attached.
 #[derive(Debug)]
 struct Ended {
+    id: u64,
+    name: ActionName,
     call: u64,
     starter: Starter,
+    /// A later run of the starter's took the number: this is reachable by handle only.
+    superseded: bool,
     outcome: Outcome,
     code: u32,
     output: Vec<u8>,
@@ -111,9 +126,14 @@ struct Running {
     owner: u32,
     /// The session that is told. `None` once the caller has gone.
     caller: Option<u32>,
+    /// The session that started it, which alone may cancel it by number; `None` once that
+    /// session has ended, since the comm core's session numbers come round again.
+    origin: Option<u32>,
     /// The run's number for its caller.
     call: u64,
     starter: Starter,
+    /// A later run of the starter's took the number: this is reachable by handle only.
+    superseded: bool,
     /// The latest progress of a detached run, for whoever comes back to it.
     last: Option<(u8, String, Vec<u8>)>,
     /// When it times out, on the clock `tick` is given.
@@ -126,6 +146,10 @@ struct Running {
 #[derive(Debug)]
 pub struct Actions {
     me: NodeName,
+    /// This start of node logic, in every handle it gives.
+    instance: u64,
+    /// Words for the last refusal, when the code alone would not say enough.
+    said: Option<String>,
     listed: Vec<Listed>,
     running: Vec<Running>,
     next: u64,
@@ -164,11 +188,20 @@ impl Actions {
         kind::ACTION_CALLER_GONE,
     ];
 
-    /// An empty list on the node `me`.
+    /// An empty list on the node `me`, with an instance of its own.
     #[must_use]
-    pub const fn new(me: NodeName) -> Self {
+    pub fn new(me: NodeName) -> Self {
+        Self::with_instance(me, fresh_instance())
+    }
+
+    /// As [`Actions::new`], with `instance` for its handles: a test's, to stand in for a
+    /// restart that drew the same or another.
+    #[must_use]
+    pub const fn with_instance(me: NodeName, instance: u64) -> Self {
         Self {
             me,
+            instance,
+            said: None,
             listed: Vec::new(),
             running: Vec::new(),
             next: 0,
@@ -180,6 +213,23 @@ impl Actions {
             max_detached_ms: MAX_DETACHED_MS,
             ended_tokens: Vec::new(),
         }
+    }
+
+    /// The words for the last refusal, if the code alone does not say enough.
+    pub fn take_said(&mut self) -> Option<String> {
+        self.said.take()
+    }
+
+    /// This list's instance: what every handle it gives starts with.
+    #[must_use]
+    pub const fn instance(&self) -> u64 {
+        self.instance
+    }
+
+    /// A refusal of `error`, in these words.
+    fn refuse(&mut self, error: Error, words: String) -> Error {
+        self.said = Some(words);
+        error
     }
 
     /// Takes detached runs with a deadline up to `max_ms`, instead of [`MAX_DETACHED_MS`].
@@ -321,6 +371,9 @@ impl Actions {
                     output: Bytes(output),
                     detail,
                     code,
+                    instance: self.instance,
+                    run: run.id,
+                    action: run.name.as_str(),
                 },
             );
         }
@@ -333,8 +386,11 @@ impl Actions {
                 self.ended.pop_front();
             }
             self.ended.push_back(Ended {
+                id: run.id,
+                name: run.name,
                 call: run.call,
                 starter: run.starter,
+                superseded: run.superseded,
                 outcome,
                 code,
                 output: output.to_vec(),
@@ -352,50 +408,6 @@ impl Actions {
         {
             self.ended.pop_front();
         }
-    }
-
-    /// Comes back to a detached run: the latest progress, or how it ended.
-    fn attach(&mut self, asked: &Asked<'_>, now_ms: u64, out: &mut dyn Out) -> Result<(), Error> {
-        let attach: Attach = asked.body()?;
-        let starter = Starter::of(asked);
-        // The newest of the starter's runs with that number.
-        if let Some(run) = self
-            .running
-            .iter_mut()
-            .rev()
-            .find(|run| run.detached && run.call == attach.call && run.starter == starter)
-        {
-            run.caller = Some(asked.session);
-            if let Some((percent, message, data)) = &run.last {
-                out.push(
-                    asked.session,
-                    &Progress {
-                        call: attach.call,
-                        percent: *percent,
-                        message,
-                        data: Bytes(data),
-                    },
-                )?;
-            }
-            return Ok(());
-        }
-        self.forget_old(now_ms);
-        let at = self
-            .ended
-            .iter()
-            .rposition(|ended| ended.call == attach.call && ended.starter == starter)
-            .ok_or(Error::NotFound)?;
-        let ended = self.ended.remove(at).ok_or(Error::NotFound)?;
-        out.send(
-            asked.session,
-            &ActionResult {
-                call: ended.call,
-                outcome: ended.outcome,
-                output: Bytes(&ended.output),
-                detail: &ended.detail,
-                code: ended.code,
-            },
-        )
     }
 
     /// Answers one request, at `now_ms` on whatever clock [`Actions::tick`] is given.
@@ -458,18 +470,35 @@ impl Actions {
                 if self
                     .running
                     .iter()
-                    .any(|other| other.caller == Some(from) && other.call == run.call)
+                    .any(|other| other.origin == Some(from) && other.call == run.call)
                 {
                     return Err(Error::AlreadyExists);
                 }
                 if self.running.len() >= MAX_RUNS {
                     return Err(Error::Busy);
                 }
-                // The caller's numbers start over with each of its sessions. What was kept of
-                // an earlier run under this number is not this run's.
+                // The caller's numbers start over with each of its sessions. A detached run
+                // is one to come back to by its number, so the starter's earlier runs under
+                // it, going or kept, are not this run: from now on they are reached by their
+                // handles only. A run that is not detached is never come back to, and takes
+                // no number from another.
                 let starter = Starter::of(asked);
-                self.ended
-                    .retain(|ended| !(ended.call == run.call && ended.starter == starter));
+                if run.detached {
+                    for older in self
+                        .running
+                        .iter_mut()
+                        .filter(|older| older.starter == starter)
+                    {
+                        older.superseded |= older.call == run.call;
+                    }
+                    for older in self
+                        .ended
+                        .iter_mut()
+                        .filter(|older| older.starter == starter)
+                    {
+                        older.superseded |= older.call == run.call;
+                    }
+                }
                 self.next += 1;
                 let id = self.next;
                 let principal = asked.principal();
@@ -489,14 +518,25 @@ impl Actions {
                 if !self.given.contains(&(owner, session)) {
                     self.given.push((owner, session));
                 }
+                out.send(
+                    from,
+                    &Started {
+                        call: run.call,
+                        instance: self.instance,
+                        run: id,
+                        action: run.name.as_str(),
+                    },
+                )?;
                 self.running.push(Running {
                     id,
                     name: run.name.clone(),
                     target: run.target.clone(),
                     owner,
                     caller: Some(from),
+                    origin: Some(from),
                     call: run.call,
                     starter,
+                    superseded: false,
                     last: None,
                     deadline: (run.deadline_ms != 0)
                         .then(|| now_ms.saturating_add(run.deadline_ms)),
@@ -520,7 +560,7 @@ impl Actions {
                     ));
                 }
                 if let Some(caller) = run.caller {
-                    let call = run.call;
+                    let (call, id) = (run.call, run.id);
                     out.push(
                         caller,
                         &Progress {
@@ -528,6 +568,8 @@ impl Actions {
                             percent: progress.percent,
                             message: progress.message,
                             data: progress.data,
+                            instance: self.instance,
+                            run: id,
                         },
                     )?;
                 }
@@ -550,16 +592,22 @@ impl Actions {
             }
             kind::ACTION_CANCEL => {
                 let cancel: Cancel = asked.body()?;
-                let run = self
-                    .running
-                    .iter()
-                    .find(|run| run.caller == Some(from) && run.call == cancel.call)
-                    .ok_or(Error::NotFound)?;
+                let at = match RunHandle::said(cancel.instance, cancel.run) {
+                    Some(handle) => self.by_handle(handle, &Starter::of(asked))?,
+                    // A number alone: a run this same session started under it, and no other.
+                    None => self
+                        .running
+                        .iter()
+                        .position(|run| run.origin == Some(from) && run.call == cancel.call),
+                };
+                let run = &self.running[at.ok_or(Error::NotFound)?];
                 out.send(
                     run.owner,
                     &Cancel {
                         call: run.id,
                         reason: reason_of(asked, cancel.reason),
+                        instance: 0,
+                        run: 0,
                     },
                 )
             }
@@ -614,6 +662,9 @@ impl Actions {
                 continue;
             }
             let run = &mut self.running[at];
+            if run.origin == Some(session) {
+                run.origin = None;
+            }
             if run.caller == Some(session) {
                 run.caller = None;
                 if !run.detached {
@@ -622,6 +673,8 @@ impl Actions {
                         &Cancel {
                             call: run.id,
                             reason: CancelReason::CallerGone,
+                            instance: 0,
+                            run: 0,
                         },
                     );
                 }
@@ -648,6 +701,8 @@ impl Actions {
                 &Cancel {
                     call: run.id,
                     reason: CancelReason::Stopping,
+                    instance: 0,
+                    run: 0,
                 },
             );
             self.end(
@@ -673,6 +728,8 @@ impl Actions {
                     &Cancel {
                         call: id,
                         reason: CancelReason::Deadline,
+                        instance: 0,
+                        run: 0,
                     },
                 );
                 self.end(

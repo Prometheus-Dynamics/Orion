@@ -135,7 +135,7 @@ fn a_bad_provider_is_contained() {
     let asked = Instant::now();
     let (ok, crashed) = board.ctl(&["action", "run", "drill.crash", "--for", "5000"]);
     assert!(!ok, "{crashed}");
-    assert!(!provider.running(), "the provider exited");
+    assert!(provider.exits_within(LONG), "the provider did not exit");
     eprintln!(
         "a run whose provider died ended after {:?}: {crashed}",
         asked.elapsed()

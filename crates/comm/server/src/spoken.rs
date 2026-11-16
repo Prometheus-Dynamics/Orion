@@ -12,6 +12,8 @@ pub const RESTORING_LEVEL: u16 = 2;
 pub const LEASE_LOST_LEVEL: u16 = 2;
 /// The level from which a session is told [`Error::Layout`].
 pub const LAYOUT_LEVEL: u16 = 2;
+/// The level from which a session is told [`Error::RunGone`].
+pub const RUN_GONE_LEVEL: u16 = 3;
 
 /// `error` as a session at `level` is told it.
 #[must_use]
@@ -23,6 +25,8 @@ pub const fn spoken(error: Error, level: u16) -> Error {
         Error::LeaseLost if level < LEASE_LOST_LEVEL => Error::Busy,
         // Before the level, a ring that does not read right was only ever malformed.
         Error::Layout if level < LAYOUT_LEVEL => Error::Malformed,
+        // Before the level, a run that is not there was only ever not found.
+        Error::RunGone if level < RUN_GONE_LEVEL => Error::NotFound,
         other => other,
     }
 }
@@ -45,7 +49,10 @@ mod tests {
         assert_eq!(spoken(Error::Restoring, 0), Error::NotFound);
         // Nothing else changes.
         for error in Error::ALL {
-            if !matches!(error, Error::Restoring | Error::LeaseLost | Error::Layout) {
+            if !matches!(
+                error,
+                Error::Restoring | Error::LeaseLost | Error::Layout | Error::RunGone
+            ) {
                 assert_eq!(spoken(*error, 0), *error);
             }
         }
@@ -66,9 +73,17 @@ mod tests {
     }
 
     #[test]
+    fn a_run_gone_is_told_from_its_level_and_not_found_below_it() {
+        assert_eq!(spoken(Error::RunGone, RUN_GONE_LEVEL), Error::RunGone);
+        assert_eq!(spoken(Error::RunGone, RUN_GONE_LEVEL - 1), Error::NotFound);
+        assert_eq!(spoken(Error::RunGone, 0), Error::NotFound);
+    }
+
+    #[test]
     fn the_level_is_one_this_build_speaks() {
         const { assert!(RESTORING_LEVEL <= orion_wire::INTERFACE_LEVEL) }
         const { assert!(LEASE_LOST_LEVEL <= orion_wire::INTERFACE_LEVEL) }
         const { assert!(LAYOUT_LEVEL <= orion_wire::INTERFACE_LEVEL) }
+        const { assert!(RUN_GONE_LEVEL <= orion_wire::INTERFACE_LEVEL) }
     }
 }

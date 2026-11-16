@@ -4,7 +4,9 @@
 
 use orion_action_list::Actions;
 use orion_check::{Admits, Policy};
-use orion_msg_actions::{CallerGone, Claim, Register, Run, Target};
+use orion_msg_actions::{
+    ActionResult, Attach, CallerGone, Claim, Outcome, Register, Run, RunHandle, Started, Target,
+};
 use orion_reply::{Asked, Out};
 use orion_types::Error;
 use orion_wire::body::encode_fields;
@@ -142,15 +144,78 @@ impl Bench {
         told
     }
 
-    /// The next frame sent, which must be a `B` for `to`.
+    /// The next frame sent, which must be a `B` for `to`. The handles node logic gives are
+    /// passed over unless a [`Started`] is asked for: [`Bench::handle`] reads those.
     #[track_caller]
     pub fn take<B: Body + Decode<'static>>(&mut self, to: u32) -> B {
+        while B::KIND != kind::ACTION_STARTED
+            && self
+                .sent
+                .frames
+                .first()
+                .is_some_and(|(_, kind, _, _)| *kind == kind::ACTION_STARTED)
+        {
+            self.sent.frames.remove(0);
+        }
         assert!(!self.sent.frames.is_empty(), "nothing was sent");
         let (session, kind, payload, _) = self.sent.frames.remove(0);
         assert_eq!((session, kind), (to, B::KIND));
         // The body is owned by the test from here on.
         let leaked: &'static [u8] = Box::leak(payload.into_boxed_slice());
         B::decode(leaked).expect("decode")
+    }
+
+    /// As [`Bench::ask`], from a user `uid`.
+    pub fn ask_as<B: Body>(&mut self, from: u32, uid: u32, body: &B) -> Result<(), Error> {
+        self.seq += 1;
+        let mut payload = [0_u8; 1024];
+        let len = encode_fields(body, &mut payload).expect("encode");
+        let asked = Asked {
+            session: from,
+            seq: self.seq,
+            kind: B::KIND,
+            class: 4,
+            uid,
+            caller: "",
+            payload: &payload[..len],
+        };
+        self.actions.request(&asked, self.now, &mut self.sent)
+    }
+
+    /// `OWNER` says run `id` ended as `outcome`.
+    pub fn result(&mut self, id: u64, outcome: Outcome) {
+        self.ask(
+            OWNER,
+            &ActionResult {
+                call: id,
+                outcome,
+                output: Bytes(b"out"),
+                detail: "",
+                // The program's own code, passed on as it is.
+                code: 11,
+                instance: 0,
+                run: 0,
+                action: "",
+            },
+        )
+        .expect("result");
+    }
+
+    /// The handle node logic gave `to` next, for its `call`.
+    #[track_caller]
+    pub fn handle(&mut self, to: u32, call: u64) -> RunHandle {
+        let at = self
+            .sent
+            .frames
+            .iter()
+            .position(|(_, kind, _, _)| *kind == kind::ACTION_STARTED)
+            .expect("no handle was given");
+        let (session, _, payload, _) = self.sent.frames.remove(at);
+        let started = Started::decode(&payload).expect("decode");
+        assert_eq!((session, started.call), (to, call));
+        assert_eq!(started.action, "set");
+        assert_eq!(started.instance, self.actions.instance());
+        RunHandle::said(started.instance, started.run).expect("a handle")
     }
 
     /// A run under way: the caller's call 7 is the list's `id`.
@@ -160,7 +225,27 @@ impl Bench {
             .run(CALLER, 7, if detached { HOUR } else { 0 }, detached)
             .expect("run");
         let claim: Claim<'_> = bench.take(OWNER);
+        assert_eq!(bench.handle(CALLER, 7).run, claim.call);
         bench.actions.take_events();
         (bench, claim.call)
+    }
+}
+
+/// Coming back to the starter's run `call` by its number alone, as a client before handles
+/// does.
+pub const fn bare(call: u64) -> Attach {
+    Attach {
+        call,
+        instance: 0,
+        run: 0,
+    }
+}
+
+/// Coming back to the run `handle` names, as call `call`.
+pub const fn by(call: u64, handle: RunHandle) -> Attach {
+    Attach {
+        call,
+        instance: handle.instance,
+        run: handle.run,
     }
 }

@@ -55,7 +55,8 @@ use std::time::Duration;
 use orion_connect::Client;
 
 pub use orion_connect::{
-    Address, ClientError, Feature, Identity, LinkRead, LinkWrite, Options, Roles, Session, Welcomed,
+    Address, ClientError, Feature, Identity, LinkRead, LinkWrite, Options, Reply, Roles, Session,
+    Welcomed,
 };
 pub use orion_types as types;
 
@@ -90,7 +91,7 @@ pub mod records {
 pub mod actions {
     pub use orion_actions::{
         ActionCall, ActionDecl, Actions, Admits, Doing, Finished, Outcome, Policy, Registration,
-        Request, Run, Target, Update,
+        Request, Run, RunHandle, Target, Update,
     };
 }
 
@@ -389,6 +390,18 @@ impl Orion {
         Ok(self.client.pump(wait)?)
     }
 
+    /// How long since anything at all, a ping's answer included, came from the node.
+    #[must_use]
+    pub fn silent_for(&self) -> Duration {
+        self.client.silent_for()
+    }
+
+    /// How every later wait for an answer is bounded, every helper's included, until this is
+    /// called again ([`Reply`]). Set it back after a request that needed a longer ceiling.
+    pub fn set_reply(&self, reply: Reply) {
+        self.client.set_reply(reply);
+    }
+
     /// Connects again to the same address, for as long as `keep_trying` says, and then says
     /// everything again: topics are declared with their rings handed back, actions are
     /// registered, and then records are put and watches asked for from where they were.
@@ -543,6 +556,17 @@ impl Orion {
     #[cfg(feature = "actions")]
     pub fn attach(&self, call: u64) -> Result<actions::Run, Error> {
         Ok(self.actions.attach(call)?)
+    }
+
+    /// Comes back to the detached run its handle names, whatever its number.
+    ///
+    /// # Errors
+    ///
+    /// A node below the level that knows handles, or a broken connection. A handle from
+    /// before node logic last started is refused as gone on the run's first read.
+    #[cfg(feature = "actions")]
+    pub fn attach_handle(&self, handle: actions::RunHandle) -> Result<actions::Run, Error> {
+        Ok(self.actions.attach_handle(handle)?)
     }
 
     /// Adds an action of this program's to the list, with who may run it.

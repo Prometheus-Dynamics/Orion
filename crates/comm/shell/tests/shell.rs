@@ -468,6 +468,11 @@ fn with_a_login_helper_the_helper_starts_the_shell() {
         let helper = std::thread::spawn(move || serve(&config, &listener));
         let board = board_with(Security::On, keys, Some(&socket));
         let mut client = Client::open(board.connector.connect(caller())).await;
+        // Held open while the shells below run, so the helper is not idle between them however
+        // slow the machine is.
+        let Heard::Opened(held, _) = client.open_shell("sleep 30", "", 0).await else {
+            panic!("not opened");
+        };
         let Heard::Opened(shell, _) = client.open_shell("id -u; exit 4", "", 0).await else {
             panic!("not opened");
         };
@@ -480,6 +485,12 @@ fn with_a_login_helper_the_helper_starts_the_shell() {
         let (out, _, code) = client.until_exit(shell).await;
         assert!(String::from_utf8_lossy(&out).contains("/dev/pts/"));
         assert_eq!(code, 5);
+        client.send(&ShellClose { shell: held }).await;
+        let began = std::time::Instant::now();
+        while (board.open)() != 0 {
+            assert!(began.elapsed() < WAIT, "the held shell is still open");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         // Gone idle, the helper exits, and no shell starts.
         let began = std::time::Instant::now();
         while !helper.is_finished() {

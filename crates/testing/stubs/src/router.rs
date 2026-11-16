@@ -44,6 +44,8 @@ fn tell(sessions: &mut Sessions, run: &Running) {
             percent: *percent,
             message,
             data: Bytes(data),
+            instance: 0,
+            run: 0,
         };
         let _ = sessions.send(caller, &progress, Delivery::MayDrop);
     }
@@ -54,6 +56,9 @@ fn tell(sessions: &mut Sessions, run: &Running) {
             output: Bytes(output),
             detail,
             code: *code,
+            instance: 0,
+            run: 0,
+            action: "",
         };
         let _ = sessions.send(caller, &result, Delivery::Must);
     }
@@ -191,6 +196,8 @@ impl Service for Router {
                     &Cancel {
                         call: run.id,
                         reason: CancelReason::Asked,
+                        instance: 0,
+                        run: 0,
                     },
                     Delivery::Must,
                 )
@@ -222,6 +229,8 @@ impl Service for Router {
                         &Cancel {
                             call: run.id,
                             reason: CancelReason::CallerGone,
+                            instance: 0,
+                            run: 0,
                         },
                         Delivery::Must,
                     );

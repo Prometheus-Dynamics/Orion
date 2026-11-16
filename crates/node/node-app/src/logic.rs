@@ -442,7 +442,11 @@ impl Logic {
             Err(Error::LeaseLost)
         } else {
             let now = self.now_ms();
-            match self.actions.request(asked, now, out) {
+            let answered = self.actions.request(asked, now, out);
+            if let Some(words) = self.actions.take_said() {
+                self.said = Some(words);
+            }
+            match answered {
                 // Not an action of this node's: another node's, perhaps.
                 Err(Error::NotFound) if asked.kind == kind::ACTION_RUN => self.forward(asked),
                 Err(Error::NotFound) if asked.kind == kind::ACTION_CANCEL => asked

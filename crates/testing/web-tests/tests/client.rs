@@ -25,7 +25,7 @@ fn page(ws: std::net::SocketAddr) -> String {
     format!(
         r#"<!doctype html><meta charset="utf-8"><title>orion web client</title>
 <script type="module">
-import {{ Orion, FieldType, Status, Outcome, Refused, crc32c }} from "/orion.js";
+import {{ Orion, FieldType, Status, Outcome, Refused, TimedOut, crc32c }} from "/orion.js";
 const report = (what) => fetch("/done?" + what).catch(() => {{}});
 const until = async (done) => {{
   for (let tries = 0; tries < 2000 && !done(); tries++) await new Promise((next) => setTimeout(next, 5));
@@ -81,6 +81,19 @@ try {{
     refused = (error instanceof Refused ? "Refused" : "other") + ":" + error.code;
   }}
 
+  // A run nobody finishes, under a ceiling: rejected as timed out, and the board still heard
+  // from all along. Then back to waiting for as long as it takes.
+  orion.setReply({{ alive: true, ceilingMs: 400 }});
+  let ceiling = "answered";
+  try {{
+    const held = await orion.run({{ name: "pump.hold" }});
+    ceiling = "answered:" + held.outcome + ":" + held.code + ":" + held.detail;
+  }} catch (error) {{
+    ceiling = error instanceof TimedOut ? "timedout:" + error.ceilingMs : "other:" + error;
+  }}
+  orion.setReply({{ alive: false }});
+  const heard = orion.silentFor() < 3 * 2000;
+
   // One on another board's topic that nobody carries: refused or left waiting, not broken.
   await report([
     "check=" + check,
@@ -94,6 +107,8 @@ try {{
     "output=" + output,
     "progress=" + progress.join("|"),
     "refused=" + refused,
+    "ceiling=" + ceiling,
+    "heard=" + heard,
   ].join("&"));
   level.close();
   orion.close();
@@ -256,6 +271,20 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
 
     // A dashboard on the board that reads what the page publishes. It asks before the page
     // has declared anything, and says what it would like.
+    // An action that is never finished: a program that registers it and takes nothing, so the
+    // page's ceiling ends the wait.
+    let holder = Orion::connect(&Address::Local(socket.clone()), "holder").expect("connect");
+    let _hold = holder
+        .register_action(
+            &ActionDecl {
+                name: "pump.hold",
+                target: Target::Node("board".parse().expect("name")),
+                description: "Holds the pump, and never says how it went",
+            },
+            Policy::new(Admits::ANYONE).without_grant(),
+        )
+        .expect("register");
+
     let dashboard = Orion::connect(&Address::Local(socket), "dashboard").expect("connect");
     let mut clicks = dashboard
         .subscribe_asking("page.clicks", b"every click")
@@ -299,7 +328,7 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
         result,
         "check=e3069283&node=board&declared=tank.level:litres:3:l:64&status=live&steady=true\
          &request=every%20click&outcome=succeeded&code=7&output=started%20gently&progress=50:priming\
-         &refused=Refused:8"
+         &refused=Refused:8&ceiling=timedout:400&heard=true"
             .replace("%20", " ")
             .replace(' ', "%20"),
         "{result}"

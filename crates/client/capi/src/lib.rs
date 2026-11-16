@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use orion::topics::{
     Field, FieldId, FieldType, Next, Publisher, SampleTime, Subscriber, TopicDecl, TopicError,
 };
-use orion::{Address, ClientError, Error, Options, Orion};
+use orion::{Address, ClientError, Error, Options, Orion, Reply};
 
 /// The major version of the surface. A change that breaks a caller raises it.
 pub const ABI_MAJOR: u32 = 1;
@@ -40,6 +40,11 @@ pub const ORION_E_BUFFER: i32 = -5;
 pub const ORION_E_VERSION: i32 = -6;
 /// Something inside the library went wrong.
 pub const ORION_E_INTERNAL: i32 = -7;
+
+/// Each answer within the connect timeout: [`Reply::Timeout`].
+pub const ORION_REPLY_TIMEOUT: i32 = 0;
+/// For as long as the node is heard from: [`Reply::Alive`].
+pub const ORION_REPLY_ALIVE: i32 = 1;
 
 /// One field of a topic, as C gives it.
 #[repr(C)]
@@ -224,6 +229,45 @@ pub unsafe extern "C" fn orion_connect(
         // SAFETY: `out` is not null and the caller promises space for one pointer.
         unsafe { out.write(Box::into_raw(Box::new(OrionHandle { orion }))) };
         Ok(ORION_OK)
+    })
+}
+
+/// Sets how every later wait for an answer is bounded.
+///
+/// # Safety
+///
+/// `orion` is null or a handle from [`orion_connect`] that has not been closed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn orion_set_reply(
+    orion: *mut OrionHandle,
+    mode: i32,
+    ceiling_ms: u32,
+) -> i32 {
+    guarded(|| {
+        // SAFETY: null, or a live handle as the caller promises.
+        let handle = unsafe { orion.as_ref() }.ok_or_else(|| argument("orion is null"))?;
+        let reply = match mode {
+            ORION_REPLY_TIMEOUT => Reply::Timeout,
+            ORION_REPLY_ALIVE => Reply::Alive {
+                ceiling: (ceiling_ms > 0).then(|| Duration::from_millis(u64::from(ceiling_ms))),
+            },
+            _ => return Err(argument("mode is not an OrionReply")),
+        };
+        handle.orion.set_reply(reply);
+        Ok(ORION_OK)
+    })
+}
+
+/// Milliseconds since anything came from the node.
+///
+/// # Safety
+///
+/// `orion` is null or a handle from [`orion_connect`] that has not been closed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn orion_silent_for_ms(orion: *const OrionHandle) -> u64 {
+    // SAFETY: null, or a live handle as the caller promises.
+    unsafe { orion.as_ref() }.map_or(0, |handle| {
+        u64::try_from(handle.orion.silent_for().as_millis()).unwrap_or(u64::MAX)
     })
 }
 

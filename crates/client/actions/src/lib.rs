@@ -9,6 +9,13 @@
 //! wait for how it ended, or [`Run::cancel`] it. A run started `detached` carries on if the
 //! caller goes away, and [`Actions::attach`] comes back to it.
 //!
+//! Node logic names each run with a [`RunHandle`], told as the run starts. A caller's numbers
+//! start over with each session, so after a session is lost the number may name another run;
+//! the handle never does. [`Run::handle`] reads it, [`Actions::attach_handle`] comes back by it,
+//! and [`Run::cancel`] names it once it is known. If the session was lost before the handle
+//! came, how the run went is not known here: find out from what the action does, never by
+//! coming back to the number alone.
+//!
 //! A program that registered an action is handed each run of it as a [`Request::Run`], says
 //! how it is doing with [`Registration::progress`] and how it ended with
 //! [`Registration::finish`]. It is told when the caller asks to stop.
@@ -22,12 +29,12 @@ use std::time::{Duration, Instant};
 use orion_connect::{Client, ClientError, Cx, Feature, Handler, Incoming};
 use orion_msg_actions::{
     ActionResult, Attach, CallerGone, Cancel, Claim, Progress, Register, Registered,
-    Run as RunMessage,
+    Run as RunMessage, Started,
 };
 use orion_wire::{Bytes, kind};
 
 pub use orion_check::{Admits, Policy};
-pub use orion_msg_actions::{CancelReason, Outcome, Target};
+pub use orion_msg_actions::{CancelReason, Outcome, RunHandle, Target};
 
 /// How many runs wait for a program to take them before more are turned away as busy.
 pub const CLAIM_QUEUE: usize = 64;
@@ -148,6 +155,8 @@ struct Listed {
 /// One run this program started, as far as it has been told.
 struct Following {
     call: u64,
+    /// The run's handle, once node logic has said it.
+    handle: Option<RunHandle>,
     /// The newest progress not yet given to the program.
     doing: Option<Doing>,
     finished: Option<Finished>,
@@ -165,6 +174,20 @@ struct State {
 }
 
 impl State {
+    /// The run a frame is about: by the handle it names, else by its number. A run whose
+    /// handle is known is never matched by number, which may be another run's now.
+    fn about(&mut self, call: u64, instance: u64, run: u64) -> Option<&mut Following> {
+        let handle = RunHandle::said(instance, run);
+        let at = handle
+            .and_then(|handle| self.runs.iter().position(|run| run.handle == Some(handle)))
+            .or_else(|| {
+                self.runs
+                    .iter()
+                    .position(|run| run.call == call && run.handle.is_none())
+            })?;
+        Some(&mut self.runs[at])
+    }
+
     /// Whether the registration sent as `seq` was confirmed. Its confirmation is used up, so
     /// a later request that comes round to the same number waits for its own.
     fn taken(&mut self, seq: u16) -> bool {
@@ -179,6 +202,7 @@ impl State {
 impl Handler for State {
     fn kinds(&self) -> &'static [u8] {
         &[
+            kind::ACTION_STARTED,
             kind::ACTION_PROGRESS,
             kind::ACTION_RESULT,
             kind::ACTION_CLAIM,
@@ -190,9 +214,19 @@ impl Handler for State {
 
     fn handle(&mut self, frame: &Incoming<'_>, cx: &mut Cx<'_>) -> Result<(), ClientError> {
         match frame.kind() {
+            kind::ACTION_STARTED => {
+                let started: Started<'_> = frame.body()?;
+                if let Some(run) = self
+                    .runs
+                    .iter_mut()
+                    .find(|run| run.call == started.call && run.handle.is_none())
+                {
+                    run.handle = RunHandle::said(started.instance, started.run);
+                }
+            }
             kind::ACTION_PROGRESS => {
                 let progress: Progress<'_> = frame.body()?;
-                if let Some(run) = self.runs.iter_mut().find(|run| run.call == progress.call) {
+                if let Some(run) = self.about(progress.call, progress.instance, progress.run) {
                     // Only the newest matters: how it is doing, not how it was.
                     run.doing = Some(Doing {
                         percent: progress.percent,
@@ -203,7 +237,7 @@ impl Handler for State {
             }
             kind::ACTION_RESULT => {
                 let result: ActionResult<'_> = frame.body()?;
-                if let Some(run) = self.runs.iter_mut().find(|run| run.call == result.call) {
+                if let Some(run) = self.about(result.call, result.instance, result.run) {
                     run.finished = Some(Finished {
                         outcome: result.outcome,
                         output: result.output.0.to_vec(),
@@ -223,6 +257,9 @@ impl Handler for State {
                         output: Bytes(&[]),
                         detail: "the action's program is busy",
                         code: 0,
+                        instance: 0,
+                        run: 0,
+                        action: "",
                     })?;
                     return Ok(());
                 }
@@ -283,9 +320,10 @@ impl Actions {
         }
     }
 
-    fn follow(&self, call: u64, seq: u16) -> Run {
+    fn follow(&self, call: u64, handle: Option<RunHandle>, seq: u16) -> Run {
         self.state.borrow_mut().runs.push(Following {
             call,
+            handle,
             doing: None,
             finished: None,
         });
@@ -310,11 +348,7 @@ impl Actions {
         if action.detached {
             self.client.needs(Feature::DetachedRun)?;
         }
-        let call = {
-            let mut state = self.state.borrow_mut();
-            state.next_call += 1;
-            state.next_call
-        };
+        let call = self.next_call();
         let seq = self.client.send(&RunMessage {
             call,
             name: action
@@ -328,18 +362,49 @@ impl Actions {
             // Its own session: only another node's node logic speaks for another.
             on_behalf: 0,
         })?;
-        Ok(self.follow(call, seq))
+        Ok(self.follow(call, None, seq))
     }
 
-    /// Comes back to a run that was started detached. Its latest progress, or how it ended,
-    /// follows.
+    fn next_call(&self) -> u64 {
+        let mut state = self.state.borrow_mut();
+        state.next_call += 1;
+        state.next_call
+    }
+
+    /// Comes back to a run that was started detached, by its number. Its latest progress, or
+    /// how it ended, follows. The number names the run this caller last started under it: a
+    /// run started under it before that is reached by [`Actions::attach_handle`] only.
     ///
     /// # Errors
     ///
     /// If the connection broke. A run that is not there is found on the first read.
     pub fn attach(&self, call: u64) -> Result<Run, ClientError> {
-        let seq = self.client.send(&Attach { call })?;
-        Ok(self.follow(call, seq))
+        let seq = self.client.send(&Attach {
+            call,
+            instance: 0,
+            run: 0,
+        })?;
+        Ok(self.follow(call, None, seq))
+    }
+
+    /// Comes back to the detached run `handle` names, whatever its number. Its latest
+    /// progress, or how it ended, follows. A handle from before node logic last started is
+    /// refused with [`orion_types::Error::RunGone`]: that run is gone.
+    ///
+    /// # Errors
+    ///
+    /// [`ClientError::Level`] on a node below [`Feature::RunHandle`]'s level: nothing is sent.
+    /// If the connection broke. A run that is not there is found on the first read.
+    pub fn attach_handle(&self, handle: RunHandle) -> Result<Run, ClientError> {
+        // An older node reads the number alone, which may be another run's.
+        self.client.needs(Feature::RunHandle)?;
+        let call = self.next_call();
+        let seq = self.client.send(&Attach {
+            call,
+            instance: handle.instance,
+            run: handle.run,
+        })?;
+        Ok(self.follow(call, Some(handle), seq))
     }
 
     /// Adds an action to the list. `policy` says who may run it, and is required: there is no
@@ -434,6 +499,20 @@ impl Run {
         self.call
     }
 
+    /// The run's handle, which names it whatever becomes of this session: what
+    /// [`Actions::attach_handle`] takes. Known once node logic has said it, which any
+    /// [`Run::poll`] or [`Run::wait`] reads. Never known from a node below
+    /// [`Feature::RunHandle`]'s level, or for a run carried to another node.
+    #[must_use]
+    pub fn handle(&self) -> Option<RunHandle> {
+        self.state
+            .borrow()
+            .runs
+            .iter()
+            .find(|run| run.call == self.call)
+            .and_then(|run| run.handle)
+    }
+
     /// The newest news of the run, if there is any since the last look. It does not wait.
     /// Progress is the newest only; how it ended is given once.
     ///
@@ -492,15 +571,20 @@ impl Run {
         }
     }
 
-    /// Asks for the run to stop. How it ended still comes as its result.
+    /// Asks for the run to stop. How it ended still comes as its result. It names the run by
+    /// its handle once that is known; by its number alone, a node stops only a run this same
+    /// session started under it.
     ///
     /// # Errors
     ///
     /// If the connection broke.
     pub fn cancel(&mut self) -> Result<(), ClientError> {
+        let handle = self.handle();
         self.client.send(&Cancel {
             call: self.call,
             reason: CancelReason::Asked,
+            instance: handle.map_or(0, |handle| handle.instance),
+            run: handle.map_or(0, |handle| handle.run),
         })?;
         Ok(())
     }
@@ -575,6 +659,8 @@ impl Registration {
             percent,
             message,
             data: Bytes(data),
+            instance: 0,
+            run: 0,
         })?;
         Ok(())
     }
@@ -616,6 +702,9 @@ impl Registration {
             output: Bytes(output),
             detail,
             code,
+            instance: 0,
+            run: 0,
+            action: "",
         })?;
         Ok(())
     }

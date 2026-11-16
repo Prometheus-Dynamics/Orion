@@ -1,10 +1,6 @@
 //! One filled-in sample of every kind. Each is checked to survive a round trip as it is built.
 
-use orion_check::{Admits, Policy};
-use orion_msg_actions::{
-    ActionResult, Attach, CallerGone, Cancel, CancelReason, Claim, Outcome, Progress, Register,
-    Registered, Run, Target,
-};
+use orion_msg_actions::Target;
 use orion_msg_files::{
     FileBegin, FileChunk, FileCommit, FilePull, FileSink, FileSinkReady, FileState, FileStatus,
 };
@@ -74,6 +70,7 @@ macro_rules! sample {
     }};
 }
 
+mod actions;
 mod shell_and_link;
 
 fn node(name: &str) -> NodeName {
@@ -118,7 +115,7 @@ pub fn all() -> Vec<Sample> {
     session(&mut out);
     records(&mut out);
     files(&mut out);
-    actions(&mut out);
+    actions::samples(&mut out);
     topics(&mut out);
     workloads(&mut out);
     peers(&mut out);
@@ -342,72 +339,6 @@ fn files(out: &mut Vec<Sample>) {
         }
     );
     sample!(out, FileSinkReady { request_seq: 9 });
-}
-
-fn actions(out: &mut Vec<Sample>) {
-    let policy = Policy::new(Admits::LOCAL.and(Admits::OPERATOR));
-    sample!(
-        out,
-        Register {
-            name: action(),
-            target: Target::Node(node("left")),
-            policy,
-            description: "restart it"
-        }
-    );
-    sample!(
-        out,
-        Run {
-            call: 7,
-            name: action(),
-            target: target(),
-            args: Bytes(b"a"),
-            deadline_ms: 5000,
-            detached: true,
-            on_behalf: 4
-        }
-    );
-    sample!(
-        out,
-        Claim {
-            call: 7,
-            name: action(),
-            target: target(),
-            args: Bytes(b"a"),
-            deadline_ms: 5000,
-            caller: "local:1000",
-            session: 3
-        }
-    );
-    sample!(
-        out,
-        Progress {
-            call: 7,
-            percent: 40,
-            message: "halfway",
-            data: Bytes(b"d")
-        }
-    );
-    sample!(
-        out,
-        ActionResult {
-            call: 7,
-            outcome: Outcome::Succeeded,
-            output: Bytes(b"o"),
-            detail: "",
-            code: 11,
-        }
-    );
-    sample!(
-        out,
-        Cancel {
-            call: 7,
-            reason: CancelReason::CallerGone
-        }
-    );
-    sample!(out, Attach { call: 7 });
-    sample!(out, Registered { request_seq: 9 });
-    sample!(out, CallerGone { session: 3 });
 }
 
 fn topics(out: &mut Vec<Sample>) {

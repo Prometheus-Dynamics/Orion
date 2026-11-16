@@ -33,6 +33,7 @@ const enum Kind {
   ActionProgress = 0x33,
   ActionResult = 0x34,
   ActionCancel = 0x35,
+  ActionStarted = 0x39,
   TopicDeclare = 0x40,
   TopicOpened = 0x42,
   TopicSubscribe = 0x43,
@@ -136,6 +137,28 @@ export class Refused extends Error {
     this.name = "Refused";
   }
 }
+
+/**
+ * A wait that ran past the ceiling `setReply` gave it. The connection is fine: the answer was
+ * slow.
+ */
+export class TimedOut extends Error {
+  constructor(readonly ceilingMs: number) {
+    super(`no answer within ${ceilingMs} ms`);
+    this.name = "TimedOut";
+  }
+}
+
+/**
+ * How a wait for an answer is bounded, from `setReply` on. `{ alive: false }`, the default,
+ * waits until the answer comes or the connection ends. `{ alive: true }` also ends the
+ * connection when nothing at all has come from the board for its idle time: the window the
+ * board declared when it welcomed this page (`comm.idle_ms`, three heartbeats unless set), not
+ * a number of this page's. The page pings every half heartbeat and the board answers each, so
+ * a board that is running is never silent that long. With `ceilingMs`, each wait begun from
+ * then on also fails with `TimedOut` that long after it began.
+ */
+export type Reply = { alive: false } | { alive: true; ceilingMs?: number };
 
 // --- The wire: postcard bodies in checksummed frames ---
 
@@ -356,6 +379,9 @@ interface Waiting {
 
 interface Running {
   seq: number;
+  /** The run's handle, once the board has said it: 0n until then, and from a board too old. */
+  instance: bigint;
+  run: bigint;
   onprogress: ((progress: Progress) => void) | undefined;
   resolve: (result: Result) => void;
   reject: (error: Error) => void;
@@ -371,6 +397,12 @@ export class Orion {
   private seq = 0;
   private nextCall = 0n;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
+  private reply: Reply = { alive: false };
+  private lastHeard = Date.now();
+  /** The board's idle time, from its welcome. */
+  private idleMs = 0;
+  /** Ended for being silent too long. */
+  private silent = false;
   /** Requests waiting for the frame that answers them, by their sequence number. */
   private readonly waiting = new Map<number, Waiting>();
   private readonly subscriptions: Subscription[] = [];
@@ -403,6 +435,7 @@ export class Orion {
       };
       socket.onmessage = (event) => {
         if (!(event.data instanceof ArrayBuffer)) return;
+        orion.lastHeard = Date.now();
         let message;
         try {
           message = unframe(new Uint8Array(event.data));
@@ -428,12 +461,20 @@ export class Orion {
             );
             return;
           }
+          // Appended: a board too old to say has three heartbeats.
+          const idleMs = welcome.rest > 0 ? welcome.uint() : 0;
+          orion.idleMs = idleMs > 0 ? idleMs : heartbeatMs * 3;
           // Heard from at least twice in every heartbeat, so the board never gives up on a
-          // page that is merely quiet.
-          orion.heartbeat = setInterval(
-            () => orion.send(Kind.Ping, new Writer().uint(Date.now()).done()),
-            Math.max(100, heartbeatMs / 2),
-          );
+          // page that is merely quiet; and, when the page asked, a board silent for its idle
+          // time is taken for gone.
+          orion.heartbeat = setInterval(() => {
+            if (orion.reply.alive && orion.silentFor() >= orion.idleMs) {
+              orion.silent = true;
+              orion.close();
+              return;
+            }
+            orion.send(Kind.Ping, new Writer().uint(Date.now()).done());
+          }, Math.max(100, heartbeatMs / 2));
           welcomed = true;
           resolve(orion);
         } else if (message.kind === Kind.Reject) {
@@ -459,6 +500,19 @@ export class Orion {
     this.socket.close();
   }
 
+  /** Milliseconds since anything at all, a ping's answer included, came from the board. */
+  silentFor(): number {
+    return Date.now() - this.lastHeard;
+  }
+
+  /**
+   * How every wait for an answer begun from now on is bounded, until this is called again.
+   * Set it back after a request that needed a longer ceiling.
+   */
+  setReply(reply: Reply): void {
+    this.reply = reply;
+  }
+
   /**
    * Subscribes to `topic`, or to `node/topic` for another board's. `onsample` is given each
    * sample as it arrives. Resolves when the board has taken the subscription; the topic
@@ -477,6 +531,7 @@ export class Orion {
     return new Promise((resolve, reject) => {
       // Answered by `Opened` or by `TopicState`; either says it was taken.
       this.waiting.set(seq, { resolve: () => resolve(subscription), reject });
+      this.ceiling(reject, () => this.waiting.delete(seq));
     });
   }
 
@@ -531,8 +586,23 @@ export class Orion {
     body.blob(action.args ?? new Uint8Array()).uint(action.deadlineMs ?? 0).bool(false);
     const seq = this.send(Kind.ActionRun, body.done());
     return new Promise((resolve, reject) => {
-      this.runs.set(call, { seq, onprogress, resolve, reject });
+      this.runs.set(call, { seq, instance: 0n, run: 0n, onprogress, resolve, reject });
+      this.ceiling(reject, () => this.runs.delete(call));
     });
+  }
+
+  /**
+   * The run a frame is about: by the handle it names, else by its number. A run whose handle
+   * is known is never matched by number.
+   */
+  private about(call: bigint, instance: bigint, id: bigint): [bigint, Running] | undefined {
+    if (instance !== 0n && id !== 0n) {
+      for (const entry of this.runs) {
+        if (entry[1].instance === instance && entry[1].run === id) return entry;
+      }
+    }
+    const run = this.runs.get(call);
+    return run !== undefined && run.run === 0n ? [call, run] : undefined;
   }
 
   private send(kind: number, payload: Uint8Array): number {
@@ -545,7 +615,20 @@ export class Orion {
 
   private request(kind: number, payload: Uint8Array): Promise<Reader> {
     const seq = this.send(kind, payload);
-    return new Promise((resolve, reject) => this.waiting.set(seq, { resolve, reject }));
+    return new Promise((resolve, reject) => {
+      this.waiting.set(seq, { resolve, reject });
+      this.ceiling(reject, () => this.waiting.delete(seq));
+    });
+  }
+
+  /** Rejects a wait with `TimedOut` at the ceiling, if there is one and it still waits. */
+  private ceiling(reject: (error: Error) => void, stillWaiting: () => boolean): void {
+    const reply = this.reply;
+    if (!reply.alive || reply.ceilingMs === undefined) return;
+    const ceilingMs = reply.ceilingMs;
+    setTimeout(() => {
+      if (stillWaiting()) reject(new TimedOut(ceilingMs));
+    }, ceilingMs);
   }
 
   private answered(seq: number, reader: Reader): void {
@@ -614,22 +697,34 @@ export class Orion {
         }
         break;
       }
-      case Kind.ActionProgress: {
+      case Kind.ActionStarted: {
         const run = this.runs.get(reader.big());
-        run?.onprogress?.({ percent: reader.u8(), message: reader.str(), data: reader.blob().slice() });
+        if (run !== undefined && run.run === 0n) {
+          run.instance = reader.big();
+          run.run = reader.big();
+        }
+        break;
+      }
+      case Kind.ActionProgress: {
+        const call = reader.big();
+        const progress = { percent: reader.u8(), message: reader.str(), data: reader.blob().slice() };
+        // Appended: the run's handle. A board too old to send it said nothing.
+        const [instance, id] = reader.rest > 0 ? [reader.big(), reader.big()] : [0n, 0n];
+        this.about(call, instance, id)?.[1].onprogress?.(progress);
         break;
       }
       case Kind.ActionResult: {
         const call = reader.big();
-        const run = this.runs.get(call);
-        if (run !== undefined) {
-          this.runs.delete(call);
-          const outcome = reader.u8() as Outcome;
-          const output = reader.blob().slice();
-          const detail = reader.str();
-          // Appended: a board too old to send it said nothing, which is 0.
-          const code = reader.rest > 0 ? reader.uint() : 0;
-          run.resolve({ outcome, code, output, detail });
+        const outcome = reader.u8() as Outcome;
+        const output = reader.blob().slice();
+        const detail = reader.str();
+        // Appended: a board too old to send them said nothing, which is 0.
+        const code = reader.rest > 0 ? reader.uint() : 0;
+        const [instance, id] = reader.rest > 0 ? [reader.big(), reader.big()] : [0n, 0n];
+        const found = this.about(call, instance, id);
+        if (found !== undefined) {
+          this.runs.delete(found[0]);
+          found[1].resolve({ outcome, code, output, detail });
         }
         break;
       }
@@ -663,7 +758,11 @@ export class Orion {
   private closed(): void {
     if (this.heartbeat !== undefined) clearInterval(this.heartbeat);
     this.heartbeat = undefined;
-    const gone = new Error("the connection to the board ended");
+    const gone = new Error(
+      this.silent
+        ? `the board was silent for its idle time (${this.idleMs} ms)`
+        : "the connection to the board ended",
+    );
     for (const waiting of this.waiting.values()) waiting.reject(gone);
     for (const run of this.runs.values()) run.reject(gone);
     this.waiting.clear();

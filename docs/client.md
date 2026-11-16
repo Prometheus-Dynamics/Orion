@@ -114,7 +114,29 @@ socket neither side ends the session for silence: the comm core keeps a quiet pr
 it, and the client keeps a silent comm core, because that socket reports the other end closing
 at once. A program with nothing to wait for calls `next`
 with a zero wait from its own loop; one that waits on other things too gives `as_fd` to `poll`.
-With feature `tokio`, `next_async` waits inside a runtime instead.
+With feature `tokio`, `next_async` and `answer_async` wait inside a runtime instead.
+
+**How long an answer may take** is `Options::reply`, and `set_reply` changes it for every
+later wait, the helpers' included, until it is set again (a reconnect keeps it). Set it back
+after a request that needed a longer ceiling.
+
+- `Reply::Timeout`, the default: each answer within `Options::timeout`, the same number that
+  bounds connecting and the hello. A busy node, or a starved machine, can make a healthy answer
+  late.
+- `Reply::Alive { ceiling }`: for as long as the node is heard from. The wait fails with:
+  - `ClientError::Lost` when nothing at all has come for the node's idle time;
+  - a timed-out `ClientError::Io` at the ceiling, if there is one. The session is still good.
+
+  The window is the node's declared value (`Welcomed::idle`), never a number of the client's.
+  The client pings every half heartbeat while it waits, and the node answers each ping, so a
+  node that is running is never silent that long. Under `Alive` this holds on the board's own
+  socket too.
+- `silent_for()` is how long since anything at all came. The same calls are on `Client` and
+  `Orion`.
+- C: `orion_set_reply` and `orion_silent_for_ms`. The web client: `setReply` and
+  `silentFor`; it has no bound by default.
+- A node that takes the connection and never says hello fails with a timed-out
+  `ClientError::Io` (`ORION_E_TIMEOUT` in C), not the kernel's "try again".
 
 **Who the board is, and being let in.** `node()` is who the board says it is, signed by its key
 and made for the question, `clock()` how its clock compares, `sync_peers()` and `forgive(peer)`
@@ -245,7 +267,9 @@ any program that connects adds its own.
 | `run.poll()`, `run.wait(for)` | News of the run: how it is doing (the newest only), or how it ended |
 | `run.finish(for)` | Waits for how it ended |
 | `run.cancel()` | Asks for it to stop. How it ended still comes |
-| `actions.attach(number)` | Comes back to a run that was started detached |
+| `actions.attach(number)` | Comes back to a run that was started detached, by its number |
+| `run.handle()` | The run's handle, which names it whatever becomes of this session |
+| `actions.attach_handle(handle)` | Comes back to the detached run a handle names |
 | `actions.register(decl, policy)` | Adds an action. The policy is required |
 | `registration.poll()`, `.wait(for)` | The next run handed to this program, a request to stop one, or a caller gone |
 | `registration.progress(..)`, `.finish(..)` | Says how a run is doing, and how it ended |
@@ -285,6 +309,27 @@ going or not: that is the time to let go of what it holds for that caller. A det
 on until its deadline. A detached run needs a deadline (`deadline_ms`), no longer than the node
 takes (`actions.max_detached_ms`, an hour unless said): it is refused otherwise, as `NoDeadline`
 or `DeadlineTooLong`.
+
+**A run's handle.** A caller's numbers start over with each session, so once a session is
+lost its number may name another run. Node logic tells each run's handle as it starts, and
+`run.handle()` gives it once any `poll` or `wait` has read it. It is `RunHandle { instance, run }`,
+kept as 16 bytes (`to_bytes`, `from_bytes`) or as text (`<16 hex>-<16 hex>`, by `Display` and
+`FromStr`). Keep it with whatever the run is for.
+
+- `actions.attach_handle(handle)` comes back to that run alone, from any session of the same
+  starter. It needs a node at level 3 (`Feature::RunHandle`): below it, nothing is sent.
+- `run.cancel()` names the handle once it is known. By number alone, a node stops only a run
+  this same session started.
+- A handle from before node logic last started is refused as `RunGone`: that run is gone, and
+  how it ended is not known on the node.
+- **If the session is lost before the handle comes**, how the run went is not known. Find out
+  from what the action does, by reading what it changes. Never come back to the number alone:
+  by then it may name another run.
+
+`actions.attach(number)` still works for a detached run that no later detached run of the same
+starter took. Once one has, the number is refused as `NotFound`, saying to use the handle. A
+node too old to give handles gives none, and `run.handle()` is `None`; so is a run carried to
+another node.
 
 A program that is not taking its runs does not have them pile up: 64 wait, and the next is
 answered as rejected, busy, at once.

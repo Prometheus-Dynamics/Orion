@@ -207,7 +207,12 @@ impl Helper {
             Command::Cancel { id, reason } => {
                 if self.running.contains_key(&id)
                     && let Some(session) = &mut self.session
-                    && let Err(error) = session.send(&Cancel { call: id, reason })
+                    && let Err(error) = session.send(&Cancel {
+                        call: id,
+                        reason,
+                        instance: 0,
+                        run: 0,
+                    })
                 {
                     self.lost(&error);
                 }

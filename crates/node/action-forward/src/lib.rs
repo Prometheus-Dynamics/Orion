@@ -233,6 +233,11 @@ impl Forwards {
                     output: Bytes(output),
                     detail,
                     code,
+                    // A run carried to another node has no handle here: it is followed and
+                    // cancelled by its number.
+                    instance: 0,
+                    run: 0,
+                    action: "",
                 },
             );
         }
@@ -258,6 +263,8 @@ impl Forwards {
                                 percent,
                                 message: &message,
                                 data: Bytes(&data),
+                                instance: 0,
+                                run: 0,
                             },
                         );
                     }

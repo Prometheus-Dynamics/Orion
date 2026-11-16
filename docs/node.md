@@ -236,16 +236,32 @@ actions; any program on the board adds its own.
   its deadline and under its program as before. It must have a deadline, so that it ends
   even if nobody comes back: without one it is refused as `a detached run needs a deadline`,
   and one longer than `actions.max_detached_ms` (an hour unless said) as `deadline is longer
-  than allowed`. Whoever started it comes back with `Attach`
-  and the run's number, from any session: it is sent the latest progress at once and then
-  what follows, and can cancel. How a detached run ended is kept for ten minutes (256 runs
-  at most, the oldest goes first) and given to its starter when it asks, once; that is so
-  even if a caller seemed to be attached when it ended, because a session can end a moment
-  before node logic hears of it. "Whoever
+  than allowed`. Whoever started it comes back with `Attach`, from any session: it is sent
+  the run's handle (`ACTION_STARTED`), the latest progress at once and then what follows. How
+  a detached run ended is kept for ten minutes (256 runs at most, the oldest goes first) and
+  given to its starter when it asks, once; that is so even if a caller seemed to be attached
+  when it ended, because a session can end a moment before node logic hears of it. "Whoever
   started it" is the same user on the board, the same operator key or the same peer, as the
-  comm core says; for anyone else the run is `not found`. A caller's numbers start over with each
-  of its sessions, so a new run under a number replaces what was kept under it, and of two
-  such runs under way the newer is the one come back to.
+  comm core says; for anyone else the run is `not found`.
+- **Run handles.** Every run started here is told to its caller with `ACTION_STARTED`: its
+  number, its handle and its action. The handle is `instance`, drawn at random each time node
+  logic starts, and `run`, node logic's own number for the run. Progress and results carry it
+  too. It is kept as 16 bytes (each half little-endian) or written `<16 hex>-<16 hex>`. A
+  caller's numbers start over with each of its sessions, so after a session is lost a number
+  can name another run; a handle never does.
+  - `Attach` and `Cancel` that name a handle reach that run alone, for its starter. A handle
+    from before node logic last started is refused as `run gone` (23); a session below level 3
+    is told `not found`.
+  - A number alone, as an older client sends it: a cancel reaches only a run this same session
+    started under it. An attach reaches the starter's run under that number that no later
+    detached run took. A detached run started under a number takes it: the starter's earlier
+    runs under it, going or kept, are reached by their handles only, and an attach by the
+    number alone is refused saying so. A run that is not detached takes no number.
+  - A run carried to another node has no handle here: its caller follows and cancels it by
+    number.
+  - If a session is lost between starting a run and hearing its handle, how the run went is
+    not known. Find out from what the action does (read what it changes), never by coming back
+    to the number alone, which may name another run by then.
 - **Deadlines.** A run with a deadline that passes ends as `TimedOut` and the program is told
   to stop. What the program says of it afterwards is ignored.
 - **Only the program that has a run speaks for it.** A result from anyone else is `denied`.

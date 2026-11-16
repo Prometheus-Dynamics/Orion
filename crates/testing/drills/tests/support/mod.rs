@@ -250,6 +250,19 @@ impl Proc {
     pub fn running(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
     }
+
+    /// Whether it exits within `within`. A process's sockets close as it exits, a moment
+    /// before it can be waited for, so what it was connected to can hear it go first.
+    pub fn exits_within(&mut self, within: Duration) -> bool {
+        let until = Instant::now() + within;
+        while self.running() {
+            if Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
 }
 
 impl Drop for Proc {

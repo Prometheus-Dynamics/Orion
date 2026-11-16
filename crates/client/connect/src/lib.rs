@@ -44,6 +44,7 @@ use orion_wire::{
 };
 
 pub use address::{Address, DEFAULT_PORT, DEFAULT_SOCKET};
+pub use alive::Reply;
 pub use client::{Client, Handler};
 pub use error::ClientError;
 pub use fd::{BorrowedFd, OwnedFd};
@@ -68,8 +69,11 @@ pub struct Options {
     pub identity: Option<Identity>,
     /// The largest frame this client takes.
     pub max_frame: u32,
-    /// How long connecting and saying hello may take.
+    /// How long connecting and saying hello may take, and, with [`Reply::Timeout`], each
+    /// answer.
     pub timeout: Duration,
+    /// How a wait for an answer is bounded. [`Reply::Timeout`] by default.
+    pub reply: Reply,
 }
 
 impl Default for Options {
@@ -79,6 +83,7 @@ impl Default for Options {
             identity: None,
             max_frame: 64 * 1024,
             timeout: Duration::from_secs(5),
+            reply: Reply::Timeout,
         }
     }
 }
@@ -304,6 +309,7 @@ impl Session {
                 .map(|identity| Identity::from_secret(&identity.secret())),
             max_frame: self.options.max_frame,
             timeout: self.options.timeout,
+            reply: self.options.reply,
         }
     }
 
@@ -530,7 +536,8 @@ impl Session {
         )))
     }
 
-    /// How long a request waits for its answer, and connecting for its hello.
+    /// How long connecting may take for its hello, and, with [`Reply::Timeout`], a request
+    /// for its answer.
     #[must_use]
     pub const fn timeout(&self) -> Duration {
         self.options.timeout
@@ -547,15 +554,14 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// [`ClientError::Refused`] if the comm core refused the request, a timed-out
-    /// [`ClientError::Io`] if no answer came within the session's timeout, and as
-    /// [`Session::next`].
+    /// [`ClientError::Refused`] if the comm core refused the request, as
+    /// [`Session::reply_left`] when the wait is over, and as [`Session::next`].
     pub fn answer(&mut self, seq: u16, want: u8) -> Result<Incoming<'_>, ClientError> {
-        let deadline = Instant::now() + self.options.timeout;
+        let since = Instant::now();
         loop {
-            let left = deadline.saturating_duration_since(Instant::now());
+            let left = self.reply_left(since)?;
             let Some(incoming) = self.next(left)? else {
-                return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
+                continue;
             };
             if incoming.kind() == kind::REFUSAL {
                 let refusal: Refusal<'_> = incoming.body()?;
@@ -718,57 +724,4 @@ fn signed(
 }
 
 #[cfg(all(feature = "tokio", target_os = "linux"))]
-mod wait {
-    //! Waiting for the session inside a tokio runtime.
-
-    use std::time::{Duration, Instant};
-
-    use tokio::io::Interest;
-    use tokio::net::UnixDatagram;
-
-    use super::{ClientError, Incoming, Session};
-
-    impl Session {
-        /// As [`Session::next`], inside a tokio runtime: waits without blocking the thread.
-        /// Sending still writes at once, which a comm core that is reading never holds up.
-        ///
-        /// # Errors
-        ///
-        /// As [`Session::next`].
-        pub async fn next_async(
-            &mut self,
-            wait: Duration,
-        ) -> Result<Option<Incoming<'_>>, ClientError> {
-            // Tokio waits on a duplicate of the session's descriptor. Which kind of socket it
-            // is told it has does not matter: it is only ever asked whether there is
-            // something to read.
-            let duplicate = self.transport.fd().try_clone_to_owned()?;
-            let waiter = UnixDatagram::from_std(std::os::unix::net::UnixDatagram::from(duplicate))?;
-            let deadline = Instant::now() + wait;
-            loop {
-                if self.take()? {
-                    return Ok(Some(self.incoming()));
-                }
-                let now = Instant::now();
-                self.keep_alive(now)?;
-                if now >= deadline {
-                    return Ok(None);
-                }
-                let until = self.wake_at(deadline);
-                let ready = tokio::time::timeout(
-                    until.saturating_duration_since(now),
-                    waiter.ready(Interest::READABLE),
-                )
-                .await;
-                if let Ok(ready) = ready {
-                    ready?;
-                    // Readiness is forgotten here and asked for again after the next look, so
-                    // a frame that is only partly here does not spin.
-                    let _ = waiter.try_io(Interest::READABLE, || {
-                        Err::<(), _>(std::io::Error::from(std::io::ErrorKind::WouldBlock))
-                    });
-                }
-            }
-        }
-    }
-}
+mod wait;

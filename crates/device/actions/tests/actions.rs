@@ -199,6 +199,8 @@ fn a_cancel_is_passed_on() {
     rig.send(&Cancel {
         call: 9,
         reason: orion_msg_actions::CancelReason::Deadline,
+        instance: 0,
+        run: 0,
     });
     // With why, as the wire numbers it.
     assert_eq!(rig.last_heard(), Some("Cancel { call: 9, reason: 3 }"));

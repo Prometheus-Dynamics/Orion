@@ -96,6 +96,8 @@ safely ignore have no level.
 | 2 | The error `restoring` (20) | (told to a session, not asked of a node: see below) |
 | 2 | The error `layout` (21) | (told to a session: see below) |
 | 2 | The error `lease lost` (22) | (told to a session: see below) |
+| 3 | `RunHandle`: `Attach` and `Cancel` naming a run by `instance` and `run` | Read the number alone, which may name another run of the same caller |
+| 3 | The error `run gone` (23) | (told to a session: see below) |
 
 **Errors have levels too.** An error code added after level 1 is told only to a session that said
 it is at that code's level or above. A session below it is told what it was told before the code
@@ -103,12 +105,15 @@ existed. `restoring` (20) is level 2: a session at level 0 or 1 is told `not fou
 so a client of an older build never meets a code it does not know. `lease lost` (22) is level 2
 too, and a session below it is told `busy`. `layout` (21), a ring offered by a publisher built
 against another shared-memory layout, is level 2, and a session below it is told `malformed`.
+`run gone` (23), a run handle from before node logic last started, is level 3, and a session
+below it is told `not found`.
 `orion_server::spoken` is the one place this is decided, for the comm core's own refusals and
 for node logic's. Words sent with a refusal go only with the code they were written for: a
 session told the older code is told that code's own words.
 
 Additions with no level, because an older side ignores them and does nothing different that
-matters: `Cancel.reason`, `Claim.session`, `ACTION_CALLER_GONE` to a program, the hello document's
+matters: `ACTION_STARTED` and the `instance`, `run` and `action` appended to `Progress` and
+`ActionResult` (an older client follows by its number, as before), `Cancel.reason`, `Claim.session`, `ACTION_CALLER_GONE` to a program, the hello document's
 `state`, `recovery_why`, `security` and `security_generation` facts, `Reject`'s two revisions, and the resource state `Restoring` (4).
 An older program reads that state as one it does not know, which is not `Ready`, so it waits as
 it should.

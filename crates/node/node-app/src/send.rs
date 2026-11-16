@@ -133,6 +133,9 @@ fn end(
         output: Bytes(&[]),
         detail,
         code: 0,
+        instance: 0,
+        run: 0,
+        action: "",
     })
     .map(|_| ())
 }
@@ -299,6 +302,8 @@ impl Sends {
                         percent,
                         message: "sending",
                         data: Bytes(&[]),
+                        instance: 0,
+                        run: 0,
                     })?;
                 }
                 Ok(())

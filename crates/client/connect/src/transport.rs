@@ -42,6 +42,19 @@ const LINK_FRAME: usize = 8192;
 /// How long a send waits for the other end to make room before the session counts as lost.
 const SEND_WAIT: Duration = Duration::from_secs(5);
 
+/// A handshake read or write that failed: its time ran out when the kernel says "try again",
+/// which is what a socket's own timeout returns.
+fn hello_late(error: io::Error) -> io::Error {
+    if error.kind() == io::ErrorKind::WouldBlock {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "connecting: no answer from the node within Options::timeout",
+        )
+    } else {
+        error
+    }
+}
+
 /// Writes all of `bytes` to a non-blocking descriptor, waiting for room when there is none.
 #[cfg(target_os = "linux")]
 fn write_all<W: Write + AsFd>(mut to: W, bytes: &[u8]) -> Result<(), ClientError> {
@@ -315,13 +328,15 @@ impl Transport {
         // The handshake is a few fixed messages: a deadline on each is a deadline on it.
         stream.set_read_timeout(Some(timeout))?;
         stream.set_write_timeout(Some(timeout))?;
-        stream.write_all(&preamble(if identity.is_some() {
-            MODE_SIGNED
-        } else {
-            MODE_PLAIN
-        }))?;
+        stream
+            .write_all(&preamble(if identity.is_some() {
+                MODE_SIGNED
+            } else {
+                MODE_PLAIN
+            }))
+            .map_err(hello_late)?;
         let mut status = [0_u8; 1];
-        stream.read_exact(&mut status)?;
+        stream.read_exact(&mut status).map_err(hello_late)?;
         if status[0] != STATUS_OK {
             return Err(ClientError::Denied(
                 "the node needs a signed session, and this client has no key",
@@ -337,9 +352,9 @@ impl Transport {
             Some(identity) => {
                 let fresh = Fresh::new();
                 let client = hello(&fresh, &identity.public());
-                stream.write_all(&client)?;
+                stream.write_all(&client).map_err(hello_late)?;
                 let mut answer = [0_u8; SERVER_HELLO_LEN];
-                stream.read_exact(&mut answer)?;
+                stream.read_exact(&mut answer).map_err(hello_late)?;
                 let mut server = [0_u8; 96];
                 server.copy_from_slice(&answer[..96]);
                 let transcript = Transcript { client, server };
@@ -357,8 +372,10 @@ impl Transport {
                 let (to_server, to_client) = transcript.keys(&fresh, true).ok_or(
                     ClientError::Denied("the node sent a key exchange that gives no secret"),
                 )?;
-                stream.write_all(&transcript.sign_client(identity))?;
-                stream.read_exact(&mut status)?;
+                stream
+                    .write_all(&transcript.sign_client(identity))
+                    .map_err(hello_late)?;
+                stream.read_exact(&mut status).map_err(hello_late)?;
                 if status[0] != STATUS_OK {
                     return Err(ClientError::Denied("the node refused this client's key"));
                 }
