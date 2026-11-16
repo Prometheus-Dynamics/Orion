@@ -94,6 +94,7 @@ The always-up program: connections, the broker, hello, discovery, time and links
 - [x] [C47](docs/prs/C47.md) A run's code from a microcontroller and in a web page (wave 18; needs C44)
 - [x] [C49](docs/prs/C49.md) A session dropped for its writes says whether they stalled or failed, and on what (wave 18; needs C48)
 - [x] [C50](docs/prs/C50.md) A program killed with frames unread is a peer closing, not a broken connection (wave 18; needs C49)
+- [x] [C51](docs/prs/C51.md) What the code grew by from I6, measured on the board, and whether it is needed (wave 18; needs C50)
 
 ## D. Client
 

@@ -42,6 +42,7 @@ use orion::{Address, Error, Options, Orion, Roles, fields};
 /// Why a role stopped.
 type Failed = Box<dyn std::error::Error>;
 
+mod pages;
 mod throttle;
 use orion_sample_executor::{Sample, run};
 
@@ -72,6 +73,7 @@ pub fn role(args: &[String]) -> Option<ExitCode> {
         "viewer" => viewer(&socket),
         "executor" => executor(&socket),
         "provider" => provider(&socket),
+        "pages" => pages::pages(args),
         "throttle" => match (args.get(2), args.get(3).and_then(|rate| rate.parse().ok())) {
             (Some(target), Some(rate)) => throttle::throttle(&args[1], target, rate),
             _ => Err("usage: throttle <listen> <target> <bytes a second>".into()),
