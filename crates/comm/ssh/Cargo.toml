@@ -11,6 +11,9 @@ publish = false
 [features]
 # Local forwarding: connections from the board, carried on a channel.
 forward = ["dep:orion-ssh-forward"]
+# The login helper: sessions started by a process of their own, so the comm core need not be
+# root (`orion login-helper`), and the comm core's end of it.
+login-helper = ["dep:postcard", "dep:serde", "dep:shm-fdpass"]
 
 [dependencies]
 orion-check = { path = "../../core/check" }
@@ -18,6 +21,9 @@ orion-config = { path = "../../core/config" }
 orion-keys = { path = "../keys" }
 orion-ssh-forward = { path = "../ssh-forward", optional = true }
 orion-types = { path = "../../core/types" }
+postcard = { workspace = true, features = ["alloc"], optional = true }
+serde = { workspace = true, features = ["alloc", "derive"], optional = true }
+shm-fdpass = { workspace = true, optional = true }
 russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
 rustix = { version = "1", default-features = false, features = ["std", "pty", "process", "thread", "termios", "fs", "stdio", "event", "net", "pipe", "rand"] }
 tokio = { workspace = true, features = ["rt", "net", "io-util", "time", "sync", "macros", "process", "fs"] }
@@ -29,6 +35,10 @@ tokio = { workspace = true, features = ["rt", "macros", "time", "net", "io-util"
 [[test]]
 name = "forward"
 required-features = ["forward"]
+
+[[test]]
+name = "login"
+required-features = ["login-helper"]
 
 [lints]
 workspace = true

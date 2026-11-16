@@ -428,8 +428,9 @@ Recovery keeps to the same interface when the settings were read.
   board's, read from `/etc/passwd` and `/etc/group`. Each session runs in a helper process:
   the comm core's own program started again with `ssh-session` (or `ssh.helper`). The helper
   takes the terminal as its own, becomes the account with all its groups, checks that it has
-  and that it cannot go back, and then becomes the account's shell. A comm core that runs as
-  root can let in any account; one that does not can only let in the account it runs as.
+  and that it cannot go back, and then becomes the account's shell. The comm core does not
+  start it: the login helper does (below), and a comm core with none (`login.helper` unset)
+  can let in any account only if it runs as root, and otherwise only the account it runs as.
 - **What a session is.** A login shell or a command, on a terminal if the client asks for
   one, with its window size, input, output, errors apart, exit code, and the signal that
   ended it as a shell would report it. Its environment is `HOME`, `USER`, `LOGNAME`, `SHELL`,
@@ -496,7 +497,8 @@ listened on yet is not among them: the network, WebSocket, SSH and NT4 ways in e
   interface.
 - **Nothing written.** The host key is the board's if it can be read, and one for the run if
   not. A session needs no home directory, and an account whose shell is gone gets `/bin/sh`.
-  If the account files themselves are gone and the comm core is root, `root` is still let in.
+  If the account files themselves are gone and the comm core is root, or has a login helper,
+  `root` is still let in.
 - **Never backed off.** If no address can be listened on, each is tried again every second,
   for ever, at the same pace.
 - **To the service manager** recovery is a comm core that is up, with `recovery: <why>` as
@@ -550,6 +552,39 @@ command, terminal)` in the client (feature `shell`) opens one; it is on unless `
 
 The kinds are `0x80` to `0x87` (`docs/wire.md`).
 
+## The login helper
+
+`orion login-helper` (feature `login-helper`, on in `orion`) is the one process that becomes
+other users, so the comm core never has to be root. The comm core decides who logs in as it
+always has, and then asks the helper, on a socket (`login.helper`), to start what it let in:
+a session for an SSH login, a shell over an Orion session, or an SSH connection's child.
+
+- **It decides again.** For each question it reads the security switch and the trust store as
+  they are then (the store read only: nothing is made or written), and runs the same check
+  the comm core ran. An SSH login is let in only if the key may log in as that account; a
+  shell only if the principal the comm core names may have a shell as that account
+  (`orion_ssh::SHELL`). What it refuses it says why, and the comm core passes that on. So a
+  comm core that is taken over can ask for anything, and gets only what the check would give
+  the principals it names: it can name principals, not forge keys, since an SSH login is the
+  key the client proved it holds.
+- **It answers one user.** Only `login.comm_user` (by the kernel's word on the socket, not
+  the asker's) may ask; anyone else is refused before what they asked is read.
+- **A connection's child is fixed.** The question names no account: the child is
+  `ssh.sandbox_user`, from the helper's own settings, and a sandbox user that is root is
+  refused.
+- **Recovery.** A comm core in recovery says so, and the helper decides with the recovery
+  keys. Settings the helper cannot read it reads as recovery does, from the last good start's
+  record or not at all, and then answers nothing but recovery: a board whose settings are
+  broken still lets in whoever the recovery keys name, through the helper.
+- **It goes when idle.** The system starts it on the first question (`orion-login.socket`)
+  and it exits once no session it started runs and nothing has been asked for
+  `login.idle_ms`. A session's end comes back to the comm core through the helper, which
+  counts it.
+
+`packaging/README.md` has the units: the comm core as `orion-comm` with only `CAP_SYS_TIME`
+and `CAP_NET_BIND_SERVICE`, the helper as root with only `CAP_SETUID`, `CAP_SETGID`,
+`CAP_CHOWN` and `CAP_KILL`.
+
 ## The helper programs
 
 The comm core starts helper programs: a session that becomes the user (`ssh-session`), the
@@ -568,6 +603,7 @@ holds one copy of the code they share.
 ```
 orion comm [settings file]     the comm core
 orion node [settings file]     node logic
+orion login-helper [settings]  the login helper
 orion [ctl] <concept> <verb>   the command line (docs/client.md)
 ```
 

@@ -11,6 +11,8 @@ publish = false
 [features]
 # Local forwarding, as in orion-ssh.
 forward = ["orion-ssh/forward"]
+# Children and sessions started by the login helper (`login.helper`).
+login-helper = ["orion-ssh/login-helper"]
 
 [dependencies]
 orion-check = { path = "../../core/check" }

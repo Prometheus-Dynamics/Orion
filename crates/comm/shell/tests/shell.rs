@@ -42,20 +42,8 @@ fn caller() -> Principal {
     }
 }
 
-struct Board {
-    connector: MemConnector,
-    open: Box<dyn Fn() -> usize>,
-}
-
-fn board(security: Security) -> Board {
-    let keys = SharedKeys::new(Keys::open(KeysConfig::in_memory("lab"), security).expect("keys"));
-    let comm = Comm::new(
-        "board".parse().expect("name"),
-        security,
-        Some(Rc::new(keys.clone())),
-        Limits::default(),
-    );
-    let config = SshConfig {
+fn ssh_config() -> SshConfig {
+    SshConfig {
         listen: "127.0.0.1:0".parse().expect("addr"),
         interface: None,
         host_key: std::env::temp_dir().join("orion-shell-unused-host-key"),
@@ -70,8 +58,32 @@ fn board(security: Security) -> Board {
         max_connections: 4,
         max_unauthenticated: 4,
         login: Duration::from_secs(60),
-    };
+    }
+}
+
+struct Board {
+    connector: MemConnector,
+    open: Box<dyn Fn() -> usize>,
+}
+
+fn board(security: Security) -> Board {
+    let keys = SharedKeys::new(Keys::open(KeysConfig::in_memory("lab"), security).expect("keys"));
+    board_with(security, keys, None)
+}
+
+fn board_with(security: Security, keys: SharedKeys, helper: Option<&Path>) -> Board {
+    let comm = Comm::new(
+        "board".parse().expect("name"),
+        security,
+        Some(Rc::new(keys.clone())),
+        Limits::default(),
+    );
+    let config = ssh_config();
     let keeper = Keeper::new(config, security, keys, "127.0.0.1:0".parse().expect("addr"));
+    #[cfg(feature = "login-helper")]
+    let keeper = keeper.with_helper(helper.map(Path::to_owned));
+    #[cfg(not(feature = "login-helper"))]
+    let _ = helper;
     let service = ShellService::new(&comm, Rc::new(keeper));
     let open = service.counter();
     comm.add_service(service);
@@ -417,5 +429,68 @@ fn nobody_becomes_someone_else_and_a_closed_or_left_shell_ends() {
             assert!(began.elapsed() < WAIT, "a shell outlived its session");
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+    });
+}
+
+/// With a login helper the shell is the helper's to start: a shell runs, on pipes and on a
+/// terminal, and once the helper is gone no shell starts. What the helper refuses is in
+/// `orion-ssh`'s `tests/login.rs`.
+#[cfg(feature = "login-helper")]
+#[test]
+fn with_a_login_helper_the_helper_starts_the_shell() {
+    use orion_ssh::login::{HelperConfig, RecoveryLogin, serve};
+    run(async {
+        let dir = std::env::temp_dir().join(format!("orion-shell-helper-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("keys")).expect("dir");
+        std::fs::write(dir.join("security"), "on\ngeneration 1\n").expect("record");
+        let stored = KeysConfig {
+            state_dir: Some(dir.join("keys")),
+            ..KeysConfig::in_memory("lab")
+        };
+        let keys = SharedKeys::new(Keys::open(stored.clone(), Security::On).expect("keys"));
+        let socket = dir.join("login.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("listen");
+        let config = HelperConfig {
+            ssh: None,
+            shell: Some(ssh_config()),
+            sandbox_user: me().name,
+            keys: stored,
+            security_view: dir.join("security"),
+            comm_uid: rustix::process::getuid().as_raw(),
+            idle: Duration::from_millis(500),
+            recovery: RecoveryLogin {
+                ssh: ssh_config(),
+                keys_file: dir.join("no-recovery-keys"),
+                trust: |_| None,
+            },
+        };
+        let helper = std::thread::spawn(move || serve(&config, &listener));
+        let board = board_with(Security::On, keys, Some(&socket));
+        let mut client = Client::open(board.connector.connect(caller())).await;
+        let Heard::Opened(shell, _) = client.open_shell("id -u; exit 4", "", 0).await else {
+            panic!("not opened");
+        };
+        let (out, _, code) = client.until_exit(shell).await;
+        assert_eq!(String::from_utf8_lossy(&out).trim(), me().uid.to_string());
+        assert_eq!(code, 4);
+        let Heard::Opened(shell, _) = client.open_shell("tty; exit 5", "xterm", 0).await else {
+            panic!("not opened on a terminal");
+        };
+        let (out, _, code) = client.until_exit(shell).await;
+        assert!(String::from_utf8_lossy(&out).contains("/dev/pts/"));
+        assert_eq!(code, 5);
+        // Gone idle, the helper exits, and no shell starts.
+        let began = std::time::Instant::now();
+        while !helper.is_finished() {
+            assert!(began.elapsed() < WAIT, "the helper stayed");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(matches!(helper.join(), Ok(Ok(()))));
+        assert_eq!(
+            client.open_shell("echo in", "", 0).await,
+            Heard::Refused(Some(Error::Unavailable))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     });
 }

@@ -62,6 +62,9 @@ pub struct RecoveryConfig {
     pub retry: Duration,
     /// Why the comm core is in recovery, for the log and for whoever asks.
     pub why: String,
+    /// The login helper that starts sessions, when this process cannot.
+    #[cfg(feature = "login-helper")]
+    pub login_helper: Option<PathBuf>,
 }
 
 /// The keys in the text of a recovery keys file. A line that is not a plain ed25519 public
@@ -77,6 +80,13 @@ pub fn keys_in(text: &str) -> Vec<([u8; 32], String)> {
             Some((bytes, key.comment().as_str_lossy().to_owned()))
         })
         .collect()
+}
+
+/// A trust store that holds `keys` and nothing else, as the recovery way in trusts them: for
+/// the login helper, which decides recovery logins again.
+#[must_use]
+pub fn trusted(keys: &[([u8; 32], String)]) -> Option<Keys> {
+    trust(keys)
 }
 
 /// A trust store that holds the recovery keys and nothing else: each is an operator
@@ -196,7 +206,17 @@ impl Recovery {
                         max_unauthenticated: 8,
                         login: Duration::from_secs(60),
                     };
-                    match Ssh::start(ssh, config.security, running.keys.clone()).await {
+                    #[cfg(feature = "login-helper")]
+                    let started = Ssh::start_with(
+                        ssh,
+                        config.security,
+                        running.keys.clone(),
+                        config.login_helper.clone(),
+                    )
+                    .await;
+                    #[cfg(not(feature = "login-helper"))]
+                    let started = Ssh::start(ssh, config.security, running.keys.clone()).await;
+                    match started {
                         Ok(server) => {
                             let at = server.local_addr();
                             match &config.interface {

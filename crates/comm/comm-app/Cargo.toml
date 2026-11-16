@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery", "devices", "shell"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery", "devices", "shell", "login-helper"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -39,6 +39,9 @@ ssh-forward = ["ssh", "orion-ssh/forward", "orion-ssh-sandbox?/forward"]
 ssh-sandbox = ["ssh", "dep:orion-ssh-sandbox"]
 # A shell on the board over an Orion session, as the account asked for.
 shell = ["ssh", "dep:orion-shell"]
+# Sessions, and SSH connections' children, started by the login helper (`login.helper`), so
+# the comm core need not be root; and `orion login-helper` itself.
+login-helper = ["recovery", "orion-ssh/login-helper", "orion-ssh-sandbox?/login-helper", "orion-shell?/login-helper", "orion-recovery/login-helper", "dep:rustix"]
 # The recovery way in: what is started when the comm core cannot be. It tells systemd how the
 # start went, so it brings that with it.
 recovery = ["ssh", "systemd", "dep:orion-recovery", "dep:orion-check"]
@@ -96,6 +99,7 @@ orion-unix = { path = "../unix" }
 orion-ws = { path = "../ws", optional = true }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"] }
 tracing.workspace = true
+rustix = { version = "1", default-features = false, features = ["std", "process", "net", "fs", "stdio"], optional = true }
 
 [dev-dependencies]
 orion = { path = "../../client/orion", default-features = false, features = ["shell"] }

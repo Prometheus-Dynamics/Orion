@@ -7,6 +7,13 @@ node.name = board
 # Node logic runs as the orion user (uid 901, from orion.sysusers): let it in as node logic.
 socket.node_uids = 901
 
+# The login helper, which starts each login as the account let in. orion-comm.service sets
+# login.helper (ORION_LOGIN_HELPER), so the comm core can run as orion-comm and never as root;
+# a comm core started otherwise, as root, starts logins itself. The helper answers the comm
+# core's user alone:
+# login.comm_user = orion-comm
+# login.idle_ms = 10000
+
 # The way in over SSH, with logins as the board's own users.
 # ssh.listen = 0.0.0.0:22
 

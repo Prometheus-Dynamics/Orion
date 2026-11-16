@@ -1,0 +1,40 @@
+# The login helper: the one process that becomes other users. Installed as
+# /usr/lib/systemd/system/orion-login.service, started by orion-login.socket.
+#
+# The comm core decides who logs in and runs as orion-comm with no right to become anyone. A
+# session, and each SSH connection's child, is asked of this helper, which decides the login
+# again on its own (the same check, switch and trust store, read and never written) and starts
+# only that: a login as the account let in, or a child as ssh.sandbox_user. Sessions run in
+# this unit. It exits when none runs and nothing has been asked for login.idle_ms.
+
+[Unit]
+Description=Orion login helper
+Documentation=https://github.com/Prometheus-Dynamics/Orion/blob/main/packaging/README.md
+Requires=orion-login.socket
+After=orion-login.socket
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/orion login-helper
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+# Started again by the next connection, not by a restart.
+Restart=no
+
+User=root
+# The trust store in /var/lib/orion is the orion group's to read.
+Group=orion
+# Becoming the account (SETUID, SETGID), its terminal (CHOWN), and ending the sessions it
+# started, which are other users' processes (KILL). Nothing else, not even reading files root
+# alone may: the helper reads what the orion group may.
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_KILL
+# Not set on purpose: NoNewPrivileges= (it would follow every login into its shell),
+# ProtectHome= and ProtectSystem=strict (a session writes where its user may), PrivateTmp=.
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

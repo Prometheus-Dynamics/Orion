@@ -82,6 +82,8 @@ fn config(dir: &Path, why: &str) -> RecoveryConfig {
         security: Security::On,
         retry: Duration::from_millis(100),
         why: why.to_owned(),
+        #[cfg(feature = "login-helper")]
+        login_helper: None,
     }
 }
 

@@ -78,6 +78,9 @@ pub struct CommSettings {
     /// addresses.
     #[cfg(feature = "recovery")]
     pub recovery_listen: Vec<std::net::SocketAddr>,
+    /// `login.*`: the login helper, which starts sessions when the comm core is not root.
+    #[cfg(feature = "login-helper")]
+    pub login: crate::login_helper::LoginSettings,
     /// `ssh.sandbox`, `ssh.sandbox_user`: whether what SSH clients send is read in a child
     /// process with no rights, and the account that child becomes. `None` for no sandbox.
     #[cfg(feature = "ssh-sandbox")]
@@ -181,6 +184,8 @@ impl CommSettings {
             None => 0o660,
         };
         let status_interval = Duration::from_millis(source.get("status.interval_ms", 1000_u64)?);
+        #[cfg(feature = "login-helper")]
+        let login = crate::login_helper::LoginSettings::from_source(source)?;
         if status_interval.is_zero() {
             return Err(error("status.interval_ms", "must be above 0".into()));
         }
@@ -265,10 +270,16 @@ impl CommSettings {
                 .unwrap_or_else(|| orion_recovery::KEYS_FILE.into()),
             #[cfg(feature = "recovery")]
             recovery_listen: source.list("recovery.listen")?,
+            #[cfg(feature = "login-helper")]
+            login: login.clone(),
             #[cfg(feature = "ssh-sandbox")]
             ssh_sandbox: if source.get("ssh.sandbox", true)? {
                 Some(orion_ssh_sandbox::SandboxConfig {
                     user: source.get("ssh.sandbox_user", "nobody".to_owned())?,
+                    #[cfg(feature = "login-helper")]
+                    login_helper: login.helper.clone(),
+                    #[cfg(not(feature = "login-helper"))]
+                    login_helper: None,
                 })
             } else {
                 None

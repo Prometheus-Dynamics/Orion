@@ -30,8 +30,8 @@ use orion_msg_session::{
     ShellClose, ShellCredit, ShellData, ShellEof, ShellExit, ShellOpen, ShellOpened, ShellResize,
 };
 use orion_server::{
-    Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Policy, Principal, Service, SessionId,
-    Sessions, WeakComm, What,
+    Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Policy, Service, SessionId, Sessions,
+    WeakComm, What,
 };
 use orion_ssh::{Io, Keeper, Started, Terminal, Wanted};
 use orion_wire::{Bytes, Decode, FrameView, kind};
@@ -53,7 +53,7 @@ const CHUNK: usize = 16 * 1024;
 const DRAIN: Duration = Duration::from_secs(2);
 
 /// Who may ask: root and programs on the board, and operators granted the account.
-const POLICY: Policy = Policy::new(Admits::ROOT.and(Admits::LOCAL).and(Admits::OPERATOR));
+const POLICY: Policy = orion_ssh::SHELL;
 /// What a shell already open is asked to do: its own session's, checked by number.
 const OWN: Policy = Policy::new(Admits::ANYONE).without_grant();
 
@@ -171,15 +171,11 @@ impl ShellService {
             return Err(Error::Busy);
         }
         let caller = cx.caller();
-        let caller_uid = match caller.principal {
-            Principal::Local { uid, .. } => Some(uid),
-            _ => None,
-        };
         let from = format!("{} ({})", caller.name, caller.principal);
         let max_frame = caller.max_frame as usize;
         let admitted = self
             .keeper
-            .admit(&request, open.account, caller_uid, &from)
+            .admit(&request, open.account, &caller.principal, &from)
             .ok_or(Error::Denied)?;
         let terminal = (!open.term.is_empty()).then(|| Terminal {
             term: open.term.to_owned(),

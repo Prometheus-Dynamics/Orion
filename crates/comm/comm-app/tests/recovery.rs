@@ -173,6 +173,8 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
             retry: Duration::from_millis(100),
             last_good: dir.join("no-record"),
             security_view,
+            #[cfg(feature = "login-helper")]
+            login: Default::default(),
         };
         let with = || with_view(secured());
         let good = |state: &Path| {
@@ -444,6 +446,8 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
             retry: Duration::from_millis(100),
             last_good: dir.join("state/last-good.carriers"),
             security_view: secured(),
+            #[cfg(feature = "login-helper")]
+            login: Default::default(),
         };
         let socket = dir.join("board.sock");
         let good = format!(
@@ -545,5 +549,66 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
         // Aborted tasks are dropped, and let go of the socket, when the runtime next runs.
         tokio::time::sleep(Duration::from_millis(50)).await;
         let _ = std::fs::remove_dir_all(dir);
+    });
+}
+
+/// A comm core that is not root, with settings that cannot be read, ends in recovery and lets
+/// the repairer in through the login helper, which reads the same broken settings and answers
+/// as recovery does: the recovery keys decide. Once the helper is gone, nobody gets in, so it
+/// was the helper that started the sessions.
+#[cfg(feature = "login-helper")]
+#[test]
+fn broken_settings_and_a_recovery_key_log_in_through_the_login_helper() {
+    if !installed() {
+        return;
+    }
+    run(async {
+        let dir = temp("login-helper");
+        let (repairer, public) = keygen(&dir, "repairer");
+        let (stranger, _) = keygen(&dir, "stranger");
+        std::fs::write(dir.join("recovery_keys"), &public).expect("keys");
+        let socket = dir.join("login.sock");
+        let with = RecoverWith {
+            listen: vec!["127.0.0.1:0".parse().expect("addr")],
+            keys_file: dir.join("recovery_keys"),
+            helper: Some(helper()),
+            retry: Duration::from_millis(100),
+            last_good: dir.join("no-record"),
+            security_view: secured(),
+            login: orion_comm_app::login_helper::LoginSettings {
+                helper: Some(socket.clone()),
+                comm_user: rustix::process::getuid().as_raw().to_string(),
+                idle: Duration::from_millis(500),
+            },
+        };
+        let broken = || settings("node.name = board\ncomm.max_sessions = many\n");
+        assert!(broken().is_err());
+        // The helper, as the system starts it: the same file, read the same way.
+        let helper_with = with.clone();
+        let login_helper =
+            std::thread::spawn(move || orion_comm_app::login_helper::run(broken(), &helper_with));
+        let began = Instant::now();
+        while !socket.exists() {
+            assert!(began.elapsed() < WAIT, "the login helper never listened");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let started = start_or_recover(broken(), with).await;
+        let (addr, why) = in_recovery(&started).await;
+        assert!(why.contains("the settings cannot be read"), "{why}");
+        assert_eq!(
+            said(&ssh(&dir, addr, Some(&repairer), "echo in").await),
+            "in\n"
+        );
+        assert_eq!(said(&ssh(&dir, addr, Some(&stranger), "echo in").await), "");
+        assert_eq!(said(&ssh(&dir, addr, None, "echo in").await), "");
+        // Idle, the helper goes; then a recovery key opens no session.
+        let began = Instant::now();
+        while !login_helper.is_finished() {
+            assert!(began.elapsed() < WAIT, "the login helper stayed");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(login_helper.join().expect("the helper"), 0);
+        assert_eq!(said(&ssh(&dir, addr, Some(&repairer), "echo in").await), "");
+        drop(started);
     });
 }

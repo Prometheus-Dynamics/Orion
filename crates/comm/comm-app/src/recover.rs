@@ -31,6 +31,10 @@ pub struct RecoverWith {
     /// The board's security record, read when the settings cannot be: the switch is the
     /// record's in recovery too. [`orion_config::SECURITY_VIEW`] but in tests.
     pub security_view: PathBuf,
+    /// The login helper's settings, when the comm core's cannot be read: where it listens and
+    /// whose it is.
+    #[cfg(feature = "login-helper")]
+    pub login: crate::login_helper::LoginSettings,
 }
 
 impl Default for RecoverWith {
@@ -45,11 +49,23 @@ impl Default for RecoverWith {
             retry: Duration::from_secs(1),
             last_good: crate::last_good::USUAL.into(),
             security_view: orion_config::SECURITY_VIEW.into(),
+            #[cfg(feature = "login-helper")]
+            login: crate::login_helper::LoginSettings::default(),
         }
     }
 }
 
 impl RecoverWith {
+    /// Where the login helper listens when the settings cannot say.
+    #[cfg(feature = "login-helper")]
+    #[must_use]
+    pub fn login_socket(&self) -> PathBuf {
+        self.login
+            .helper
+            .clone()
+            .unwrap_or_else(|| crate::login_helper::LOGIN_SOCKET.into())
+    }
+
     /// The defaults, with what the environment says: `ORION_RECOVERY_KEYS` (the keys file)
     /// and `ORION_RECOVERY_LISTEN` (addresses joined by `,`). The environment is still there
     /// when the settings file is what is broken.
@@ -176,7 +192,18 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         || with.keys_file.clone(),
         |settings| settings.recovery_keys.clone(),
     );
-    let comm = RecoveryComm::start(settings, &view, &why, shell, &recovery_keys);
+    #[cfg(feature = "login-helper")]
+    let login_helper = crate::login_helper::recovery_helper(settings, &with);
+    #[cfg(not(feature = "login-helper"))]
+    let login_helper = None;
+    let comm = RecoveryComm::start(
+        settings,
+        &view,
+        &why,
+        shell,
+        &recovery_keys,
+        login_helper.clone(),
+    );
     #[allow(unused_mut)]
     let mut subsystems = ssh.map(|ssh| ssh.subsystems.clone()).unwrap_or_default();
     #[cfg(feature = "ssh-sftp")]
@@ -226,6 +253,8 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         security,
         retry: with.retry,
         why,
+        #[cfg(feature = "login-helper")]
+        login_helper,
     });
     InRecovery { ssh, comm }
 }

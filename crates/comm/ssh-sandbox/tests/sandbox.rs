@@ -104,7 +104,11 @@ struct Server {
 impl Server {
     fn start(dir: &Path) -> Self {
         let (key, public) = keygen(dir, "admin");
-        let (config, keys) = (config(dir), trust(public));
+        Self::start_with(dir, key, trust(public), SandboxConfig::default())
+    }
+
+    fn start_with(dir: &Path, key: PathBuf, keys: SharedKeys, sandbox: SandboxConfig) -> Self {
+        let config = config(dir);
         let (ready, started) = std::sync::mpsc::channel();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let ssh = Arc::new(Mutex::new(None));
@@ -115,10 +119,9 @@ impl Server {
                 .build()
                 .expect("runtime");
             runtime.block_on(async move {
-                let server =
-                    SandboxedSsh::start(config, SandboxConfig::default(), Security::On, keys)
-                        .await
-                        .expect("the server starts");
+                let server = SandboxedSsh::start(config, sandbox, Security::On, keys)
+                    .await
+                    .expect("the server starts");
                 ready.send(server.local_addr()).expect("ready");
                 *held.lock().expect("lock") = Some(server);
                 let _ = stopped.await;
@@ -449,5 +452,90 @@ fn the_keeper_answers_only_what_a_child_in_that_state_may_ask() {
         took >= Duration::from_millis(550) && took < Duration::from_secs(5),
         "{took:?}"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// With a login helper, the connection's child and the sessions are the helper's to start:
+/// everything still works, and once the helper is gone no connection is served.
+#[cfg(feature = "login-helper")]
+#[test]
+fn with_a_login_helper_the_helper_starts_the_children_and_the_sessions() {
+    use orion_ssh::login::{HelperConfig, RecoveryLogin, serve};
+    if !installed() {
+        return;
+    }
+    let dir = temp("helper");
+    let (key, public) = keygen(&dir, "admin");
+    // The trust store on disk, which the helper reads for itself.
+    let stored = KeysConfig {
+        state_dir: Some(dir.join("keys")),
+        ..KeysConfig::in_memory("lab")
+    };
+    std::fs::create_dir_all(dir.join("keys")).expect("dir");
+    let mut keys = Keys::open(stored.clone(), Security::On).expect("keys");
+    keys.approve_operator(public, "admin").expect("enroll");
+    keys.grant(&KeyId(public), true, Vec::new(), true)
+        .expect("grant");
+    drop(keys);
+    let keys = SharedKeys::new(Keys::read_only(stored.clone(), Security::On).expect("keys"));
+    std::fs::write(dir.join("security"), "on\ngeneration 1\n").expect("record");
+    let socket = dir.join("login.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).expect("listen");
+    let helper = HelperConfig {
+        ssh: Some(config(&dir)),
+        shell: None,
+        sandbox_user: me().name,
+        keys: stored,
+        security_view: dir.join("security"),
+        comm_uid: rustix::process::getuid().as_raw(),
+        idle: Duration::from_millis(500),
+        recovery: RecoveryLogin {
+            ssh: config(&dir),
+            keys_file: dir.join("no-recovery-keys"),
+            trust: |_| None,
+        },
+    };
+    let helper = std::thread::spawn(move || serve(&helper, &listener));
+    let server = Server::start_with(
+        &dir,
+        key,
+        keys,
+        SandboxConfig {
+            login_helper: Some(socket),
+            ..SandboxConfig::default()
+        },
+    );
+    let ran = server.ssh(&server.key, &[], &["echo out; id -u; exit 7"], "");
+    assert_eq!(ran.status.code(), Some(7), "{}", text(&ran.stderr));
+    assert_eq!(text(&ran.stdout), format!("out\n{}\n", me().uid));
+    let ran = server.ssh(&server.key, &["-tt"], &[], "tty; exit 3\n");
+    assert_eq!(ran.status.code(), Some(3), "{}", text(&ran.stderr));
+    // The key revoked in the store on disk: the comm core, which read the store once, still
+    // lets it log in, and the helper, which reads it for every session, starts nothing.
+    Keys::open(
+        KeysConfig {
+            state_dir: Some(dir.join("keys")),
+            ..KeysConfig::in_memory("lab")
+        },
+        Security::On,
+    )
+    .expect("keys")
+    .revoke(public)
+    .expect("revoked");
+    let ran = server.ssh(&server.key, &[], &["echo out"], "");
+    assert_eq!(
+        text(&ran.stdout),
+        "",
+        "the session started without the helper"
+    );
+    assert_ne!(ran.status.code(), Some(0));
+    until("the child is gone", || {
+        server.children().is_empty() && server.connections() == 0
+    });
+    // Idle, the helper goes, and with it the way to start a child.
+    until("the helper exits", || helper.is_finished());
+    assert!(matches!(helper.join(), Ok(Ok(()))));
+    let ran = server.ssh(&server.key, &[], &["echo out"], "");
+    assert_eq!(text(&ran.stdout), "");
     let _ = std::fs::remove_dir_all(dir);
 }

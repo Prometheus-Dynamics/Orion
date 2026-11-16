@@ -72,6 +72,9 @@ The name in brackets is the cargo feature that carries the part.
 | `ssh.max_unauthenticated` | 10 | the most that have not logged in |
 | `ssh.login_ms` | 60000 | how long a connection has to log in |
 | `shell` | `on` | whether a shell may be opened over an Orion session, `on` or `off` (`shell`); the shell runs in `ssh.helper` |
+| `login.helper` | none | the login helper's socket, which starts every login (`login-helper`); none starts them in the comm core, which must then be root to let in anyone but its own user. The systemd unit sets `/run/orion-login/login.sock` |
+| `login.comm_user` | `orion-comm` | the comm core's user, a name or a number: the only one the login helper answers |
+| `login.idle_ms` | 10000 | how long the login helper stays with no session running and nothing asked |
 | `recovery.keys` | `/etc/orion/recovery_keys` | the public keys that may log in when the comm core is in recovery (`recovery`) |
 | `nt4.listen` | off | where NT4 clients connect, or `ws` to share `ws.listen` (`nt4`) |
 | `nt4.server` | off | the NT4 server to join as a client, `host` or `host:port` (`nt4-client`) |

@@ -8,6 +8,10 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Sessions started by the login helper, when the comm core is not root.
+login-helper = ["orion-ssh/login-helper"]
+
 [dependencies]
 orion-check = { path = "../../core/check" }
 orion-keys = { path = "../keys" }

@@ -7,6 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[features]
+# Shells started by the login helper (`Keeper::with_helper`).
+login-helper = ["orion-ssh/login-helper"]
+
 [dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
 orion-server = { path = "../server" }

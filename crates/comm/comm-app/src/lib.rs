@@ -17,6 +17,8 @@ mod error;
 #[cfg(feature = "ssh")]
 mod helper;
 pub mod last_good;
+#[cfg(feature = "login-helper")]
+pub mod login_helper;
 #[cfg(feature = "nt4")]
 mod nt4_ws;
 #[cfg(feature = "recovery")]
@@ -210,6 +212,8 @@ impl CommCore {
             parts.push("shell");
             let keeper =
                 orion_ssh::Keeper::new(config.clone(), security, keys.clone(), config.listen);
+            #[cfg(feature = "login-helper")]
+            let keeper = keeper.with_helper(settings.login.helper.clone());
             comm.add_service(orion_shell::ShellService::new(&comm, Rc::new(keeper)));
         } else {
             comm.add_service(orion_shell::ShellOff);
@@ -398,6 +402,10 @@ impl CommCore {
                 #[cfg(feature = "ssh-sandbox")]
                 let sandbox = settings.ssh_sandbox.clone();
                 let keys = keys.clone();
+                #[cfg(feature = "login-helper")]
+                let login_helper = settings.login.helper.clone();
+                #[cfg(not(feature = "login-helper"))]
+                let login_helper: Option<std::path::PathBuf> = None;
                 ways::now_or_later(
                     "the SSH way in",
                     listen.to_string(),
@@ -410,6 +418,7 @@ impl CommCore {
                             sandbox.clone(),
                             security,
                             keys.clone(),
+                            login_helper.clone(),
                         )
                     },
                     |_| None,

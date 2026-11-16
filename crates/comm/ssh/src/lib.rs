@@ -27,6 +27,8 @@ mod door;
 pub mod helper;
 pub mod hostkey;
 mod keeper;
+#[cfg(feature = "login-helper")]
+pub mod login;
 mod session;
 pub mod users;
 
@@ -66,6 +68,24 @@ impl Request for Login {
         What::Login
     }
 }
+
+/// Who may open a shell over a session: root and programs on the board, and operators
+/// granted it (`login`, or `shell:ACCOUNT`). The shell service asks it, and the login helper
+/// asks it again.
+pub const SHELL: Policy = Policy::new(Admits::ROOT.and(Admits::LOCAL).and(Admits::OPERATOR));
+
+/// Opening a shell as an account, as the check sees it.
+#[derive(Clone, Copy, Debug)]
+pub struct ShellAs<'a>(pub &'a str);
+
+impl Request for ShellAs<'_> {
+    fn what(&self) -> What<'_> {
+        What::Shell(self.0)
+    }
+}
+
+/// The word that says a command line is for an SSH connection's child.
+pub const SANDBOX_MODE: &str = "ssh-connection";
 
 /// The program that sessions run in, and the arguments that go before the helper's own.
 /// The comm core's binary names itself; a test names `orion-ssh-helper`.
@@ -674,6 +694,31 @@ impl Ssh {
         security: Security,
         keys: SharedKeys,
     ) -> std::io::Result<Self> {
+        Self::open(config, security, keys, None).await
+    }
+
+    /// [`Ssh::start`], with sessions started by the login helper at `helper` if one is
+    /// named.
+    ///
+    /// # Errors
+    ///
+    /// As [`Ssh::start`].
+    #[cfg(feature = "login-helper")]
+    pub async fn start_with(
+        config: SshConfig,
+        security: Security,
+        keys: SharedKeys,
+        helper: Option<PathBuf>,
+    ) -> std::io::Result<Self> {
+        Self::open(config, security, keys, helper).await
+    }
+
+    async fn open(
+        config: SshConfig,
+        security: Security,
+        keys: SharedKeys,
+        #[cfg_attr(not(feature = "login-helper"), allow(unused_variables))] helper: Option<PathBuf>,
+    ) -> std::io::Result<Self> {
         let host_key = hostkey::load_or_make(&config.host_key)
             .map_err(|error| std::io::Error::new(error.kind(), format!("no host key: {error}")))?;
         let protocol = protocol(host_key);
@@ -693,7 +738,10 @@ impl Ssh {
         }
         let places = Places::new(&config);
         let login = config.login;
-        let keeper = Arc::new(Keeper::new(config, security, keys, local_addr));
+        let keeper = Keeper::new(config, security, keys, local_addr);
+        #[cfg(feature = "login-helper")]
+        let keeper = keeper.with_helper(helper);
+        let keeper = Arc::new(keeper);
         let room = places.clone();
         let task = tokio::spawn(async move {
             let listener = match (listener, interface) {

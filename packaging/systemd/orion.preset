@@ -2,3 +2,4 @@
 # Install as /usr/lib/systemd/system-preset/80-orion.preset.
 enable orion-comm.service
 enable orion-node.service
+enable orion-login.socket

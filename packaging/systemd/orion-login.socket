@@ -1,0 +1,20 @@
+# The login helper's socket. Installed as /usr/lib/systemd/system/orion-login.socket.
+#
+# Only the comm core's user may connect (mode 0600, owned by orion-comm), and the helper checks
+# who asked as well. The first connection starts orion-login.service, which is handed this
+# listening socket as its input; it exits again when nobody is logged in.
+
+[Unit]
+Description=Orion login helper socket
+Documentation=https://github.com/Prometheus-Dynamics/Orion/blob/main/packaging/README.md
+
+[Socket]
+ListenStream=/run/orion-login/login.sock
+SocketUser=orion-comm
+SocketGroup=root
+SocketMode=0600
+DirectoryMode=0755
+Accept=no
+
+[Install]
+WantedBy=sockets.target

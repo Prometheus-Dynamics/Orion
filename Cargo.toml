@@ -54,10 +54,12 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 
-# What ships on boards. Unwinding is what lets a component's panic be contained.
+# What ships on boards. Unwinding is what lets a component's panic be contained. One codegen
+# unit: the link takes longer and every binary is smaller (orion by 464 KB at C52).
 [profile.service]
 inherits = "release"
 opt-level = "z"
 lto = "fat"
+codegen-units = 1
 panic = "unwind"
 strip = true

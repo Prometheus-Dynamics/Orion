@@ -219,6 +219,7 @@ impl TestBoard {
             retry: Duration::from_millis(50),
             last_good: dir.join("last-good"),
             security_view: record,
+            login: Default::default(),
         };
         let (comm, up) = comm(comm_settings, with, forced);
         let mut board = Self {

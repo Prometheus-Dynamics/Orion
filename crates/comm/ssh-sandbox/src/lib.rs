@@ -47,12 +47,16 @@ use protocol::Hello;
 pub struct SandboxConfig {
     /// `ssh.sandbox_user`: the account children become. It should own nothing.
     pub user: String,
+    /// `login.helper`: the login helper that starts the children, and the sessions, when
+    /// the comm core is not root. `None`: this process starts them.
+    pub login_helper: Option<std::path::PathBuf>,
 }
 
 impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
             user: "nobody".to_owned(),
+            login_helper: None,
         }
     }
 }
@@ -62,6 +66,9 @@ struct Shared {
     places: Arc<Places>,
     host_key: String,
     become_ids: Option<(u32, u32)>,
+    /// The login helper, which starts the children when there is one.
+    #[cfg(feature = "login-helper")]
+    helper: Option<orion_ssh::login::LoginClient>,
     /// The children there are, by process id.
     children: Mutex<Vec<u32>>,
 }
@@ -93,13 +100,7 @@ fn connection(shared: &Arc<Shared>, client: OwnedFd, peer: SocketAddr) -> std::i
     };
     let (ours, theirs) = UnixStream::pair()?;
     let config = shared.keeper.config();
-    // The client's connection is the child's input, and the socket to here its output.
-    let mut child = std::process::Command::new(&config.helper.program)
-        .args(&config.helper.args)
-        .arg(child::MODE)
-        .stdin(Stdio::from(client))
-        .stdout(Stdio::from(OwnedFd::from(theirs)))
-        .spawn()?;
+    let child = Child::start(shared, config, client, theirs)?;
     let pid = child.id();
     let children = |with: &dyn Fn(&mut Vec<u32>)| {
         with(
@@ -122,11 +123,62 @@ fn connection(shared: &Arc<Shared>, client: OwnedFd, peer: SocketAddr) -> std::i
     }
     // Gone, silent too long, or not making sense: whichever, it ends here, and with it
     // every session it carried, whose status sockets close with it.
-    let _ = child.kill();
-    let _ = child.wait();
+    child.end();
     children(&|children| children.retain(|child| *child != pid));
     drop(place);
     Ok(())
+}
+
+/// A connection's child: started here, or by the login helper and held by its status socket.
+enum Child {
+    Here(std::process::Child),
+    #[cfg(feature = "login-helper")]
+    Helper(u32, OwnedFd),
+}
+
+impl Child {
+    /// The client's connection is the child's input, and the socket to here its output.
+    fn start(
+        shared: &Shared,
+        config: &orion_ssh::SshConfig,
+        client: OwnedFd,
+        socket: UnixStream,
+    ) -> std::io::Result<Self> {
+        #[cfg(feature = "login-helper")]
+        if let Some(helper) = &shared.helper {
+            let (pid, status) = helper.sandbox(client, socket.into())?;
+            return Ok(Self::Helper(pid, status));
+        }
+        #[cfg(not(feature = "login-helper"))]
+        let _ = shared;
+        std::process::Command::new(&config.helper.program)
+            .args(&config.helper.args)
+            .arg(child::MODE)
+            .stdin(Stdio::from(client))
+            .stdout(Stdio::from(OwnedFd::from(socket)))
+            .spawn()
+            .map(Self::Here)
+    }
+
+    fn id(&self) -> u32 {
+        match self {
+            Self::Here(child) => child.id(),
+            #[cfg(feature = "login-helper")]
+            Self::Helper(pid, _) => *pid,
+        }
+    }
+
+    /// Ends it: killed here, or its status socket closed, which the helper ends it for.
+    fn end(self) {
+        match self {
+            Self::Here(mut child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            #[cfg(feature = "login-helper")]
+            Self::Helper(_, status) => drop(status),
+        }
+    }
 }
 
 impl SandboxedSsh {
@@ -158,8 +210,12 @@ impl SandboxedSsh {
         if listener.is_some() {
             tracing::info!("ssh: each connection is read by a child; open on {local_addr}");
         }
-        // Who a child becomes, if this process may make it anyone.
-        let become_ids = if rustix::process::getuid().is_root() {
+        // Who a child becomes, if this process may make it anyone. With a login helper the
+        // helper makes it its own `ssh.sandbox_user`, before it starts.
+        let with_helper = cfg!(feature = "login-helper") && sandbox.login_helper.is_some();
+        let become_ids = if with_helper {
+            None
+        } else if rustix::process::getuid().is_root() {
             let user = users::lookup(&config.etc, &sandbox.user)
                 .filter(|user| user.uid != 0)
                 .ok_or_else(|| {
@@ -178,7 +234,16 @@ impl SandboxedSsh {
         };
         let shared = Arc::new(Shared {
             places: Places::new(&config),
+            #[cfg(feature = "login-helper")]
+            keeper: Keeper::new(config, security, keys, local_addr)
+                .with_helper(sandbox.login_helper.clone()),
+            #[cfg(not(feature = "login-helper"))]
             keeper: Keeper::new(config, security, keys, local_addr),
+            #[cfg(feature = "login-helper")]
+            helper: sandbox
+                .login_helper
+                .clone()
+                .map(orion_ssh::login::LoginClient::new),
             host_key,
             become_ids,
             children: Mutex::new(Vec::new()),

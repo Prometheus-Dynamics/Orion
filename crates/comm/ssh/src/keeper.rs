@@ -65,6 +65,18 @@ pub enum Wanted {
 pub struct Admitted {
     _checked: Proof,
     user: User,
+    #[cfg(feature = "login-helper")]
+    asked: Asked,
+}
+
+/// What a login was let in on, for the login helper to decide again.
+#[cfg(feature = "login-helper")]
+#[derive(Clone, Debug)]
+enum Asked {
+    /// An SSH login as the account, with this key, from there.
+    Ssh(String, Option<[u8; 32]>),
+    /// A shell over a session as the account, for this principal.
+    Shell(String, Principal),
 }
 
 /// What let a login through: the SSH login's check, or the check of a session's request.
@@ -135,7 +147,7 @@ fn open_terminal(terminal: &Terminal) -> std::io::Result<(OwnedFd, OwnedFd)> {
 
 /// Waits for the session's process and says how it ended on `status`; if `status` is
 /// closed first, ends the process.
-fn watch(mut child: std::process::Child, status: OwnedFd) {
+pub(crate) fn watch(mut child: std::process::Child, status: OwnedFd) {
     use rustix::event::{PollFd, PollFlags, poll};
     use std::io::Write;
     use std::os::unix::process::ExitStatusExt;
@@ -184,6 +196,8 @@ pub struct Keeper {
     security: Security,
     keys: SharedKeys,
     local_addr: SocketAddr,
+    #[cfg(feature = "login-helper")]
+    helper: Option<crate::login::LoginClient>,
 }
 
 impl Keeper {
@@ -201,7 +215,29 @@ impl Keeper {
             security,
             keys,
             local_addr,
+            #[cfg(feature = "login-helper")]
+            helper: None,
         }
+    }
+
+    /// Starts sessions through the login helper at `path`, which decides each again and is
+    /// the one process that becomes the account. Without one, this process starts them.
+    #[cfg(feature = "login-helper")]
+    #[must_use]
+    pub fn with_helper(mut self, path: Option<std::path::PathBuf>) -> Self {
+        self.helper = path.map(crate::login::LoginClient::new);
+        self
+    }
+
+    /// Whether this process can start a session as `uid`: it is root, it is that user, or a
+    /// login helper does it.
+    fn can_become(&self, uid: u32) -> bool {
+        #[cfg(feature = "login-helper")]
+        if self.helper.is_some() {
+            return true;
+        }
+        let me = rustix::process::getuid();
+        me.is_root() || me.as_raw() == uid
     }
 
     /// What it was told.
@@ -256,12 +292,11 @@ impl Keeper {
             info!("ssh: {from} asked for {name}, which is not an account here");
             return None;
         };
-        let me = rustix::process::getuid();
-        if !me.is_root() && me.as_raw() != user.uid {
+        if !self.can_become(user.uid) {
             warn!(
                 "ssh: {from} asked for {name}, but the comm core runs as user {} and can only \
                  let that user in",
-                me.as_raw()
+                rustix::process::getuid().as_raw()
             );
             return None;
         }
@@ -269,6 +304,8 @@ impl Keeper {
         Some(Admitted {
             _checked: Proof::Login(checked),
             user,
+            #[cfg(feature = "login-helper")]
+            asked: Asked::Ssh(name.to_owned(), key.copied()),
         })
     }
 
@@ -282,9 +319,13 @@ impl Keeper {
         &self,
         _checked: &Checked<T>,
         name: &str,
-        caller_uid: Option<u32>,
+        who: &Principal,
         from: &str,
     ) -> Option<Admitted> {
+        let caller_uid = match who {
+            Principal::Local { uid, .. } => Some(*uid),
+            _ => None,
+        };
         let Some(user) = users::lookup(&self.config.etc, name).or_else(|| self.root_anyway(name))
         else {
             info!("shell: {from} asked for {name}, which is not an account here");
@@ -297,12 +338,11 @@ impl Keeper {
             info!("shell: {from} is user {uid} on the board and may not become {name}");
             return None;
         }
-        let me = rustix::process::getuid();
-        if !me.is_root() && me.as_raw() != user.uid {
+        if !self.can_become(user.uid) {
             warn!(
                 "shell: {from} asked for {name}, but the comm core runs as user {} and can only \
                  let that user in",
-                me.as_raw()
+                rustix::process::getuid().as_raw()
             );
             return None;
         }
@@ -310,21 +350,21 @@ impl Keeper {
         Some(Admitted {
             _checked: Proof::Session,
             user,
+            #[cfg(feature = "login-helper")]
+            asked: Asked::Shell(name.to_owned(), who.clone()),
         })
     }
 
     /// For the recovery way in: root, when the board's account files do not say who root
     /// is and this process is root.
     fn root_anyway(&self, name: &str) -> Option<User> {
-        (self.config.recovery && name == "root" && rustix::process::getuid().is_root()).then(|| {
-            User {
-                name: "root".to_owned(),
-                uid: 0,
-                gid: 0,
-                groups: vec![0],
-                home: "/".into(),
-                shell: "/bin/sh".into(),
-            }
+        (self.config.recovery && name == "root" && self.can_become(0)).then(|| User {
+            name: "root".to_owned(),
+            uid: 0,
+            gid: 0,
+            groups: vec![0],
+            home: "/".into(),
+            shell: "/bin/sh".into(),
         })
     }
 
@@ -335,6 +375,41 @@ impl Keeper {
     ///
     /// If there is no such subsystem, or the session's process cannot be started.
     pub fn start(
+        &self,
+        admitted: &Admitted,
+        wanted: Wanted,
+        terminal: Option<&Terminal>,
+        peer: Option<SocketAddr>,
+    ) -> std::io::Result<Started> {
+        #[cfg(feature = "login-helper")]
+        if let Some(helper) = &self.helper {
+            use crate::login::{Ask, Who};
+            let term = crate::login::term(terminal);
+            let ask = match &admitted.asked {
+                Asked::Ssh(account, key) => Ask::Ssh {
+                    account: account.clone(),
+                    key: *key,
+                    peer,
+                    local: self.local_addr,
+                    want: wanted.into(),
+                    term,
+                    recovery: self.config.recovery,
+                },
+                Asked::Shell(account, who) => Ask::Shell {
+                    account: account.clone(),
+                    who: Who::from(who),
+                    want: wanted.into(),
+                    term,
+                    recovery: self.config.recovery,
+                },
+            };
+            return helper.session(&ask);
+        }
+        self.start_here(admitted, wanted, terminal, peer)
+    }
+
+    /// [`Keeper::start`] in this process, which must be able to become the account.
+    pub(crate) fn start_here(
         &self,
         admitted: &Admitted,
         wanted: Wanted,

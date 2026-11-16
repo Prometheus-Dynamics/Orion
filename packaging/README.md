@@ -1,6 +1,6 @@
 # Packaging
 
-How Orion runs on a board: two systemd services from one binary, a settings file and a user.
+How Orion runs on a board: three systemd services from one binary, a settings file and two users.
 `scripts/packaging-check.sh` checks every file here, and the gate runs it.
 
 How Orion is built and put into an image is not here: whoever owns an image's build
@@ -10,28 +10,46 @@ describes that, installing the files below where the table says.
 |---|---|---|
 | `systemd/orion-comm.service` | `/usr/lib/systemd/system/orion-comm.service` | The comm core: `orion comm`. |
 | `systemd/orion-node.service` | `/usr/lib/systemd/system/orion-node.service` | Node logic: `orion node`. |
+| `systemd/orion-login.socket` | `/usr/lib/systemd/system/orion-login.socket` | The login helper's socket, which starts it. |
+| `systemd/orion-login.service` | `/usr/lib/systemd/system/orion-login.service` | The login helper: `orion login-helper`. |
 | `systemd/orion.conf.example` | `/etc/orion/orion.conf` | The settings both read. |
-| `systemd/orion.sysusers` | `/usr/lib/sysusers.d/orion.conf` | The `orion` user and group (uid and gid 901). |
-| `systemd/orion.preset` | `/usr/lib/systemd/system-preset/80-orion.preset` | Enables both services. |
+| `systemd/orion.sysusers` | `/usr/lib/sysusers.d/orion.conf` | The `orion` user and group (901) and the `orion-comm` user (902). |
+| `systemd/orion.preset` | `/usr/lib/systemd/system-preset/80-orion.preset` | Enables both services and the login socket. |
 
-## The two services
+## The services
 
-`orion` is one binary (docs/comm.md, "One binary: `orion`"). The comm core and node logic run
-as two services so that each restarts alone and each has only the rights it needs:
+`orion` is one binary (docs/comm.md, "One binary: `orion`"). The comm core, the login helper
+and node logic run as separate services so that each restarts alone and each has only the
+rights it needs:
 
-- **`orion-comm.service`**, `orion comm`, as root with group `orion`. Root because it lets
-  SSH logins in as the users they name; group `orion` because its socket
-  (`/run/orion/orion.sock`, mode 0660) is for the programs in that group.
+- **`orion-comm.service`**, `orion comm`, as the `orion-comm` user with group `orion`, never
+  root. Group `orion` because its socket (`/run/orion/orion.sock`, mode 0660) is for the
+  programs in that group; `dialout` for serial links. Its only capabilities are
+  `CAP_SYS_TIME` (`time.sync = discipline`) and `CAP_NET_BIND_SERVICE` (SSH on port 22),
+  with `NoNewPrivileges=yes`. It decides who logs in, and asks the login helper
+  (`ORION_LOGIN_HELPER`, set in the unit) to start each login.
   - `Type=notify`: it is started when every listener is up, and it tells systemd it is alive
     every half of `WatchdogSec=30s` from its own thread. A comm core that stops turning is
     killed and started again.
   - `Restart=always`, after 1 s, growing to at most 30 s over five tries, and no start limit
     (`StartLimitIntervalSec=0`): the way into the board is never switched off for good.
   - `RuntimeDirectory=orion` is kept across a restart, so programs reconnect to what they
-    shared. Its keys and SSH host key are in `/var/lib/orion`, root's.
-  - Hardened only as far as logins allow. Each session is the user's own shell, so the unit
-    sets nothing that would follow a login into it: no `NoNewPrivileges=`, `ProtectHome=`,
-    `ProtectSystem=strict`, `PrivateTmp=` or `PrivateDevices=`.
+    shared. Its keys and SSH host key are in `/var/lib/orion`, `orion-comm`'s, which the
+    `orion` group may read.
+  - Hardened as far as its work allows: it keeps the clock, devices and the network.
+    `systemd-analyze security` rates it 4.7, and the check fails it above 5.0.
+- **`orion-login.socket`** and **`orion-login.service`**, `orion login-helper`: the one
+  process that becomes other users. The socket (`/run/orion-login/login.sock`, mode 0600,
+  `orion-comm`'s) starts the helper on the comm core's first question, handing it the
+  listening socket as its input. It runs as root with group `orion` and only `CAP_SETUID`,
+  `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL`. It answers the comm core's user alone, decides
+  each login again (the same check, the security switch and the trust store, read and never
+  written), and starts only what it decided: a session as the account let in, or an SSH
+  connection's child as `ssh.sandbox_user`. Sessions run in this unit, so it sets nothing that
+  would follow a login into its shell: no `NoNewPrivileges=`, `ProtectHome=`,
+  `ProtectSystem=strict`, `PrivateTmp=` or `PrivateDevices=`. With no session and nothing
+  asked for `login.idle_ms` (10 s) it exits, and the socket starts it again. When the
+  settings cannot be read it answers as recovery does: the recovery keys decide.
 - **`orion-node.service`**, `orion node`, as the `orion` user, after the comm core. It is the
   comm core's first client and connects again when the comm core restarts, so it wants the comm
   core but does not stop with it. The settings let uid 901 in as node logic
@@ -40,7 +58,7 @@ as two services so that each restarts alone and each has only the rights it need
   `/var/lib/orion` (`ORION_KEYS_DIR`) to act as the node toward other nodes. It is hardened
   fully: `systemd-analyze security` rates it 1.8, and the check fails it above 2.5.
 
-Change either unit with a drop-in (`/etc/systemd/system/orion-comm.service.d/*.conf`), not an
+Change a unit with a drop-in (`/etc/systemd/system/orion-comm.service.d/*.conf`), not an
 edited copy.
 
 ## Settings
@@ -50,10 +68,11 @@ Both services read `/etc/orion/orion.conf`, and `ORION_*` in the environment ove
 the board's name and lets the `orion` user in as node logic; everything else is commented out
 with its meaning. The keys are in docs/comm.md and docs/node.md.
 
-## The `orion` user
+## The users
 
-`orion.sysusers` declares the user and group with uid and gid 901, the user also in `dialout`
-for serial links. `systemd-sysusers` reads it at boot, which needs a writable `/etc`; an image
+`orion.sysusers` declares the `orion` user and group with uid and gid 901, the user also in
+`dialout` for serial links, and the comm core's user `orion-comm` (902), in `orion` and
+`dialout`. The login helper answers `login.comm_user` (`orion-comm`) alone. `systemd-sysusers` reads it at boot, which needs a writable `/etc`; an image
 with a read-only root filesystem makes the user from the same file when it is built. 901 is
 also in the settings (`socket.node_uids`): keep the two the same.
 
@@ -90,7 +109,8 @@ Boards with BusyBox init (the smallest ones) start Orion from `packaging/busybox
 
 The rcS that runs `/etc/init.d/S??*` in order starts them; each takes `start`, `stop`,
 `restart` and `status`. They keep what the units keep: the same settings file, socket and state
-directories; the comm core as root with its socket given to the `orion` group; node logic as the
+directories; the comm core with its socket given to the `orion` group, but as root, starting
+logins itself, with no login helper (`login.helper` unset); node logic as the
 `orion` user (901) with `ORION_STATE_DIR` and `ORION_KEYS_DIR` as in its unit; the same failure
 rule (start again after 1 s, doubling to 30 s, never giving up; a run of a minute starts the wait
 over); and a clean stop (TERM, 30 s, then KILL). Output goes to `/var/log/orion-comm.log` and

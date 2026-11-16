@@ -266,6 +266,33 @@ impl Keys {
         Ok(keys)
     }
 
+    /// The trust store as it is on disk, for a reader that must not change it: the login
+    /// helper. Nothing is made, taken or written: the identity is a throwaway (a reader never
+    /// signs), and a key a flash left is the comm core's to take, at its start.
+    ///
+    /// # Errors
+    ///
+    /// [`KeysError::Store`] if the store is there and cannot be read.
+    pub fn read_only(config: KeysConfig, security: Security) -> Result<Self, KeysError> {
+        let mut keys = Self {
+            identity: Identity::generate(),
+            config,
+            security,
+            peers: BTreeMap::new(),
+            operators: BTreeMap::new(),
+            revoked: BTreeSet::new(),
+            unknown: Vec::new(),
+        };
+        if let Some(dir) = keys.config.state_dir.clone() {
+            match std::fs::read_to_string(dir.join(TRUST_FILE)) {
+                Ok(text) => keys.parse(&text),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(KeysError::Store(error)),
+            }
+        }
+        Ok(keys)
+    }
+
     fn parse(&mut self, text: &str) {
         for line in text.lines() {
             let mut words = line.split_whitespace();

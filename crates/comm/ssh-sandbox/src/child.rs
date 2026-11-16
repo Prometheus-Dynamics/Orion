@@ -13,7 +13,7 @@ use rustix::thread::{Gid, Uid};
 use crate::protocol::{Answer, Ask, Hello, recv, send};
 
 /// The word that says a command line is for the child.
-pub const MODE: &str = "ssh-connection";
+pub const MODE: &str = orion_ssh::SANDBOX_MODE;
 
 /// The door from the child: a socket to the keeper. One question at a time.
 #[derive(Clone, Debug)]

@@ -92,6 +92,9 @@ pub(crate) async fn ssh(
     #[cfg(feature = "ssh-sandbox")] sandbox: Option<orion_ssh_sandbox::SandboxConfig>,
     security: orion_server::Security,
     keys: orion_keys::SharedKeys,
+    #[cfg_attr(not(feature = "login-helper"), allow(unused_variables))] login_helper: Option<
+        std::path::PathBuf,
+    >,
 ) -> io::Result<crate::SshServer> {
     use crate::SshServer;
     #[cfg(feature = "ssh-sandbox")]
@@ -117,7 +120,9 @@ pub(crate) async fn ssh(
             Err(error) => return Err(error),
         }
     }
-    orion_ssh::Ssh::start(config, security, keys)
-        .await
-        .map(SshServer::Plain)
+    #[cfg(feature = "login-helper")]
+    let started = orion_ssh::Ssh::start_with(config, security, keys, login_helper).await;
+    #[cfg(not(feature = "login-helper"))]
+    let started = orion_ssh::Ssh::start(config, security, keys).await;
+    started.map(SshServer::Plain)
 }

@@ -49,6 +49,7 @@ Both services read /etc/orion/orion.conf unless a file is named, then the enviro
 enum Mode {
     Comm(Vec<OsString>),
     Node(Vec<OsString>),
+    LoginHelper(Vec<OsString>),
     Ctl(Vec<OsString>),
     Version,
 }
@@ -64,6 +65,7 @@ fn mode(program: &str, mut args: Vec<OsString>) -> Mode {
     let second = args.get(1).and_then(|word| word.to_str());
     match first {
         "comm" => Mode::Comm(args.split_off(1)),
+        "login-helper" => Mode::LoginHelper(args.split_off(1)),
         "node" if !second.is_some_and(|verb| CTL_NODE_VERBS.contains(&verb)) => {
             Mode::Node(args.split_off(1))
         }
@@ -163,6 +165,26 @@ fn comm(args: &[OsString]) -> ExitCode {
     }
 }
 
+/// `orion login-helper [settings file]`: the one process that becomes other users. It reads
+/// the comm core's settings the same way, and when they are broken it answers as recovery.
+fn login_helper(args: &[OsString]) -> ExitCode {
+    let path = match settings_path(args) {
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            println!("usage: orion login-helper [settings file]");
+            return ExitCode::SUCCESS;
+        }
+        Err(message) => {
+            eprintln!("orion login-helper: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    orion_log::install();
+    let settings = read(&path).and_then(|text| CommSettings::from_source(&mut source(&text)?));
+    let code = orion_comm_app::login_helper::run(settings, &RecoverWith::from_env());
+    ExitCode::from(u8::try_from(code).unwrap_or(1))
+}
+
 fn node(args: &[OsString]) -> ExitCode {
     let path = match settings_path(args) {
         Ok(Some(path)) => path,
@@ -232,6 +254,7 @@ pub fn main() -> ExitCode {
     match mode(&program, rest) {
         Mode::Comm(args) => comm(&args),
         Mode::Node(args) => node(&args),
+        Mode::LoginHelper(args) => login_helper(&args),
         Mode::Ctl(args) => ctl(args),
         Mode::Version => {
             println!("orion {}", env!("CARGO_PKG_VERSION"));
@@ -251,6 +274,7 @@ mod tests {
     fn which(program: &str, text: &str) -> (&'static str, Vec<OsString>) {
         match mode(program, words(text)) {
             Mode::Comm(args) => ("comm", args),
+            Mode::LoginHelper(args) => ("login-helper", args),
             Mode::Node(args) => ("node", args),
             Mode::Ctl(args) => ("ctl", args),
             Mode::Version => ("version", Vec::new()),

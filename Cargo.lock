@@ -2163,8 +2163,11 @@ dependencies = [
  "orion-keys",
  "orion-ssh-forward",
  "orion-types",
+ "postcard",
  "russh",
  "rustix",
+ "serde",
+ "shm-fdpass",
  "tokio",
  "tracing",
 ]

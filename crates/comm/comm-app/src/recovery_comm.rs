@@ -53,6 +53,11 @@ impl RecoveryComm {
         why: &str,
         shell: Option<orion_ssh::SshConfig>,
         recovery_keys: &Path,
+        #[cfg_attr(
+            not(all(feature = "login-helper", feature = "shell")),
+            allow(unused_variables)
+        )]
+        login_helper: Option<std::path::PathBuf>,
     ) -> Self {
         let node = settings.map_or_else(
             || "node.local".parse().expect("a node name"),
@@ -78,6 +83,8 @@ impl RecoveryComm {
         if let Some(config) = shell {
             let at = config.listen;
             let keeper = orion_ssh::Keeper::new(config, security, keys.clone(), at);
+            #[cfg(feature = "login-helper")]
+            let keeper = keeper.with_helper(login_helper);
             comm.add_service(orion_shell::ShellService::new(&comm, Rc::new(keeper)));
         } else {
             comm.add_service(orion_shell::ShellOff);
