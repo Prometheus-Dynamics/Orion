@@ -165,6 +165,30 @@ subscriber on the board reads a ring, whoever the publisher is.
 - Nothing allocates per sample. The writer and the doorbells for a topic are rebuilt only when its
   ring, publisher or subscribers change.
 
+## Files from a board
+
+`crates/comm/file-offers` (`orion-file-offers`, feature `offers`). A program on the board offers
+the files under a prefix (`FileOffer`), and a client anywhere fetches one by name (`FileFetch`).
+The comm core, not node logic, routes, so that a board in recovery can still hand over files.
+
+- **The longest prefix wins.** A fetch goes to the program offering the longest prefix of the
+  name, renumbered for that program and with who asked (`caller`) said. A name nothing offers is
+  refused as `not found`, "nothing offers <name>".
+- **One program a prefix.** The first to offer it holds it until its session ends. Another is
+  refused as `busy`, naming the holder, logged, and counted in `FileOffersList.clashes`.
+- **The program gives, the client paces.** The program answers with `FileGive` (size and
+  digest), then `FileGiveChunk`s from where the client said it was (`from`), keeping at most
+  `FETCH_WINDOW` (8) of them on their way past what the client said it has (`FileTaken`). The
+  comm core asks for chunks small enough that a window fits in the client's outbox twice over,
+  so a client slow to read is never closed for what its program was allowed to send.
+- **Each side is told when the other goes.** A fetch whose program's session ends is rejected to
+  the client, "the program that offers it went"; one whose client goes is rejected to the
+  program, which stops.
+- **Who may.** Offering is checked as a write of `files`, by default for programs on the board
+  and devices wired to it; fetching and listing as a read of `files`, for programs on the board,
+  operators and other nodes. Both need the grant where grants are kept.
+- **Bounded.** At most 64 prefixes offered and 256 fetches under way; one more is `busy`.
+
 ## Samples for subscribers without a ring
 
 A subscriber on another board, or in a browser, cannot map a ring. It subscribes like anyone

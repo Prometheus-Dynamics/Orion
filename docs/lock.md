@@ -260,6 +260,11 @@ what to change.
 - **C62.** Tests and drills only: nothing a consumer calls changes. `docs/flakes.md` is added.
 - **C63.** `Describing::topic_with` is added (**Add**): a resource's topic declared with its own
   `expiry_ms` and `on_subscribe`. `Describing::topic` is unchanged.
+- **D16.** Files from a board (**Add**, level 4, `INTERFACE_LEVEL` 4): kinds `FILE_OFFER` (0x27)
+  to `FILE_OFFERS_LIST` (0x2E), `FETCH_WINDOW`, `OfferedBy`; `Files::offer`/`fetch`/
+  `start_fetch`/`offers`, `Offer`, `Asked`, `Gift`, `Giving`, `Fetching`, `Offered`;
+  `Feature::FileOffers` (a `match` on `Feature` without `_` gains an arm); the comm core's
+  `orion-file-offers` service (feature `offers`, on by default); `Sessions::outbox_bytes`.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

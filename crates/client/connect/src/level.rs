@@ -28,17 +28,20 @@ pub enum Feature {
     RunOnBehalf,
     /// A run come back to or cancelled by the handle node logic gave it.
     RunHandle,
+    /// A file offered by a program on the board and fetched by a client.
+    FileOffers,
 }
 
 impl Feature {
     /// Every feature, for tables and tests.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::SubscribeFromLatest,
         Self::Shell,
         Self::SignedLink,
         Self::DetachedRun,
         Self::RunOnBehalf,
         Self::RunHandle,
+        Self::FileOffers,
     ];
 
     /// The lowest level that has it.
@@ -51,6 +54,7 @@ impl Feature {
             | Self::DetachedRun
             | Self::RunOnBehalf => 1,
             Self::RunHandle => 3,
+            Self::FileOffers => 4,
         }
     }
 
@@ -64,6 +68,7 @@ impl Feature {
             Self::DetachedRun => "a detached run",
             Self::RunOnBehalf => "a run carried for another node's caller",
             Self::RunHandle => "a run named by its handle",
+            Self::FileOffers => "a file offered on the board",
         }
     }
 }

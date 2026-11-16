@@ -1,0 +1,25 @@
+[package]
+name = "orion-file-offers"
+description = "Files from a board: the comm core hands a fetch to the program that offers the name."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orion-msg-files = { path = "../../core/msg-files" }
+orion-server = { path = "../server" }
+orion-types = { path = "../../core/types" }
+orion-wire = { path = "../../core/wire" }
+tracing.workspace = true
+
+[dev-dependencies]
+orion-connect = { path = "../../client/connect" }
+orion-files = { path = "../../client/files" }
+orion-unix = { path = "../unix" }
+sha2 = { version = "0.11.0", default-features = false }
+tokio = { workspace = true, features = ["rt", "time", "macros", "sync"] }
+
+[lints]
+workspace = true

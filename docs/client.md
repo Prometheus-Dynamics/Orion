@@ -443,6 +443,29 @@ hands it a `Begin` (answer with how many bytes of that transfer it already has),
 Its answers pace the sender, so it is never handed more than a few chunks ahead of what it has
 answered for.
 
+**Files from a board.** A program on the board offers the files under a prefix, and a client
+anywhere fetches one by name; the comm core hands each fetch to the program offering the longest
+prefix of the name, and knows nothing of what the file holds. Both need a node at level 4
+(`Feature::FileOffers`).
+
+- `files.offer(prefix)` offers every name under `prefix` (one or more parts of a name, ending in
+  `/`) for as long as the session lives. A prefix another program offers is refused as `busy`,
+  naming that program; the refusal is counted where the list of offers says it, so a clash is
+  seen. `offer.next(wait)` hands the program what was asked for (`asked.name()`, `from()`, how
+  much the client has already, and `caller()`, who asked as the audit log names them). It
+  answers `asked.refuse(why)`, in its own words, or `asked.give(source)`: the source is read
+  through once for its digest (`give_known(source, Known)` skips that), and the returned gift is
+  stepped (`gift.step(wait)`, or `gift.finish()`) until the client has it all or says why not.
+  The client's answers pace it: at most eight chunks on their way.
+- `files.fetch(name, into, have, progress)` fetches it into `into`, which holds its first `have`
+  bytes already (zero for none): a fetch that broke off goes on from what is here. The digest is
+  checked over all of it at the end: committed, or rejected with why (the file is shorter than
+  what is here, or what is here is not the file). `files.start_fetch(name, into, have)` begins one
+  to be stepped, as a push is. A name nothing offers is refused as `not found`, "nothing offers
+  <name>"; a program that goes mid-fetch ends it rejected, "the program that offers it went".
+- `files.offers()` lists every prefix offered (`Offered { prefix, by, name, principal, since_ms
+  }`) and how many offers were refused for a clash.
+
 ## The executor role
 
 `orion-executor`. An executor is any program that connects and says "I run this kind of

@@ -206,6 +206,13 @@ pub struct Sessions {
 }
 
 impl Sessions {
+    /// How much may wait to be sent to one session (`comm.outbox_bytes`): a service that
+    /// passes a stream on keeps what it has on the way under it.
+    #[must_use]
+    pub const fn outbox_bytes(&self) -> u32 {
+        self.limits.outbox_bytes
+    }
+
     pub(crate) fn new(limits: Limits) -> Self {
         Self {
             slots: Vec::new(),

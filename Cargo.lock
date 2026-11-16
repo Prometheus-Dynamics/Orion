@@ -1383,6 +1383,7 @@ dependencies = [
  "orion-connect",
  "orion-device-gateway",
  "orion-discovery",
+ "orion-file-offers",
  "orion-hello",
  "orion-keys",
  "orion-link-can",
@@ -1624,6 +1625,22 @@ dependencies = [
  "orion-types",
  "orion-wire",
  "orion-workloads",
+ "tracing",
+]
+
+[[package]]
+name = "orion-file-offers"
+version = "1.0.1-dev"
+dependencies = [
+ "orion-connect",
+ "orion-files",
+ "orion-msg-files",
+ "orion-server",
+ "orion-types",
+ "orion-unix",
+ "orion-wire",
+ "sha2",
+ "tokio",
  "tracing",
 ]
 

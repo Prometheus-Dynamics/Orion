@@ -470,17 +470,22 @@ fn with_a_login_helper_the_helper_starts_the_shell() {
         let mut client = Client::open(board.connector.connect(caller())).await;
         // Held open while the shells below run, so the helper is not idle between them however
         // slow the machine is.
-        let Heard::Opened(held, _) = client.open_shell("sleep 30", "", 0).await else {
-            panic!("not opened");
+        // What was heard instead is said: this test once heard something else, in a gate
+        // (docs/flakes.md).
+        let heard = client.open_shell("sleep 30", "", 0).await;
+        let Heard::Opened(held, _) = heard else {
+            panic!("not opened: {heard:?}");
         };
-        let Heard::Opened(shell, _) = client.open_shell("id -u; exit 4", "", 0).await else {
-            panic!("not opened");
+        let heard = client.open_shell("id -u; exit 4", "", 0).await;
+        let Heard::Opened(shell, _) = heard else {
+            panic!("not opened: {heard:?}");
         };
         let (out, _, code) = client.until_exit(shell).await;
         assert_eq!(String::from_utf8_lossy(&out).trim(), me().uid.to_string());
         assert_eq!(code, 4);
-        let Heard::Opened(shell, _) = client.open_shell("tty; exit 5", "xterm", 0).await else {
-            panic!("not opened on a terminal");
+        let heard = client.open_shell("tty; exit 5", "xterm", 0).await;
+        let Heard::Opened(shell, _) = heard else {
+            panic!("not opened on a terminal: {heard:?}");
         };
         let (out, _, code) = client.until_exit(shell).await;
         assert!(String::from_utf8_lossy(&out).contains("/dev/pts/"));

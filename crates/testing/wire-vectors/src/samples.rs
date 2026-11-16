@@ -2,7 +2,9 @@
 
 use orion_msg_actions::Target;
 use orion_msg_files::{
-    FileBegin, FileChunk, FileCommit, FilePull, FileSink, FileSinkReady, FileState, FileStatus,
+    FileBegin, FileChunk, FileCommit, FileFetch, FileGive, FileGiveChunk, FileOffer, FileOffered,
+    FileOffers, FileOffersList, FilePull, FileSink, FileSinkReady, FileState, FileStatus,
+    FileTaken, OfferEntry, OfferedBy,
 };
 use orion_msg_peers::{
     CLOCK_MONOTONIC, EnrollChallenge, EnrollConfirm, EnrollHello, EnrollRole, GrantedAction,
@@ -339,6 +341,59 @@ fn files(out: &mut Vec<Sample>) {
         }
     );
     sample!(out, FileSinkReady { request_seq: 9 });
+    sample!(out, FileOffer { prefix: "logs/" });
+    sample!(out, FileOffered { request_seq: 10 });
+    sample!(
+        out,
+        FileFetch {
+            transfer: 3,
+            name: FileName::new("logs/kernel").expect("valid"),
+            from: 4096,
+            caller: "local:1000",
+            max_chunk: 32768
+        }
+    );
+    sample!(
+        out,
+        FileGive {
+            transfer: 3,
+            size: 8192,
+            digest: DIGEST
+        }
+    );
+    sample!(
+        out,
+        FileGiveChunk {
+            transfer: 3,
+            offset: 4096,
+            data: Bytes(b"lines")
+        }
+    );
+    sample!(
+        out,
+        FileTaken {
+            transfer: 3,
+            received: 4096,
+            state: FileState::Receiving,
+            detail: ""
+        }
+    );
+    sample!(out, FileOffers { reserved: 0 });
+    let offers = [OfferEntry {
+        prefix: "logs/",
+        by: OfferedBy::Program,
+        name: "logger",
+        principal: "local:1000",
+        since_ms: 1234,
+    }];
+    sample!(
+        out,
+        FileOffersList {
+            request_seq: 11,
+            clashes: 1,
+            offers: List::new(&offers)
+        }
+    );
 }
 
 fn topics(out: &mut Vec<Sample>) {

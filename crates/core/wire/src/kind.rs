@@ -88,6 +88,14 @@ kinds! {
         FILE_PULL = 0x24,
         FILE_SINK = 0x25,
         FILE_SINK_READY = 0x26,
+        FILE_OFFER = 0x27,
+        FILE_OFFERED = 0x28,
+        FILE_FETCH = 0x29,
+        FILE_GIVE = 0x2A,
+        FILE_GIVE_CHUNK = 0x2B,
+        FILE_TAKEN = 0x2C,
+        FILE_OFFERS = 0x2D,
+        FILE_OFFERS_LIST = 0x2E,
     }
     Actions {
         ACTION_REGISTER = 0x30,

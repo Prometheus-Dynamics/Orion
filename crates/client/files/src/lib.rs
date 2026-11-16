@@ -23,13 +23,18 @@
 //! Both work on any address. A push keeps only a few chunks in flight, so it neither fills
 //! the connection nor waits for an answer per chunk.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 
+mod fetch;
+mod offer;
 mod push;
 
+pub use fetch::{Fetching, Offered};
+pub use offer::{Asked, Gift, Giving, Offer};
+pub use orion_msg_files::OfferedBy;
 pub use push::{Known, Pushing, Step};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -291,6 +296,12 @@ pub struct Pull<'a> {
 pub struct Files {
     client: Client,
     state: Rc<RefCell<State>>,
+    fetches: Rc<RefCell<fetch::Fetches>>,
+    /// Whether `fetches` hears its kinds yet: only once this program offers, fetches or
+    /// lists, so a program that does none of them carries none of it.
+    hearing: Rc<Cell<bool>>,
+    /// The number the next fetch is given, but for its top bit.
+    next_fetch: Rc<Cell<u64>>,
 }
 
 impl fmt::Debug for Files {
@@ -305,9 +316,18 @@ impl Files {
     pub fn new(client: &Client) -> Self {
         let state = Rc::new(RefCell::new(State::default()));
         client.add(state.clone());
+        let fetches = Rc::new(RefCell::new(fetch::Fetches::default()));
+        // Fetches of two programs, or of this one before and after it started again, are told
+        // apart by the comm core by session; this keeps one session's own apart.
+        let start = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(1, |since| since.as_nanos() as u64);
         Self {
             client: client.clone(),
             state,
+            fetches,
+            hearing: Rc::new(Cell::new(false)),
+            next_fetch: Rc::new(Cell::new(start)),
         }
     }
 
@@ -329,6 +349,16 @@ impl Files {
             client: self.client.clone(),
             state,
         })
+    }
+
+    /// Hears what offers and fetches are told, from now on; asks the node first whether it
+    /// offers files at all.
+    pub(crate) fn hear_fetches(&self) -> Result<(), ClientError> {
+        self.client.needs(orion_connect::Feature::FileOffers)?;
+        if !self.hearing.replace(true) {
+            self.client.add(self.fetches.clone());
+        }
+        Ok(())
     }
 
     pub(crate) fn follow(&self, transfer: u64, digest: [u8; 32]) {

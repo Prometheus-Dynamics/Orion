@@ -99,7 +99,8 @@ pub mod actions {
 #[cfg(feature = "files")]
 pub mod files {
     pub use orion_files::{
-        FileState, Files, Handed, Known, Pull, Pushing, Sink, Step, Transfer, digest,
+        Asked, Fetching, FileState, Files, Gift, Giving, Handed, Known, Offer, Offered, OfferedBy,
+        Pull, Pushing, Sink, Step, Transfer, digest,
     };
 }
 

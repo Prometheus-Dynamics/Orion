@@ -1,0 +1,354 @@
+//! Files from a board: a client fetches what a program there offers, through the comm core,
+//! whole or from where it broke off, and each side is told when the other goes.
+
+#![cfg(target_os = "linux")]
+
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use orion_connect::{Address, Client, ClientError, Options, Session};
+use orion_file_offers::FileOffersService;
+use orion_files::{FileState, Files, Giving, Known, OfferedBy, Step};
+use orion_server::{Comm, Error, Limits, Security};
+use orion_unix::UnixCarrier;
+use sha2::{Digest, Sha256};
+
+const WAIT: Duration = Duration::from_secs(10);
+
+/// A comm core with the offers service, in a thread of its own, on a socket of its own.
+fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
+    let dir = std::env::temp_dir().join(format!("orion-offers-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    let socket = dir.join("orion.sock");
+    let (ready, started) = mpsc::channel();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let path = socket.clone();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        tokio::task::LocalSet::new().block_on(&runtime, async move {
+            let comm = Comm::new(
+                "board".parse().expect("name"),
+                Security::Off,
+                None,
+                Limits::default(),
+            );
+            comm.add_service(FileOffersService::standard());
+            let unix = UnixCarrier::bind(&path, Some(0o600), &[]).expect("socket");
+            tokio::task::spawn_local(async move { comm.serve(unix).await });
+            ready.send(()).expect("ready");
+            let _ = stopped.await;
+        });
+    });
+    started.recv().expect("the comm core starts");
+    (socket, stop)
+}
+
+fn files(socket: &Path, name: &str) -> Files {
+    let session = Session::connect(&Address::Local(socket.to_owned()), name, Options::default())
+        .expect("connect");
+    Files::new(&Client::new(session))
+}
+
+/// Bytes that differ from place to place, so a chunk in the wrong place is seen.
+fn content(size: usize) -> Vec<u8> {
+    (0..size).map(|at| (at * 31 % 251) as u8).collect()
+}
+
+/// What the offering program saw of the one request it was handed, and how its gift ended.
+#[derive(Debug)]
+struct Served {
+    name: String,
+    from: u64,
+    caller: String,
+    ended: Giving,
+}
+
+/// A program that offers `prefix` and serves `files` (name, bytes) to `count` requests, in a
+/// thread; refuses any other name in its own words. Its offer is in place when this returns.
+fn offerer(
+    socket: &Path,
+    prefix: &'static str,
+    files_held: Vec<(&'static str, Vec<u8>)>,
+    count: usize,
+) -> JoinHandle<Vec<Served>> {
+    let socket = socket.to_owned();
+    let (ready, offered) = mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        let files = files(&socket, "logger");
+        let mut offer = files.offer(prefix).expect("offer");
+        ready.send(()).expect("ready");
+        let mut served = Vec::new();
+        while served.len() < count {
+            let Some(asked) = offer.next(WAIT).expect("next") else {
+                panic!("asked for nothing");
+            };
+            let (name, from, caller) = (
+                asked.name().to_owned(),
+                asked.from(),
+                asked.caller().to_owned(),
+            );
+            let Some((_, bytes)) = files_held.iter().find(|(held, _)| *held == name) else {
+                asked
+                    .refuse(&format!("{name}: no such file"))
+                    .expect("refuse");
+                served.push(Served {
+                    name,
+                    from,
+                    caller,
+                    ended: Giving::Done {
+                        taken: false,
+                        detail: "refused".into(),
+                    },
+                });
+                continue;
+            };
+            let ended = asked
+                .give(Cursor::new(bytes.clone()))
+                .expect("give")
+                .finish()
+                .expect("given");
+            served.push(Served {
+                name,
+                from,
+                caller,
+                ended,
+            });
+        }
+        served
+    });
+    offered.recv().expect("offered");
+    handle
+}
+
+#[test]
+fn a_file_offered_on_the_board_is_fetched_whole_and_checked() {
+    let (socket, _stop) = comm_core("whole");
+    // Larger than the window, so the client's answers pace the program.
+    let kernel = content(600 * 1024);
+    let program = offerer(&socket, "logs/", vec![("logs/kernel", kernel.clone())], 1);
+
+    let client = files(&socket, "collector");
+    let mut into = Cursor::new(Vec::new());
+    let mut seen = Vec::new();
+    let transfer = client
+        .fetch("logs/kernel", &mut into, 0, |received, size| {
+            seen.push((received, size));
+        })
+        .expect("fetch");
+    assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
+    assert_eq!(transfer.received, kernel.len() as u64);
+    assert_eq!(into.into_inner(), kernel);
+    let digest: [u8; 32] = Sha256::digest(&kernel).into();
+    assert_eq!(transfer.digest, digest);
+    assert!(seen.len() > 2, "progress was told as it went: {seen:?}");
+
+    let served = program.join().expect("program");
+    assert_eq!(served[0].name, "logs/kernel");
+    assert_eq!(served[0].from, 0);
+    // The comm core says who asked, as the audit log names them.
+    assert!(
+        served[0].caller.starts_with("local:"),
+        "{}",
+        served[0].caller
+    );
+    assert_eq!(
+        served[0].ended,
+        Giving::Done {
+            taken: true,
+            detail: String::new()
+        }
+    );
+}
+
+#[test]
+fn a_fetch_that_broke_off_goes_on_from_what_is_here() {
+    let (socket, _stop) = comm_core("resume");
+    let kernel = content(300 * 1024);
+    let program = offerer(&socket, "logs/", vec![("logs/kernel", kernel.clone())], 1);
+
+    let client = files(&socket, "collector");
+    let have = 70_000;
+    let mut into = Cursor::new(kernel[..have].to_vec());
+    let transfer = client
+        .fetch("logs/kernel", &mut into, have as u64, |_, _| {})
+        .expect("fetch");
+    assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
+    assert_eq!(into.into_inner(), kernel);
+    let served = program.join().expect("program");
+    assert_eq!(served[0].from, have as u64, "only the rest was asked for");
+}
+
+#[test]
+fn a_name_nothing_offers_and_one_the_program_lacks_are_refused_by_name() {
+    let (socket, _stop) = comm_core("refused");
+    let program = offerer(&socket, "logs/", vec![], 1);
+    let client = files(&socket, "collector");
+
+    let error = client
+        .fetch("other/x", &mut Cursor::new(Vec::new()), 0, |_, _| {})
+        .expect_err("nothing offers it");
+    assert!(
+        matches!(&error, ClientError::Refused { error: Error::NotFound, detail } if detail == "nothing offers other/x"),
+        "{error}"
+    );
+
+    let transfer = client
+        .fetch("logs/missing", &mut Cursor::new(Vec::new()), 0, |_, _| {})
+        .expect("answered");
+    assert_eq!(transfer.state, FileState::Rejected);
+    assert_eq!(transfer.detail, "logs/missing: no such file");
+    program.join().expect("program");
+}
+
+#[test]
+fn a_second_program_offering_a_prefix_is_refused_naming_the_holder_and_counted() {
+    let (socket, _stop) = comm_core("clash");
+    let holder = files(&socket, "logger");
+    let offer = holder.offer("logs/").expect("offer");
+    let other = files(&socket, "other-logger");
+    let error = other.offer("logs/").expect_err("held");
+    assert!(
+        matches!(&error, ClientError::Refused { error: Error::Busy, detail } if detail.starts_with("logs/ is offered by logger (local:")),
+        "{error}"
+    );
+    assert!(matches!(
+        other.offer("logs").expect_err("not a prefix"),
+        ClientError::Refused {
+            error: Error::InvalidName,
+            ..
+        }
+    ));
+
+    let (offers, clashes) = other.offers().expect("offers");
+    assert_eq!(clashes, 1);
+    assert_eq!(offers.len(), 1);
+    assert_eq!(offers[0].prefix, "logs/");
+    assert_eq!(offers[0].by, OfferedBy::Program);
+    assert_eq!(offers[0].name, "logger");
+    assert!(offers[0].principal.starts_with("local:"));
+
+    // Its session ends: the prefix is free.
+    drop(offer);
+    drop(holder);
+    let mut taken = None;
+    for _ in 0..200 {
+        match other.offer("logs/") {
+            Ok(offer) => {
+                taken = Some(offer);
+                break;
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    assert!(taken.is_some(), "the prefix was never freed");
+    let (offers, _) = other.offers().expect("offers");
+    assert_eq!(offers[0].name, "other-logger");
+}
+
+#[test]
+fn the_longest_prefix_offered_is_handed_the_fetch() {
+    let (socket, _stop) = comm_core("longest");
+    let broad = offerer(&socket, "logs/", vec![("logs/boot", content(10))], 1);
+    let narrow = offerer(
+        &socket,
+        "logs/kernel/",
+        vec![("logs/kernel/ring", content(20))],
+        1,
+    );
+    let client = files(&socket, "collector");
+    let mut ring = Cursor::new(Vec::new());
+    let mut boot = Cursor::new(Vec::new());
+    let one = client.fetch("logs/kernel/ring", &mut ring, 0, |_, _| {});
+    let two = client.fetch("logs/boot", &mut boot, 0, |_, _| {});
+    assert_eq!(one.expect("ring").state, FileState::Committed);
+    assert_eq!(two.expect("boot").state, FileState::Committed);
+    assert_eq!(ring.into_inner(), content(20));
+    assert_eq!(boot.into_inner(), content(10));
+    assert_eq!(narrow.join().expect("narrow")[0].name, "logs/kernel/ring");
+    assert_eq!(broad.join().expect("broad")[0].name, "logs/boot");
+}
+
+#[test]
+fn a_file_whose_bytes_are_not_its_digest_is_not_taken() {
+    let (socket, _stop) = comm_core("digest");
+    let socket_for = socket.clone();
+    let (ready, offered) = mpsc::channel();
+    let program = std::thread::spawn(move || {
+        let files = files(&socket_for, "logger");
+        let mut offer = files.offer("logs/").expect("offer");
+        ready.send(()).expect("ready");
+        let asked = offer.next(WAIT).expect("next").expect("asked");
+        let bytes = content(5000);
+        let wrong = Known {
+            digest: [7; 32],
+            size: bytes.len() as u64,
+        };
+        asked
+            .give_known(Cursor::new(bytes), wrong)
+            .expect("give")
+            .finish()
+            .expect("over")
+    });
+    offered.recv().expect("offered");
+    let client = files(&socket, "collector");
+    let transfer = client
+        .fetch("logs/kernel", &mut Cursor::new(Vec::new()), 0, |_, _| {})
+        .expect("answered");
+    assert_eq!(transfer.state, FileState::Rejected);
+    assert!(transfer.detail.contains("digest"), "{}", transfer.detail);
+    let Giving::Done { taken, detail } = program.join().expect("program") else {
+        panic!("not over");
+    };
+    assert!(!taken);
+    assert!(detail.contains("digest"), "{detail}");
+}
+
+#[test]
+fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
+    let (socket, _stop) = comm_core("gone");
+    let socket_for = socket.clone();
+    let (ready, offered) = mpsc::channel();
+    let (asked_tx, asked_rx) = mpsc::channel();
+    let (go, gone) = mpsc::channel::<()>();
+    let program = std::thread::spawn(move || {
+        let files = files(&socket_for, "logger");
+        let mut offer = files.offer("logs/").expect("offer");
+        ready.send(()).expect("ready");
+        let asked = offer.next(WAIT).expect("next").expect("asked");
+        // Gives the start, then its session ends before the rest.
+        let mut gift = asked.give(Cursor::new(content(1 << 20))).expect("give");
+        let _ = gift.step(Duration::from_millis(10)).expect("step");
+        asked_tx.send(()).expect("asked");
+        gone.recv().expect("go");
+    });
+    offered.recv().expect("offered");
+    let client = files(&socket, "collector");
+    let mut fetching = client
+        .start_fetch("logs/kernel", Cursor::new(Vec::new()), 0)
+        .expect("fetch");
+    loop {
+        if let Step::Progress { received, .. } =
+            fetching.step(Duration::from_millis(20)).expect("step")
+            && received > 0
+        {
+            break;
+        }
+    }
+    asked_rx.recv().expect("asked");
+    go.send(()).expect("go");
+    program.join().expect("program");
+    let ended = loop {
+        if let Step::Done(transfer) = fetching.step(Duration::from_millis(50)).expect("step") {
+            break transfer;
+        }
+    };
+    assert_eq!(ended.state, FileState::Rejected);
+    assert_eq!(ended.detail, "the program that offers it went");
+}

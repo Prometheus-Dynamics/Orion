@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery", "devices", "shell", "login-helper"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery", "devices", "shell", "login-helper", "offers"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -19,6 +19,8 @@ self-status = ["dep:orion-self-status"]
 proxy = ["dep:orion-broker-proxy"]
 # Buffer topics: frames in shared memory.
 buffers = ["dep:orion-broker-buffers"]
+# Files offered by programs on the board, fetched by clients.
+offers = ["dep:orion-file-offers"]
 # Passing records and the rest of what is node logic's to node logic.
 node = ["dep:orion-relay"]
 # Each device on a link as a resource, with its topics and actions.
@@ -70,6 +72,7 @@ full = ["mdns", "link-sealed", "link-can", "link-usb"]
 orion-broker = { path = "../broker" }
 orion-broker-buffers = { path = "../broker-buffers", optional = true }
 orion-broker-proxy = { path = "../broker-proxy", optional = true }
+orion-file-offers = { path = "../file-offers", optional = true }
 orion-check = { path = "../../core/check", optional = true }
 orion-config = { path = "../../core/config" }
 orion-device-gateway = { path = "../device-gateway", optional = true }

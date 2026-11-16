@@ -192,6 +192,8 @@ impl CommCore {
             &broker,
             settings.broker.declare,
         ));
+        #[cfg(feature = "offers")]
+        comm.add_service(orion_file_offers::FileOffersService::standard());
         // Devices on links, each a resource with what it declared and registered.
         #[cfg(feature = "devices")]
         let devices = {
