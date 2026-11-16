@@ -318,6 +318,7 @@ impl Board {
                 .expect("outbound");
                 comm.add_service(BrokerProxy::new(&broker, anyone));
                 comm.add_service(BrokerBuffers::new(&broker, anyone));
+                comm.add_service(orion_file_offers::FileOffersService::new(anyone, anyone));
                 comm.add_service(orion_hello::Hello::new(
                     node.clone(),
                     board_keys.clone(),

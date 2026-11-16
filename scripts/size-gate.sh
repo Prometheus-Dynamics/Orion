@@ -35,13 +35,15 @@ RECOVERY_HOST=3270000
 ORION_HOST=6590000
 CAPI_HOST=740000
 # A board's files, static musl. aarch64, the one run on a board, as measured at C52b (one
-# codegen unit, the login helper in); the others as at C41, until they run on one:
+# codegen unit, the login helper in), and its `orion` at D16b (files from a board, and
+# `orion file fetch`: +36,744 since C52b, after D16's cuts; docs/prs/D16b.md); the others as at
+# C41, until they run on one:
 #                                   orion-recovery   orion
-#   aarch64-unknown-linux-musl      2,654,240        5,213,424
+#   aarch64-unknown-linux-musl      2,654,240        5,250,168
 #   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
 BOARDS=(
-    "aarch64-unknown-linux-musl     2680000          5240000"
+    "aarch64-unknown-linux-musl     2680000          5270000"
     "armv7-unknown-linux-musleabihf 2810000          5350000"
     "riscv64gc-unknown-linux-musl   3040000          5690000"
 )

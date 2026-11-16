@@ -98,6 +98,7 @@ pub mod actions {
 /// Files, pushed or pulled.
 #[cfg(feature = "files")]
 pub mod files {
+    pub use orion_files::index;
     pub use orion_files::{
         Asked, Fetching, FileState, Files, Gift, Giving, Handed, Known, Offer, Offered, OfferedBy,
         Pull, Pushing, Sink, Step, Transfer, digest,

@@ -234,4 +234,4 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [C62](docs/prs/C62.md) Roles started before Orion wait for it, and two flakes fixed by their cause (wave 19; needs C61)
 - [x] [C63](docs/prs/C63.md) A resource's topic may give a late subscriber its newest values (wave 19; needs C29)
 - [x] [D16](docs/prs/D16.md) Files from a board: a program offers a prefix, a client fetches by name (wave 19; needs D15)
-- [ ] D16b The index convention, a fetch held to its bound, and `orion file offers`/`fetch` (wave 19; needs D16)
+- [x] [D16b](docs/prs/D16b.md) The index convention, a fetch held to its bound, and `orion file offers`/`fetch` (wave 19; needs D16)

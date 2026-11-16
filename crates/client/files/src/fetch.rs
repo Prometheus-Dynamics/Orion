@@ -214,6 +214,8 @@ pub struct Fetching<W> {
     last_heard: Instant,
     /// How much the program was last told is here.
     told: u64,
+    /// The most bytes the file may be.
+    bound: Option<u64>,
     over: bool,
 }
 
@@ -303,6 +305,7 @@ impl Files {
             hasher,
             last_heard: Instant::now(),
             told: have,
+            bound: None,
             over: false,
         })
     }
@@ -319,22 +322,9 @@ impl Files {
         name: &str,
         into: &mut (impl Read + Write + Seek),
         have: u64,
-        mut progress: impl FnMut(u64, u64),
+        progress: impl FnMut(u64, u64),
     ) -> Result<Transfer, ClientError> {
-        let mut fetching = self.start_fetch(name, into, have)?;
-        let mut told = None;
-        loop {
-            match fetching.step(Duration::from_millis(200))? {
-                Step::Done(transfer) => return Ok(transfer),
-                Step::Waiting => {}
-                Step::Progress { received, size } => {
-                    if told != Some(received) {
-                        told = Some(received);
-                        progress(received, size);
-                    }
-                }
-            }
-        }
+        self.start_fetch(name, into, have)?.finish(progress)
     }
 
     /// Every prefix offered on the board, and how many offers were refused because another
@@ -371,6 +361,35 @@ impl<W: Read + Write + Seek> Fetching<W> {
     #[must_use]
     pub const fn transfer(&self) -> u64 {
         self.transfer
+    }
+
+    /// Holds the fetch to `bound` bytes, from the prefix's index ([`crate::index`]): a file
+    /// said to be larger is not taken, and nothing past the bound is written.
+    #[must_use]
+    pub const fn within(mut self, bound: u64) -> Self {
+        self.bound = Some(bound);
+        self
+    }
+
+    /// Steps until the fetch is over, telling `progress` how much is here, of how much.
+    ///
+    /// # Errors
+    ///
+    /// As [`Fetching::step`].
+    pub fn finish(mut self, mut progress: impl FnMut(u64, u64)) -> Result<Transfer, ClientError> {
+        let mut told = None;
+        loop {
+            match self.step(Duration::from_millis(200))? {
+                Step::Done(transfer) => return Ok(transfer),
+                Step::Waiting => {}
+                Step::Progress { received, size } => {
+                    if told != Some(received) {
+                        told = Some(received);
+                        progress(received, size);
+                    }
+                }
+            }
+        }
     }
 
     /// Moves the fetch on, waiting at most about `wait`: writes what has come, and says how
@@ -441,6 +460,13 @@ impl<W: Read + Write + Seek> Fetching<W> {
             self.files.client.pump(wait)?;
             return Ok(Step::Waiting);
         };
+        if let Some(bound) = self.bound
+            && size > bound
+        {
+            let why = format!("the file is {size} bytes, more than its bound of {bound}");
+            self.tell(FileState::Rejected, &why)?;
+            return Ok(self.done(FileState::Rejected, why, digest));
+        }
         if size < self.written {
             let why = format!(
                 "the file is {size} bytes, shorter than the {} here",

@@ -29,6 +29,7 @@ use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 
 mod fetch;
+pub mod index;
 mod offer;
 mod push;
 

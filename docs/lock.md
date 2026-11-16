@@ -265,6 +265,9 @@ what to change.
   `start_fetch`/`offers`, `Offer`, `Asked`, `Gift`, `Giving`, `Fetching`, `Offered`;
   `Feature::FileOffers` (a `match` on `Feature` without `_` gains an arm); the comm core's
   `orion-file-offers` service (feature `offers`, on by default); `Sessions::outbox_bytes`.
+- **D16b.** `orion_files::index` (`Index`, `Entry`, `NotAnIndex`, `FIRST_LINE`),
+  `Fetching::within` and `Fetching::finish`, `orion file fetch` and `orion file offers` (**Add**).
+  The stub board offers files as the comm core does.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

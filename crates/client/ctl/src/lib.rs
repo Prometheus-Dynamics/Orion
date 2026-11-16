@@ -31,6 +31,7 @@
 //! is what lets it be a mode of the one binary, and what its tests call.
 
 mod args;
+mod files;
 mod operator;
 mod value;
 
@@ -38,7 +39,6 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use orion::actions::{ActionCall, Outcome, Target, Update};
-use orion::files::{FileState, Pull};
 use orion::records::RecordClass;
 use orion::topics::{FieldId, Next, SampleTime, Status, Subscriber, TopicDecl};
 use orion::workloads::{RestartPolicy, Workload, WorkloadState};
@@ -65,6 +65,8 @@ usage: orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <ver
             remove NAME [--force] [--for MS]
   file      push DESTINATION PATH
             pull DESTINATION URL --size BYTES --sha256 HEX [--for MS]
+            fetch NAME PATH [--bound BYTES]   (goes on from what PATH holds)
+            offers
   operator  ask --as NAME [--enrollment-key-file PATH]   (needs --key: enrolls that key)
             enroll KEY --as NAME                          (root on the board, any key)
 
@@ -183,8 +185,10 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
         ("action", "attach") => action_attach,
         ("workload", "put") => workload_put,
         ("workload", "remove") => workload_remove,
-        ("file", "push") => file_push,
-        ("file", "pull") => file_pull,
+        ("file", "push") => files::push,
+        ("file", "pull") => files::pull,
+        ("file", "fetch") => files::fetch,
+        ("file", "offers") => files::offers,
         _ => return Err(Failed::Usage(format!("there is no `{concept} {verb}`"))),
     };
     // Understood before anything is asked of a board: a mistake costs no connection.
@@ -199,7 +203,7 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
     run(&orion, &mut args, out)
 }
 
-fn wait_option(args: &mut Args, default_ms: u64) -> Result<Duration, Usage> {
+pub(crate) fn wait_option(args: &mut Args, default_ms: u64) -> Result<Duration, Usage> {
     Ok(Duration::from_millis(
         args.number("--for")?.unwrap_or(default_ms),
     ))
@@ -681,60 +685,4 @@ fn workload_remove(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done 
     track(orion, &name, wait, out, |state| {
         state == WorkloadState::Gone
     })
-}
-
-fn file_push(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
-    let destination = args.word("a destination")?;
-    let path = args.word("a file")?;
-    args.done()?;
-    let mut file =
-        std::fs::File::open(&path).map_err(|error| Failed::Usage(format!("{path}: {error}")))?;
-    let ended = orion.files().push(&destination, &mut file, |_, _| {})?;
-    finished_transfer(&destination, &ended, out)
-}
-
-fn finished_transfer(
-    destination: &str,
-    ended: &orion::files::Transfer,
-    out: &mut dyn Write,
-) -> Done {
-    if ended.state == FileState::Committed {
-        writeln!(out, "{destination} is in place, {} bytes", ended.received)?;
-        Ok(())
-    } else {
-        writeln!(out, "{destination} was rejected: {}", ended.detail)?;
-        Err(Failed::Unsuccessful)
-    }
-}
-
-fn file_pull(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
-    let destination = args.word("a destination")?;
-    let url = args.word("a URL")?;
-    let size = args
-        .number("--size")?
-        .ok_or_else(|| Failed::Usage("missing --size".into()))?;
-    let sum = args
-        .option("--sha256")?
-        .ok_or_else(|| Failed::Usage("missing --sha256".into()))?;
-    let digest: [u8; 32] = value::unhex(&sum)
-        .and_then(|bytes| bytes.try_into().ok())
-        .ok_or_else(|| Failed::Usage("--sha256 is 64 hex digits".into()))?;
-    let wait = wait_option(args, 600_000)?;
-    args.done()?;
-    // The same file to the same place is the same transfer, so asking again follows it.
-    let transfer = u64::from_le_bytes([
-        digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7],
-    ]);
-    let ended = orion.files().pull(
-        &Pull {
-            transfer,
-            url: &url,
-            destination: &destination,
-            size,
-            digest,
-        },
-        wait,
-        |_, _| {},
-    )?;
-    finished_transfer(&destination, &ended, out)
 }

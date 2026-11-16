@@ -2247,6 +2247,7 @@ dependencies = [
  "orion-broker-buffers",
  "orion-broker-proxy",
  "orion-device-gateway",
+ "orion-file-offers",
  "orion-hello",
  "orion-keys",
  "orion-link-serial",

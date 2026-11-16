@@ -13,6 +13,7 @@ orion-broker = { path = "../../comm/broker" }
 orion-broker-buffers = { path = "../../comm/broker-buffers" }
 orion-broker-proxy = { path = "../../comm/broker-proxy" }
 orion-device-gateway = { path = "../../comm/device-gateway" }
+orion-file-offers = { path = "../../comm/file-offers" }
 orion-hello = { path = "../../comm/hello" }
 orion-keys = { path = "../../comm/keys" }
 orion-link-serial = { path = "../../comm/link-serial" }

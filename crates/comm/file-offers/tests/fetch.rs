@@ -352,3 +352,43 @@ fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
     assert_eq!(ended.state, FileState::Rejected);
     assert_eq!(ended.detail, "the program that offers it went");
 }
+
+#[test]
+fn a_fetch_held_to_a_bound_does_not_take_a_larger_file() {
+    let (socket, _stop) = comm_core("bound");
+    let program = offerer(
+        &socket,
+        "logs/",
+        vec![("logs/kernel", content(5000)), ("logs/boot", content(4000))],
+        2,
+    );
+    let client = files(&socket, "collector");
+    let mut into = Cursor::new(Vec::new());
+    let over = client
+        .start_fetch("logs/kernel", &mut into, 0)
+        .expect("fetch")
+        .within(4000)
+        .finish(|_, _| {})
+        .expect("answered");
+    assert_eq!(over.state, FileState::Rejected);
+    assert_eq!(
+        over.detail,
+        "the file is 5000 bytes, more than its bound of 4000"
+    );
+    assert!(into.into_inner().is_empty(), "nothing of it was written");
+    // At its bound exactly, it is taken.
+    let mut into = Cursor::new(Vec::new());
+    let at = client
+        .start_fetch("logs/boot", &mut into, 0)
+        .expect("fetch")
+        .within(4000)
+        .finish(|_, _| {})
+        .expect("answered");
+    assert_eq!(at.state, FileState::Committed, "{}", at.detail);
+    let served = program.join().expect("program");
+    assert!(
+        matches!(&served[0].ended, Giving::Done { taken: false, detail } if detail.contains("bound")),
+        "{:?}",
+        served[0].ended
+    );
+}

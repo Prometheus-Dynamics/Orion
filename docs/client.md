@@ -466,6 +466,24 @@ prefix of the name, and knows nothing of what the file holds. Both need a node a
 - `files.offers()` lists every prefix offered (`Offered { prefix, by, name, principal, since_ms
   }`) and how many offers were refused for a clash.
 
+**The index of a prefix.** Each prefix offered has an index, `<prefix>index`, so a client can say
+how much a fetch will be, and warn of what may hold a user's data, before it fetches anything.
+Orion owns its format, and every program writes it alike:
+
+```text
+orion-index 1
+total 1048576
+logs/kernel 262144 no-user-data
+logs/journal 786432 user-data
+```
+
+The first line is the format and its version; `total` bounds the whole prefix in bytes; then
+one line a file: its whole name, the most bytes it can be, and `user-data` if it may hold a
+user's data or `no-user-data` if not. `orion_files::index::Index` writes one (`write`) and reads
+one (`parse`, which says which line is wrong and why, and `bound(name)`). A fetch held to a
+file's bound, `files.start_fetch(..).within(bound)`, does not take a file said to be larger, and
+writes nothing of it.
+
 ## The executor role
 
 `orion-executor`. An executor is any program that connects and says "I run this kind of
@@ -620,6 +638,8 @@ workload  put NAME --kind K [--spec TEXT | --spec-file PATH] [--node N]
 workload  remove NAME [--force] [--for MS]
 file      push DESTINATION PATH
 file      pull DESTINATION URL --size BYTES --sha256 HEX [--for MS]
+file      fetch NAME PATH [--bound BYTES]   a file offered on the board; goes on from what PATH holds
+file      offers                    what is offered on the board, and by whom
 operator  ask --as NAME [--enrollment-key-file PATH]   this operator's key (--key) asks to be let in
 operator  enroll KEY --as NAME                         root on the board lets a key in
 ```
