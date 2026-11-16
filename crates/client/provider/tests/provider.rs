@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 
 use orion_actions::{ActionCall, Actions, Admits, Outcome, Policy, Request, Target};
 use orion_connect::{Address, Client, Options, Roles, Session};
-use orion_msg_topics::{Declare, Field, FieldType};
+use orion_msg_topics::{Declare, Field, FieldType, OnSubscribe};
 use orion_provider::{Found, Provider, ResourceState, resources};
 use orion_records::Records;
 use orion_stubs::Board;
-use orion_topics::{Publisher, Status, Topics};
+use orion_topics::{Publisher, Status, TopicDecl, Topics};
 use orion_wire::Decode;
 use shm_ring::{FieldId, SampleTime};
 
@@ -270,4 +270,55 @@ fn a_providers_device_appears_with_no_device_code_on_the_reading_side() {
     }
     assert!(fan.speed.withdrawn());
     assert!(provider.resource("not a name", "fan").is_err());
+}
+
+/// What a reader is told of `topic`'s declaration: when its values go stale, and what a
+/// subscriber sent samples as messages is given first.
+fn declared(reader: &Side, topic: &str) -> (u32, OnSubscribe) {
+    let subscriber = reader.topics.subscribe(topic, &[]).expect("subscribe");
+    subscriber.with_declaration(|declaration| {
+        let declare = Declare::decode(declaration.expect("declared")).expect("declaration");
+        (declare.expiry_ms, declare.on_subscribe)
+    })
+}
+
+#[test]
+fn a_resources_topic_may_give_a_late_subscriber_its_newest_values() {
+    let board = Board::start("provider-latest");
+    let owner = side(&board, "fan-driver", Roles::CLIENT.and(Roles::PROVIDER));
+    let reader = side(&board, "dashboard", Roles::CLIENT);
+    let provider = Provider::new(&owner.client, &owner.records, &owner.topics, &owner.actions);
+    let mode = [Field {
+        name: "mode",
+        ty: FieldType::Text,
+        unit: "",
+        type_name: "",
+    }];
+    let mut describing = provider.resource("fan.left", "fan").expect("name");
+    // A value that changes rarely: a subscriber that starts late is given it at once.
+    let _mode = describing
+        .topic_with(&TopicDecl {
+            name: "mode",
+            fields: &mode,
+            history: 4,
+            expiry_ms: 5000,
+            max_payload: 16,
+            on_subscribe: OnSubscribe::Latest,
+        })
+        .expect("declare");
+    // The shorthand is as before.
+    let _speed = describing.topic("speed", &mode, 4, 16).expect("declare");
+    let _fan = describing.publish(ResourceState::Ready).expect("publish");
+
+    let listed = resources(&reader.records, "fan.").expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].topics, ["fan.left.mode", "fan.left.speed"]);
+    assert_eq!(
+        declared(&reader, "fan.left.mode"),
+        (5000, OnSubscribe::Latest)
+    );
+    assert_eq!(
+        declared(&reader, "fan.left.speed"),
+        (0, OnSubscribe::FromNow)
+    );
 }

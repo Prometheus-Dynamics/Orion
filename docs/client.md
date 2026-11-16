@@ -486,6 +486,12 @@ provider.resource("fan.left", "fan")      the kind is the provider's own word
     .publish(Ready)                        writes the record: now it can be found
 ```
 
+`.topic` declares a topic whose values never go stale and whose subscribers sent samples as
+messages start from now. `.topic_with(&TopicDecl { .. })` declares it as the `TopicDecl` says,
+the name taken under the resource's: a value that changes rarely, a mode say, is declared with
+`OnSubscribe::Latest` and an `expiry_ms`, so a dashboard on another board is given it when it
+starts instead of waiting for it to change.
+
 What is written down is enough for a program that has never heard of the kind. The record
 names the resource's topics and actions; a topic's declaration names its fields, types and
 units; an action has a description and a policy. `resources(records, prefix)` is the reading

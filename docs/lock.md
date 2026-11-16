@@ -258,6 +258,8 @@ what to change.
   (**Add**; a struct literal of `Options` without `..Default` gains a field). `reconnect` now
   tries again on `Rejected(Busy | NoSession)`.
 - **C62.** Tests and drills only: nothing a consumer calls changes. `docs/flakes.md` is added.
+- **C63.** `Describing::topic_with` is added (**Add**): a resource's topic declared with its own
+  `expiry_ms` and `on_subscribe`. `Describing::topic` is unchanged.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

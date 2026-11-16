@@ -18,7 +18,7 @@ use std::fmt;
 use orion_actions::{ActionDecl, Actions, Policy, Registration, Target};
 use orion_connect::{Client, ClientError};
 use orion_msg_records::{Label, Offered, ResourceDescription, ResourceRecord};
-use orion_msg_topics::Field;
+use orion_msg_topics::{Field, OnSubscribe};
 use orion_records::{Record, RecordClass, RecordEntry, Records};
 use orion_topics::{Publisher, TopicDecl, TopicError, Topics};
 use orion_types::{HlcTimestamp, NodeName, ResourceName};
@@ -100,7 +100,9 @@ impl Describing {
         self
     }
 
-    /// Declares a topic of the resource, `<resource>.<name>`, and returns its publisher.
+    /// Declares a topic of the resource, `<resource>.<name>`, and returns its publisher. Its
+    /// values never go stale, and a subscriber sent samples as messages starts from now: for
+    /// anything else, [`Describing::topic_with`].
     ///
     /// # Errors
     ///
@@ -112,14 +114,30 @@ impl Describing {
         history: u32,
         max_payload: u32,
     ) -> Result<Publisher, TopicError> {
-        let full = format!("{}.{name}", self.name);
-        let publisher = self.provider.topics.declare(&TopicDecl {
-            name: &full,
+        self.topic_with(&TopicDecl {
+            name,
             fields,
             history,
             expiry_ms: 0,
             max_payload,
-            on_subscribe: Default::default(),
+            on_subscribe: OnSubscribe::FromNow,
+        })
+    }
+
+    /// Declares a topic of the resource as `topic` says, named `<resource>.<topic.name>`, and
+    /// returns its publisher. A value that changes rarely, a fan's mode say, is declared with
+    /// [`OnSubscribe::Latest`], so a subscriber on another board or in a browser is given it
+    /// when it starts instead of waiting for it to change.
+    ///
+    /// # Errors
+    ///
+    /// As [`Topics::declare`]: a node too old to give a late subscriber the newest values
+    /// refuses [`OnSubscribe::Latest`] rather than quietly starting it from now.
+    pub fn topic_with(&mut self, topic: &TopicDecl<'_>) -> Result<Publisher, TopicError> {
+        let full = format!("{}.{}", self.name, topic.name);
+        let publisher = self.provider.topics.declare(&TopicDecl {
+            name: &full,
+            ..*topic
         })?;
         self.topics.push(full);
         Ok(publisher)
