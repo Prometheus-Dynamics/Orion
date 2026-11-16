@@ -238,6 +238,12 @@ what to change.
   becomes the session, and a `Reject` mid-session is `ClientError::Lost`.
   `Session::reconnect_over_with(open, keep_trying)` and `FIRST_AGAIN`/`MOST_BETWEEN` are
   added (**Add**). `reconnect_over` lets the old halves go before saying hello.
+- **C60.** The stub board's action router is node logic's own action list
+  (`orion-action-list`) behind the door, not a stand-in: it answers as a board does, so a
+  detached run with no deadline is refused (`NoDeadline`) there too.
+  `Board::restart_node_logic` and `Board::node_logic_instance` are added (**Add**;
+  `orion-stubs` is a dev dependency, not a consumer's). `Router::default` becomes
+  `Router::new(node)`. Nothing on the wire changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

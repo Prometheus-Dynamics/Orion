@@ -4,8 +4,11 @@
 //! [`Board::start`] runs a real comm core in its own thread: the real server, the real topic
 //! broker with its add-ons, the real hello and keys, on a real socket and a real network
 //! port. What belongs to node logic is stood in for by the smallest thing that speaks the
-//! wire: a record [`store`], an action [`router`], a file [`receiver`] and a workload
-//! [`tracker`]. Each keeps to what the wire and the client's briefs say of the real one.
+//! wire: a record [`store`], a file [`receiver`] and a workload [`tracker`], each keeping to
+//! what the wire and the client's briefs say of the real one. Actions are not stood in for:
+//! the [`router`] is node logic's own action list behind the door, so run handles, attach,
+//! cancel, deadlines and a restart of node logic ([`Board::restart_node_logic`]) behave here
+//! as on a board.
 
 #![cfg(target_os = "linux")]
 
@@ -90,7 +93,16 @@ pub struct Board {
     keys: SharedKeys,
     dir: PathBuf,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
+    /// Asks of the action router, in the board's thread.
+    control: tokio::sync::mpsc::UnboundedSender<Control>,
     thread: Option<std::thread::JoinHandle<()>>,
+}
+
+/// What a test asks of the action router: each answers with the list's instance.
+#[derive(Debug)]
+enum Control {
+    Restart(mpsc::Sender<u64>),
+    Instance(mpsc::Sender<u64>),
 }
 
 impl Board {
@@ -266,6 +278,7 @@ impl Board {
         let keys = SharedKeys::new(Keys::open(keys_config, security).expect("keys"));
         let (ready, started) = mpsc::channel();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let (control, mut controls) = tokio::sync::mpsc::unbounded_channel::<Control>();
         let (path, on_shelf, board_keys) = (socket.clone(), shelf.clone(), keys.clone());
         let thread = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -326,7 +339,29 @@ impl Board {
                     );
                 } else {
                     comm.add_service(store::Store::default());
-                    comm.add_service(devices.watch(router::Router::default()));
+                    // Node logic's own action list, behind the door.
+                    let router = router::Router::new(node.clone());
+                    comm.add_service(devices.watch(router.clone()));
+                    // Deadlines pass with time, not only when a frame comes.
+                    let (ticking, ticked) = (comm.clone(), router.clone());
+                    tokio::task::spawn_local(async move {
+                        loop {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                            ticking.with(|sessions, _| ticked.tick(sessions));
+                        }
+                    });
+                    tokio::task::spawn_local(async move {
+                        while let Some(asked) = controls.recv().await {
+                            let reply = match asked {
+                                Control::Restart(reply) => {
+                                    router.restart();
+                                    reply
+                                }
+                                Control::Instance(reply) => reply,
+                            };
+                            let _ = reply.send(router.instance());
+                        }
+                    });
                 }
                 if !for_node {
                     comm.add_service(receiver::Receiver::new(on_shelf));
@@ -386,8 +421,41 @@ impl Board {
             keys,
             dir: dir.to_owned(),
             stop: Some(stop),
+            control,
             thread: Some(thread),
         }
+    }
+
+    fn ask(&self, asked: impl FnOnce(mpsc::Sender<u64>) -> Control) -> u64 {
+        let (reply, answer) = mpsc::channel();
+        self.control
+            .send(asked(reply))
+            .expect("the board is running");
+        answer
+            .recv()
+            .expect("a board for node logic has no action router of its own")
+    }
+
+    /// Node logic starts again, as after a crash: its action list gets an instance of its own,
+    /// so a run handle from before names nothing and is told the run is gone, and nothing is
+    /// running. The comm core hands it every registration again, so actions stay listed.
+    /// Returns the new instance.
+    ///
+    /// # Panics
+    ///
+    /// On a board for node logic ([`Options::for_node`]): there is no stand-in to restart.
+    pub fn restart_node_logic(&self) -> u64 {
+        self.ask(Control::Restart)
+    }
+
+    /// The action list's instance: what every run handle it gives starts with.
+    ///
+    /// # Panics
+    ///
+    /// As [`Board::restart_node_logic`].
+    #[must_use]
+    pub fn node_logic_instance(&self) -> u64 {
+        self.ask(Control::Instance)
     }
 
     /// The board's socket.

@@ -1239,6 +1239,7 @@ dependencies = [
  "orion-connect",
  "orion-msg-actions",
  "orion-server",
+ "orion-stubs",
  "orion-types",
  "orion-unix",
  "orion-wire",
@@ -2224,6 +2225,7 @@ dependencies = [
 name = "orion-stubs"
 version = "1.0.1-dev"
 dependencies = [
+ "orion-action-list",
  "orion-broker",
  "orion-broker-buffers",
  "orion-broker-proxy",
@@ -2238,6 +2240,7 @@ dependencies = [
  "orion-msg-workloads",
  "orion-outbound",
  "orion-relay",
+ "orion-reply",
  "orion-server",
  "orion-tcp",
  "orion-time",

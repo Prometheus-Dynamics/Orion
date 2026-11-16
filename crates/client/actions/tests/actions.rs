@@ -1,15 +1,14 @@
 //! An action registered by another process runs through the check.
 //!
-//! This test is the comm core, with a small router standing in for node logic's, and the
-//! caller. It starts the same test binary again as the program that owns the action.
+//! This test is the comm core, with node logic's own action list behind the door (the stub's
+//! router), and the caller. It starts the same test binary again as the program that owns the
+//! action.
 
 #![cfg(target_os = "linux")]
 
-use std::cell::RefCell;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -17,253 +16,12 @@ use orion_actions::{
     ActionCall, ActionDecl, Actions, Admits, Outcome, Policy, Request, Target, Update,
 };
 use orion_connect::{Address, Client, ClientError, Options, Session};
-use orion_msg_actions::{ActionResult, Attach, Cancel, Claim, Progress, Register, Registered, Run};
-use orion_server::{
-    Checked, Comm, Cx, Delivery, Error, Incoming, Limits, Security, Service, SessionId, Sessions,
-    What,
-};
+use orion_server::{Comm, Error, Limits, Security};
+use orion_stubs::router::Router;
 use orion_unix::UnixCarrier;
-use orion_wire::{Bytes, FrameView, body, kind};
 
 const ROLE: &str = "ORION_TEST_ROLE";
 const SOCKET: &str = "ORION_TEST_SOCKET";
-
-struct Listed {
-    name: String,
-    owner: SessionId,
-    policy: Policy,
-}
-
-struct Running {
-    /// The run's number on the wire to the action's program.
-    id: u64,
-    caller: Option<(SessionId, u64)>,
-    owner: SessionId,
-    detached: bool,
-    doing: Option<(u8, String, Vec<u8>)>,
-    finished: Option<(Outcome, Vec<u8>, String, u32)>,
-}
-
-/// The open list of actions and the runs under way: what node logic keeps.
-#[derive(Default)]
-struct Router {
-    listed: Vec<Listed>,
-    running: Vec<Running>,
-    next: u64,
-    /// Every run that reached the router, for the test to look at.
-    reached: Rc<RefCell<Vec<String>>>,
-}
-
-fn tell(sessions: &mut Sessions, run: &Running) {
-    let Some((caller, call)) = run.caller else {
-        return;
-    };
-    if let Some((percent, message, data)) = &run.doing {
-        let progress = Progress {
-            call,
-            percent: *percent,
-            message,
-            data: Bytes(data),
-            instance: 0,
-            run: 0,
-        };
-        let _ = sessions.send(caller, &progress, Delivery::MayDrop);
-    }
-    if let Some((outcome, output, detail, code)) = &run.finished {
-        let result = ActionResult {
-            call,
-            outcome: *outcome,
-            output: Bytes(output),
-            detail,
-            code: *code,
-            instance: 0,
-            run: 0,
-            action: "",
-        };
-        let _ = sessions.send(caller, &result, Delivery::Must);
-    }
-}
-
-impl Service for Router {
-    fn kinds(&self) -> &'static [u8] {
-        &[
-            kind::ACTION_REGISTER,
-            kind::ACTION_RUN,
-            kind::ACTION_PROGRESS,
-            kind::ACTION_RESULT,
-            kind::ACTION_CANCEL,
-            kind::ACTION_ATTACH,
-        ]
-    }
-
-    fn asks<'a>(&self, frame: &FrameView<'a>) -> Result<(What<'a>, Policy), Error> {
-        let local = Policy::new(Admits::LOCAL);
-        match frame.kind() {
-            kind::ACTION_REGISTER => Ok((What::Write("actions"), local)),
-            kind::ACTION_RUN => {
-                // The check is asked with the policy the action was registered with: that is
-                // what makes a registered action as guarded as a built-in one.
-                let (_call, rest) = body::take::<u64>(frame.payload())?;
-                let (name, _) = body::take::<&str>(rest)?;
-                let listed = self
-                    .listed
-                    .iter()
-                    .find(|listed| listed.name == name)
-                    .ok_or(Error::NotFound)?;
-                Ok((What::Run(name), listed.policy))
-            }
-            _ => Ok((What::Read("actions"), local.without_grant())),
-        }
-    }
-
-    fn handle(&mut self, request: Checked<Incoming<'_>>, cx: &mut Cx<'_>) -> Result<(), Error> {
-        let incoming = request.get();
-        let from = cx.from();
-        match incoming.kind() {
-            kind::ACTION_REGISTER => {
-                let register: Register<'_> = incoming.body()?;
-                if self
-                    .listed
-                    .iter()
-                    .any(|listed| listed.name == register.name.as_str())
-                {
-                    return Err(Error::AlreadyExists);
-                }
-                self.listed.push(Listed {
-                    name: register.name.to_string(),
-                    owner: from,
-                    policy: register.policy,
-                });
-                cx.reply(&Registered {
-                    request_seq: cx.request_seq(),
-                })
-            }
-            kind::ACTION_RUN => {
-                let run: Run<'_> = incoming.body()?;
-                let owner = self
-                    .listed
-                    .iter()
-                    .find(|listed| listed.name == run.name.as_str())
-                    .map(|listed| listed.owner)
-                    .ok_or(Error::NotFound)?;
-                self.reached.borrow_mut().push(run.name.to_string());
-                self.next += 1;
-                self.running.push(Running {
-                    id: self.next,
-                    caller: Some((from, run.call)),
-                    owner,
-                    detached: run.detached,
-                    doing: None,
-                    finished: None,
-                });
-                let caller = cx.caller().principal.to_string();
-                cx.sessions().send(
-                    owner,
-                    &Claim {
-                        call: self.next,
-                        name: run.name.clone(),
-                        target: run.target.clone(),
-                        args: run.args,
-                        deadline_ms: run.deadline_ms,
-                        caller: &caller,
-                        session: 0,
-                        detached: run.detached,
-                    },
-                    Delivery::Must,
-                )
-            }
-            kind::ACTION_PROGRESS => {
-                let progress: Progress<'_> = incoming.body()?;
-                let run = self
-                    .running
-                    .iter_mut()
-                    .find(|run| run.id == progress.call && run.owner == from)
-                    .ok_or(Error::NotFound)?;
-                run.doing = Some((
-                    progress.percent,
-                    progress.message.to_owned(),
-                    progress.data.0.to_vec(),
-                ));
-                tell(cx.sessions(), run);
-                Ok(())
-            }
-            kind::ACTION_RESULT => {
-                let result: ActionResult<'_> = incoming.body()?;
-                let run = self
-                    .running
-                    .iter_mut()
-                    .find(|run| run.id == result.call && run.owner == from)
-                    .ok_or(Error::NotFound)?;
-                run.doing = None;
-                run.finished = Some((
-                    result.outcome,
-                    result.output.0.to_vec(),
-                    result.detail.to_owned(),
-                    result.code,
-                ));
-                tell(cx.sessions(), run);
-                Ok(())
-            }
-            kind::ACTION_CANCEL => {
-                let cancel: Cancel = incoming.body()?;
-                let run = self
-                    .running
-                    .iter()
-                    .find(|run| run.caller == Some((from, cancel.call)))
-                    .ok_or(Error::NotFound)?;
-                cx.sessions().send(
-                    run.owner,
-                    &Cancel {
-                        call: run.id,
-                        reason: orion_msg_actions::CancelReason::Asked,
-                        instance: 0,
-                        run: 0,
-                    },
-                    Delivery::Must,
-                )
-            }
-            _ => {
-                // Coming back to a detached run: by the number the first caller knew it by.
-                let attach: Attach = incoming.body()?;
-                let run = self
-                    .running
-                    .iter_mut()
-                    .find(|run| {
-                        run.detached && run.caller.is_none_or(|(_, call)| call == attach.call)
-                    })
-                    .ok_or(Error::NotFound)?;
-                run.caller = Some((from, attach.call));
-                tell(cx.sessions(), run);
-                Ok(())
-            }
-        }
-    }
-
-    fn closed(&mut self, session: SessionId, sessions: &mut Sessions) {
-        // A caller that leaves takes its runs with it, unless they were detached.
-        for run in &mut self.running {
-            if run.caller.is_some_and(|(caller, _)| caller == session) {
-                if run.detached {
-                    run.caller = run.caller.map(|(_, call)| (SessionId(u32::MAX), call));
-                } else if run.finished.is_none() {
-                    let _ = sessions.send(
-                        run.owner,
-                        &Cancel {
-                            call: run.id,
-                            reason: orion_msg_actions::CancelReason::Asked,
-                            instance: 0,
-                            run: 0,
-                        },
-                        Delivery::Must,
-                    );
-                }
-            }
-        }
-        self.listed.retain(|listed| listed.owner != session);
-    }
-
-    fn quiet(&mut self, _session: SessionId, _quiet_ms: u64, _sessions: &mut Sessions) {}
-}
 
 fn actions(socket: &Path, name: &str) -> Actions {
     let session = Session::connect(&Address::Local(socket.to_owned()), name, Options::default())
@@ -393,17 +151,19 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
                 None,
                 Limits::default(),
             );
-            let reached = Rc::new(RefCell::new(Vec::new()));
-            comm.add_service(Router {
-                reached: reached.clone(),
-                ..Router::default()
-            });
+            let router = Router::new("board".parse().expect("name"));
+            comm.add_service(router.clone());
             let unix = UnixCarrier::bind(&path, Some(0o600), &[]).expect("socket");
             let stats = comm.clone();
             tokio::task::spawn_local(async move { comm.serve(unix).await });
             ready.send(()).expect("ready");
             let _ = stopped.await;
-            let reached = reached.borrow().clone();
+            // Every run that reached the list.
+            let reached: Vec<String> = router
+                .take_events()
+                .into_iter()
+                .map(|event| event.name.to_string())
+                .collect();
             (reached, stats.stats().refused)
         })
     });
@@ -422,7 +182,8 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
         name: "lights.fade",
         target: node.clone(),
         args,
-        deadline_ms: 0,
+        // The node keeps no detached run without an end to it.
+        deadline_ms: if detached { 60_000 } else { 0 },
         detached,
     };
     // Until the other process has registered it, there is no such action.

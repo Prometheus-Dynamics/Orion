@@ -21,8 +21,10 @@ orion-msg-files = { path = "../../core/msg-files" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-msg-workloads = { path = "../../core/msg-workloads" }
+orion-action-list = { path = "../../node/action-list" }
 orion-outbound = { path = "../../comm/outbound" }
 orion-relay = { path = "../../comm/relay" }
+orion-reply = { path = "../../node/reply" }
 orion-server = { path = "../../comm/server" }
 orion-tcp = { path = "../../comm/tcp" }
 orion-time = { path = "../../comm/time" }

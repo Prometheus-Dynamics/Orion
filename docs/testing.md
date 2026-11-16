@@ -71,4 +71,11 @@ for node logic. It stays for what the test board cannot do:
   does with one;
 - the client's tests use the stand-ins to answer what a real board would need a setup for.
 
+The stub and the node share the action list. Actions are not a stand-in:
+`orion_stubs::router::Router` passes every action request to node logic's own list
+(`orion-action-list`), so a run has a real handle, a handle from before a restart
+(`Board::restart_node_logic`) is told `RunGone`, and every refusal is the node's. A test fails
+if anything else in the workspace answers action runs by rules of its own
+(`crates/testing/stubs/tests/one_list.rs`).
+
 A consumer uses the test board.

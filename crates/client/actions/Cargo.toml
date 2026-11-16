@@ -17,6 +17,7 @@ orion-wire = { path = "../../core/wire" }
 # The tests that need a comm core run on Linux, where it is.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 orion-server = { path = "../../comm/server" }
+orion-stubs = { path = "../../testing/stubs" }
 orion-unix = { path = "../../comm/unix" }
 tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
 
