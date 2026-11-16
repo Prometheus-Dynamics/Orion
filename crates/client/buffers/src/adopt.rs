@@ -10,6 +10,9 @@
 //! - **Reader slots are shared.** The program says which slots Orion may give its subscribers
 //!   (`reader_slots`, a bit for each); its own readers keep the others.
 //! - **A comm core that restarts** is handed the same ring and pool again by `poll`.
+//! - **An entry with no buffer** (`BufferWriter::publish_empty`, a job that ended with nothing
+//!   to show) reaches Orion's subscribers as it is, as `NextBatch::NoBuffers`: there is
+//!   nothing to hold.
 
 use std::os::fd::OwnedFd;
 
@@ -219,6 +222,14 @@ impl AdoptedBuffers {
             .publishers
             .retain(|side| side.handle != handle);
         self.publisher.withdraw()
+    }
+
+    /// Cuts off Orion's subscriber in `slot` by hand ([`HoldTable::cut_off`]): what it holds
+    /// can be reused at once, and it is told on its next read. Only a slot of Orion's: one of
+    /// the program's own readers is never touched, and is `false`, as is a slot with no
+    /// subscriber or one cut off already. The slot stays Orion's until the subscriber goes.
+    pub fn cut_off(&self, slot: u32, pool: &Pool, table: &mut HoldTable) -> bool {
+        self.readers.iter().any(|(own, _, _)| *own == slot) && table.cut_off(slot, pool.page())
     }
 
     /// How many of Orion's subscribers the topic has.

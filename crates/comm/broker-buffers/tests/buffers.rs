@@ -348,7 +348,7 @@ impl Viewer {
         let mut newest = None;
         for _ in 0..64 {
             match frames.next() {
-                NextBatch::Batch(frame) => newest = Some((frame.meta[0], frame.held)),
+                NextBatch::Frame(frame) => newest = Some((frame.meta[0], frame.held)),
                 NextBatch::Empty => break,
                 _ => {}
             }
@@ -358,10 +358,9 @@ impl Viewer {
 }
 
 fn whole(held: &Held<Arc<Marks>>, fill: u8) -> bool {
-    held.bytes(0)
+    held.read(0, |bytes| bytes.iter().all(|byte| *byte == fill))
         .expect("bytes")
-        .iter()
-        .all(|byte| *byte == fill)
+        .expect("a held frame is never reused")
 }
 
 #[test]

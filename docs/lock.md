@@ -244,6 +244,12 @@ what to change.
   `Board::restart_node_logic` and `Board::node_logic_instance` are added (**Add**;
   `orion-stubs` is a dev dependency, not a consumer's). `Router::default` becomes
   `Router::new(node)`. Nothing on the wire changes.
+- **J12.** The `shm-*` pins move to `e9224a53`. `NextBatch::Batch` is renamed `NextBatch::Frame`,
+  and `NextBatch::NoBuffers` is new (**Break** for a matcher of `NextBatch`, which `orion-buffers`
+  re-exports). `BufferPublisher::publish_empty`, `holders_of` and `cut_off`, and
+  `AdoptedBuffers::cut_off` are added, and `Torn` and `NoBuffers` are re-exported (**Add**).
+  `Held::read`/`Held::current` are the checked reads; `Held::bytes` is unchecked. The wire and the
+  layouts are unchanged.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

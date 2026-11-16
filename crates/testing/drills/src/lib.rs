@@ -252,13 +252,16 @@ fn viewer(socket: &Path) -> Result<(), Failed> {
     loop {
         loop {
             match frames.next() {
-                NextBatch::Batch(frame) => {
+                NextBatch::Frame(frame) => {
                     let number = frame.time.as_nanos();
-                    let whole = frame.held.bytes(0).is_some_and(|bytes| {
+                    // Read as a consumer must: checked against the use the frame was held
+                    // in. A buffer reused under the read is dropped, never taken as the frame.
+                    match frame.held.read(0, |bytes| {
                         bytes.len() == FRAME_SIZE && bytes.iter().all(|&b| b == fill(number))
-                    });
-                    if !whole {
-                        println!("torn {number}");
+                    }) {
+                        Some(Ok(true)) => {}
+                        Some(Err(_reused)) => println!("reused {number}"),
+                        Some(Ok(false)) | None => println!("torn {number}"),
                     }
                     last = number;
                 }

@@ -39,7 +39,8 @@ mod adopt;
 
 pub use adopt::AdoptedBuffers;
 pub use shm_ring_buffers::{
-    Batch, BufferDesc, BufferError, BufferIndex, Dropped, Held, NextBatch, Pool, PoolView,
+    Batch, BufferDesc, BufferError, BufferIndex, Dropped, Held, NextBatch, NoBuffers, Pool,
+    PoolView, Torn,
 };
 pub use shm_ring_holds::{HoldTable, Marks};
 
@@ -439,6 +440,36 @@ impl BufferPublisher {
         Ok(seq)
     }
 
+    /// Publishes an entry that names no buffer: a job that ended with nothing to show (a
+    /// refusal, a timeout), with only its `time` and the publisher's own `meta`. Subscribers
+    /// get it as [`NextBatch::NoBuffers`], never as a frame. Nothing is taken from the pool,
+    /// so it is never dropped for want of a buffer.
+    ///
+    /// # Errors
+    ///
+    /// If the metadata is longer than the topic allows.
+    pub fn publish_empty(&mut self, time: SampleTime, meta: &[u8]) -> Result<u64, BufferError> {
+        let seq = self.writer.publish_empty(time, meta)?;
+        self.publisher.wake();
+        Ok(seq)
+    }
+
+    /// The subscribers holding `buffer` now, by slot. One that is cut off holds nothing.
+    /// Allocates: it is for deciding whom to cut off, not for every frame.
+    #[must_use]
+    pub fn holders_of(&self, buffer: BufferIndex) -> Vec<u32> {
+        self.table.holders_of(buffer)
+    }
+
+    /// Cuts off the subscriber in `slot` by hand, as one over its limits is cut off: what it
+    /// holds can be reused at once, and its next [`BufferSubscriber::next`] is
+    /// [`NextBatch::CutOff`]. A read it is in the middle of is not stopped; read through
+    /// [`Held::read`], it comes back [`Torn`] and the value is dropped. `true` if this call cut
+    /// it off; `false` if there is no subscriber in `slot` or it was cut off already.
+    pub fn cut_off(&mut self, slot: u32) -> bool {
+        self.table.cut_off(slot, self.writer.pool().page())
+    }
+
     /// Replaces the pool, as a camera changing mode does. Its generation must be higher than
     /// the last. Subscribers are handed the new pool and keep the old mapped for frames they
     /// still hold.
@@ -549,7 +580,9 @@ impl BufferSubscriber {
     /// The publisher's pool as it was handed over: each buffer's memory descriptor and where in
     /// it the buffer is ([`PoolView::descriptor`]), for a program that maps or passes on the
     /// buffers itself. `None` until the pool has arrived. A frame's buffers are also reached
-    /// through its `held` ([`Held::bytes`], [`Held::descriptor`]).
+    /// through its `held`: read them with [`Held::read`], which drops a value read from a
+    /// buffer reused under it ([`Torn`]). [`Held::bytes`] and [`Held::descriptor`] are not
+    /// checked.
     pub fn pool(&mut self) -> Option<&PoolView> {
         refresh(
             &self.state,

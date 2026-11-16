@@ -368,8 +368,11 @@ fn frames(options: &Options) {
                 if let Some((sent, held)) = pending.take() {
                     // The frame is held: read the number the publisher wrote in the buffer,
                     // in place, as a consumer of the frame would start to.
-                    let bytes = held.bytes(0).expect("bytes");
-                    assert_eq!(bytes[..8], sent.to_le_bytes(), "the frame's own bytes");
+                    let own = held
+                        .read(0, |bytes| bytes[..8] == sent.to_le_bytes())
+                        .expect("bytes")
+                        .expect("a held frame is never reused");
+                    assert!(own, "the frame's own bytes");
                     latency.push((base.elapsed().as_nanos() as u64).saturating_sub(sent));
                     drop(held);
                 }
@@ -443,7 +446,7 @@ fn take_frame(
     pending: &mut Option<(u64, HeldFrame)>,
 ) {
     if pending.is_none()
-        && let NextBatch::Batch(frame) = reader.next()
+        && let NextBatch::Frame(frame) = reader.next()
     {
         *pending = Some((frame.time.as_nanos(), frame.held));
     }
@@ -493,8 +496,8 @@ fn frames_awake() {
         {
             return false;
         }
-        if let NextBatch::Batch(frame) = reader.next() {
-            held += u64::from(frame.held.bytes(0).is_some());
+        if let NextBatch::Frame(frame) = reader.next() {
+            held += u64::from(frame.held.current(0).is_some_and(|bytes| bytes.is_ok()));
         }
         true
     };

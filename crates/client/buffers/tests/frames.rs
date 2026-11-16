@@ -83,13 +83,14 @@ fn viewer_process() {
         }
         loop {
             let held = match frames.next() {
-                NextBatch::Batch(frame) => {
+                NextBatch::Frame(frame) => {
                     last = u64::from_le_bytes(frame.meta.try_into().expect("the frame's number"));
                     assert_eq!(frame.time, SampleTime::from_nanos(last));
                     frame.held
                 }
                 NextBatch::Empty => break,
                 NextBatch::CutOff => panic!("cut off"),
+                NextBatch::NoBuffers(_) => panic!("this publisher always shows a frame"),
                 NextBatch::Skipped(_) | NextBatch::Limited | NextBatch::PoolChanged { .. } => {
                     continue;
                 }
@@ -97,7 +98,10 @@ fn viewer_process() {
             let index = held.buffer(0).expect("one buffer").0 as usize;
             // The bytes are fetched again for the check: a held frame is only as good as the
             // hold, so nothing is read through a pointer kept from before.
-            let bytes = held.bytes(0).expect("mapped");
+            let bytes = held
+                .current(0)
+                .expect("mapped")
+                .expect("a held frame is never reused");
             assert!(check(bytes, last), "frame {last} is not what was published");
             if places[index].is_null() {
                 places[index] = bytes.as_ptr();

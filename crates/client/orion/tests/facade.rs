@@ -240,15 +240,14 @@ fn a_camera_offers_its_pool_again_to_a_comm_core_that_restarts() {
                 .expect("publish");
         }
         let _ = viewer.pump(Duration::from_millis(5));
-        if let NextBatch::Batch(frame) = reading.next() {
+        if let NextBatch::Frame(frame) = reading.next() {
             let filled = frame.time.as_nanos() as u8;
             assert!(
                 frame
                     .held
-                    .bytes(0)
+                    .read(0, |bytes| bytes.iter().all(|&b| b == filled))
                     .expect("bytes")
-                    .iter()
-                    .all(|&b| b == filled)
+                    .expect("a held frame is never reused")
             );
             break;
         }

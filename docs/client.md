@@ -232,8 +232,21 @@ drop it to give the buffers back. The publisher sees who holds what and never re
 buffer. A subscriber that holds more than it asked to be allowed, or for longer, is cut off, so
 a stuck reader cannot stop a camera.
 
-Read a held frame's bytes through `held.bytes(..)` each time. A slice kept from before the
-frame was held, or after it was dropped, is memory the publisher may be writing.
+Read a held frame's bytes through `held.read(index, |bytes| ..)`. It checks, after the read,
+that the buffer was not reused while it ran, and gives `Err(Torn)` if it was: drop that value,
+it is not the frame's. A buffer is only reused under a reader that was cut off. `held.current`
+gives the slice with the same check. `held.bytes` and `held.descriptor` are not checked, and a
+slice kept from before the frame was held, or after it was dropped, is memory the publisher may
+be writing.
+
+A job that ended with nothing to show (a refusal, a timeout) is published with
+`publish_empty(time, meta)`: an entry that names no buffer, so it is never dropped for want of
+one. A subscriber gets it as `NextBatch::NoBuffers` (its `seq`, `time` and the publisher's own
+`meta`), never as a frame. Its reason, if the metadata says one, is in the publisher's words.
+
+A publisher can also cut a subscriber off by hand: `holders_of(buffer)` says who holds a buffer,
+and `cut_off(slot)` makes what that one holds reusable at once, as the limits do. For an adopted
+topic, `AdoptedBuffers::cut_off(slot, pool, table)` cuts off only Orion's own subscribers.
 
 **A ring the program made itself.** A program that serves readers of its own, with or without
 Orion, makes its ring, pool and hold table with the `shm-*` crates. `adopt` (a value topic) and

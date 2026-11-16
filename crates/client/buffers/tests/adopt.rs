@@ -144,10 +144,14 @@ fn a_program_s_own_ring_and_pool_become_a_buffer_topic() {
         let _ = frames.wait(Duration::from_millis(5)).expect("wait");
         loop {
             match frames.next() {
-                NextBatch::Batch(frame) => {
+                NextBatch::Frame(frame) => {
                     let meta = u64::from_le_bytes(frame.meta.try_into().expect("number"));
-                    let bytes = frame.held.bytes(0).expect("mapped");
-                    assert_eq!(bytes[..8], meta.to_le_bytes(), "the program's own bytes");
+                    let own = frame
+                        .held
+                        .read(0, |bytes| bytes[..8] == meta.to_le_bytes())
+                        .expect("mapped")
+                        .expect("a held frame is never reused");
+                    assert!(own, "the program's own bytes");
                     seen.push(meta);
                 }
                 // Frames gone before this reader got to them: read on to the ones still
