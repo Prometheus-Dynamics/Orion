@@ -63,6 +63,18 @@ halves, a USB interface it claimed say: a `LinkRead` and a `LinkWrite`. The same
 it as over a serial port, signed with a key in `options`, and `expect` is then the key the board
 must prove. `reconnect_over(read, write)` says hello again over new halves, as the same program.
 
+A link that is not signed loses frames with nothing said, so over one the hello is said again
+until the welcome comes or `options.timeout` passes: again after 250 ms (`FIRST_AGAIN`), the wait
+doubling to 2 s (`MOST_BETWEEN`). The board takes a hello inside a session on a link as a start
+over, so this is always safe; a welcome to an earlier hello that arrives after the session
+began is followed by the welcome to the later one, and the session takes that as what it now
+is. `reconnect_over_with(open, keep_trying)` is the way back that never gives up: it opens new
+halves with `open` and says hello over them, again and again at the pace of `reconnect`, until
+it is welcomed or `keep_trying` says stop. A program whose link comes and goes calls that.
+
+`ClientError::Lost` also comes from a `Reject { NoSession }` in the middle of a session: the
+comm core has no session for this one any more (a link let go, a restart). Say hello again.
+
 The read half runs on a thread of its own; the session writes on the caller's thread. The
 session never waits for that thread. When the session is dropped, or given new halves, it drops
 its write half: that is the program's signal to make the read return with an error (cancel the

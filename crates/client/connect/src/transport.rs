@@ -85,6 +85,15 @@ pub(crate) enum Step {
     Closed,
 }
 
+/// The write half of halves that were let go.
+struct LetGo;
+
+impl LinkWrite for LetGo {
+    fn write_all(&mut self, _: &[u8]) -> io::Result<()> {
+        Err(io::Error::other("let go"))
+    }
+}
+
 /// Where a transport's bytes come from and go to.
 pub(crate) enum Io {
     /// A non-blocking descriptor, waited on with `poll`.
@@ -260,6 +269,24 @@ impl Transport {
     }
 
     /// A link over a byte stream.
+    /// Drops the write half of halves the program gave, which is its signal to end the reading
+    /// thread: a link's halves that are replaced are let go before anything is said over the
+    /// new ones, or the old thread could take the answer. Anything else is kept as it is.
+    pub(crate) fn let_go(&mut self) {
+        if let Self::Link {
+            io: Io::Piped { write, .. },
+            ..
+        } = self
+        {
+            *write = Box::new(LetGo);
+        }
+    }
+
+    /// Whether a frame sent can be lost with nothing said: a link that is not signed.
+    pub(crate) const fn loses_frames(&self) -> bool {
+        matches!(self, Self::Link { seals: None, .. })
+    }
+
     pub(crate) fn link(io: Io) -> Self {
         Self::Link {
             io,

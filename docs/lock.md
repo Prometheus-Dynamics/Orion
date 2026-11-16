@@ -233,6 +233,11 @@ what to change.
   The device library takes `NoSession` mid-session as gone and says hello at once.
 - **C58.** A USB link's reader that is let go hands what it reads to the stream that took over.
   Nothing a consumer calls changes.
+- **C59.** Over a link that is not signed, the client says hello again on a capped backoff until
+  it is welcomed (250 ms doubling to 2 s, within `options.timeout`). A welcome mid-session
+  becomes the session, and a `Reject` mid-session is `ClientError::Lost`.
+  `Session::reconnect_over_with(open, keep_trying)` and `FIRST_AGAIN`/`MOST_BETWEEN` are
+  added (**Add**). `reconnect_over` lets the old halves go before saying hello.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

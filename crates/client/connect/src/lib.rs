@@ -29,6 +29,7 @@ mod alive;
 mod client;
 mod error;
 mod fd;
+mod hello;
 mod level;
 mod link_sign;
 mod piped;
@@ -37,7 +38,7 @@ mod welcomed;
 
 use std::time::{Duration, Instant};
 
-use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, RejectReason, Welcome};
+use orion_msg_session::{Hello, Ping, Pong, Refusal};
 use orion_supervise::{Decision, Path, Supervisor};
 use orion_wire::{
     Body, Decode, FrameView, INTERFACE_LEVEL, INTERFACE_REVISION, encode_body, frame, kind,
@@ -48,6 +49,7 @@ pub use alive::Reply;
 pub use client::{Client, Handler};
 pub use error::{ClientError, SOCKET_PATH_MAX, socket_path};
 pub use fd::{BorrowedFd, OwnedFd};
+pub use hello::{FIRST_AGAIN, MOST_BETWEEN};
 pub use level::Feature;
 pub use orion_identity::Identity;
 pub use orion_msg_session::Roles;
@@ -271,7 +273,11 @@ impl Session {
     }
 
     /// Says hello again, as the same program, over new halves of a link the program opened:
-    /// the cable was plugged in again, say. The old halves are let go first.
+    /// the cable was plugged in again, say. The old halves are let go first. A link that is not
+    /// signed loses frames without a word, so the hello is said again, on a capped backoff
+    /// ([`FIRST_AGAIN`] doubling to [`MOST_BETWEEN`]), until the welcome comes or the session's
+    /// timeout passes. To keep trying past that, with new halves each time, use
+    /// [`Session::reconnect_over_with`].
     ///
     /// # Errors
     ///
@@ -282,6 +288,7 @@ impl Session {
         write: impl LinkWrite,
     ) -> Result<(), ClientError> {
         let options = self.same_options();
+        self.transport.let_go();
         let transport = signed(
             Transport::over(read, write)?,
             self.link_key.as_ref(),
@@ -296,6 +303,42 @@ impl Session {
             ..fresh
         };
         Ok(())
+    }
+
+    /// Says hello again, as the same program, over halves `open` gives, for as long as
+    /// `keep_trying` says: the way back for a program whose link comes and goes. Each try
+    /// opens new halves and waits for the welcome, saying hello again while there is none
+    /// (see [`Session::reconnect_over`]); a try that finds nobody is followed by the next at
+    /// the same pace as [`Session::reconnect`]. `keep_trying` is asked before each wait and
+    /// told the state: return `false` to stop.
+    ///
+    /// # Errors
+    ///
+    /// The last failure, if `keep_trying` said to stop or `open` failed; or if the comm core now
+    /// says no: trying again does not change an answer.
+    pub fn reconnect_over_with<R: LinkRead, W: LinkWrite>(
+        &mut self,
+        mut open: impl FnMut() -> std::io::Result<(R, W)>,
+        mut keep_trying: impl FnMut(&Status) -> bool,
+    ) -> Result<(), ClientError> {
+        let mut supervisor = Supervisor::new(Path::Access);
+        loop {
+            let (read, write) = open().map_err(ClientError::Io)?;
+            let error = match self.reconnect_over(read, write) {
+                Ok(()) => return Ok(()),
+                Err(error) if error.is_lost() => error,
+                Err(error) => return Err(error),
+            };
+            let now_ms = self.started.elapsed().as_millis() as u64;
+            let wait_ms = match supervisor.on_failure(now_ms) {
+                Decision::RetryAt(at_ms) => at_ms.saturating_sub(now_ms),
+                Decision::StayOff => u64::from(orion_supervise::ACCESS_RETRY_MS),
+            };
+            if !keep_trying(&supervisor.status()) {
+                return Err(error);
+            }
+            std::thread::sleep(Duration::from_millis(wait_ms));
+        }
     }
 
     /// The options this session was made with, again.
@@ -330,64 +373,14 @@ impl Session {
             level: INTERFACE_LEVEL,
         };
         let len = encode_body(&hello, 1, &mut outbox).map_err(|_| ClientError::TooLarge)?;
-        transport.send(&outbox[..len], &[])?;
-        let deadline = Instant::now() + options.timeout;
         let mut fds = FdSet::default();
-        let welcomed = loop {
-            let len = match transport.take(&mut inbox, &mut fds)? {
-                Step::Frame(len) => len,
-                Step::Closed => return Err(ClientError::Lost),
-                Step::Nothing => {
-                    let left = deadline.saturating_duration_since(Instant::now());
-                    if left.is_zero() || !transport.wait(left)? {
-                        return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
-                    }
-                    continue;
-                }
-            };
-            let view = frame::decode(&inbox[..len])
-                .map_err(|_| ClientError::Protocol("a damaged frame"))?;
-            match view.kind() {
-                kind::WELCOME => {
-                    let welcome = Welcome::decode(view.payload())
-                        .map_err(|_| ClientError::Protocol("welcome"))?;
-                    if welcome.revision != INTERFACE_REVISION {
-                        return Err(ClientError::Revision {
-                            node: welcome.revision,
-                            client: INTERFACE_REVISION,
-                        });
-                    }
-                    let heartbeat = Duration::from_millis(u64::from(welcome.heartbeat_ms.max(1)));
-                    break Welcomed {
-                        node: welcome.node,
-                        session: welcome.session,
-                        heartbeat,
-                        // A comm core that does not say gives up after three heartbeats.
-                        idle: match welcome.idle_ms {
-                            0 => heartbeat * 3,
-                            ms => Duration::from_millis(u64::from(ms)).max(heartbeat),
-                        },
-                        max_frame: welcome.max_frame,
-                        revision: welcome.revision,
-                        level: welcome.level,
-                        signed: transport.signed(),
-                        node_key: transport.node_key(),
-                    };
-                }
-                kind::REJECT => {
-                    let reject = Reject::decode(view.payload())
-                        .map_err(|_| ClientError::Protocol("reject"))?;
-                    if reject.reason == RejectReason::RevisionMismatch {
-                        return Err(ClientError::Revision {
-                            node: reject.node_revision,
-                            client: INTERFACE_REVISION,
-                        });
-                    }
-                    return Err(ClientError::Rejected(reject.reason));
-                }
-                _ => {}
-            }
-        };
+        let welcomed = hello::welcomed(
+            &mut transport,
+            &outbox[..len],
+            &mut inbox,
+            &mut fds,
+            options.timeout,
+        )?;
         let now = Instant::now();
         Ok(Self {
             transport,
@@ -661,6 +654,12 @@ impl Session {
                     })?;
                 }
                 kind::PONG => {}
+                // A welcome to a hello said again over a link: the session the comm core has
+                // for this one now. (The one before ended when that hello came.)
+                kind::WELCOME => self.welcomed = hello::welcome_of(&view, &self.transport)?,
+                // The comm core has no session for this one: it ended there (a link let go,
+                // the comm core restarted) while this side went on. Lost: say hello again.
+                kind::REJECT => return Err(ClientError::Lost),
                 _ => {
                     self.inbox_len = len;
                     return Ok(true);
