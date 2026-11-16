@@ -21,6 +21,9 @@ pub fn helper(args: impl IntoIterator<Item = OsString>) -> Option<i32> {
         // One SSH connection, read with no rights.
         #[cfg(feature = "ssh-sandbox")]
         orion_ssh_sandbox::child::MODE => Some(orion_ssh_sandbox::child::main()),
+        // A command a configured file is made from, as `offers.user`.
+        #[cfg(feature = "offers")]
+        crate::configured::MODE => Some(crate::configured::command_main(args)),
         _ => None,
     }
 }

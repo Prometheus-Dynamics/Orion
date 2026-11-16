@@ -80,10 +80,7 @@ impl RecoveryComm {
         let state = hello.state();
         comm.add_service(hello);
         #[cfg(feature = "offers")]
-        comm.add_service(
-            crate::own_files::OrionFiles::new(settings, format!("recovery\nwhy: {why}\n"))
-                .service(),
-        );
+        comm.add_service(crate::own_files::in_recovery(&comm, settings, why));
         #[cfg(feature = "shell")]
         if let Some(config) = shell {
             let at = config.listen;

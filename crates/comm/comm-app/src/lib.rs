@@ -13,6 +13,8 @@
 #![cfg(target_os = "linux")]
 
 mod carriers;
+#[cfg(feature = "offers")]
+mod configured;
 mod error;
 #[cfg(feature = "ssh")]
 mod helper;
@@ -195,13 +197,7 @@ impl CommCore {
             settings.broker.declare,
         ));
         #[cfg(feature = "offers")]
-        comm.add_service(
-            own_files::OrionFiles::new(
-                Some(&settings),
-                format!("{}\n", settings.board_state.word()),
-            )
-            .service(),
-        );
+        comm.add_service(own_files::running(&comm, &settings)?);
         // Devices on links, each a resource with what it declared and registered.
         #[cfg(feature = "devices")]
         let devices = {

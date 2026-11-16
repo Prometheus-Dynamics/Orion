@@ -13,8 +13,8 @@
 //!   port 22 and is otherwise a comm core with nothing set.
 //! - With settings that cannot be read, or that it cannot start as they say, it does not
 //!   end: it opens the recovery way in (see `orion-recovery`, the crate).
-//! - It is also its own helper programs: started with `ssh-session`, `ssh-sftp` or
-//!   `ssh-connection` it is the one the comm core asked for.
+//! - It is also its own helper programs: started with `ssh-session`, `ssh-sftp`,
+//!   `ssh-connection` or `offers-command` it is the one the comm core asked for.
 //!
 //! The environment can set anything the file can: `ssh.listen` is `ORION_SSH_LISTEN`.
 //! `ORION_RECOVERY_KEYS`, `ORION_RECOVERY_LISTEN` and `ORION_RECOVERY_LAST_GOOD` hold even when the

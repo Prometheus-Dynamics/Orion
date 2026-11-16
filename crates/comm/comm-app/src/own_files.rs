@@ -13,8 +13,8 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use orion_file_offers::{FileOffersService, OwnFiles, OwnName};
-use orion_server::Sessions;
+use orion_file_offers::{FileOffersService, OwnFiles, OwnName, Reading, Ready};
+use orion_server::{Comm, Sessions};
 use sha2::{Digest, Sha256};
 
 use crate::CommSettings;
@@ -27,6 +27,39 @@ const LAST_GOOD_BYTES: u64 = 16 * 1024;
 const STATE_BYTES: u64 = 4 * 1024;
 const SESSIONS_BYTES: u64 = 64 * 1024;
 const VERSION_BYTES: u64 = 4 * 1024;
+
+/// The files service of a comm core running as `settings` say, with its own files and those the
+/// settings name.
+///
+/// # Errors
+///
+/// Why the files the settings name cannot be served.
+pub(crate) fn running(
+    comm: &Comm,
+    settings: &CommSettings,
+) -> Result<FileOffersService, crate::StartError> {
+    let state = format!("{}\n", settings.board_state.word());
+    match OrionFiles::new(Some(settings), state).service(comm, Some(settings)) {
+        (service, None) => Ok(service),
+        (_, Some(why)) => Err(crate::error::failed("offers.file", why)),
+    }
+}
+
+/// The files service in recovery, because of `why`: the comm core's own files, and those the
+/// settings name if they were read and can be served.
+#[cfg(feature = "recovery")]
+pub(crate) fn in_recovery(
+    comm: &Comm,
+    settings: Option<&CommSettings>,
+    why: &str,
+) -> FileOffersService {
+    let state = format!("recovery\nwhy: {why}\n");
+    let (service, not) = OrionFiles::new(settings, state).service(comm, settings);
+    if let Some(not) = not {
+        tracing::warn!("recovery: the files the settings name are not served: {not}");
+    }
+    service
+}
 
 /// The comm core's own files.
 #[derive(Debug)]
@@ -57,9 +90,27 @@ impl OrionFiles {
         }
     }
 
-    /// The files service, with these as its own.
-    pub(crate) fn service(self) -> FileOffersService {
-        FileOffersService::standard().with_own(self)
+    /// The files service of `comm`, with these as its own, and the prefixes `settings` name,
+    /// unless they cannot be served: then why, too.
+    pub(crate) fn service(
+        self,
+        comm: &Comm,
+        settings: Option<&CommSettings>,
+    ) -> (FileOffersService, Option<String>) {
+        let mut service = FileOffersService::standard().with_own(comm, self);
+        let Some(settings) = settings else {
+            return (service, None);
+        };
+        let user = settings.offers_user.as_deref();
+        match crate::configured::load(&settings.offers_file, settings.offers_owner, user) {
+            Ok(prefixes) => {
+                for prefix in prefixes {
+                    service = service.with_configured(comm, prefix);
+                }
+                (service, None)
+            }
+            Err(why) => (service, Some(why)),
+        }
     }
 }
 
@@ -84,19 +135,22 @@ impl OwnFiles for OrionFiles {
         ]
     }
 
-    fn read(&mut self, name: &str, sessions: &Sessions) -> Option<Vec<u8>> {
-        let text = match name.strip_prefix(PREFIX)? {
-            "log" => return Some(orion_log::window()),
+    fn read(&mut self, name: &str, sessions: &Sessions, _: Ready) -> Reading {
+        let text = match name.strip_prefix(PREFIX).unwrap_or_default() {
+            "log" => return Reading::Now(orion_log::window()),
             "settings" => self.settings.clone(),
             "last-good.carriers" => {
-                return std::fs::read(self.state_dir.join(crate::last_good::FILE)).ok();
+                return std::fs::read(self.state_dir.join(crate::last_good::FILE)).map_or_else(
+                    |_| Reading::Not(format!("{name}: cannot be read now")),
+                    Reading::Now,
+                );
             }
             "state" => self.state.clone(),
             "sessions" => sessions_text(sessions),
             "version" => version_text(),
-            _ => return None,
+            _ => return Reading::Not(format!("{name}: no such file")),
         };
-        Some(text.into_bytes())
+        Reading::Now(text.into_bytes())
     }
 }
 

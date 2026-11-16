@@ -236,3 +236,4 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [D16](docs/prs/D16.md) Files from a board: a program offers a prefix, a client fetches by name (wave 19; needs D15)
 - [x] [D16b](docs/prs/D16b.md) The index convention, a fetch held to its bound, and `orion file offers`/`fetch` (wave 19; needs D16)
 - [x] [C30](docs/prs/C30.md) The comm core's own files, `orion/`, running and in recovery (wave 19; needs D16b)
+- [x] [C31](docs/prs/C31.md) Files the settings name, paths and commands, served while no program offers their prefix (wave 19; needs C30)

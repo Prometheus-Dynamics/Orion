@@ -275,6 +275,13 @@ what to change.
   `orion_file_offers::{OwnFiles, OwnName, SNAPSHOT_MS}` and `FileOffersService::with_own`,
   `orion_config::may_be_secret` and `Source::said`, `orion_log::{window, window_bytes,
   set_window_bytes, WINDOW_BYTES}`, and `CommSettings::{said, log_window_bytes}` (**Add**).
+- **C31.** Files the settings name (`offers.file`, `offers.user`): each prefix served while no
+  program offers it, listed `OfferedBy::Configured`; a program offering it takes it over. A
+  new helper mode, `offers-command`. In Rust, `FileOffersService::with_configured`, and
+  `CommSettings::{offers_file, offers_user}` (**Add**). `OwnFiles::read` now takes a `Ready`
+  and gives a `Reading` (`Now`, `Later`, `Not`), and `FileOffersService::with_own` takes the
+  `Comm` (**Break**: an `OwnFiles` returns `Reading::Now(bytes)` for `Some(bytes)` and
+  `Reading::Not(why)` for `None`; pass the comm core to `with_own`).
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

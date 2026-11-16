@@ -489,6 +489,11 @@ its log, its settings with secrets left out, its state and why, its sessions, it
 the record of its last good start, listed in `orion/index` (`docs/comm.md`). `offers()` lists it
 `OfferedBy::CommCore`. No program may offer it.
 
+**Files the board's settings name.** A board may serve prefixes from its settings
+(`offers.file`: files and commands), while no program offers them; `offers()` lists such a
+prefix `OfferedBy::Configured`, and as the program's while a program offers it. A client
+fetches them as any other.
+
 ## The executor role
 
 `orion-executor`. An executor is any program that connects and says "I run this kind of

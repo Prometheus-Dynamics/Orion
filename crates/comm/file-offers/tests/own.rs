@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use orion_connect::{Address, Client, ClientError, Options, Session};
-use orion_file_offers::{FileOffersService, OwnFiles, OwnName};
+use orion_file_offers::{FileOffersService, OwnFiles, OwnName, Reading, Ready};
 use orion_files::index::{Entry, Index};
 use orion_files::{FileState, Files, OfferedBy};
 use orion_server::{Comm, Error, Limits, Security, Sessions};
@@ -48,15 +48,15 @@ impl OwnFiles for Fake {
         ]
     }
 
-    fn read(&mut self, name: &str, sessions: &Sessions) -> Option<Vec<u8>> {
+    fn read(&mut self, name: &str, sessions: &Sessions, _: Ready) -> Reading {
         match name {
             "own/count" => {
                 self.made.set(self.made.get() + 1);
-                Some(format!("made {} times", self.made.get()).into_bytes())
+                Reading::Now(format!("made {} times", self.made.get()).into_bytes())
             }
-            "own/big" => Some(content(600 * 1024)),
-            "own/sessions" => Some(format!("{}", sessions.iter().count()).into_bytes()),
-            _ => None,
+            "own/big" => Reading::Now(content(600 * 1024)),
+            "own/sessions" => Reading::Now(format!("{}", sessions.iter().count()).into_bytes()),
+            _ => Reading::Not(format!("{name}: cannot be read now")),
         }
     }
 }
@@ -85,7 +85,7 @@ fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
             let own = Fake {
                 made: Rc::default(),
             };
-            comm.add_service(FileOffersService::standard().with_own(own));
+            comm.add_service(FileOffersService::standard().with_own(&comm, own));
             let unix = UnixCarrier::bind(&path, Some(0o600), &[]).expect("socket");
             tokio::task::spawn_local(async move { comm.serve(unix).await });
             ready.send(()).expect("ready");

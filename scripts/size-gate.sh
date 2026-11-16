@@ -34,15 +34,15 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 RECOVERY_HOST=3270000
 ORION_HOST=6590000
 CAPI_HOST=740000
-# A board's files, static musl. aarch64, the one run on a board, as measured at C30 (the comm
-# core's own files, `orion/`, in both, recovery serving them too: +38,480 and +20,952 since
-# C52b and D16b; docs/prs/C30.md); the others as at C41, until they run on one:
+# A board's files, static musl. aarch64, the one run on a board, as measured at C31 (files the
+# settings name, paths and commands, in both: +40,400 and +37,360 since C30, after a cut;
+# docs/prs/C31.md); the others as at C41, until they run on one:
 #                                   orion-recovery   orion
-#   aarch64-unknown-linux-musl      2,692,720        5,271,120
+#   aarch64-unknown-linux-musl      2,733,120        5,308,480
 #   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
 BOARDS=(
-    "aarch64-unknown-linux-musl     2720000          5300000"
+    "aarch64-unknown-linux-musl     2760000          5330000"
     "armv7-unknown-linux-musleabihf 2810000          5350000"
     "riscv64gc-unknown-linux-musl   3040000          5690000"
 )

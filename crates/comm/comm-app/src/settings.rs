@@ -114,6 +114,13 @@ pub struct CommSettings {
     pub said: String,
     /// `log.window_bytes`: how many bytes of the newest log lines are kept, for `orion/log`.
     pub log_window_bytes: usize,
+    /// `offers.file`: the files the comm core serves while no program offers their prefix.
+    pub offers_file: std::path::PathBuf,
+    /// `offers.user`: whom their commands run as; the comm core's own user if none.
+    pub offers_user: Option<String>,
+    /// Whose `offers.file` must be: root's. For tests.
+    #[doc(hidden)]
+    pub offers_owner: u32,
 }
 
 /// A link brought over the network: its name and where the board listens for it.
@@ -336,6 +343,9 @@ impl CommSettings {
             shell: None,
             said: source.said(),
             log_window_bytes: source.get("log.window_bytes", orion_log::WINDOW_BYTES)?,
+            offers_file: source.get("offers.file", "/etc/orion/offers.conf".into())?,
+            offers_user: source.optional("offers.user")?,
+            offers_owner: 0,
             config,
         };
         #[cfg(feature = "shell")]

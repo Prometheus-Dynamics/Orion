@@ -87,6 +87,8 @@ The name in brackets is the cargo feature that carries the part.
 | `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
 | `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |
 | `log.window_bytes` | 262144 | how many bytes of the newest log lines are kept in memory, whole lines, for `orion/log` (`offers`); 0 keeps none |
+| `offers.file` | `/etc/orion/offers.conf` | files the comm core serves while no program offers their prefix: paths and commands (`offers`; format in `docs/comm.md`). Must be root's and written by no one else; none is none |
+| `offers.user` | the comm core's own | whom those commands run as; another user needs a comm core that is root |
 | `time.*` | off | time sync (`time`) |
 | `discovery`, `discovery.ttl_ms`, `discovery.interfaces` | off | finding peers (`discovery`, `mdns`) |
 | `links.serial` | none | `name=path@baud`, comma separated (`link-serial`) |

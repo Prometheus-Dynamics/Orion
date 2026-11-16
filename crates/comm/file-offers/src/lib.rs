@@ -17,6 +17,12 @@
 //! **Each side is told when the other goes.** A fetch whose program goes is rejected to its
 //! client; one whose client goes is rejected to its program, which stops giving it.
 //!
+//! **The comm core gives some itself.** Its own, under `orion/`, which no program may offer
+//! ([`FileOffersService::with_own`]); and those its settings name, each prefix served while no
+//! program offers it ([`FileOffersService::with_configured`]): a program offering the same
+//! prefix takes it over for as long as its session lives. A fetch under way keeps the side it
+//! began with.
+//!
 //! The comm core rather than node logic routes, so that a board in recovery, where no node
 //! logic runs, can still hand over its own files.
 
@@ -24,18 +30,19 @@
 
 mod own;
 
-pub use own::{OwnFiles, OwnName, SNAPSHOT_MS};
+pub use own::{OwnFiles, OwnName, Reading, Ready, SNAPSHOT_MS};
 
 use orion_msg_files::{
     FETCH_WINDOW, FileFetch, FileGive, FileGiveChunk, FileOffer, FileOffered, FileOffers,
     FileOffersList, FileState, FileTaken, OfferEntry, OfferedBy,
 };
 use orion_server::{
-    Admits, Checked, Cx, Delivery, Error, Incoming, Policy, Service, SessionId, Sessions, What,
+    Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Policy, Service, SessionId, Sessions,
+    What,
 };
 use orion_types::FileName;
 use orion_wire::{FrameView, List, kind};
-use tracing::warn;
+use tracing::{info, warn};
 
 /// The most prefixes offered at once. One more is refused as busy.
 pub const MAX_OFFERS: usize = 64;
@@ -119,7 +126,9 @@ pub struct FileOffersService {
     next: u64,
     clashes: u64,
     /// The comm core's own files, if it offers any.
-    own: Option<own::Own>,
+    own: Option<own::Shared>,
+    /// The prefixes the settings name, each served while no program offers it.
+    configured: Vec<own::Shared>,
 }
 
 impl FileOffersService {
@@ -135,14 +144,23 @@ impl FileOffersService {
             next: 1,
             clashes: 0,
             own: None,
+            configured: Vec::new(),
         }
     }
 
     /// Offers `files` as the comm core's own: their prefix is never a program's, and a fetch
-    /// under it is the comm core's to give.
+    /// under it is the comm core's to give. `comm` is the comm core this service is added to.
     #[must_use]
-    pub fn with_own(mut self, files: impl OwnFiles + 'static) -> Self {
-        self.own = Some(own::Own::new(Box::new(files)));
+    pub fn with_own(mut self, comm: &Comm, files: impl OwnFiles + 'static) -> Self {
+        self.own = Some(own::Own::new(comm, Box::new(files)));
+        self
+    }
+
+    /// Offers `files` while no program offers their prefix: a program that does takes it
+    /// over until its session ends. `comm` is the comm core this service is added to.
+    #[must_use]
+    pub fn with_configured(mut self, comm: &Comm, files: impl OwnFiles + 'static) -> Self {
+        self.configured.push(own::Own::new(comm, Box::new(files)));
         self
     }
 
@@ -171,6 +189,25 @@ impl FileOffersService {
             .max_by_key(|offer| offer.prefix.len())
     }
 
+    /// Whether a program offers `prefix` itself.
+    fn held(&self, prefix: &str) -> bool {
+        self.offers.iter().any(|offer| offer.prefix == prefix)
+    }
+
+    /// The configured prefix that serves `name`: the longest of `name`, if it is longer than
+    /// any a program offers. A program offering the same prefix is the one that serves it.
+    fn configured_for(&self, name: &str) -> Option<own::Shared> {
+        let program = self.offering(name).map_or(0, |offer| offer.prefix.len());
+        self.configured
+            .iter()
+            .filter(|files| {
+                let files = files.borrow();
+                files.has(name) && files.prefix().len() > program
+            })
+            .max_by_key(|files| files.borrow().prefix().len())
+            .cloned()
+    }
+
     fn offer(&mut self, request: &FileOffer<'_>, cx: &mut Cx<'_>) -> Result<(), Error> {
         let prefix = request.prefix;
         if !prefix.ends_with('/') || FileName::new(prefix.trim_end_matches('/')).is_err() {
@@ -180,10 +217,10 @@ impl FileOffersService {
             );
         }
         if let Some(own) = &self.own
-            && own.has(prefix)
+            && own.borrow().has(prefix)
         {
             self.clashes += 1;
-            let holder = own.prefix().to_owned();
+            let holder = own.borrow().prefix().to_owned();
             return cx.refuse(
                 Error::Busy,
                 &format!("{prefix} is under {holder}, which the comm core offers"),
@@ -204,11 +241,21 @@ impl FileOffersService {
                 return cx.refuse(Error::Busy, &format!("{prefix} is offered by {holder}"));
             }
             None if self.offers.len() >= MAX_OFFERS => return Err(Error::Busy),
-            None => self.offers.push(Offer {
-                prefix: prefix.to_owned(),
-                session: from,
-                since_ms: cx.now_ms(),
-            }),
+            None => {
+                if self
+                    .configured
+                    .iter()
+                    .any(|files| files.borrow().prefix() == prefix)
+                {
+                    let program = format!("{} ({})", cx.caller().name, cx.caller().principal);
+                    info!("{program} offers {prefix}, and serves it in place of the settings");
+                }
+                self.offers.push(Offer {
+                    prefix: prefix.to_owned(),
+                    session: from,
+                    since_ms: cx.now_ms(),
+                });
+            }
         }
         let request_seq = cx.request_seq();
         cx.reply(&FileOffered { request_seq })
@@ -225,31 +272,49 @@ impl FileOffersService {
             .max(1)
     }
 
+    /// The comm core gives `request` itself, from `files`.
+    fn give_own(
+        files: &own::Shared,
+        request: &FileFetch<'_>,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        let chunk = Self::chunk_for(cx) as usize;
+        let (client, now_ms) = (cx.from(), cx.now_ms());
+        let fetch = (
+            client,
+            request.transfer,
+            request.name.as_str(),
+            request.from,
+        );
+        let given = files.borrow_mut().give(fetch, chunk, now_ms, cx.sessions());
+        match given {
+            Ok(()) => Ok(()),
+            Err(own::NotGiven::Busy) => Err(Error::Busy),
+            Err(own::NotGiven::Rejected(why)) => {
+                let _ = cx.sessions().send(
+                    client,
+                    &FileTaken {
+                        transfer: request.transfer,
+                        received: 0,
+                        state: FileState::Rejected,
+                        detail: &why,
+                    },
+                    Delivery::Must,
+                );
+                Ok(())
+            }
+        }
+    }
+
     fn fetch(&mut self, request: &FileFetch<'_>, cx: &mut Cx<'_>) -> Result<(), Error> {
         let name = request.name.as_str();
-        if let Some(own) = &mut self.own
-            && own.has(name)
-        {
-            let chunk = Self::chunk_for(cx) as usize;
-            let (client, now_ms) = (cx.from(), cx.now_ms());
-            let fetch = (client, request.transfer, name, request.from);
-            return match own.give(fetch, chunk, now_ms, cx.sessions()) {
-                Ok(()) => Ok(()),
-                Err(own::NotGiven::Busy) => Err(Error::Busy),
-                Err(own::NotGiven::Rejected(why)) => {
-                    let _ = cx.sessions().send(
-                        client,
-                        &FileTaken {
-                            transfer: request.transfer,
-                            received: 0,
-                            state: FileState::Rejected,
-                            detail: &why,
-                        },
-                        Delivery::Must,
-                    );
-                    Ok(())
-                }
-            };
+        let own = self
+            .own
+            .clone()
+            .filter(|own| own.borrow().has(name))
+            .or_else(|| self.configured_for(name));
+        if let Some(files) = own {
+            return Self::give_own(&files, request, cx);
         }
         let Some(offerer) = self.offering(name).map(|offer| offer.session) else {
             return cx.refuse(Error::NotFound, &format!("nothing offers {name}"));
@@ -364,10 +429,10 @@ impl FileOffersService {
 
     fn taken(&mut self, taken: &FileTaken<'_>, cx: &mut Cx<'_>) -> Result<(), Error> {
         let from = cx.from();
-        if let Some(own) = &mut self.own
-            && own.taken(from, taken, cx.sessions())
-        {
-            return Ok(());
+        for files in self.own.iter().chain(&self.configured) {
+            if files.borrow_mut().taken(from, taken, cx.sessions()) {
+                return Ok(());
+            }
         }
         let over = matches!(taken.state, FileState::Committed | FileState::Rejected);
         // From the program: the number is its own. From the client: the client's.
@@ -417,15 +482,29 @@ impl FileOffersService {
                     .unwrap_or_default()
             })
             .collect();
-        let own = self.own.as_ref().map(|own| OfferEntry {
-            prefix: own.prefix(),
-            by: OfferedBy::CommCore,
-            name: "",
-            principal: "",
-            since_ms: 0,
-        });
-        let entries: Vec<OfferEntry<'_>> = own
-            .into_iter()
+        // Each prefix as the one that serves it: a configured prefix a program holds is the
+        // program's.
+        let comm_core: Vec<(String, OfferedBy)> = self
+            .own
+            .iter()
+            .map(|own| (own.borrow().prefix().to_owned(), OfferedBy::CommCore))
+            .chain(
+                self.configured
+                    .iter()
+                    .map(|files| files.borrow().prefix().to_owned())
+                    .filter(|prefix| !self.held(prefix))
+                    .map(|prefix| (prefix, OfferedBy::Configured)),
+            )
+            .collect();
+        let entries: Vec<OfferEntry<'_>> = comm_core
+            .iter()
+            .map(|(prefix, by)| OfferEntry {
+                prefix,
+                by: *by,
+                name: "",
+                principal: "",
+                since_ms: 0,
+            })
             .chain(
                 self.offers
                     .iter()
@@ -490,8 +569,8 @@ impl Service for FileOffersService {
 
     fn closed(&mut self, session: SessionId, sessions: &mut Sessions) {
         self.offers.retain(|offer| offer.session != session);
-        if let Some(own) = &mut self.own {
-            own.closed(session);
+        for files in self.own.iter().chain(&self.configured) {
+            files.borrow_mut().closed(session);
         }
         let ended: Vec<u64> = self
             .fetches

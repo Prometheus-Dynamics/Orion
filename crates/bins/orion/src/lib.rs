@@ -17,8 +17,8 @@
 //!   settings file is never called `show`, `peers` or `time`.
 //! - Started as `orionctl`, `orion-comm` or `orion-node` (a link to the file), it is that
 //!   mode with no word for it.
-//! - It is also the comm core's helper programs: started with `ssh-session`, `ssh-sftp` or
-//!   `ssh-connection`, it is the one the comm core asked for.
+//! - It is also the comm core's helper programs: started with `ssh-session`, `ssh-sftp`,
+//!   `ssh-connection` or `offers-command`, it is the one the comm core asked for.
 //! - `ORION_LOG` names how much the services log, to standard error.
 //!
 //! The program is [`main`]; it is a library too so that a program that is `orion` and more

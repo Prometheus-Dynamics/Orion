@@ -214,6 +214,41 @@ offered by the comm core.
 - In recovery, when the settings could not be read, `orion/settings` says so and
   `orion/state` says why.
 
+**Files the settings name, `offers.file`.** What a board with no program to offer them still
+hands over, in running and in recovery: a file read as it is, or a command's output. Each
+prefix is served while no program offers it; a program that offers the same prefix takes it
+over for as long as its session lives, without a clash, and the settings serve it again when
+that session ends. A fetch under way keeps the side it began with. `FileOffersList` names the
+side that serves each prefix now: `Configured`, or the program. `<prefix>index` lists each
+prefix's files, as the comm core's own.
+
+`offers.file` (`/etc/orion/offers.conf`), one file a line, `#` beginning a comment:
+
+```text
+system/ kernel = command /usr/bin/dmesg bound 262144 timeout 5000
+system/ os-release = path /etc/os-release bound 4096
+system/ journal = command /usr/bin/journalctl -b -n 2000 bound 1048576 timeout 10000 user-data
+```
+
+- **`path /<absolute path>`** is read as it is, up to its bound, and never waited on: what a
+  device has not yet is not read. A file that cannot be opened is rejected, saying why.
+- **`command /<absolute program> [args]`** runs with no shell, no environment but `PATH`, in
+  `/`, with nothing on its input; its output up to its bound is the file. At its bound it is
+  ended and what it wrote is the file. It must end within its `timeout` in milliseconds, or it
+  is ended and the fetch rejected, "<name>: <program> did not finish in <ms> ms"; an exit that
+  is not 0 is rejected with its status. Every fetch of a file being made waits for the one run.
+- **`user-data`** marks a file that may hold a user's data, in the index.
+- **Who runs them.** `offers.user`, the comm core's own user unless it is said. Another user
+  needs a comm core that is root: it starts itself as the `offers-command` helper, which
+  becomes the user, with its groups, before the command. Under the packaged unit the comm core
+  is `orion-comm`: give that user the groups its commands need.
+- **Only root says what runs.** The file must be root's and written by no one else, or none
+  of it is served: a comm core that would serve it does not start (`offers.file: ...`, and
+  so recovery, which says why), and recovery passes it over, saying so in its log. No file is
+  no files. A line that is not one says which and why.
+- Each file is held 60 seconds after it is made, as the comm core's own are, so a fetch that
+  goes on gets the same bytes.
+
 ## Samples for subscribers without a ring
 
 A subscriber on another board, or in a browser, cannot map a ring. It subscribes like anyone
@@ -576,6 +611,8 @@ pinned the board's key is told it is another.
   name root hands a handle over for: the program that sets up the gadget needs no list.
 - A comm core whose start failed part way stops what it had started before recovery opens,
   so recovery in the same process gets the board's socket.
+- **The files the settings name** (`offers.file`) are offered in recovery too, if the
+  settings were read: a board in recovery still hands over its kernel log.
 - **The comm core's own files** are offered in recovery too, with the hello document: `orion/state`
   says `recovery` and why, `orion/log` holds what led to it, and `orion/settings` what was set
   (see files from a board). `orion file fetch orion/log log.txt` over the socket or a USB cable
@@ -654,7 +691,8 @@ and `CAP_NET_BIND_SERVICE`, the helper as root.
 ## The helper programs
 
 The comm core starts helper programs: a session that becomes the user (`ssh-session`), the
-sftp subsystem (`ssh-sftp`), the child that reads an SSH connection (`ssh-connection`). Each
+sftp subsystem (`ssh-sftp`), the child that reads an SSH connection (`ssh-connection`), a
+command a configured file is made from, as `offers.user` (`offers-command`). Each
 is the comm core's own program started again with that word. `orion_comm_app::helper` is where
 those words are known: a binary that holds the comm core calls it first thing and exits with
 what it returns, if it returns anything. `orion-comm-helper` is a program that is only that,
@@ -705,7 +743,7 @@ orion-recovery [settings file]
 
 **Size gate.** `scripts/size-gate.sh`, part of the gate, builds it as it ships and fails if
 it has grown past a limit set a small margin (20-30 KB) above its last measured size:
-2,692,720 bytes for an aarch64 board, static, at C30. A change that needs the bytes cuts what
+2,733,120 bytes for an aarch64 board, static, at C31. A change that needs the bytes cuts what
 it can first, then raises the limit in the same commit and says why.
 
 ## The network carrier
