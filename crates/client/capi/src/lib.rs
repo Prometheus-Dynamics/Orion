@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use orion::topics::{
     Field, FieldId, FieldType, Next, Publisher, SampleTime, Subscriber, TopicDecl, TopicError,
 };
-use orion::{Address, ClientError, Error, Options, Orion, Reply};
+use orion::{Address, ClientError, Error, Options, Orion, Patience, Reply};
 
 /// The major version of the surface. A change that breaks a caller raises it.
 pub const ABI_MAJOR: u32 = 1;
@@ -197,7 +197,7 @@ pub extern "C" fn orion_last_error() -> *const c_char {
     LAST_ERROR.with(|last| last.borrow().as_ptr())
 }
 
-/// Connects to a comm core.
+/// Connects to a comm core, trying until it is welcomed or refused.
 ///
 /// # Safety
 ///
@@ -209,6 +209,36 @@ pub unsafe extern "C" fn orion_connect(
     name: *const c_char,
     timeout_ms: u32,
     out: *mut *mut OrionHandle,
+) -> i32 {
+    // SAFETY: as the caller promised.
+    unsafe { connect(address, name, timeout_ms, out, Patience::Forever) }
+}
+
+/// Connects to a comm core with one try.
+///
+/// # Safety
+///
+/// As [`orion_connect`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn orion_connect_once(
+    address: *const c_char,
+    name: *const c_char,
+    timeout_ms: u32,
+    out: *mut *mut OrionHandle,
+) -> i32 {
+    // SAFETY: as the caller promised.
+    unsafe { connect(address, name, timeout_ms, out, Patience::Once) }
+}
+
+/// # Safety
+///
+/// As [`orion_connect`].
+unsafe fn connect(
+    address: *const c_char,
+    name: *const c_char,
+    timeout_ms: u32,
+    out: *mut *mut OrionHandle,
+    patience: Patience,
 ) -> i32 {
     guarded(|| {
         if out.is_null() {
@@ -226,6 +256,7 @@ pub unsafe extern "C" fn orion_connect(
         let name = unsafe { text(name, "name") }?;
         let options = Options {
             timeout: Duration::from_millis(u64::from(timeout_ms.max(1))),
+            patience,
             ..Options::default()
         };
         let orion = Orion::connect_with(&address, name, options)?;

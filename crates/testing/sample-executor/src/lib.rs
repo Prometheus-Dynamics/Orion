@@ -209,12 +209,12 @@ pub fn run(
             roles: Roles::CLIENT.and(Roles::EXECUTOR),
             ..Options::default()
         };
-        let orion = match Orion::connect_with(&address, "sample-executor", options) {
+        let orion = match Orion::connect_watching(&address, "sample-executor", options, |_| {
+            keep_going()
+        }) {
             Ok(orion) => orion,
-            Err(orion::Error::Client(error)) if error.is_lost() => {
-                std::thread::sleep(Duration::from_millis(50));
-                continue;
-            }
+            // Told to stop while it was trying.
+            Err(orion::Error::Client(error)) if error.may_retry() => continue,
             Err(orion::Error::Client(error)) => return Err(error),
             Err(other) => return Err(ClientError::Io(std::io::Error::other(other.to_string()))),
         };

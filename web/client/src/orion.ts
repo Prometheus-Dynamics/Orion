@@ -20,6 +20,9 @@ const PROTOCOL_VERSION = 1;
 const INTERFACE_REVISION = 1;
 /** The `Reject` reason for a `Hello` of another wire revision. */
 const REVISION_MISMATCH = 5;
+/** Turned away for want of room, or with no session to take a frame: tried again. */
+const BUSY = 3;
+const NO_SESSION = 6;
 const MAX_FRAME = 64 * 1024;
 
 const enum Kind {
@@ -142,6 +145,20 @@ export class Refused extends Error {
  * A wait that ran past the ceiling `setReply` gave it. The connection is fine: the answer was
  * slow.
  */
+/**
+ * The comm core answered the hello with no: the page's roles or its wire revision. An answer,
+ * so connecting again does not change it, and `Orion.connect` stops trying.
+ */
+export class TurnedAway extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TurnedAway";
+  }
+}
+
+/** How long `Orion.connect` waits between tries: a way in is tried again soon, and never backed off. */
+export const CONNECT_AGAIN_MS = 250;
+
 export class TimedOut extends Error {
   constructor(readonly ceilingMs: number) {
     super(`no answer within ${ceilingMs} ms`);
@@ -415,8 +432,34 @@ export class Orion {
 
   private constructor(private readonly socket: WebSocket) {}
 
-  /** Connects to the comm core at `url` as the program `name`, and says hello. */
-  static connect(url: string, name: string): Promise<Orion> {
+  /**
+   * Connects to the comm core at `url` as the program `name`, and says hello. Nobody answering
+   * is not an answer: this keeps trying, every `CONNECT_AGAIN_MS`, until the comm core welcomes
+   * the page or turns it away (`TurnedAway`, rejected at once), so a page may open before the
+   * board is up. `keepTrying`, if given, is told how many tries have failed before each wait,
+   * and stops the trying by returning false: the last failure is then the rejection.
+   */
+  static async connect(
+    url: string,
+    name: string,
+    keepTrying?: (failures: number) => boolean,
+  ): Promise<Orion> {
+    for (let failures = 1; ; failures++) {
+      try {
+        return await Orion.connectOnce(url, name);
+      } catch (error) {
+        if (error instanceof TurnedAway) throw error;
+        if (keepTrying !== undefined && !keepTrying(failures)) throw error;
+      }
+      await new Promise((again) => setTimeout(again, CONNECT_AGAIN_MS));
+    }
+  }
+
+  /**
+   * One try at connecting: nothing answering is the rejection. For a page that says so to a
+   * person, not for one that needs the board.
+   */
+  static connectOnce(url: string, name: string): Promise<Orion> {
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(url, PROTOCOL);
       socket.binaryType = "arraybuffer";
@@ -455,7 +498,7 @@ export class Orion {
           if (revision !== INTERFACE_REVISION) {
             orion.close();
             reject(
-              new Error(
+              new TurnedAway(
                 `the board speaks wire revision ${revision} and this page ${INTERFACE_REVISION}`,
               ),
             );
@@ -483,12 +526,15 @@ export class Orion {
           if (reason === REVISION_MISMATCH) {
             const board = turned.uint();
             reject(
-              new Error(
+              new TurnedAway(
                 `the board speaks wire revision ${board} and this page ${INTERFACE_REVISION}`,
               ),
             );
+          } else if (reason === BUSY || reason === NO_SESSION) {
+            // No room now, or no session for this one: not an answer, so tried again.
+            reject(new Error(`the comm core could not take the session now (${reason})`));
           } else {
-            reject(new Error(`the comm core turned the session away (${reason})`));
+            reject(new TurnedAway(`the comm core turned the session away (${reason})`));
           }
         }
       };

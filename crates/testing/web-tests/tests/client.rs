@@ -94,6 +94,17 @@ try {{
   orion.setReply({{ alive: false }});
   const heard = orion.silentFor() < 3 * 2000;
 
+  // Nothing at an address: one try says so; the obvious connect keeps trying, told of each
+  // failure, until it is told to stop.
+  const nowhere = "ws://127.0.0.1:1/orion";
+  let once = "connected";
+  try {{ await Orion.connectOnce(nowhere, "page"); }} catch {{ once = "failed"; }}
+  const failures = [];
+  let kept = "connected";
+  try {{
+    await Orion.connect(nowhere, "page", (failed) => {{ failures.push(failed); return failed < 3; }});
+  }} catch {{ kept = "stopped"; }}
+
   // One on another board's topic that nobody carries: refused or left waiting, not broken.
   await report([
     "check=" + check,
@@ -109,6 +120,7 @@ try {{
     "refused=" + refused,
     "ceiling=" + ceiling,
     "heard=" + heard,
+    "nowhere=" + [once, kept, failures.join("|")].join(","),
   ].join("&"));
   level.close();
   orion.close();
@@ -328,7 +340,7 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
         result,
         "check=e3069283&node=board&declared=tank.level:litres:3:l:64&status=live&steady=true\
          &request=every%20click&outcome=succeeded&code=7&output=started%20gently&progress=50:priming\
-         &refused=Refused:8&ceiling=timedout:400&heard=true"
+         &refused=Refused:8&ceiling=timedout:400&heard=true&nowhere=failed,stopped,1|2|3"
             .replace("%20", " ")
             .replace(' ', "%20"),
         "{result}"

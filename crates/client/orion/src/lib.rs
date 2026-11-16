@@ -55,8 +55,8 @@ use std::time::Duration;
 use orion_connect::Client;
 
 pub use orion_connect::{
-    Address, ClientError, Feature, Identity, LinkRead, LinkWrite, Options, Reply, Roles, Session,
-    Welcomed,
+    Address, ClientError, Feature, Identity, LinkRead, LinkWrite, Options, Patience, Reply, Roles,
+    Session, Status, Welcomed,
 };
 pub use orion_types as types;
 
@@ -232,23 +232,55 @@ impl fmt::Debug for Orion {
 }
 
 impl Orion {
-    /// Connects to the comm core at `address` as the program `name`.
+    /// Connects to the comm core at `address` as the program `name`. Nobody answering is not
+    /// an answer: this keeps trying until it is welcomed or refused, so a program may start
+    /// before the comm core ([`Session::connect`]).
     ///
     /// # Errors
     ///
-    /// If nothing answers there, or the comm core turns the session away.
+    /// If the comm core turns the session away, or another refusal
+    /// ([`ClientError::may_retry`]).
     pub fn connect(address: &Address, name: &str) -> Result<Self, Error> {
         Self::connect_with(address, name, Options::default())
     }
 
-    /// As [`Orion::connect`], saying which roles to ask for, and, across a network, with
-    /// which key.
+    /// As [`Orion::connect`], saying which roles to ask for, across a network with which key,
+    /// and how long to keep trying ([`Options::patience`]).
     ///
     /// # Errors
     ///
-    /// As [`Orion::connect`].
+    /// As [`Orion::connect`], and the last failure once the patience is spent.
     pub fn connect_with(address: &Address, name: &str, options: Options) -> Result<Self, Error> {
         Ok(Self::over(Session::connect(address, name, options)?))
+    }
+
+    /// One try at connecting, for a tool that says so to a person ([`Session::connect_once`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Orion::connect`], and whatever the one try met.
+    pub fn connect_once(address: &Address, name: &str, options: Options) -> Result<Self, Error> {
+        Ok(Self::over(Session::connect_once(address, name, options)?))
+    }
+
+    /// As [`Orion::connect_with`], telling `keep_trying` how it goes before each wait
+    /// ([`Session::connect_watching`]): return `false` to stop.
+    ///
+    /// # Errors
+    ///
+    /// As [`Orion::connect_with`], and the last failure if `keep_trying` said to stop.
+    pub fn connect_watching(
+        address: &Address,
+        name: &str,
+        options: Options,
+        keep_trying: impl FnMut(&Status) -> bool,
+    ) -> Result<Self, Error> {
+        Ok(Self::over(Session::connect_watching(
+            address,
+            name,
+            options,
+            keep_trying,
+        )?))
     }
 
     /// Over a session that is already made.

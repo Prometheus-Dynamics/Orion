@@ -236,6 +236,22 @@ impl ClientError {
     pub const fn is_lost(&self) -> bool {
         matches!(self, Self::Io(_) | Self::Lost)
     }
+
+    /// Whether trying again may get a different answer: the way in broke or nobody answered
+    /// ([`ClientError::is_lost`]), or the comm core had no room for another session or no
+    /// session for this one (`Busy`, `NoSession`). Everything else is a refusal, final for this
+    /// program as it is: turned away at hello for its roles, its revision or by the check; a
+    /// node that is not the one pinned or refuses the key; memory or a layout it cannot read;
+    /// a frame too large; a socket path too long. Connecting keeps trying on the one and stops
+    /// at once on the other.
+    #[must_use]
+    pub const fn may_retry(&self) -> bool {
+        self.is_lost()
+            || matches!(
+                self,
+                Self::Rejected(RejectReason::Busy | RejectReason::NoSession)
+            )
+    }
 }
 
 #[cfg(test)]
@@ -262,6 +278,39 @@ mod tests {
         assert_eq!(bare.to_string(), "refused: busy");
         assert_eq!(bare.refusal(), Some(Error::Busy));
         assert_eq!(ClientError::Lost.refusal(), None);
+    }
+
+    #[test]
+    fn only_a_way_in_that_broke_or_had_no_room_is_tried_again() {
+        use orion_msg_session::RejectReason;
+        let again = [
+            ClientError::Io(io::ErrorKind::ConnectionRefused.into()),
+            ClientError::Io(io::ErrorKind::NotFound.into()),
+            ClientError::Io(io::ErrorKind::TimedOut.into()),
+            ClientError::Lost,
+            ClientError::Rejected(RejectReason::Busy),
+            ClientError::Rejected(RejectReason::NoSession),
+        ];
+        for error in &again {
+            assert!(error.may_retry(), "{error}");
+        }
+        let answers = [
+            ClientError::Rejected(RejectReason::Denied),
+            ClientError::Rejected(RejectReason::RoleNotOffered),
+            ClientError::Rejected(RejectReason::VersionMismatch),
+            ClientError::Revision { node: 1, client: 2 },
+            ClientError::Denied("refused this client's key"),
+            ClientError::refused(Error::Busy, ""),
+            ClientError::Protocol("a damaged frame"),
+            ClientError::TooLarge,
+            ClientError::PathTooLong {
+                path: "/x".into(),
+                len: 200,
+            },
+        ];
+        for error in &answers {
+            assert!(!error.may_retry(), "{error}");
+        }
     }
 
     fn layout(found: u64, reads: u64, level: u16) -> String {

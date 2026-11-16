@@ -230,3 +230,4 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [C58](docs/prs/C58.md) A USB reader that is let go hands on what it reads (wave 19; needs C57)
 - [x] [C59](docs/prs/C59.md) A client over a link says hello again until it is welcomed (wave 19; needs C57)
 - [x] [C60](docs/prs/C60.md) The stub and the node share the action list (wave 19; needs C53b)
+- [x] [C61](docs/prs/C61.md) The obvious connect keeps trying until it is answered (wave 19; needs C59)

@@ -317,7 +317,8 @@ fn there_is_one_way_back_and_it_never_gives_up() {
 
     // Nothing was ever there.
     let nowhere = Address::Local(dir.join("no-such.sock"));
-    let error = Session::connect(&nowhere, "tool", options(None)).expect_err("nothing");
+    // One try says so; the obvious connect would wait for it to come.
+    let error = Session::connect_once(&nowhere, "tool", options(None)).expect_err("nothing");
     assert!(error.is_lost(), "{error}");
     drop(board);
     let _ = std::fs::remove_dir_all(dir);

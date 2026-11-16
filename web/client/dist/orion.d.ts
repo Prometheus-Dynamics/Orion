@@ -81,6 +81,15 @@ export declare class Refused extends Error {
  * A wait that ran past the ceiling `setReply` gave it. The connection is fine: the answer was
  * slow.
  */
+/**
+ * The comm core answered the hello with no: the page's roles or its wire revision. An answer,
+ * so connecting again does not change it, and `Orion.connect` stops trying.
+ */
+export declare class TurnedAway extends Error {
+    constructor(message: string);
+}
+/** How long `Orion.connect` waits between tries: a way in is tried again soon, and never backed off. */
+export declare const CONNECT_AGAIN_MS = 250;
 export declare class TimedOut extends Error {
     readonly ceilingMs: number;
     constructor(ceilingMs: number);
@@ -166,8 +175,19 @@ export declare class Orion {
     /** The declaration that came just before the `Opened` it belongs to. */
     private declared;
     private constructor();
-    /** Connects to the comm core at `url` as the program `name`, and says hello. */
-    static connect(url: string, name: string): Promise<Orion>;
+    /**
+     * Connects to the comm core at `url` as the program `name`, and says hello. Nobody answering
+     * is not an answer: this keeps trying, every `CONNECT_AGAIN_MS`, until the comm core welcomes
+     * the page or turns it away (`TurnedAway`, rejected at once), so a page may open before the
+     * board is up. `keepTrying`, if given, is told how many tries have failed before each wait,
+     * and stops the trying by returning false: the last failure is then the rejection.
+     */
+    static connect(url: string, name: string, keepTrying?: (failures: number) => boolean): Promise<Orion>;
+    /**
+     * One try at connecting: nothing answering is the rejection. For a page that says so to a
+     * person, not for one that needs the board.
+     */
+    static connectOnce(url: string, name: string): Promise<Orion>;
     /** Ends the connection. */
     close(): void;
     /** Milliseconds since anything at all, a ping's answer included, came from the board. */

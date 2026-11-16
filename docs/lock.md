@@ -250,6 +250,13 @@ what to change.
   `AdoptedBuffers::cut_off` are added, and `Torn` and `NoBuffers` are re-exported (**Add**).
   `Held::read`/`Held::current` are the checked reads; `Held::bytes` is unchecked. The wire and the
   layouts are unchanged.
+- **C61.** `Session::connect`, `Orion::connect`/`connect_with`, `orion_connect` and the browser's
+  `Orion.connect` keep trying until welcomed or refused (**Break** in behaviour: a caller that
+  relied on one try uses `connect_once` / `orion_connect_once` / `Orion.connectOnce`).
+  `Options::patience` (`Patience::{Forever, Within, Once}`), `connect_once`, `connect_watching`,
+  `ClientError::may_retry`, `orion_connect_once`, `TurnedAway` and `CONNECT_AGAIN_MS` are added
+  (**Add**; a struct literal of `Options` without `..Default` gains a field). `reconnect` now
+  tries again on `Rejected(Busy | NoSession)`.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

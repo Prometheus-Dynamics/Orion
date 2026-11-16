@@ -42,7 +42,7 @@ use orion::files::{FileState, Pull};
 use orion::records::RecordClass;
 use orion::topics::{FieldId, Next, SampleTime, Status, Subscriber, TopicDecl};
 use orion::workloads::{RestartPolicy, Workload, WorkloadState};
-use orion::{Address, Error, Options, Orion};
+use orion::{Address, Error, Options, Orion, Patience};
 use orion_msg_records::NodeRecord;
 use orion_msg_topics::{Declare, Field, FieldType};
 use orion_wire::Decode;
@@ -160,6 +160,8 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
         let options = Options {
             timeout,
             identity,
+            // A person is waiting: try for as long as the timeout, then say so.
+            patience: Patience::Within(timeout),
             ..Options::default()
         };
         let orion = Orion::connect_with(&address, &name, options)?;
@@ -189,6 +191,8 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
     let options = Options {
         timeout,
         identity,
+        // A person is waiting: try for as long as the timeout, then say so.
+        patience: Patience::Within(timeout),
         ..Options::default()
     };
     let orion = Orion::connect_with(&address, &name, options)?;

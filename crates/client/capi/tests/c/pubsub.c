@@ -38,11 +38,12 @@ int main(int argc, char **argv) {
 
   /* What cannot work says so and leaves nothing behind. */
   Orion *nobody = NULL;
-  if (orion_connect("/nonexistent/orion.sock", "c", 200, &nobody) != ORION_E_LOST || nobody != NULL) {
+  if (orion_connect_once("/nonexistent/orion.sock", "c", 200, &nobody) != ORION_E_LOST ||
+      nobody != NULL) {
     fprintf(stderr, "a missing socket was not reported as lost\n");
     return 1;
   }
-  if (orion_connect("not an address", "c", 200, &nobody) != ORION_E_ARGUMENT) {
+  if (orion_connect_once("not an address", "c", 200, &nobody) != ORION_E_ARGUMENT) {
     fprintf(stderr, "a bad address was not refused\n");
     return 1;
   }

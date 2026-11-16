@@ -42,7 +42,7 @@ fn a_path_too_long_for_a_socket_is_refused_with_its_length_and_never_lost() {
     );
 
     // One that fits is tried, and what is not there is a connection that may come.
-    let error = Session::connect(&Address::Local(path_of(107)), "tool", Options::default())
+    let error = Session::connect_once(&Address::Local(path_of(107)), "tool", Options::default())
         .expect_err("nothing there");
     assert!(error.is_lost(), "{error:?}");
 }

@@ -23,6 +23,39 @@ one handle; what it can do is behind cargo features so a program carries only wh
 
 `examples/roles.rs` in that crate is every role in one file.
 
+**Starting before the comm core.** `Orion::connect` keeps trying until the comm core welcomes
+the program or refuses it, so a program may start before the comm core, or while it restarts,
+and needs no loop of its own. Tries come every 250 ms, as for any way in, and each waits up to
+`Options::timeout` for the welcome. `Options::patience` says how long:
+
+| `Patience` | Keeps trying |
+| --- | --- |
+| `Forever` (default) | until welcomed or refused |
+| `Within(d)` | for up to `d`, then the last failure |
+| `Once` | one try: `connect_once`, for a tool that says so to a person |
+
+`connect_watching(address, name, options, keep_trying)` tells `keep_trying` how it goes before
+each wait (`Status`: tries failed, when the next is) and stops when it says `false`: a monitor
+shows "connecting" from it and never stacks a loop of its own on top. Over a link
+(`Session::over`, `over_link`), the patience is how long a hello, or a signed link's handshake,
+is said again on the same halves.
+
+A refusal is an answer and ends the trying at once (`ClientError::may_retry` is `false`):
+
+- turned away at hello for the program's roles, its wire revision, or by the check
+  (`Rejected(RoleNotOffered | RevisionMismatch | VersionMismatch | Denied)`, `Revision`);
+- on the network, a node that is not the one pinned (`OtherKey`) or that refuses this client or
+  needs a key it does not have (`Denied`);
+- a socket path too long (`PathTooLong`), a frame too large (`TooLarge`), memory or a layout it
+  cannot read (`Memory`, `Layout`), something that is not the wire (`Protocol`), and a refusal
+  of a request (`Refused`).
+
+Everything else is tried again: nothing at the address, nobody answering, a connection that
+broke (`Io`, `Lost`), and a comm core with no room for another session or no session for this
+one (`Rejected(Busy | NoSession)`). In C, `orion_connect` keeps trying and `orion_connect_once`
+is the one try; in a browser, `Orion.connect` keeps trying and `Orion.connectOnce` is the one try.
+A device says hello until a host answers, and after a refusal says it again a while later.
+
 **When the comm core goes away.** A call fails with an error for which `is_lost` is true.
 `orion.reconnect(..)` connects again and says everything again: topics are declared with their
 rings handed back, then actions are registered, then records are put again and subscriptions and
@@ -172,7 +205,7 @@ the connection broke or the comm core went quiet. `reconnect` connects again to 
 address as the same program, a short fixed time between tries, for as long as the caller
 says. A connection to the comm core is a way in, and those are not backed off. An answer of
 "no" (a rejected hello, a key that is not welcome) is returned at once: asking again does not
-change it.
+change it. What is an answer is the same as for the first connect (`may_retry`, above).
 
 ## One session, many parts
 

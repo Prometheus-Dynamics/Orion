@@ -364,7 +364,8 @@ fn a_node_that_never_says_hello_has_timed_out() {
         ..Options::default()
     };
     let address = Address::Network { host, key: None };
-    let error = Session::connect(&address, "tool", options)
+    // One try: the obvious connect would try again for as long as it takes.
+    let error = Session::connect_once(&address, "tool", options)
         .map(|_| ())
         .expect_err("no hello");
     assert!(timed_out(&error), "{error}");

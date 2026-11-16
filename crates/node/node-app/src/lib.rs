@@ -545,7 +545,9 @@ impl Node {
                 roles: Roles::NODE.and(Roles::CLIENT).and(Roles::PROVIDER),
                 ..Options::default()
             };
-            match Session::connect(&address, "node", options) {
+            // One try at a time: this loop paces the tries itself, and stays ready to stop
+            // and to save between them.
+            match Session::connect_once(&address, "node", options) {
                 Ok(session) => {
                     info!("connected to the comm core as node logic");
                     pause = Duration::from_millis(20);

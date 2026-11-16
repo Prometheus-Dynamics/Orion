@@ -10,7 +10,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use orion_connect::{Address, ClientError, Identity, Options, Roles, Session};
+use orion_connect::{Address, ClientError, Identity, Options, Patience, Roles, Session};
 use orion_types::NodeName;
 
 /// This node's key, which the comm core makes and keeps.
@@ -29,7 +29,7 @@ pub struct Dialer {
     /// Whether a node must be pinned: with security on, a node the trust file does not name
     /// is not connected to.
     pub check: bool,
-    /// How long connecting may take.
+    /// How long connecting may take: one try.
     pub timeout: Duration,
 }
 
@@ -59,6 +59,9 @@ impl Dialer {
             roles,
             identity: Some(identity),
             timeout: self.timeout,
+            // One try: the caller is waiting on a request, and a node that is away is said
+            // to be unavailable. Whoever dials again paces it.
+            patience: Patience::Once,
             ..Options::default()
         };
         let address = Address::Network {

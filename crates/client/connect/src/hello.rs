@@ -52,18 +52,18 @@ pub(crate) fn welcome_of(
     })
 }
 
-/// Says `hello`, a whole frame, and waits up to `timeout` for the welcome; over a link that is
-/// not signed, says it again while there is none.
+/// Says `hello`, a whole frame, and waits up to `timeout` for the welcome (`None`: for as long
+/// as it takes); over a link that is not signed, says it again while there is none.
 pub(crate) fn welcomed(
     transport: &mut Transport,
     hello: &[u8],
     inbox: &mut [u8],
     fds: &mut FdSet,
-    timeout: Duration,
+    timeout: Option<Duration>,
 ) -> Result<Welcomed, ClientError> {
     transport.send(hello, &[])?;
     let start = Instant::now();
-    let deadline = start + timeout;
+    let deadline = timeout.map(|timeout| start + timeout);
     let again = transport.loses_frames();
     let mut between = FIRST_AGAIN;
     let mut next = start + between;
@@ -73,7 +73,7 @@ pub(crate) fn welcomed(
             Step::Closed => return Err(ClientError::Lost),
             Step::Nothing => {
                 let now = Instant::now();
-                if now >= deadline {
+                if deadline.is_some_and(|deadline| now >= deadline) {
                     return Err(ClientError::Io(std::io::ErrorKind::TimedOut.into()));
                 }
                 if again && now >= next {
@@ -81,7 +81,14 @@ pub(crate) fn welcomed(
                     between = (between * 2).min(MOST_BETWEEN);
                     next = now + between;
                 }
-                let until = if again { deadline.min(next) } else { deadline };
+                let until = match (deadline, again) {
+                    (Some(deadline), true) => deadline.min(next),
+                    (Some(deadline), false) => deadline,
+                    (None, true) => next,
+                    // No deadline and nothing to say again: wait for the welcome a while at a
+                    // time.
+                    (None, false) => now + MOST_BETWEEN,
+                };
                 transport.wait(until.saturating_duration_since(now))?;
                 continue;
             }

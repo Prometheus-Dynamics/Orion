@@ -32,6 +32,7 @@ mod fd;
 mod hello;
 mod level;
 mod link_sign;
+mod patience;
 mod piped;
 mod transport;
 mod welcomed;
@@ -54,6 +55,7 @@ pub use level::Feature;
 pub use orion_identity::Identity;
 pub use orion_msg_session::Roles;
 pub use orion_supervise::Status;
+pub use patience::Patience;
 pub use piped::{LinkRead, LinkWrite};
 pub use welcomed::Welcomed;
 
@@ -76,6 +78,9 @@ pub struct Options {
     pub timeout: Duration,
     /// How a wait for an answer is bounded. [`Reply::Timeout`] by default.
     pub reply: Reply,
+    /// How long connecting keeps trying while nobody answers: [`Patience::Forever`] by
+    /// default. Over a link, how long a hello is said again while there is no welcome.
+    pub patience: Patience,
 }
 
 impl Default for Options {
@@ -86,6 +91,7 @@ impl Default for Options {
             max_frame: 64 * 1024,
             timeout: Duration::from_secs(5),
             reply: Reply::Timeout,
+            patience: Patience::Forever,
         }
     }
 }
@@ -219,17 +225,6 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
-    /// Connects to the comm core at `address` as the program `name`, and says hello.
-    ///
-    /// # Errors
-    ///
-    /// If nothing answers there, the comm core turns the session away, or, on the network,
-    /// the node is not who was expected or refuses this client.
-    pub fn connect(address: &Address, name: &str, options: Options) -> Result<Self, ClientError> {
-        let transport = open(address, &options)?;
-        Self::hello(transport, Some(address.clone()), name, options)
-    }
-
     /// A session over a link someone else opened: a descriptor that carries bytes both ways,
     /// such as a serial port. There is no address to connect to again, so
     /// [`Session::reconnect`] fails.
@@ -275,9 +270,9 @@ impl Session {
     /// Says hello again, as the same program, over new halves of a link the program opened:
     /// the cable was plugged in again, say. The old halves are let go first. A link that is not
     /// signed loses frames without a word, so the hello is said again, on a capped backoff
-    /// ([`FIRST_AGAIN`] doubling to [`MOST_BETWEEN`]), until the welcome comes or the session's
-    /// timeout passes. To keep trying past that, with new halves each time, use
-    /// [`Session::reconnect_over_with`].
+    /// ([`FIRST_AGAIN`] doubling to [`MOST_BETWEEN`]), for as long as the session's
+    /// [`Patience`] says (by default until the welcome comes). To try with new halves each
+    /// time instead, use [`Session::reconnect_over_with`].
     ///
     /// # Errors
     ///
@@ -287,7 +282,19 @@ impl Session {
         read: impl LinkRead,
         write: impl LinkWrite,
     ) -> Result<(), ClientError> {
-        let options = self.same_options();
+        self.reconnect_over_as(read, write, self.options.patience)
+    }
+
+    fn reconnect_over_as(
+        &mut self,
+        read: impl LinkRead,
+        write: impl LinkWrite,
+        patience: Patience,
+    ) -> Result<(), ClientError> {
+        let options = Options {
+            patience,
+            ..self.same_options()
+        };
         self.transport.let_go();
         let transport = signed(
             Transport::over(read, write)?,
@@ -324,9 +331,10 @@ impl Session {
         let mut supervisor = Supervisor::new(Path::Access);
         loop {
             let (read, write) = open().map_err(ClientError::Io)?;
-            let error = match self.reconnect_over(read, write) {
+            // One hello window a try: a try that finds nobody opens new halves.
+            let error = match self.reconnect_over_as(read, write, Patience::Once) {
                 Ok(()) => return Ok(()),
-                Err(error) if error.is_lost() => error,
+                Err(error) if error.may_retry() => error,
                 Err(error) => return Err(error),
             };
             let now_ms = self.started.elapsed().as_millis() as u64;
@@ -343,17 +351,7 @@ impl Session {
 
     /// The options this session was made with, again.
     fn same_options(&self) -> Options {
-        Options {
-            roles: self.options.roles,
-            identity: self
-                .options
-                .identity
-                .as_ref()
-                .map(|identity| Identity::from_secret(&identity.secret())),
-            max_frame: self.options.max_frame,
-            timeout: self.options.timeout,
-            reply: self.options.reply,
-        }
+        self.options.again()
     }
 
     fn hello(
@@ -374,13 +372,15 @@ impl Session {
         };
         let len = encode_body(&hello, 1, &mut outbox).map_err(|_| ClientError::TooLarge)?;
         let mut fds = FdSet::default();
-        let welcomed = hello::welcomed(
-            &mut transport,
-            &outbox[..len],
-            &mut inbox,
-            &mut fds,
-            options.timeout,
-        )?;
+        // Over a link that loses frames, the hello is said again for as long as the patience
+        // says; elsewhere one hello is waited for, and the connect tries again.
+        let window = if transport.loses_frames() {
+            options.patience.over_a_link(options.timeout)
+        } else {
+            Some(options.timeout)
+        };
+        let welcomed =
+            hello::welcomed(&mut transport, &outbox[..len], &mut inbox, &mut fds, window)?;
         let now = Instant::now();
         Ok(Self {
             transport,
@@ -611,7 +611,7 @@ impl Session {
                     };
                     return Ok(());
                 }
-                Err(error) if error.is_lost() => error,
+                Err(error) if error.may_retry() => error,
                 Err(error) => return Err(error),
             };
             let now_ms = self.started.elapsed().as_millis() as u64;
@@ -712,8 +712,21 @@ fn signed(
 ) -> Result<Transport, ClientError> {
     match &options.identity {
         Some(identity) => {
-            transport.sign_link(identity, expect, options.timeout)?;
-            Ok(transport)
+            // The handshake is a hello too: over a link it is tried again for as long as the
+            // patience says, on the same halves.
+            let start = Instant::now();
+            loop {
+                match transport.sign_link(identity, expect, options.timeout) {
+                    Ok(()) => return Ok(transport),
+                    Err(error)
+                        if error.may_retry()
+                            && options
+                                .patience
+                                .over_a_link(options.timeout)
+                                .is_none_or(|within| start.elapsed() < within) => {}
+                    Err(error) => return Err(error),
+                }
+            }
         }
         None if expect.is_some() => Err(ClientError::Denied(
             "a board's key can only be checked on a signed session",
