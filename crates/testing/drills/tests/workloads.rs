@@ -163,6 +163,9 @@ fn orion_dies_whole_and_takes_back_what_kept_running() {
     let first = wait_starts(&file, 1)[0];
     saved(&board);
     drop(orion);
+    // Both roles are in before Orion goes: each has a session, and values flow.
+    publisher.wait_line("published", LONG);
+    subscriber.wait_for("seen", 1, LONG);
 
     comm.kill();
     node.kill();

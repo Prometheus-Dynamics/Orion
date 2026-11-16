@@ -99,7 +99,14 @@ fn on_a_link(pongs: bool) -> (Node, UnixStream) {
 
 /// A node behind a socket on the board, and the socket's path.
 fn on_the_board(name: &str, pongs: bool) -> (Node, std::path::PathBuf) {
-    let path = std::env::temp_dir().join(format!("orion-alive-{name}-{}", std::process::id()));
+    // A path of its own for each node, however its test is named: tests run side by side in
+    // one process, and two binding one path take each other's clients.
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "orion-alive-{name}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).expect("socket");
     let pings = Arc::new(AtomicU32::new(0));
@@ -315,15 +322,18 @@ fn a_node_silent_for_its_idle_time_is_gone_and_silent_for_says_so() {
     let reply = Reply::Alive {
         ceiling: Some(Duration::from_secs(30)),
     };
-    let (_node, path, mut session) = asking("silent", false, reply);
-    let (error, after) = unanswered(&mut session);
+    let (_node, path, mut session) = asking("idle", false, reply);
+    let (error, _) = unanswered(&mut session);
+    // Silence is counted from the last frame heard, the welcome, not from the question, which
+    // came a moment later (longer on a loaded machine): measure what the rule is about.
+    let silent = session.silent_for();
     assert!(matches!(error, ClientError::Lost), "{error}");
-    let idle = u64::from(HEARTBEAT_MS) * 3;
+    let idle = Duration::from_millis(u64::from(HEARTBEAT_MS) * 3);
+    // Gone at its idle time, and far from the 30 s ceiling: the idle rule, not the ceiling.
     assert!(
-        (idle..idle + 300).contains(&(after.as_millis() as u64)),
-        "after {after:?}"
+        silent >= idle && silent < idle + Duration::from_secs(2),
+        "silent for {silent:?}"
     );
-    assert!(session.silent_for() >= Duration::from_millis(idle));
     let _ = std::fs::remove_file(&path);
 }
 

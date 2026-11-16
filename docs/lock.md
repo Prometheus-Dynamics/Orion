@@ -257,6 +257,7 @@ what to change.
   `ClientError::may_retry`, `orion_connect_once`, `TurnedAway` and `CONNECT_AGAIN_MS` are added
   (**Add**; a struct literal of `Options` without `..Default` gains a field). `reconnect` now
   tries again on `Rejected(Busy | NoSession)`.
+- **C62.** Tests and drills only: nothing a consumer calls changes. `docs/flakes.md` is added.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

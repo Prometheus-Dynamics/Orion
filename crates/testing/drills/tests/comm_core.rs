@@ -10,6 +10,34 @@ use support::{Board, clean};
 
 const LONG: Duration = Duration::from_secs(10);
 
+/// Longer than any role ever waited before giving up, so one that gives up is seen to.
+const BEFORE: Duration = Duration::from_secs(12);
+
+#[test]
+fn roles_started_before_orion_wait_for_it_and_flow_when_it_comes() {
+    let board = Board::new("early", "");
+    let publisher = board.role("publisher", &[]);
+    let subscriber = board.role("subscriber", &[]);
+    std::thread::sleep(BEFORE);
+    for role in [&publisher, &subscriber] {
+        assert_eq!(
+            role.count("failed"),
+            0,
+            "a role gave up: {:?}",
+            role.lines()
+        );
+    }
+    let mut both = [publisher, subscriber];
+    assert!(both.iter_mut().all(|role| role.running()), "a role ended");
+
+    let _comm = board.comm();
+    let _node = board.node();
+    let [publisher, subscriber] = both;
+    subscriber.wait_for("seen", 200, LONG);
+    publisher.wait_line("published", LONG);
+    clean(&subscriber);
+}
+
 #[test]
 fn the_comm_core_dies_and_the_rings_carry_on() {
     let board = Board::new("comm", "");

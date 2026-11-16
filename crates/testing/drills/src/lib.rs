@@ -89,23 +89,17 @@ pub fn role(args: &[String]) -> Option<ExitCode> {
     })
 }
 
+/// A role may start before the comm core, or while it restarts: the obvious connect keeps
+/// trying until it is answered, as any program's does.
 fn connect(socket: &Path, name: &str, roles: Roles) -> Result<Orion, Error> {
-    // A role may start before the comm core has its socket up.
-    let started = Instant::now();
-    loop {
-        match Orion::connect_with(
-            &Address::Local(socket.to_owned()),
-            name,
-            Options {
-                roles,
-                ..Options::default()
-            },
-        ) {
-            Ok(orion) => return Ok(orion),
-            Err(error) if started.elapsed() > Duration::from_secs(10) => return Err(error),
-            Err(_) => std::thread::sleep(Duration::from_millis(20)),
-        }
-    }
+    Orion::connect_with(
+        &Address::Local(socket.to_owned()),
+        name,
+        Options {
+            roles,
+            ..Options::default()
+        },
+    )
 }
 
 /// Keeps a session between pieces of work: takes in what came, and once it is lost, tries
