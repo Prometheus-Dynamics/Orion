@@ -282,6 +282,9 @@ what to change.
   and gives a `Reading` (`Now`, `Later`, `Not`), and `FileOffersService::with_own` takes the
   `Comm` (**Break**: an `OwnFiles` returns `Reading::Now(bytes)` for `Some(bytes)` and
   `Reading::Not(why)` for `None`; pass the comm core to `with_own`).
+- **C64.** A subscriber handed a buffer pool page of another layout gets `ClientError::Layout`
+  ("a buffer pool", both numbers), as for a ring. It was already mapped; now proved. The pool
+  page table in `docs/ring.md` has the layout word.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

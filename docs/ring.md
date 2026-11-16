@@ -204,13 +204,16 @@ memfd. A subscriber gets those descriptors, the list of slices and the pool page
 them read-only. It checks every slice against its descriptor and refuses a regular or
 shared-memory file that is not sealed against shrinking.
 
-**The pool page** is a sealed page the publisher writes and readers map read-only.
+**The pool page** is a sealed page the publisher writes and readers map read-only. Its layout
+is checked first, as a ring's is: a subscriber handed a pool page of another layout is told
+`ClientError::Layout` with "a buffer pool" and both numbers, not that the memory was broken.
 
 | Word | Holds |
 | --- | --- |
 | 0 | Magic: `SHMPOOL1` |
-| 1 | Generation (low 32 bits), buffers (high 32) |
-| 2 to 7 | Reserved, zero |
+| 1 | Layout number: 2 (the device library's M34; layout 1 was the magic and the shape alone) |
+| 2 | Generation (low 32 bits), buffers (high 32) |
+| 3 to 7 | Reserved, zero |
 | 8 | Tickets: one word per buffer, `uses << 1 | taken back` |
 | 8 + buffers | Cut-off: one word per reader slot (64), nonzero once that reader is cut off |
 
