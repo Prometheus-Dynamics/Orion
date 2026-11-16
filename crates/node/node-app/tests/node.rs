@@ -341,3 +341,19 @@ fn what_was_done_is_in_the_audit_log() {
         "{log}"
     );
 }
+
+/// A socket path no Unix socket can be at stops node logic at its start, with words: it never
+/// gets to the loop that connects again, where it would try for ever.
+#[test]
+fn a_socket_path_too_long_stops_node_logic_before_it_tries() {
+    let dir = dir("long-socket");
+    let mut settings = settings(&dir, Duration::from_secs(1));
+    settings.config.socket = dir.join("s".repeat(120));
+    let error = Node::load(settings).expect_err("too long");
+    let words = error.to_string();
+    assert!(
+        words.starts_with("socket: ") && words.contains("107"),
+        "{words}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

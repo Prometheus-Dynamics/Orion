@@ -223,3 +223,4 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [C52b](docs/prs/C52b.md) A root login is all of root again; a connection's child holds nothing (wave 18; needs C52)
 - [x] [I6b](docs/prs/I6b.md) The board limits, tightened to what a board runs (wave 18; needs C52b)
 - [x] [C54](docs/prs/C54.md) A program is told a run is detached, and a deadline's end says so (wave 18; needs C53b)
+- [x] [C55](docs/prs/C55.md) A socket path too long is said, and never tried again (wave 18; needs C54)

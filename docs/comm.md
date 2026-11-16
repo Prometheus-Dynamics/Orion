@@ -100,6 +100,9 @@ buffer, the outbox and the timers belong to the session.
 `crates/comm/unix` (`orion-unix`). One Unix socket (`socket`, `/run/orion/orion.sock`). Every
 program on the board connects once and keeps the connection.
 
+- A `socket` longer than 107 bytes (`orion_unix::SOCKET_PATH_MAX`) is refused before anything
+  is touched, with words naming the path, its length and the limit.
+
 - A frame is `[u32 length][frame]` in one `sendmsg`, with descriptors attached to it. A frame must
   fit the socket's buffer, which the default 64 KiB limit does.
 - Who is connecting comes from the kernel (`SO_PEERCRED`): a user id and a group id. The socket's

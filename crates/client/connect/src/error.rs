@@ -82,6 +82,35 @@ pub enum ClientError {
         /// Why, as the shared-memory crate said it.
         why: String,
     },
+    /// The board's socket is at a path longer than a Unix socket address holds
+    /// ([`SOCKET_PATH_MAX`] bytes). Found before anything was tried, and never lost:
+    /// connecting again cannot help, a shorter path can.
+    PathTooLong {
+        /// The path.
+        path: std::path::PathBuf,
+        /// Its length in bytes.
+        len: usize,
+    },
+}
+
+/// The longest path a Unix socket can be at, in bytes: the address's `sun_path` is 108 bytes,
+/// and the last is the terminating NUL.
+pub const SOCKET_PATH_MAX: usize = 107;
+
+/// Whether a Unix socket can be at `path`: [`ClientError::PathTooLong`] if it is too long.
+///
+/// # Errors
+///
+/// [`ClientError::PathTooLong`].
+pub fn socket_path(path: &std::path::Path) -> Result<(), ClientError> {
+    let len = path.as_os_str().len();
+    if len > SOCKET_PATH_MAX {
+        return Err(ClientError::PathTooLong {
+            path: path.to_owned(),
+            len,
+        });
+    }
+    Ok(())
 }
 
 impl ClientError {
@@ -149,6 +178,12 @@ impl fmt::Display for ClientError {
                 level,
             } => layout(f, what, *found, *reads, *level),
             Self::Memory { what, why } => write!(f, "{what} cannot be used: {why}"),
+            Self::PathTooLong { path, len } => write!(
+                f,
+                "the socket path {} is {len} bytes, and a Unix socket's path is at most \
+                 {SOCKET_PATH_MAX} (sun_path is 108 with its terminating NUL): use a shorter one",
+                path.display()
+            ),
         }
     }
 }

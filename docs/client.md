@@ -32,6 +32,12 @@ name while the comm core was away), `reconnect` fails and the resource is not sa
 going from one to the other while the comm core was away, and it takes the same ring back when
 it returns. Nothing that was flowing stops.
 
+**A socket path too long.** A Unix socket's path is at most 107 bytes (`SOCKET_PATH_MAX`:
+`sun_path` is 108 with its NUL). A longer one is `ClientError::PathTooLong { path, len }`,
+said before anything is tried, and never `is_lost`: connecting again cannot help, so a loop
+that tries again while it is lost stops at once. In C it is `ORION_E_ARGUMENT`.
+`orion_connect::socket_path` checks a path the same way. Node logic refuses to start with one.
+
 **When another program is not back yet.** After the node or its comm core restarts, a resource
 whose provider has not said it again has the state `Restoring`, never `Ready`. Wait for `Ready`
 (a watch tells both changes) and then call it. A run sent in the gap anyway is refused

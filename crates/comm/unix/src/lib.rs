@@ -46,8 +46,11 @@ impl UnixCarrier {
     ///
     /// - `AddrInUse`: another program is listening at `path`.
     /// - `AlreadyExists`: something that is not a socket is at `path`. It is left alone.
+    /// - `InvalidInput`: `path` is longer than a Unix socket's path can be
+    ///   ([`SOCKET_PATH_MAX`] bytes), with the words that say so. Nothing is touched.
     /// - Anything `bind` or `chmod` fails with.
     pub fn bind(path: &Path, mode: Option<u32>, node_uids: &[u32]) -> io::Result<Self> {
+        fits(path)?;
         clear_stale(path)?;
         let listener = UnixListener::bind(path)?;
         if let Some(mode) = mode {
@@ -65,6 +68,29 @@ impl UnixCarrier {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// The longest path a Unix socket can be at, in bytes: `sun_path` is 108 with its NUL.
+pub const SOCKET_PATH_MAX: usize = 107;
+
+/// Refuses, with words, a path no socket can be at, before any system call is made with it.
+///
+/// # Errors
+///
+/// `InvalidInput`, naming the path, its length and the limit.
+pub fn fits(path: &Path) -> io::Result<()> {
+    let len = path.as_os_str().len();
+    if len > SOCKET_PATH_MAX {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "the socket path {} is {len} bytes, and a Unix socket's path is at most \
+                 {SOCKET_PATH_MAX} (sun_path is 108 with its terminating NUL): use a shorter one",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Removes a socket at `path` that nobody is listening on.
@@ -299,6 +325,34 @@ async fn send(stream: &UnixStream, frame: &[u8], fds: &[OwnedFd]) -> io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A path no socket can be at is refused with words before anything is touched.
+    #[test]
+    fn a_path_too_long_is_refused_with_its_length_before_anything_is_touched() {
+        let dir = std::env::temp_dir().join(format!("orion-unix-long-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let name = "s".repeat(SOCKET_PATH_MAX + 1 - dir.as_os_str().len() - 1);
+        let path = dir.join(name);
+        assert_eq!(path.as_os_str().len(), SOCKET_PATH_MAX + 1);
+        run(async {
+            let error = UnixCarrier::bind(&path, Some(0o660), &[]).expect_err("too long");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            let words = error.to_string();
+            assert!(
+                words.contains(&path.display().to_string())
+                    && words.contains(&format!("{} bytes", SOCKET_PATH_MAX + 1))
+                    && words.contains("108"),
+                "{words}"
+            );
+        });
+        assert!(!path.exists(), "something was made at the path");
+        // One byte shorter is a socket.
+        let fits = dir.join("s".repeat(SOCKET_PATH_MAX - dir.as_os_str().len() - 1));
+        run(async {
+            UnixCarrier::bind(&fits, None, &[]).expect("fits");
+        });
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn run(test: impl Future<Output = ()>) {
         tokio::runtime::Builder::new_current_thread()

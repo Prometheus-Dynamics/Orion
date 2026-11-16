@@ -84,7 +84,8 @@ const char *orion_last_error(void);
  * Connects to the comm core at `address` as the program `name`. An address is a socket path
  * ("/run/orion/orion.sock"), "orion+tcp://host[:port]" or "serial:<path>[@baud]"; null is the
  * board's own socket. `timeout_ms` is how long connecting may take, and each request unless
- * orion_set_reply says otherwise.
+ * orion_set_reply says otherwise. A socket path longer than 107 bytes is ORION_E_ARGUMENT,
+ * said before anything is tried.
  */
 int32_t orion_connect(const char *address, const char *name, uint32_t timeout_ms, Orion **out);
 

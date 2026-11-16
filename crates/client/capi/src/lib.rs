@@ -122,7 +122,8 @@ impl From<Error> for Failed {
                 | ClientError::Layout { .. }
                 | ClientError::Level { .. },
             ) => ORION_E_REFUSED,
-            Error::Topic(TopicError::Invalid(_) | TopicError::Publish(_)) => ORION_E_ARGUMENT,
+            Error::Topic(TopicError::Invalid(_) | TopicError::Publish(_))
+            | Error::Client(ClientError::PathTooLong { .. }) => ORION_E_ARGUMENT,
             _ => ORION_E_INTERNAL,
         };
         Self(status, error.to_string())

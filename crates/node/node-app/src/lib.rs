@@ -177,8 +177,13 @@ impl Node {
     ///
     /// # Errors
     ///
-    /// If the state directory cannot be made or used.
+    /// If the state directory cannot be made or used, or the comm core's socket is at a
+    /// path no socket can be at: connecting again would never help.
     pub fn load(settings: NodeSettings) -> Result<Self, StartError> {
+        orion_connect::socket_path(&settings.config.socket).map_err(|error| StartError {
+            what: "socket",
+            error: io::Error::new(io::ErrorKind::InvalidInput, error.to_string()),
+        })?;
         let mut persist =
             Persist::open(&settings.config.state_dir).map_err(|error| StartError {
                 what: "state directory",

@@ -46,7 +46,7 @@ use orion_wire::{
 pub use address::{Address, DEFAULT_PORT, DEFAULT_SOCKET};
 pub use alive::Reply;
 pub use client::{Client, Handler};
-pub use error::ClientError;
+pub use error::{ClientError, SOCKET_PATH_MAX, socket_path};
 pub use fd::{BorrowedFd, OwnedFd};
 pub use level::Feature;
 pub use orion_identity::Identity;

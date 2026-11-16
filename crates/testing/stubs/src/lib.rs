@@ -102,9 +102,18 @@ impl Board {
     /// If the board cannot start: a test has nothing to do then.
     #[must_use]
     pub fn start(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-stubs-{name}-{}", std::process::id()));
+        // A short name for the directory, so the socket's path fits under a long temporary
+        // directory too: `name` hashed, and written in the directory for whoever looks.
+        let hash = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            name.hash(&mut hasher);
+            hasher.finish() as u32
+        };
+        let dir = std::env::temp_dir().join(format!("orion-{hash:08x}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("the board's directory");
+        std::fs::write(dir.join("name"), name).expect("the board's name");
         Self::start_in(&dir, Security::Off, None)
     }
 
@@ -174,6 +183,21 @@ impl Board {
         Self::start_all(dir, options)
     }
 
+    /// As [`Board::start_with`], with what stops it before anything starts given back
+    /// instead of a panic: a socket path too long for a Unix socket in `dir`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput`, naming the path, its length and the limit. No thread is started.
+    ///
+    /// # Panics
+    ///
+    /// If the board cannot start for another reason.
+    pub fn try_start_with(dir: &Path, options: Options) -> std::io::Result<Self> {
+        orion_unix::fits(&dir.join("orion.sock"))?;
+        Ok(Self::start_all(dir, options))
+    }
+
     /// As [`Board::start_for_node`], with a serial link on each of `links`: a device on the
     /// other end of one is a resource of the board.
     ///
@@ -226,6 +250,11 @@ impl Board {
             .into_iter()
             .collect();
         let socket = dir.join("orion.sock");
+        // Said here, in the caller's thread, before anything starts: not as a panic in the
+        // board's thread that the caller never sees.
+        if let Err(error) = orion_unix::fits(&socket) {
+            panic!("the board cannot start: {error}");
+        }
         let shelf = Arc::new(Shelf::default());
         // A named board keeps its key and trust file in `dir/state`, as a comm core does: node
         // logic reads them there, and the key stays the same across a restart.
@@ -411,5 +440,22 @@ impl Board {
 impl Drop for Board {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Too long a socket path is given back before a thread starts; a long name is not one.
+    #[test]
+    fn a_socket_path_too_long_is_said_before_the_board_starts() {
+        let long = std::env::temp_dir().join("d".repeat(120));
+        let error = Board::try_start_with(&long, Options::default()).expect_err("too long");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("107"), "{error}");
+        assert!(!long.exists(), "something was made for it");
+        let board = Board::start(&"a test with a long name, ".repeat(8));
+        assert!(board.socket.as_os_str().len() <= orion_unix::SOCKET_PATH_MAX);
     }
 }

@@ -239,6 +239,9 @@ impl Transport {
 
     #[cfg(target_os = "linux")]
     pub(crate) fn local(path: &Path) -> Result<Self, ClientError> {
+        // Before any system call: too long a path is the caller's to fix, never a connection
+        // that may come back.
+        crate::socket_path(path)?;
         let stream = UnixStream::connect(path)?;
         // Every descriptor of a session is non-blocking, so a runtime can wait on it too.
         // Sending waits for room itself.
