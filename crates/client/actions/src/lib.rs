@@ -126,6 +126,10 @@ pub enum Request {
         /// it when that session ends. Zero from a node that does not say. A run carried
         /// from another node has the token of the session that asked for it there.
         session: u64,
+        /// The run goes on without its caller: when [`Request::CallerGone`] names its
+        /// session, keep it running until it ends or its deadline passes. False from a node
+        /// that does not say.
+        detached: bool,
     },
     /// Stop this run. Finish it as [`Outcome::Cancelled`], or as whatever it had become.
     Cancel {
@@ -271,6 +275,7 @@ impl Handler for State {
                     deadline_ms: claim.deadline_ms,
                     caller: claim.caller.to_owned(),
                     session: claim.session,
+                    detached: claim.detached,
                 });
             }
             kind::ACTION_CANCEL => {

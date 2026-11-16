@@ -63,6 +63,7 @@ fn claim(call: u64, name: &str, target: orion_msg_actions::Target, args: &[u8]) 
         deadline_ms: 2_000,
         caller: "operator:9f3c",
         session: 5,
+        detached: false,
     };
     orion_device_host::Host::default().frame(&claim)
 }

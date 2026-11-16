@@ -17,6 +17,11 @@ pub enum Target {
     Resource(ResourceName),
 }
 
+/// The [`ActionResult::code`] of a run that node logic ended because its deadline passed
+/// ([`Outcome::TimedOut`]): `ETIMEDOUT`'s number. A run ended any other way by node logic
+/// (cancelled, its caller or program gone) has code 0; a program's own codes are its own.
+pub const DEADLINE_CODE: u32 = 110;
+
 open_enum! {
     /// How an action ended.
     pub enum Outcome: u8 {
@@ -92,6 +97,10 @@ body! {
         /// node logic runs, also when one identity connects twice. [`CallerGone`] names it
         /// when that session ends. Zero from a host that does not say.
         pub session: u64,
+        /// The run goes on without its caller, until it ends or its deadline passes: a
+        /// [`CallerGone`] for its session does not end it. False from a host that does not
+        /// say.
+        pub detached: bool,
     }
 }
 

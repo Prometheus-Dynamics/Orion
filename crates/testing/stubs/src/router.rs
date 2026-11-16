@@ -148,6 +148,7 @@ impl Service for Router {
                         caller: &caller,
                         // The stub does not say whose session it was.
                         session: 0,
+                        detached: run.detached,
                     },
                     Delivery::Must,
                 )

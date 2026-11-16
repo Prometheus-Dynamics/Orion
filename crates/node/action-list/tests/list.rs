@@ -7,7 +7,8 @@ use common::{Bench, CALLER, HOUR, OTHER, OWNER, bare, by, fan};
 use orion_action_list::{ENDED_FOR_MS, Event, MAX_ENDED, MAX_RUNS};
 use orion_check::{Admits, Policy};
 use orion_msg_actions::{
-    ActionResult, Cancel, CancelReason, Claim, Outcome, Progress, Register, Registered, Target,
+    ActionResult, Cancel, CancelReason, Claim, DEADLINE_CODE, Outcome, Progress, Register,
+    Registered, Target,
 };
 use orion_reply::Asked;
 use orion_types::Error;
@@ -239,8 +240,8 @@ fn node_logic_stopping_cancels_every_run_and_says_why() {
         assert_eq!((cancel.call, cancel.reason), (id, CancelReason::Stopping));
         let result: ActionResult<'_> = bench.take(CALLER);
         assert_eq!(
-            (result.outcome, result.detail),
-            (Outcome::Cancelled, "node logic is stopping")
+            (result.outcome, result.detail, result.code),
+            (Outcome::Cancelled, "node logic is stopping", 0)
         );
     }
     assert_eq!((bench.actions.running(), bench.actions.ended()), (0, 0));
@@ -321,7 +322,10 @@ fn a_program_that_goes_takes_its_actions_and_fails_its_runs() {
     let (mut bench, _) = Bench::running(false);
     bench.gone(OWNER);
     let result: ActionResult<'_> = bench.take(CALLER);
-    assert_eq!((result.call, result.outcome), (7, Outcome::Failed));
+    assert_eq!(
+        (result.call, result.outcome, result.code),
+        (7, Outcome::Failed, 0)
+    );
     assert_eq!(result.detail, "the program that runs it went away");
     assert_eq!((bench.actions.listed(), bench.actions.running()), (0, 0));
     assert_eq!(bench.run(CALLER, 8, 0, false), Err(Error::NotFound));
@@ -335,7 +339,7 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
     bench.run(CALLER, 7, 500, false).expect("run");
     let claim: Claim<'_> = bench.take(OWNER);
     bench.handle(CALLER, 7);
-    assert_eq!(claim.deadline_ms, 500);
+    assert_eq!((claim.deadline_ms, claim.detached), (500, false));
     assert_eq!(bench.actions.next_deadline(), Some(bench.now + 500));
     bench.actions.tick(bench.now + 499, &mut bench.sent);
     assert!(bench.sent.frames.is_empty());
@@ -346,7 +350,11 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
         (claim.call, CancelReason::Deadline)
     );
     let result: ActionResult<'_> = bench.take(CALLER);
-    assert_eq!((result.call, result.outcome), (7, Outcome::TimedOut));
+    // Ended by node logic for its deadline, with the code that says so.
+    assert_eq!(
+        (result.call, result.outcome, result.code),
+        (7, Outcome::TimedOut, DEADLINE_CODE)
+    );
     assert_eq!(bench.actions.next_deadline(), None);
     // What the program says a moment later is of a run that ended: nothing, and no error.
     bench
@@ -463,7 +471,11 @@ fn a_detached_run_that_ended_with_nobody_there_is_kept_for_its_starter() {
     bench.now += 60_000;
     bench.ask(BACK, &bare(7)).expect("attach");
     let result: ActionResult<'_> = bench.take(BACK);
-    assert_eq!((result.call, result.outcome), (7, Outcome::Failed));
+    // The program's own code, kept as it said it.
+    assert_eq!(
+        (result.call, result.outcome, result.code),
+        (7, Outcome::Failed, 11)
+    );
     assert_eq!(result.output.0, b"out");
     // Told once.
     assert_eq!(bench.ask(BACK, &bare(7)), Err(Error::NotFound));
@@ -569,6 +581,8 @@ fn a_detached_run_still_has_its_deadline_and_its_program() {
     let mut bench = Bench::with_action();
     bench.run(CALLER, 7, 500, true).expect("run");
     let claim: Claim<'_> = bench.take(OWNER);
+    // The program is told the run goes on without its caller.
+    assert!(claim.detached);
     bench.gone(CALLER);
     bench.now += 500;
     bench.actions.tick(bench.now, &mut bench.sent);
@@ -576,14 +590,18 @@ fn a_detached_run_still_has_its_deadline_and_its_program() {
     assert_eq!(cancel.call, claim.call);
     bench.ask(BACK, &bare(7)).expect("attach");
     let result: ActionResult<'_> = bench.take(BACK);
-    assert_eq!(result.outcome, Outcome::TimedOut);
+    assert_eq!(
+        (result.outcome, result.code),
+        (Outcome::TimedOut, DEADLINE_CODE)
+    );
 
     let (mut bench, _) = Bench::running(true);
     bench.gone(CALLER);
     bench.gone(OWNER);
     bench.ask(BACK, &bare(7)).expect("attach");
     let result: ActionResult<'_> = bench.take(BACK);
-    assert_eq!(result.outcome, Outcome::Failed);
+    // Ended by node logic another way: no code.
+    assert_eq!((result.outcome, result.code), (Outcome::Failed, 0));
 }
 
 #[test]

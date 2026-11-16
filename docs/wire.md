@@ -113,7 +113,7 @@ session told the older code is told that code's own words.
 
 Additions with no level, because an older side ignores them and does nothing different that
 matters: `ACTION_STARTED` and the `instance`, `run` and `action` appended to `Progress` and
-`ActionResult` (an older client follows by its number, as before), `Cancel.reason`, `Claim.session`, `ACTION_CALLER_GONE` to a program, the hello document's
+`ActionResult` (an older client follows by its number, as before), `Cancel.reason`, `Claim.session`, `Claim.detached` (false from an older node), `ACTION_CALLER_GONE` to a program, the hello document's
 `state`, `recovery_why`, `security` and `security_generation` facts, `Reject`'s two revisions, and the resource state `Restoring` (4).
 An older program reads that state as one it does not know, which is not `Ready`, so it waits as
 it should.

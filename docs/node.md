@@ -262,8 +262,11 @@ actions; any program on the board adds its own.
   - If a session is lost between starting a run and hearing its handle, how the run went is
     not known. Find out from what the action does (read what it changes), never by coming back
     to the number alone, which may name another run by then.
-- **Deadlines.** A run with a deadline that passes ends as `TimedOut` and the program is told
-  to stop. What the program says of it afterwards is ignored.
+- **Deadlines.** A run with a deadline that passes ends as `TimedOut`, with code 110
+  (`DEADLINE_CODE`), and the program is told to stop. What the program says of it afterwards
+  is ignored. Node logic's other ends (cancelled, caller or program gone, stopping) have code 0.
+- **A program is told a run is detached.** The run handed to it carries `detached`, so it
+  knows that the caller's session ending does not end the run.
 - **Only the program that has a run speaks for it.** A result from anyone else is `denied`.
 - **Runs as a topic.** `orion.actions` has two fields. `event` is a line for each thing that
   happens to a run: `<run> <action> <node|resource>:<target> <percent> <outcome or -> <message>`,

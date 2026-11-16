@@ -510,6 +510,7 @@ impl Actions {
                         deadline_ms: run.deadline_ms,
                         caller: &principal,
                         session,
+                        detached: run.detached,
                     },
                 )?;
                 if !self.given.contains(&(owner, session)) {
@@ -731,7 +732,7 @@ impl Actions {
                 );
                 self.end(
                     at,
-                    (Outcome::TimedOut, 0),
+                    (Outcome::TimedOut, orion_msg_actions::DEADLINE_CODE),
                     &[],
                     "it ran out of time",
                     now_ms,

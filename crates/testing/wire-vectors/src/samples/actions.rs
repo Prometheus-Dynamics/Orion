@@ -41,7 +41,8 @@ pub(super) fn samples(out: &mut Vec<Sample>) {
             args: Bytes(b"a"),
             deadline_ms: 5000,
             caller: "local:1000",
-            session: 3
+            session: 3,
+            detached: true
         }
     );
     sample!(

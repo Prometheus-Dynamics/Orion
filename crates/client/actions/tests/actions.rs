@@ -167,6 +167,7 @@ impl Service for Router {
                         deadline_ms: run.deadline_ms,
                         caller: &caller,
                         session: 0,
+                        detached: run.detached,
                     },
                     Delivery::Must,
                 )
@@ -313,12 +314,18 @@ fn owner_process() {
         }
         match runs.wait(Duration::from_millis(20)).expect("wait") {
             Some(Request::Run {
-                call, name, args, ..
+                call,
+                name,
+                args,
+                detached,
+                ..
             }) => {
                 assert_ne!(
                     name, "lights.reset",
                     "a run the check refused reached the action"
                 );
+                // Told whether the run outlives its caller: only the one started detached.
+                assert_eq!(detached, args == b"slowly", "{args:?}");
                 match args.as_slice() {
                     b"stop" => return,
                     b"forever" => {

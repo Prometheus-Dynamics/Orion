@@ -290,8 +290,10 @@ none given, and is what a node too old to pass one on gives. A program sets it w
 `Actions::finish_with_code`, or `orion_finish_code` in the C API, and a web page reads it as
 `result.code`. The words stay in `detail`. Node logic
 passes the code on as the program gave it: to the caller, to whoever attaches to a detached run
-later, and back across nodes. Orion's own ends (a deadline, a program that went, node logic
-stopping) give zero.
+later, and back across nodes. Orion's own ends give zero, except a deadline: a run node logic
+ended because its deadline passed is `TimedOut` with code 110 (`DEADLINE_CODE`, `ETIMEDOUT`'s
+number), so a caller can tell it from a program that gave up by itself. A program that went,
+or node logic stopping, gives zero.
 
 A run handed to the program says who asked for it (`caller`), as the audit log names them:
 `local:<uid>`, `operator:<key>`, `peer:<node>`, `device:<name>` or `anonymous`. A run forwarded
@@ -309,7 +311,8 @@ node runs, also when one identity connects twice, and also for a caller on anoth
 run was carried here. When that session ends, for any cause, the
 program is told once with `Request::CallerGone { session }`, whether its runs from it are still
 going or not: that is the time to let go of what it holds for that caller. A detached run goes
-on until its deadline. A detached run needs a deadline (`deadline_ms`), no longer than the node
+on until its deadline, and the run says so (`Request::Run { detached }`): a program need not
+guess from the deadline whether `CallerGone` ends it. A node too old to say gives `false`. A detached run needs a deadline (`deadline_ms`), no longer than the node
 takes (`actions.max_detached_ms`, an hour unless said): it is refused otherwise, as `NoDeadline`
 or `DeadlineTooLong`.
 
