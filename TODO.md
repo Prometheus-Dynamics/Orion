@@ -220,4 +220,5 @@ Agreed with the libraries around Orion on 2026-11-11.
 - Pinning a graph to a core. A workload's placement has room for a CPU set (A9).
 - The MCU template's C API does not pass `CALLER_GONE` on (C33). Low priority: it runs one run at a
   time and holds nothing for a caller.
-- [ ] [C52b](docs/prs/C52b.md) A root login is all of root again; a connection's child holds nothing (wave 18; needs C52)
+- [x] [C52b](docs/prs/C52b.md) A root login is all of root again; a connection's child holds nothing (wave 18; needs C52)
+- [x] [I6b](docs/prs/I6b.md) The board limits, tightened to what a board runs (wave 18; needs C52b)
