@@ -22,6 +22,10 @@
 
 #![cfg(target_os = "linux")]
 
+mod own;
+
+pub use own::{OwnFiles, OwnName, SNAPSHOT_MS};
+
 use orion_msg_files::{
     FETCH_WINDOW, FileFetch, FileGive, FileGiveChunk, FileOffer, FileOffered, FileOffers,
     FileOffersList, FileState, FileTaken, OfferEntry, OfferedBy,
@@ -114,6 +118,8 @@ pub struct FileOffersService {
     fetches: Table<Fetch>,
     next: u64,
     clashes: u64,
+    /// The comm core's own files, if it offers any.
+    own: Option<own::Own>,
 }
 
 impl FileOffersService {
@@ -128,7 +134,16 @@ impl FileOffersService {
             fetches: Table(Vec::new()),
             next: 1,
             clashes: 0,
+            own: None,
         }
+    }
+
+    /// Offers `files` as the comm core's own: their prefix is never a program's, and a fetch
+    /// under it is the comm core's to give.
+    #[must_use]
+    pub fn with_own(mut self, files: impl OwnFiles + 'static) -> Self {
+        self.own = Some(own::Own::new(Box::new(files)));
+        self
     }
 
     /// Who may as the node has it: programs on the board and devices wired to it offer, as
@@ -164,6 +179,16 @@ impl FileOffersService {
                 &format!("{prefix:?} is not a prefix: one or more parts of a name, ending in /"),
             );
         }
+        if let Some(own) = &self.own
+            && own.has(prefix)
+        {
+            self.clashes += 1;
+            let holder = own.prefix().to_owned();
+            return cx.refuse(
+                Error::Busy,
+                &format!("{prefix} is under {holder}, which the comm core offers"),
+            );
+        }
         let from = cx.from();
         match self.offers.iter().find(|offer| offer.prefix == prefix) {
             Some(offer) if offer.session == from => {}
@@ -189,8 +214,43 @@ impl FileOffersService {
         cx.reply(&FileOffered { request_seq })
     }
 
+    /// The chunks a fetch asks for: a window of them fits in the client's outbox twice over,
+    /// so a client that is slow to read is never closed for what it was allowed to be sent.
+    fn chunk_for(cx: &mut Cx<'_>) -> u32 {
+        let fits = cx.sessions().outbox_bytes() / (2 * FETCH_WINDOW);
+        cx.caller()
+            .max_frame
+            .min(fits)
+            .saturating_sub(CHUNK_OVERHEAD)
+            .max(1)
+    }
+
     fn fetch(&mut self, request: &FileFetch<'_>, cx: &mut Cx<'_>) -> Result<(), Error> {
         let name = request.name.as_str();
+        if let Some(own) = &mut self.own
+            && own.has(name)
+        {
+            let chunk = Self::chunk_for(cx) as usize;
+            let (client, now_ms) = (cx.from(), cx.now_ms());
+            let fetch = (client, request.transfer, name, request.from);
+            return match own.give(fetch, chunk, now_ms, cx.sessions()) {
+                Ok(()) => Ok(()),
+                Err(own::NotGiven::Busy) => Err(Error::Busy),
+                Err(own::NotGiven::Rejected(why)) => {
+                    let _ = cx.sessions().send(
+                        client,
+                        &FileTaken {
+                            transfer: request.transfer,
+                            received: 0,
+                            state: FileState::Rejected,
+                            detail: &why,
+                        },
+                        Delivery::Must,
+                    );
+                    Ok(())
+                }
+            };
+        }
         let Some(offerer) = self.offering(name).map(|offer| offer.session) else {
             return cx.refuse(Error::NotFound, &format!("nothing offers {name}"));
         };
@@ -219,15 +279,7 @@ impl FileOffersService {
             },
         );
         let caller = cx.caller().principal.to_string();
-        // A window of chunks fits in the client's outbox twice over, so a client that is slow
-        // to read is never closed for what its program was allowed to send.
-        let fits = cx.sessions().outbox_bytes() / (2 * FETCH_WINDOW);
-        let max_chunk = cx
-            .caller()
-            .max_frame
-            .min(fits)
-            .saturating_sub(CHUNK_OVERHEAD)
-            .max(1);
+        let max_chunk = Self::chunk_for(cx);
         let passed = cx.sessions().send(
             offerer,
             &FileFetch {
@@ -312,6 +364,11 @@ impl FileOffersService {
 
     fn taken(&mut self, taken: &FileTaken<'_>, cx: &mut Cx<'_>) -> Result<(), Error> {
         let from = cx.from();
+        if let Some(own) = &mut self.own
+            && own.taken(from, taken, cx.sessions())
+        {
+            return Ok(());
+        }
         let over = matches!(taken.state, FileState::Committed | FileState::Rejected);
         // From the program: the number is its own. From the client: the client's.
         if let Some(fetch) = self.fetches.get(&taken.transfer)
@@ -360,17 +417,27 @@ impl FileOffersService {
                     .unwrap_or_default()
             })
             .collect();
-        let entries: Vec<OfferEntry<'_>> = self
-            .offers
-            .iter()
-            .zip(&named)
-            .map(|(offer, (name, principal))| OfferEntry {
-                prefix: &offer.prefix,
-                by: OfferedBy::Program,
-                name,
-                principal,
-                since_ms: offer.since_ms,
-            })
+        let own = self.own.as_ref().map(|own| OfferEntry {
+            prefix: own.prefix(),
+            by: OfferedBy::CommCore,
+            name: "",
+            principal: "",
+            since_ms: 0,
+        });
+        let entries: Vec<OfferEntry<'_>> = own
+            .into_iter()
+            .chain(
+                self.offers
+                    .iter()
+                    .zip(&named)
+                    .map(|(offer, (name, principal))| OfferEntry {
+                        prefix: &offer.prefix,
+                        by: OfferedBy::Program,
+                        name,
+                        principal,
+                        since_ms: offer.since_ms,
+                    }),
+            )
             .collect();
         let request_seq = cx.request_seq();
         cx.reply(&FileOffersList {
@@ -423,6 +490,9 @@ impl Service for FileOffersService {
 
     fn closed(&mut self, session: SessionId, sessions: &mut Sessions) {
         self.offers.retain(|offer| offer.session != session);
+        if let Some(own) = &mut self.own {
+            own.closed(session);
+        }
         let ended: Vec<u64> = self
             .fetches
             .iter()

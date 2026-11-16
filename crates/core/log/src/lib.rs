@@ -1,10 +1,15 @@
 //! Where the log goes: lines on standard error, which a console, a service manager or an
 //! initramfs's own log all take. One line an event: its level, where it is from, what it
 //! says, and its fields.
+//!
+//! The newest lines are also kept in memory, up to [`window_bytes`] of them, for the comm core
+//! to hand over as its own `orion/log` on a board whose log went nowhere else ([`window`]).
 
+use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::io::Write as _;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
@@ -68,6 +73,7 @@ impl Subscriber for Lines {
             line.fields
         );
         let _ = std::io::stderr().lock().write_all(text.as_bytes());
+        keep(&text);
     }
 
     fn enter(&self, _span: &Id) {}
@@ -88,4 +94,82 @@ pub fn install() {
     };
     // Only fails if a log is already going somewhere, which is as good.
     let _ = tracing::subscriber::set_global_default(lines);
+}
+
+/// How many bytes of the newest lines are kept by default.
+pub const WINDOW_BYTES: usize = 256 * 1024;
+
+static WINDOW: Mutex<VecDeque<u8>> = Mutex::new(VecDeque::new());
+static WINDOW_LIMIT: AtomicUsize = AtomicUsize::new(WINDOW_BYTES);
+
+/// Keeps at most `bytes` of the newest lines from now on (`log.window_bytes`); zero keeps none.
+pub fn set_window_bytes(bytes: usize) {
+    WINDOW_LIMIT.store(bytes, Ordering::Relaxed);
+    trim(
+        &mut WINDOW
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        bytes,
+    );
+}
+
+/// How many bytes of the newest lines are kept.
+#[must_use]
+pub fn window_bytes() -> usize {
+    WINDOW_LIMIT.load(Ordering::Relaxed)
+}
+
+/// The newest lines kept, oldest first, each whole.
+#[must_use]
+pub fn window() -> Vec<u8> {
+    let window = WINDOW
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (front, back) = window.as_slices();
+    [front, back].concat()
+}
+
+fn keep(line: &str) {
+    let limit = WINDOW_LIMIT.load(Ordering::Relaxed);
+    if line.len() > limit {
+        return;
+    }
+    let mut window = WINDOW
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    window.extend(line.as_bytes());
+    trim(&mut window, limit);
+}
+
+/// Drops whole lines from the front until `window` is at most `limit` bytes: the line the
+/// first byte to go is on goes whole.
+fn trim(window: &mut VecDeque<u8>, limit: usize) {
+    let Some(over) = window.len().checked_sub(limit).filter(|over| *over > 0) else {
+        return;
+    };
+    match window.range(over - 1..).position(|byte| *byte == b'\n') {
+        Some(end) => drop(window.drain(..over + end)),
+        None => window.clear(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_window_keeps_the_newest_whole_lines_within_its_bytes() {
+        set_window_bytes(32);
+        for line in ["one 1111\n", "two 2222\n", "three 333\n", "four 4444\n"] {
+            keep(line);
+        }
+        assert_eq!(window(), b"two 2222\nthree 333\nfour 4444\n");
+        // A line longer than the window is not kept, and keeps nothing out.
+        keep(&"x".repeat(40));
+        assert_eq!(window(), b"two 2222\nthree 333\nfour 4444\n");
+        set_window_bytes(12);
+        assert_eq!(window(), b"four 4444\n");
+        set_window_bytes(0);
+        assert!(window().is_empty());
+    }
 }

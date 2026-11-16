@@ -86,6 +86,7 @@ The name in brackets is the cargo feature that carries the part.
 | `peer.nodes` | none | where other nodes are, `name=address:port`, for subscribing to their topics (`topic-peers`) |
 | `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
 | `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |
+| `log.window_bytes` | 262144 | how many bytes of the newest log lines are kept in memory, whole lines, for `orion/log` (`offers`); 0 keeps none |
 | `time.*` | off | time sync (`time`) |
 | `discovery`, `discovery.ttl_ms`, `discovery.interfaces` | off | finding peers (`discovery`, `mdns`) |
 | `links.serial` | none | `name=path@baud`, comma separated (`link-serial`) |

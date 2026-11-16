@@ -268,6 +268,13 @@ what to change.
 - **D16b.** `orion_files::index` (`Index`, `Entry`, `NotAnIndex`, `FIRST_LINE`),
   `Fetching::within` and `Fetching::finish`, `orion file fetch` and `orion file offers` (**Add**).
   The stub board offers files as the comm core does.
+- **C30.** The comm core offers `orion/` itself, running and in recovery: `orion/index`, `log`,
+  `settings`, `last-good.carriers`, `state`, `sessions`, `version`. A program offering `orion/`
+  or a prefix under it is refused as `busy` (it was free before). `FileOffersList` lists it
+  first, `OfferedBy::CommCore`. New setting `log.window_bytes`. In Rust,
+  `orion_file_offers::{OwnFiles, OwnName, SNAPSHOT_MS}` and `FileOffersService::with_own`,
+  `orion_config::may_be_secret` and `Source::said`, `orion_log::{window, window_bytes,
+  set_window_bytes, WINDOW_BYTES}`, and `CommSettings::{said, log_window_bytes}` (**Add**).
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

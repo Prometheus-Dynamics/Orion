@@ -109,6 +109,11 @@ pub struct CommSettings {
     /// `links.usb`: the names of the USB links, whose handles are handed over at run time.
     #[cfg(feature = "link-usb")]
     pub usb_links: Vec<String>,
+    /// What was set and where, the values of keys that may be secret left out
+    /// ([`Source::said`]): the comm core's own `orion/settings`.
+    pub said: String,
+    /// `log.window_bytes`: how many bytes of the newest log lines are kept, for `orion/log`.
+    pub log_window_bytes: usize,
 }
 
 /// A link brought over the network: its name and where the board listens for it.
@@ -329,6 +334,8 @@ impl CommSettings {
             usb_links: source.list("links.usb")?,
             #[cfg(feature = "shell")]
             shell: None,
+            said: source.said(),
+            log_window_bytes: source.get("log.window_bytes", orion_log::WINDOW_BYTES)?,
             config,
         };
         #[cfg(feature = "shell")]

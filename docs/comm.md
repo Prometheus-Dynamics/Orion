@@ -189,6 +189,31 @@ The comm core, not node logic, routes, so that a board in recovery can still han
   operators and other nodes. Both need the grant where grants are kept.
 - **Bounded.** At most 64 prefixes offered and 256 fetches under way; one more is `busy`.
 
+**The comm core's own files, `orion/`.** What explains a board's trouble from Orion's side,
+fetched as any offered file is, running and in recovery, with no login and no program running.
+No program may offer `orion/` or a prefix under it: that is refused as `busy`, "… is under
+orion/, which the comm core offers", and counted as a clash. `FileOffersList` lists it first,
+offered by the comm core.
+
+| Name | Bound | User data | What it is |
+| --- | --- | --- | --- |
+| `orion/index` | | | the index of the rest, in the format of `docs/client.md` |
+| `orion/log` | `log.window_bytes` | yes | the newest lines of the comm core's log, whole |
+| `orion/settings` | 64 KiB | no | each setting that was set, `name = value    # file` or `# environment`; the value of one whose name may hold a secret (its last part ends in `key`, or it says secret, password or token) is `(left out)` |
+| `orion/last-good.carriers` | 16 KiB | no | the record of the last good start, as recovery reads it |
+| `orion/state` | 4 KiB | no | `running` or `flasher`; in recovery, `recovery` and a line `why: …` |
+| `orion/sessions` | 64 KiB | yes | one line a session: its number, name, principal, roles, level, `local` or `remote`, and since when it has been quiet |
+| `orion/version` | 4 KiB | no | the version, protocol, interface revision and level, and `kinds_sha256`, the digest of every kind's number, concept and name |
+
+- **Made when asked for, held for a fetch.** A name's bytes are made at its first fetch, cut at
+  its bound, and held for 60 seconds: a fetch that broke off and goes on within that time is
+  given the same bytes, so its digest holds. After it they are made again.
+- **The comm core gives them itself,** paced by the client as a program's are; at most 64 at
+  once, one more is `busy`. A name it does not have is rejected, "<name>: no such file"; one
+  that cannot be read now (no record of a last good start), "<name>: cannot be read now".
+- In recovery, when the settings could not be read, `orion/settings` says so and
+  `orion/state` says why.
+
 ## Samples for subscribers without a ring
 
 A subscriber on another board, or in a browser, cannot map a ring. It subscribes like anyone
@@ -551,6 +576,10 @@ pinned the board's key is told it is another.
   name root hands a handle over for: the program that sets up the gadget needs no list.
 - A comm core whose start failed part way stops what it had started before recovery opens,
   so recovery in the same process gets the board's socket.
+- **The comm core's own files** are offered in recovery too, with the hello document: `orion/state`
+  says `recovery` and why, `orion/log` holds what led to it, and `orion/settings` what was set
+  (see files from a board). `orion file fetch orion/log log.txt` over the socket or a USB cable
+  needs no login.
 
 ## A shell over the session
 
@@ -676,7 +705,7 @@ orion-recovery [settings file]
 
 **Size gate.** `scripts/size-gate.sh`, part of the gate, builds it as it ships and fails if
 it has grown past a limit set a small margin (20-30 KB) above its last measured size:
-2,870,824 bytes for an aarch64 board, static, at C41. A change that needs the bytes cuts what
+2,692,720 bytes for an aarch64 board, static, at C30. A change that needs the bytes cuts what
 it can first, then raises the limit in the same commit and says why.
 
 ## The network carrier

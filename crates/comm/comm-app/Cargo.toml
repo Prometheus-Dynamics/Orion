@@ -20,7 +20,7 @@ proxy = ["dep:orion-broker-proxy"]
 # Buffer topics: frames in shared memory.
 buffers = ["dep:orion-broker-buffers"]
 # Files offered by programs on the board, fetched by clients.
-offers = ["dep:orion-file-offers"]
+offers = ["dep:orion-file-offers", "dep:sha2"]
 # Passing records and the rest of what is node logic's to node logic.
 node = ["dep:orion-relay"]
 # Each device on a link as a resource, with its topics and actions.
@@ -79,6 +79,7 @@ orion-device-gateway = { path = "../device-gateway", optional = true }
 orion-discovery = { path = "../discovery", optional = true }
 orion-hello = { path = "../hello" }
 orion-keys = { path = "../keys" }
+orion-log = { path = "../../core/log" }
 orion-link-can = { path = "../link-can", optional = true }
 orion-link-serial = { path = "../link-serial", optional = true }
 orion-link-usb = { path = "../link-usb", optional = true }
@@ -99,19 +100,21 @@ orion-time = { path = "../time", optional = true }
 orion-topic-peers = { path = "../topic-peers", optional = true }
 orion-types = { path = "../../core/types" }
 orion-unix = { path = "../unix" }
+orion-wire = { path = "../../core/wire" }
 orion-ws = { path = "../ws", optional = true }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "signal"] }
+sha2 = { version = "0.11.0", default-features = false, optional = true }
 tracing.workspace = true
 rustix = { version = "1", default-features = false, features = ["std", "process", "net", "fs", "stdio"], optional = true }
 
 [dev-dependencies]
 orion = { path = "../../client/orion", default-features = false, features = ["shell"] }
 orion-connect = { path = "../../client/connect" }
+orion-files = { path = "../../client/files" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
 shm-ring = { workspace = true }
 shm-ring-doorbell = { workspace = true }
-orion-wire = { path = "../../core/wire" }
 rustix = { version = "1", default-features = false, features = ["std", "process"] }
 tokio = { workspace = true, features = ["test-util", "net"] }
 
@@ -134,6 +137,10 @@ required-features = ["recovery", "ssh-sftp", "ssh-sandbox", "nt4"]
 [[test]]
 name = "ways"
 required-features = ["ws", "ssh", "nt4"]
+
+[[test]]
+name = "own_files"
+required-features = ["offers", "recovery"]
 
 [lints]
 workspace = true

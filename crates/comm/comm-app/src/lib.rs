@@ -21,6 +21,8 @@ pub mod last_good;
 pub mod login_helper;
 #[cfg(feature = "nt4")]
 mod nt4_ws;
+#[cfg(feature = "offers")]
+mod own_files;
 #[cfg(feature = "recovery")]
 mod recover;
 #[cfg(feature = "recovery")]
@@ -193,7 +195,13 @@ impl CommCore {
             settings.broker.declare,
         ));
         #[cfg(feature = "offers")]
-        comm.add_service(orion_file_offers::FileOffersService::standard());
+        comm.add_service(
+            own_files::OrionFiles::new(
+                Some(&settings),
+                format!("{}\n", settings.board_state.word()),
+            )
+            .service(),
+        );
         // Devices on links, each a resource with what it declared and registered.
         #[cfg(feature = "devices")]
         let devices = {

@@ -484,6 +484,11 @@ one (`parse`, which says which line is wrong and why, and `bound(name)`). A fetc
 file's bound, `files.start_fetch(..).within(bound)`, does not take a file said to be larger, and
 writes nothing of it.
 
+**The comm core's own, `orion/`.** Every board offers `orion/` itself, running and in recovery:
+its log, its settings with secrets left out, its state and why, its sessions, its version, and
+the record of its last good start, listed in `orion/index` (`docs/comm.md`). `offers()` lists it
+`OfferedBy::CommCore`. No program may offer it.
+
 ## The executor role
 
 `orion-executor`. An executor is any program that connects and says "I run this kind of

@@ -80,6 +80,18 @@ struct Entry {
     retired: Option<&'static str>,
 }
 
+/// Whether the setting `key` may hold a secret, by its name: its last part is or ends in `key`,
+/// or it names a secret, a password or a token. Its value is never shown ([`Source::said`]).
+#[must_use]
+pub fn may_be_secret(key: &str) -> bool {
+    let key = canonical(key);
+    let last = key.rsplit('_').next().unwrap_or(&key);
+    last.ends_with("key")
+        || ["secret", "password", "token"]
+            .iter()
+            .any(|word| key.contains(word))
+}
+
 /// The raw settings, before anything is typed.
 #[derive(Debug, Default)]
 pub struct Source {
@@ -234,6 +246,27 @@ impl Source {
                 })
             })
             .collect()
+    }
+
+    /// What was set, as `key = value`, one a line with where it came from, for a person to
+    /// read on a board in trouble. The value of a key that may hold a secret is left out, by
+    /// its name ([`may_be_secret`]): it says `(left out)`. Everything not set is its default.
+    #[must_use]
+    pub fn said(&self) -> String {
+        let mut text = String::new();
+        for (key, entry) in &self.entries {
+            let value = if may_be_secret(key) {
+                "(left out)"
+            } else {
+                entry.value.as_str()
+            };
+            let from = match entry.from {
+                Origin::File => "file",
+                Origin::Environment => "environment",
+            };
+            text.push_str(&format!("{} = {value}    # {from}\n", entry.name));
+        }
+        text
     }
 
     /// Every key nobody read. Call this after every part has taken its settings.
@@ -532,5 +565,27 @@ mod tests {
         assert_eq!(source.list::<u32>("socket.node_uids").unwrap(), [901]);
         assert_eq!(source.get("records.save_after_ms", 500_u64).unwrap(), 10);
         assert!(source.warnings().is_empty(), "{:?}", source.warnings());
+    }
+
+    #[test]
+    fn what_was_said_leaves_out_what_may_be_a_secret() {
+        let source = Source::parse(
+            "node.name = left\nenrollment.key = s3cret\nssh.host_key = /k\nlink.secret_file = /s\n",
+            env(&[
+                ("ORION_COMM_MAX_SESSIONS", "32"),
+                ("ORION_API_TOKEN", "t0k"),
+            ]),
+        )
+        .expect("parse");
+        let said = source.said();
+        assert!(said.contains("node.name = left    # file\n"), "{said}");
+        assert!(
+            said.contains("ORION_COMM_MAX_SESSIONS = 32    # environment\n"),
+            "{said}"
+        );
+        for secret in ["s3cret", "/k", "/s", "t0k"] {
+            assert!(!said.contains(secret), "{secret} in {said}");
+        }
+        assert_eq!(said.matches("(left out)").count(), 4, "{said}");
     }
 }
