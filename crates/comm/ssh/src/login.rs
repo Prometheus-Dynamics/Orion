@@ -553,7 +553,6 @@ fn sandbox(
     fds: Vec<OwnedFd>,
     running: &Arc<AtomicUsize>,
 ) -> Result<(Answer, Vec<OwnedFd>), String> {
-    use std::os::unix::process::CommandExt;
     let ssh = config.ssh.as_ref().ok_or("the SSH way in is off")?;
     let mut fds = fds.into_iter();
     let (Some(client), Some(socket), None) = (fds.next(), fds.next(), fds.next()) else {
@@ -575,11 +574,14 @@ fn sandbox(
         .arg(crate::SANDBOX_MODE)
         .stdin(std::process::Stdio::from(client))
         .stdout(std::process::Stdio::from(socket));
-    // Becoming the account happens between fork and exec: the child is never anyone else.
-    // Without the right to, it runs as this process's user, as a comm core that is not root
-    // runs it itself.
+    // The child becomes the account itself, first thing, before it reads a byte: as root it
+    // can first empty its bounding set, which after the switch it no longer could. The
+    // account is named here, by the helper, never by the comm core. Without the right to,
+    // it runs as this process's user, as a comm core that is not root runs it itself.
     if rustix::process::getuid().is_root() {
-        command.uid(user.uid).gid(user.gid);
+        command
+            .arg(crate::SANDBOX_BECOME)
+            .arg(format!("{}:{}", user.uid, user.gid));
     }
     let child = command
         .spawn()

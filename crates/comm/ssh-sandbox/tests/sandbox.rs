@@ -104,11 +104,16 @@ struct Server {
 impl Server {
     fn start(dir: &Path) -> Self {
         let (key, public) = keygen(dir, "admin");
-        Self::start_with(dir, key, trust(public), SandboxConfig::default())
+        Self::start_with(config(dir), key, trust(public), SandboxConfig::default())
     }
 
-    fn start_with(dir: &Path, key: PathBuf, keys: SharedKeys, sandbox: SandboxConfig) -> Self {
-        let config = config(dir);
+    fn start_with(
+        config: SshConfig,
+        key: PathBuf,
+        keys: SharedKeys,
+        sandbox: SandboxConfig,
+    ) -> Self {
+        let dir = config.host_key.parent().expect("the lab").to_owned();
         let (ready, started) = std::sync::mpsc::channel();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let ssh = Arc::new(Mutex::new(None));
@@ -130,7 +135,7 @@ impl Server {
         });
         Self {
             addr: started.recv().expect("the server starts"),
-            dir: dir.to_owned(),
+            dir,
             key,
             user: me().name,
             ssh,
@@ -497,7 +502,7 @@ fn with_a_login_helper_the_helper_starts_the_children_and_the_sessions() {
     };
     let helper = std::thread::spawn(move || serve(&helper, &listener));
     let server = Server::start_with(
-        &dir,
+        config(&dir),
         key,
         keys,
         SandboxConfig {
@@ -537,5 +542,181 @@ fn with_a_login_helper_the_helper_starts_the_children_and_the_sessions() {
     assert!(matches!(helper.join(), Ok(Ok(()))));
     let ran = server.ssh(&server.key, &[], &["echo out"], "");
     assert_eq!(text(&ran.stdout), "");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Set when the test runs again inside its own user namespace.
+const INSIDE: &str = "ORION_SANDBOX_RIGHTS_INSIDE";
+
+/// What each kind of session holds, read from the kernel and not from `id -u`: a root login
+/// is all of root; a login as anyone else holds nothing; a connection's child holds nothing
+/// and never can, its bounding set empty. Becoming other accounts needs root, so the test
+/// runs itself again in a user namespace of its own, as that namespace's root, with the
+/// user's subordinate ids as the other accounts. Where that is not allowed it says so and
+/// passes; the board run asks the same of the real thing.
+#[cfg(feature = "login-helper")]
+#[test]
+fn each_kind_of_session_holds_what_it_should_and_no_more() {
+    if std::env::var_os(INSIDE).is_some() {
+        each_kind_of_session_inside();
+        println!("rights: every kind of session checked");
+        return;
+    }
+    if !installed() {
+        return;
+    }
+    let unshare = || {
+        let mut unshare = Command::new("unshare");
+        unshare.args(["--map-auto", "--map-root-user", "--"]);
+        unshare
+    };
+    let allowed = unshare()
+        .arg("true")
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !allowed {
+        println!("no user namespace with subordinate ids here: what sessions hold was not tried");
+        return;
+    }
+    let ran = unshare()
+        .arg(std::env::current_exe().expect("this test"))
+        .args([
+            "--exact",
+            "each_kind_of_session_holds_what_it_should_and_no_more",
+            "--nocapture",
+        ])
+        .env(INSIDE, "1")
+        .output()
+        .expect("the test again, inside");
+    let said = format!("{}{}", text(&ran.stdout), text(&ran.stderr));
+    assert!(ran.status.success(), "{said}");
+    assert!(
+        said.contains("rights: every kind of session checked"),
+        "{said}"
+    );
+}
+
+/// A process's `Uid`, `CapPrm`, `CapEff`, `CapBnd` and `NoNewPrivs`, from its status.
+fn rights(status: &str) -> [String; 5] {
+    ["Uid", "CapPrm", "CapEff", "CapBnd", "NoNewPrivs"].map(|name| {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(name)?.strip_prefix(':'))
+            .and_then(|value| value.split_whitespace().next())
+            .unwrap_or_else(|| panic!("no {name} in {status}"))
+            .to_owned()
+    })
+}
+
+#[cfg(feature = "login-helper")]
+fn each_kind_of_session_inside() {
+    use orion_ssh::login::{HelperConfig, RecoveryLogin, serve};
+    assert!(
+        rustix::process::getuid().is_root(),
+        "not root in the namespace"
+    );
+    let dir = temp("rights");
+    let (key, public) = keygen(&dir, "admin");
+    // The namespace's accounts: its root, an operator's account, and the children's.
+    let etc = dir.join("etc");
+    std::fs::create_dir_all(&etc).expect("dir");
+    std::fs::write(
+        etc.join("passwd"),
+        "root:x:0:0::/tmp:/bin/sh\nop:x:1000:1000::/tmp:/bin/sh\nchild:x:2000:2000::/:/bin/false\n",
+    )
+    .expect("passwd");
+    std::fs::write(etc.join("group"), "root:x:0:\nop:x:1000:\nchild:x:2000:\n").expect("group");
+    let config = |dir: &Path| SshConfig {
+        etc: etc.clone(),
+        ..config(dir)
+    };
+    let stored = KeysConfig {
+        state_dir: Some(dir.join("keys")),
+        ..KeysConfig::in_memory("lab")
+    };
+    std::fs::create_dir_all(dir.join("keys")).expect("dir");
+    let mut keys = Keys::open(stored.clone(), Security::On).expect("keys");
+    keys.approve_operator(public, "admin").expect("enroll");
+    keys.grant(&KeyId(public), true, Vec::new(), true)
+        .expect("grant");
+    drop(keys);
+    let keys = SharedKeys::new(Keys::read_only(stored.clone(), Security::On).expect("keys"));
+    std::fs::write(dir.join("security"), "on\ngeneration 1\n").expect("record");
+    let socket = dir.join("login.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).expect("listen");
+    let helper = HelperConfig {
+        ssh: Some(config(&dir)),
+        shell: None,
+        sandbox_user: "child".to_owned(),
+        keys: stored,
+        security_view: dir.join("security"),
+        comm_uid: 0,
+        idle: Duration::from_secs(60),
+        recovery: RecoveryLogin {
+            ssh: config(&dir),
+            keys_file: dir.join("no-recovery-keys"),
+            trust: |_| None,
+        },
+    };
+    std::thread::spawn(move || serve(&helper, &listener));
+    let mut server = Server::start_with(
+        config(&dir),
+        key,
+        keys,
+        SandboxConfig {
+            login_helper: Some(socket),
+            ..SandboxConfig::default()
+        },
+    );
+    let mine = rights(&std::fs::read_to_string("/proc/self/status").expect("status"));
+    let all = mine[3].clone();
+    assert_ne!(
+        all, "0000000000000000",
+        "the namespace's root holds nothing"
+    );
+    let session = |server: &Server| {
+        let ran = server.ssh(&server.key, &[], &["cat /proc/self/status"], "");
+        assert_eq!(ran.status.code(), Some(0), "{}", text(&ran.stderr));
+        rights(&text(&ran.stdout))
+    };
+    // Root: all of it, as root has.
+    server.user = "root".to_owned();
+    assert_eq!(
+        session(&server),
+        ["0", &all, &all, &all, "0"].map(str::to_owned)
+    );
+    // Anyone else: nothing held, as any login that is not root.
+    server.user = "op".to_owned();
+    let [uid, permitted, effective, _, _] = session(&server);
+    assert_eq!(
+        [uid, permitted, effective],
+        ["1000", "0000000000000000", "0000000000000000"].map(str::to_owned)
+    );
+    // The connection's child: nothing held, nothing it could ever hold, nothing to gain.
+    until("the earlier children are gone", || {
+        server.children().is_empty() && server.connections() == 0
+    });
+    std::thread::scope(|scope| {
+        let open = scope.spawn(|| server.ssh(&server.key, &[], &["sleep 2; echo done"], ""));
+        let mut seen = None;
+        until(
+            "the connection's child, once it has given up its rights",
+            || {
+                seen = server.children().into_iter().find_map(|pid| {
+                    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+                    let held = rights(&status);
+                    (held[4] == "1").then_some(held)
+                });
+                seen.is_some()
+            },
+        );
+        let zero = "0000000000000000";
+        assert_eq!(
+            seen,
+            Some(["2000", zero, zero, zero, "1"].map(str::to_owned))
+        );
+        assert_eq!(text(&open.join().expect("ssh").stdout), "done\n");
+    });
     let _ = std::fs::remove_dir_all(dir);
 }

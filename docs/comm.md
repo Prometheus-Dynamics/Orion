@@ -581,9 +581,18 @@ a session for an SSH login, a shell over an Orion session, or an SSH connection'
   `login.idle_ms`. A session's end comes back to the comm core through the helper, which
   counts it.
 
+- **What each session holds.** A login as root is all of root: recovery, slot work and
+  bring-up need it, so the helper's unit sets no bounding set, which a login would keep. A
+  login as anyone else holds no capability. A connection's child, started as root with the
+  account it is to become named by the helper, empties its bounding set, becomes that account
+  and sets no-new-privileges, all before it reads a byte: it holds nothing and never can.
+
+Whether a root login is bounded when the security switch is on (each login in a unit of its
+own, as the system's login manager does, and on boards without systemd) is decided with what
+the switch on means for root logins, not here.
+
 `packaging/README.md` has the units: the comm core as `orion-comm` with only `CAP_SYS_TIME`
-and `CAP_NET_BIND_SERVICE`, the helper as root with only `CAP_SETUID`, `CAP_SETGID`,
-`CAP_CHOWN` and `CAP_KILL`.
+and `CAP_NET_BIND_SERVICE`, the helper as root.
 
 ## The helper programs
 

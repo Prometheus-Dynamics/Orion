@@ -25,10 +25,10 @@ Restart=no
 User=root
 # The trust store in /var/lib/orion is the orion group's to read.
 Group=orion
-# Becoming the account (SETUID, SETGID), its terminal (CHOWN), and ending the sessions it
-# started, which are other users' processes (KILL). Nothing else, not even reading files root
-# alone may: the helper reads what the orion group may.
-CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_KILL
+# No CapabilityBoundingSet= on purpose: a login keeps this unit's bounding set, and a root
+# login is all of root (recovery, slot work and bring-up need it). The comm core, which reads
+# what clients send, is the process kept without rights; a connection's child empties its own
+# bounding set before it reads anything.
 # Not set on purpose: NoNewPrivileges= (it would follow every login into its shell),
 # ProtectHome= and ProtectSystem=strict (a session writes where its user may), PrivateTmp=.
 ProtectKernelModules=yes

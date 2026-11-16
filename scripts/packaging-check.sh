@@ -75,6 +75,24 @@ else
     echo "    sysusers not checked: no systemd-sysusers"
 fi
 
+# A login keeps the helper's bounding set, and a root login is all of root: the helper's unit
+# sets none. The comm core's account is one sysusers makes, and its unit makes the directory
+# it listens in: without either a board's first start fails (217/USER) or goes into recovery.
+if grep -q '^CapabilityBoundingSet=' packaging/systemd/orion-login.service; then
+    echo "    FAIL: orion-login.service bounds its capabilities, and every root login with them"
+    failures=$((failures + 1))
+else
+    echo "    login helper: no bounding set, so a root login is all of root"
+fi
+comm_user=$(sed -n 's/^User=//p' packaging/systemd/orion-comm.service)
+if grep -q "^u $comm_user " packaging/systemd/orion.sysusers \
+    && grep -q '^RuntimeDirectory=' packaging/systemd/orion-comm.service; then
+    echo "    comm core: its account ($comm_user) in sysusers, its runtime directory in its unit"
+else
+    echo "    FAIL: orion-comm.service runs as $comm_user: not in orion.sysusers, or no RuntimeDirectory="
+    failures=$((failures + 1))
+fi
+
 for script in packaging/busybox/orion-supervise packaging/busybox/S4*; do
     if ! out=$(sh -n "$script" 2>&1); then
         echo "    FAIL: $script does not parse:"

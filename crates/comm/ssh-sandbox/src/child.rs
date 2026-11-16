@@ -85,6 +85,46 @@ impl Door for Remote {
     }
 }
 
+/// Empties this process's bounding set and checks that it is empty. Each capability up to
+/// the last the kernel knows: past that the kernel says the number is not one.
+fn empty_bounding_set() -> Result<(), String> {
+    use rustix::thread::{CapabilitySet, capability_is_in_bounding_set};
+    let each = (0..64).map(|bit| CapabilitySet::from_bits_retain(1 << bit));
+    for capability in each.clone() {
+        match rustix::thread::remove_capability_from_bounding_set(capability) {
+            Ok(()) => {}
+            Err(rustix::io::Errno::INVAL) => break,
+            Err(error) => return Err(format!("bounding set: {error}")),
+        }
+    }
+    for capability in each {
+        match capability_is_in_bounding_set(capability) {
+            Ok(false) => {}
+            Ok(true) => return Err(format!("{capability:?} is still in the bounding set")),
+            Err(_) => break,
+        }
+    }
+    Ok(())
+}
+
+/// Who the login helper named for this child to become, if it named anyone: `--become
+/// uid:gid` after the mode word.
+fn named_by_helper() -> Result<Option<(u32, u32)>, String> {
+    let mut args = std::env::args().skip_while(|arg| arg != MODE).skip(1);
+    match args.next() {
+        None => Ok(None),
+        Some(flag) if flag == orion_ssh::SANDBOX_BECOME => {
+            let ids = args.next().unwrap_or_default();
+            let (uid, gid) = ids
+                .split_once(':')
+                .and_then(|(uid, gid)| Some((uid.parse().ok()?, gid.parse().ok()?)))
+                .ok_or_else(|| format!("{flag} needs uid:gid, not {ids:?}"))?;
+            Ok(Some((uid, gid)))
+        }
+        Some(other) => Err(format!("unknown argument {other}")),
+    }
+}
+
 /// Gives up every right this process has that it does not need, and checks that they are
 /// gone. Called before a byte from the client is read.
 fn give_up_rights(become_ids: Option<(u32, u32)>) -> Result<(), String> {
@@ -94,6 +134,8 @@ fn give_up_rights(become_ids: Option<(u32, u32)>) -> Result<(), String> {
         if uid.is_root() {
             return Err("the keeper named root".to_owned());
         }
+        // Nothing this process or what it starts could ever hold: only root may empty it.
+        empty_bounding_set()?;
         // One thread so far, so what is set for the thread is set for the process.
         rustix::thread::set_thread_groups(&[]).map_err(|error| format!("groups: {error}"))?;
         rustix::thread::set_thread_res_gid(gid, gid, gid)
@@ -130,12 +172,24 @@ pub fn main() -> i32 {
         (Ok(client), Ok(keeper)) => (client, UnixStream::from(keeper)),
         _ => return fail("it was not given its two sockets".to_owned()),
     };
+    // Named by the login helper: who to become, before anything is read, even the keeper.
+    let named = match named_by_helper() {
+        Ok(named) => named,
+        Err(why) => return fail(why),
+    };
+    if named.is_some()
+        && let Err(why) = give_up_rights(named)
+    {
+        return fail(why);
+    }
     // From the keeper, which is trusted: the client has not been read yet.
     let hello: Hello = match recv(&keeper) {
         Ok(Some((hello, _))) => hello,
         _ => return fail("the keeper said nothing".to_owned()),
     };
-    if let Err(why) = give_up_rights(hello.become_ids) {
+    if named.is_none()
+        && let Err(why) = give_up_rights(hello.become_ids)
+    {
         return fail(why);
     }
     let Ok(host_key) = russh::keys::PrivateKey::from_openssh(&hello.host_key) else {

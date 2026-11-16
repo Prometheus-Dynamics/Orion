@@ -41,8 +41,9 @@ rights it needs:
 - **`orion-login.socket`** and **`orion-login.service`**, `orion login-helper`: the one
   process that becomes other users. The socket (`/run/orion-login/login.sock`, mode 0600,
   `orion-comm`'s) starts the helper on the comm core's first question, handing it the
-  listening socket as its input. It runs as root with group `orion` and only `CAP_SETUID`,
-  `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL`. It answers the comm core's user alone, decides
+  listening socket as its input. It runs as root with group `orion` and no bounding set, since
+  a login keeps it and a root login must be all of root; an SSH connection's child empties its
+  own before it reads anything. It answers the comm core's user alone, decides
   each login again (the same check, the security switch and the trust store, read and never
   written), and starts only what it decided: a session as the account let in, or an SSH
   connection's child as `ssh.sandbox_user`. Sessions run in this unit, so it sets nothing that
@@ -75,6 +76,12 @@ with its meaning. The keys are in docs/comm.md and docs/node.md.
 `dialout`. The login helper answers `login.comm_user` (`orion-comm`) alone. `systemd-sysusers` reads it at boot, which needs a writable `/etc`; an image
 with a read-only root filesystem makes the user from the same file when it is built. 901 is
 also in the settings (`socket.node_uids`): keep the two the same.
+
+An image with `orion-comm.service` must have the `orion-comm` account: systemd starts no unit
+as an account it cannot find (`217/USER`). Its runtime and state directories (`/run/orion`,
+`/var/lib/orion`) are made for it by the unit (`RuntimeDirectory=`, `StateDirectory=`), so an
+image adds none of its own; a comm core started some other way as `orion-comm` needs a
+directory it may write for its socket, or it cannot listen and goes into recovery.
 
 ## Building
 

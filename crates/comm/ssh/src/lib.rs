@@ -86,6 +86,9 @@ impl Request for ShellAs<'_> {
 
 /// The word that says a command line is for an SSH connection's child.
 pub const SANDBOX_MODE: &str = "ssh-connection";
+/// After [`SANDBOX_MODE`], from the login helper: the `uid:gid` the child becomes before it
+/// reads anything, having emptied its bounding set while it still could.
+pub const SANDBOX_BECOME: &str = "--become";
 
 /// The program that sessions run in, and the arguments that go before the helper's own.
 /// The comm core's binary names itself; a test names `orion-ssh-helper`.
