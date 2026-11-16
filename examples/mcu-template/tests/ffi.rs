@@ -6,7 +6,7 @@ use std::ffi::CStr;
 
 use orion_mcu_template::ffi::*;
 use orion_msg_actions::{
-    ActionResult, Cancel, CancelReason, Claim, Outcome, Progress, Register, Target,
+    ActionResult, CallerGone, Cancel, CancelReason, Claim, Outcome, Progress, Register, Target,
 };
 use orion_msg_topics::Sample;
 use orion_wire::{Bytes, kind};
@@ -135,15 +135,24 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
     assert_eq!((second.handle, second.payload.0), (102, &[1][..]));
 
     // A run, with its arguments, progress and result.
+    // SAFETY: null pointers are skipped.
+    let before = unsafe {
+        orion_run_detail(
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    assert_eq!(before, ORION_ERR_STATE, "no run taken yet");
     let claim = peer.raw(&Claim {
         call: 41,
         name: "zero".parse().expect("name"),
         target: Target::Resource("c-board".parse().expect("name")),
         args: Bytes(b"now"),
-        deadline_ms: 0,
+        deadline_ms: 2_000,
         caller: "",
-        session: 0,
-        detached: false,
+        session: 9,
+        detached: true,
     });
     feed(&claim);
     // A second while the first waits is turned away at once.
@@ -169,6 +178,11 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         (0, 41, 3, b"no"),
         "cut to the room given"
     );
+    // What it is: whose session, its deadline, and that it goes on without its caller.
+    let (mut session, mut deadline, mut detached) = (0_u64, 0_u64, false);
+    // SAFETY: every pointer is valid for writing.
+    let detail = unsafe { orion_run_detail(&mut session, &mut deadline, &mut detached) };
+    assert_eq!((detail, session, deadline, detached), (0, 9, 2_000, true));
     // SAFETY: as above.
     assert_eq!(
         unsafe { orion_run(&mut call, args.as_mut_ptr(), 2, &mut len) },
@@ -244,7 +258,31 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
     feed(&cancel);
     assert_ne!(orion_poll(now) & ORION_EVENT_CANCEL, 0);
     assert_eq!(orion_cancelled(), 77);
+    assert_eq!(orion_cancel_reason(), ORION_CANCEL_ASKED);
     assert_eq!(orion_cancelled(), 0);
+    // One whose deadline passed says so: its caller was told it timed out.
+    feed(&peer.raw(&Cancel {
+        call: 78,
+        reason: CancelReason::Deadline,
+        instance: 0,
+        run: 0,
+    }));
+    assert_ne!(orion_poll(now) & ORION_EVENT_CANCEL, 0);
+    assert_eq!(
+        (orion_cancelled(), orion_cancel_reason()),
+        (78, ORION_CANCEL_DEADLINE)
+    );
+
+    // Sessions that asked and ended: each said once, oldest first, the newest kept when
+    // more end than are held.
+    for session in 1..=5 {
+        feed(&peer.raw(&CallerGone { session }));
+    }
+    assert_ne!(orion_poll(now) & ORION_EVENT_CALLER_GONE, 0);
+    let gone: Vec<u64> =
+        std::iter::from_fn(|| Some(orion_caller_gone()).filter(|&s| s != 0)).collect();
+    assert_eq!(gone, [2, 3, 4, 5]);
+    assert_eq!(orion_poll(now) & ORION_EVENT_CALLER_GONE, 0);
 
     // Starting over says hello again, with the new tables.
     // SAFETY: literals.

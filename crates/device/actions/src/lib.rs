@@ -127,6 +127,10 @@ pub enum Heard<'a> {
         /// The token of the session that asked, never reused, or zero from a host that does
         /// not say. [`Heard::CallerGone`] names it when that session ends.
         session: u64,
+        /// The run goes on without its caller: [`Heard::CallerGone`] for its session does
+        /// not end it, only its deadline or a cancel does. False from a host that does not
+        /// say.
+        detached: bool,
     },
     /// Stop run `call`. The host ends it as cancelled; a result sent after is dropped.
     Cancel {
@@ -214,8 +218,10 @@ impl<const N: usize> Actions<N> {
                 let (Some(args), Some(deadline_ms)) = (r.bytes(), r.varint()) else {
                     return Heard::Other;
                 };
-                // Who asked, then the session's token: both appended, so a host may not say.
+                // Who asked, the session's token, whether it is detached: each appended, so a
+                // host may not say.
                 let session = r.bytes().and_then(|_| r.varint()).unwrap_or(0);
+                let detached = r.u8() == Some(1);
                 let registered = &self.registered;
                 let found = self.specs.iter().enumerate().position(|(action, spec)| {
                     registered.get(action) == Some(Request::Answered)
@@ -229,6 +235,7 @@ impl<const N: usize> Actions<N> {
                         args,
                         deadline_ms,
                         session,
+                        detached,
                     },
                     None => Heard::Other,
                 }

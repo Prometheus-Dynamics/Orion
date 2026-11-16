@@ -41,6 +41,13 @@ extern "C" {
 #define ORION_EVENT_CANCEL (1u << 4)       /* a run is to stop: orion_cancelled */
 #define ORION_EVENT_DEMAND (1u << 5)       /* listeners changed: orion_subscribers */
 #define ORION_EVENT_FIRMWARE (1u << 6)     /* new firmware on trial: reset when ready */
+#define ORION_EVENT_CALLER_GONE (1u << 7)  /* a session that asked for runs ended */
+
+/* Why a run is to stop: orion_cancel_reason. */
+#define ORION_CANCEL_ASKED 1       /* its caller asked */
+#define ORION_CANCEL_CALLER_GONE 2 /* its caller's session ended, and it was not detached */
+#define ORION_CANCEL_DEADLINE 3    /* its deadline passed: the caller is told code 110 */
+#define ORION_CANCEL_STOPPING 4    /* node logic is stopping */
 
 /* A topic's field. */
 #define ORION_FIELD_BOOL 1
@@ -106,8 +113,20 @@ uint32_t orion_subscribers(uint32_t topic);
  * length. Returns the action's number, or -1 if none waits. */
 int32_t orion_run(uint64_t *call, uint8_t *args, size_t cap, size_t *len);
 
+/* What the run orion_run last handed over is: the asking session's token (0 if the host did
+ * not say), its deadline in ms (0 for none), and whether it goes on without its caller.
+ * 0, or ORION_ERR_STATE before any run. A null pointer is skipped. */
+int32_t orion_run_detail(uint64_t *session, uint64_t *deadline_ms, bool *detached);
+
 /* The run the host asked to stop, or 0. */
 uint64_t orion_cancelled(void);
+
+/* Why the run orion_cancelled last named is to stop: ORION_CANCEL_*, or 0 if not said. */
+uint8_t orion_cancel_reason(void);
+
+/* A session that asked for runs and ended, oldest first, or 0 for none left; each said once.
+ * Let go of what is held for that caller; its detached runs go on until their deadline. */
+uint64_t orion_caller_gone(void);
 
 /* How run `call` is doing: percent done (255 unknown) and what it is doing. */
 int32_t orion_progress(uint64_t call, uint8_t percent, const char *message);

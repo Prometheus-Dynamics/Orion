@@ -206,6 +206,29 @@ what to change.
   - The MCU template's C API gains `orion_finish_code`.
   - The web client's `Result` gains `code`, zero from a board that did not send one.
   - The C library has no actions, so there is nothing for it to read or set.
+- **C52, C52b.** The comm core runs as `orion-comm` (902) with only `CAP_SYS_TIME` and
+  `CAP_NET_BIND_SERVICE`. Logins are started by the login helper (`orion login-helper`,
+  `orion-login.socket`), root with no bounding set, so a root login is all of root. An image
+  with the units must have the `orion-comm` account. The BusyBox scripts are unchanged: the
+  comm core there is root and starts logins itself.
+- **C53, C53b.** Run handles. `Cancel`, `Progress`, `ActionResult` and `Attach` gain appended
+  `instance` and `run` (and `ActionResult` gains `action`), with zeros for a bare one: code
+  that builds them by their fields adds them (**Break** for struct literals). New:
+  `ACTION_STARTED`, `RunHandle`, `Error::RunGone` (level 3), `Feature::RunHandle`,
+  `Actions::attach_handle`, and `Reply::Within(Duration)` (`ORION_REPLY_WITHIN` in C).
+- **C54.** `Claim` gains appended `detached`, and `Request::Run` gains `detached` (**Break** for
+  a match on `Request::Run` without `..`). A run node logic ends at its deadline is `TimedOut`
+  with code 110 (`orion_msg_actions::DEADLINE_CODE`).
+- **C55.** `ClientError::PathTooLong { path, len }` (not lost), `orion_connect::SOCKET_PATH_MAX`
+  and `socket_path`, `orion_unix::fits`, `Board::try_start_with`. `ORION_E_ARGUMENT` in C.
+- **C56.** The microcontroller side catches up:
+  - `orion_device_actions::Heard::Run` gains `detached` (**Break** for a match without `..`);
+  - the MCU template's C API gains `ORION_EVENT_CALLER_GONE` and `orion_caller_gone`,
+    `orion_run_detail` (session, deadline, detached), and `orion_cancel_reason` with
+    `ORION_CANCEL_*`, where `ORION_CANCEL_DEADLINE` is a run its caller was told timed out
+    with code 110.
+
+  A device is not a caller, so run handles are not its to use. The C library has no actions.
 
 ## Builds
 

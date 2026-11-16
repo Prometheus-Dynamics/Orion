@@ -55,6 +55,8 @@ pub const ORION_EVENT_CANCEL: u32 = 1 << 4;
 pub const ORION_EVENT_DEMAND: u32 = 1 << 5;
 /// `orion_poll`: new firmware checked out and is on trial: reset when ready to start it.
 pub const ORION_EVENT_FIRMWARE: u32 = 1 << 6;
+/// `orion_poll`: a session that asked for runs ended: `orion_caller_gone` says which.
+pub const ORION_EVENT_CALLER_GONE: u32 = 1 << 7;
 
 /// A field of a number with a fraction, 8 bytes.
 pub const ORION_FIELD_FLOAT: u8 = 3;
@@ -121,7 +123,13 @@ struct Waiting {
     action: usize,
     call: u64,
     len: usize,
+    deadline_ms: u64,
+    session: u64,
+    detached: bool,
 }
+
+/// How many ended sessions are held for `orion_caller_gone` before the oldest is let go.
+const GONE: usize = 4;
 
 /// The session and the layers, once the tables are fixed.
 struct Running {
@@ -134,8 +142,14 @@ struct Layers {
     topics: Topics<ORION_MAX_TOPICS>,
     actions: Actions<ORION_MAX_ACTIONS>,
     run: Option<Waiting>,
+    /// The run `orion_run` last handed over, for `orion_run_detail`.
+    taken: Option<Waiting>,
     args: [u8; RX],
     cancelled: u64,
+    cancel_reason: u8,
+    /// Ended sessions not yet taken by `orion_caller_gone`, oldest first.
+    gone: [u64; GONE],
+    gone_len: usize,
     events: u32,
     #[cfg(feature = "ffi-slots")]
     firmware: Option<Firmware>,
@@ -225,8 +239,12 @@ impl Port {
                                     .unwrap_or_default(),
                             ),
                             run: None,
+                            taken: None,
                             args: [0; RX],
                             cancelled: 0,
+                            cancel_reason: 0,
+                            gone: [0; GONE],
+                            gone_len: 0,
                             events: 0,
                             #[cfg(feature = "ffi-slots")]
                             firmware: (!tables.prefix.is_empty()).then(|| {
@@ -474,7 +492,12 @@ fn heard(
     }
     match running.actions.handle(frame) {
         Run::Run {
-            action, call, args, ..
+            action,
+            call,
+            args,
+            deadline_ms,
+            session,
+            detached,
         } => {
             if running.run.is_some() || args.len() > running.args.len() {
                 // One run at a time: the host is told now rather than at the deadline.
@@ -490,16 +513,31 @@ fn heard(
                     action,
                     call,
                     len: args.len(),
+                    deadline_ms,
+                    session,
+                    detached,
                 });
                 running.events |= ORION_EVENT_RUN;
             }
         }
-        Run::Cancel { call, .. } => {
+        Run::Cancel { call, reason } => {
             if running.run.is_some_and(|run| run.call == call) {
                 running.run = None;
             }
             running.cancelled = call;
+            running.cancel_reason = reason;
             running.events |= ORION_EVENT_CANCEL;
+        }
+        Run::CallerGone { session } => {
+            if running.gone_len == GONE {
+                running.gone.copy_within(1.., 0);
+                running.gone_len -= 1;
+            }
+            if let Some(slot) = running.gone.get_mut(running.gone_len) {
+                *slot = session;
+                running.gone_len += 1;
+            }
+            running.events |= ORION_EVENT_CALLER_GONE;
         }
         _ => {}
     }
@@ -639,50 +677,6 @@ pub extern "C" fn orion_subscribers(topic: u32) -> u32 {
         .unwrap_or(0)
 }
 
-/// Takes the run that is waiting: its number into `call`, up to `cap` bytes of its arguments
-/// into `args` and their whole length into `len`. Returns the action's number, or -1 if
-/// none waits. Answer it with `orion_finish`.
-///
-/// # Safety
-///
-/// `call` and `len` are valid for writing; `args` is null or valid for writing `cap` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn orion_run(
-    call: *mut u64,
-    args: *mut u8,
-    cap: usize,
-    len: *mut usize,
-) -> i32 {
-    if call.is_null() || len.is_null() {
-        return ORION_ERR_ARG;
-    }
-    PORT.running(|running| {
-        let Some(run) = running.layers.run.take() else {
-            return -1;
-        };
-        let held = running.layers.args.get(..run.len).unwrap_or_default();
-        // SAFETY: the caller's promise.
-        unsafe {
-            *call = run.call;
-            *len = run.len;
-            if !args.is_null() {
-                let n = held.len().min(cap);
-                core::ptr::copy_nonoverlapping(held.as_ptr(), args, n);
-            }
-        }
-        number(run.action)
-    })
-    .unwrap_or(ORION_ERR_STATE)
-}
-
-/// The run the host asked to stop, or 0. The host ends it as cancelled; a result sent after
-/// is dropped.
-#[unsafe(no_mangle)]
-pub extern "C" fn orion_cancelled() -> u64 {
-    PORT.running(|running| core::mem::take(&mut running.layers.cancelled))
-        .unwrap_or(0)
-}
-
 fn sent(result: Result<u16, orion_device_core::SendError>) -> i32 {
     match result {
         Ok(_) => 0,
@@ -788,6 +782,9 @@ pub extern "C" fn orion_api_version() -> u32 {
 pub extern "C" fn orion_interface_revision() -> u16 {
     orion_device_core::INTERFACE_REVISION
 }
+
+mod runs;
+pub use runs::*;
 
 #[cfg(feature = "ffi-slots")]
 mod slots;

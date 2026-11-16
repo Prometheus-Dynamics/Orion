@@ -13,6 +13,7 @@ use orion_mcu_template::ffi;
 const HEADER: &str = include_str!("../include/orion_mcu.h");
 const SOURCE: &str = concat!(
     include_str!("../src/ffi/mod.rs"),
+    include_str!("../src/ffi/runs.rs"),
     include_str!("../src/ffi/slots.rs")
 );
 
@@ -59,6 +60,17 @@ fn every_value_in_the_header_is_the_librarys() {
         ("ORION_EVENT_CANCEL", ffi::ORION_EVENT_CANCEL.into()),
         ("ORION_EVENT_DEMAND", ffi::ORION_EVENT_DEMAND.into()),
         ("ORION_EVENT_FIRMWARE", ffi::ORION_EVENT_FIRMWARE.into()),
+        (
+            "ORION_EVENT_CALLER_GONE",
+            ffi::ORION_EVENT_CALLER_GONE.into(),
+        ),
+        ("ORION_CANCEL_ASKED", ffi::ORION_CANCEL_ASKED.into()),
+        (
+            "ORION_CANCEL_CALLER_GONE",
+            ffi::ORION_CANCEL_CALLER_GONE.into(),
+        ),
+        ("ORION_CANCEL_DEADLINE", ffi::ORION_CANCEL_DEADLINE.into()),
+        ("ORION_CANCEL_STOPPING", ffi::ORION_CANCEL_STOPPING.into()),
         ("ORION_FIELD_BOOL", ffi::ORION_FIELD_BOOL.into()),
         ("ORION_FIELD_INT", ffi::ORION_FIELD_INT.into()),
         ("ORION_FIELD_FLOAT", ffi::ORION_FIELD_FLOAT.into()),

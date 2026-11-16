@@ -55,6 +55,16 @@ fn ready() -> ActionRig {
 }
 
 fn claim(call: u64, name: &str, target: orion_msg_actions::Target, args: &[u8]) -> Vec<u8> {
+    claim_as(call, name, target, args, false)
+}
+
+fn claim_as(
+    call: u64,
+    name: &str,
+    target: orion_msg_actions::Target,
+    args: &[u8],
+    detached: bool,
+) -> Vec<u8> {
     let claim = Claim {
         call,
         name: name.parse().expect("a name"),
@@ -63,7 +73,7 @@ fn claim(call: u64, name: &str, target: orion_msg_actions::Target, args: &[u8]) 
         deadline_ms: 2_000,
         caller: "operator:9f3c",
         session: 5,
-        detached: false,
+        detached,
     };
     orion_device_host::Host::default().frame(&claim)
 }
@@ -105,6 +115,7 @@ fn a_run_is_handed_over_and_its_result_reaches_the_host() {
         args: b"now",
         deadline_ms: 2_000,
         session: 5,
+        detached: false,
     };
     assert_eq!(rig.last_heard(), Some(format!("{want:?}").as_str()));
 
@@ -277,5 +288,21 @@ fn a_caller_gone_names_the_session_its_runs_came_from() {
     rig.feed(&claim(41, "zero", on_imu(), b""));
     rig.feed(&orion_device_host::Host::default().frame(&CallerGone { session: 5 }));
     let want = Heard::CallerGone { session: 5 };
+    assert_eq!(rig.last_heard(), Some(format!("{want:?}").as_str()));
+}
+
+/// A run started detached says so: the device keeps it when its caller's session ends.
+#[test]
+fn a_detached_run_says_so() {
+    let mut rig = ready();
+    rig.feed(&claim_as(42, "zero", on_imu(), b"later", true));
+    let want = Heard::Run {
+        action: 0,
+        call: 42,
+        args: b"later",
+        deadline_ms: 2_000,
+        session: 5,
+        detached: true,
+    };
     assert_eq!(rig.last_heard(), Some(format!("{want:?}").as_str()));
 }
