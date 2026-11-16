@@ -318,6 +318,36 @@ fn a_host_that_says_no_is_left_alone_for_a_while() {
 }
 
 #[test]
+fn a_host_with_no_session_for_it_is_told_hello_at_once() {
+    let (mut device, mut host) = connected(0);
+    device.link.poll(10);
+    host.take(&mut device);
+    // The host's side was let go while this one went on: its next frame is answered with
+    // "no session". It is gone as surely as by silence, and sooner: hello on the next poll,
+    // not three heartbeats later.
+    let none = host.frame(&Reject {
+        reason: RejectReason::NoSession,
+        node_revision: 0,
+        peer_revision: 0,
+    });
+    device.receive(&none, nothing);
+    device.link.poll(20);
+    assert_eq!(device.link.next_event(), Some(Event::Disconnected));
+    assert_eq!(host.take(&mut device)[0].0, kind::HELLO);
+    assert_eq!(device.link.state(), State::Connecting);
+    // Another reason, mid-session, is not one the host says there: nothing changes.
+    let (mut device, mut host) = connected(0);
+    let other = host.frame(&Reject {
+        reason: RejectReason::Busy,
+        node_revision: 0,
+        peer_revision: 0,
+    });
+    device.receive(&other, nothing);
+    device.link.poll(20);
+    assert_eq!(device.link.state(), State::Connected);
+}
+
+#[test]
 fn a_host_of_another_wire_revision_is_taken_as_one_that_said_no() {
     let mut device = Device::new(DeviceConfig::new("imu-board"));
     let mut host = Host::default();

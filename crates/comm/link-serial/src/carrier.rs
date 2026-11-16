@@ -13,8 +13,8 @@ use orion_net_handshake::Seal;
 use orion_server::{Carrier, Connection, FdSet, FrameRead, FrameWrite, Principal, Roles};
 use orion_supervise::{Decision, Path, Report, Status, Supervisor};
 use orion_types::DeviceName;
-use orion_wire::frame;
 use orion_wire::{StreamDecoder, StreamEncoder};
+use orion_wire::{frame, kind};
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
@@ -70,6 +70,27 @@ struct Reading {
     len: usize,
     /// The frame that made the carrier hand over a connection.
     first: Vec<u8>,
+    /// The length of a hello in `first` that ended the last connection and begins the next.
+    pending: usize,
+}
+
+/// Whether `frame` begins a session: a hello, or one asking for a signed session. One that
+/// comes inside an open session is the other end starting over on the same link (its program
+/// was restarted, or its cable plugged in again while this side saw nothing go): that session
+/// ends and the hello begins the next, rather than being taken as out of turn and lost, which
+/// would leave the other end waiting for a welcome that never comes.
+fn starts_over(frame: &[u8]) -> bool {
+    frame::decode(frame).is_ok_and(|view| view.kind() == kind::HELLO) || signed::asks(frame)
+}
+
+/// Keeps `frame`, which starts over, to begin the next connection.
+fn keep_for_next(reading: &mut Reading, frame: &[u8]) -> bool {
+    let Some(to) = reading.first.get_mut(..frame.len()) else {
+        return false;
+    };
+    to.copy_from_slice(frame);
+    reading.pending = frame.len();
+    true
 }
 
 struct Shared<S> {
@@ -80,7 +101,19 @@ struct Shared<S> {
     home: Notify,
     /// The stream failed and must be opened again.
     failed: Cell<bool>,
+    /// The number of the connection the link carries now. A connection writes only while it
+    /// is the one: what an ended session still had to send never reaches the next.
+    serving: Cell<u64>,
     stats: Cell<LinkStats>,
+}
+
+impl<S> Shared<S> {
+    /// The next connection's number, which makes it the one the link carries.
+    fn next_connection(&self) -> u64 {
+        let number = self.serving.get().wrapping_add(1);
+        self.serving.set(number);
+        number
+    }
 }
 
 impl<S> Shared<S> {
@@ -217,9 +250,11 @@ impl<O: Open> StreamCarrier<O> {
                     at: 0,
                     len: 0,
                     first: vec![0; MAX_FRAME],
+                    pending: 0,
                 }))),
                 home: Notify::new(),
                 failed: Cell::new(false),
+                serving: Cell::new(0),
                 stats: Cell::new(LinkStats::default()),
             }),
             supervisor: Supervisor::new(Path::Access),
@@ -308,15 +343,22 @@ impl<O: Open> Carrier for StreamCarrier<O> {
             };
             if self.shared.failed.replace(false) {
                 *self.shared.stream.borrow_mut() = None;
-                (reading.at, reading.len) = (0, 0);
+                (reading.at, reading.len, reading.pending) = (0, 0, 0);
                 reading.decoder.reset();
                 self.failed("stream", &io::Error::other("lost")).await;
             }
             let stream = self.stream().await;
-            // Nothing is handed to the server until the other end has said something whole.
-            let mut first = std::mem::take(&mut reading.first);
-            let found = next_frame(&self.shared, &stream, &mut reading, &mut first).await;
-            reading.first = first;
+            // Nothing is handed to the server until the other end has said something whole: a
+            // hello that ended the last connection, or the next frame on the link.
+            let found = match std::mem::take(&mut reading.pending) {
+                0 => {
+                    let mut first = std::mem::take(&mut reading.first);
+                    let found = next_frame(&self.shared, &stream, &mut reading, &mut first).await;
+                    reading.first = first;
+                    found
+                }
+                len => Ok(Some(len)),
+            };
             match found {
                 Ok(Some(len)) if signed::asks(&reading.first[..len]) => {
                     let asked = reading.first[..len].to_vec();
@@ -338,6 +380,7 @@ impl<O: Open> Carrier for StreamCarrier<O> {
                             self.shared.count(|stats| stats.connections += 1);
                             return Ok(StreamConnection {
                                 name: self.name.clone(),
+                                number: self.shared.next_connection(),
                                 shared: self.shared.clone(),
                                 stream,
                                 reading,
@@ -355,6 +398,7 @@ impl<O: Open> Carrier for StreamCarrier<O> {
                     self.shared.count(|stats| stats.connections += 1);
                     return Ok(StreamConnection {
                         name: self.name.clone(),
+                        number: self.shared.next_connection(),
                         shared: self.shared.clone(),
                         stream,
                         reading,
@@ -376,6 +420,8 @@ impl<O: Open> Carrier for StreamCarrier<O> {
 /// One device's connection over the link.
 pub struct StreamConnection<S: ByteStream> {
     name: DeviceName,
+    /// Which of the link's connections this is.
+    number: u64,
     shared: Rc<Shared<S>>,
     stream: Rc<S>,
     reading: Box<Reading>,
@@ -439,6 +485,7 @@ impl<S: ByteStream + 'static> Connection for StreamConnection<S> {
                 seal: reading,
             },
             StreamWrite {
+                number: self.number,
                 shared: self.shared,
                 stream: self.stream,
                 out: [0; CHUNK],
@@ -488,12 +535,24 @@ impl<S: ByteStream> FrameRead for StreamRead<S> {
         }
         let Some(seal) = &mut self.seal else {
             let found = next_frame(&self.shared, &self.stream, reading, buf).await;
-            if !matches!(found, Ok(Some(_))) {
-                self.shared.failed.set(true);
+            match found {
+                Ok(Some(len))
+                    if starts_over(&buf[..len]) && keep_for_next(reading, &buf[..len]) =>
+                {
+                    return Ok(None);
+                }
+                Ok(Some(_)) => {}
+                _ => self.shared.failed.set(true),
             }
             return found;
         };
         match next_frame(&self.shared, &self.stream, reading, &mut self.sealed).await {
+            Ok(Some(len))
+                if starts_over(&self.sealed[..len])
+                    && keep_for_next(reading, &self.sealed[..len]) =>
+            {
+                Ok(None)
+            }
             // A frame that fails its check ends the session, not the link: the next frame on
             // the link starts over.
             Ok(Some(len)) => signed::open(seal, &self.sealed[..len], buf).map(Some),
@@ -515,6 +574,8 @@ impl<S: ByteStream> Drop for StreamRead<S> {
 
 /// The writing half.
 pub struct StreamWrite<S: ByteStream> {
+    /// Which of the link's connections it writes for.
+    number: u64,
     shared: Rc<Shared<S>>,
     stream: Rc<S>,
     out: [u8; CHUNK],
@@ -535,6 +596,10 @@ impl<S: ByteStream> FrameWrite for StreamWrite<S> {
                 io::ErrorKind::InvalidInput,
                 "a link carries no descriptors",
             ));
+        }
+        if self.shared.serving.get() != self.number {
+            // The link carries the next session now; this one's frames are not for it.
+            return Err(io::ErrorKind::BrokenPipe.into());
         }
         match &mut self.seal {
             Some(seal) => {

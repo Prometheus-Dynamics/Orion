@@ -63,6 +63,10 @@ open_enum! {
         RoleNotOffered = 4,
         /// The `Hello` named another wire revision: [`Reject`] carries both.
         RevisionMismatch = 5,
+        /// A frame came where a `Hello` was due: there is no session to take it. Said on a
+        /// link whose session ended while the other end went on (the board's side of it was
+        /// let go, or the comm core restarted); the other end then says hello again.
+        NoSession = 6,
     }
 }
 

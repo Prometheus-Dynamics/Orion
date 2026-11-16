@@ -121,6 +121,8 @@ pub struct Link<const TX: usize> {
     turned_away: bool,
     /// Set by a welcome, for `poll` to send the first ping from.
     welcomed: bool,
+    /// The host has no session for this one: it ended there while this side went on.
+    no_session: bool,
     last_heard: u32,
     /// When the next hello, or the next ping, is due.
     next_at: u32,
@@ -152,6 +154,7 @@ impl<const TX: usize> Link<TX> {
             heard: false,
             turned_away: false,
             welcomed: false,
+            no_session: false,
             last_heard: 0,
             next_at: 0,
             events: [None; EVENTS],
@@ -305,8 +308,10 @@ impl<const TX: usize> Link<TX> {
             let quiet = self
                 .heartbeat_ms
                 .saturating_mul(self.config.missed_heartbeats);
-            if now_ms.wrapping_sub(self.last_heard) > quiet {
-                // Gone. Hello starts again in this same call.
+            // Told it has no session there, or quiet too long: gone either way. Hello starts
+            // again in this same call.
+            if core::mem::take(&mut self.no_session) || now_ms.wrapping_sub(self.last_heard) > quiet
+            {
                 self.leave(now_ms);
             } else {
                 if let Some(now) = self.owed_pong
@@ -398,6 +403,12 @@ impl<const TX: usize> Link<TX> {
             }
             (kind::PONG, State::Connected) => {
                 self.heard = true;
+                true
+            }
+            (kind::REJECT, State::Connected) => {
+                if Reader::new(frame.payload()).u8() == Some(RejectReason::NoSession.code()) {
+                    self.no_session = true;
+                }
                 true
             }
             (kind::WELCOME | kind::REJECT | kind::HELLO, _) => true,

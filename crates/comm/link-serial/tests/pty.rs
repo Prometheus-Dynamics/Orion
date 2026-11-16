@@ -1,5 +1,6 @@
 //! A serial link over a pseudo-terminal: the wire crosses it, it comes back after the device
-//! goes away, and a quiet link costs nothing.
+//! goes away, a device that starts over on it is welcomed again, and a quiet link costs
+//! nothing.
 
 use std::cell::RefCell;
 use std::fs::File;
@@ -11,6 +12,7 @@ use orion_link_serial::{LinkStats, Serial, StreamCarrier};
 use orion_measure::sched::thread_cpu_ns;
 use orion_measure::{CountingAlloc, thread_counts};
 use orion_msg_session::{Hello, Ping, Pong, Reject, RejectReason, Welcome};
+use orion_server::{Carrier, Connection, FdSet, FrameRead, FrameWrite};
 use orion_server::{Comm, Limits, Roles, Security};
 use orion_supervise::{Report, State, Status};
 use orion_wire::{Body, Decode, StreamDecoder, encode_body, encode_frame, kind};
@@ -108,17 +110,11 @@ impl Device {
         B::decode(&self.payload[..self.payload_len]).expect("body")
     }
 
-    async fn hello(&mut self) {
-        self.send(&Hello {
-            name: "sensor",
-            roles: Roles::DEVICE,
-            max_frame: 512,
-            revision: 1,
-            level: 0,
-        })
-        .await;
+    /// Says hello and waits for the welcome; the session it names.
+    async fn hello(&mut self) -> u32 {
+        self.send(&HELLO).await;
         assert_eq!(self.next().await, kind::WELCOME);
-        let _: Welcome = self.body();
+        self.body::<Welcome>().session
     }
 
     async fn ping(&mut self, now_ms: u64) {
@@ -132,6 +128,14 @@ impl Device {
         }
     }
 }
+
+const HELLO: Hello<'static> = Hello {
+    name: "sensor",
+    roles: Roles::DEVICE,
+    max_frame: 512,
+    revision: 1,
+    level: 0,
+};
 
 #[derive(Clone, Default)]
 struct States(Rc<RefCell<Vec<Status>>>);
@@ -383,4 +387,112 @@ fn a_quiet_link_allocates_nothing_and_polls_nothing() {
         assert_eq!((board.stats)().reads, reads);
         assert!(cpu_ms < 20, "{cpu_ms} ms of processor time in 400 ms idle");
     });
+}
+
+#[test]
+fn a_device_that_says_hello_inside_its_session_is_welcomed_to_the_next() {
+    run(async {
+        let (mut device, path) = Device::pty();
+        let board = board(path, 2000);
+        until("the port opens", || (board.stats)().opens == 1).await;
+        let first = device.hello().await;
+        device.ping(1).await;
+
+        // Its program starts again, or its cable comes out and goes back in while the board
+        // sees nothing go: it says hello on the same link, inside the session the board still
+        // has. That session ends and the hello begins the next; it is not lost.
+        let second = device.hello().await;
+        assert_ne!(second, first, "a new session");
+        device.ping(2).await;
+        until("the first session is gone", || {
+            board.comm.with(|sessions, _| sessions.len()) == 1
+        })
+        .await;
+        let stats = (board.stats)();
+        assert_eq!((stats.opens, stats.connections), (1, 2), "the same port");
+        assert_eq!(board.comm.stats().opened, 2);
+    });
+}
+
+#[test]
+fn a_frame_where_a_hello_was_due_is_told_there_is_no_session() {
+    run(async {
+        let (mut device, path) = Device::pty();
+        let board = board(path, 2000);
+        until("the port opens", || (board.stats)().opens == 1).await;
+
+        // The device thinks it has a session, but the board has none for it (the board's
+        // side was let go, or it started again): it is told so at once, not left to find out
+        // by its own deadline.
+        device.send(&Ping { now_ms: 3 }).await;
+        assert_eq!(device.next().await, kind::REJECT);
+        assert_eq!(device.body::<Reject>().reason, RejectReason::NoSession);
+        device.hello().await;
+        device.ping(4).await;
+    });
+}
+
+#[test]
+fn what_an_ended_session_still_sends_never_reaches_the_next() {
+    run(async {
+        let (mut device, path) = Device::pty();
+        let mut carrier = StreamCarrier::new(
+            "uart0".parse().expect("name"),
+            Serial {
+                path,
+                baud: 115_200,
+            },
+        );
+        let (mut buf, mut fds) = ([0_u8; 512], FdSet::default());
+        // The port is opened by the first wait for a connection, and what came before is not
+        // kept: the hello is said once it is open.
+        let stats = carrier.stats();
+        let accepting = tokio::task::spawn_local(async move {
+            let first = carrier.accept().await.expect("first");
+            (carrier, first)
+        });
+        until("the port opens", || stats().opens == 1).await;
+        device.send(&HELLO).await;
+        let (mut carrier, first) = accepting.await.expect("accept");
+        let (mut read, mut write) = first.split();
+        let len = read
+            .recv(&mut buf, &mut fds)
+            .await
+            .expect("read")
+            .expect("a frame");
+        assert_eq!(buf[..len], frame(&HELLO, 1)[..]);
+
+        // Hello again, inside that connection: it ends, and the next one begins with it.
+        device.send(&HELLO).await;
+        assert_eq!(read.recv(&mut buf, &mut fds).await.expect("read"), None);
+        drop(read);
+        let (mut read, mut next) = carrier.accept().await.expect("next").split();
+        let len = read
+            .recv(&mut buf, &mut fds)
+            .await
+            .expect("read")
+            .expect("a frame");
+        assert_eq!(buf[..len], frame(&HELLO, 2)[..]);
+
+        // The ended connection still had something to send. It goes nowhere: the device hears
+        // only the session it is in now.
+        let late = write.send(&frame(&Pong { now_ms: 7 }, 1), &[]).await;
+        assert_eq!(
+            late.expect_err("late").kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+        next.send(&frame(&Pong { now_ms: 8 }, 1), &[])
+            .await
+            .expect("send");
+        assert_eq!(device.next().await, kind::PONG);
+        assert_eq!(device.body::<Pong>().now_ms, 8);
+    });
+}
+
+/// `body` as a whole frame, as a carrier hands it over.
+fn frame<B: Body>(body: &B, seq: u16) -> Vec<u8> {
+    let mut frame = vec![0_u8; 256];
+    let len = encode_body(body, seq, &mut frame).expect("encode");
+    frame.truncate(len);
+    frame
 }

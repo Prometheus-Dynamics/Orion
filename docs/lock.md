@@ -227,6 +227,10 @@ what to change.
     `orion_run_detail` (session, deadline, detached), and `orion_cancel_reason` with
     `ORION_CANCEL_*`, where `ORION_CANCEL_DEADLINE` is a run its caller was told timed out
     with code 110.
+- **C57.** A hello on a link always begins a session: one inside an open session on a link
+  ends it and begins the next, and an ended session's late frames never reach the next.
+  `RejectReason::NoSession` (6) answers a frame where a hello was due (**Add**; an open enum).
+  The device library takes `NoSession` mid-session as gone and says hello at once.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -229,6 +229,12 @@ impl Server {
     }
 
     fn hello(&mut self, session: SessionId, frame: &FrameView<'_>) -> Flow {
+        if frame.kind() != kind::HELLO {
+            // Something whole that is not a hello: the other end thinks it has a session
+            // here and has not been told otherwise. Telling it beats letting it find out by
+            // its own deadline.
+            return self.reject(session, RejectReason::NoSession);
+        }
         let Ok(hello) = orion_wire::decode_body::<Hello<'_>>(frame) else {
             self.stats.dropped += 1;
             self.sessions.dropped(session, Dropped::Damaged);

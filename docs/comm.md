@@ -88,7 +88,8 @@ turned away with both revisions, and every `Welcome` names this build's additive
 | Goes quiet | Closed at `comm.idle_ms` (three heartbeats), unless it is a program on the board's socket: that one is kept, logged and seen as quiet |
 | Never says hello | Closed at the hello deadline |
 | Sends a frame that makes a service panic | That session is closed. The service keeps serving |
-| Sends a bad frame, a second hello, another protocol version | Closed, with a `Reject` where one applies |
+| Sends a bad frame, a second hello, another protocol version | Closed, with a `Reject` where one applies. On a link a second hello begins the next session instead (see Links) |
+| Sends something else where its hello was due | Closed, with `Reject { NoSession }` |
 
 Everything is on one thread. Nothing allocates per request once a session is open: the read
 buffer, the outbox and the timers belong to the session.
@@ -858,6 +859,16 @@ arrived. Until then one task waits for the port to become readable: no session, 
 allocation. A device that stops talking loses its session to the heartbeat deadline, not the
 port.
 
+**A hello on a link always begins a session.** The far end of a link can start over without
+the board seeing anything go: its program restarted, or its cable came out and went back in
+while the board's side kept the port. So a hello (or a request for a signed session) that
+comes inside an open session on a link ends that session and begins the next, rather than
+being taken as out of turn and lost, which would leave the other end waiting for a welcome that
+never comes. Each connection on a link has a number, and only the newest writes: what an ended
+session still had to send never reaches the next. A frame that is not a hello, where a hello
+was due, is answered `Reject { NoSession }`: the other end thinks it has a session the board
+does not, and is told so at once instead of finding out by its own deadline.
+
 **A link that crosses a network** (feature `sealed`). A person's computer with the device on one
 of its ports can carry the port's bytes to the board over TCP. The handshake is signed by the
 board's key and the operator's; the operator must be enrolled and granted the action
@@ -945,8 +956,8 @@ one, the device was unplugged and is back: the old stream ends and the link goes
   function is disabled, and every call after with `EAGAIN` until it is back. The link keeps its
   descriptors and reads again 100 ms later, doubling to 1 s while the host stays away; bytes
   written meanwhile are lost, not the link. The session running over it ends at its own
-  deadline, and the host's next hello starts another, with no new offer. Any other error, or
-  the end of a file, ends the link.
+  deadline, or at the host's next hello, which starts another, with no new offer. Any other
+  error, or the end of a file, ends the link.
 - **Taking endpoints back.** An offer of endpoints may carry a third descriptor, the end (a
   pipe, an eventfd, a socket). When it becomes readable or its other end is closed, the link
   lets go of all three and waits for the next offer. The holder needs this to take the function

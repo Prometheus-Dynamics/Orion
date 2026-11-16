@@ -173,9 +173,14 @@ fn connections_that_break_the_protocol_are_turned_away() {
         assert_eq!(reject.reason, RejectReason::RoleNotOffered);
         assert!(node.is_closed().await);
 
-        // Anything but a hello first; a second hello; a frame with a bad CRC.
+        // Anything but a hello first: told there is no session, then closed. A second hello;
+        // a frame with a bad CRC.
         let mut early = Client::new(&board, USER);
         early.ask(kind::GET, 1, &[]).await;
+        assert_eq!(
+            early.recv::<Reject>().await.expect("reject").reason,
+            RejectReason::NoSession
+        );
         assert!(early.is_closed().await);
         let mut twice = Client::open(&board, USER).await;
         assert!(twice.hello::<Welcome>(Roles::CLIENT).await.is_none());
