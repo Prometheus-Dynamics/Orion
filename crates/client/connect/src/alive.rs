@@ -25,6 +25,9 @@ pub enum Reply {
     /// it. A busy node or a starved machine can make a healthy answer late.
     #[default]
     Timeout,
+    /// Each answer within this long, a bound of its own: [`crate::Options::timeout`] then
+    /// bounds connecting and saying hello alone.
+    Within(Duration),
     /// For as long as the node is heard from. The wait ends when nothing at all has come from
     /// it for its idle time, the window the node declared in its welcome (`comm.idle_ms`,
     /// three heartbeats unless set): that is [`ClientError::Lost`]. Any frame renews the
@@ -74,6 +77,7 @@ impl Session {
         let now = Instant::now();
         let (limit, silent) = match self.options.reply {
             Reply::Timeout => (Some(self.options.timeout), None),
+            Reply::Within(bound) => (Some(bound), None),
             Reply::Alive { ceiling } => (ceiling, Some(self.last_heard + self.welcomed.idle)),
         };
         let mut left = Duration::MAX;

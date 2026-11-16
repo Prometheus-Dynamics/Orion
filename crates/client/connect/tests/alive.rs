@@ -104,22 +104,19 @@ fn on_the_board(name: &str, pongs: bool) -> (Node, std::path::PathBuf) {
     let listener = UnixListener::bind(&path).expect("socket");
     let pings = Arc::new(AtomicU32::new(0));
     let counted = Arc::clone(&pings);
-    // Each connection in turn: a test that gave up on a slow handshake connects again.
     std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else {
+        let Ok((stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buf = vec![0_u8; 8192];
+        while let Ok(Some(received)) = shm_fdpass::recv(stream.as_fd(), &mut buf, 0, false) {
+            let Ok(view) = frame::decode(&buf[..received.len]) else {
                 return;
             };
-            let mut buf = vec![0_u8; 8192];
-            while let Ok(Some(received)) = shm_fdpass::recv(stream.as_fd(), &mut buf, 0, false) {
-                let Ok(view) = frame::decode(&buf[..received.len]) else {
-                    break;
-                };
-                if let Some(framed) = answer(view.kind(), pongs, &counted)
-                    && shm_fdpass::send(stream.as_fd(), &[&framed], &[], false).is_err()
-                {
-                    break;
-                }
+            if let Some(framed) = answer(view.kind(), pongs, &counted)
+                && shm_fdpass::send(stream.as_fd(), &[&framed], &[], false).is_err()
+            {
+                return;
             }
         }
     });
@@ -236,21 +233,14 @@ fn a_comm_core_that_closes_the_boards_socket_is_gone_at_once() {
 /// with `reply`.
 fn asking(name: &str, pongs: bool, reply: Reply) -> (Node, std::path::PathBuf, Session) {
     let (node, path) = on_the_board(name, pongs);
-    let options = || Options {
-        timeout: Duration::from_millis(300),
+    // Connecting has the usual timeout: what these tests measure is the reply bound, which is
+    // set apart from it.
+    let options = Options {
         reply,
         ..Options::default()
     };
-    // The short timeout is what these tests measure a reply against. It bounds the handshake
-    // too, which a loaded machine can take longer over: that is tried again.
-    let mut tries = 0;
-    let session = loop {
-        match Session::connect(&Address::Local(path.clone()), "tool", options()) {
-            Ok(session) => break session,
-            Err(error) if timed_out(&error) && tries < 20 => tries += 1,
-            Err(error) => panic!("session: {error}"),
-        }
-    };
+    let session =
+        Session::connect(&Address::Local(path.clone()), "tool", options).expect("session");
     (node, path, session)
 }
 
@@ -269,13 +259,34 @@ fn timed_out(error: &ClientError) -> bool {
     matches!(error, ClientError::Io(io) if io.kind() == std::io::ErrorKind::TimedOut)
 }
 
-/// By default an answer has `Options::timeout`, however alive the node is: today's rule.
+/// By default an answer has `Options::timeout`, however alive the node is: today's rule. Read
+/// from the bound itself, so the test waits for no timeout to pass.
 #[test]
 fn by_default_an_answer_has_the_timeout() {
-    let (_node, path, mut session) = asking("timeout", true, Reply::default());
+    let (_node, path, session) = asking("timeout", true, Reply::default());
+    assert_eq!(session.reply(), Reply::Timeout);
+    let timeout = Options::default().timeout;
+    let left = session.reply_left(Instant::now()).expect("time left");
+    assert!(left <= timeout && left > timeout / 2, "{left:?}");
+    let begun = Instant::now()
+        .checked_sub(timeout)
+        .expect("an instant that long ago");
+    let error = session.reply_left(begun).expect_err("its time is up");
+    assert!(timed_out(&error), "{error}");
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A bound of its own: an answer waits that long, whatever the connect timeout is.
+#[test]
+fn a_bound_of_its_own_is_kept_apart_from_the_connect_timeout() {
+    let bound = Duration::from_millis(300);
+    let (_node, path, mut session) = asking("within", true, Reply::Within(bound));
     let (error, after) = unanswered(&mut session);
     assert!(timed_out(&error), "{error}");
-    assert!((300..600).contains(&after.as_millis()), "after {after:?}");
+    assert!(
+        after >= bound && after < Options::default().timeout,
+        "after {after:?}"
+    );
     let _ = std::fs::remove_file(&path);
 }
 
@@ -319,19 +330,21 @@ fn a_node_silent_for_its_idle_time_is_gone_and_silent_for_says_so() {
 /// The bound is the session's, kept until it is set again.
 #[test]
 fn the_reply_bound_is_kept_until_it_is_set_again() {
-    let (_node, path, mut session) = asking("set", true, Reply::default());
+    let short = Reply::Within(Duration::from_millis(300));
+    let (_node, path, mut session) = asking("set", true, short);
+    let ceiling = Duration::from_millis(1500);
     let longer = Reply::Alive {
-        ceiling: Some(Duration::from_millis(900)),
+        ceiling: Some(ceiling),
     };
     session.set_reply(longer);
     assert_eq!(session.reply(), longer);
     let (_, after) = unanswered(&mut session);
-    assert!(after >= Duration::from_millis(900), "after {after:?}");
+    assert!(after >= ceiling, "after {after:?}");
     let (_, after) = unanswered(&mut session);
-    assert!(after >= Duration::from_millis(900), "after {after:?}");
-    session.set_reply(Reply::Timeout);
+    assert!(after >= ceiling, "after {after:?}");
+    session.set_reply(short);
     let (_, after) = unanswered(&mut session);
-    assert!(after < Duration::from_millis(600), "after {after:?}");
+    assert!(after < ceiling, "after {after:?}");
     let _ = std::fs::remove_file(&path);
 }
 

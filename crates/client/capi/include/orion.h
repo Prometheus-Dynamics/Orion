@@ -97,13 +97,15 @@ typedef enum OrionReply {
    * for the idle time it declared when it welcomed this program (comm.idle_ms, three heartbeats
    * unless set), and ORION_E_TIMEOUT at the ceiling, if one is given.
    */
-  ORION_REPLY_ALIVE = 1
+  ORION_REPLY_ALIVE = 1,
+  /* Each answer within `ceiling_ms`, a bound of its own: the connect timeout then bounds connecting alone. */
+  ORION_REPLY_WITHIN = 2
 } OrionReply;
 
 /*
  * Sets how every later wait for an answer is bounded, until it is set again: `mode` is an
- * OrionReply, and `ceiling_ms` the longest one wait may take with ORION_REPLY_ALIVE, 0 for no
- * ceiling. Set it back after a request that needed a longer ceiling.
+ * OrionReply, and `ceiling_ms` the longest one wait may take: with ORION_REPLY_ALIVE, 0 for no
+ * ceiling; with ORION_REPLY_WITHIN, the bound itself, which must not be 0. Set it back after a request that needed a longer ceiling.
  */
 int32_t orion_set_reply(Orion *orion, int32_t mode, uint32_t ceiling_ms);
 

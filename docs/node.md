@@ -253,10 +253,10 @@ actions; any program on the board adds its own.
     from before node logic last started is refused as `run gone` (23); a session below level 3
     is told `not found`.
   - A number alone, as an older client sends it: a cancel reaches only a run this same session
-    started under it. An attach reaches the starter's run under that number that no later
-    detached run took. A detached run started under a number takes it: the starter's earlier
-    runs under it, going or kept, are reached by their handles only, and an attach by the
-    number alone is refused saying so. A run that is not detached takes no number.
+    started under it. An attach reaches the starter's run under that number that no later run
+    took. Any run started under a number, detached or not, takes it: the starter's earlier runs
+    under it, going or kept, are reached by their handles only, and an attach by the number
+    alone is refused saying so. A number alone never gives back an older run's answer.
   - A run carried to another node has no handle here: its caller follows and cancels it by
     number.
   - If a session is lost between starting a run and hearing its handle, how the run went is

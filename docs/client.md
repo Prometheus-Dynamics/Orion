@@ -123,6 +123,8 @@ after a request that needed a longer ceiling.
 - `Reply::Timeout`, the default: each answer within `Options::timeout`, the same number that
   bounds connecting and the hello. A busy node, or a starved machine, can make a healthy answer
   late.
+- `Reply::Within(bound)`: each answer within `bound`, a bound of its own. `Options::timeout`
+  then bounds connecting and the hello alone.
 - `Reply::Alive { ceiling }`: for as long as the node is heard from. The wait fails with:
   - `ClientError::Lost` when nothing at all has come for the node's idle time;
   - a timed-out `ClientError::Io` at the ceiling, if there is one. The session is still good.
@@ -133,7 +135,8 @@ after a request that needed a longer ceiling.
   socket too.
 - `silent_for()` is how long since anything at all came. The same calls are on `Client` and
   `Orion`.
-- C: `orion_set_reply` and `orion_silent_for_ms`. The web client: `setReply` and
+- C: `orion_set_reply` (`ORION_REPLY_TIMEOUT`, `ORION_REPLY_ALIVE` or `ORION_REPLY_WITHIN`) and
+  `orion_silent_for_ms`. The web client: `setReply` and
   `silentFor`; it has no bound by default.
 - A node that takes the connection and never says hello fails with a timed-out
   `ClientError::Io` (`ORION_E_TIMEOUT` in C), not the kernel's "try again".
@@ -326,8 +329,8 @@ kept as 16 bytes (`to_bytes`, `from_bytes`) or as text (`<16 hex>-<16 hex>`, by 
   from what the action does, by reading what it changes. Never come back to the number alone:
   by then it may name another run.
 
-`actions.attach(number)` still works for a detached run that no later detached run of the same
-starter took. Once one has, the number is refused as `NotFound`, saying to use the handle. A
+`actions.attach(number)` still works for a detached run that no later run of the same starter
+took, detached or not. Once one has, the number is refused as `NotFound`, saying to use the handle. A
 node too old to give handles gives none, and `run.handle()` is `None`; so is a run carried to
 another node.
 

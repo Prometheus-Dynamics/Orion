@@ -537,10 +537,13 @@ fn a_run_handle_names_one_run_across_sessions_and_restarts() {
         deadline_ms: 60_000,
         ..call("open", args)
     };
-    let ender = Orion::connect(&address, "ender").expect("connect");
+    // Session two, connected now. Every run of the same user takes its number from that user's
+    // older runs, so what is held is ended from this session, whose own later numbers are past
+    // the one in play.
+    let caller = Orion::connect(&address, "dashboard").expect("connect");
     let end = |tag: &'static [u8]| {
         let args: &'static [u8] = Box::leak([b"end:".as_slice(), tag].concat().into_boxed_slice());
-        let mut run = ender.run(&call("open", args)).expect("run");
+        let mut run = caller.run(&call("open", args)).expect("run");
         run.finish(Duration::from_secs(5)).expect("ended");
     };
     let under_way = |run: &mut orion::actions::Run| {
@@ -562,7 +565,6 @@ fn a_run_handle_names_one_run_across_sessions_and_restarts() {
         (run.call(), under_way(&mut run))
     };
     // Session two starts another under the same number while the old one still runs.
-    let caller = Orion::connect(&address, "dashboard").expect("connect");
     let mut new = caller.run(&detached(b"hold:new")).expect("run");
     assert_eq!(new.call(), number, "a session's numbers start over");
     let new_handle = under_way(&mut new);

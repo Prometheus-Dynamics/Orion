@@ -477,27 +477,24 @@ impl Actions {
                 if self.running.len() >= MAX_RUNS {
                     return Err(Error::Busy);
                 }
-                // The caller's numbers start over with each of its sessions. A detached run
-                // is one to come back to by its number, so the starter's earlier runs under
-                // it, going or kept, are not this run: from now on they are reached by their
-                // handles only. A run that is not detached is never come back to, and takes
-                // no number from another.
+                // The caller's numbers start over with each of its sessions. The starter's
+                // earlier runs under this number, going or kept, are not this run, detached or
+                // not: from now on they are reached by their handles only, and a number alone
+                // never gives back an older run's answer in this one's place.
                 let starter = Starter::of(asked);
-                if run.detached {
-                    for older in self
-                        .running
-                        .iter_mut()
-                        .filter(|older| older.starter == starter)
-                    {
-                        older.superseded |= older.call == run.call;
-                    }
-                    for older in self
-                        .ended
-                        .iter_mut()
-                        .filter(|older| older.starter == starter)
-                    {
-                        older.superseded |= older.call == run.call;
-                    }
+                for older in self
+                    .running
+                    .iter_mut()
+                    .filter(|older| older.starter == starter)
+                {
+                    older.superseded |= older.call == run.call;
+                }
+                for older in self
+                    .ended
+                    .iter_mut()
+                    .filter(|older| older.starter == starter)
+                {
+                    older.superseded |= older.call == run.call;
                 }
                 self.next += 1;
                 let id = self.next;

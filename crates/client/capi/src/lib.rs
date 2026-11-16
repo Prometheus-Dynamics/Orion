@@ -45,6 +45,8 @@ pub const ORION_E_INTERNAL: i32 = -7;
 pub const ORION_REPLY_TIMEOUT: i32 = 0;
 /// For as long as the node is heard from: [`Reply::Alive`].
 pub const ORION_REPLY_ALIVE: i32 = 1;
+/// Each answer within a bound of its own, apart from the connect timeout: [`Reply::Within`].
+pub const ORION_REPLY_WITHIN: i32 = 2;
 
 /// One field of a topic, as C gives it.
 #[repr(C)]
@@ -251,6 +253,10 @@ pub unsafe extern "C" fn orion_set_reply(
             ORION_REPLY_ALIVE => Reply::Alive {
                 ceiling: (ceiling_ms > 0).then(|| Duration::from_millis(u64::from(ceiling_ms))),
             },
+            ORION_REPLY_WITHIN if ceiling_ms > 0 => {
+                Reply::Within(Duration::from_millis(u64::from(ceiling_ms)))
+            }
+            ORION_REPLY_WITHIN => return Err(argument("ORION_REPLY_WITHIN needs a bound")),
             _ => return Err(argument("mode is not an OrionReply")),
         };
         handle.orion.set_reply(reply);

@@ -53,6 +53,12 @@ int main(int argc, char **argv) {
     fprintf(stderr, "a mode that is not one was taken\n");
     return 1;
   }
+  if (orion_set_reply(reader, ORION_REPLY_WITHIN, 0) != ORION_E_ARGUMENT) {
+    fprintf(stderr, "a fixed bound of 0 was taken\n");
+    return 1;
+  }
+  CHECK(orion_set_reply(reader, ORION_REPLY_WITHIN, 5000));
+  CHECK(orion_set_reply(reader, ORION_REPLY_ALIVE, 0));
   CHECK(orion_pump(reader, 50));
   if (orion_silent_for_ms(reader) > 10000 || orion_silent_for_ms(NULL) != 0) {
     fprintf(stderr, "silent for %llu ms\n", (unsigned long long)orion_silent_for_ms(reader));

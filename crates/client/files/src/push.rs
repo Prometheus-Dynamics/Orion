@@ -332,7 +332,7 @@ impl<S: Read + Seek> Pushing<S> {
                     return Err(error);
                 }
                 // Checking the digest of a large file takes the board a while: twelve
-                // timeouts, or for as long as the node is heard from.
+                // timeouts, or whatever bound the caller set.
                 let left = match self.files.client.reply() {
                     Reply::Timeout => {
                         let left =
@@ -342,7 +342,9 @@ impl<S: Read + Seek> Pushing<S> {
                         }
                         left
                     }
-                    Reply::Alive { .. } => self.files.client.reply_left(*since)?,
+                    Reply::Alive { .. } | Reply::Within(_) => {
+                        self.files.client.reply_left(*since)?
+                    }
                 };
                 self.files.client.pump(left.min(wait))?;
                 Ok(self.progress(size))

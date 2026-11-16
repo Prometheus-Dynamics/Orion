@@ -98,17 +98,37 @@ fn an_old_run_still_going_is_cancelled_by_its_handle_not_by_the_number() {
 }
 
 #[test]
-fn a_run_that_is_not_detached_takes_no_number_from_a_detached_one() {
+fn a_plain_run_under_a_kept_number_is_its_own_and_the_old_answer_is_never_given_for_it() {
     let mut bench = Bench::with_action();
-    let (_, handle) = detached(&mut bench, CALLER, 7);
+    // Session one's detached run ends while nobody is there: its answer is kept under 7.
+    let (old, old_handle) = detached(&mut bench, CALLER, 7);
     bench.gone(CALLER);
-    // Another program of the same user runs something under its own 7.
-    bench.run(OTHER, 7, 0, false).expect("run");
-    let _: Claim<'_> = bench.take(OWNER);
-    bench.handle(OTHER, 7);
-    // The detached run is still the one the number comes back to.
-    bench.ask(BACK, &bare(7)).expect("attach");
-    assert_eq!(bench.handle(BACK, 7), handle);
+    bench.result(old, Outcome::Failed);
+    assert_eq!(bench.actions.ended(), 1);
+    // Session two starts a plain run as its 7.
+    bench.run(BACK, 7, 0, false).expect("run");
+    let claim: Claim<'_> = bench.take(OWNER);
+    let plain = bench.handle(BACK, 7);
+    // Its result is its own.
+    bench.result(claim.call, Outcome::Succeeded);
+    let result: ActionResult<'_> = bench.take(BACK);
+    assert_eq!(
+        (result.call, result.outcome, result.run),
+        (7, Outcome::Succeeded, plain.run)
+    );
+    // A number alone is refused, saying why, never answered with the old run's end.
+    assert_eq!(bench.ask(BACK, &bare(7)), Err(Error::NotFound));
+    let said = bench.actions.take_said().expect("words");
+    assert!(said.contains("by its handle"), "{said}");
+    assert!(
+        bench.sent.frames.is_empty(),
+        "something was given for the number"
+    );
+    // The old answer is still there, by its handle.
+    bench.ask(BACK, &by(8, old_handle)).expect("attach");
+    assert_eq!(bench.handle(BACK, 8), old_handle);
+    let result: ActionResult<'_> = bench.take(BACK);
+    assert_eq!((result.outcome, result.run), (Outcome::Failed, old));
 }
 
 #[test]
