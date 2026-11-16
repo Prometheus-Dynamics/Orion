@@ -110,6 +110,8 @@ struct Client {
     connection: MemConnection,
     buf: Vec<u8>,
     seq: u16,
+    /// The request the last refusal heard answered.
+    refused: u16,
 }
 
 impl Client {
@@ -118,6 +120,7 @@ impl Client {
             connection,
             buf: vec![0; 64 * 1024],
             seq: 0,
+            refused: 0,
         };
         client
             .send(&Hello {
@@ -174,7 +177,9 @@ impl Client {
                         Heard::Exit(exit.shell, exit.code)
                     }
                     kind::REFUSAL => {
-                        Heard::Refused(Refusal::decode(&payload).expect("refusal").error())
+                        let refusal = Refusal::decode(&payload).expect("refusal");
+                        self.refused = refusal.request_seq;
+                        Heard::Refused(refusal.error())
                     }
                     kind::PONG => Heard::Pong(Pong::decode(&payload).expect("pong").now_ms),
                     _ => continue,
@@ -197,7 +202,16 @@ impl Client {
             window,
         })
         .await;
-        self.hear(WAIT).await.expect("an answer")
+        let asked = self.seq;
+        loop {
+            let heard = self.hear(WAIT).await.expect("an answer");
+            // Credit given for output of a shell that has since exited is refused, and that
+            // refusal may come after the exit: it answers that credit, not this.
+            if matches!(heard, Heard::Refused(_)) && self.refused != asked {
+                continue;
+            }
+            return heard;
+        }
     }
 
     /// Everything the shell sends until it exits, giving credit for each piece: output,
@@ -470,8 +484,6 @@ fn with_a_login_helper_the_helper_starts_the_shell() {
         let mut client = Client::open(board.connector.connect(caller())).await;
         // Held open while the shells below run, so the helper is not idle between them however
         // slow the machine is.
-        // What was heard instead is said: this test once heard something else, in a gate
-        // (docs/flakes.md).
         let heard = client.open_shell("sleep 30", "", 0).await;
         let Heard::Opened(held, _) = heard else {
             panic!("not opened: {heard:?}");
@@ -483,6 +495,9 @@ fn with_a_login_helper_the_helper_starts_the_shell() {
         let (out, _, code) = client.until_exit(shell).await;
         assert_eq!(String::from_utf8_lossy(&out).trim(), me().uid.to_string());
         assert_eq!(code, 4);
+        // Credit for the shell that exited, as a slow machine sends it after the exit: refused,
+        // and not the answer to the next shell.
+        client.send(&ShellCredit { shell, bytes: 1 }).await;
         let heard = client.open_shell("tty; exit 5", "xterm", 0).await;
         let Heard::Opened(shell, _) = heard else {
             panic!("not opened on a terminal: {heard:?}");

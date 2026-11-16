@@ -285,6 +285,8 @@ what to change.
 - **C64.** A subscriber handed a buffer pool page of another layout gets `ClientError::Layout`
   ("a buffer pool", both numbers), as for a ring. It was already mapped; now proved. The pool
   page table in `docs/ring.md` has the layout word.
+- **C65.** Tests only: nothing a consumer calls changes. The shell test's open flake is fixed by
+  its cause (`docs/flakes.md`).
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
