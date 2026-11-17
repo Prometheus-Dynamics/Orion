@@ -240,3 +240,4 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [C64](docs/prs/C64.md) A buffer pool of another layout is said as one, with both layouts (wave 19; needs the device library's M34 pin)
 - [x] [C65](docs/prs/C65.md) The shell test's flake fixed by its cause: a refusal is matched to its request (wave 19; needs C52)
 - [x] [C32b](docs/prs/C32b.md) Orion's precheck of the security switch, running and in recovery (wave 19; needs C32a)
+- [x] [J13](docs/prs/J13.md) The shm-* pins at the device library's d4942290, its FL1 merge (wave 19; needs J12)

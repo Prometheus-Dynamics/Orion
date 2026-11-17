@@ -292,6 +292,8 @@ what to change.
   `SECURITY_PRECHECKED` (0xB1); `SecurityTo`, `PrecheckLine`; `Orion::security_precheck`,
   `node::SecurityTo`; `Feature::SecurityPrecheck` (a `match` on `Feature` or on `Concept`
   without `_` gains an arm). The comm core answers it running and in recovery.
+- **J13.** The `shm-*` pins move to `d4942290` (the device library's FL1 merge). Nothing under the
+  device library's `shm/` changed since `e9224a53`, so nothing a consumer calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
