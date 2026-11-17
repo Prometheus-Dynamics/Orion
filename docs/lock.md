@@ -294,6 +294,11 @@ what to change.
   without `_` gains an arm). The comm core answers it running and in recovery.
 - **J13.** The `shm-*` pins move to `d4942290` (the device library's FL1 merge). Nothing under the
   device library's `shm/` changed since `e9224a53`, so nothing a consumer calls changes.
+- **C68.** Attaching to an ended detached run no longer takes its end: every attach while it is
+  kept (ten minutes, the newest 256) gets the same end. After that it is refused `not found`
+  with words beginning `expired:`. `orion_action_list::MAX_EXPIRED` is added (**Add**). A caller
+  that relied on a second attach being `not found` now gets the end again (**Break** in
+  behaviour only).
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

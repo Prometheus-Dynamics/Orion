@@ -6,9 +6,18 @@ use orion_reply::{Asked, Out};
 use orion_types::Error;
 use orion_wire::Bytes;
 
-use crate::{Actions, Starter};
+use crate::{Actions, ENDED_FOR_MS, Ended, MAX_ENDED, MAX_EXPIRED, Starter};
 
 impl Actions {
+    /// `ended` is no longer kept: coming back to it is now refused as expired.
+    pub(crate) fn expire(&mut self, ended: &Ended) {
+        if self.expired.len() >= MAX_EXPIRED {
+            self.expired.pop_front();
+        }
+        self.expired
+            .push_back((ended.id, ended.call, ended.starter.clone()));
+    }
+
     /// The running run `handle` names, if `starter` started it; `None` if it is not running.
     ///
     /// # Errors
@@ -119,10 +128,24 @@ impl Actions {
             }
             return Ok(());
         }
-        let ended = self
-            .ended
-            .remove(ended.ok_or(Error::NotFound)?)
-            .ok_or(Error::NotFound)?;
+        // Kept, not taken: coming back again finds the same end, until it expires.
+        let Some(ended) = ended.and_then(|at| self.ended.get(at)) else {
+            let by_handle = RunHandle::said(attach.instance, attach.run);
+            let gone = self.expired.iter().find(|(id, call, of)| {
+                *of == starter && by_handle.map_or(*call == attach.call, |handle| *id == handle.run)
+            });
+            return Err(match gone.map(|(id, ..)| *id) {
+                Some(id) => self.refuse(
+                    Error::NotFound,
+                    format!(
+                        "expired: run {id} ended, and how it ended is kept for {} minutes and \
+                         for the newest {MAX_ENDED} runs; that has passed",
+                        ENDED_FOR_MS / 60_000
+                    ),
+                ),
+                None => Error::NotFound,
+            });
+        };
         out.send(
             asked.session,
             &Started {

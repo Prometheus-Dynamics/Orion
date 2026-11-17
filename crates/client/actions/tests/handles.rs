@@ -147,7 +147,7 @@ fn a_handle_from_before_node_logic_started_again_is_told_the_run_is_gone() {
 }
 
 #[test]
-fn a_cancel_by_a_handle_that_names_nothing_now_is_refused_and_the_newer_run_goes_on() {
+fn a_cancel_by_an_ended_runs_handle_never_reaches_the_newer_run_under_its_number() {
     let board = Board::start("handles-cancel");
     let (_side, mut owner) = owner(&board);
     let lost = actions(&board, "caller");
@@ -163,23 +163,17 @@ fn a_cancel_by_a_handle_that_names_nothing_now_is_refused_and_the_newer_run_goes
     let caller = actions(&board, "caller");
     let (mut newer, _, newer_claim) = start(&caller, &mut owner, b"newer");
     assert_eq!(newer.call(), old_number, "the number came round again");
-    // The old run's ending was kept for whoever comes back to it, and is handed out once: by
-    // the old handle, it is the old run's, never the newer one's under the same number.
-    let mut kept = caller.attach_handle(old).expect("sent");
-    assert_eq!(kept.finish(WAIT).expect("ended").output, b"old done");
-    // Now the old handle names nothing: coming back to it is refused, and so is a cancel by it.
+    // The old run's ending was kept for whoever comes back to it, and is handed out each time
+    // the same: by the old handle, it is the old run's, never the newer one's under the same
+    // number.
+    for _ in 0..2 {
+        let mut kept = caller.attach_handle(old).expect("sent");
+        assert_eq!(kept.finish(WAIT).expect("ended").output, b"old done");
+    }
+    // A cancel by the old handle has nothing running to stop, and never reaches the newer run.
     let mut stale = caller.attach_handle(old).expect("sent");
+    assert_eq!(stale.finish(WAIT).expect("ended").output, b"old done");
     stale.cancel().expect("sent");
-    assert!(
-        matches!(
-            stale.finish(WAIT),
-            Err(ClientError::Refused {
-                error: Error::NotFound,
-                ..
-            })
-        ),
-        "a stale handle reached something"
-    );
     // Frames reach the owner in order: had the cancel reached the newer run, the owner would
     // be told before it is handed the next run.
     let (_next, _, _) = start(&caller, &mut owner, b"next");

@@ -56,9 +56,10 @@ fn a_new_session_reusing_a_number_follows_its_own_run_and_the_old_one_is_reached
     bench.ask(OTHER, &bare(7)).expect("attach");
     assert_eq!(bench.handle(OTHER, 7), new_handle);
     let _: ActionResult<'_> = bench.take(OTHER);
-    // ...and never the old one.
-    assert_eq!(bench.ask(OTHER, &bare(7)), Err(Error::NotFound));
-    assert!(bench.actions.take_said().is_some());
+    // ...again, the same end, and never the old one.
+    bench.ask(OTHER, &bare(7)).expect("attach again");
+    let again: ActionResult<'_> = bench.take(OTHER);
+    assert_eq!((again.outcome, again.run), (Outcome::Succeeded, new));
     // ...only through its handle, by another session of the same starter.
     bench.ask(OTHER, &by(3, old_handle)).expect("attach");
     assert_eq!(bench.handle(OTHER, 3), old_handle);
@@ -67,13 +68,15 @@ fn a_new_session_reusing_a_number_follows_its_own_run_and_the_old_one_is_reached
         (result.call, result.outcome, result.run),
         (7, Outcome::Failed, old)
     );
-    // A handle whose run has ended and was told is stale: nothing to cancel, nor to come back
-    // to.
+    // A handle whose run has ended has nothing to cancel, but its end is still there to come
+    // back to, the same each time, while it is kept.
     assert_eq!(
         bench.ask(OTHER, &cancel(0, Some(old_handle))),
         Err(Error::NotFound)
     );
-    assert_eq!(bench.ask(OTHER, &by(4, old_handle)), Err(Error::NotFound));
+    bench.ask(OTHER, &by(4, old_handle)).expect("attach again");
+    let again: ActionResult<'_> = bench.take(OTHER);
+    assert_eq!((again.outcome, again.run), (Outcome::Failed, old));
 }
 
 #[test]

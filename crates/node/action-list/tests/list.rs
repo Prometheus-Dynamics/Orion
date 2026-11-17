@@ -458,7 +458,8 @@ fn whoever_started_a_detached_run_comes_back_to_its_progress() {
     bench.ask(BACK, &bare(7)).expect("attach");
     let again: ActionResult<'_> = bench.take(BACK);
     assert_eq!((again.outcome, again.code), (Outcome::Succeeded, 11));
-    assert_eq!(bench.actions.ended(), 0);
+    // Coming back does not take it: it is there for the next time too.
+    assert_eq!(bench.actions.ended(), 1);
 }
 
 #[test]
@@ -477,15 +478,19 @@ fn a_detached_run_that_ended_with_nobody_there_is_kept_for_its_starter() {
         (7, Outcome::Failed, 11)
     );
     assert_eq!(result.output.0, b"out");
-    // Told once.
-    assert_eq!(bench.ask(BACK, &bare(7)), Err(Error::NotFound));
+    // Told again, the same, as often as it is asked while it is kept.
+    bench.ask(BACK, &bare(7)).expect("attach again");
+    let again: ActionResult<'_> = bench.take(BACK);
+    assert_eq!((again.outcome, again.code), (Outcome::Failed, 11));
 
-    // Kept for ten minutes and no longer.
+    // Kept for ten minutes and no longer; then it is said to have expired.
     let (mut bench, id) = Bench::running(true);
     bench.gone(CALLER);
     bench.result(id, Outcome::Succeeded);
     bench.now += ENDED_FOR_MS + 1;
     assert_eq!(bench.ask(BACK, &bare(7)), Err(Error::NotFound));
+    let said = bench.actions.take_said().expect("words");
+    assert!(said.starts_with("expired: "), "{said}");
     assert_eq!(bench.actions.ended(), 0);
 }
 
@@ -508,7 +513,7 @@ fn a_new_run_under_a_number_takes_it_and_the_earlier_end_is_reached_by_its_handl
     assert_eq!(bench.actions.ended(), 1, "the earlier end is still kept");
     bench.gone(BACK);
     bench.result(claim.call, Outcome::Succeeded);
-    // By its number: the newer run's end, once.
+    // By its number: the newer run's end.
     bench.ask(30, &bare(7)).expect("attach");
     assert_eq!(bench.handle(30, 7), second);
     let result: ActionResult<'_> = bench.take(30);
@@ -516,10 +521,11 @@ fn a_new_run_under_a_number_takes_it_and_the_earlier_end_is_reached_by_its_handl
         (result.outcome, result.run),
         (Outcome::Succeeded, second.run)
     );
-    // The earlier one is not reached by the number, and the refusal says how it is.
-    assert_eq!(bench.ask(30, &bare(7)), Err(Error::NotFound));
-    let said = bench.actions.take_said().expect("words");
-    assert!(said.contains("by its handle"), "{said}");
+    // The number keeps reaching the newer run's end, never the earlier one...
+    bench.ask(30, &bare(7)).expect("attach again");
+    let again: ActionResult<'_> = bench.take(30);
+    assert_eq!(again.run, second.run);
+    // ...which is reached by its handle.
     bench.ask(30, &by(9, first.1)).expect("attach");
     assert_eq!(bench.handle(30, 9), first.1);
     let result: ActionResult<'_> = bench.take(30);
@@ -527,7 +533,7 @@ fn a_new_run_under_a_number_takes_it_and_the_earlier_end_is_reached_by_its_handl
         (result.call, result.outcome, result.run),
         (7, Outcome::Failed, first.0)
     );
-    assert_eq!(bench.actions.ended(), 0);
+    assert_eq!(bench.actions.ended(), 2);
 }
 
 #[test]

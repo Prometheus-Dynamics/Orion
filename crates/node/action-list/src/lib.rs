@@ -20,7 +20,8 @@
 //!   A new run under a number makes the starter's older runs under it reachable by handle only.
 //! - A caller that goes away has its run cancelled, unless the run is detached. A detached
 //!   run carries on, and whoever started it can come back to it with `Attach`, from any
-//!   session: it is then told the latest progress, or how the run ended. A detached run must
+//!   session: it is then told the latest progress, or how the run ended, the same each time
+//!   while that is kept; after, it is refused as expired. A detached run must
 //!   have a deadline, no longer than the node takes, so that it ends without its caller.
 //! - `Claim` names the caller's session by a token that is never reused. When that session
 //!   ends, for any cause, each program that was given a run from it is told once with
@@ -53,6 +54,10 @@ pub const MAX_ENDED: usize = 256;
 
 /// How long such a run is kept.
 pub const ENDED_FOR_MS: u64 = 10 * 60 * 1000;
+
+/// How many runs whose end is no longer kept are still known to have been, so that coming
+/// back to one is refused as expired, not as a run that never was. The oldest goes first.
+pub const MAX_EXPIRED: usize = 1024;
 
 /// The longest deadline a detached run may have unless the node says otherwise: an hour.
 pub const MAX_DETACHED_MS: u64 = 60 * 60 * 1000;
@@ -155,6 +160,8 @@ pub struct Actions {
     next: u64,
     events: Vec<Event>,
     ended: VecDeque<Ended>,
+    /// Runs whose end is no longer kept: number, call and starter.
+    expired: VecDeque<(u64, u64, Starter)>,
     /// Each caller that asked for a run, as its session and, for a peer carrying runs for
     /// sessions of its own, that node's token for one of them; and its token here. The comm
     /// core's numbers come round again, tokens never do.
@@ -207,6 +214,7 @@ impl Actions {
             next: 0,
             events: Vec::new(),
             ended: VecDeque::new(),
+            expired: VecDeque::new(),
             tokens: Vec::new(),
             next_token: 0,
             given: Vec::new(),
@@ -316,6 +324,7 @@ impl Actions {
         self.listed.clear();
         self.running.clear();
         self.ended.clear();
+        self.expired.clear();
         self.tokens.clear();
         self.given.clear();
         self.ended_tokens.clear();
@@ -382,8 +391,10 @@ impl Actions {
             // seems to be there: its session may have ended a moment ago without this node
             // having heard, and then the result just sent went nowhere.
             self.forget_old(now_ms);
-            if self.ended.len() >= MAX_ENDED {
-                self.ended.pop_front();
+            if self.ended.len() >= MAX_ENDED
+                && let Some(oldest) = self.ended.pop_front()
+            {
+                self.expire(&oldest);
             }
             self.ended.push_back(Ended {
                 id: run.id,
@@ -406,7 +417,9 @@ impl Actions {
             .front()
             .is_some_and(|ended| now_ms.saturating_sub(ended.at_ms) > ENDED_FOR_MS)
         {
-            self.ended.pop_front();
+            if let Some(oldest) = self.ended.pop_front() {
+                self.expire(&oldest);
+            }
         }
     }
 

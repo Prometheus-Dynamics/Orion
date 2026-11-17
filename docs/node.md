@@ -239,8 +239,11 @@ actions; any program on the board adds its own.
   than allowed`. Whoever started it comes back with `Attach`, from any session: it is sent
   the run's handle (`ACTION_STARTED`), the latest progress at once and then what follows. How
   a detached run ended is kept for ten minutes (256 runs at most, the oldest goes first) and
-  given to its starter when it asks, once; that is so even if a caller seemed to be attached
-  when it ended, because a session can end a moment before node logic hears of it. "Whoever
+  given to its starter each time it asks, the same each time: coming back does not use it up.
+  That is so even if a caller seemed to be attached when it ended, because a session can end a
+  moment before node logic hears of it. Once it is no longer kept, coming back is refused
+  `not found` with words that begin `expired:`, and a run that never was is `not found` with no
+  such words. The last 1,024 runs that expired are remembered for that. "Whoever
   started it" is the same user on the board, the same operator key or the same peer, as the
   comm core says; for anyone else the run is `not found`.
 - **Run handles.** Every run started here is told to its caller with `ACTION_STARTED`: its

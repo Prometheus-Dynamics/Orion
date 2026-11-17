@@ -480,7 +480,8 @@ fn a_caller_disconnects_mid_action_and_reattaches_to_the_progress() {
         (Outcome::Succeeded, &b"long done"[..])
     );
 
-    // One that ends while its caller is away is still there to come back to, once.
+    // One that ends while its caller is away is still there to come back to, the same each
+    // time.
     let number = {
         let caller = Orion::connect(&address, "dashboard").expect("connect");
         let mut run = caller.run(&detached(b"long")).expect("run");
@@ -497,13 +498,10 @@ fn a_caller_disconnects_mid_action_and_reattaches_to_the_progress() {
     let ended = back.finish(Duration::from_secs(5)).expect("how it ended");
     assert_eq!(ended.output, b"long done");
     let mut again = caller.attach(number).expect("sent");
-    match again.wait(Duration::from_secs(5)) {
-        Err(ClientError::Refused {
-            error: Error::NotFound,
-            ..
-        }) => {}
-        other => panic!("expected not found, got {other:?}"),
-    }
+    let ended = again
+        .finish(Duration::from_secs(5))
+        .expect("how it ended, again");
+    assert_eq!(ended.output, b"long done");
 
     // A run that was not detached is cancelled when its caller goes: nothing to come back to.
     let number = {
@@ -575,7 +573,7 @@ fn a_run_handle_names_one_run_across_sessions_and_restarts() {
     let ended = new.finish(Duration::from_secs(5)).expect("ends");
     assert_eq!(ended.output, b"new done");
     drop(new);
-    // The number reaches the newer run's end, kept once...
+    // The number reaches the newer run's end, kept for coming back to...
     let mut back = caller.attach(number).expect("attach");
     assert_eq!(
         back.finish(Duration::from_secs(5)).expect("ended").output,
@@ -583,15 +581,20 @@ fn a_run_handle_names_one_run_across_sessions_and_restarts() {
     );
     assert_eq!(back.handle(), Some(new_handle));
     drop(back);
-    // ...and never the old one's.
+    // ...again, and never the old one's.
     let mut again = caller.attach(number).expect("sent");
-    assert_eq!(refused(&mut again), Error::NotFound);
-    // The old answer is reached by its handle alone, once.
-    let mut old_back = caller.attach_handle(old).expect("attach");
-    let ended = old_back.finish(Duration::from_secs(5)).expect("ended");
-    assert_eq!(ended.output, b"old done");
-    let mut stale = caller.attach_handle(old).expect("sent");
-    assert_eq!(refused(&mut stale), Error::NotFound);
+    let ended = again.finish(Duration::from_secs(5)).expect("ended");
+    assert_eq!(
+        (ended.output, again.handle()),
+        (b"new done".to_vec(), Some(new_handle))
+    );
+    drop(again);
+    // The old answer is reached by its handle alone, the same each time.
+    for _ in 0..2 {
+        let mut old_back = caller.attach_handle(old).expect("attach");
+        let ended = old_back.finish(Duration::from_secs(5)).expect("ended");
+        assert_eq!(ended.output, b"old done");
+    }
 
     // Cancel after coming back by the handle reaches the run come back to.
     let third = {
