@@ -189,6 +189,11 @@ struct Board {
 
 impl Board {
     fn start(name: &str) -> Self {
+        Self::start_with(name, Limits::default().write_ms)
+    }
+
+    /// A board that drops a session once one frame to it has waited `write_ms` to be taken.
+    fn start_with(name: &str, write_ms: u32) -> Self {
         let dir = std::env::temp_dir().join(format!("orion-records-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
@@ -204,6 +209,7 @@ impl Board {
             tokio::task::LocalSet::new().block_on(&runtime, async move {
                 let limits = Limits {
                     outbox_bytes: 8 << 20,
+                    write_ms,
                     ..Limits::default()
                 };
                 let comm = Comm::new("board".parse().expect("name"), Security::Off, None, limits);
@@ -224,13 +230,17 @@ impl Board {
     }
 
     fn records(&self, name: &str) -> Records {
+        Records::new(&self.client(name))
+    }
+
+    fn client(&self, name: &str) -> Client {
         let session = Session::connect(
             &Address::Local(self.socket.clone()),
             name,
             Options::default(),
         )
         .expect("connect");
-        Records::new(&Client::new(session))
+        Client::new(session)
     }
 }
 
@@ -471,9 +481,12 @@ fn a_watch_delivers_every_change_in_order() {
 
 #[test]
 fn a_watcher_that_falls_behind_catches_up_and_misses_no_record() {
-    let board = Board::start("behind");
+    // Its frames wait no longer than this to be taken, and the writes below take longer, so a
+    // session that is not pumped while they go on is dropped on every run.
+    let board = Board::start_with("behind", 300);
     let writer = board.records("writer");
-    let watcher = board.records("watcher");
+    let session = board.client("watcher");
+    let watcher = Records::new(&session);
     let mut watch = watcher
         .watch(RecordClass::Resource, "", HlcTimestamp::ZERO)
         .expect("watch");
@@ -486,6 +499,12 @@ fn a_watcher_that_falls_behind_catches_up_and_misses_no_record() {
         writer
             .put(&[resource(key, &(index as u32).to_le_bytes())])
             .expect("put");
+        // Turning the session takes what arrives, so the board is never left waiting on it.
+        // The watch's changes queue up unread, and past its queue it falls behind.
+        while session.pump(Duration::ZERO).expect("pump") {}
+        if index % 64 == 63 {
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
     // Something else on the same session is answered meanwhile: the watch's changes arrive.
     assert_eq!(

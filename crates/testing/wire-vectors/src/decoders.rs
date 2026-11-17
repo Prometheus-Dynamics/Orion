@@ -132,6 +132,8 @@ decoders! {
     TIME_REPLY => peers::TimeReply,
     TIME_OFFER => peers::TimeOffer,
     TIME_TURN => peers::TimeTurn,
+    SECURITY_PRECHECK => peers::SecurityPrecheck,
+    SECURITY_PRECHECKED => peers::SecurityPrechecked,
 }
 
 /// List elements decode separately from their bodies, so they get their own turn.
@@ -161,6 +163,7 @@ fn decode_elements(concept: Concept, bytes: &[u8]) {
             exercise::<peers::GrantedAction>(bytes);
             exercise::<peers::OperatorEntry>(bytes);
         }
+        Concept::Security => exercise::<peers::PrecheckLine>(bytes),
         Concept::Session
         | Concept::Files
         | Concept::Actions

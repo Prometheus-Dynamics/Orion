@@ -9,8 +9,9 @@ use orion_msg_files::{
 use orion_msg_peers::{
     CLOCK_MONOTONIC, EnrollChallenge, EnrollConfirm, EnrollHello, EnrollRole, GrantedAction,
     OperatorEnroll, OperatorEntry, OperatorList, OperatorState, OperatorWelcome, Operators,
-    PeerForgive, PeerObserved, PeerRevoke, PeerState, PeerStates, PeerStatus, PeerSync, SyncState,
-    TimeOffer, TimeReply, TimeRequest, TimeTurn,
+    PeerForgive, PeerObserved, PeerRevoke, PeerState, PeerStates, PeerStatus, PeerSync,
+    PrecheckLine, SecurityPrecheck, SecurityPrechecked, SecurityTo, SyncState, TimeOffer,
+    TimeReply, TimeRequest, TimeTurn,
 };
 use orion_msg_records::{Changed, Get, Label, NodeRecord, Put, RecordClass, RecordEntry, Watch};
 use orion_msg_session::{
@@ -759,6 +760,18 @@ fn peers(out: &mut Vec<Sample>) {
         TimeTurn {
             request_seq: 7,
             poll_ms: 64_000
+        }
+    );
+    sample!(out, SecurityPrecheck { to: SecurityTo::On });
+    let lines = [PrecheckLine {
+        line: "missing: orion: nobody could get in",
+    }];
+    let lines = List::new(&lines);
+    sample!(
+        out,
+        SecurityPrechecked {
+            request_seq: 8,
+            lines
         }
     );
 }

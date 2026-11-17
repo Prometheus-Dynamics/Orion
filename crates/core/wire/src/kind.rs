@@ -29,6 +29,8 @@ pub enum Concept {
     /// `0xA0` to `0xAF`: what the comm core tells node logic about a session, beyond the
     /// session range, which is full.
     Node = 0xA,
+    /// `0xB0` to `0xBF`: the board's security switch.
+    Security = 0xB,
 }
 
 /// One row of the table.
@@ -176,6 +178,10 @@ kinds! {
     }
     Node {
         NODE_QUIET = 0xA0,
+    }
+    Security {
+        SECURITY_PRECHECK = 0xB0,
+        SECURITY_PRECHECKED = 0xB1,
     }
 }
 

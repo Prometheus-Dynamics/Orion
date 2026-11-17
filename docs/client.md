@@ -198,7 +198,10 @@ where its sync with other boards is. `enroll(public_key, name, enrollment_key)` 
 let an operator in: from root on the board for any key, at once; from the operator itself, on a
 session signed with that key, at once with the cluster's enrollment key (only a proof made from
 it is sent) and `Pending` until approved without. The answer (`node::Enrollment`) has the state,
-what the operator may do, and the board's key.
+what the operator may do, and the board's key. `security_precheck(SecurityTo::On | Off)` is
+what Orion has against turning the board's security switch that way, as `missing: ...` /
+`busy: ...` lines and none when nothing is. It changes nothing, and needs a node at level 5
+(`Feature::SecurityPrecheck`).
 
 **There is one way back.** A call that fails with an error for which `is_lost` is true means
 the connection broke or the comm core went quiet. `reconnect` connects again to the same

@@ -498,6 +498,26 @@ answered as an operator that may do everything, and nothing is recorded.
 Settings: `cluster` (`default`), `enrollment.key` (none: only an administrator enrolls),
 `operators.read` (`true`), `operators.actions` (none).
 
+### Before the security switch turns: the precheck
+
+The board's security switch is its record, `/etc/board/security` (`docs/settings.md`). Before
+the device library turns it, it asks every part of the board what it has against the turn, and
+turns it only if none says anything. Orion's part is `SECURITY_PRECHECK` (`0xB0`, level 5) with
+the state it would go to, answered `SECURITY_PRECHECKED` (`0xB1`) with lines in the words of the
+device library's `system.security-precondition/1`: `missing: <reason>` or `busy: <reason>`, and
+no line when nothing is against it. The device library's bridge asks it from
+`precondition(on, into)`, and takes no answer within its call deadline as
+`missing: it did not answer`.
+
+| Turned to | Orion says |
+| --- | --- |
+| On | `missing: orion: nobody but root could get in once it is on: ...` unless one of these exists: an enrolled operator (not pending, not revoked), a key in the recovery keys file, or `enrollment.key`. In recovery the trust store is not opened, so only the recovery keys file counts. |
+| Off | Nothing. Whether a turn-off is authorized is the writer's to check. |
+
+Orion is never `busy`: it installs and tries nothing a turn would cut short. Asking changes
+nothing. It is a read (`What::Read("security")`) for programs on the board and operators granted
+read. Both the running comm core and recovery answer it.
+
 ## The SSH way in
 
 `crates/comm/ssh` (`orion-ssh`). The comm core answers SSH itself, on `ssh.listen`; a person's

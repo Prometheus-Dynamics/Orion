@@ -239,3 +239,4 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [C31](docs/prs/C31.md) Files the settings name, paths and commands, served while no program offers their prefix (wave 19; needs C30)
 - [x] [C64](docs/prs/C64.md) A buffer pool of another layout is said as one, with both layouts (wave 19; needs the device library's M34 pin)
 - [x] [C65](docs/prs/C65.md) The shell test's flake fixed by its cause: a refusal is matched to its request (wave 19; needs C52)
+- [x] [C32b](docs/prs/C32b.md) Orion's precheck of the security switch, running and in recovery (wave 19; needs C32a)

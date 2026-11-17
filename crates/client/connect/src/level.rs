@@ -30,11 +30,13 @@ pub enum Feature {
     RunHandle,
     /// A file offered by a program on the board and fetched by a client.
     FileOffers,
+    /// The comm core asked what it has against turning the board's security switch.
+    SecurityPrecheck,
 }
 
 impl Feature {
     /// Every feature, for tables and tests.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::SubscribeFromLatest,
         Self::Shell,
         Self::SignedLink,
@@ -42,6 +44,7 @@ impl Feature {
         Self::RunOnBehalf,
         Self::RunHandle,
         Self::FileOffers,
+        Self::SecurityPrecheck,
     ];
 
     /// The lowest level that has it.
@@ -55,6 +58,7 @@ impl Feature {
             | Self::RunOnBehalf => 1,
             Self::RunHandle => 3,
             Self::FileOffers => 4,
+            Self::SecurityPrecheck => 5,
         }
     }
 
@@ -69,6 +73,7 @@ impl Feature {
             Self::RunOnBehalf => "a run carried for another node's caller",
             Self::RunHandle => "a run named by its handle",
             Self::FileOffers => "a file offered on the board",
+            Self::SecurityPrecheck => "a precheck of the security switch",
         }
     }
 }

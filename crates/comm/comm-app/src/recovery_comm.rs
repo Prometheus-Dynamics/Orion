@@ -79,6 +79,10 @@ impl RecoveryComm {
             .with_security(view);
         let state = hello.state();
         comm.add_service(hello);
+        comm.add_service(crate::precheck::Precheck::new(
+            None,
+            Some(recovery_keys.to_owned()),
+        ));
         #[cfg(feature = "offers")]
         comm.add_service(crate::own_files::in_recovery(&comm, settings, why));
         #[cfg(feature = "shell")]

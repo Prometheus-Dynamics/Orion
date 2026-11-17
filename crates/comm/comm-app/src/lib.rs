@@ -25,6 +25,7 @@ pub mod login_helper;
 mod nt4_ws;
 #[cfg(feature = "offers")]
 mod own_files;
+mod precheck;
 #[cfg(feature = "recovery")]
 mod recover;
 #[cfg(feature = "recovery")]
@@ -228,6 +229,11 @@ impl CommCore {
             .with_security(&settings.config.security_view);
         comm.add_service(hello.in_state(settings.board_state.clone()));
         comm.add_service(KeysService::new(node.clone(), keys.clone()));
+        #[cfg(feature = "recovery")]
+        let recovery_keys = Some(settings.recovery_keys.clone());
+        #[cfg(not(feature = "recovery"))]
+        let recovery_keys = None;
+        comm.add_service(precheck::Precheck::new(Some(keys.clone()), recovery_keys));
         #[cfg(feature = "devices")]
         comm.add_service(devices.watch(broker));
         #[cfg(not(feature = "devices"))]

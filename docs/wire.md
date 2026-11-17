@@ -99,6 +99,7 @@ safely ignore have no level.
 | 3 | `RunHandle`: `Attach` and `Cancel` naming a run by `instance` and `run` | Read the number alone, which may name another run of the same caller |
 | 3 | The error `run gone` (23) | (told to a session: see below) |
 | 4 | `FileOffers`: `FILE_OFFER`, `FILE_FETCH`, `FILE_OFFERS` | Not answer |
+| 5 | `SecurityPrecheck`: `SECURITY_PRECHECK` | Not answer |
 
 **Errors have levels too.** An error code added after level 1 is told only to a session that said
 it is at that code's level or above. A session below it is told what it was told before the code

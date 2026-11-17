@@ -9,9 +9,9 @@ use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_identity::{fingerprint, hello, proof, random};
 use orion_msg_peers::{
     CLOCK_REALTIME, OperatorEnroll, OperatorWelcome, PeerForgive, PeerStates, PeerStatus,
-    TimeReply, TimeRequest,
+    SecurityPrecheck, SecurityPrechecked, TimeReply, TimeRequest,
 };
-pub use orion_msg_peers::{OperatorState, SyncState};
+pub use orion_msg_peers::{OperatorState, SecurityTo, SyncState};
 use orion_msg_session::Identify;
 use orion_types::NodeName;
 use orion_wire::{Bytes, kind};
@@ -151,6 +151,7 @@ pub(crate) struct State {
     time: Option<(TimeReply, Instant, i128)>,
     peers: Option<(u16, Vec<SyncPeer>)>,
     welcome: Option<Enrollment>,
+    prechecked: Option<(u16, Vec<String>)>,
 }
 
 impl Handler for State {
@@ -160,11 +161,17 @@ impl Handler for State {
             kind::TIME_REPLY,
             kind::PEER_STATES,
             kind::OPERATOR_WELCOME,
+            kind::SECURITY_PRECHECKED,
         ]
     }
 
     fn handle(&mut self, frame: &Incoming<'_>, _cx: &mut Cx<'_>) -> Result<(), ClientError> {
-        if frame.kind() == kind::PEER_STATES {
+        if frame.kind() == kind::SECURITY_PRECHECKED {
+            let answer: SecurityPrechecked<'_> = frame.body()?;
+            let lines = answer.lines.iter().flatten();
+            let lines = lines.map(|line| line.line.to_owned()).collect();
+            self.prechecked = Some((answer.request_seq, lines));
+        } else if frame.kind() == kind::PEER_STATES {
             let states: PeerStates<'_> = frame.body()?;
             let peers = states
                 .peers
@@ -305,6 +312,27 @@ pub(crate) fn peers(
     })?;
     let (_, peers) = state.borrow_mut().peers.take().ok_or(ClientError::Lost)?;
     Ok(peers)
+}
+
+/// What the comm core has against turning the security switch `to`: no line when nothing.
+pub(crate) fn precheck(
+    client: &Client,
+    state: &Rc<RefCell<State>>,
+    to: SecurityTo,
+) -> Result<Vec<String>, ClientError> {
+    client.needs(orion_connect::Feature::SecurityPrecheck)?;
+    state.borrow_mut().prechecked = None;
+    let seq = client.send(&SecurityPrecheck { to })?;
+    client.answered(seq, || {
+        let answered = state.borrow().prechecked.as_ref().map(|(seq, _)| *seq);
+        answered == Some(seq)
+    })?;
+    let (_, lines) = state
+        .borrow_mut()
+        .prechecked
+        .take()
+        .ok_or(ClientError::Lost)?;
+    Ok(lines)
 }
 
 /// Asks the node, `node` by name, to enrol `public_key` as an operator called `name`. With

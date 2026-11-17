@@ -274,3 +274,41 @@ body! {
         pub poll_ms: u32,
     }
 }
+
+open_enum! {
+    /// Which way the board's security switch would be turned.
+    pub enum SecurityTo: u8 {
+        /// On: only keys the board trusts get in.
+        On = 1,
+        /// Off: everyone may do everything.
+        Off = 2,
+    }
+}
+
+body! {
+    /// Asks whether the comm core sees anything against turning the board's security switch
+    /// `to` that state. It changes nothing. Answered with [`SecurityPrechecked`].
+    pub struct SecurityPrecheck = kind::SECURITY_PRECHECK {
+        /// The state the switch would be turned to.
+        pub to: SecurityTo,
+    }
+}
+
+body! {
+    /// One thing against turning the switch, in the words of the device library's
+    /// `system.security-precondition/1`: `missing: <reason>` or `busy: <reason>`.
+    pub struct PrecheckLine<'a> {
+        /// The line.
+        pub line: &'a str,
+    }
+}
+
+body! {
+    /// Answers a [`SecurityPrecheck`]. No line means nothing is against it.
+    pub struct SecurityPrechecked<'a> = kind::SECURITY_PRECHECKED {
+        /// The `seq` of the [`SecurityPrecheck`].
+        pub request_seq: u16,
+        /// What is against it, if anything.
+        pub lines: List<'a, PrecheckLine<'a>>,
+    }
+}

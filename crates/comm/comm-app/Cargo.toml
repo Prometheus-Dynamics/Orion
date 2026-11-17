@@ -79,6 +79,7 @@ orion-device-gateway = { path = "../device-gateway", optional = true }
 orion-discovery = { path = "../discovery", optional = true }
 orion-hello = { path = "../hello" }
 orion-keys = { path = "../keys" }
+orion-msg-peers = { path = "../../core/msg-peers" }
 orion-log = { path = "../../core/log" }
 orion-link-can = { path = "../link-can", optional = true }
 orion-link-serial = { path = "../link-serial", optional = true }
@@ -145,6 +146,10 @@ required-features = ["offers", "recovery"]
 [[test]]
 name = "own_files"
 required-features = ["offers", "recovery"]
+
+[[test]]
+name = "precheck"
+required-features = ["recovery"]
 
 [lints]
 workspace = true

@@ -287,6 +287,11 @@ what to change.
   page table in `docs/ring.md` has the layout word.
 - **C65.** Tests only: nothing a consumer calls changes. The shell test's open flake is fixed by
   its cause (`docs/flakes.md`).
+- **C32b.** Orion's precheck of the security switch (**Add**, level 5, `INTERFACE_LEVEL` 5): a
+  new concept, `Security` (`0xB0` to `0xBF`), with kinds `SECURITY_PRECHECK` (0xB0) and
+  `SECURITY_PRECHECKED` (0xB1); `SecurityTo`, `PrecheckLine`; `Orion::security_precheck`,
+  `node::SecurityTo`; `Feature::SecurityPrecheck` (a `match` on `Feature` or on `Concept`
+  without `_` gains an arm). The comm core answers it running and in recovery.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

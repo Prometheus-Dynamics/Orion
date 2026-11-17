@@ -379,6 +379,19 @@ impl Orion {
         Ok(node::peers(&self.client, &self.node, Some(peer))?)
     }
 
+    /// What Orion has against turning the board's security switch `to`, in the words of the
+    /// device library's `system.security-precondition/1`: a `missing: <reason>` or
+    /// `busy: <reason>` line for each thing, and none when nothing is. It changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`orion_connect::ClientError::Level`] from a node below
+    /// [`orion_connect::Feature::SecurityPrecheck`]'s level, and nothing is sent. Refused
+    /// without read access; as [`Orion::clock`].
+    pub fn security_precheck(&self, to: node::SecurityTo) -> Result<Vec<String>, Error> {
+        Ok(node::precheck(&self.client, &self.node, to)?)
+    }
+
     /// Asks the board to enrol `public_key` as an operator called `name`.
     ///
     /// Who may ask: an administrator on the board (root, on the board's own socket), for any
