@@ -319,6 +319,9 @@ what to change.
   another's. Nothing a caller calls changes.
 - **I16.** Tests that check nothing listens on a port hold the port while they check. Nothing a
   caller calls changes.
+- **I17.** CI runs the tests with cargo-nextest, as the gate does where it is installed, and lets
+  the sandbox test's user namespace hold capabilities. The test skips, and says so, where a
+  namespace holds none. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

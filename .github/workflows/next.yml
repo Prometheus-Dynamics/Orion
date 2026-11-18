@@ -25,6 +25,18 @@ jobs:
       # rust-toolchain.toml selects the toolchain and its components.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The gate runs each test in a process of its own with cargo-nextest where it is installed,
+      # as on a worker's machine; without it, cargo test runs the same cases one binary at a time.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      # Ubuntu's AppArmor gives a user namespace made by an unconfined program no capabilities,
+      # and the sandbox test that checks what each kind of session holds needs them in one of
+      # its own. This runner is the test's, and thrown away after.
+      - run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - run: ./scripts/gate.sh
 
   # The client on the systems it is built for besides Linux: built, and its tests run. The tests

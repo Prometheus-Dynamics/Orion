@@ -202,6 +202,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I14](docs/prs/I14.md) A scoped check for the inner loop, and a prune for the target directory (wave 19; needs I13)
 - [x] [I15](docs/prs/I15.md) A new worktree's target directory starts as a copy of another's (wave 19; needs I14)
 - [x] [I16](docs/prs/I16.md) A test that checks nothing listens on a port holds that port (wave 19; needs I15)
+- [x] [I17](docs/prs/I17.md) CI green again: the sandbox test gets capabilities, and the tests run with nextest (wave 19; needs I16)
 
 ## J. The stack around Orion
 

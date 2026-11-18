@@ -570,13 +570,25 @@ fn each_kind_of_session_holds_what_it_should_and_no_more() {
         unshare.args(["--map-auto", "--map-root-user", "--"]);
         unshare
     };
-    let allowed = unshare()
-        .arg("true")
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if !allowed {
+    let runs = |unshare: &mut Command| {
+        unshare
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    if !runs(unshare().arg("true")) {
         println!("no user namespace with subordinate ids here: what sessions hold was not tried");
+        return;
+    }
+    // A namespace can be made and its root still hold no capabilities: Ubuntu's AppArmor
+    // (`kernel.apparmor_restrict_unprivileged_userns`) gives one made by an unconfined program
+    // none, and emptying a bounding set is then refused. Asked of `setpriv` where it is installed.
+    let setpriv = Command::new("setpriv").arg("--version").output().is_ok();
+    if setpriv && !runs(unshare().args(["setpriv", "--bounding-set", "-all", "true"])) {
+        println!(
+            "a user namespace here holds no capabilities (AppArmor's unprivileged_userns): \
+             what sessions hold was not tried"
+        );
         return;
     }
     let ran = unshare()
