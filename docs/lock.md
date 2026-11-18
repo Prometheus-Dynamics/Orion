@@ -324,6 +324,8 @@ what to change.
   namespace holds none. Nothing a caller calls changes.
 - **I18.** The tests that take longest start first, and SHA-256 is optimized in debug and test
   builds. Nothing a caller calls changes.
+- **I19.** A test that pushes a file again reads it again for each try. Nothing a caller calls
+  changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

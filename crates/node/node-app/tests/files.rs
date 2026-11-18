@@ -132,18 +132,20 @@ impl Seek for Lying {
     }
 }
 
-/// Pushes until node logic answers.
-fn push(
+/// Pushes until node logic answers, each try from a source `made` again: a sender that tries
+/// again reads its file again. A source that counts its passes (`Failing`, `Lying`) would
+/// otherwise start the second try where the first left it, and fail or lie in its digest pass.
+fn push<S: Read + Seek>(
     orion: &Orion,
     destination: &str,
-    source: &mut (impl Read + Seek),
+    mut made: impl FnMut() -> S,
     seen: &mut Vec<u64>,
 ) -> Result<orion::files::Transfer, ClientError> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match orion
             .files()
-            .push(destination, source, |received, _| seen.push(received))
+            .push(destination, &mut made(), |received, _| seen.push(received))
         {
             Err(ClientError::Refused {
                 error: Error::Unavailable,
@@ -167,13 +169,13 @@ fn a_push_that_is_interrupted_goes_on_from_where_it_was() {
 
     // The first try: the source fails after 400 KiB.
     let sender = Orion::connect(&address, "sender").expect("connect");
-    let mut failing = Failing {
+    let failing = || Failing {
         inner: Cursor::new(data.clone()),
         sending: false,
         fail_at: 400_000,
     };
     let mut seen = Vec::new();
-    let failed = push(&sender, "models/detector.bin", &mut failing, &mut seen);
+    let failed = push(&sender, "models/detector.bin", failing, &mut seen);
     assert!(matches!(failed, Err(ClientError::Io(_))), "{failed:?}");
     assert!(!place.exists(), "nothing is in place until it is whole");
     drop(sender);
@@ -212,7 +214,7 @@ fn a_push_that_is_interrupted_goes_on_from_where_it_was() {
     let done = push(
         &sender,
         "models/detector.bin",
-        &mut Cursor::new(data.clone()),
+        || Cursor::new(data.clone()),
         &mut seen,
     )
     .expect("push");
@@ -229,7 +231,7 @@ fn a_push_that_is_interrupted_goes_on_from_where_it_was() {
     let again = push(
         &sender,
         "models/detector.bin",
-        &mut Cursor::new(data.clone()),
+        || Cursor::new(data.clone()),
         &mut seen,
     )
     .expect("push");
@@ -259,18 +261,18 @@ fn a_file_that_does_not_match_its_digest_is_refused() {
     let done = push(
         &sender,
         "firmware.bin",
-        &mut Cursor::new(good.clone()),
+        || Cursor::new(good.clone()),
         &mut seen,
     )
     .expect("push");
     assert_eq!(done.state, FileState::Committed);
 
     // Then one whose bytes are not the ones its digest was taken of.
-    let mut lying = Lying {
+    let lying = || Lying {
         inner: Cursor::new(contents()),
         passes: 0,
     };
-    let refused = push(&sender, "firmware.bin", &mut lying, &mut seen).expect("an answer");
+    let refused = push(&sender, "firmware.bin", lying, &mut seen).expect("an answer");
     assert_eq!(refused.state, FileState::Rejected);
     assert_eq!(refused.detail, "the digest does not match");
     // What was there is untouched, and the bad bytes are gone.
