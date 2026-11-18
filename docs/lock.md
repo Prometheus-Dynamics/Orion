@@ -329,6 +329,8 @@ what to change.
 - **I20.** `scripts/gate.sh --part <part>` runs one part of the gate. CI runs the five parts at
   once, each on a runner of its own, and keys its caches on the root manifest. Nothing a caller
   calls changes.
+- **I21.** The gate runs its feature matrix, other-systems and device lanes at a lower priority
+  than the size gate and the main steps. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

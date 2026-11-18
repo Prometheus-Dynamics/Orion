@@ -158,6 +158,7 @@ fi
 # [package.metadata.orion]
 # no_std = true
 other_systems() {
+  renice -n "$behind" -p "$BASHPID" > /dev/null
   export CARGO_TARGET_DIR="$target_dir/other-systems"
   local target crate client=()
   mapfile -t no_std_crates < <(grep -l '^no_std = true' crates/*/*/Cargo.toml | xargs -r sed -n 's/^name = "\(.*\)"$/\1/p')
@@ -181,16 +182,21 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   main lockfile lockfile
   main format cargo fmt --all --check
 
-  # Beside the rest, each in target directories of its own.
+  # Beside the rest, each in target directories of its own. The size gate goes last of all
+  # when a crate the shipped files hold changes: each of its builds ends in a fat-LTO link of one
+  # thread. The other lanes and the main steps finish well before it, so the other lanes run at a
+  # lower priority (`nice`) and leave those links the processors first. Mean of six interleaved
+  # gates after a change to the comm core, at load 29-83: 125 s, 91 s with this (I21).
+  behind=10
   # Every crate with optional features: none, each alone, all.
-  lane matrix "feature matrix" scripts/feature-matrix.sh
+  lane matrix "feature matrix" nice -n "$behind" scripts/feature-matrix.sh
   lane other-systems "no_std and the client on other systems" other_systems
   if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
     lane size "size gate" scripts/size-gate.sh
   fi
   devices=()
   if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
-    devices+=("device size" env CARGO_TARGET_DIR="$target_dir/device-lane" scripts/device-size.sh --)
+    devices+=("device size" nice -n "$behind" env CARGO_TARGET_DIR="$target_dir/device-lane" scripts/device-size.sh --)
   fi
   if [ -x scripts/mcu-template.sh ] && [ -d examples/mcu-template ]; then
     devices+=("mcu template" env CARGO_TARGET_DIR="$target_dir" scripts/mcu-template.sh --)
