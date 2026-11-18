@@ -15,12 +15,17 @@ fn keys() -> SharedKeys {
     SharedKeys::new(Keys::open(KeysConfig::in_memory("lab"), Security::Off).expect("keys"))
 }
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("bind")
-        .local_addr()
-        .expect("addr")
-        .port()
+/// A port held, bound and not listening, for as long as the socket lives: one merely found free
+/// can be handed to another test's listener, which a check that nothing listens there would
+/// take for the server's. Bound with SO_REUSEADDR, as the server binds, it does not stop the
+/// server listening there.
+fn held_port() -> (tokio::net::TcpSocket, u16) {
+    let held = tokio::net::TcpSocket::new_v4().expect("socket");
+    held.set_reuseaddr(true).expect("reuse");
+    held.bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .expect("bind");
+    let port = held.local_addr().expect("addr").port();
+    (held, port)
 }
 
 #[test]
@@ -57,7 +62,7 @@ fn listening_on_one_interface_takes_connections_there() {
 #[test]
 fn an_interface_that_is_not_there_is_waited_for_not_given_up_on() {
     let dir = temp("interface-absent");
-    let port = free_port();
+    let (held, port) = held_port();
     let server = Server::start(&dir, Security::Off, keys(), |config| {
         config.listen = SocketAddr::from(([127, 0, 0, 1], port));
         config.interface = Some("orionnone0".to_owned());
@@ -68,5 +73,6 @@ fn an_interface_that_is_not_there_is_waited_for_not_given_up_on() {
     let error = orion_ssh::listen(server.addr, Some("orionnone0")).expect_err("not there");
     assert!(orion_ssh::absent(&error), "{error}");
     drop(server);
+    drop(held);
     let _ = std::fs::remove_dir_all(dir);
 }

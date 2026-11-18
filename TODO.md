@@ -201,6 +201,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I13](docs/prs/I13.md) Debug builds are incremental, and test browsers leave the GPU alone (wave 19; needs I12)
 - [x] [I14](docs/prs/I14.md) A scoped check for the inner loop, and a prune for the target directory (wave 19; needs I13)
 - [x] [I15](docs/prs/I15.md) A new worktree's target directory starts as a copy of another's (wave 19; needs I14)
+- [x] [I16](docs/prs/I16.md) A test that checks nothing listens on a port holds that port (wave 19; needs I15)
 
 ## J. The stack around Orion
 

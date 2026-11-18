@@ -317,6 +317,8 @@ what to change.
   `scripts/prune-target.sh`. Nothing a caller calls changes.
 - **I15.** New `scripts/seed-target.sh`, to start a worktree's target directory as a copy of
   another's. Nothing a caller calls changes.
+- **I16.** Tests that check nothing listens on a port hold the port while they check. Nothing a
+  caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -61,12 +61,13 @@ fn a_connection_from_the_board_is_carried_both_ways() {
     assert_eq!(text(&ran.stdout).len(), "service\n".len() + much.len());
     assert!(text(&ran.stdout).ends_with(&much.to_ascii_uppercase()[much.len() - 1000..]));
 
-    // Nothing listening there: the client is told, and nothing is carried.
-    let closed = TcpListener::bind("127.0.0.1:0")
-        .expect("listen")
-        .local_addr()
-        .expect("addr")
-        .port();
+    // Nothing listening there: the client is told, and nothing is carried. The port is held,
+    // bound and not listening, until then: one merely found free could be another test's
+    // listener by the time the board connects.
+    let held = tokio::net::TcpSocket::new_v4().expect("socket");
+    held.bind("127.0.0.1:0".parse().expect("addr"))
+        .expect("bind");
+    let closed = held.local_addr().expect("addr").port();
     let ran = server.ssh(
         &me.name,
         Some(&admin),
@@ -75,6 +76,7 @@ fn a_connection_from_the_board_is_carried_both_ways() {
     );
     assert!(!ran.status.success());
     assert_eq!(text(&ran.stdout), "");
+    drop(held);
     // Someone who is not let in gets no connection from the board either.
     let ran = server.ssh(&me.name, Some(&stranger), &["-W", &target], "x");
     assert_eq!(

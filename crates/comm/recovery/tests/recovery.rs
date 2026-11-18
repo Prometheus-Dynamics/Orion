@@ -366,11 +366,15 @@ fn on_one_interface_recovery_is_open_there_and_nowhere_else() {
     let dir = temp("interface");
     // The board's settings named an interface that is not there yet: nothing listens on
     // the address alone, which would be wider than the board is.
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("bind")
-        .local_addr()
-        .expect("addr")
-        .port();
+    // The port is held, bound and not listening, until the check is done: a port merely found
+    // free can be handed to another test's listener meanwhile, which the check would take for
+    // recovery's. Bound with SO_REUSEADDR, as recovery binds, it would not stop recovery
+    // listening there.
+    let held = tokio::net::TcpSocket::new_v4().expect("socket");
+    held.set_reuseaddr(true).expect("reuse");
+    held.bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .expect("bind");
+    let port = held.local_addr().expect("addr").port();
     let mut absent = config(&dir, "the interface is not there yet");
     absent.listen = vec![SocketAddr::from(([127, 0, 0, 1], port))];
     absent.interface = Some("orionnone0".to_owned());
@@ -379,6 +383,7 @@ fn on_one_interface_recovery_is_open_there_and_nowhere_else() {
     std::thread::sleep(Duration::from_millis(500));
     assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
     drop(board);
+    drop(held);
 
     // On one that is there, it lets in as the settings say: security off, no key.
     let mut there = config(&dir, "on lo");
