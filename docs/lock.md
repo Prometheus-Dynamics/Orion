@@ -335,6 +335,8 @@ what to change.
   branch still needs them. Nothing a caller calls changes.
 - **I23.** A test board (`orion-stubs`) listens on a port below the kernel's ephemeral range when
   none is named. Nothing a caller calls changes.
+- **I24.** The size gate reuses a measurement whose content key it has recorded, and measures
+  everything at least daily, with `--measure`, and in CI. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

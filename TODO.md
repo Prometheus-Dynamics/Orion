@@ -209,6 +209,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I21](docs/prs/I21.md) The lanes with time to spare run at a lower priority than the size gate (wave 19; needs I20)
 - [x] [I22](docs/prs/I22.md) A worker proves its change, and the landing gate proves the tree (wave 19; needs I21)
 - [x] [I23](docs/prs/I23.md) A test board's port comes from below the ephemeral range, so it is free when the board starts again (wave 19; needs I22)
+- [x] [I24](docs/prs/I24.md) A size build whose inputs were measured before is not built again (wave 19; needs I23)
 
 ## J. The stack around Orion
 

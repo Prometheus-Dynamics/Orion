@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Content keys for the size gate's builds (scripts/size-gate.sh).
+
+A build's key is a hash of everything that can change the bytes it makes:
+
+- every file, by content, in the directory of each workspace crate in the package's dependency
+  closure (normal and build dependencies, on every platform: a superset, never less). Tracked
+  files and new ones; files git ignores are not read by any build here;
+- `Cargo.lock` (every registry and git dependency, by version and checksum or revision), the
+  root `Cargo.toml` (profiles, features, patches, workspace dependencies), `rust-toolchain.toml`,
+  every cargo config file cargo reads (`.cargo/config.toml` here and in each directory above it,
+  and in CARGO_HOME), and where CARGO_HOME is (a dependency's paths are in its panic messages);
+- this script, so a change to what a key holds measures everything again;
+- the toolchain (`rustc -vV`, `cargo -V`), the package, the target, and the C compiler and
+  linker: `cc --version` for this machine, zig's version and the wrapper scripts for a board;
+- every environment variable a build or a build script reads by convention (CARGO_*, RUST*,
+  CC*, CXX*, AR*, CFLAGS*, LDFLAGS*, TARGET_*, HOST_*, ZIG*, PKG_CONFIG*, SOURCE_DATE_EPOCH),
+  but CARGO_TARGET_DIR, with the worktree's path written as <root>.
+
+The worktree's path itself is not in the key: the gate's self-test and every re-measure check
+that a build's bytes do not depend on it.
+
+    size-key.py ROOT NAME:PACKAGE:TARGET...    one line per build: NAME KEY
+    size-key.py --explain ROOT NAME:PACKAGE:TARGET
+                                               each input and its hash, then the key
+
+TARGET is `host` for a build for this machine.
+"""
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+
+# Raised when what goes into a key changes, so no older entry is read as a newer one.
+KEY_VERSION = "1"
+
+ENV = re.compile(
+    r"^(CARGO_|RUST|CC|CXX|AR(_|$)|CFLAGS|CXXFLAGS|LDFLAGS|TARGET_|HOST_|ZIG|PKG_CONFIG|SOURCE_DATE_EPOCH)"
+)
+NOT_IN_KEY = {"CARGO_TARGET_DIR"}
+
+
+def run(args, cwd):
+    try:
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        return f"<{args[0]} failed: {error}>"
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def file_digest(path):
+    try:
+        with open(path, "rb") as file:
+            return digest(file.read())
+    except FileNotFoundError:
+        return "absent"
+
+
+def cargo_home():
+    return os.environ.get("CARGO_HOME") or os.path.join(os.path.expanduser("~"), ".cargo")
+
+
+def cargo_configs(root):
+    """Every cargo config file cargo reads for a build in ROOT, nearest first."""
+    found = []
+    here = os.path.abspath(root)
+    while True:
+        for name in ("config.toml", "config"):
+            path = os.path.join(here, ".cargo", name)
+            if os.path.isfile(path):
+                found.append(path)
+        parent = os.path.dirname(here)
+        if parent == here:
+            break
+        here = parent
+    for name in ("config.toml", "config"):
+        path = os.path.join(cargo_home(), name)
+        if os.path.isfile(path) and path not in found:
+            found.append(path)
+    return found
+
+
+class Workspace:
+    def __init__(self, root):
+        self.root = os.path.abspath(root)
+        meta = json.loads(
+            run(["cargo", "metadata", "--locked", "--offline", "--format-version", "1"], self.root)
+        )
+        self.packages = {p["id"]: p for p in meta["packages"]}
+        self.members = set(meta["workspace_members"])
+        self.by_name = {self.packages[i]["name"]: i for i in self.members}
+        self.deps = {}
+        for node in meta["resolve"]["nodes"]:
+            self.deps[node["id"]] = [
+                dep["pkg"]
+                for dep in node["deps"]
+                if any(kind["kind"] != "dev" for kind in dep["dep_kinds"])
+            ]
+        self.digests = {}
+        self.shared_cache = None
+
+    def closure(self, package):
+        start = self.by_name[package]
+        seen, todo = set(), [start]
+        while todo:
+            current = todo.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            todo.extend(self.deps.get(current, []))
+        return sorted(
+            os.path.relpath(os.path.dirname(self.packages[i]["manifest_path"]), self.root)
+            for i in seen
+            if i in self.members
+        )
+
+    def files(self, directory):
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", directory],
+            cwd=self.root,
+            capture_output=True,
+            check=True,
+        ).stdout
+        names = sorted({name.decode() for name in listed.split(b"\0") if name})
+        out = []
+        for name in names:
+            if name not in self.digests:
+                self.digests[name] = file_digest(os.path.join(self.root, name))
+            out.append((name, self.digests[name]))
+        return out
+
+    def shared(self):
+        if self.shared_cache is None:
+            inputs = [("key version", KEY_VERSION)]
+            for name in ("Cargo.lock", "Cargo.toml", "rust-toolchain.toml", "scripts/size-key.py"):
+                inputs.append((name, file_digest(os.path.join(self.root, name))))
+            for path in cargo_configs(self.root):
+                shown = path.replace(self.root, "<root>", 1) if path.startswith(self.root) else path
+                inputs.append((f"cargo config {shown}", file_digest(path)))
+            inputs.append(("CARGO_HOME", cargo_home()))
+            inputs.append(("rustc -vV", digest(run(["rustc", "-vV"], self.root).encode())))
+            inputs.append(("cargo -V", digest(run(["cargo", "-V"], self.root).encode())))
+            env = sorted(
+                (name, value.replace(self.root, "<root>"))
+                for name, value in os.environ.items()
+                if ENV.match(name) and name not in NOT_IN_KEY
+            )
+            inputs.append(("environment", digest(json.dumps(env).encode())))
+            self.shared_cache = inputs
+        return self.shared_cache
+
+    def inputs(self, package, target):
+        inputs = list(self.shared())
+        inputs.append(("package", package))
+        inputs.append(("target", target))
+        if target == "host":
+            inputs.append(("cc --version", digest(run(["cc", "--version"], self.root).encode())))
+        else:
+            inputs.append(("zig version", run(["zig", "version"], self.root).strip()))
+            for suffix in ("", "-ar"):
+                wrapper = os.path.join("scripts", "zigcc", target + suffix)
+                inputs.append((wrapper, file_digest(os.path.join(self.root, wrapper))))
+        for directory in self.closure(package):
+            for name, file_hash in self.files(directory):
+                inputs.append((name, file_hash))
+        return inputs
+
+    def key(self, package, target):
+        return digest(json.dumps(self.inputs(package, target)).encode())
+
+
+def main(argv):
+    explain = bool(argv) and argv[0] == "--explain"
+    if explain:
+        argv = argv[1:]
+    if len(argv) < 2:
+        print(__doc__.strip().splitlines()[-6], file=sys.stderr)
+        return 2
+    workspace = Workspace(argv[0])
+    for spec in argv[1:]:
+        name, package, target = spec.split(":")
+        if explain:
+            for label, value in workspace.inputs(package, target):
+                print(f"{label}\t{value}")
+        print(name, workspace.key(package, target))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
