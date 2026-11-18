@@ -6,11 +6,24 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 
+/// Firefox's settings for a profile that leaves the GPU alone.
+const SOFTWARE_ONLY: &str = "\
+user_pref(\"gfx.webrender.software\", true);
+user_pref(\"layers.acceleration.disabled\", true);
+user_pref(\"gfx.canvas.accelerated\", false);
+user_pref(\"webgl.disabled\", true);
+user_pref(\"media.hardware-video-decoding.enabled\", false);
+user_pref(\"media.ffmpeg.vaapi.enabled\", false);
+";
+
 /// A headless browser on `url`, if one is installed. `profile` is an empty directory for it.
 #[must_use]
 pub fn browse(url: &str, profile: &Path) -> Option<Child> {
+    // Nothing here runs on this machine's GPU: drawing, video and GL are all in software.
     let firefox = |program: &str| {
+        std::fs::write(profile.join("user.js"), SOFTWARE_ONLY).ok()?;
         Command::new(program)
+            .env("LIBGL_ALWAYS_SOFTWARE", "1")
             .args(["--headless", "--no-remote", "--new-instance", "--profile"])
             .arg(profile)
             .arg(url)
@@ -21,9 +34,12 @@ pub fn browse(url: &str, profile: &Path) -> Option<Child> {
     };
     let chrome = |program: &str| {
         Command::new(program)
+            .env("LIBGL_ALWAYS_SOFTWARE", "1")
             .args([
                 "--headless=new",
                 "--disable-gpu",
+                "--disable-gpu-compositing",
+                "--disable-accelerated-video-decode",
                 "--no-first-run",
                 "--no-sandbox",
                 "--autoplay-policy=no-user-gesture-required",

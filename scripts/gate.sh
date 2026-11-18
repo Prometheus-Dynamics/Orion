@@ -2,7 +2,8 @@
 # The check every PR into next must pass. CI runs exactly this.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+# Debug and test builds are incremental (cargo's default): a change rebuilds only what it
+# touched. The steps whose output is measured pin it off themselves.
 
 step() {
   local label="$1" start

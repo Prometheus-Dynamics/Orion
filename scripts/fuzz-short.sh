@@ -5,6 +5,8 @@
 # The targets are built once, then all run at the same time, each for the whole budget: one
 # libFuzzer process is one thread.
 set -euo pipefail
+# Never incremental, whatever the caller set: the targets are built as cargo-fuzz builds them.
+export CARGO_INCREMENTAL=0
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 seconds="${1:-3}"
 logs="$(mktemp -d "${TMPDIR:-/tmp}/orion-fuzz.XXXXXX")"

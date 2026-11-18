@@ -12,6 +12,8 @@
 # narrow it. Each variant past can is the stream device with one more layer. A change that goes
 # past a budget either wins the bytes back or raises the budget here, with the reason.
 set -euo pipefail
+# Never incremental, whatever the caller set: the bytes measured are of a build made whole, as it ships.
+export CARGO_INCREMENTAL=0
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 read -r -a targets <<<"${DEVICE_SIZE_TARGETS:-thumbv6m-none-eabi thumbv7em-none-eabihf riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf}"

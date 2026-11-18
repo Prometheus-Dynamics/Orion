@@ -22,6 +22,8 @@
 # A change that pushes a size past its limit either wins the bytes back or raises the
 # limit here, in the same commit, with the reason.
 set -euo pipefail
+# Never incremental, whatever the caller set: the bytes measured are of a build made whole, as it ships.
+export CARGO_INCREMENTAL=0
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # Bytes. Each is what was measured when it was last set, and a small margin: 20-30 KB, rounded

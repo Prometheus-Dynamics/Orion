@@ -310,6 +310,9 @@ what to change.
   changes.
 - **I12.** `scripts/gate.sh` runs its steps that have target directories of their own beside
   clippy and the tests. Nothing a caller calls changes.
+- **I13.** The gate's debug and test builds are incremental; the size gate, the device size and
+  fuzz pin `CARGO_INCREMENTAL=0`. The web tests' browsers run in software only. Nothing a caller
+  calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
