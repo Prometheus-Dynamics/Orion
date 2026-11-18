@@ -36,10 +36,12 @@ fn next(
     loop {
         match transport.take(buf, &mut FdSet::default())? {
             // A link is a stream that outlives its sessions: the board's answer to the last
-            // session's heartbeat may still be in it, unread. It is nobody's now.
+            // session's heartbeat may still be in it, unread, sealed if that session was
+            // signed. It is nobody's now: nothing is sealed before this handshake ends.
             Step::Frame(len)
-                if frame::decode(&buf[..len])
-                    .is_ok_and(|view| matches!(view.kind(), kind::PING | kind::PONG)) => {}
+                if frame::decode(&buf[..len]).is_ok_and(|view| {
+                    matches!(view.kind(), kind::PING | kind::PONG | kind::LINK_SEALED)
+                }) => {}
             Step::Frame(len) => return Ok(len),
             Step::Closed => return Err(ClientError::Lost),
             Step::Nothing => {

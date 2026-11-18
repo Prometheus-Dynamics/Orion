@@ -242,3 +242,4 @@ Agreed with the libraries around Orion on 2026-11-11.
 - [x] [C32b](docs/prs/C32b.md) Orion's precheck of the security switch, running and in recovery (wave 19; needs C32a)
 - [x] [J13](docs/prs/J13.md) The shm-* pins at the device library's d4942290, its FL1 merge (wave 19; needs J12)
 - [x] [C68](docs/prs/C68.md) An ended detached run is given back every time it is asked for, until it expires (wave 19; needs J13)
+- [x] [C71](docs/prs/C71.md) Two flakes under load fixed by cause: a sealed leftover on a link, a command killed as it exits (wave 19; needs C68)

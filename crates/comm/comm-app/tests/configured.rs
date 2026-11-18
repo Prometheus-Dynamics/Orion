@@ -38,7 +38,9 @@ fn settings(dir: &Path, mode: u32) -> CommSettings {
              sys/ echo = command /usr/bin/echo made by echo bound 100 timeout 5000\n\
              sys/ yes = command /usr/bin/yes bound 1000 timeout 5000 user-data\n\
              sys/ slow = command /usr/bin/sleep 5 bound 10 timeout 200\n\
-             sys/ fails = command /usr/bin/false bound 10 timeout 5000\n",
+             sys/ fails = command /usr/bin/false bound 10 timeout 5000\n\
+             sys/ closes = command /usr/bin/sh -c echo${{IFS}}closed;exec>&-;sleep${{IFS}}0.2 \
+             bound 10 timeout 5000\n",
             dir.display()
         ),
     )
@@ -108,10 +110,11 @@ fn a_running_comm_core_serves_the_files_its_settings_name() {
             "sys/yes",
             "sys/slow",
             "sys/fails",
+            "sys/closes",
         ];
         let (fetched, offers) = fetch(core.socket(), names).await;
         let index = Index::parse(fetched[0].as_ref().expect("index")).expect("an index");
-        assert_eq!(index.total, 100 + 100 + 1000 + 10 + 10);
+        assert_eq!(index.total, 100 + 100 + 1000 + 10 + 10 + 10);
         assert_eq!(index.bound("sys/yes"), Some(1000));
         assert!(index.entries[2].user_data && !index.entries[0].user_data);
         assert_eq!(fetched[1], Ok("board-1\n".into()));
@@ -126,6 +129,9 @@ fn a_running_comm_core_serves_the_files_its_settings_name() {
             fails.starts_with("sys/fails: /usr/bin/false exit status: 1"),
             "{fails}"
         );
+        // Its output closed while it still ran, as coreutils closes it on the way out: it
+        // is waited for, never ended then and told killed.
+        assert_eq!(fetched[6], Ok("closed\n".into()));
         assert!(
             offers
                 .iter()

@@ -235,7 +235,8 @@ system/ journal = command /usr/bin/journalctl -b -n 2000 bound 1048576 timeout 1
 - **`command /<absolute program> [args]`** runs with no shell, no environment but `PATH`, in
   `/`, with nothing on its input; its output up to its bound is the file. At its bound it is
   ended and what it wrote is the file. It must end within its `timeout` in milliseconds, or it
-  is ended and the fetch rejected, "<name>: <program> did not finish in <ms> ms"; an exit that
+  is ended and the fetch rejected, "<name>: <program> did not finish in <ms> ms". Closing its
+  output is not its end: it is waited for to exit, within the same `timeout`. An exit that
   is not 0 is rejected with its status. Every fetch of a file being made waits for the one run.
 - **`user-data`** marks a file that may hold a user's data, in the index.
 - **Who runs them.** `offers.user`, the comm core's own user unless it is said. Another user

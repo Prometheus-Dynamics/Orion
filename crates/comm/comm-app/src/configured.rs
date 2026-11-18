@@ -312,8 +312,19 @@ fn run(
     let (told, heard) = tokio::sync::oneshot::channel();
     let (name, program) = (name.to_owned(), argv[0].clone());
     std::thread::spawn(move || {
-        let made = output(&mut child, bound, Duration::from_millis(timeout_ms));
-        let _ = child.kill();
+        let timeout = Duration::from_millis(timeout_ms);
+        let deadline = Instant::now() + timeout;
+        let mut made = output(&mut child, bound, timeout, deadline);
+        // A command that closed its output may not have exited yet: one that closes it on its
+        // way out (coreutils does) and is ended then would be told killed. It is waited for,
+        // until the deadline.
+        let closed = matches!(made, Ok((_, false)));
+        if closed && !exits_by(&child, deadline) {
+            made = Err(format!("did not finish in {timeout_ms} ms"));
+        }
+        if !closed || made.is_err() {
+            let _ = child.kill();
+        }
         let status = child.wait();
         let made = match (made, status) {
             (Err(why), _) => Err(format!("{name}: {program} {why}")),
@@ -340,11 +351,11 @@ fn output(
     child: &mut std::process::Child,
     bound: u64,
     timeout: Duration,
+    deadline: Instant,
 ) -> Result<(Vec<u8>, bool), String> {
     let Some(mut out) = child.stdout.take() else {
         return Err("has no output".into());
     };
-    let deadline = Instant::now() + timeout;
     let mut bytes = Vec::new();
     let mut buf = [0_u8; 8192];
     loop {
@@ -372,6 +383,31 @@ fn output(
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(error) => return Err(format!("output: {error}")),
+        }
+    }
+}
+
+/// Whether `child` has exited by `deadline`. It is not reaped.
+fn exits_by(child: &std::process::Child, deadline: Instant) -> bool {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    let Some(pid) = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    else {
+        return false;
+    };
+    let Ok(process) = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) else {
+        return false;
+    };
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let timespec = Timespec::try_from(left).unwrap_or_default();
+        let mut fds = [PollFd::new(&process, PollFlags::IN)];
+        match poll(&mut fds, Some(&timespec)) {
+            Ok(0) => return false,
+            Ok(_) => return true,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(_) => return false,
         }
     }
 }

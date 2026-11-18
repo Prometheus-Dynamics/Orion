@@ -299,6 +299,12 @@ what to change.
   with words beginning `expired:`. `orion_action_list::MAX_EXPIRED` is added (**Add**). A caller
   that relied on a second attach being `not found` now gets the end again (**Break** in
   behaviour only).
+- **C71.** A signed hello on a link skips a sealed frame that comes before the board's answer: one
+  left by the last signed session on the link. Before, it failed with `the board does not take a
+  signed session on a link`. Nothing a caller calls changes.
+  A file of `offers.file` made by a command whose output ends is waited for until its
+  `timeout` before the command is ended; before, it was ended at once, and could be told killed.
+  One that closes its output and runs past its `timeout` is refused `did not finish in N ms`.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
