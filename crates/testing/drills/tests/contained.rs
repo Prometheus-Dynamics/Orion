@@ -3,7 +3,7 @@
 //! arrives in order), lets one neighbour misbehave, and checks that the traffic, the command
 //! line and the comm core never noticed.
 
-mod support;
+use crate::support;
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;

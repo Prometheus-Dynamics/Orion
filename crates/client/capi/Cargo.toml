@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-capi"
 description = "A small versioned C surface over the Orion client: connect, publish, subscribe."
 edition.workspace = true
@@ -21,3 +22,9 @@ orion-stubs = { path = "../../testing/stubs" }
 [lints.rust]
 unsafe_code = "allow"
 unsafe_op_in_unsafe_fn = "deny"
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"

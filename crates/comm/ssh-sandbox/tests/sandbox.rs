@@ -18,6 +18,16 @@ use orion_ssh_sandbox::protocol::{Answer, Ask, Want, recv, send};
 use orion_ssh_sandbox::{SandboxConfig, SandboxedSsh, monitor};
 use orion_types::KeyId;
 
+/// A test's name in this binary, for running the binary again on that test alone: the file's
+/// module path in the test crate, then the name (`actions::provider_process` where the crate's
+/// test files share one binary; `provider_process` where this file is a binary of its own).
+fn own_test(name: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{name}"),
+        None => name.to_owned(),
+    }
+}
+
 const WAIT: Duration = Duration::from_secs(15);
 
 fn installed() -> bool {
@@ -595,7 +605,7 @@ fn each_kind_of_session_holds_what_it_should_and_no_more() {
         .arg(std::env::current_exe().expect("this test"))
         .args([
             "--exact",
-            "each_kind_of_session_holds_what_it_should_and_no_more",
+            own_test("each_kind_of_session_holds_what_it_should_and_no_more").as_str(),
             "--nocapture",
         ])
         .env(INSIDE, "1")

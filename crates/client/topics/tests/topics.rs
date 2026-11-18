@@ -11,7 +11,7 @@ use orion_broker::{Broker, BrokerConfig};
 use orion_broker_proxy::BrokerProxy;
 use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
-use orion_measure::{CountingAlloc, thread_counts};
+use orion_measure::thread_counts;
 use orion_msg_topics::{Declare, Field, FieldType};
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_tcp::{TcpCarrier, TcpOptions};
@@ -22,8 +22,7 @@ use orion_wire::Decode;
 use shm_ring::{FieldId, Next, SampleTime};
 use shm_ring_time::Lookup;
 
-#[global_allocator]
-static GLOBAL: CountingAlloc = CountingAlloc::system();
+// The counting allocator is the binary's, set once in tests/all.rs.
 
 const FIELDS: [Field<'static>; 2] = [
     Field {

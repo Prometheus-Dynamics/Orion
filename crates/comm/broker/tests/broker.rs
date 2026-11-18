@@ -1,6 +1,6 @@
 //! The broker over the in-memory carrier.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

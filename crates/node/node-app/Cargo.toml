@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-node-app"
 description = "Node logic, assembled: the comm core's first client, which keeps the records and answers for them."
 edition.workspace = true
@@ -52,6 +53,12 @@ orion-sample-executor = { path = "../../testing/sample-executor" }
 orion-stubs = { path = "../../testing/stubs" }
 sha2 = { version = "0.11.0", default-features = false }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

@@ -1,7 +1,7 @@
 //! Who may free a lease: the session that wrote it, a caller whose principal is its holder, or
 //! root. Anyone else is told who holds it.
 
-mod common;
+use crate::common;
 
 use common::*;
 

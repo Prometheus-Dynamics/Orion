@@ -3,7 +3,7 @@
 
 #![cfg(target_os = "linux")]
 
-mod common;
+use crate::common;
 
 use common::*;
 use orion_connect::{FIRST_AGAIN, MOST_BETWEEN};

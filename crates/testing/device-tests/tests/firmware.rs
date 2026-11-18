@@ -21,7 +21,7 @@ use orion_msg_files::FileSend;
 use orion_stubs::Board;
 use orion_wire::body::encode_fields;
 
-mod common;
+use crate::common;
 use common::{Logic, dir, pty, settings, until};
 
 const CAPACITY: usize = 64 * 1024;

@@ -2,7 +2,7 @@
 //! included, keep going, because those hold their rings; nothing new connects. It restarts,
 //! publishers offer their rings again, and everything connects again with no backoff.
 
-mod support;
+use crate::support;
 
 use std::time::{Duration, Instant};
 

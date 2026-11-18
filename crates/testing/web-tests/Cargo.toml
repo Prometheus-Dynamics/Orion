@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-web-tests"
 description = "The web client and the video example run in a real browser against a comm core."
 edition.workspace = true
@@ -15,6 +16,12 @@ orion = { path = "../../client/orion" }
 orion-stubs = { path = "../stubs" }
 sha2 = { version = "0.11.0", default-features = false }
 socket2 = "0.6"
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

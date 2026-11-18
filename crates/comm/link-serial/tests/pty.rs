@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use orion_link_serial::{LinkStats, Serial, StreamCarrier};
 use orion_measure::sched::thread_cpu_ns;
-use orion_measure::{CountingAlloc, thread_counts};
+use orion_measure::thread_counts;
 use orion_msg_session::{Hello, Ping, Pong, Reject, RejectReason, Welcome};
 use orion_server::{Carrier, Connection, FdSet, FrameRead, FrameWrite};
 use orion_server::{Comm, Limits, Roles, Security};
@@ -19,8 +19,7 @@ use orion_wire::{Body, Decode, StreamDecoder, encode_body, encode_frame, kind};
 use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
 use tokio::net::unix::pipe;
 
-#[global_allocator]
-static GLOBAL: CountingAlloc = CountingAlloc::system();
+// The counting allocator is the binary's, set once in tests/all.rs.
 
 fn run(test: impl Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread()

@@ -13,8 +13,7 @@ use orion_nt4::{
 };
 use tokio::time::timeout;
 
-#[global_allocator]
-static GLOBAL: orion_measure::CountingAlloc = orion_measure::CountingAlloc::system();
+// The counting allocator is the binary's, set once in tests/all.rs.
 
 const WAIT: Duration = Duration::from_secs(5);
 

@@ -1,20 +1,22 @@
 # The tests that take longest start first. The run takes as long as its slowest test, or longer
 # when that test starts last. Measured in a gate at I18: the first two took 15-22 s, the next six
-# 5-12 s. A test's priority changes only when it starts, never what it checks.
+# 5-12 s. A test's priority changes only when it starts, never what it checks. A filter names a
+# test by its whole name in its binary (`<file>::<test>` where a crate's test files share one), and
+# scripts/check-test-filters.py, in the gate, fails a filter that matches no test.
 [[profile.default.overrides]]
 filter = '''
-  test(=video_plays_in_a_browser_on_plain_http_over_a_throttled_link)
-  | test(=a_large_file_passes_to_its_receiver_with_memory_bounded_by_the_chunk)
+  test(=video::video_plays_in_a_browser_on_plain_http_over_a_throttled_link)
+  | test(=sink::a_large_file_passes_to_its_receiver_with_memory_bounded_by_the_chunk)
 '''
 priority = 100
 
 [[profile.default.overrides]]
 filter = '''
-  test(=roles_started_before_orion_wait_for_it_and_flow_when_it_comes)
+  test(=comm_core::roles_started_before_orion_wait_for_it_and_flow_when_it_comes)
   | test(=workload_put_and_remove)
   | test(=a_file_that_takes_long_to_hash_does_not_cost_the_session)
-  | test(=a_link_is_opened_again_for_as_long_as_it_takes)
-  | test(=a_device_on_a_link_is_a_resource_an_ordinary_client_reads_and_drives)
-  | test(=a_dialer_never_gives_up_and_never_slows_down)
+  | test(=pty::a_link_is_opened_again_for_as_long_as_it_takes)
+  | test(=devices::a_device_on_a_link_is_a_resource_an_ordinary_client_reads_and_drives)
+  | test(=tcp::a_dialer_never_gives_up_and_never_slows_down)
 '''
 priority = 50

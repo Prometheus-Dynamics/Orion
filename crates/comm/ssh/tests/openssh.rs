@@ -1,7 +1,7 @@
 //! The server with OpenSSH's own `ssh` as the client: logins through the check, commands,
 //! a shell on a terminal, and the limits before a login. If `ssh` is not installed the
 //! tests say so and pass.
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

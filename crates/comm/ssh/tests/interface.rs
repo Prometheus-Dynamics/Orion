@@ -1,6 +1,6 @@
 //! SSH on one network interface (`ssh.interface`), and one that is not there yet.
 
-mod common;
+use crate::common;
 
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;

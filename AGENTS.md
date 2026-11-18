@@ -57,6 +57,14 @@ The work is a pre-planned list of PRs into `next`.
 6. A brief names the exact base commit and the files in scope, and is small enough to finish in
    one context. Longer work hands off through a written state file.
 7. Board runs go one runner per board, in parallel with software work.
+- A crate with two or more integration-test files builds them as one binary: `autotests = false`,
+  and `tests/all.rs` names each file as a module (a file that needs features has its `cfg` there).
+  Add a new test file to `all.rs`; the gate fails a test file that nothing builds. Tests in one
+  crate share a binary, so under plain `cargo test` they run as threads of one process: a test may
+  not rely on being alone in its process (the global allocator, the environment, the current
+  directory). nextest, which the gate uses, still runs each test in a process of its own. A test
+  that runs its binary again names itself with `module_path!()`, and a nextest filter names a test
+  by its whole name, `<file>::<test>`; the gate fails a filter that matches no test.
 - Start a new worktree's target directory with `scripts/seed-target.sh FROM TO`, from another
   worktree's: a copy, never a share, and on btrfs a clone that costs no space.
 

@@ -337,6 +337,9 @@ what to change.
   none is named. Nothing a caller calls changes.
 - **I24.** The size gate reuses a measurement whose content key it has recorded, and measures
   everything at least daily, with `--measure`, and in CI. Nothing a caller calls changes.
+- **I25.** A crate with two or more integration-test files builds them as one binary
+  (`tests/all.rs`); its tests are named `<file>::<test>`. The gate fails a nextest filter that
+  matches no test and a test file nothing builds. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

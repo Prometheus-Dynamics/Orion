@@ -1,7 +1,7 @@
 //! A caller's session that ends: each program that was given a run from it is told once, by a
 //! token that names that session alone. And a detached run must end by itself.
 
-mod common;
+use crate::common;
 
 use common::{Bench, CALLER, HOUR, OTHER, OWNER, fan};
 use orion_msg_actions::{CallerGone, Cancel, CancelReason, Claim, Run};

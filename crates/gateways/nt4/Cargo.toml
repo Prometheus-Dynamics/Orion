@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-nt4"
 description = "NetworkTables 4.1 client and server: topics over WebSocket with MessagePack values and a clock estimate."
 edition.workspace = true
@@ -34,6 +35,12 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync"
 [dev-dependencies]
 orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
 tokio = { workspace = true, features = ["macros", "rt", "time", "io-std", "io-util"] }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

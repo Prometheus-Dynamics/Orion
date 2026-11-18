@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-keys"
 description = "Who is trusted: the node's identity, peer keys, operators and what each may do, and enrollment."
 edition.workspace = true
@@ -21,6 +22,12 @@ tracing.workspace = true
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
 tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

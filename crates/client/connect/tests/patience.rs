@@ -3,7 +3,7 @@
 
 #![cfg(target_os = "linux")]
 
-mod common;
+use crate::common;
 
 use common::*;
 use orion_connect::{Address, ClientError, Options, Patience, Roles, Session};

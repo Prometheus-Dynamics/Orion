@@ -3,15 +3,14 @@
 
 #![cfg(target_os = "linux")]
 
-mod common;
+use crate::common;
 
 use common::*;
 use orion_connect::{Address, ClientError, Roles};
-use orion_measure::{CountingAlloc, thread_counts};
+use orion_measure::thread_counts;
 use orion_msg_session::RejectReason;
 
-#[global_allocator]
-static GLOBAL: CountingAlloc = CountingAlloc::system();
+// The counting allocator is the binary's, set once in tests/all.rs.
 
 /// The test every kind of address runs.
 fn exercise(mut session: Session, descriptors: bool) {

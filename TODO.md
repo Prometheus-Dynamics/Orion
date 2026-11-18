@@ -210,6 +210,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I22](docs/prs/I22.md) A worker proves its change, and the landing gate proves the tree (wave 19; needs I21)
 - [x] [I23](docs/prs/I23.md) A test board's port comes from below the ephemeral range, so it is free when the board starts again (wave 19; needs I22)
 - [x] [I24](docs/prs/I24.md) A size build whose inputs were measured before is not built again (wave 19; needs I23)
+- [x] [I25](docs/prs/I25.md) A crate's integration tests are one binary (wave 19; needs I24)
 
 ## J. The stack around Orion
 

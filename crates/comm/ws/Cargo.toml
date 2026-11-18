@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-ws"
 description = "The WebSocket carrier: the same frames for a browser, on a listener other WebSocket protocols share."
 edition.workspace = true
@@ -20,6 +21,12 @@ orion-keys = { path = "../keys" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

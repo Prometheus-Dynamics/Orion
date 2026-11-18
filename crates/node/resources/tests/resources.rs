@@ -1,6 +1,6 @@
 //! Resources over a store: one provider each, lost when it goes, held by one at a time.
 
-mod common;
+use crate::common;
 
 use common::*;
 use orion_resources::{bind, list, release, release_all};

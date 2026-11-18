@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-drills"
 description = "Failure drills: the board's programs as processes, each killed while the others run, and checked against the design's table."
 edition.workspace = true
@@ -17,6 +18,12 @@ orion = { path = "../../client/orion", features = ["topics", "buffers", "actions
 orion-bin = { path = "../../bins/orion" }
 orion-sample-executor = { path = "../sample-executor" }
 rustix = { version = "1", default-features = false, features = ["std", "net"] }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

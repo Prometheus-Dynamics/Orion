@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-buffers"
 description = "The client's buffer topics: frames in shared memory, published without a copy and held by whoever reads them."
 edition.workspace = true
@@ -25,6 +26,12 @@ orion-types = { path = "../../core/types" }
 orion-server = { path = "../../comm/server" }
 orion-unix = { path = "../../comm/unix" }
 tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

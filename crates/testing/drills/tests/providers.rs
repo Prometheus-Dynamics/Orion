@@ -2,7 +2,7 @@
 //! provider that is still there writes its resources again, and one that is not has them
 //! marked lost.
 
-mod support;
+use crate::support;
 
 use std::time::{Duration, Instant};
 

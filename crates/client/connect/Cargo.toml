@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-connect"
 description = "The client's connection: one session and one way back to it, on the board's socket, the network or a link."
 edition.workspace = true
@@ -38,6 +39,12 @@ orion-tcp = { path = "../../comm/tcp" }
 orion-unix = { path = "../../comm/unix" }
 rustix = { version = "1", default-features = false, features = ["std", "pty"] }
 tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

@@ -14,6 +14,16 @@ use orion_node_app::{ACTIONS_TOPIC, Node, NodeSettings};
 use orion_stubs::{Board, Security};
 use tokio::sync::oneshot;
 
+/// A test's name in this binary, for running the binary again on that test alone: the file's
+/// module path in the test crate, then the name (`actions::provider_process` where the crate's
+/// test files share one binary; `provider_process` where this file is a binary of its own).
+fn own_test(name: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{name}"),
+        None => name.to_owned(),
+    }
+}
+
 /// Set for the process that is the provider: the board's socket.
 const PROVIDER_SOCKET: &str = "ORION_TEST_PROVIDER_SOCKET";
 
@@ -208,7 +218,7 @@ impl Provider {
         let mut child = Command::new(std::env::current_exe().expect("this test"))
             .args([
                 "--exact",
-                "provider_process",
+                own_test("provider_process").as_str(),
                 "--nocapture",
                 "--test-threads=1",
             ])

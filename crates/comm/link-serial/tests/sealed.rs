@@ -8,14 +8,13 @@ use std::time::Duration;
 use orion_keys::{Identity, Keys, KeysConfig, SharedKeys};
 use orion_link_serial::sealed::{LINK_ATTACH, SealedListener, SealedStream};
 use orion_link_serial::{ByteStream, LinkStats, StreamCarrier};
-use orion_measure::{CountingAlloc, thread_counts};
+use orion_measure::thread_counts;
 use orion_msg_session::{Hello, Ping, Pong};
 use orion_server::{Comm, Limits, Roles, Security};
 use orion_wire::{Body, Decode, StreamDecoder, encode_body, encode_frame, kind};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[global_allocator]
-static GLOBAL: CountingAlloc = CountingAlloc::system();
+// The counting allocator is the binary's, set once in tests/all.rs.
 
 fn run(test: impl Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread()

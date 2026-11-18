@@ -2,7 +2,7 @@
 //! through the board, whole and both ways, and only for someone who is logged in and only
 //! when it is on. If `ssh` is not installed the tests say so and pass.
 
-mod common;
+use crate::common;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};

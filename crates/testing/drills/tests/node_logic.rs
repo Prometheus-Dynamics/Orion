@@ -1,7 +1,7 @@
 //! The table's first row. Node logic dies: links, SSH, topics and gateways keep working, and
 //! requests for records answer "restarting". It comes back by connecting as a client.
 
-mod support;
+use crate::support;
 
 use std::time::{Duration, Instant};
 

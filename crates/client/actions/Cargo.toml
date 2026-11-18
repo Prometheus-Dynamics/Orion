@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-actions"
 description = "The client's actions: run one, follow it, cancel it, come back to it; and add one of your own with its policy."
 edition.workspace = true
@@ -20,6 +21,12 @@ orion-server = { path = "../../comm/server" }
 orion-stubs = { path = "../../testing/stubs" }
 orion-unix = { path = "../../comm/unix" }
 tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

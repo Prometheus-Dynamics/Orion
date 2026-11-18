@@ -1,15 +1,13 @@
 //! The server over the in-memory carrier: sessions, the check, deadlines, and sessions that
 //! misbehave.
 
-mod common;
+use crate::common;
 
 use common::*;
-use orion_measure::CountingAlloc;
 use orion_measure::thread_counts;
 use orion_msg_session::Refusal;
 
-#[global_allocator]
-static GLOBAL: CountingAlloc = CountingAlloc::system();
+// The counting allocator is the binary's, set once in tests/all.rs.
 
 #[test]
 fn a_session_opens_pings_and_reaches_a_service() {

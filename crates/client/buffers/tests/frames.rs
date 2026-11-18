@@ -14,14 +14,23 @@ use orion_broker::{Broker, BrokerConfig};
 use orion_broker_buffers::BrokerBuffers;
 use orion_buffers::{Buffers, HoldLimits, NextBatch, Pool};
 use orion_connect::{Address, Client, Options, Session};
-use orion_measure::{CountingAlloc, thread_counts};
+use orion_measure::thread_counts;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_topics::{Status, TopicError, Topics};
 use orion_unix::UnixCarrier;
 use shm_ring::SampleTime;
 
-#[global_allocator]
-static GLOBAL: CountingAlloc = CountingAlloc::system();
+/// A test's name in this binary, for running the binary again on that test alone: the file's
+/// module path in the test crate, then the name (`actions::provider_process` where the crate's
+/// test files share one binary; `provider_process` where this file is a binary of its own).
+fn own_test(name: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{name}"),
+        None => name.to_owned(),
+    }
+}
+
+// The counting allocator is the binary's, set once in tests/all.rs.
 
 const ROLE: &str = "ORION_TEST_ROLE";
 const SOCKET: &str = "ORION_TEST_SOCKET";
@@ -185,7 +194,11 @@ fn two_processes_pass_frames_without_a_copy() {
 
     // The viewer, in another process.
     let mut viewer = Command::new(std::env::current_exe().expect("this test"))
-        .args(["--exact", "viewer_process", "--nocapture"])
+        .args([
+            "--exact",
+            own_test("viewer_process").as_str(),
+            "--nocapture",
+        ])
         .env(ROLE, "viewer")
         .env(SOCKET, &socket)
         .spawn()

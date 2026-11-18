@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-comm-app"
 description = "The comm core, assembled: the always-up program that owns every way into the board."
 edition.workspace = true
@@ -123,33 +124,11 @@ tokio = { workspace = true, features = ["test-util", "net"] }
 name = "orion-comm-helper"
 required-features = ["ssh"]
 
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
 [[test]]
-name = "shell"
-required-features = ["shell", "recovery"]
-
-[[test]]
-name = "signed_link"
-required-features = ["shell", "recovery", "link-usb"]
-
-[[test]]
-name = "recovery"
-required-features = ["recovery", "ssh-sftp", "ssh-sandbox", "nt4"]
-
-[[test]]
-name = "ways"
-required-features = ["ws", "ssh", "nt4"]
-
-[[test]]
-name = "configured"
-required-features = ["offers", "recovery"]
-
-[[test]]
-name = "own_files"
-required-features = ["offers", "recovery"]
-
-[[test]]
-name = "precheck"
-required-features = ["recovery"]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

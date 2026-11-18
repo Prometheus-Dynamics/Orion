@@ -1,6 +1,6 @@
 //! A lease with no end, held by a program that has gone quiet, and another that wants it.
 
-mod common;
+use crate::common;
 
 use common::*;
 use orion_resources::QUIET_MS;

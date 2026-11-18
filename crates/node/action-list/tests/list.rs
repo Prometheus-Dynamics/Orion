@@ -1,7 +1,7 @@
 //! The list: registering, routing a run to whoever registered it, and what happens to a run
 //! when either end goes away or it runs out of time.
 
-mod common;
+use crate::common;
 
 use common::{Bench, CALLER, HOUR, OTHER, OWNER, bare, by, fan};
 use orion_action_list::{ENDED_FOR_MS, Event, MAX_ENDED, MAX_RUNS};

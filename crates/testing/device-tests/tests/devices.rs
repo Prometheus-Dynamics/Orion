@@ -20,7 +20,7 @@ use orion_device_core::{DeviceConfig, StreamDevice};
 use orion_device_topics::{Field, FieldType, TopicSpec, Topics};
 use orion_stubs::Board;
 
-mod common;
+use crate::common;
 use common::{Logic, dir, pty, settings, until};
 
 static TOPICS: [TopicSpec; 1] = [TopicSpec::latest(

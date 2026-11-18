@@ -20,6 +20,16 @@ use orion_server::{Comm, Error, Limits, Security};
 use orion_stubs::router::Router;
 use orion_unix::UnixCarrier;
 
+/// A test's name in this binary, for running the binary again on that test alone: the file's
+/// module path in the test crate, then the name (`actions::provider_process` where the crate's
+/// test files share one binary; `provider_process` where this file is a binary of its own).
+fn own_test(name: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{name}"),
+        None => name.to_owned(),
+    }
+}
+
 const ROLE: &str = "ORION_TEST_ROLE";
 const SOCKET: &str = "ORION_TEST_SOCKET";
 
@@ -170,7 +180,7 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
     started.recv().expect("the comm core starts");
 
     let mut owner = Command::new(std::env::current_exe().expect("this test"))
-        .args(["--exact", "owner_process", "--nocapture"])
+        .args(["--exact", own_test("owner_process").as_str(), "--nocapture"])
         .env(ROLE, "owner")
         .env(SOCKET, &socket)
         .spawn()

@@ -1,6 +1,6 @@
 //! Why the comm core ends a session, and a program on the board that is quiet but not gone.
 
-mod common;
+use crate::common;
 
 use common::*;
 

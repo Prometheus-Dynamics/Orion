@@ -3,8 +3,7 @@
 use orion_measure::harness::assert_steady_no_allocs;
 use orion_wire_vectors::{all, decoders};
 
-#[global_allocator]
-static GLOBAL: orion_measure::CountingAlloc = orion_measure::CountingAlloc::system();
+// The counting allocator is the binary's, set once in tests/all.rs.
 
 #[test]
 fn no_body_allocates_to_decode_or_encode() {

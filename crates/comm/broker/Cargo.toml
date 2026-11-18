@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-broker"
 description = "The topic broker: makes rings, hands their ends out once, and then stays out of the way."
 edition.workspace = true
@@ -23,6 +24,12 @@ orion-msg-session = { path = "../../core/msg-session" }
 shm-ring-doorbell = { workspace = true }
 orion-unix = { path = "../unix" }
 tokio = { workspace = true, features = ["rt", "time", "macros", "net", "test-util"] }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

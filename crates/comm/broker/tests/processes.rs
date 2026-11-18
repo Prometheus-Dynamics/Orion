@@ -4,7 +4,7 @@
 //! same test binary twice more, once as a publisher and once as a subscriber. They find each
 //! other through the broker and then exchange 100,000 values, with wake-ups, without it.
 
-mod common;
+use crate::common;
 
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
@@ -17,6 +17,16 @@ use orion_server::{Comm, Limits, Security};
 use orion_unix::{UnixCarrier, UnixConnection};
 use shm_ring::{FieldId, Flags, Next, SampleTime};
 use shm_ring_doorbell::{Bell, Doorbell, Wake};
+
+/// A test's name in this binary, for running the binary again on that test alone: the file's
+/// module path in the test crate, then the name (`actions::provider_process` where the crate's
+/// test files share one binary; `provider_process` where this file is a binary of its own).
+fn own_test(name: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{name}"),
+        None => name.to_owned(),
+    }
+}
 
 const ROLE: &str = "ORION_TEST_ROLE";
 const SOCKET: &str = "ORION_TEST_SOCKET";
@@ -154,7 +164,7 @@ fn child_process() {
 
 fn start(role: &str, socket: &Path) -> Child {
     Command::new(std::env::current_exe().expect("test binary"))
-        .args(["--exact", "child_process", "--nocapture"])
+        .args(["--exact", own_test("child_process").as_str(), "--nocapture"])
         .env(ROLE, role)
         .env(SOCKET, socket)
         .spawn()

@@ -2,7 +2,7 @@
 //! on record as lost, and they are started again when it is back. Orion dies, both parts:
 //! what runs keeps running, and Orion takes it back by name without starting it again.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 use std::time::Duration;

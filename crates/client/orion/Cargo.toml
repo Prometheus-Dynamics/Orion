@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion"
 description = "The Orion client: one crate, one handle, the same calls wherever the comm core is."
 edition.workspace = true
@@ -58,13 +59,11 @@ orion-stubs = { path = "../../testing/stubs" }
 name = "roles"
 required-features = ["full"]
 
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
 [[test]]
-name = "facade"
-required-features = ["full"]
-
-[[test]]
-name = "older"
-required-features = ["full"]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

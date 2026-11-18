@@ -124,6 +124,19 @@ tests() {
   fi
 }
 
+# Every filter in .config/nextest.toml (a priority, a test group) matches a test: a test renamed
+# or moved into a shared binary would otherwise lose it without a word. Against the list nextest
+# gives for the binaries the tests just ran; nothing to check without nextest.
+test_filters() {
+  if cargo nextest --version > /dev/null 2>&1; then
+    local listing
+    listing="$(mktemp)"
+    cargo nextest list --workspace --all-features --message-format json > "$listing"
+    scripts/check-test-filters.py "$listing"
+    rm -f "$listing"
+  fi
+}
+
 # The tree this gate checks, as `git add -A` would commit it: stamped at the end if it passed and
 # nothing changed while it ran, so scripts/push.sh pushes only what passed.
 tree_now() {
@@ -146,6 +159,8 @@ if [ -x scripts/check-boundaries.sh ]; then
   main boundaries scripts/check-boundaries.sh
   main boundaries-self-test scripts/check-boundaries.sh --self-test
 fi
+main "test filters self-test" scripts/check-test-filters.py --self-test
+main "test files" scripts/check-test-filters.py --files
 
 if [ -x scripts/check-links.sh ]; then
   main links scripts/check-links.sh
@@ -208,6 +223,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
 
   main clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
   main tests tests
+  main "test filters" test_filters
   main "the check compiled out" cargo test -q -p orion-check --no-default-features --lib
   main "the steps beside" join_lanes
   # The stable-toolchain garbage test always runs. These go deeper where the tools are

@@ -1,7 +1,7 @@
 //! A run's handle: what names one run of one start of node logic, when a caller's numbers
 //! start over with each of its sessions.
 
-mod common;
+use crate::common;
 
 use common::{Bench, CALLER, HOUR, OTHER, OWNER, bare, by};
 use orion_action_list::Actions;

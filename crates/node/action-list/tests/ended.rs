@@ -1,7 +1,7 @@
 //! A detached run's end, come back to: the same answer every time while it is kept, and
 //! "expired" once it is not, never "no such run".
 
-mod common;
+use crate::common;
 
 use common::{Bench, CALLER, HOUR, OTHER, OWNER, bare, by};
 use orion_action_list::{ENDED_FOR_MS, MAX_ENDED};
