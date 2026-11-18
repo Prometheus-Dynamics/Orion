@@ -21,17 +21,39 @@ for package in json.load(sys.stdin)["packages"]:
     print(name, "--all-features")
 ' "$@")
 
-failed=0
-log=$(mktemp)
-for build in "${builds[@]}"; do
-  read -r crate flags <<< "$build"
-  # shellcheck disable=SC2086
-  if ! cargo check -q --locked -p "$crate" $flags 2> "$log"; then
-    echo "FAILED: cargo check -p $crate $flags"
-    grep -E '^error' -A6 "$log" | head -40
-    failed=$((failed + 1))
-  fi
+# The builds go to SHARDS lanes, each with a target directory of its own under this one, all
+# at once: cargo holds a target directory for one build at a time. A build is always in the
+# same lane, so each lane keeps what it built last time.
+shards="${FEATURE_MATRIX_SHARDS:-6}"
+lanes="${CARGO_TARGET_DIR:-target}/feature-matrix"
+logs=$(mktemp -d)
+trap 'rm -rf "$logs"' EXIT
+
+lane() {
+  local shard="$1" i crate flags failed=0
+  for i in "${!builds[@]}"; do
+    [ $((i % shards)) -eq "$shard" ] || continue
+    read -r crate flags <<< "${builds[$i]}"
+    # shellcheck disable=SC2086
+    if ! CARGO_TARGET_DIR="$lanes/$shard" cargo check -q --locked -p "$crate" $flags 2> "$logs/$shard.err"; then
+      echo "FAILED: cargo check -p $crate $flags"
+      grep -E '^error' -A6 "$logs/$shard.err" | head -40
+      failed=$((failed + 1))
+    fi
+  done
+  echo "$failed" > "$logs/$shard.failed"
+}
+
+pids=()
+for ((shard = 0; shard < shards; shard++)); do
+  lane "$shard" > "$logs/$shard.out" &
+  pids+=("$!")
 done
-rm -f "$log"
+failed=0
+for ((shard = 0; shard < shards; shard++)); do
+  wait "${pids[$shard]}" || true
+  cat "$logs/$shard.out"
+  failed=$((failed + $(cat "$logs/$shard.failed" 2> /dev/null || echo 1)))
+done
 echo "feature matrix: ${#builds[@]} builds, $failed failed"
 [ "$failed" -eq 0 ]

@@ -20,6 +20,19 @@ lockfile() {
   cargo metadata --locked --format-version 1 > /dev/null
 }
 
+# Every test, as `cargo test --workspace --all-features` runs them. With cargo-nextest
+# installed, each test binary's cases run in processes of their own, all binaries at once, and
+# the doctests (which nextest does not run) after; without it, cargo test runs them all. The
+# same cases run either way, ignored ones skipped by both.
+tests() {
+  if cargo nextest --version > /dev/null 2>&1; then
+    cargo nextest run --workspace --all-features --no-tests=fail
+    cargo test --workspace --all-features --doc
+  else
+    cargo test --workspace --all-features
+  fi
+}
+
 # The tree this gate checks, as `git add -A` would commit it: stamped at the end if it passed and
 # nothing changed while it ran, so scripts/push.sh pushes only what passed.
 tree_now() {
@@ -42,7 +55,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   step lockfile lockfile
   step format cargo fmt --all --check
   step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
-  step tests cargo test --workspace --all-features
+  step tests tests
   step "the check compiled out" cargo test -q -p orion-check --no-default-features --lib
   # Every crate with optional features: none, each alone, all.
   step "feature matrix" scripts/feature-matrix.sh

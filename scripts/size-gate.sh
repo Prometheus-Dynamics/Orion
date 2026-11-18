@@ -50,31 +50,48 @@ BOARDS=(
 target_dir="${CARGO_TARGET_DIR:-target}"
 failures=0
 
-gate() {
-    local label="$1" file="$2" limit="$3" size
-    size=$(stat -c %s "$file")
-    if [ "$size" -gt "$limit" ]; then
-        echo "    FAIL: $label is $size bytes, over its limit of $limit"
-        failures=$((failures + 1))
-    else
-        echo "    $label: $size bytes (limit $limit)"
-    fi
+# Each build has a target directory of its own, under this one, so all of them run at once: a
+# fat-LTO link is one thread, and cargo holds a target directory for one build at a time. Each
+# says what it measured in a file of its own, read back in order once all have ended.
+lanes="$target_dir/size-gate"
+results=$(mktemp -d)
+trap 'rm -rf "$results"' EXIT
+pids=()
+
+# build <name> <package> <file> <label> <limit> [target]: builds <package> for [target] (this
+# machine without one) and holds <file> to <limit> bytes; a board's file must be static.
+build() {
+    local name="$1" package="$2" file="$3" label="$4" limit="$5" target="${6:-}"
+    local dir="$lanes/$name" out="$results/$name"
+    (
+        if [ -n "$target" ]; then
+            CARGO_TARGET_DIR="$dir" cargo build --quiet --locked --profile service \
+                --target "$target" -p "$package" || exit 1
+            file="$dir/$target/service/$file"
+        else
+            CARGO_TARGET_DIR="$dir" cargo build --quiet --profile service -p "$package" || exit 1
+            file="$dir/service/$file"
+        fi
+        size=$(stat -c %s "$file")
+        failed=0
+        if [ "$size" -gt "$limit" ]; then
+            echo "    FAIL: $label is $size bytes, over its limit of $limit"
+            failed=1
+        else
+            echo "    $label: $size bytes (limit $limit)"
+        fi
+        if [ -n "$target" ] && command -v file > /dev/null && ! file "$file" | grep -q "statically linked"; then
+            echo "    FAIL: $file is not statically linked"
+            failed=1
+        fi
+        exit "$failed"
+    ) > "$out" 2>&1 &
+    pids+=("$!:$name")
 }
 
-static() {
-    local file="$1"
-    if command -v file > /dev/null && ! file "$file" | grep -q "statically linked"; then
-        echo "    FAIL: $file is not statically linked"
-        failures=$((failures + 1))
-    fi
-}
-
-cargo build --quiet --profile service -p orion-recovery-bin
-gate "orion-recovery for this machine" "$target_dir/service/orion-recovery" "$RECOVERY_HOST"
-cargo build --quiet --profile service -p orion-bin
-gate "orion for this machine" "$target_dir/service/orion" "$ORION_HOST"
-cargo build --quiet --profile service -p orion-capi
-gate "liborion_c.so for this machine" "$target_dir/service/liborion_c.so" "$CAPI_HOST"
+build recovery-host orion-recovery-bin orion-recovery "orion-recovery for this machine" "$RECOVERY_HOST"
+build orion-host orion-bin orion "orion for this machine" "$ORION_HOST"
+build capi-host orion-capi liborion_c.so "liborion_c.so for this machine" "$CAPI_HOST"
 
 installed=$(rustup target list --installed 2>/dev/null || true)
 
@@ -89,7 +106,8 @@ check_zig() {
     if [ "$found" != "$ZIG_VERSION" ]; then
         echo "    FAIL: zig $found is on PATH; the board files are built with zig $ZIG_VERSION only." >&2
         echo "          Install zig $ZIG_VERSION, or set CC_<target> to another C compiler for that target." >&2
-        exit 1
+        failures=$((failures + 1))
+        return 1
     fi
     zig_checked=yes
 }
@@ -103,7 +121,7 @@ for line in "${BOARDS[@]}"; do
     fi
     if [ -z "${!cc_var:-}" ]; then
         if command -v zig > /dev/null; then
-            check_zig
+            check_zig || break
             export "$cc_var=$PWD/scripts/zigcc/$board"
             export "AR_$(echo "$board" | tr '-' '_')=$PWD/scripts/zigcc/$board-ar"
         else
@@ -113,12 +131,17 @@ for line in "${BOARDS[@]}"; do
     fi
     linker="CARGO_TARGET_${triple}_LINKER"
     export "$linker=${!linker:-rust-lld}"
-    cargo build --quiet --locked --profile service --target "$board" -p orion-recovery-bin
-    gate "orion-recovery for a board ($board, static)" "$target_dir/$board/service/orion-recovery" "$recovery_limit"
-    static "$target_dir/$board/service/orion-recovery"
-    cargo build --quiet --locked --profile service --target "$board" -p orion-bin
-    gate "orion for a board ($board, static)" "$target_dir/$board/service/orion" "$orion_limit"
-    static "$target_dir/$board/service/orion"
+    build "recovery-$board" orion-recovery-bin orion-recovery \
+        "orion-recovery for a board ($board, static)" "$recovery_limit" "$board"
+    build "orion-$board" orion-bin orion "orion for a board ($board, static)" "$orion_limit" "$board"
+done
+
+for entry in "${pids[@]}"; do
+    pid="${entry%%:*}" name="${entry#*:}"
+    if ! wait "$pid"; then
+        failures=$((failures + 1))
+    fi
+    cat "$results/$name"
 done
 
 [ "$failures" -eq 0 ]

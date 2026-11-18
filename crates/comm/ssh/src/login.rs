@@ -194,7 +194,11 @@ fn broken(why: impl std::fmt::Display) -> std::io::Error {
 fn send<T: Serialize>(socket: &UnixStream, message: &T, fds: &[OwnedFd]) -> std::io::Result<()> {
     let bytes = postcard::to_allocvec(message).map_err(broken)?;
     let fds: Vec<_> = fds.iter().map(AsFd::as_fd).collect();
-    shm_fdpass::send_on(socket, &[&bytes], &fds).map_err(|error| broken(error.to_string()))
+    shm_fdpass::send_on(socket, &[&bytes], &fds).map_err(|error| match &error {
+        // The kind is kept: a helper that answered and closed first is told by it.
+        shm_fdpass::SendError::Io(io) => std::io::Error::new(io.kind(), error.to_string()),
+        _ => broken(error.to_string()),
+    })
 }
 
 fn recv<T: for<'de> Deserialize<'de>>(
@@ -211,6 +215,34 @@ fn recv<T: for<'de> Deserialize<'de>>(
     let mut fds = received.fds;
     let fds = (0..fds.len()).filter_map(|index| fds.take(index)).collect();
     Ok(Some((message, fds)))
+}
+
+/// Asks on `socket`, connected to the helper, and gives its answer.
+fn ask_on(
+    socket: &UnixStream,
+    ask: &Ask,
+    fds: &[OwnedFd],
+) -> std::io::Result<(Answer, Vec<OwnedFd>)> {
+    // The helper refuses an asker of another user before it reads the question, and
+    // closes. The question's send can then fail, but the refusal is there to be read.
+    if let Err(error) = send(socket, ask, fds) {
+        if !matches!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+        ) {
+            return Err(error);
+        }
+        return match recv(socket) {
+            Ok(Some(answer)) => Ok(answer),
+            _ => Err(error),
+        };
+    }
+    recv(socket)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "the login helper answered nothing",
+        )
+    })
 }
 
 /// The comm core's end: asks the helper at `path`, one connection a question.
@@ -242,13 +274,7 @@ impl LoginClient {
                 ),
             )
         })?;
-        send(&socket, ask, fds)?;
-        recv(&socket)?.ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "the login helper answered nothing",
-            )
-        })
+        ask_on(&socket, ask, fds)
     }
 
     /// Asks for a session, and gives it as the keeper would have started it.
@@ -593,4 +619,30 @@ fn sandbox(
         .spawn(move || crate::keeper::watch(child, ours.into()))
         .map_err(|error| error.to_string())?;
     Ok((Answer::Sandbox(pid), vec![counted(theirs.into(), running)]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refusal_sent_before_the_question_was_read_is_heard() {
+        // The helper's end answers and closes before the question is sent: the order a busy
+        // machine gives an asker of another user.
+        let (asker, helper) = UnixStream::pair().expect("pair");
+        send(&helper, &Answer::Refused("not you".to_owned()), &[]).expect("refusal");
+        drop(helper);
+        let ask = Ask::Shell {
+            account: "nobody".to_owned(),
+            who: Who::Local { uid: 1, gid: 1 },
+            want: Want::Command(b"true".to_vec()),
+            term: None,
+            recovery: false,
+        };
+        let answer = ask_on(&asker, &ask, &[]).map(|(answer, _)| answer);
+        assert!(
+            matches!(&answer, Ok(Answer::Refused(why)) if why == "not you"),
+            "{answer:?}"
+        );
+    }
 }

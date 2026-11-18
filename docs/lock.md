@@ -305,6 +305,9 @@ what to change.
   A file of `offers.file` made by a command whose output ends is waited for until its
   `timeout` before the command is ended; before, it was ended at once, and could be told killed.
   One that closes its output and runs past its `timeout` is refused `did not finish in N ms`.
+- **I11.** The login helper's client reads a refusal the helper sent before reading its
+  question, where before it could fail with `send failed: Broken pipe`. Nothing a caller calls
+  changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
