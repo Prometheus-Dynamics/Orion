@@ -326,6 +326,9 @@ what to change.
   builds. Nothing a caller calls changes.
 - **I19.** A test that pushes a file again reads it again for each try. Nothing a caller calls
   changes.
+- **I20.** `scripts/gate.sh --part <part>` runs one part of the gate. CI runs the five parts at
+  once, each on a runner of its own, and keys its caches on the root manifest. Nothing a caller
+  calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

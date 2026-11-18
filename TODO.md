@@ -205,6 +205,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I17](docs/prs/I17.md) CI green again: the sandbox test gets capabilities, and the tests run with nextest (wave 19; needs I16)
 - [x] [I18](docs/prs/I18.md) The longest tests start first, and SHA-256 is optimized in test builds (wave 19; needs I17)
 - [x] [I19](docs/prs/I19.md) A push tried again reads its file again, in the node files test (wave 19; needs I18)
+- [x] [I20](docs/prs/I20.md) CI runs the gate in five parts at once, with caches keyed on the root manifest (wave 19; needs I19)
 
 ## J. The stack around Orion
 

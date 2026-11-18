@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
-# The check every PR into next must pass. CI runs exactly this.
+# The check every PR into next must pass. CI runs exactly this, in parts.
+#
+#   scripts/gate.sh                 everything; stamps the tree for scripts/push.sh if it passes
+#   scripts/gate.sh --part <part>   one part, and no stamp: `main` (every step not in a lane), or
+#                                   a lane: `matrix`, `other-systems`, `size`, `devices`
+#
+# The parts together are the whole gate. CI runs each on a machine of its own, at once.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+part=""
+if [ "$#" -gt 0 ]; then
+  case "${1:-} ${2:-}" in
+    "--part main" | "--part matrix" | "--part other-systems" | "--part size" | "--part devices")
+      part="$2"
+      ;;
+    *)
+      echo "usage: scripts/gate.sh [--part main|matrix|other-systems|size|devices]" >&2
+      exit 2
+      ;;
+  esac
+fi
 # Debug and test builds are incremental (cargo's default): a change rebuilds only what it
 # touched. The steps whose output is measured pin it off themselves.
 
@@ -12,6 +30,13 @@ step() {
   start=$SECONDS
   "$@"
   echo "    $label: $((SECONDS - start)) s"
+}
+
+# A step of the main part: run unless the gate was asked for a lane alone.
+main() {
+  if [ -z "$part" ] || [ "$part" = main ]; then
+    step "$@"
+  fi
 }
 
 # Steps that build in target directories of their own run beside the rest, each in a lane: a
@@ -32,9 +57,19 @@ end_lanes() {
 trap end_lanes EXIT
 
 # lane <name> <label> <command...> [-- <label> <command...>]...
+# The whole gate runs each beside the rest. Asked for that lane alone, it runs it, in front.
 lane() {
   local name="$1"
   shift
+  if [ "$part" = "$name" ]; then
+    lane_steps "$@"
+  elif [ -z "$part" ]; then
+    lane_steps "$@" > "$lane_logs/$name" 2>&1 &
+    lane_pids+=("$!")
+    lane_names+=("$name")
+  fi
+}
+lane_steps() {
   (
     set +m
     # Each command runs plainly under `set -e`: one run as `command || ...` would have `-e`
@@ -55,9 +90,7 @@ lane() {
       "${command[@]}"
       echo "    $label: $((SECONDS - start)) s"
     done
-  ) > "$lane_logs/$name" 2>&1 &
-  lane_pids+=("$!")
-  lane_names+=("$name")
+  )
 }
 
 # Waits for every lane, prints what each said, and fails if one did.
@@ -106,16 +139,16 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
   checked_tree="$(tree_now)"
 fi
 
-step "push guard" scripts/push.sh --self-test
+main "push guard" scripts/push.sh --self-test
 
 # Checks that build nothing come first: they fail fastest.
 if [ -x scripts/check-boundaries.sh ]; then
-  step boundaries scripts/check-boundaries.sh
-  step boundaries-self-test scripts/check-boundaries.sh --self-test
+  main boundaries scripts/check-boundaries.sh
+  main boundaries-self-test scripts/check-boundaries.sh --self-test
 fi
 
 if [ -x scripts/check-links.sh ]; then
-  step links scripts/check-links.sh
+  main links scripts/check-links.sh
 fi
 
 # The client builds on Windows and macOS as well as Linux. Clippy for each, tests included:
@@ -145,8 +178,8 @@ other_systems() {
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
-  step lockfile lockfile
-  step format cargo fmt --all --check
+  main lockfile lockfile
+  main format cargo fmt --all --check
 
   # Beside the rest, each in target directories of its own.
   # Every crate with optional features: none, each alone, all.
@@ -167,20 +200,24 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   fi
   [ "${#devices[@]}" -gt 0 ] && lane devices "${devices[@]}"
 
-  step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
-  step tests tests
-  step "the check compiled out" cargo test -q -p orion-check --no-default-features --lib
-  step "the steps beside" join_lanes
+  main clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
+  main tests tests
+  main "the check compiled out" cargo test -q -p orion-check --no-default-features --lib
+  main "the steps beside" join_lanes
   # The stable-toolchain garbage test always runs. These go deeper where the tools are
   # installed. Alone, last: a target's budget is time, so what runs beside it would cut how
   # much it tries.
   if [ -d testing/fuzz ] && command -v cargo-fuzz > /dev/null && rustup toolchain list | grep -q '^nightly'; then
-    step "fuzz, short budget" scripts/fuzz-short.sh
+    main "fuzz, short budget" scripts/fuzz-short.sh
   fi
 else
   echo "no crates yet"
 fi
 
+if [ -n "$part" ]; then
+  echo "gate part $part passed (a part is not stamped)"
+  exit 0
+fi
 if [ -n "$checked_tree" ]; then
   if [ "$(tree_now)" = "$checked_tree" ]; then
     stamps="$(git rev-parse --git-dir)/orion-gate-passed"

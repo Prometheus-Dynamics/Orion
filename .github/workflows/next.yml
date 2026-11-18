@@ -18,13 +18,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The gate, in its parts, each on a runner of its own and at once: on one runner its lanes
+  # share the runner's few cores with clippy and the tests. Together the parts are the whole gate.
   gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [main, matrix, other-systems, size, devices]
+    name: gate (${{ matrix.part }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       # rust-toolchain.toml selects the toolchain and its components.
       - uses: dtolnay/rust-toolchain@stable
+      # A cache for each part: each builds in target directories of its own. rust-cache's own key
+      # does not see the root manifest's profiles: a change to one matched the cache whole, so it
+      # was never saved again and the builds it held no longer fit.
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.part }}-${{ hashFiles('Cargo.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
       # The gate runs each test in a process of its own with cargo-nextest where it is installed,
       # as on a worker's machine; without it, cargo test runs the same cases one binary at a time.
       - uses: taiki-e/install-action@v2
@@ -37,7 +49,7 @@ jobs:
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
-      - run: ./scripts/gate.sh
+      - run: ./scripts/gate.sh --part ${{ matrix.part }}
 
   # The client on the systems it is built for besides Linux: built, and its tests run. The tests
   # that need a comm core are Linux's; what runs here is the rest.
@@ -51,6 +63,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ hashFiles('Cargo.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
       - shell: bash
         run: >
           cargo test --all-features
