@@ -322,6 +322,8 @@ what to change.
 - **I17.** CI runs the tests with cargo-nextest, as the gate does where it is installed, and lets
   the sandbox test's user namespace hold capabilities. The test skips, and says so, where a
   namespace holds none. Nothing a caller calls changes.
+- **I18.** The tests that take longest start first, and SHA-256 is optimized in debug and test
+  builds. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

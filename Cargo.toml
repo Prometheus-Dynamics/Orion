@@ -46,6 +46,12 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# SHA-256 unoptimized is the larger part of a test that moves 96 MiB through every hop and
+# hashes it on each side: 14-22 s, 3-7 s with this (I18). Only how fast it runs changes; debug
+# assertions and overflow checks are the profile's, as before.
+[profile.dev.package.sha2]
+opt-level = 3
+
 # What goes on a microcontroller: as small as it gets, and a panic is the end.
 [profile.device]
 inherits = "release"
