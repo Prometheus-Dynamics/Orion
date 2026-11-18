@@ -38,6 +38,8 @@ The work is a pre-planned list of PRs into `next`.
   feature matrix for the crates you changed and every crate that depends on them. It is about
   half the gate's time, and never stands in for it. `scripts/prune-target.sh --delete`, run right
   after a gate passes, removes what the gate's debug builds no longer use.
+- Start a new worktree's target directory with `scripts/seed-target.sh FROM TO`, from another
+  worktree's: a copy, never a share, and on btrfs a clone that costs no space.
 
 ## Rules
 

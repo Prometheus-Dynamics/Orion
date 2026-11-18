@@ -315,6 +315,8 @@ what to change.
   calls changes.
 - **I14.** New `scripts/check-changed.sh`, a subset of the gate for the inner loop, and
   `scripts/prune-target.sh`. Nothing a caller calls changes.
+- **I15.** New `scripts/seed-target.sh`, to start a worktree's target directory as a copy of
+  another's. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
