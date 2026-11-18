@@ -105,6 +105,35 @@ enum Control {
     Instance(mpsc::Sender<u64>),
 }
 
+/// Listens on a free port below the range the kernel hands out by itself, for a board that may
+/// come back on the same port. A port from that range (as port 0 gives) can be handed to any
+/// socket on the machine, an outgoing connection's own end among them, in the moment between a
+/// board stopping and starting again; a port below it goes only to a socket that names it.
+async fn listen_outside_the_ephemeral_range(options: TcpOptions) -> TcpCarrier {
+    let ephemeral = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")
+        .ok()
+        .and_then(|range| range.split_whitespace().next()?.parse::<u16>().ok())
+        .unwrap_or(32768);
+    let (low, high) = (16384u16, ephemeral.max(16385));
+    let span = u32::from(high - low);
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.subsec_nanos())
+        ^ std::process::id().rotate_left(16);
+    for step in 0..span {
+        let port = low
+            + u16::try_from((seed.wrapping_add(step.wrapping_mul(7919))) % span)
+                .expect("under the span");
+        let listen = SocketAddr::from(([127, 0, 0, 1], port));
+        match TcpCarrier::bind(listen, options.clone()).await {
+            Ok(tcp) => return tcp,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
+            Err(error) => panic!("listen: {error}"),
+        }
+    }
+    panic!("listen: no free port in {low}..{high}");
+}
+
 impl Board {
     /// Starts a board named `board` in a directory of its own under the system's temporary
     /// one, with security off. `name` keeps tests apart.
@@ -377,8 +406,13 @@ impl Board {
                     max_frame: 64 * 1024,
                     handshake: Duration::from_secs(5),
                 };
-                let listen = SocketAddr::from(([127, 0, 0, 1], port.unwrap_or(0)));
-                let tcp = TcpCarrier::bind(listen, options).await.expect("listen");
+                let tcp = match port {
+                    Some(port) => {
+                        let listen = SocketAddr::from(([127, 0, 0, 1], port));
+                        TcpCarrier::bind(listen, options).await.expect("listen")
+                    }
+                    None => listen_outside_the_ephemeral_range(options).await,
+                };
                 // And the way in for browsers.
                 let mut pages = orion_ws::WsListener::bind(
                     SocketAddr::from(([127, 0, 0, 1], 0)),

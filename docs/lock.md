@@ -333,6 +333,8 @@ what to change.
   than the size gate and the main steps. Nothing a caller calls changes.
 - **I22.** `scripts/push.sh` pushes a working branch `pr/<id>` without gate stamps. Every other
   branch still needs them. Nothing a caller calls changes.
+- **I23.** A test board (`orion-stubs`) listens on a port below the kernel's ephemeral range when
+  none is named. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
