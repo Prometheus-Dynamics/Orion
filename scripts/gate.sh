@@ -13,6 +13,63 @@ step() {
   echo "    $label: $((SECONDS - start)) s"
 }
 
+# Steps that build in target directories of their own run beside the rest, each in a lane: a
+# process group of its own, its output kept in a file and printed, with its time, once every
+# lane has ended. A lane runs its steps one after another and stops at the first that fails.
+# If the gate stops first, its lanes are ended with it.
+target_dir="${CARGO_TARGET_DIR:-$PWD/target}"
+lane_logs="$(mktemp -d)"
+lane_pids=()
+lane_names=()
+set -m
+end_lanes() {
+  for pid in "${lane_pids[@]}"; do
+    kill -- "-$pid" 2> /dev/null || true
+  done
+  rm -rf "$lane_logs"
+}
+trap end_lanes EXIT
+
+# lane <name> <label> <command...> [-- <label> <command...>]...
+lane() {
+  local name="$1"
+  shift
+  (
+    set +m
+    # Each command runs plainly under `set -e`: one run as `command || ...` would have `-e`
+    # ignored inside it, and a function's failing step would not stop it.
+    label=""
+    trap 'status=$?; [ "$status" -eq 0 ] || echo "    FAILED: $label"' EXIT
+    while [ "$#" -gt 0 ]; do
+      label="$1"
+      shift
+      local command=()
+      while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+        command+=("$1")
+        shift
+      done
+      [ "$#" -gt 0 ] && shift
+      echo "==> $label (beside the rest)"
+      local start=$SECONDS
+      "${command[@]}"
+      echo "    $label: $((SECONDS - start)) s"
+    done
+  ) > "$lane_logs/$name" 2>&1 &
+  lane_pids+=("$!")
+  lane_names+=("$name")
+}
+
+# Waits for every lane, prints what each said, and fails if one did.
+join_lanes() {
+  local failed=0 i
+  for i in "${!lane_pids[@]}"; do
+    wait "${lane_pids[$i]}" || failed=1
+    cat "$lane_logs/${lane_names[$i]}"
+  done
+  lane_pids=()
+  return "$failed"
+}
+
 # Board images are built `--locked --offline` from Cargo.lock alone: a lockfile that no longer
 # matches the manifests fails here, first, before anything else has had the chance to rewrite
 # it.
@@ -50,42 +107,7 @@ fi
 
 step "push guard" scripts/push.sh --self-test
 
-# The workspace glob matches nothing until the first crate lands.
-if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
-  step lockfile lockfile
-  step format cargo fmt --all --check
-  step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
-  step tests tests
-  step "the check compiled out" cargo test -q -p orion-check --no-default-features --lib
-  # Every crate with optional features: none, each alone, all.
-  step "feature matrix" scripts/feature-matrix.sh
-
-  # A crate that must build without std says so in its manifest:
-  # [package.metadata.orion]
-  # no_std = true
-  mapfile -t no_std_crates < <(grep -l '^no_std = true' crates/*/*/Cargo.toml | xargs -r sed -n 's/^name = "\(.*\)"$/\1/p')
-  for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
-    for crate in "${no_std_crates[@]}"; do
-      step "$crate on $target" cargo check -q -p "$crate" --no-default-features --target "$target"
-    done
-  done
-
-  # The client builds on Windows and macOS as well as Linux. Clippy for each, tests included:
-  # what needs a comm core is Linux's and drops out. CI's hosted runners build and run them on
-  # those systems (`.github/workflows/next.yml`).
-  client=()
-  for crate in orion-connect orion-topics orion-records orion-actions orion-files orion-executor \
-    orion-provider orion-ctl orion-capi orion; do
-    client+=(-p "$crate")
-  done
-  for target in x86_64-pc-windows-msvc x86_64-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin; do
-    step "client on $target" cargo clippy -q "${client[@]}" --all-features --all-targets \
-      --target "$target" -- -D warnings
-  done
-else
-  echo "no crates yet"
-fi
-
+# Checks that build nothing come first: they fail fastest.
 if [ -x scripts/check-boundaries.sh ]; then
   step boundaries scripts/check-boundaries.sh
   step boundaries-self-test scripts/check-boundaries.sh --self-test
@@ -95,25 +117,67 @@ if [ -x scripts/check-links.sh ]; then
   step links scripts/check-links.sh
 fi
 
-if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
-  step "size gate" scripts/size-gate.sh
-fi
+# The client builds on Windows and macOS as well as Linux. Clippy for each, tests included:
+# what needs a comm core is Linux's and drops out. CI's hosted runners build and run them on
+# those systems (`.github/workflows/next.yml`). And a crate that must build without std says
+# so in its manifest:
+# [package.metadata.orion]
+# no_std = true
+other_systems() {
+  export CARGO_TARGET_DIR="$target_dir/other-systems"
+  local target crate client=()
+  mapfile -t no_std_crates < <(grep -l '^no_std = true' crates/*/*/Cargo.toml | xargs -r sed -n 's/^name = "\(.*\)"$/\1/p')
+  for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
+    for crate in "${no_std_crates[@]}"; do
+      step "$crate on $target" cargo check -q -p "$crate" --no-default-features --target "$target"
+    done
+  done
+  for crate in orion-connect orion-topics orion-records orion-actions orion-files orion-executor \
+    orion-provider orion-ctl orion-capi orion; do
+    client+=(-p "$crate")
+  done
+  for target in x86_64-pc-windows-msvc x86_64-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin; do
+    step "client on $target" cargo clippy -q "${client[@]}" --all-features --all-targets \
+      --target "$target" -- -D warnings
+  done
+}
 
-if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
-  step "device size" scripts/device-size.sh
-fi
+# The workspace glob matches nothing until the first crate lands.
+if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
+  step lockfile lockfile
+  step format cargo fmt --all --check
 
-if [ -x scripts/packaging-check.sh ] && [ -d packaging ]; then
-  step packaging scripts/packaging-check.sh
-fi
+  # Beside the rest, each in target directories of its own.
+  # Every crate with optional features: none, each alone, all.
+  lane matrix "feature matrix" scripts/feature-matrix.sh
+  lane other-systems "no_std and the client on other systems" other_systems
+  if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
+    lane size "size gate" scripts/size-gate.sh
+  fi
+  devices=()
+  if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
+    devices+=("device size" env CARGO_TARGET_DIR="$target_dir/device-lane" scripts/device-size.sh --)
+  fi
+  if [ -x scripts/mcu-template.sh ] && [ -d examples/mcu-template ]; then
+    devices+=("mcu template" env CARGO_TARGET_DIR="$target_dir" scripts/mcu-template.sh --)
+  fi
+  if [ -x scripts/packaging-check.sh ] && [ -d packaging ]; then
+    devices+=(packaging scripts/packaging-check.sh --)
+  fi
+  [ "${#devices[@]}" -gt 0 ] && lane devices "${devices[@]}"
 
-if [ -x scripts/mcu-template.sh ] && [ -d examples/mcu-template ]; then
-  step "mcu template" scripts/mcu-template.sh
-fi
-
-# The stable-toolchain garbage test always runs. These go deeper where the tools are installed.
-if [ -d testing/fuzz ] && command -v cargo-fuzz > /dev/null && rustup toolchain list | grep -q '^nightly'; then
-  step "fuzz, short budget" scripts/fuzz-short.sh
+  step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
+  step tests tests
+  step "the check compiled out" cargo test -q -p orion-check --no-default-features --lib
+  step "the steps beside" join_lanes
+  # The stable-toolchain garbage test always runs. These go deeper where the tools are
+  # installed. Alone, last: a target's budget is time, so what runs beside it would cut how
+  # much it tries.
+  if [ -d testing/fuzz ] && command -v cargo-fuzz > /dev/null && rustup toolchain list | grep -q '^nightly'; then
+    step "fuzz, short budget" scripts/fuzz-short.sh
+  fi
+else
+  echo "no crates yet"
 fi
 
 if [ -n "$checked_tree" ]; then

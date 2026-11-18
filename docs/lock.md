@@ -308,6 +308,8 @@ what to change.
 - **I11.** The login helper's client reads a refusal the helper sent before reading its
   question, where before it could fail with `send failed: Broken pipe`. Nothing a caller calls
   changes.
+- **I12.** `scripts/gate.sh` runs its steps that have target directories of their own beside
+  clippy and the tests. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

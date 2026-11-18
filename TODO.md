@@ -197,6 +197,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I9](docs/prs/I9.md) Clean up the plan (wave 16; needs I5, I6, I7, I8)
 - [x] [I10](docs/prs/I10.md) The board files are built with zig 0.15.2 only (wave 18; needs J6)
 - [x] [I11](docs/prs/I11.md) The gate runs its slow steps side by side (wave 19; needs C71)
+- [x] [I12](docs/prs/I12.md) The gate's own steps run beside each other (wave 19; needs I11)
 
 ## J. The stack around Orion
 
