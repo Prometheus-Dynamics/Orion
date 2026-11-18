@@ -34,6 +34,10 @@ The work is a pre-planned list of PRs into `next`.
 - Push with `scripts/push.sh REMOTE BRANCH`, never `git push`. A gate that passes stamps the
   exact tree it checked, and the script refuses any new commit whose tree has no stamp: run the
   gate on the tree you will commit, and change nothing until it ends.
+- While you work, `scripts/check-changed.sh` runs the gate's own format, clippy, tests and
+  feature matrix for the crates you changed and every crate that depends on them. It is about
+  half the gate's time, and never stands in for it. `scripts/prune-target.sh --delete`, run right
+  after a gate passes, removes what the gate's debug builds no longer use.
 
 ## Rules
 
