@@ -29,15 +29,34 @@ The work is a pre-planned list of PRs into `next`.
   Inherit shared dependencies with `workspace = true`, and declare any others in your own crate.
 - If your PR needs a shared interface changed, stop and say so in the PR description. The interfaces
   in the design change only through A-series or B-series PRs.
-- A PR merges when `scripts/gate.sh` passes. Paste the proof named in the brief into the PR
-  description.
+- A PR merges when `scripts/gate.sh` passes on the merged tree. Paste the proof named in the
+  brief into the PR description.
 - Push with `scripts/push.sh REMOTE BRANCH`, never `git push`. A gate that passes stamps the
-  exact tree it checked, and the script refuses any new commit whose tree has no stamp: run the
-  gate on the tree you will commit, and change nothing until it ends.
-- While you work, `scripts/check-changed.sh` runs the gate's own format, clippy, tests and
-  feature matrix for the crates you changed and every crate that depends on them. It is about
-  half the gate's time, and never stands in for it. `scripts/prune-target.sh --delete`, run right
-  after a gate passes, removes what the gate's debug builds no longer use.
+  exact tree it checked, and the script refuses any commit to `next` whose tree has no stamp:
+  whoever lands runs the gate on the tree they will commit, and changes nothing until it ends.
+  A working branch `pr/<id>` pushes without a stamp.
+- `scripts/check-changed.sh` runs the gate's own format, clippy, tests and feature matrix for the
+  crates you changed and every crate that depends on them. `scripts/prune-target.sh --delete`,
+  run right after a gate passes, removes what the gate's debug builds no longer use.
+
+## Workers and landing
+
+1. The landing gate is the proof. A worker does not run the full gate before pushing `pr/<id>`.
+   It runs `scripts/check-changed.sh`, the fail-before proof for its change (the test goes red
+   with the change undone or mutated, green with it), and fmt and clippy on what it touched.
+   Nothing lands on a red gate.
+2. Repeat runs are set by risk, and the count is stated in the PR: many runs only for a change
+   to timing or concurrency; three for a join of branches that each passed, and for an ordinary
+   change.
+3. A red landing gate is read and given a named cause before anything else runs. Never rerun
+   in hope. A flake is fixed by its cause and recorded in `docs/flakes.md`.
+4. Concurrent heavy jobs (a gate, a check, a cross build) are capped to the cores they are
+   given. One gate at a time on a machine.
+5. A worker starts warm: it reuses a kept worktree and its target directory for its next item
+   once the previous item has landed, or seeds a new one with `scripts/seed-target.sh`.
+6. A brief names the exact base commit and the files in scope, and is small enough to finish in
+   one context. Longer work hands off through a written state file.
+7. Board runs go one runner per board, in parallel with software work.
 - Start a new worktree's target directory with `scripts/seed-target.sh FROM TO`, from another
   worktree's: a copy, never a share, and on btrfs a clone that costs no space.
 

@@ -207,6 +207,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I19](docs/prs/I19.md) A push tried again reads its file again, in the node files test (wave 19; needs I18)
 - [x] [I20](docs/prs/I20.md) CI runs the gate in five parts at once, with caches keyed on the root manifest (wave 19; needs I19)
 - [x] [I21](docs/prs/I21.md) The lanes with time to spare run at a lower priority than the size gate (wave 19; needs I20)
+- [x] [I22](docs/prs/I22.md) A worker proves its change, and the landing gate proves the tree (wave 19; needs I21)
 
 ## J. The stack around Orion
 
