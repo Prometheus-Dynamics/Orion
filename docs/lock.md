@@ -381,6 +381,8 @@ what to change.
   `<step>: TIMED OUT after N s (bound N s)`. Nothing a program calls changes.
 - **I37.** A files-pull test waits for the fetch it started last before it ends. Nothing a
   program calls changes.
+- **I38.** The gate's doctests run beside nextest, their output after it. The same tests run.
+  Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

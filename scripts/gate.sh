@@ -168,12 +168,22 @@ lockfile() {
 
 # Every test, as `cargo test --workspace --all-features` runs them. With cargo-nextest
 # installed, each test binary's cases run in processes of their own, all binaries at once, and
-# the doctests (which nextest does not run) after; without it, cargo test runs them all. The
-# same cases run either way, ignored ones skipped by both.
+# the doctests (which nextest does not run) beside them, their output after; without it, cargo
+# test runs them all. The same cases run either way, ignored ones skipped by both. The doctests
+# are mostly rustdoc passes over crates that have none, about 15 s warm, which the slowest test
+# outlasts; one after the other, they were on the gate's critical path.
 tests() {
   if cargo nextest --version > /dev/null 2>&1; then
-    cargo nextest run --workspace --all-features --no-tests=fail
-    cargo test --workspace --all-features --doc
+    local doc_log doc_pid doc_status=0 status=0
+    doc_log="$(mktemp)"
+    cargo test --workspace --all-features --doc > "$doc_log" 2>&1 &
+    doc_pid=$!
+    cargo nextest run --workspace --all-features --no-tests=fail || status=$?
+    wait "$doc_pid" || doc_status=$?
+    cat "$doc_log"
+    rm -f "$doc_log"
+    [ "$doc_status" -eq 0 ] || echo "    the doctests failed" >&2
+    [ "$status" -eq 0 ] && [ "$doc_status" -eq 0 ]
   else
     cargo test --workspace --all-features
   fi

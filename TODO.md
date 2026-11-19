@@ -223,6 +223,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I35](docs/prs/I35.md) Every test removes the files it made, passed or panicked (wave 19; needs I34)
 - [x] [I36](docs/prs/I36.md) Each gate step has a TMPDIR of its own, and fails if it leaves anything there (wave 19; needs I35)
 - [x] [I37](docs/prs/I37.md) A pull test waits for the fetch it started last before its directory goes (wave 19; needs I36)
+- [x] [I38](docs/prs/I38.md) The doctests run beside the other tests, not after them (wave 19; needs I37)
 
 ## J. The stack around Orion
 
