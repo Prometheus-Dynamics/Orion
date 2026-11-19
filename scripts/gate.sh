@@ -259,11 +259,33 @@ fi
 other_systems() {
   renice -n "$behind" -p "$BASHPID" > /dev/null
   export CARGO_TARGET_DIR="$target_dir/other-systems"
-  local target crate client=()
+  local target crate group client=() packages=() targets=(thumbv7em-none-eabihf riscv32imac-unknown-none-elf)
   mapfile -t no_std_crates < <(grep -l '^no_std = true' crates/*/*/Cargo.toml | xargs -r sed -n 's/^name = "\(.*\)"$/\1/p')
-  for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
-    for crate in "${no_std_crates[@]}"; do
-      timed "$crate on $target" cargo check -q -p "$crate" --no-default-features --target "$target"
+  # Checked together, one cargo call each: each of these crates builds exactly as it does
+  # alone, every package with the same features (scripts/same-features.py, which fails if that
+  # stops being so). A crate in no group is checked alone. One call for twelve crates, not
+  # twelve: after a change to orion-types, median of three A B A B, 33 s and 18 CPU-s alone,
+  # 14 s and 5 CPU-s grouped (I39).
+  local groups=(
+    orion-types,orion-check,orion-supervise
+    orion-values,orion-device-topics,orion-msg-workloads,orion-msg-topics,orion-msg-session,orion-msg-actions,orion-msg-files,orion-msg-peers,orion-msg-records,orion-wire,orion-device-core,orion-device-firmware
+  )
+  local grouped=",$(IFS=,; echo "${groups[*]}"),"
+  for crate in $(echo "${groups[@]}" | tr ', ' '\n\n'); do
+    [[ " ${no_std_crates[*]} " == *" $crate "* ]] || { echo "$crate is in a no_std group, but is not no_std" >&2; return 1; }
+  done
+  for crate in "${no_std_crates[@]}"; do
+    [[ "$grouped" == *",$crate,"* ]] || groups+=("$crate")
+  done
+  timed "no_std groups build as their crates alone" \
+    scripts/same-features.py "$CARGO_TARGET_DIR/same-features" --no-default-features "${targets[@]}" -- "${groups[@]}"
+  for target in "${targets[@]}"; do
+    for group in "${groups[@]}"; do
+      packages=()
+      for crate in ${group//,/ }; do
+        packages+=(-p "$crate")
+      done
+      timed "$group on $target" cargo check -q "${packages[@]}" --no-default-features --target "$target"
     done
   done
   for crate in orion-connect orion-topics orion-records orion-actions orion-files orion-executor \

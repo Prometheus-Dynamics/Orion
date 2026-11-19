@@ -383,6 +383,9 @@ what to change.
   program calls changes.
 - **I38.** The gate's doctests run beside nextest, their output after it. The same tests run.
   Nothing a program calls changes.
+- **I39.** The gate checks the no_std crates in three groups per target, not one call each;
+  `scripts/same-features.py` fails the gate if a group ever builds a crate with features its own
+  call would not. Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
