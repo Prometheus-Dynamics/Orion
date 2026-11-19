@@ -388,6 +388,9 @@ what to change.
   call would not. Nothing a program calls changes.
 - **I40.** The seven `shm-*` crates are pinned to the device library's `f8652608`, through the
   `.git` URL. No other package changes. Nothing a program calls changes.
+- **I41.** `scripts/same-features.py` runs `cargo tree` without colour, so CI's
+  `CARGO_TERM_COLOR=always` no longer makes repeated packages look different. Nothing a program
+  calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

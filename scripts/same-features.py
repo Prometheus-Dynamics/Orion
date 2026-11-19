@@ -41,7 +41,9 @@ def key(root, flags, targets, groups):
 
 def resolved(root, target, flags, crates):
     """Each package the crates build (normal and build dependencies), and its features."""
-    args = ["cargo", "tree", "-q", "--locked", "--target", target, *flags.split()]
+    # Never coloured: CI sets CARGO_TERM_COLOR=always, and a coloured " (*)" is not stripped.
+    args = ["cargo", "tree", "-q", "--locked", "--color", "never", "--target", target]
+    args += flags.split()
     args += ["-e", "normal,build", "-f", "{p}|{f}", "--prefix", "none"]
     for crate in crates:
         args += ["-p", crate]
