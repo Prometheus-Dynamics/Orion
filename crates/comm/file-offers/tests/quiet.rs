@@ -138,9 +138,11 @@ fn a_fetch_given_a_limit_gives_up_on_a_quiet_program_saying_so() {
     let mut fetching = client
         .start_fetch("logs/kernel", Cursor::new(Vec::new()), 0)
         .expect("fetch")
-        .stalled_after(Duration::from_millis(100))
-        .give_up_after(limit);
+        .stalled_after(Duration::from_millis(100));
     under_way(&mut fetching);
+    // The limit is for the quiet once the file is under way: set before, it would count the
+    // program's start too, which a loaded machine can stretch past it (docs/flakes.md).
+    let mut fetching = fetching.give_up_after(limit);
     quiet.recv().expect("quiet");
     let start = Instant::now();
     let mut stalls = 0;

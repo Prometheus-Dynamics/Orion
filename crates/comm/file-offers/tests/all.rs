@@ -9,5 +9,7 @@ mod configured;
 mod fetch;
 #[path = "own.rs"]
 mod own;
+#[path = "paused.rs"]
+mod paused;
 #[path = "quiet.rs"]
 mod quiet;

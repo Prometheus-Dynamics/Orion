@@ -369,6 +369,9 @@ what to change.
   `--give-up MS`.
 - **I33.** The step bounds self-test waits for each step to run before it times or stops it, and
   `bounded.py` names a leftover read mid-`exec` by its short name. Nothing a caller calls changes.
+- **I34.** A gift counts its client's silence from the client's last word, only while the client
+  owes an answer. A program that pauses between steps past its session's timeout no longer ends
+  its gift `TimedOut`. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

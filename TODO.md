@@ -219,6 +219,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I31](docs/prs/I31.md) A program that stops giving a file ends the fetch at once, saying why (wave 19; needs I30)
 - [x] [I32](docs/prs/I32.md) A fetch says when its program is quiet, and waits, unless told to give up (wave 19; needs I31)
 - [x] [I33](docs/prs/I33.md) The step bounds self-test waits for what it checks, not for the clock (wave 19; needs I32)
+- [x] [I34](docs/prs/I34.md) A program's own pause is never its client's silence (wave 19; needs I33)
 
 ## J. The stack around Orion
 

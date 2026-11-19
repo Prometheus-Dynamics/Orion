@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use orion::{Address, Options, Orion, Roles};
+use orion::Roles;
 use orion_stubs::Board;
 
 use crate::verbs::{connect, ctl};
@@ -88,15 +88,9 @@ fn file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked() {
     // How long the program is quiet in each fetch, once the client has some of the file.
     let pauses = [Duration::from_millis(1500), Duration::from_millis(5600)];
     let program = std::thread::spawn(move || {
-        // The program's own wait for the client is longer than its quiet: what is tested is
-        // the fetch's patience, not the program's.
-        let options = Options {
-            roles: Roles::CLIENT,
-            timeout: Duration::from_secs(30),
-            ..Options::default()
-        };
-        let orion =
-            Orion::connect_with(&Address::Local(socket), "logger", options).expect("connect");
+        // Its session's timeout is the default, 5 s, shorter than its quiet: its own pause is
+        // not the client's silence.
+        let orion = connect(&socket, "logger", Roles::CLIENT);
         let mut offer = orion.files().offer("logs/").expect("offer");
         ready.send(()).expect("ready");
         let mut ended = Vec::new();
@@ -107,13 +101,18 @@ fn file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked() {
                 .expect("asked");
             let bytes: Vec<u8> = (0..size).map(|at| (at % 251) as u8).collect();
             let mut gift = asked.give(std::io::Cursor::new(bytes)).expect("give");
-            loop {
-                if let orion::files::Giving::Progress { received, .. } =
-                    gift.step(Duration::from_millis(5)).expect("step")
-                    && received > 0
-                {
-                    break;
+            // Under way, or already given up on: a limit set from the start counts this
+            // program's own start too, which a loaded machine can stretch past it.
+            let early = loop {
+                match gift.step(Duration::from_millis(5)).expect("step") {
+                    orion::files::Giving::Progress { received, .. } if received > 0 => break None,
+                    done @ orion::files::Giving::Done { .. } => break Some(done),
+                    orion::files::Giving::Progress { .. } => {}
                 }
+            };
+            if let Some(done) = early {
+                ended.push(done);
+                continue;
             }
             std::thread::sleep(pause);
             ended.push(gift.finish().expect("over"));

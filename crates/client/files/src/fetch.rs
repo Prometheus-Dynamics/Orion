@@ -103,6 +103,8 @@ pub(crate) struct Taken {
     pub(crate) received: u64,
     pub(crate) state: Option<FileState>,
     pub(crate) detail: String,
+    /// When its client's last word was taken in: its silence counts from there.
+    pub(crate) heard: Option<Instant>,
 }
 
 /// One prefix offered on the board.
@@ -209,6 +211,7 @@ impl Handler for Fetches {
                     known.state = Some(taken.state);
                     known.detail.clear();
                     known.detail.push_str(taken.detail);
+                    known.heard = Some(Instant::now());
                 }
             }
         }

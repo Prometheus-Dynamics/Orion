@@ -290,8 +290,9 @@ impl<R: Read + Seek> Gift<R> {
     ///
     /// # Errors
     ///
-    /// If the source can't be read, the client goes quiet for the session's timeout, or the
-    /// connection broke. The gift is then over.
+    /// If the source can't be read, the client goes quiet for the session's timeout while it
+    /// owes an answer, or the connection broke. The gift is then over. The client's quiet
+    /// counts from its last word: a pause of this program's between steps is not the client's.
     pub fn step(&mut self, wait: Duration) -> Result<Giving, ClientError> {
         if self.over {
             return Err(ClientError::Protocol("a gift that is over"));
@@ -318,6 +319,9 @@ impl<R: Read + Seek> Gift<R> {
     }
 
     fn step_once(&mut self, wait: Duration) -> Result<Giving, ClientError> {
+        // What the client said while this program did other things is taken in first: its
+        // silence counts from its last word, never from this gift's last step.
+        self.files.client.drain()?;
         let taken = self
             .files
             .fetches
@@ -339,12 +343,14 @@ impl<R: Read + Seek> Gift<R> {
                     detail: taken.detail,
                 });
             }
-            Some(_) if taken.received > self.acked => {
-                self.acked = taken.received;
-                self.last_heard = Instant::now();
-            }
+            Some(_) if taken.received > self.acked => self.acked = taken.received,
             _ => {}
         }
+        if let Some(heard) = taken.heard {
+            self.last_heard = self.last_heard.max(heard);
+        }
+        // Whether the client owed an answer before this step sends anything.
+        let owed = self.sent > self.acked;
         // A few chunks on their way, and no more: the client's answers pace the giver.
         let window = u64::from(FETCH_WINDOW) * self.chunk as u64;
         while self.sent < self.size && self.sent < self.acked + window {
@@ -364,6 +370,11 @@ impl<R: Read + Seek> Gift<R> {
                 data: Bytes(&self.buffer[..read]),
             })?;
             self.sent += read as u64;
+        }
+        // Waiting on the client begins now if it owed nothing before: a pause of this
+        // program's while nothing was on its way is no silence of the client's.
+        if !owed && self.sent > self.acked {
+            self.last_heard = Instant::now();
         }
         self.files.client.reply_left(self.last_heard)?;
         self.files.client.pump(wait)?;
