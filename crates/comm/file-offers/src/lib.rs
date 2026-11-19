@@ -16,6 +16,8 @@
 //!
 //! **Each side is told when the other goes.** A fetch whose program goes is rejected to its
 //! client; one whose client goes is rejected to its program, which stops giving it.
+//! A program may also stop giving a file at once, saying why (`FileTaken`, `Aborted`): the
+//! fetch is over, and the client is told so straight away rather than left to wait.
 //!
 //! **The comm core gives some itself.** Its own, under `orion/`, which no program may offer
 //! ([`FileOffersService::with_own`]); and those its settings name, each prefix served while no
@@ -434,7 +436,11 @@ impl FileOffersService {
                 return Ok(());
             }
         }
-        let over = matches!(taken.state, FileState::Committed | FileState::Rejected);
+        // Over for either side: taken, not taken, or stopped by the program that gives it.
+        let over = matches!(
+            taken.state,
+            FileState::Committed | FileState::Rejected | FileState::Aborted
+        );
         // From the program: the number is its own. From the client: the client's.
         if let Some(fetch) = self.fetches.get(&taken.transfer)
             && fetch.offerer == from

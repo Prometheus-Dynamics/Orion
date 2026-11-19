@@ -23,6 +23,10 @@ use crate::{Files, Step, Transfer};
 /// hands a program from one up. So the answers to both, on one session, are told apart.
 const CLIENT_NUMBER: u64 = 1 << 63;
 
+/// How a fetch whose program stopped giving it ends: `Aborted`, with these words and the
+/// program's reason after them.
+const STOPPED: &str = "the program that offers it stopped giving it";
+
 /// A few entries by number, kept in a list: there are never many, and a list costs a board
 /// far less code than a tree.
 #[derive(Debug)]
@@ -73,8 +77,8 @@ pub(crate) struct Heard {
     pub(crate) given: Option<(u64, [u8; 32])>,
     /// Chunks heard and not yet written.
     pub(crate) chunks: VecDeque<(u64, Vec<u8>)>,
-    /// Why it is not given, if it is not.
-    pub(crate) rejected: Option<String>,
+    /// Why it is not given, if it is not: rejected, or aborted by the program giving it.
+    pub(crate) rejected: Option<(FileState, String)>,
 }
 
 /// A fetch handed to this program, as the comm core said it.
@@ -187,8 +191,13 @@ impl Handler for Fetches {
             _ => {
                 let taken: FileTaken<'_> = frame.body()?;
                 if let Some(heard) = self.fetching.get_mut(&taken.transfer) {
-                    // The program, or the comm core, says the file is not given.
-                    heard.rejected = Some(taken.detail.to_owned());
+                    // The program, or the comm core, says the file is not given: the program
+                    // stopped giving it, or any other answer, which ends it as not given.
+                    heard.rejected = Some(if taken.state == FileState::Aborted {
+                        (FileState::Aborted, format!("{STOPPED}: {}", taken.detail))
+                    } else {
+                        (FileState::Rejected, taken.detail.to_owned())
+                    });
                 } else if let Some(known) = self.taken.get_mut(&taken.transfer) {
                     known.received = taken.received;
                     known.state = Some(taken.state);
@@ -449,8 +458,8 @@ impl<W: Read + Write + Seek> Fetching<W> {
                 heard.rejected.take(),
             )
         };
-        if let Some(why) = rejected {
-            return Ok(self.done(FileState::Rejected, why, [0; 32]));
+        if let Some((state, why)) = rejected {
+            return Ok(self.done(state, why, [0; 32]));
         }
         if let Some(error) = self.files.client.refusal(self.seq) {
             return Err(error);

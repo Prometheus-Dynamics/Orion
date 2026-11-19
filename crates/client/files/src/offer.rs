@@ -27,11 +27,14 @@ impl std::fmt::Debug for Offer {
     }
 }
 
-/// A file asked of this program: give it, or say why not.
+/// A file asked of this program: give it, or say why not. Dropped without either, it is
+/// refused, so the client is not left waiting.
 #[derive(Debug)]
 pub struct Asked {
     files: Files,
     wanted: Wanted,
+    /// Given or refused: nothing is left to say when it is dropped.
+    answered: bool,
 }
 
 /// How a file this program gives is going, after a step.
@@ -53,7 +56,8 @@ pub enum Giving {
     },
 }
 
-/// A file being given. [`Gift::step`] moves it on.
+/// A file being given. [`Gift::step`] moves it on; [`Gift::abort`] stops it, saying why, and
+/// so does dropping it before it is over.
 pub struct Gift<R> {
     files: Files,
     source: R,
@@ -126,6 +130,7 @@ impl Offer {
                 return Ok(Some(Asked {
                     files: self.files.clone(),
                     wanted,
+                    answered: false,
                 }));
             }
             let left = deadline.saturating_duration_since(Instant::now());
@@ -161,7 +166,12 @@ impl Asked {
     /// # Errors
     ///
     /// If the connection broke.
-    pub fn refuse(self, why: &str) -> Result<(), ClientError> {
+    pub fn refuse(mut self, why: &str) -> Result<(), ClientError> {
+        self.answered = true;
+        self.refused(why)
+    }
+
+    fn refused(&self, why: &str) -> Result<(), ClientError> {
         self.files
             .fetches
             .borrow_mut()
@@ -194,7 +204,7 @@ impl Asked {
     ///
     /// If the source can't be read, or the connection broke.
     pub fn give_known<R: Read + Seek>(
-        self,
+        mut self,
         mut source: R,
         known: Known,
     ) -> Result<Gift<R>, ClientError> {
@@ -216,8 +226,9 @@ impl Asked {
             limit => limit as usize,
         };
         let chunk = CHUNK.min(own).min(theirs).max(1);
+        self.answered = true;
         Ok(Gift {
-            files: self.files,
+            files: self.files.clone(),
             source,
             transfer,
             size: known.size,
@@ -228,6 +239,48 @@ impl Asked {
             last_heard: Instant::now(),
             over: false,
         })
+    }
+}
+
+impl Drop for Asked {
+    fn drop(&mut self) {
+        if !self.answered {
+            let _ = self.refused("the program that offers it did not give it");
+        }
+    }
+}
+
+impl<R> Gift<R> {
+    /// Stops giving the file, saying why: the client's fetch ends at once, as aborted, with
+    /// `why` after words that say the program stopped giving it. A gift that is over already
+    /// is left as it ended.
+    ///
+    /// # Errors
+    ///
+    /// If the connection broke: the client then hears that the program went.
+    pub fn abort(mut self, why: &str) -> Result<(), ClientError> {
+        self.stop(why)
+    }
+
+    fn stop(&mut self, why: &str) -> Result<(), ClientError> {
+        if self.over {
+            return Ok(());
+        }
+        self.over = true;
+        self.files.fetches.borrow_mut().taken.remove(&self.transfer);
+        self.files.client.send(&FileTaken {
+            transfer: self.transfer,
+            received: self.acked,
+            state: FileState::Aborted,
+            detail: why,
+        })?;
+        Ok(())
+    }
+}
+
+impl<R> Drop for Gift<R> {
+    fn drop(&mut self) {
+        let _ = self.stop("it was dropped before it was given");
     }
 }
 

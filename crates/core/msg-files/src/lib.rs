@@ -17,6 +17,9 @@ open_enum! {
         Committed = 3,
         /// It failed. See the detail.
         Rejected = 4,
+        /// The program giving a file stopped giving it, saying why in the detail. Only a giver
+        /// says it; a receiver that does not know it ends the transfer as not given.
+        Aborted = 5,
     }
 }
 

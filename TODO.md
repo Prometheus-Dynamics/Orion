@@ -216,6 +216,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I28](docs/prs/I28.md) The size gate's path check reads the build it made, on CI as here (wave 19; needs I27)
 - [x] [I29](docs/prs/I29.md) armv7 and riscv64 size builds run before a release only (wave 19; needs I28)
 - [x] [I30](docs/prs/I30.md) A run node logic stops ends as its program says, or Indeterminate (wave 19; needs I29)
+- [x] [I31](docs/prs/I31.md) A program that stops giving a file ends the fetch at once, saying why (wave 19; needs I30)
 
 ## J. The stack around Orion
 

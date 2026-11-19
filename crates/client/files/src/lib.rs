@@ -65,7 +65,7 @@ pub struct Transfer {
     pub received: u64,
     /// Where it is.
     pub state: FileState,
-    /// Why, if it was rejected.
+    /// Why, if it was rejected or aborted.
     pub detail: String,
     /// The file's SHA-256: for a push of it later ([`Known`]), or as a pull asked for it.
     pub digest: [u8; 32],

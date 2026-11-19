@@ -357,6 +357,10 @@ what to change.
   or `Cancelled` at once. A program that reports `Cancelled` after a deadline still gives
   `TimedOut`. Node logic refuses new runs while stopping, and its stop waits that bound at most.
   `orionctl` exits 3 for `Indeterminate`. An older peer reads 6 as `Unknown(6)`.
+- **I31.** A new file state, `Aborted` (5), sent only by a program giving a file:
+  `Gift::abort(why)`, and a gift dropped before it is over. The fetch ends at once, `Aborted`, with
+  "the program that offers it stopped giving it: <why>". A file asked and dropped unanswered is
+  refused. An older client reads 5 as `Unknown(5)` and still ends the fetch as not given.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -466,7 +466,12 @@ prefix of the name, and knows nothing of what the file holds. Both need a node a
   answers `asked.refuse(why)`, in its own words, or `asked.give(source)`: the source is read
   through once for its digest (`give_known(source, Known)` skips that), and the returned gift is
   stepped (`gift.step(wait)`, or `gift.finish()`) until the client has it all or says why not.
-  The client's answers pace it: at most eight chunks on their way.
+  The client's answers pace it: at most eight chunks on their way. `gift.abort(why)` stops
+  giving it, and the client's fetch ends at once, `Aborted`, with "the program that offers it
+  stopped giving it: <why>", rather than waiting out the session's silence limit. A gift dropped
+  before it is over is aborted the same way ("it was dropped before it was given"), and a file
+  asked and dropped unanswered is refused, "the program that offers it did not give it".
+  `orionctl file fetch` prints the words and exits 1.
 - `files.fetch(name, into, have, progress)` fetches it into `into`, which holds its first `have`
   bytes already (zero for none): a fetch that broke off goes on from what is here. The digest is
   checked over all of it at the end: committed, or rejected with why (the file is shorter than

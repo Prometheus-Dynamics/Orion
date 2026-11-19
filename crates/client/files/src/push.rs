@@ -35,7 +35,7 @@ pub enum Step {
         /// The file's size.
         size: u64,
     },
-    /// Over: committed, or rejected with why.
+    /// Over: committed, or rejected with why, or aborted by the program giving it, with why.
     Done(Transfer),
 }
 

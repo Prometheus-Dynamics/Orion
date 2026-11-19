@@ -4,6 +4,8 @@
 #![cfg(target_os = "linux")]
 
 use std::io::Cursor;
+use std::net::Shutdown;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -16,10 +18,10 @@ use orion_server::{Comm, Error, Limits, Security};
 use orion_unix::UnixCarrier;
 use sha2::{Digest, Sha256};
 
-const WAIT: Duration = Duration::from_secs(10);
+pub(crate) const WAIT: Duration = Duration::from_secs(10);
 
 /// A comm core with the offers service, in a thread of its own, on a socket of its own.
-fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
+pub(crate) fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
     let dir = std::env::temp_dir().join(format!("orion-offers-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("dir");
@@ -50,14 +52,14 @@ fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
     (socket, stop)
 }
 
-fn files(socket: &Path, name: &str) -> Files {
+pub(crate) fn files(socket: &Path, name: &str) -> Files {
     let session = Session::connect(&Address::Local(socket.to_owned()), name, Options::default())
         .expect("connect");
     Files::new(&Client::new(session))
 }
 
 /// Bytes that differ from place to place, so a chunk in the wrong place is seen.
-fn content(size: usize) -> Vec<u8> {
+pub(crate) fn content(size: usize) -> Vec<u8> {
     (0..size).map(|at| (at * 31 % 251) as u8).collect()
 }
 
@@ -310,10 +312,48 @@ fn a_file_whose_bytes_are_not_its_digest_is_not_taken() {
     assert!(detail.contains("digest"), "{detail}");
 }
 
+/// A relay in front of the comm core's socket, for one program: cutting it ends that
+/// program's session as a program that dies does, with nothing of the program run after.
+fn relay(socket: &Path) -> (PathBuf, impl FnOnce()) {
+    let path = socket.with_file_name("relay.sock");
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).expect("relay");
+    let socket = socket.to_owned();
+    let (cut_tx, cut_rx) = mpsc::channel::<Vec<UnixStream>>();
+    std::thread::spawn(move || {
+        let (program, _) = listener.accept().expect("accept");
+        let comm = UnixStream::connect(&socket).expect("comm core");
+        let ends = vec![
+            program.try_clone().expect("clone"),
+            comm.try_clone().expect("clone"),
+        ];
+        cut_tx.send(ends).expect("ends");
+        for (mut from, mut to) in [
+            (
+                program.try_clone().expect("clone"),
+                comm.try_clone().expect("clone"),
+            ),
+            (comm, program),
+        ] {
+            std::thread::spawn(move || {
+                let _ = std::io::copy(&mut from, &mut to);
+                let _ = to.shutdown(Shutdown::Both);
+            });
+        }
+    });
+    let cut = move || {
+        for end in cut_rx.recv().expect("ends") {
+            let _ = end.shutdown(Shutdown::Both);
+        }
+    };
+    (path, cut)
+}
+
 #[test]
 fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
     let (socket, _stop) = comm_core("gone");
-    let socket_for = socket.clone();
+    // The program dies mid-gift: no drop of its gift is run, so it says nothing itself.
+    let (socket_for, cut) = relay(&socket);
     let (ready, offered) = mpsc::channel();
     let (asked_tx, asked_rx) = mpsc::channel();
     let (go, gone) = mpsc::channel::<()>();
@@ -322,7 +362,7 @@ fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
         let mut offer = files.offer("logs/").expect("offer");
         ready.send(()).expect("ready");
         let asked = offer.next(WAIT).expect("next").expect("asked");
-        // Gives the start, then its session ends before the rest.
+        // Gives the start, then its session is cut before the rest.
         let mut gift = asked.give(Cursor::new(content(1 << 20))).expect("give");
         let _ = gift.step(Duration::from_millis(10)).expect("step");
         asked_tx.send(()).expect("asked");
@@ -342,8 +382,7 @@ fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
         }
     }
     asked_rx.recv().expect("asked");
-    go.send(()).expect("go");
-    program.join().expect("program");
+    cut();
     let ended = loop {
         if let Step::Done(transfer) = fetching.step(Duration::from_millis(50)).expect("step") {
             break transfer;
@@ -351,6 +390,8 @@ fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
     };
     assert_eq!(ended.state, FileState::Rejected);
     assert_eq!(ended.detail, "the program that offers it went");
+    go.send(()).expect("go");
+    program.join().expect("program");
 }
 
 #[test]
