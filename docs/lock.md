@@ -379,6 +379,8 @@ what to change.
   anything there, naming each entry. A step written without its slowest time does not run
   (exit 2). `GATE_STEP_BOUND_SCALE` multiplies every bound. A step past its bound says
   `<step>: TIMED OUT after N s (bound N s)`. Nothing a program calls changes.
+- **I37.** A files-pull test waits for the fetch it started last before it ends. Nothing a
+  program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

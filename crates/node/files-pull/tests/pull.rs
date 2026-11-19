@@ -356,6 +356,14 @@ fn a_fetch_says_how_far_it_is_and_only_so_many_run_at_once() {
     }
     assert!(!pulls.active());
     assert!(pulls.start(one_more), "there is room again");
+    // Its thread writes into the directory: it ends before the directory goes, or the file it
+    // makes meanwhile keeps the directory from being removed (docs/flakes.md).
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while pulls.active() {
+        pulls.poll();
+        assert!(Instant::now() < deadline, "the last fetch never ended");
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
