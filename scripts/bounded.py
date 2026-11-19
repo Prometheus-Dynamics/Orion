@@ -76,9 +76,20 @@ def parents():
 
 
 def command_line(pid):
+    """What PID runs. A process caught in exec reads empty for a moment, until its new
+    arguments are set: it is read again, and named by its short name if it stays empty."""
+    for _ in range(20):
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as file:
+                line = file.read().replace(b"\0", b" ").decode(errors="replace").strip()
+        except OSError:
+            return "?"
+        if line:
+            return line
+        time.sleep(0.005)
     try:
-        with open(f"/proc/{pid}/cmdline", "rb") as file:
-            return file.read().replace(b"\0", b" ").decode(errors="replace").strip()
+        with open(f"/proc/{pid}/comm") as file:
+            return f"[{file.read().strip()}]"
     except OSError:
         return "?"
 
@@ -264,25 +275,54 @@ def self_test():
     cases = {
         # name: (bound, shell command, exit wanted, most seconds, what the output must hold)
         "passes its status and output": (20, "echo out; echo err >&2; exit 3", 3, 10, "err"),
-        "a sleeper": (1, f"exec -a {marker} sleep 1000", 124, 6, "TIMED OUT"),
+        "a sleeper": (1, f"exec -a {marker}-sleeper sleep 1000", 124, 6, "TIMED OUT"),
         "one that ignores TERM, in a session of its own": (
             1,
-            f"setsid bash -c 'trap \"\" TERM; exec -a {marker} sleep 1000' & sleep 1000",
+            f"setsid bash -c 'trap \"\" TERM; exec -a {marker}-deaf sleep 1000' & sleep 1000",
             124,
             7,
             "TIMED OUT",
         ),
-        # The step ends at once, as a helper exiting under `set -e` would, leaving an orphan
-        # that holds what was its output. The reader below must still see the end.
+        # The step ends, as a helper exiting under `set -e` would, leaving an orphan that holds
+        # what was its output. The reader below must still see the end. The step ends only
+        # once the orphan runs as the marker: caught still in exec, it would not be named so
+        # (docs/flakes.md).
         "an orphan holding the output": (
             20,
-            f"setsid bash -c 'exec -a {marker} sleep 1000' & echo started; exit 0",
+            f"setsid bash -c 'exec -a {marker}-orphan sleep 1000' & "
+            f"until grep -qa '^{marker}-orphan' /proc/$!/cmdline; do sleep 0.01; done; "
+            "echo started; exit 0",
             125,
             6,
             marker,
         ),
     }
+    # A case's time counts from when its step runs, seen by the name its process takes: on a
+    # loaded machine the interpreter alone can take seconds to start (docs/flakes.md).
+    starts = {
+        "a sleeper": f"{marker}-sleeper",
+        "one that ignores TERM, in a session of its own": f"{marker}-deaf",
+        "an orphan holding the output": f"{marker}-orphan",
+        "a stop from outside": f"{marker}-stop",
+    }
     results, failures = {}, []
+
+    def running(root, prefix):
+        """Whether a process under ROOT runs with arguments that begin with PREFIX. Only
+        ROOT's tree is read, never every process on the machine: it is asked every 10 ms."""
+        todo = [root]
+        while todo:
+            pid = todo.pop()
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as file:
+                    if pid != root and file.read().startswith(prefix.encode()):
+                        return True
+                for task in os.listdir(f"/proc/{pid}/task"):
+                    with open(f"/proc/{pid}/task/{task}/children") as file:
+                        todo.extend(int(child) for child in file.read().split())
+            except OSError:
+                pass
+        return False
 
     def one(name, bound, script, stopped=False):
         start = time.monotonic()
@@ -292,8 +332,19 @@ def self_test():
             stderr=subprocess.STDOUT,
             env=env,
         )
+        if name in starts:
+            waited = time.monotonic() + 30
+            while (
+                not running(process.pid, starts[name])
+                and process.poll() is None
+                and time.monotonic() < waited
+            ):
+                time.sleep(0.01)
+            start = time.monotonic()
         if stopped:
-            time.sleep(1)
+            # Stopped once its step runs, which is after it can take the stop: a stop sent
+            # before, while a loaded machine still starts it, would find no handler there
+            # (docs/flakes.md).
             process.send_signal(signal.SIGTERM)
         # Read to the end of the output: this is what blocks if an orphan holds it.
         output = process.stdout.read().decode(errors="replace")
@@ -304,7 +355,7 @@ def self_test():
         threading.Thread(target=one, args=(name, bound, script))
         for name, (bound, script, _, _, _) in cases.items()
     ]
-    stop_script = f"setsid bash -c 'exec -a {marker} sleep 1000' & exec -a {marker} sleep 1000"
+    stop_script = f"setsid bash -c 'exec -a {marker} sleep 1000' & exec -a {marker}-stop sleep 1000"
     threads.append(threading.Thread(target=one, args=("a stop from outside", 100, stop_script, True)))
     cases["a stop from outside"] = (100, stop_script, 128 + signal.SIGTERM, 7, "stopped by signal")
     for thread in threads:
@@ -323,7 +374,16 @@ def self_test():
             failures.append(f"{name}: took {took:.1f} s, more than {most} s")
         if holds not in output:
             failures.append(f"{name}: output lacks {holds!r}: {output!r}")
-    left = [pid for pid in parents() if marker in command_line(pid)]
+    def says(pid):
+        """PID's arguments, read once: every process on the machine is read, kernel threads
+        among them, whose arguments are always empty."""
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as file:
+                return file.read().decode(errors="replace")
+        except OSError:
+            return ""
+
+    left = [pid for pid in parents() if marker in says(pid)]
     if left:
         failures.append(f"left running: {[command_line(pid) for pid in left]}")
         for pid in left:

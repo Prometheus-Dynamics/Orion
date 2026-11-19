@@ -218,6 +218,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I30](docs/prs/I30.md) A run node logic stops ends as its program says, or Indeterminate (wave 19; needs I29)
 - [x] [I31](docs/prs/I31.md) A program that stops giving a file ends the fetch at once, saying why (wave 19; needs I30)
 - [x] [I32](docs/prs/I32.md) A fetch says when its program is quiet, and waits, unless told to give up (wave 19; needs I31)
+- [x] [I33](docs/prs/I33.md) The step bounds self-test waits for what it checks, not for the clock (wave 19; needs I32)
 
 ## J. The stack around Orion
 

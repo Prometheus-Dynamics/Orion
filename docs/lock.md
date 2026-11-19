@@ -367,6 +367,8 @@ what to change.
   `Fetching::give_up_after(quiet)`, off by default, ends it `Rejected`, "gave up: no progress for
   <quiet>, the limit set for this fetch". `orionctl file fetch` prints each stall and takes
   `--give-up MS`.
+- **I33.** The step bounds self-test waits for each step to run before it times or stops it, and
+  `bounded.py` names a leftover read mid-`exec` by its short name. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
