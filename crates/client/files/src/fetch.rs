@@ -27,6 +27,12 @@ const CLIENT_NUMBER: u64 = 1 << 63;
 /// program's reason after them.
 const STOPPED: &str = "the program that offers it stopped giving it";
 
+/// How long a fetch hears nothing from the program before it says so ([`Step::Stalled`]), and
+/// again each time as long passes: 5 s. It keeps waiting: the program may be busy, and the
+/// comm core says if the program goes. Only a limit the caller sets ([`Fetching::give_up_after`])
+/// ends it.
+pub const NO_PROGRESS: Duration = Duration::from_secs(5);
+
 /// A few entries by number, kept in a list: there are never many, and a list costs a board
 /// far less code than a tree.
 #[derive(Debug)]
@@ -225,6 +231,12 @@ pub struct Fetching<W> {
     told: u64,
     /// The most bytes the file may be.
     bound: Option<u64>,
+    /// How long without a chunk before [`Step::Stalled`] is said.
+    no_progress: Duration,
+    /// How long without a chunk ends the fetch, if the caller set it.
+    give_up: Option<Duration>,
+    /// When [`Step::Stalled`] was last said.
+    reported: Instant,
     over: bool,
 }
 
@@ -315,6 +327,9 @@ impl Files {
             last_heard: Instant::now(),
             told: have,
             bound: None,
+            no_progress: NO_PROGRESS,
+            give_up: None,
+            reported: Instant::now(),
             over: false,
         })
     }
@@ -380,7 +395,25 @@ impl<W: Read + Write + Seek> Fetching<W> {
         self
     }
 
+    /// Says [`Step::Stalled`] after `quiet` without a chunk, not [`NO_PROGRESS`].
+    #[must_use]
+    pub const fn stalled_after(mut self, quiet: Duration) -> Self {
+        self.no_progress = quiet;
+        self
+    }
+
+    /// Ends the fetch once the program has given nothing for `quiet` at a stretch: not taken,
+    /// with "gave up: no progress for <quiet>, the limit set for this fetch", and the program
+    /// is told the same. Without it, which is the default, a fetch never gives up on a program
+    /// that is there: it says it is stalled, and waits.
+    #[must_use]
+    pub const fn give_up_after(mut self, quiet: Duration) -> Self {
+        self.give_up = Some(quiet);
+        self
+    }
+
     /// Steps until the fetch is over, telling `progress` how much is here, of how much.
+    /// A stall is waited out, unless [`Fetching::give_up_after`] says otherwise.
     ///
     /// # Errors
     ///
@@ -390,7 +423,7 @@ impl<W: Read + Write + Seek> Fetching<W> {
         loop {
             match self.step(Duration::from_millis(200))? {
                 Step::Done(transfer) => return Ok(transfer),
-                Step::Waiting => {}
+                Step::Waiting | Step::Stalled { .. } => {}
                 Step::Progress { received, size } => {
                     if told != Some(received) {
                         told = Some(received);
@@ -406,8 +439,9 @@ impl<W: Read + Write + Seek> Fetching<W> {
     ///
     /// # Errors
     ///
-    /// If `into` can't be written, the comm core refuses the fetch, the program goes quiet for
-    /// the session's timeout, or the connection broke. The fetch is then over.
+    /// If `into` can't be written, the comm core refuses the fetch, or the connection broke.
+    /// The fetch is then over. A program that goes quiet does not end it, unless
+    /// [`Fetching::give_up_after`] was set: see [`Step::Stalled`].
     pub fn step(&mut self, wait: Duration) -> Result<Step, ClientError> {
         if self.over {
             return Err(ClientError::Protocol("a fetch that is over"));
@@ -465,7 +499,9 @@ impl<W: Read + Write + Seek> Fetching<W> {
             return Err(error);
         }
         let Some((size, digest)) = given else {
-            self.files.client.reply_left(self.last_heard)?;
+            if let Some(step) = self.quiet(None, [0; 32])? {
+                return Ok(step);
+            }
             self.files.client.pump(wait)?;
             return Ok(Step::Waiting);
         };
@@ -515,11 +551,35 @@ impl<W: Read + Write + Seek> Fetching<W> {
             self.told = self.written;
             self.tell(FileState::Receiving, "")?;
         }
-        self.files.client.reply_left(self.last_heard)?;
+        if let Some(step) = self.quiet(Some(size), digest)? {
+            return Ok(step);
+        }
         self.files.client.pump(wait)?;
         Ok(Step::Progress {
             received: self.written,
             size,
         })
+    }
+
+    /// Whether the program has been quiet long enough to say so, or to give up as the caller
+    /// set: none of this while chunks come.
+    fn quiet(&mut self, size: Option<u64>, digest: [u8; 32]) -> Result<Option<Step>, ClientError> {
+        let quiet = self.last_heard.elapsed();
+        if let Some(limit) = self.give_up
+            && quiet >= limit
+        {
+            let why = format!("gave up: no progress for {limit:?}, the limit set for this fetch");
+            self.tell(FileState::Rejected, &why)?;
+            return Ok(Some(self.done(FileState::Rejected, why, digest)));
+        }
+        if quiet >= self.no_progress && self.reported.elapsed() >= self.no_progress {
+            self.reported = Instant::now();
+            return Ok(Some(Step::Stalled {
+                received: self.written,
+                size,
+                quiet,
+            }));
+        }
+        Ok(None)
     }
 }

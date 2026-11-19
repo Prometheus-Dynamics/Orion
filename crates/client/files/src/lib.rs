@@ -33,7 +33,7 @@ pub mod index;
 mod offer;
 mod push;
 
-pub use fetch::{Fetching, Offered};
+pub use fetch::{Fetching, NO_PROGRESS, Offered};
 pub use offer::{Asked, Gift, Giving, Offer};
 pub use orion_msg_files::OfferedBy;
 pub use push::{Known, Pushing, Step};

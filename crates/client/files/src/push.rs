@@ -35,6 +35,16 @@ pub enum Step {
         /// The file's size.
         size: u64,
     },
+    /// A fetch the program has given nothing more of for `quiet`, [`crate::NO_PROGRESS`] or
+    /// what the fetch was set to: it keeps waiting. Said once each time that much passes.
+    Stalled {
+        /// Bytes here, in order from the start.
+        received: u64,
+        /// The file's size, once the program said it.
+        size: Option<u64>,
+        /// How long since the program last gave anything.
+        quiet: Duration,
+    },
     /// Over: committed, or rejected with why, or aborted by the program giving it, with why.
     Done(Transfer),
 }
@@ -247,7 +257,7 @@ impl<S: Read + Seek> Pushing<S> {
         loop {
             match self.step(Duration::from_millis(200))? {
                 Step::Done(transfer) => return Ok(transfer),
-                Step::Waiting => {}
+                Step::Waiting | Step::Stalled { .. } => {}
                 Step::Progress { received, size } => {
                     if told != Some(received) {
                         told = Some(received);

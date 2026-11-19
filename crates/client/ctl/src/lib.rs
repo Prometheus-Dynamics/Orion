@@ -65,7 +65,7 @@ usage: orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <ver
             remove NAME [--force] [--for MS]
   file      push DESTINATION PATH
             pull DESTINATION URL --size BYTES --sha256 HEX [--for MS]
-            fetch NAME PATH [--bound BYTES]   (goes on from what PATH holds)
+            fetch NAME PATH [--bound BYTES] [--give-up MS]   (goes on from what PATH holds)
             offers
   operator  ask --as NAME [--enrollment-key-file PATH]   (needs --key: enrolls that key)
             enroll KEY --as NAME                          (root on the board, any key)

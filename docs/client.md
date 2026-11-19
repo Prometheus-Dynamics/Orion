@@ -478,6 +478,14 @@ prefix of the name, and knows nothing of what the file holds. Both need a node a
   what is here, or what is here is not the file). `files.start_fetch(name, into, have)` begins one
   to be stepped, as a push is. A name nothing offers is refused as `not found`, "nothing offers
   <name>"; a program that goes mid-fetch ends it rejected, "the program that offers it went".
+- A fetch never gives up on a program that is there. When the program has given nothing for
+  `NO_PROGRESS` (5 s; `fetching.stalled_after(quiet)` to change it), a step says
+  `Step::Stalled { received, size, quiet }`, again each time as long passes, and the fetch keeps
+  waiting. The comm core says if the program goes, and a lost session ends it.
+  `fetching.give_up_after(quiet)` sets a limit, off by default: that much quiet at a stretch
+  ends the fetch not taken, "gave up: no progress for <quiet>, the limit set for this fetch", and
+  the program is told the same. `orionctl file fetch` prints `NAME: no progress for N s, R of S
+  bytes here; still waiting` each time, and `--give-up MS` sets the limit.
 - `files.offers()` lists every prefix offered (`Offered { prefix, by, name, principal, since_ms
   }`) and how many offers were refused for a clash.
 
@@ -663,7 +671,7 @@ workload  put NAME --kind K [--spec TEXT | --spec-file PATH] [--node N]
 workload  remove NAME [--force] [--for MS]
 file      push DESTINATION PATH
 file      pull DESTINATION URL --size BYTES --sha256 HEX [--for MS]
-file      fetch NAME PATH [--bound BYTES]   a file offered on the board; goes on from what PATH holds
+file      fetch NAME PATH [--bound BYTES] [--give-up MS]   a file offered on the board; goes on from what PATH holds
 file      offers                    what is offered on the board, and by whom
 operator  ask --as NAME [--enrollment-key-file PATH]   this operator's key (--key) asks to be let in
 operator  enroll KEY --as NAME                         root on the board lets a key in

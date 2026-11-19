@@ -1,9 +1,10 @@
 //! `orion file`: files to a board, and from one.
 
 use std::io::Write;
+use std::time::Duration;
 
 use orion::Orion;
-use orion::files::{FileState, OfferedBy, Pull};
+use orion::files::{FileState, OfferedBy, Pull, Step};
 
 use crate::args::Args;
 use crate::{Done, Failed, value, wait_option};
@@ -70,6 +71,7 @@ pub(crate) fn fetch(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done
     let name = args.word("a name")?;
     let path = args.word("a file")?;
     let bound = args.number("--bound")?;
+    let give_up = args.number("--give-up")?;
     args.done()?;
     let mut file = std::fs::OpenOptions::new()
         .read(true)
@@ -86,7 +88,28 @@ pub(crate) fn fetch(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done
     if let Some(bound) = bound {
         fetching = fetching.within(bound);
     }
-    let ended = fetching.finish(|_, _| {})?;
+    // Never given up on unless asked: a stall is said, and waited out.
+    if let Some(give_up) = give_up {
+        fetching = fetching.give_up_after(Duration::from_millis(give_up));
+    }
+    let ended = loop {
+        match fetching.step(Duration::from_millis(200))? {
+            Step::Done(ended) => break ended,
+            Step::Stalled {
+                received,
+                size,
+                quiet,
+            } => {
+                let of = size.map_or_else(String::new, |size| format!(" of {size}"));
+                writeln!(
+                    out,
+                    "{name}: no progress for {} s, {received}{of} bytes here; still waiting",
+                    quiet.as_secs()
+                )?;
+            }
+            Step::Waiting | Step::Progress { .. } => {}
+        }
+    };
     if ended.state == FileState::Committed {
         writeln!(out, "{name} is in {path}, {} bytes", ended.received)?;
         Ok(())

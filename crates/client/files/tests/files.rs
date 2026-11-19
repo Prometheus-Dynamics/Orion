@@ -710,7 +710,7 @@ fn two_pushes_are_stepped_together_on_one_session() {
             match pushing.step(Duration::from_millis(5)).expect("step") {
                 Step::Done(transfer) => done[at] = Some(transfer),
                 Step::Progress { received, .. } => seen[at].push(received),
-                Step::Waiting => {}
+                Step::Waiting | Step::Stalled { .. } => {}
             }
         }
     }

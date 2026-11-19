@@ -22,13 +22,13 @@ use orion_wire::List;
 use orion_wire::body::encode_fields;
 
 /// Runs the tool against `board` and returns its exit code and what it printed.
-fn ctl(board: &Board, line: &str) -> (i32, String, String) {
+pub(crate) fn ctl(board: &Board, line: &str) -> (i32, String, String) {
     let mut words = vec!["--address".to_owned(), board.socket().display().to_string()];
     words.extend(line.split_whitespace().map(str::to_owned));
     run(&words)
 }
 
-fn run(words: &[String]) -> (i32, String, String) {
+pub(crate) fn run(words: &[String]) -> (i32, String, String) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let code = orion_ctl::run(words, &mut out, &mut err);
     (
@@ -38,7 +38,7 @@ fn run(words: &[String]) -> (i32, String, String) {
     )
 }
 
-fn connect(socket: &Path, name: &str, roles: Roles) -> Orion {
+pub(crate) fn connect(socket: &Path, name: &str, roles: Roles) -> Orion {
     let options = Options {
         roles,
         ..Options::default()
@@ -724,73 +724,4 @@ fn operator_ask_with_and_without_the_enrollment_key() {
     assert_eq!(code, 2, "{err}");
     drop(board);
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn file_offers_and_fetch() {
-    let board = Board::start("ctl-fetch");
-    assert_eq!(
-        ctl(&board, "file offers"),
-        (0, "nothing is offered\n".into(), String::new())
-    );
-
-    let kernel: Vec<u8> = (0..200_000_u32).map(|index| (index % 241) as u8).collect();
-    let served = kernel.clone();
-    let socket = board.socket().to_owned();
-    let (ready, offered) = std::sync::mpsc::channel();
-    let program = std::thread::spawn(move || {
-        let orion = connect(&socket, "logger", Roles::CLIENT);
-        let mut offer = orion.files().offer("logs/").expect("offer");
-        ready.send(()).expect("ready");
-        let mut asked_from = Vec::new();
-        for _ in 0..2 {
-            let asked = offer
-                .next(Duration::from_secs(10))
-                .expect("next")
-                .expect("asked");
-            asked_from.push(asked.from());
-            let gift = asked
-                .give(std::io::Cursor::new(served.clone()))
-                .expect("give");
-            let _ = gift.finish().expect("over");
-        }
-        asked_from
-    });
-    offered.recv().expect("offered");
-
-    let (code, out, err) = ctl(&board, "file offers");
-    assert_eq!((code, err.as_str()), (0, ""));
-    assert!(out.starts_with("logs/  logger (local:"), "{out}");
-
-    // Half of it is here already: the rest is fetched, and the whole checked.
-    let path = board.dir().join("kernel.log");
-    std::fs::write(&path, &kernel[..50_000]).expect("write");
-    let (code, out, err) = ctl(
-        &board,
-        &format!("file fetch logs/kernel {}", path.display()),
-    );
-    assert_eq!(
-        (code, out, err),
-        (
-            0,
-            format!("logs/kernel is in {}, 200000 bytes\n", path.display()),
-            String::new()
-        )
-    );
-    assert_eq!(std::fs::read(&path).expect("read"), kernel);
-
-    let other = board.dir().join("other.log");
-    let (code, out, _) = ctl(
-        &board,
-        &format!("file fetch logs/kernel {} --bound 1000", other.display()),
-    );
-    assert_eq!(
-        (code, out.as_str()),
-        (
-            1,
-            "logs/kernel was not fetched: the file is 200000 bytes, more than its bound of 1000\n"
-        )
-    );
-    // Only the rest was asked for.
-    assert_eq!(program.join().expect("program"), [50_000, 0]);
 }

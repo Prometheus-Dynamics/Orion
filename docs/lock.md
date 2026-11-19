@@ -361,6 +361,12 @@ what to change.
   `Gift::abort(why)`, and a gift dropped before it is over. The fetch ends at once, `Aborted`, with
   "the program that offers it stopped giving it: <why>". A file asked and dropped unanswered is
   refused. An older client reads 5 as `Unknown(5)` and still ends the fetch as not given.
+- **I32.** A fetch is no longer bounded by the session's reply rule. A new `Step::Stalled
+  { received, size, quiet }` is said after `NO_PROGRESS` (5 s) without a chunk, and again each
+  time as long passes, and the fetch waits on. A `match` on `Step` needs the new arm.
+  `Fetching::give_up_after(quiet)`, off by default, ends it `Rejected`, "gave up: no progress for
+  <quiet>, the limit set for this fetch". `orionctl file fetch` prints each stall and takes
+  `--give-up MS`.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

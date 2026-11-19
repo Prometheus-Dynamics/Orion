@@ -9,3 +9,5 @@ mod configured;
 mod fetch;
 #[path = "own.rs"]
 mod own;
+#[path = "quiet.rs"]
+mod quiet;

@@ -13,7 +13,8 @@ priority = 100
 [[profile.default.overrides]]
 filter = '''
   test(=comm_core::roles_started_before_orion_wait_for_it_and_flow_when_it_comes)
-  | test(=workload_put_and_remove)
+  | test(=verbs::workload_put_and_remove)
+  | test(=fetch::file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked)
   | test(=a_file_that_takes_long_to_hash_does_not_cost_the_session)
   | test(=pty::a_link_is_opened_again_for_as_long_as_it_takes)
   | test(=devices::a_device_on_a_link_is_a_resource_an_ordinary_client_reads_and_drives)

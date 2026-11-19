@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-ctl"
 description = "The Orion command line: the six concepts as verbs, on the one client."
 edition.workspace = true
@@ -16,6 +17,12 @@ orion-wire = { path = "../../core/wire" }
 # The tests that need a comm core run on Linux, where it is.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 orion-stubs = { path = "../../testing/stubs" }
+
+# The integration tests, in one binary: one link for the crate, not one for each file
+# (tests/all.rs). A test file that needs features says so on its module there.
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true
