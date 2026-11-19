@@ -65,6 +65,11 @@ The work is a pre-planned list of PRs into `next`.
   directory). nextest, which the gate uses, still runs each test in a process of its own. A test
   that runs its binary again names itself with `module_path!()`, and a nextest filter names a test
   by its whole name, `<file>::<test>`; the gate fails a filter that matches no test.
+- Each gate step carries, after its label, the slowest time it has taken in a gate that passed,
+  here or in CI; its bound is three times that, at least a minute. Past it the step and all it
+  started are ended and the gate fails, naming it. A step that ends with a process of its own
+  still running fails too. A new step gets its slowest green time; a step that grows past a
+  third of its bound has that number raised in the change that made it slower, with the reason.
 - Start a new worktree's target directory with `scripts/seed-target.sh FROM TO`, from another
   worktree's: a copy, never a share, and on btrfs a clone that costs no space.
 

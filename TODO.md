@@ -212,6 +212,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I24](docs/prs/I24.md) A size build whose inputs were measured before is not built again (wave 19; needs I23)
 - [x] [I25](docs/prs/I25.md) A crate's integration tests are one binary (wave 19; needs I24)
 - [x] [I26](docs/prs/I26.md) The size key works on a machine that has not fetched the dependencies yet (wave 19; needs I25)
+- [x] [I27](docs/prs/I27.md) Every gate step has a bound, and leaves nothing running (wave 19; needs I26)
 
 ## J. The stack around Orion
 

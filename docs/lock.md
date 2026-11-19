@@ -342,6 +342,9 @@ what to change.
   matches no test and a test file nothing builds. Nothing a caller calls changes.
 - **I26.** The size key fetches what the lockfile names when it is not fetched yet, and a key
   that cannot be made stops the size gate by its cause. Nothing a caller calls changes.
+- **I27.** Each gate step runs within a bound (`scripts/bounded.py`), and fails if it passes it
+  or leaves a process running. The BusyBox supervisor ends its wait between starts when it is
+  stopped, instead of leaving it running. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

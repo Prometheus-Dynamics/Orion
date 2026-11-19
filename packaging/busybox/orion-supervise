@@ -24,10 +24,13 @@ socket=${ORION_SOCKET:-/run/orion/orion.sock}
 # The settings file, if not /etc/orion/orion.conf.
 conf=${SUPERVISE_CONF:-}
 child=
+nap=
 stopping=
 
 stop() {
     stopping=1
+    # TERM during the nap between starts: the nap ends with the supervisor, not after it.
+    [ -n "$nap" ] && kill "$nap" 2>/dev/null
     [ -n "$child" ] || exit 0
     kill -TERM "$child" 2>/dev/null
     waited=0
@@ -88,6 +91,7 @@ while [ -z "$stopping" ]; do
     nap=$!
     wait "$nap"
     kill "$nap" 2>/dev/null
+    nap=
     delay=$((delay * 2))
     [ "$delay" -gt 30 ] && delay=30
 done
