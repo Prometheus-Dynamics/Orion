@@ -471,8 +471,10 @@ prefix of the name, and knows nothing of what the file holds. Both need a node a
   program busy elsewhere between steps, however long, is not a client gone quiet. `gift.abort(why)` stops
   giving it, and the client's fetch ends at once, `Aborted`, with "the program that offers it
   stopped giving it: <why>", rather than waiting out the session's silence limit. A gift dropped
-  before it is over is aborted the same way ("it was dropped before it was given"), and a file
-  asked and dropped unanswered is refused, "the program that offers it did not give it".
+  before it is over is aborted the same way ("it was dropped before it was given"), and so is
+  one whose file cannot be read ("it could not be read: <the error>"): the step that read it
+  returns that error. A file asked and dropped unanswered is refused, "the program that offers
+  it did not give it".
   `orionctl file fetch` prints the words and exits 1.
 - `files.fetch(name, into, have, progress)` fetches it into `into`, which holds its first `have`
   bytes already (zero for none): a fetch that broke off goes on from what is here. The digest is

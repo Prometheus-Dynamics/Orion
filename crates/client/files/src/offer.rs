@@ -290,8 +290,9 @@ impl<R: Read + Seek> Gift<R> {
     ///
     /// # Errors
     ///
-    /// If the source can't be read, the client goes quiet for the session's timeout while it
-    /// owes an answer, or the connection broke. The gift is then over. The client's quiet
+    /// If the source can't be read (the client's fetch then ends at once, aborted, saying so),
+    /// the client goes quiet for the session's timeout while it owes an answer, or the
+    /// connection broke. The gift is then over. The client's quiet
     /// counts from its last word: a pause of this program's between steps is not the client's.
     pub fn step(&mut self, wait: Duration) -> Result<Giving, ClientError> {
         if self.over {
@@ -316,6 +317,20 @@ impl<R: Read + Seek> Gift<R> {
                 return Ok(done);
             }
         }
+    }
+
+    /// The source could not be read: the client is told at once, its fetch aborted with why,
+    /// rather than left to wait out its silence limit. The error is the source's, whether the
+    /// telling got through or not: a broken connection is the next call's to say.
+    fn unreadable(&mut self, error: std::io::Error) -> ClientError {
+        let detail = format!("it could not be read: {error}");
+        let _ = self.files.client.send(&FileTaken {
+            transfer: self.transfer,
+            received: self.acked,
+            state: FileState::Aborted,
+            detail: &detail,
+        });
+        ClientError::Io(error)
     }
 
     fn step_once(&mut self, wait: Duration) -> Result<Giving, ClientError> {
@@ -357,13 +372,16 @@ impl<R: Read + Seek> Gift<R> {
             let want = self
                 .chunk
                 .min(usize::try_from(self.size - self.sent).unwrap_or(usize::MAX));
-            let read = self.source.read(&mut self.buffer[..want])?;
-            if read == 0 {
-                return Err(ClientError::Io(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "the source ended before its size",
-                )));
-            }
+            let read = match self.source.read(&mut self.buffer[..want]) {
+                Ok(0) => {
+                    return Err(self.unreadable(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "the source ended before its size",
+                    )));
+                }
+                Ok(read) => read,
+                Err(error) => return Err(self.unreadable(error)),
+            };
             self.files.client.send(&FileGiveChunk {
                 transfer: self.transfer,
                 offset: self.sent,

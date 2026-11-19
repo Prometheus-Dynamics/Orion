@@ -1,13 +1,16 @@
 //! A program that stops giving a file ends its client's fetch at once, saying why: by
-//! aborting the gift, or by dropping it, or what it was asked, unanswered. The client is not
-//! left to wait for the session's silence limit.
+//! aborting the gift, or by dropping it, or what it was asked, unanswered, or because the file
+//! could not be read. The client is not left to wait for the session's silence limit.
 
 #![cfg(target_os = "linux")]
 
-use std::io::Cursor;
+use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use orion_connect::ClientError;
 use orion_file_offers::MAX_FETCHES;
 use orion_files::{Fetching, FileState, Giving, Known, Step, Transfer};
 use sha2::{Digest, Sha256};
@@ -192,4 +195,145 @@ fn a_fetch_aborted_is_over_in_the_comm_core_so_aborts_do_not_use_up_its_fetches(
             detail: String::new()
         }
     );
+}
+
+/// A file whose `fail_on`th read fails, as a disk that went away would; every read counted.
+struct Failing {
+    inner: Cursor<Vec<u8>>,
+    reads: Arc<AtomicUsize>,
+    fail_on: usize,
+}
+
+impl Read for Failing {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.reads.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_on {
+            return Err(std::io::Error::other("the disk went away"));
+        }
+        self.inner.read(buf)
+    }
+}
+
+impl Seek for Failing {
+    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+/// `size` bytes of [`content`], failing on read `fail_on`, and what to give them as.
+fn failing(size: usize, fail_on: usize) -> (Failing, Known, Arc<AtomicUsize>) {
+    let bytes = content(size);
+    let known = Known {
+        digest: Sha256::digest(&bytes).into(),
+        size: bytes.len() as u64,
+    };
+    let reads = Arc::new(AtomicUsize::new(0));
+    let source = Failing {
+        inner: Cursor::new(bytes),
+        reads: reads.clone(),
+        fail_on,
+    };
+    (source, known, reads)
+}
+
+#[test]
+fn a_gift_whose_file_cannot_be_read_ends_the_fetch_at_once_saying_so() {
+    let (socket, _stop, _dir) = comm_core("unreadable");
+    let socket_for = socket.clone();
+    let (ready, offered) = mpsc::channel();
+    let (failed_tx, failed) = mpsc::channel();
+    let (done, finished) = mpsc::channel::<()>();
+    let program = std::thread::spawn(move || {
+        let files = files(&socket_for, "logger");
+        let mut offer = files.offer("logs/").expect("offer");
+        ready.send(()).expect("ready");
+        let asked = offer.next(WAIT).expect("next").expect("asked");
+        let (source, known, _) = failing(4 << 20, 3);
+        let mut gift = asked.give_known(source, known).expect("give");
+        let error = loop {
+            match gift.step(Duration::from_millis(5)) {
+                Ok(Giving::Progress { .. }) => {}
+                Ok(done @ Giving::Done { .. }) => {
+                    panic!("given, though it cannot be read: {done:?}")
+                }
+                Err(error) => break error,
+            }
+        };
+        failed_tx
+            .send((error.to_string(), Instant::now()))
+            .expect("failed");
+        // The program's session lives on: what the client hears is why, not that it went.
+        finished.recv().expect("finished");
+    });
+    offered.recv().expect("offered");
+    let client = files(&socket, "collector");
+    let mut fetching = client
+        .start_fetch("logs/kernel", Cursor::new(Vec::new()), 0)
+        .expect("fetch");
+    let transfer = ended(&mut fetching, Duration::from_secs(10));
+    let (error, at) = failed.recv().expect("the program's step failed");
+    let took = at.elapsed();
+    assert!(error.contains("the disk went away"), "{error}");
+    assert_eq!(transfer.state, FileState::Aborted, "{}", transfer.detail);
+    assert_eq!(
+        transfer.detail,
+        "the program that offers it stopped giving it: it could not be read: the disk went away"
+    );
+    assert!(took < AT_ONCE, "heard {took:?} after the read failed");
+    done.send(()).expect("done");
+    program.join().expect("program");
+}
+
+#[test]
+fn a_gift_whose_connection_broke_says_so_and_never_reads_on() {
+    let (socket, stop, _dir) = comm_core("broken");
+    let socket_for = socket.clone();
+    let (ready, offered) = mpsc::channel();
+    let (giving_tx, giving) = mpsc::channel::<()>();
+    let (broken_tx, broken) = mpsc::channel::<()>();
+    let program = std::thread::spawn(move || {
+        let files = files(&socket_for, "logger");
+        let mut offer = files.offer("logs/").expect("offer");
+        ready.send(()).expect("ready");
+        let asked = offer.next(WAIT).expect("next").expect("asked");
+        let (source, known, reads) = failing(4 << 20, usize::MAX);
+        let mut gift = asked.give_known(source, known).expect("give");
+        gift.step(Duration::from_millis(5)).expect("the first step");
+        giving_tx.send(()).expect("giving");
+        broken.recv().expect("broken");
+        let start = Instant::now();
+        let (error, before, after) = loop {
+            let before = reads.load(Ordering::SeqCst);
+            match gift.step(Duration::from_millis(5)) {
+                Ok(_) => assert!(start.elapsed() < WAIT, "the break was never seen"),
+                Err(error) => break (error, before, reads.load(Ordering::SeqCst)),
+            }
+        };
+        // The connection's error, not the file's: the source was never what failed.
+        assert!(
+            matches!(error, ClientError::Io(_) | ClientError::Lost),
+            "{error:?}"
+        );
+        assert!(!error.to_string().contains("the disk"), "{error}");
+        assert!(
+            after <= before + 1,
+            "read on after the break: {before} then {after}"
+        );
+        // The gift is over: nothing more is read or sent, by a step or by its drop.
+        let read = reads.load(Ordering::SeqCst);
+        assert!(matches!(
+            gift.step(Duration::from_millis(5)),
+            Err(ClientError::Protocol("a gift that is over"))
+        ));
+        drop(gift);
+        assert_eq!(reads.load(Ordering::SeqCst), read);
+    });
+    offered.recv().expect("offered");
+    let client = files(&socket, "collector");
+    let _fetching = client
+        .start_fetch("logs/kernel", Cursor::new(Vec::new()), 0)
+        .expect("fetch");
+    giving.recv().expect("giving");
+    stop.send(()).expect("stop the comm core");
+    broken_tx.send(()).expect("broken");
+    program.join().expect("program");
 }

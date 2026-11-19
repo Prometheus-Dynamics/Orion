@@ -228,6 +228,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I40](docs/prs/I40.md) The shared-memory ring crates come from the device library at f8652608 (wave 19; needs I39)
 - [x] [I41](docs/prs/I41.md) The feature comparison reads cargo tree the same with colour on or off (wave 19; needs I40)
 - [x] [I42](docs/prs/I42.md) Each comm core keeps its own window on the log (wave 19; needs I41)
+- [x] [I43](docs/prs/I43.md) A gift whose file cannot be read ends the fetch at once, saying so (wave 19; needs I42)
 
 ## J. The stack around Orion
 

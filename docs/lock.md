@@ -395,6 +395,10 @@ what to change.
   `orion/log` within their own `log.window_bytes`. In Rust, `orion_log::Window` (`new`, `bytes`,
   `read`) (**Add**); `orion_log::{window, window_bytes, set_window_bytes}` (**Remove**). No caller
   outside Orion used them. Nothing on the wire changes.
+- **I43.** A gift whose file cannot be read ends its client's fetch at once, `Aborted`, with
+  "the program that offers it stopped giving it: it could not be read: <the error>". It no
+  longer waits out the silence limit. `Gift::step` still returns the read's error. Nothing a
+  program calls changes, and nothing new is on the wire.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
