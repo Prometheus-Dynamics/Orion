@@ -304,8 +304,17 @@ for p in "${plans[@]}"; do
     IFS='|' read -r name package _ _ _ target <<< "$p"
     specs+=("$name:$package:${target:-host}")
 done
+# Taken whole first: a key script that fails stops the gate here, by name, and a process
+# substitution's failure would not.
+key_list="$(scripts/size-key.py . "${specs[@]}")"
 declare -A keys
-while read -r name key; do keys[$name]="$key"; done < <(scripts/size-key.py . "${specs[@]}")
+while read -r name key; do keys[$name]="$key"; done <<< "$key_list"
+for p in "${plans[@]}"; do
+    if [ -z "${keys[${p%%|*}]:-}" ]; then
+        echo "    no size key for ${p%%|*}: scripts/size-key.py gave none" >&2
+        exit 1
+    fi
+done
 
 for p in "${plans[@]}"; do
     IFS='|' read -r name package file label limit target <<< "$p"

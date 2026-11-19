@@ -89,9 +89,18 @@ def cargo_configs(root):
 class Workspace:
     def __init__(self, root):
         self.root = os.path.abspath(root)
-        meta = json.loads(
-            run(["cargo", "metadata", "--locked", "--offline", "--format-version", "1"], self.root)
+        # Not --offline: on a machine that has not fetched the dependencies yet (a fresh CI
+        # runner) cargo fetches what the lockfile names, as the build after it would. A key is
+        # never made from a failed listing.
+        listing = subprocess.run(
+            ["cargo", "metadata", "--locked", "--format-version", "1"],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
         )
+        if listing.returncode != 0:
+            sys.exit(f"size-key.py: cargo metadata failed:\n{listing.stderr}")
+        meta = json.loads(listing.stdout)
         self.packages = {p["id"]: p for p in meta["packages"]}
         self.members = set(meta["workspace_members"])
         self.by_name = {self.packages[i]["name"]: i for i in self.members}

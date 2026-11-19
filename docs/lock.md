@@ -340,6 +340,8 @@ what to change.
 - **I25.** A crate with two or more integration-test files builds them as one binary
   (`tests/all.rs`); its tests are named `<file>::<test>`. The gate fails a nextest filter that
   matches no test and a test file nothing builds. Nothing a caller calls changes.
+- **I26.** The size key fetches what the lockfile names when it is not fetched yet, and a key
+  that cannot be made stops the size gate by its cause. Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
