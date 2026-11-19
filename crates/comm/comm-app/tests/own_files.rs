@@ -26,11 +26,15 @@ fn temp(name: &str) -> Scratch {
 
 /// Settings on a board whose security record says off, with a key whose value is a secret.
 fn settings(dir: &Path) -> CommSettings {
+    settings_with_window(dir, 4096)
+}
+
+fn settings_with_window(dir: &Path, window: usize) -> CommSettings {
     let view = dir.join("security");
     std::fs::write(&view, "off\ngeneration 1\n").expect("security record");
     let text = format!(
         "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n\
-         ssh.host_key = {0}/very-secret-key\nlog.window_bytes = 4096\n",
+         ssh.host_key = {0}/very-secret-key\nlog.window_bytes = {window}\n",
         dir.display()
     );
     let mut source = Source::parse(&text, Vec::new()).expect("source");
@@ -86,7 +90,6 @@ fn a_running_comm_core_offers_its_own_files_with_secrets_left_out() {
         let dir = temp("running");
         orion_log::install();
         let core = CommCore::start(settings(&dir)).await.expect("start");
-        tracing::info!("a line to find in orion/log");
         let names = &[
             "orion/index",
             "orion/settings",
@@ -138,16 +141,49 @@ fn a_running_comm_core_offers_its_own_files_with_secrets_left_out() {
             fetched[4]
         );
         assert!(fetched[4].contains("\nkinds_sha256 "), "{}", fetched[4]);
+        // Other tests in this process log too, so which lines are newest is not this test's
+        // to say: the lines themselves are checked through a large window, below.
         assert!(fetched[5].len() <= 4096);
-        assert!(
-            fetched[5].contains("a line to find in orion/log"),
-            "{}",
-            fetched[5]
-        );
+        assert!(fetched[5].is_empty() || fetched[5].ends_with('\n'));
 
         assert_eq!(offers[0].prefix, "orion/");
         assert_eq!(offers[0].by, OfferedBy::CommCore);
         drop(core);
+    });
+}
+
+#[test]
+fn two_comm_cores_in_one_process_each_keep_their_own_log_window() {
+    run(async {
+        orion_log::install();
+        let (small_dir, large_dir) = (temp("small-window"), temp("large-window"));
+        let small = CommCore::start(settings_with_window(&small_dir, 4096))
+            .await
+            .expect("start the small one");
+        let large = CommCore::start(settings_with_window(&large_dir, 262_144))
+            .await
+            .expect("start the large one");
+        // More than the small window holds, all of it within the large one.
+        for n in 0..200 {
+            tracing::info!("line {n} of a log longer than four kilobytes");
+        }
+        let names = &["orion/index", "orion/log"];
+        let (from_small, _) = fetch(small.socket(), names).await;
+        let (from_large, _) = fetch(large.socket(), names).await;
+        let bound = |index: &str| Index::parse(index).expect("an index").bound("orion/log");
+        assert_eq!(bound(&from_small[0]), Some(4096));
+        assert_eq!(bound(&from_large[0]), Some(262_144));
+        // The large window keeps the lines long, and the small one still shows only its own,
+        // whole lines. Other tests in this process log too, so the lines are looked for in the
+        // large one, which their few lines cannot push these out of.
+        assert!(from_small[1].len() <= 4096, "{}", from_small[1].len());
+        assert!(from_small[1].ends_with('\n'), "{}", from_small[1]);
+        assert!(from_large[1].len() > 4096, "{}", from_large[1].len());
+        for n in [0, 199] {
+            let line = format!("line {n} of a log longer than four kilobytes");
+            assert!(from_large[1].contains(&line), "{line}");
+        }
+        drop((small, large));
     });
 }
 

@@ -391,6 +391,10 @@ what to change.
 - **I41.** `scripts/same-features.py` runs `cargo tree` without colour, so CI's
   `CARGO_TERM_COLOR=always` no longer makes repeated packages look different. Nothing a program
   calls changes.
+- **I42.** Each comm core keeps its own window on the log: two in one process each offer
+  `orion/log` within their own `log.window_bytes`. In Rust, `orion_log::Window` (`new`, `bytes`,
+  `read`) (**Add**); `orion_log::{window, window_bytes, set_window_bytes}` (**Remove**). No caller
+  outside Orion used them. Nothing on the wire changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
