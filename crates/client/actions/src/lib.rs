@@ -131,7 +131,10 @@ pub enum Request {
         /// that does not say.
         detached: bool,
     },
-    /// Stop this run. Finish it as [`Outcome::Cancelled`], or as whatever it had become.
+    /// Stop this run. Finish it as [`Outcome::Cancelled`], or as whatever it had become: a run
+    /// that finished first says so. Node logic waits a bound for the answer when it stopped
+    /// the run itself (a deadline, or node logic stopping); with none by then the run ends
+    /// [`Outcome::Indeterminate`], never as cancelled or timed out by assumption.
     Cancel {
         /// The run.
         call: u64,

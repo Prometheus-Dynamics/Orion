@@ -50,6 +50,8 @@ export var Outcome;
     Outcome[Outcome["Rejected"] = 3] = "Rejected";
     Outcome[Outcome["TimedOut"] = 4] = "TimedOut";
     Outcome[Outcome["Cancelled"] = 5] = "Cancelled";
+    /** Told to stop, and its program did not say how it ended in time: it may have been done. */
+    Outcome[Outcome["Indeterminate"] = 6] = "Indeterminate";
 })(Outcome || (Outcome = {}));
 /** A request the board refused, with its stable code. */
 export class Refused extends Error {

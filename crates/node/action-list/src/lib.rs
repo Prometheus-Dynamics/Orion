@@ -27,7 +27,11 @@
 //!   ends, for any cause, each program that was given a run from it is told once with
 //!   `CallerGone`, whether its runs are still going or not.
 //! - A program that goes away takes its actions off the list, and its runs end as failed.
-//! - A run with a deadline that passes ends as timed out, and the program is told to stop.
+//! - A run with a deadline that passes, and every run when node logic stops, is told to stop,
+//!   and its program has a bound ([`CONFIRM_MS`]) to say how it ended. What it says ends the
+//!   run (a run cancelled at its deadline as timed out). With no word by then the run ends
+//!   [`Outcome::Indeterminate`]: node logic never says a run was cancelled or timed out when the
+//!   program may have finished it.
 //!
 //! Everything that happens to a run is also an [`Event`], for whoever shows runs to people.
 
@@ -42,8 +46,11 @@ use orion_types::{ActionName, Error, NodeName};
 use orion_wire::{Bytes, kind};
 
 mod attach;
+mod stop;
 
 use attach::fresh_instance;
+pub use stop::CONFIRM_MS;
+use stop::Stop;
 
 /// The most runs under way at once. More are refused as busy.
 pub const MAX_RUNS: usize = 4096;
@@ -145,6 +152,8 @@ struct Running {
     deadline: Option<u64>,
     /// Whether it carries on when its caller goes.
     detached: bool,
+    /// Node logic told its program to stop, and waits for its word until then.
+    stop: Option<Stop>,
 }
 
 /// The list.
@@ -173,6 +182,10 @@ pub struct Actions {
     max_detached_ms: u64,
     /// Tokens of callers that ended since [`Actions::take_ended`].
     ended_tokens: Vec<u64>,
+    /// How long a program has to say how a run node logic stopped ended.
+    confirm_ms: u64,
+    /// Node logic is stopping: no new run is taken.
+    closing: bool,
 }
 
 /// A caller: a session, or one session behind a peer's.
@@ -220,6 +233,8 @@ impl Actions {
             given: Vec::new(),
             max_detached_ms: MAX_DETACHED_MS,
             ended_tokens: Vec::new(),
+            confirm_ms: CONFIRM_MS,
+            closing: false,
         }
     }
 
@@ -341,10 +356,14 @@ impl Actions {
         std::mem::take(&mut self.events)
     }
 
-    /// When the next deadline passes: when to call [`Actions::tick`].
+    /// When the next deadline, or the next bound for a program's word, passes: when to call
+    /// [`Actions::tick`].
     #[must_use]
     pub fn next_deadline(&self) -> Option<u64> {
-        self.running.iter().filter_map(|run| run.deadline).min()
+        self.running
+            .iter()
+            .filter_map(|run| run.stop.map_or(run.deadline, |stop| Some(stop.by_ms)))
+            .min()
     }
 
     fn event(&mut self, at: usize, percent: u8, message: &str, outcome: Option<Outcome>) {
@@ -386,7 +405,8 @@ impl Actions {
                 },
             );
         }
-        if run.detached {
+        // Node logic stopping keeps nothing for a starter to come back to.
+        if run.detached && !self.closing {
             // How a detached run ended is kept for whoever started it, also when a caller
             // seems to be there: its session may have ended a moment ago without this node
             // having heard, and then the result just sent went nowhere.
@@ -465,6 +485,9 @@ impl Actions {
             }
             kind::ACTION_RUN => {
                 let run: Run<'_> = asked.body()?;
+                if self.closing {
+                    return Err(self.refuse(Error::Unavailable, "node logic is stopping".into()));
+                }
                 if run.detached {
                     // A run that outlives its caller must end by itself some time.
                     if run.deadline_ms == 0 {
@@ -552,6 +575,7 @@ impl Actions {
                     deadline: (run.deadline_ms != 0)
                         .then(|| now_ms.saturating_add(run.deadline_ms)),
                     detached: run.detached,
+                    stop: None,
                 });
                 self.event(self.running.len() - 1, 255, "claimed", None);
                 Ok(())
@@ -591,14 +615,8 @@ impl Actions {
                 let Some(at) = self.owned(result.call, from)? else {
                     return Ok(());
                 };
-                self.end(
-                    at,
-                    (result.outcome, result.code),
-                    result.output.0,
-                    result.detail,
-                    now_ms,
-                    out,
-                );
+                let ended = self.confirmed(at, (result.outcome, result.code));
+                self.end(at, ended, result.output.0, result.detail, now_ms, out);
                 Ok(())
             }
             kind::ACTION_CANCEL => {
@@ -700,60 +718,6 @@ impl Actions {
             .position(|caller| caller.session == session)
         {
             self.caller_ended(at, out);
-        }
-    }
-
-    /// Node logic is stopping: every run is cancelled where it runs, and ends for its caller
-    /// as cancelled. Nothing is kept for a starter to come back to.
-    pub fn stopping(&mut self, now_ms: u64, out: &mut dyn Out) {
-        while let Some(run) = self.running.first() {
-            let _ = out.send(
-                run.owner,
-                &Cancel {
-                    call: run.id,
-                    reason: CancelReason::Stopping,
-                    instance: 0,
-                    run: 0,
-                },
-            );
-            self.end(
-                0,
-                (Outcome::Cancelled, 0),
-                &[],
-                "node logic is stopping",
-                now_ms,
-                out,
-            );
-        }
-        self.ended.clear();
-    }
-
-    /// Ends the runs whose deadline has passed at `now_ms`.
-    pub fn tick(&mut self, now_ms: u64, out: &mut dyn Out) {
-        let mut at = 0;
-        while at < self.running.len() {
-            if self.running[at].deadline.is_some_and(|due| due <= now_ms) {
-                let (owner, id) = (self.running[at].owner, self.running[at].id);
-                let _ = out.send(
-                    owner,
-                    &Cancel {
-                        call: id,
-                        reason: CancelReason::Deadline,
-                        instance: 0,
-                        run: 0,
-                    },
-                );
-                self.end(
-                    at,
-                    (Outcome::TimedOut, orion_msg_actions::DEADLINE_CODE),
-                    &[],
-                    "it ran out of time",
-                    now_ms,
-                    out,
-                );
-            } else {
-                at += 1;
-            }
         }
     }
 }

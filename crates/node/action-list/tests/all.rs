@@ -12,3 +12,5 @@ mod ended;
 mod handles;
 #[path = "list.rs"]
 mod list;
+#[path = "stopped.rs"]
+mod stopped;

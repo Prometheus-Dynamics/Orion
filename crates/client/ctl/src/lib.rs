@@ -82,6 +82,9 @@ pub(crate) enum Failed {
     Client(Error),
     /// It was done, and the answer is that it did not work. Already printed.
     Unsuccessful,
+    /// It was told to stop and it is not known how it ended: it may have been done. Already
+    /// printed.
+    Indeterminate,
 }
 
 impl From<Usage> for Failed {
@@ -118,11 +121,12 @@ pub(crate) type Done = Result<(), Failed>;
 
 /// Runs one command. `args` are the words after the program's name. What a person is to read
 /// goes to `out`, what went wrong to `err`. Returns the exit code: 0 done, 1 not done, 2 not
-/// understood.
+/// understood, 3 not known whether it was done (a run that ended `Indeterminate`).
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     match command(args, out) {
         Ok(()) => 0,
         Err(Failed::Unsuccessful) => 1,
+        Err(Failed::Indeterminate) => 3,
         Err(Failed::Client(error)) => {
             let _ = writeln!(err, "orion: {error}");
             1
@@ -524,6 +528,13 @@ fn follow(mut run: orion::actions::Run, wait: Duration, out: &mut dyn Write) -> 
                     finished.outcome,
                     if said.is_empty() { "" } else { ": " }
                 )?;
+                if finished.outcome == Outcome::Indeterminate {
+                    writeln!(
+                        out,
+                        "it is not known whether it was done: look at what the action changes"
+                    )?;
+                    return Err(Failed::Indeterminate);
+                }
                 return if finished.outcome == Outcome::Succeeded {
                     Ok(())
                 } else {

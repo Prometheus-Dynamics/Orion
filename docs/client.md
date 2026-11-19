@@ -357,10 +357,17 @@ none given, and is what a node too old to pass one on gives. A program sets it w
 `Actions::finish_with_code`, or `orion_finish_code` in the C API, and a web page reads it as
 `result.code`. The words stay in `detail`. Node logic
 passes the code on as the program gave it: to the caller, to whoever attaches to a detached run
-later, and back across nodes. Orion's own ends give zero, except a deadline: a run node logic
-ended because its deadline passed is `TimedOut` with code 110 (`DEADLINE_CODE`, `ETIMEDOUT`'s
-number), so a caller can tell it from a program that gave up by itself. A program that went,
-or node logic stopping, gives zero.
+later, and back across nodes. Orion's own ends give zero, except a deadline: a run its program
+stopped because its deadline passed is `TimedOut` with code 110 (`DEADLINE_CODE`, `ETIMEDOUT`'s
+number), so a caller can tell it from a program that gave up by itself. A program that went
+gives zero.
+
+When node logic stops a run itself (its deadline passed, or node logic is stopping), the program
+is told to stop and the run waits for its word, up to `actions.confirm_ms` (10 s). The program's
+word ends the run: a run it had finished a moment before ends as it finished, not as stopped.
+A run with no word by then ends `Indeterminate` (6), code 0: it may have been done or not, and
+node logic does not guess. An older client reads 6 as an outcome it does not know, which is not
+a success either.
 
 A run handed to the program says who asked for it (`caller`), as the audit log names them:
 `local:<uid>`, `operator:<key>`, `peer:<node>`, `device:<name>` or `anonymous`. A run forwarded
@@ -368,9 +375,9 @@ from another node was asked for by that node. The check has already decided; `ca
 program that answers different callers differently, or keeps its own log.
 
 A request to stop a run says why (`reason`): `Asked` (its caller asked), `CallerGone` (its
-caller's session ended first, and it was not detached), `Deadline` (its deadline passed; the
-caller has already been told it timed out), or `Stopping` (node logic is stopping; the caller is
-told it was cancelled). Node logic sets it. What a caller says of why is not kept. A run carried
+caller's session ended first, and it was not detached), `Deadline` (its deadline passed), or
+`Stopping` (node logic is stopping). For the last two the caller is told what the program says,
+or `Indeterminate` if it says nothing in time. Node logic sets it. What a caller says of why is not kept. A run carried
 from another node keeps the reason that node gave. `Unsaid` comes from a host that does not say.
 
 A run also carries `session`, a token for the caller's session that is never reused while the
@@ -664,7 +671,8 @@ the address to ([getting-started.md](getting-started.md), "The first connection 
 security on"). It exits 0 only when the operator is enrolled.
 
 It exits 0 when the thing was done, 1 when it was not (the board refused, the action failed,
-the time ran out), and 2 when the command was not understood, which it finds out before it
+the time ran out), 3 when an action ended `Indeterminate` (it is not known whether it was done;
+it says so, and to look at what the action changes), and 2 when the command was not understood, which it finds out before it
 asks any board. A value is shown by its field's declared type and unit, so the tool reads
 topics it has never heard of. The whole tool is one function, `orion_ctl::run`, so it can be a
 mode of the one binary.

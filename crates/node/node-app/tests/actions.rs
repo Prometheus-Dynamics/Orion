@@ -27,14 +27,14 @@ fn own_test(name: &str) -> String {
 /// Set for the process that is the provider: the board's socket.
 const PROVIDER_SOCKET: &str = "ORION_TEST_PROVIDER_SOCKET";
 
-fn dir(name: &str) -> PathBuf {
+pub(crate) fn dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("directory");
     dir
 }
 
-fn settings(dir: &Path) -> NodeSettings {
+pub(crate) fn settings(dir: &Path) -> NodeSettings {
     let mut source = orion_config::Source::parse("", []).expect("no settings");
     let mut settings = NodeSettings::from_source(&mut source).expect("defaults");
     settings.config.socket = dir.join("orion.sock");
@@ -47,13 +47,13 @@ fn settings(dir: &Path) -> NodeSettings {
 
 /// Node logic in a thread of its own, until dropped: then it is told to stop, as a signal
 /// would.
-struct Logic {
+pub(crate) struct Logic {
     kill: Option<oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Logic {
-    fn start(settings: NodeSettings) -> Self {
+    pub(crate) fn start(settings: NodeSettings) -> Self {
         let (kill, killed) = oneshot::channel::<()>();
         let thread = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -123,6 +123,8 @@ fn provider_process() {
     let _wipe = register("wipe", Admits::OPERATOR);
     println!("provider ready");
     let mut long = None;
+    // Runs that finish just as they are told to stop, and runs that never answer a stop.
+    let (mut first, mut deaf) = (Vec::new(), Vec::new());
     // Runs held by a tag until `end:<tag>`.
     let mut held: Vec<(Vec<u8>, u64)> = Vec::new();
     // The sessions it was told have ended.
@@ -178,6 +180,19 @@ fn provider_process() {
                     // Left running: it ends when it is cancelled.
                     continue;
                 }
+                if args == b"first" {
+                    // Finishes as it is told to stop: its answer is that it was done.
+                    open.progress(call, 90, "nearly done", b"")
+                        .expect("progress");
+                    first.push(call);
+                    continue;
+                }
+                if args == b"deaf" {
+                    // Never answers a stop.
+                    open.progress(call, 30, "working", b"").expect("progress");
+                    deaf.push(call);
+                    continue;
+                }
                 if args == b"long" {
                     // Says where it is and goes on until it is released.
                     open.progress(call, 30, "working", b"").expect("progress");
@@ -199,6 +214,11 @@ fn provider_process() {
                 open.finish(call, Outcome::Succeeded, &output, "")
                     .expect("finish");
             }
+            Some(Request::Cancel { call, .. }) if deaf.contains(&call) => {}
+            Some(Request::Cancel { call, .. }) if first.contains(&call) => {
+                open.finish(call, Outcome::Succeeded, b"finished first", "")
+                    .expect("finish");
+            }
             Some(Request::Cancel { call, .. }) => {
                 held.retain(|(_, held)| *held != call);
                 open.finish(call, Outcome::Cancelled, b"", "stopped")
@@ -210,11 +230,11 @@ fn provider_process() {
     }
 }
 
-struct Provider(Child);
+pub(crate) struct Provider(Child);
 
 impl Provider {
     /// Starts this test binary again as the provider, and waits until its actions are listed.
-    fn start(socket: &Path) -> Self {
+    pub(crate) fn start(socket: &Path) -> Self {
         let mut child = Command::new(std::env::current_exe().expect("this test"))
             .args([
                 "--exact",
@@ -247,7 +267,7 @@ impl Drop for Provider {
     }
 }
 
-fn call(name: &'static str, args: &'static [u8]) -> ActionCall<'static> {
+pub(crate) fn call(name: &'static str, args: &'static [u8]) -> ActionCall<'static> {
     ActionCall {
         name,
         target: fan(),
@@ -410,9 +430,10 @@ fn actions_are_still_there_after_node_logic_restarts() {
     ));
     drop(logic);
     let stopped = slow.finish(Duration::from_secs(5)).expect("it ends");
+    // As the program said, once told why.
     assert_eq!(
         (stopped.outcome, stopped.detail.as_str()),
-        (Outcome::Cancelled, "node logic is stopping")
+        (Outcome::Cancelled, "stopped")
     );
 
     // It starts again. The provider never notices, and its action is on the new list.

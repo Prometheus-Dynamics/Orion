@@ -4,7 +4,7 @@
 use crate::common;
 
 use common::{Bench, CALLER, HOUR, OTHER, OWNER, bare, by, fan};
-use orion_action_list::{ENDED_FOR_MS, Event, MAX_ENDED, MAX_RUNS};
+use orion_action_list::{CONFIRM_MS, ENDED_FOR_MS, Event, MAX_ENDED, MAX_RUNS};
 use orion_check::{Admits, Policy};
 use orion_msg_actions::{
     ActionResult, Cancel, CancelReason, Claim, DEADLINE_CODE, Outcome, Progress, Register,
@@ -238,11 +238,12 @@ fn node_logic_stopping_cancels_every_run_and_says_why() {
     for id in [first, detached] {
         let cancel: Cancel = bench.take(OWNER);
         assert_eq!((cancel.call, cancel.reason), (id, CancelReason::Stopping));
+    }
+    // Each ends as its program says.
+    for id in [first, detached] {
+        bench.result(id, Outcome::Cancelled);
         let result: ActionResult<'_> = bench.take(CALLER);
-        assert_eq!(
-            (result.outcome, result.detail, result.code),
-            (Outcome::Cancelled, "node logic is stopping", 0)
-        );
+        assert_eq!((result.outcome, result.code), (Outcome::Cancelled, 11));
     }
     assert_eq!((bench.actions.running(), bench.actions.ended()), (0, 0));
     assert!(bench.sent.frames.is_empty());
@@ -349,8 +350,15 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
         (cancel.call, cancel.reason),
         (claim.call, CancelReason::Deadline)
     );
+    // The run waits for the program's word, up to its bound.
+    assert!(bench.sent.frames.is_empty());
+    assert_eq!(
+        bench.actions.next_deadline(),
+        Some(bench.now + 500 + CONFIRM_MS)
+    );
+    bench.result(claim.call, Outcome::Cancelled);
     let result: ActionResult<'_> = bench.take(CALLER);
-    // Ended by node logic for its deadline, with the code that says so.
+    // Stopped for its deadline: timed out, with the code that says so.
     assert_eq!(
         (result.call, result.outcome, result.code),
         (7, Outcome::TimedOut, DEADLINE_CODE)
@@ -594,6 +602,7 @@ fn a_detached_run_still_has_its_deadline_and_its_program() {
     bench.actions.tick(bench.now, &mut bench.sent);
     let cancel: Cancel = bench.take(OWNER);
     assert_eq!(cancel.call, claim.call);
+    bench.result(claim.call, Outcome::Cancelled);
     bench.ask(BACK, &bare(7)).expect("attach");
     let result: ActionResult<'_> = bench.take(BACK);
     assert_eq!(

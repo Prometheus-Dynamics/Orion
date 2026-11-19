@@ -81,6 +81,10 @@ pub struct NodeSettings {
     /// `actions.max_detached_ms`: the longest deadline a detached run may have. A detached
     /// run must have one, so that it ends without its caller.
     pub max_detached_ms: u64,
+    /// `actions.confirm_ms`: how long a program has to say how a run ended once node logic
+    /// told it to stop (its deadline passed, or node logic is stopping). With no word by
+    /// then the run ends `Indeterminate`. Also how long node logic's stop waits at most.
+    pub confirm_ms: u64,
     /// `leases.quiet_ms`: how long a program on the board that holds a lease with no end must
     /// be quiet before another claimant may take it.
     pub lease_quiet_ms: u64,
@@ -130,6 +134,7 @@ impl NodeSettings {
                 "actions.max_detached_ms",
                 orion_action_list::MAX_DETACHED_MS,
             )?,
+            confirm_ms: source.get("actions.confirm_ms", orion_action_list::CONFIRM_MS)?,
             lease_quiet_ms: source.get("leases.quiet_ms", orion_resources::QUIET_MS)?,
             save_after: Duration::from_millis(source.get("records.save_after_ms", 500_u64)?),
             max_drift_ms: source.get("records.max_drift_ms", defaults.max_drift_ms)?,
@@ -250,6 +255,7 @@ impl Node {
             .workloads
             .set_placement_grace(settings.placement_grace.as_millis() as u64);
         logic.actions.set_max_detached(settings.max_detached_ms);
+        logic.actions.set_confirm(settings.confirm_ms);
         logic
             .records
             .resources_mut()
@@ -389,7 +395,8 @@ impl Node {
         Ok(())
     }
 
-    /// Node logic is stopping: every run is cancelled where it runs, saying so.
+    /// Node logic is stopping: every run's program is told to stop, saying so. The runs end
+    /// as their programs say, or `Indeterminate` at the bound, while [`Node::serve`] goes on.
     fn stopping(&mut self, client: &Client) {
         let mut direct = Direct::new(client, &mut self.scratch);
         {
@@ -459,12 +466,18 @@ impl Node {
                 None
             }
         };
+        // Set once `stop` is done: the runs' programs were told to stop, and this goes on
+        // until each run has ended, which its bound caps. A comm core lost meanwhile ends it.
+        let mut stopping = false;
         loop {
             if let Err(error) = client.drain() {
-                return Some(error);
+                return (!stopping).then_some(error);
             }
             if let Err(error) = self.turn(&client, progress.as_mut()) {
-                return Some(error);
+                return (!stopping).then_some(error);
+            }
+            if stopping && self.logic.borrow().actions.running() == 0 {
+                return None;
             }
             let now = Instant::now();
             self.save_if_due(now);
@@ -522,13 +535,19 @@ impl Node {
                     readable.await;
                 }
             };
-            let stopped = tokio::select! {
-                () = stop.as_mut() => true,
-                () = waiting => false,
+            // `stop` is waited on until it is done, and never again after.
+            let stopped = if stopping {
+                waiting.await;
+                false
+            } else {
+                tokio::select! {
+                    () = stop.as_mut() => true,
+                    () = waiting => false,
+                }
             };
             if stopped {
                 self.stopping(&client);
-                return None;
+                stopping = true;
             }
         }
     }

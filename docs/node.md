@@ -265,9 +265,14 @@ actions; any program on the board adds its own.
   - If a session is lost between starting a run and hearing its handle, how the run went is
     not known. Find out from what the action does (read what it changes), never by coming back
     to the number alone, which may name another run by then.
-- **Deadlines.** A run with a deadline that passes ends as `TimedOut`, with code 110
-  (`DEADLINE_CODE`), and the program is told to stop. What the program says of it afterwards
-  is ignored. Node logic's other ends (cancelled, caller or program gone, stopping) have code 0.
+- **Deadlines, and stopping.** A run with a deadline that passes, and every run when node logic
+  stops, is told to stop, and its program has `actions.confirm_ms` (10 s) to say how it ended.
+  What it says ends the run; a run it stopped at its deadline ends as `TimedOut`, with code 110
+  (`DEADLINE_CODE`), and one it had finished ends as it finished. With no word by then the run
+  ends `Indeterminate`, code 0: node logic never says a run was cancelled or timed out when the
+  program may have finished it. While stopping, no new run is taken (`unavailable`), and node
+  logic stops once every run has ended, by the bound at the latest. What a program says after
+  its run ended is ignored. Node logic's other ends (caller or program gone) have code 0.
 - **A program is told a run is detached.** The run handed to it carries `detached`, so it
   knows that the caller's session ending does not end the run.
 - **Only the program that has a run speaks for it.** A result from anyone else is `denied`.

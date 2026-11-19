@@ -21,6 +21,8 @@ mod resources;
 mod restoring;
 #[path = "sink.rs"]
 mod sink;
+#[path = "stops.rs"]
+mod stops;
 #[path = "sync.rs"]
 mod sync;
 #[path = "workloads.rs"]

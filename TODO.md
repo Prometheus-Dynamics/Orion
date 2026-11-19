@@ -215,6 +215,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I27](docs/prs/I27.md) Every gate step has a bound, and leaves nothing running (wave 19; needs I26)
 - [x] [I28](docs/prs/I28.md) The size gate's path check reads the build it made, on CI as here (wave 19; needs I27)
 - [x] [I29](docs/prs/I29.md) armv7 and riscv64 size builds run before a release only (wave 19; needs I28)
+- [x] [I30](docs/prs/I30.md) A run node logic stops ends as its program says, or Indeterminate (wave 19; needs I29)
 
 ## J. The stack around Orion
 

@@ -102,6 +102,8 @@ export enum Outcome {
   Rejected = 3,
   TimedOut = 4,
   Cancelled = 5,
+  /** Told to stop, and its program did not say how it ended in time: it may have been done. */
+  Indeterminate = 6,
 }
 
 /** An action to run: against a node or a resource, or this board if neither is said. */

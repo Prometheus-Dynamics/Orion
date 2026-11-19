@@ -351,6 +351,12 @@ what to change.
 - **I29.** The armv7 and riscv64 size builds run before a release only
   (`scripts/size-gate.sh --release`, docs/release.md); x86_64 and aarch64 stay on every change.
   Nothing a caller calls changes.
+- **I30.** A new outcome, `Indeterminate` (6). A run node logic stops itself, at its deadline
+  or when node logic stops, waits up to `actions.confirm_ms` (10 s) for its program's word and
+  ends as the program says; with none it ends `Indeterminate`, where it used to end `TimedOut`
+  or `Cancelled` at once. A program that reports `Cancelled` after a deadline still gives
+  `TimedOut`. Node logic refuses new runs while stopping, and its stop waits that bound at most.
+  `orionctl` exits 3 for `Indeterminate`. An older peer reads 6 as `Unknown(6)`.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

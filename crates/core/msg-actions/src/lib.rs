@@ -17,9 +17,10 @@ pub enum Target {
     Resource(ResourceName),
 }
 
-/// The [`ActionResult::code`] of a run that node logic ended because its deadline passed
-/// ([`Outcome::TimedOut`]): `ETIMEDOUT`'s number. A run ended any other way by node logic
-/// (cancelled, its caller or program gone) has code 0; a program's own codes are its own.
+/// The [`ActionResult::code`] of a run that its program stopped because node logic told it its
+/// deadline passed ([`Outcome::TimedOut`]): `ETIMEDOUT`'s number. A run ended any other way by
+/// node logic (its program gone, [`Outcome::Indeterminate`]) has code 0; a program's own codes
+/// are its own.
 pub const DEADLINE_CODE: u32 = 110;
 
 open_enum! {
@@ -35,6 +36,11 @@ open_enum! {
         TimedOut = 4,
         /// It was cancelled.
         Cancelled = 5,
+        /// Node logic told it to stop (its deadline passed, or node logic was stopping), and
+        /// its program did not say how it ended in time: it may have finished, failed or
+        /// stopped. Not to be read as done, nor as not done. Never `Unknown`: an older peer
+        /// reads this number as `Unknown(6)`, which is not a success either.
+        Indeterminate = 6,
     }
 }
 
