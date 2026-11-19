@@ -28,13 +28,28 @@ fi
 # runs under scripts/bounded.py, in a session of its own, its output through a file: past its
 # bound, it and everything it started are ended (TERM, then KILL) and the gate fails, naming
 # it. A step that ends with a process of its own still running fails too, so no process it
-# leaves can hold the gate's output open.
+# leaves can hold the gate's output open. Each step has a TMPDIR of its own, and fails if it
+# leaves anything there.
+#
+# A step written without its number does not run (exit 2): it would be bounded by nothing
+# anyone chose. On a machine slower than any these numbers came from, GATE_STEP_BOUND_SCALE (a
+# whole number, 1 if unset) multiplies every bound.
 #
 # bounded <label> <slowest seconds> <command...>: a command, or a function of this script.
 bounded() {
-  local label="$1" bound=$(($2 * 3))
+  local label="$1" scale="${GATE_STEP_BOUND_SCALE:-1}" bound
+  if ! [[ "${2:-}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "$label: no bound: '${2:-}' is not its slowest time in seconds" >&2
+    exit 2
+  fi
+  if ! [[ "$scale" =~ ^[1-9][0-9]*$ ]]; then
+    echo "$label: GATE_STEP_BOUND_SCALE must be a whole number, not '$scale'" >&2
+    exit 2
+  fi
+  bound=$(($2 * 3))
   shift 2
   [ "$bound" -ge 60 ] || bound=60
+  bound=$((bound * scale))
   if declare -F "$1" > /dev/null; then
     scripts/bounded.py "$bound" "$label" -- bash -c 'set -euo pipefail; "$@"' "$label" "$@"
   else
@@ -194,6 +209,24 @@ fi
 
 main "push guard" 3 scripts/push.sh --self-test
 main "step bounds self-test" 3 scripts/bounded.py --self-test
+# A step with no number, or a scale that is not one, refuses to run.
+bounds_refuse() {
+  local number scale status
+  for number in x "" 0; do
+    status=0
+    (bounded probe "$number" true) > /dev/null 2>&1 || status=$?
+    [ "$status" -eq 2 ] || { echo "a bound of '$number': exit $status, not 2" >&2; return 1; }
+  done
+  for scale in 1.5 0 2; do
+    status=0
+    (GATE_STEP_BOUND_SCALE="$scale" bounded probe 1 true) > /dev/null 2>&1 || status=$?
+    [ "$status" -eq "$([ "$scale" = 2 ] && echo 0 || echo 2)" ] ||
+      { echo "a scale of '$scale': exit $status" >&2; return 1; }
+  done
+}
+if [ -z "$part" ] || [ "$part" = main ]; then
+  timed "steps without a bound refuse" bounds_refuse
+fi
 
 # Checks that build nothing come first: they fail fastest.
 if [ -x scripts/check-boundaries.sh ]; then

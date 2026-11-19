@@ -74,8 +74,11 @@ The work is a pre-planned list of PRs into `next`.
 - Each gate step carries, after its label, the slowest time it has taken in a gate that passed,
   here or in CI; its bound is three times that, at least a minute. Past it the step and all it
   started are ended and the gate fails, naming it. A step that ends with a process of its own
-  still running fails too. A new step gets its slowest green time; a step that grows past a
-  third of its bound has that number raised in the change that made it slower, with the reason.
+  still running fails too, and so does one that leaves anything in its TMPDIR: each step gets
+  an empty one of its own. A step written without its number does not run. On a slower machine,
+  `GATE_STEP_BOUND_SCALE=2` (a whole number) doubles every bound. A new step gets its slowest
+  green time; a step that grows past a third of its bound has that number raised in the change
+  that made it slower, with the reason.
 - Start a new worktree's target directory with `scripts/seed-target.sh FROM TO`, from another
   worktree's: a copy, never a share, and on btrfs a clone that costs no space.
 

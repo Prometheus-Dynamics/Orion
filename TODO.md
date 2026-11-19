@@ -221,6 +221,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I33](docs/prs/I33.md) The step bounds self-test waits for what it checks, not for the clock (wave 19; needs I32)
 - [x] [I34](docs/prs/I34.md) A program's own pause is never its client's silence (wave 19; needs I33)
 - [x] [I35](docs/prs/I35.md) Every test removes the files it made, passed or panicked (wave 19; needs I34)
+- [x] [I36](docs/prs/I36.md) Each gate step has a TMPDIR of its own, and fails if it leaves anything there (wave 19; needs I35)
 
 ## J. The stack around Orion
 

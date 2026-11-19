@@ -17,15 +17,23 @@ status:
 
 - past its bound: 124, with `TIMED OUT: LABEL` and the bound;
 - ended, but processes it started were still running: 125, naming each (they are ended too);
+- ended, but it left something in its TMPDIR: 125, naming each entry;
 - otherwise the step's own.
+
+Each step gets a TMPDIR of its own, empty, with a short name (a socket under it must fit in
+107 bytes), under the TMPDIR this script was given. What a step makes there, it removes: one
+gate's tests left 176 entries, 139 MB, in a shared one, and a full tmpfs fails unrelated steps
+with errors that say nothing of it. Whatever is left is named, then removed.
 
 TERM, INT or HUP to this script ends the step and every process under it the same way.
 
-`--self-test` plants a sleeper, a process that ignores TERM, an orphan that holds the output
-and a stop from outside, and checks each ends within its bound with nothing left running.
+`--self-test` plants a sleeper, a process that ignores TERM, an orphan that holds the output,
+a stop from outside and a step that leaves a file in its TMPDIR, and checks each ends within its
+bound with nothing left running, and the leftover is named.
 """
 
 import ctypes
+import shutil
 import os
 import signal
 import subprocess
@@ -204,6 +212,7 @@ def run(bound, label, command):
     signal.signal(signal.SIGALRM, on_alarm)
 
     log = tempfile.NamedTemporaryFile(prefix="orion-step.", delete=False)
+    scratch = tempfile.mkdtemp(prefix="g")
     stop = threading.Event()
     copier = threading.Thread(target=copy, args=(log.name, stop, sys.stdout.buffer), daemon=True)
     group = None
@@ -224,6 +233,7 @@ def run(bound, label, command):
                     stderr=log,
                     close_fds=True,
                     start_new_session=True,
+                    env=dict(os.environ, TMPDIR=scratch),
                 )
             except OSError as error:
                 print(f"    {label}: cannot run {command[0]}: {error}", flush=True)
@@ -248,12 +258,20 @@ def run(bound, label, command):
                 for pid, line in left:
                     print(f"      {pid} {line[:200]}", flush=True)
                 return 125
+            files = sorted(os.listdir(scratch))
+            if files:
+                print(f"    {label}: ended, but left these in its TMPDIR (now removed):", flush=True)
+                for name in files[:50]:
+                    print(f"      {name}", flush=True)
+                if len(files) > 50:
+                    print(f"      and {len(files) - 50} more", flush=True)
+                return 125
             return 128 - status if status < 0 else status
         except Bound:
             end_all(group)
             drain()
             how = "every process under it" if subreaper else "its process group"
-            print(f"    TIMED OUT: {label}: past its bound of {bound} s; {how} ended", flush=True)
+            print(f"    {label}: TIMED OUT after {bound} s (bound {bound} s); {how} ended", flush=True)
             return 124
         except Stopped as stopped:
             signal.alarm(0)
@@ -265,6 +283,7 @@ def run(bound, label, command):
         drain()
         log.close()
         os.unlink(log.name)
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def self_test():
@@ -295,6 +314,15 @@ def self_test():
             125,
             6,
             marker,
+        ),
+        # Given an empty TMPDIR of its own, apart from this script's; what it leaves is named.
+        "one that leaves a file in its TMPDIR": (
+            20,
+            f'[ "$TMPDIR" != "{tempfile.gettempdir()}" ] && [ -z "$(ls -A "$TMPDIR")" ] '
+            f"&& touch \"$TMPDIR/{marker}-left\"",
+            125,
+            10,
+            f"left these in its TMPDIR (now removed):\n      {marker}-left",
         ),
     }
     # A case's time counts from when its step runs, seen by the name its process takes: on a

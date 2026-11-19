@@ -375,6 +375,10 @@ what to change.
 - **I35.** Tests keep their files in `orion_scratch::Scratch`, removed when the test ends, passed
   or panicked. `orion_stubs::Board::start` removes the directory it made when the board is
   dropped; a board started in a caller's directory leaves it. Nothing a program calls changes.
+- **I36.** Each gate step runs with an empty TMPDIR of its own and fails (125) if it leaves
+  anything there, naming each entry. A step written without its slowest time does not run
+  (exit 2). `GATE_STEP_BOUND_SCALE` multiplies every bound. A step past its bound says
+  `<step>: TIMED OUT after N s (bound N s)`. Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
