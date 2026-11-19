@@ -386,6 +386,8 @@ what to change.
 - **I39.** The gate checks the no_std crates in three groups per target, not one call each;
   `scripts/same-features.py` fails the gate if a group ever builds a crate with features its own
   call would not. Nothing a program calls changes.
+- **I40.** The seven `shm-*` crates are pinned to the device library's `f8652608`, through the
+  `.git` URL. No other package changes. Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

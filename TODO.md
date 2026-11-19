@@ -225,6 +225,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I37](docs/prs/I37.md) A pull test waits for the fetch it started last before its directory goes (wave 19; needs I36)
 - [x] [I38](docs/prs/I38.md) The doctests run beside the other tests, not after them (wave 19; needs I37)
 - [x] [I39](docs/prs/I39.md) The no_std crates are checked in groups that build each as it builds alone (wave 19; needs I38)
+- [x] [I40](docs/prs/I40.md) The shared-memory ring crates come from the device library at f8652608 (wave 19; needs I39)
 
 ## J. The stack around Orion
 
