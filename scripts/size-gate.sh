@@ -183,7 +183,9 @@ fi
 measure="${SIZE_GATE_MEASURE:-0}"
 [ "${1:-}" = "--measure" ] && measure=1
 
-target_dir="${CARGO_TARGET_DIR:-target}"
+# Absolute: the path check builds from another directory, and a relative target directory would
+# put that build somewhere else than where it is read (CI sets none: `target`).
+target_dir="$(realpath -m "${CARGO_TARGET_DIR:-target}")"
 failures=0
 
 # Each build has a target directory of its own, under this one, so all of them run at once: a
@@ -342,10 +344,14 @@ if [ "$measure" = 1 ]; then
     git ls-files -z --cached --others --exclude-standard \
         | rsync -a --delete --from0 --files-from=- ./ "$copy/src/"
     if (cd "$copy/src" && CARGO_TARGET_DIR="$copy/target" cargo build --quiet --profile service -p orion-capi); then
-        if cmp -s "$copy/target/service/liborion_c.so" "$lanes/capi-host/service/liborion_c.so"; then
+        if [ ! -f "$copy/target/service/liborion_c.so" ] || [ ! -f "$lanes/capi-host/service/liborion_c.so" ]; then
+            echo "    FAIL: the path check has no liborion_c.so to compare at $copy/target/service or $lanes/capi-host/service"
+            failures=$((failures + 1))
+        elif cmp -s "$copy/target/service/liborion_c.so" "$lanes/capi-host/service/liborion_c.so"; then
             echo "    liborion_c.so from a copy at another path: the same bytes"
         else
             echo "    FAIL: liborion_c.so built at another path has other bytes; a key measured in one worktree would not hold in another"
+            scripts/elf-diff.py "$lanes/capi-host/service/liborion_c.so" "$copy/target/service/liborion_c.so" || true
             failures=$((failures + 1))
         fi
     else

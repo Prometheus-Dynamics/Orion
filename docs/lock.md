@@ -345,6 +345,9 @@ what to change.
 - **I27.** Each gate step runs within a bound (`scripts/bounded.py`), and fails if it passes it
   or leaves a process running. The BusyBox supervisor ends its wait between starts when it is
   stopped, instead of leaving it running. Nothing a caller calls changes.
+- **I28.** The size gate's target directory is absolute, so its path check reads the build it
+  made when `CARGO_TARGET_DIR` is unset (CI); when the bytes differ it reports where. Nothing a
+  caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
