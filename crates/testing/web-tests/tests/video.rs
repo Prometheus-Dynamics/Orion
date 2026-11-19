@@ -10,6 +10,7 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use orion::{Address, Orion};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use orion_web_tests::browser::{browse, outside_address, serve, web_dir};
 use orion_web_tests::video::{Clip, H264, JPEG, fragments, publish};
@@ -152,9 +153,7 @@ fn play(websocket: SocketAddr, throttle: bool) -> Option<String> {
         "http://{site}/video-example/index.html?board=ws://{link_at}/orion&jpeg={JPEG}&h264={H264}\
          &mime=video/mp4;%20codecs=%22avc1.42D00B%22&report=/done&enough=40&losses=1"
     );
-    let profile = std::env::temp_dir().join(format!("orion-web-video-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&profile);
-    std::fs::create_dir_all(&profile).expect("profile");
+    let profile = Scratch::new("web-video");
     let Some(mut browser) = browse(&url, &profile) else {
         println!("no browser is installed: the video example was not run");
         return None;
@@ -162,7 +161,6 @@ fn play(websocket: SocketAddr, throttle: bool) -> Option<String> {
     let result = reported.recv_timeout(Duration::from_secs(120));
     let _ = browser.kill();
     let _ = browser.wait();
-    let _ = std::fs::remove_dir_all(&profile);
     let result = result.expect("the page reported within two minutes");
     println!("the page reported: {result}");
     Some(result)

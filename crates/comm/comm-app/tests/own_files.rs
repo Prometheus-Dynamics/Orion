@@ -2,7 +2,7 @@
 //! recovery, with the values of settings that may be secret left out.
 
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use orion_comm_app::{CommCore, CommSettings, RecoverWith, recover};
@@ -10,6 +10,7 @@ use orion_config::Source;
 use orion_connect::{Address, Client, Options, Session};
 use orion_files::index::Index;
 use orion_files::{FileState, Files, OfferedBy};
+use orion_scratch::Scratch;
 
 fn run(test: impl Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -19,11 +20,8 @@ fn run(test: impl Future<Output = ()>) {
     tokio::task::LocalSet::new().block_on(&runtime, test);
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-own-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("own-{name}"))
 }
 
 /// Settings on a board whose security record says off, with a key whose value is a secret.

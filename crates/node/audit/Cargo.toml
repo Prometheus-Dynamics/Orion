@@ -10,5 +10,8 @@ repository.workspace = true
 [dependencies]
 tracing.workspace = true
 
+[dev-dependencies]
+orion-scratch = { path = "../../testing/scratch" }
+
 [lints]
 workspace = true

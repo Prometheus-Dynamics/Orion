@@ -2,7 +2,7 @@
 //! large file passes with memory that does not grow with the file.
 
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -11,6 +11,7 @@ use orion::files::{FileState, Handed, digest};
 use orion::types::Error;
 use orion::{Address, ClientError, Orion};
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
@@ -18,11 +19,8 @@ use tokio::sync::oneshot;
 /// The file: large beside a chunk (32 KiB) and beside what may be in flight (256 KiB).
 const SIZE: u64 = 96 << 20;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("node-{name}"))
 }
 
 fn settings(dir: &Path) -> NodeSettings {

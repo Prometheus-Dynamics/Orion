@@ -406,6 +406,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_scratch::Scratch;
 
     /// As the board would read it with no security record: tests never read this machine's.
     fn config(source: &mut Source) -> Result<Config, ConfigError> {
@@ -483,15 +484,13 @@ mod tests {
 
     #[test]
     fn the_switch_is_the_boards_record() {
-        let dir = std::env::temp_dir().join(format!("orion-config-view-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new("config-view");
         let path = dir.join("security");
         std::fs::write(&path, "on\ngeneration 3\n").expect("write");
         let mut source = Source::parse("security = off", env(&[])).unwrap();
         let config = Config::from_source_with_view(&mut source, &path).unwrap();
         assert_eq!(config.security, Security::On);
         assert_eq!(config.security_view.generation, Some(3));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -313,12 +313,10 @@ fn parse(text: &str) -> Option<BTreeSet<Name>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_scratch::Scratch;
 
-    fn dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("orion-served-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("directory");
-        dir
+    fn dir(name: &str) -> Scratch {
+        Scratch::new(&format!("served-{name}"))
     }
 
     fn run(name: &str) -> Name {
@@ -352,12 +350,12 @@ mod tests {
         // In the window the list is not looked at, so it cannot lose what is coming back.
         assert!(!again.due(10_000 + 1));
         assert!(again.due(10_000 + RESTORE_MS));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn what_was_served_a_moment_ago_is_restoring_though_the_file_lags() {
-        let (mut served, _) = Served::load(&dir("moment"));
+        let dir = dir("moment");
+        let (mut served, _) = Served::load(&dir);
         served.restart(set(&[run("arm.home")]), 0);
         assert!(served.restoring(&run("arm.home"), 1));
     }
@@ -381,12 +379,12 @@ mod tests {
             served.restart(BTreeSet::new(), 0);
             assert!(!served.restoring(&run("a"), 0));
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_name_stays_on_the_list_for_a_while_after_its_program_left() {
-        let (mut served, _) = Served::load(&dir("linger"));
+        let dir = dir("linger");
+        let (mut served, _) = Served::load(&dir);
         assert!(served.update(set(&[run("a"), run("b")]), 0).is_some());
         // b's program leaves, as a node being stopped sees: b is still listed.
         assert_eq!(served.update(set(&[run("a")]), 1_000), None);
@@ -405,7 +403,8 @@ mod tests {
         let many: BTreeSet<Name> = (0..MAX_SERVED + 10)
             .map(|i| run(&format!("a{i:05}")))
             .collect();
-        let (mut served, _) = Served::load(&dir("bounded"));
+        let dir = dir("bounded");
+        let (mut served, _) = Served::load(&dir);
         let text = served.update(many, 0).expect("changed");
         let read = parse(&text).expect("a list");
         assert_eq!(read.len(), MAX_SERVED);

@@ -8,12 +8,13 @@
 
 use std::io::Read;
 use std::os::unix::net::UnixListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use orion_check::Security;
 use orion_keys::{Keys, KeysConfig};
+use orion_scratch::Scratch;
 use orion_ssh::login::{Ask, HelperConfig, LoginClient, RecoveryLogin, Want, Who, serve};
 use orion_ssh::{Helper, Io, SshConfig, users};
 use orion_types::KeyId;
@@ -98,15 +99,10 @@ fn recovery_login(dir: &Path) -> RecoveryLogin {
 }
 
 struct Lab {
-    dir: PathBuf,
     client: LoginClient,
     helper: Option<JoinHandle<std::io::Result<()>>>,
-}
-
-impl Drop for Lab {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    // Last, so that it goes after the helper's thread and the client that use it.
+    dir: Scratch,
 }
 
 impl Lab {
@@ -126,8 +122,7 @@ impl Lab {
 }
 
 fn lab(name: &str, switch: Switch, comm_uid: u32, idle: Duration) -> Lab {
-    let dir = std::env::temp_dir().join(format!("orion-login-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = Scratch::new(&format!("login-{name}"));
     std::fs::create_dir_all(dir.join("keys")).expect("directory");
     let view = dir.join("security");
     match switch {
@@ -168,9 +163,9 @@ fn lab(name: &str, switch: Switch, comm_uid: u32, idle: Duration) -> Lab {
     };
     let helper = std::thread::spawn(move || serve(&config, &listener));
     Lab {
-        dir,
         client: LoginClient::new(path),
         helper: Some(helper),
+        dir,
     }
 }
 

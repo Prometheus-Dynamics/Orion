@@ -2,7 +2,7 @@
 //! one, and the one the caller's policy does not admit is refused at the door.
 
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -11,6 +11,7 @@ use orion::topics::Next;
 use orion::types::Error;
 use orion::{Address, ClientError, Orion};
 use orion_node_app::{ACTIONS_TOPIC, Node, NodeSettings};
+use orion_scratch::Scratch;
 use orion_stubs::{Board, Security};
 use tokio::sync::oneshot;
 
@@ -27,11 +28,8 @@ fn own_test(name: &str) -> String {
 /// Set for the process that is the provider: the board's socket.
 const PROVIDER_SOCKET: &str = "ORION_TEST_PROVIDER_SOCKET";
 
-pub(crate) fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+pub(crate) fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("node-{name}"))
 }
 
 pub(crate) fn settings(dir: &Path) -> NodeSettings {

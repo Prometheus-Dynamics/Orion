@@ -2,13 +2,13 @@
 
 #![cfg(all(feature = "client", feature = "server"))]
 
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use orion_nt4::{
     Client, ClientConfig, ClientEvent, Properties, Server, ServerConfig, SubscribeOptions,
     Subscription, TopicEvent, Value,
 };
+use orion_scratch::Scratch;
 use tokio::time::timeout;
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -77,8 +77,9 @@ fn persistent() -> Properties {
     props
 }
 
-fn temp_file(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("orion-nt4-{tag}-{}.json", std::process::id()))
+/// A directory for one test's persistence file; it is removed when the test ends.
+fn scratch(tag: &str) -> Scratch {
+    Scratch::new(&format!("nt4-{tag}"))
 }
 
 #[tokio::test]
@@ -120,8 +121,8 @@ async fn json_topics_announce_as_strings_and_carry_text_values() {
 
 #[tokio::test]
 async fn persisted_json_topics_reload_with_their_type() {
-    let path = temp_file("json");
-    let _ = std::fs::remove_file(&path);
+    let dir = scratch("json");
+    let path = dir.join("persist.json");
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         persist_path: Some(path.clone()),
@@ -145,13 +146,12 @@ async fn persisted_json_topics_reload_with_their_type() {
         topic.value,
         Some(Value::String("{\"mode\":\"run\"}".into()))
     );
-    let _ = std::fs::remove_file(&path);
 }
 
 #[tokio::test]
 async fn persistence_is_compact_and_written_after_a_debounce() {
-    let path = temp_file("debounce");
-    let _ = std::fs::remove_file(&path);
+    let dir = scratch("debounce");
+    let path = dir.join("persist.json");
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         persist_path: Some(path.clone()),
@@ -180,7 +180,6 @@ async fn persistence_is_compact_and_written_after_a_debounce() {
     assert!(!text.contains('\n'), "file is not compact: {text}");
     assert!(text.contains("1.25"), "{text}");
     drop(server);
-    let _ = std::fs::remove_file(&path);
 }
 
 #[tokio::test]

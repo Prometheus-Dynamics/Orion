@@ -65,6 +65,12 @@ The work is a pre-planned list of PRs into `next`.
   directory). nextest, which the gate uses, still runs each test in a process of its own. A test
   that runs its binary again names itself with `module_path!()`, and a nextest filter names a test
   by its whole name, `<file>::<test>`; the gate fails a filter that matches no test.
+- A test's files go in an `orion_scratch::Scratch` (`crates/testing/scratch`), never straight
+  under `std::env::temp_dir()`. It makes `orion-<name>-<pid>-<n>`, a new one each time, and
+  removes it with everything in it when dropped, whether the test passed or panicked. Keep it
+  for as long as anything uses what is in it: bind it to a name, or hold it in the struct
+  that uses it, as its last field. A child process that writes temporary files of its own (a
+  browser) gets its `TMPDIR` inside the scratch.
 - Each gate step carries, after its label, the slowest time it has taken in a gate that passed,
   here or in CI; its bound is three times that, at least a minute. Past it the step and all it
   started are ended and the gate fails, naming it. A step that ends with a process of its own

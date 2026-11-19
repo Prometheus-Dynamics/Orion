@@ -14,6 +14,7 @@ use std::time::Duration;
 use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_file_offers::FileOffersService;
 use orion_files::{FileState, Files, Giving, Known, OfferedBy, Step};
+use orion_scratch::Scratch;
 use orion_server::{Comm, Error, Limits, Security};
 use orion_unix::UnixCarrier;
 use sha2::{Digest, Sha256};
@@ -21,10 +22,8 @@ use sha2::{Digest, Sha256};
 pub(crate) const WAIT: Duration = Duration::from_secs(10);
 
 /// A comm core with the offers service, in a thread of its own, on a socket of its own.
-pub(crate) fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
-    let dir = std::env::temp_dir().join(format!("orion-offers-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+pub(crate) fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>, Scratch) {
+    let dir = Scratch::new(&format!("offers-{name}"));
     let socket = dir.join("orion.sock");
     let (ready, started) = mpsc::channel();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -49,7 +48,7 @@ pub(crate) fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()
         });
     });
     started.recv().expect("the comm core starts");
-    (socket, stop)
+    (socket, stop, dir)
 }
 
 pub(crate) fn files(socket: &Path, name: &str) -> Files {
@@ -131,7 +130,7 @@ fn offerer(
 
 #[test]
 fn a_file_offered_on_the_board_is_fetched_whole_and_checked() {
-    let (socket, _stop) = comm_core("whole");
+    let (socket, _stop, _dir) = comm_core("whole");
     // Larger than the window, so the client's answers pace the program.
     let kernel = content(600 * 1024);
     let program = offerer(&socket, "logs/", vec![("logs/kernel", kernel.clone())], 1);
@@ -171,7 +170,7 @@ fn a_file_offered_on_the_board_is_fetched_whole_and_checked() {
 
 #[test]
 fn a_fetch_that_broke_off_goes_on_from_what_is_here() {
-    let (socket, _stop) = comm_core("resume");
+    let (socket, _stop, _dir) = comm_core("resume");
     let kernel = content(300 * 1024);
     let program = offerer(&socket, "logs/", vec![("logs/kernel", kernel.clone())], 1);
 
@@ -189,7 +188,7 @@ fn a_fetch_that_broke_off_goes_on_from_what_is_here() {
 
 #[test]
 fn a_name_nothing_offers_and_one_the_program_lacks_are_refused_by_name() {
-    let (socket, _stop) = comm_core("refused");
+    let (socket, _stop, _dir) = comm_core("refused");
     let program = offerer(&socket, "logs/", vec![], 1);
     let client = files(&socket, "collector");
 
@@ -211,7 +210,7 @@ fn a_name_nothing_offers_and_one_the_program_lacks_are_refused_by_name() {
 
 #[test]
 fn a_second_program_offering_a_prefix_is_refused_naming_the_holder_and_counted() {
-    let (socket, _stop) = comm_core("clash");
+    let (socket, _stop, _dir) = comm_core("clash");
     let holder = files(&socket, "logger");
     let offer = holder.offer("logs/").expect("offer");
     let other = files(&socket, "other-logger");
@@ -256,7 +255,7 @@ fn a_second_program_offering_a_prefix_is_refused_naming_the_holder_and_counted()
 
 #[test]
 fn the_longest_prefix_offered_is_handed_the_fetch() {
-    let (socket, _stop) = comm_core("longest");
+    let (socket, _stop, _dir) = comm_core("longest");
     let broad = offerer(&socket, "logs/", vec![("logs/boot", content(10))], 1);
     let narrow = offerer(
         &socket,
@@ -279,7 +278,7 @@ fn the_longest_prefix_offered_is_handed_the_fetch() {
 
 #[test]
 fn a_file_whose_bytes_are_not_its_digest_is_not_taken() {
-    let (socket, _stop) = comm_core("digest");
+    let (socket, _stop, _dir) = comm_core("digest");
     let socket_for = socket.clone();
     let (ready, offered) = mpsc::channel();
     let program = std::thread::spawn(move || {
@@ -351,7 +350,7 @@ fn relay(socket: &Path) -> (PathBuf, impl FnOnce()) {
 
 #[test]
 fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
-    let (socket, _stop) = comm_core("gone");
+    let (socket, _stop, _dir) = comm_core("gone");
     // The program dies mid-gift: no drop of its gift is run, so it says nothing itself.
     let (socket_for, cut) = relay(&socket);
     let (ready, offered) = mpsc::channel();
@@ -396,7 +395,7 @@ fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
 
 #[test]
 fn a_fetch_held_to_a_bound_does_not_take_a_larger_file() {
-    let (socket, _stop) = comm_core("bound");
+    let (socket, _stop, _dir) = comm_core("bound");
     let program = offerer(
         &socket,
         "logs/",

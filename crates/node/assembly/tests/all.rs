@@ -4,7 +4,7 @@
 
 use std::io::{BufRead, BufReader, Cursor, Write};
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -21,15 +21,13 @@ use orion_assembly::{run_until, settings};
 use orion_config::Source;
 use orion_msg_records::LeaseRecord;
 use orion_sample_executor::{Sample, run};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use orion_wire::body::encode_fields;
 use tokio::sync::oneshot;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-assembly-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("assembly-{name}"))
 }
 
 /// The settings file, as it would be on a board: the comm core's keys are in it too.

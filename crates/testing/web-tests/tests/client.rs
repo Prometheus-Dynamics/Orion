@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use orion::actions::{ActionDecl, Admits, Outcome, Policy, Request, Target};
 use orion::topics::{FieldId, Next, SampleTime, TopicDecl};
 use orion::{Address, Orion, fields};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use orion_web_tests::browser::browse;
 use sha2::{Digest, Sha256};
@@ -308,9 +309,7 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
     let (report, reported) = mpsc::channel();
     serve(http, page(board.websocket()), client, report);
 
-    let profile = std::env::temp_dir().join(format!("orion-web-client-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&profile);
-    std::fs::create_dir_all(&profile).expect("profile");
+    let profile = Scratch::new("web-client");
     let Some(mut browser) = browse(&url, &profile) else {
         println!("no browser is installed: the web client was not run");
         return;
@@ -332,7 +331,6 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
     let result = reported.recv_timeout(Duration::from_secs(90));
     let _ = browser.kill();
     let _ = browser.wait();
-    let _ = std::fs::remove_dir_all(&profile);
     let result = result.expect("the page reported within ninety seconds");
     println!("the page reported: {result}");
 

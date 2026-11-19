@@ -11,6 +11,7 @@ use orion_msg_session::{
     Hello, Ping, Pong, Refusal, Roles, ShellClose, ShellCredit, ShellData, ShellEof, ShellExit,
     ShellOpen, ShellOpened, ShellResize, Welcome,
 };
+use orion_scratch::Scratch;
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Limits, Principal};
 use orion_shell::ShellService;
@@ -454,8 +455,7 @@ fn nobody_becomes_someone_else_and_a_closed_or_left_shell_ends() {
 fn with_a_login_helper_the_helper_starts_the_shell() {
     use orion_ssh::login::{HelperConfig, RecoveryLogin, serve};
     run(async {
-        let dir = std::env::temp_dir().join(format!("orion-shell-helper-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = Scratch::new("shell-helper");
         std::fs::create_dir_all(dir.join("keys")).expect("dir");
         std::fs::write(dir.join("security"), "on\ngeneration 1\n").expect("record");
         let stored = KeysConfig {
@@ -522,6 +522,5 @@ fn with_a_login_helper_the_helper_starts_the_shell() {
             client.open_shell("echo in", "", 0).await,
             Heard::Refused(Some(Error::Unavailable))
         );
-        let _ = std::fs::remove_dir_all(&dir);
     });
 }

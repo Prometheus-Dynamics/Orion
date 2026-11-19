@@ -16,5 +16,8 @@ https = ["ureq/rustls"]
 tracing.workspace = true
 ureq = { version = "3", default-features = false }
 
+[dev-dependencies]
+orion-scratch = { path = "../../testing/scratch" }
+
 [lints]
 workspace = true

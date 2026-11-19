@@ -50,6 +50,7 @@ tracing.workspace = true
 orion = { path = "../../client/orion", features = ["files", "provider", "workloads", "executor"] }
 orion-ctl = { path = "../../client/ctl" }
 orion-sample-executor = { path = "../../testing/sample-executor" }
+orion-scratch = { path = "../../testing/scratch" }
 orion-stubs = { path = "../../testing/stubs" }
 sha2 = { version = "0.11.0", default-features = false }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }

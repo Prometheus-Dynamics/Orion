@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use orion_file_store::{Files, FilesConfig, MAX_TRANSFERS};
 use orion_msg_files::{FileBegin, FileChunk, FileCommit, FileState, FileStatus};
 use orion_reply::{Asked, Out};
+use orion_scratch::Scratch;
 use orion_types::Error;
 use orion_wire::body::encode_fields;
 use orion_wire::{Body, Bytes, Decode};
@@ -33,16 +34,17 @@ impl Out for Sent {
 /// What a status said: who was told, bytes received, state, detail.
 type Said = (u32, u64, FileState, String);
 
+/// A bench on a store in a directory. A bench made with `new` owns the directory, and it goes
+/// with the bench; one made with `at` is reopened on a directory some other holds.
 struct Bench {
     files: Files,
     sent: Sent,
     root: PathBuf,
+    owned: Option<Scratch>,
 }
 
-fn root(name: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("orion-file-store-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    root
+fn root(name: &str) -> Scratch {
+    Scratch::new(&format!("file-store-{name}"))
 }
 
 fn digest(data: &[u8]) -> [u8; 32] {
@@ -51,7 +53,10 @@ fn digest(data: &[u8]) -> [u8; 32] {
 
 impl Bench {
     fn new(name: &str) -> Self {
-        Self::at(&root(name))
+        let owned = root(name);
+        let mut bench = Self::at(&owned);
+        bench.owned = Some(owned);
+        bench
     }
 
     fn at(root: &Path) -> Self {
@@ -59,6 +64,7 @@ impl Bench {
             files: Files::open(FilesConfig::new(root)).expect("store"),
             sent: Sent::default(),
             root: root.to_owned(),
+            owned: None,
         }
     }
 
@@ -187,7 +193,8 @@ fn a_transfer_goes_on_in_a_store_that_was_closed_and_opened() {
 
 #[test]
 fn the_same_number_for_another_file_starts_over() {
-    let mut bench = Bench::new("restart");
+    let dir = root("restart");
+    let mut bench = Bench::at(&dir);
     bench.begin(1, "file.bin", DATA).expect("begin");
     bench.chunk(1, 0, &DATA[..12]).expect("chunk");
     for (destination, data) in [
@@ -199,9 +206,8 @@ fn the_same_number_for_another_file_starts_over() {
         bench.chunk(1, 0, &data[..5]).expect("chunk");
     }
     // And closed and opened: the part of the other file is not taken for this one.
-    let root = bench.root.clone();
     drop(bench);
-    let mut bench = Bench::at(&root);
+    let mut bench = Bench::at(&dir);
     assert_eq!(bench.begin(1, "file.bin", DATA).expect("begin").1, 0);
 }
 
@@ -260,15 +266,16 @@ fn more_bytes_than_the_size_are_rejected() {
 
 #[test]
 fn a_file_larger_than_the_node_takes_is_rejected_at_begin() {
-    let root = root("large");
+    let dir = root("large");
     let mut bench = Bench {
         files: Files::open(FilesConfig {
-            root: root.clone(),
+            root: dir.to_path_buf(),
             max_size: 10,
         })
         .expect("store"),
         sent: Sent::default(),
-        root,
+        root: dir.to_path_buf(),
+        owned: None,
     };
     let refused = bench.begin(1, "file.bin", DATA).expect("begin");
     assert_eq!(refused.2, FileState::Rejected);

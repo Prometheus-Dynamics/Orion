@@ -74,5 +74,4 @@ fn an_interface_that_is_not_there_is_waited_for_not_given_up_on() {
     assert!(orion_ssh::absent(&error), "{error}");
     drop(server);
     drop(held);
-    let _ = std::fs::remove_dir_all(dir);
 }

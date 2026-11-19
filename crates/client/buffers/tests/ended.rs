@@ -13,6 +13,7 @@ use orion_buffers::{
     BufferPublisher, BufferSubscriber, Buffers, HoldLimits, HoldTable, Marks, NextBatch, Pool, Torn,
 };
 use orion_connect::{Address, Client, Options, Session};
+use orion_scratch::Scratch;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_topics::Topics;
 use orion_unix::UnixCarrier;
@@ -33,10 +34,14 @@ fn buffers(socket: &std::path::Path, name: &str) -> Buffers {
 
 /// A comm core with the broker and buffer topics, in a thread of its own, on a socket of its
 /// own under the temporary directory.
-fn comm_core(name: &str) -> (std::path::PathBuf, tokio::sync::oneshot::Sender<()>) {
-    let dir = std::env::temp_dir().join(format!("orion-ended-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+fn comm_core(
+    name: &str,
+) -> (
+    Scratch,
+    std::path::PathBuf,
+    tokio::sync::oneshot::Sender<()>,
+) {
+    let dir = Scratch::new(&format!("ended-{name}"));
     let socket = dir.join("orion.sock");
     let (ready, started) = mpsc::channel();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -69,7 +74,7 @@ fn comm_core(name: &str) -> (std::path::PathBuf, tokio::sync::oneshot::Sender<()
         });
     });
     started.recv().expect("the comm core starts");
-    (socket, stop)
+    (dir, socket, stop)
 }
 
 /// A publisher of `count` buffers and one subscriber of it, the subscriber placed and handed
@@ -138,7 +143,7 @@ fn seen(subscriber: &mut BufferSubscriber) -> Seen {
 
 #[test]
 fn a_job_that_ended_with_nothing_to_show_reaches_a_subscriber_as_its_own_arm() {
-    let (socket, _stop) = comm_core("nothing");
+    let (_dir, socket, _stop) = comm_core("nothing");
     let (mut publisher, mut subscriber, _viewer) = pair(&socket, 2);
 
     frame(&mut publisher, 1, 10);
@@ -159,7 +164,7 @@ fn a_job_that_ended_with_nothing_to_show_reaches_a_subscriber_as_its_own_arm() {
 
 #[test]
 fn a_subscriber_cut_off_by_hand_gives_its_buffer_back_and_a_late_read_is_dropped() {
-    let (socket, _stop) = comm_core("cut");
+    let (_dir, socket, _stop) = comm_core("cut");
     let (mut publisher, mut subscriber, _viewer) = pair(&socket, 2);
 
     let buffer = frame(&mut publisher, 1, 10);
@@ -194,7 +199,7 @@ fn a_subscriber_cut_off_by_hand_gives_its_buffer_back_and_a_late_read_is_dropped
 
 #[test]
 fn an_adopted_topic_cuts_off_only_orions_own_subscribers() {
-    let (socket, _stop) = comm_core("adopted");
+    let (_dir, socket, _stop) = comm_core("adopted");
     let ring = Ring::create(&Spec {
         fields: 1,
         history: 8,

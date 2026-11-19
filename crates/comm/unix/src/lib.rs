@@ -325,12 +325,12 @@ async fn send(stream: &UnixStream, frame: &[u8], fds: &[OwnedFd]) -> io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_scratch::Scratch;
 
     /// A path no socket can be at is refused with words before anything is touched.
     #[test]
     fn a_path_too_long_is_refused_with_its_length_before_anything_is_touched() {
-        let dir = std::env::temp_dir().join(format!("orion-unix-long-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new("unix-long");
         let name = "s".repeat(SOCKET_PATH_MAX + 1 - dir.as_os_str().len() - 1);
         let path = dir.join(name);
         assert_eq!(path.as_os_str().len(), SOCKET_PATH_MAX + 1);
@@ -398,9 +398,7 @@ mod tests {
     #[test]
     fn a_socket_failure_keeps_its_kind() {
         run(async {
-            let dir = std::env::temp_dir().join(format!("orion-unix-kind-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).expect("directory");
+            let dir = Scratch::new("unix-kind");
             let path = dir.join("s");
             let listener = std::os::unix::net::UnixListener::bind(&path).expect("bind");
             listener.set_nonblocking(true).expect("nonblocking");
@@ -412,7 +410,6 @@ mod tests {
             let error = recv(&listening, &mut buf, &mut fds)
                 .await
                 .expect_err("listening");
-            let _ = std::fs::remove_dir_all(&dir);
             assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{error}");
         });
     }

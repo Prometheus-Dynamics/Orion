@@ -34,6 +34,7 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync"
 
 [dev-dependencies]
 orion-measure = { path = "../../core/measure", features = ["alloc-counter"] }
+orion-scratch = { path = "../../testing/scratch" }
 tokio = { workspace = true, features = ["macros", "rt", "time", "io-std", "io-util"] }
 
 # The integration tests, in one binary: one link for the crate, not one for each file

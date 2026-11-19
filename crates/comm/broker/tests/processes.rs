@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use common::{Client, Event, Wire};
 use orion_broker::{Broker, BrokerConfig};
+use orion_scratch::Scratch;
 use orion_server::{Comm, Limits, Security};
 use orion_unix::{UnixCarrier, UnixConnection};
 use shm_ring::{FieldId, Flags, Next, SampleTime};
@@ -173,9 +174,7 @@ fn start(role: &str, socket: &Path) -> Child {
 
 #[test]
 fn two_processes_exchange_values_and_the_broker_is_idle_afterward() {
-    let dir = std::env::temp_dir().join(format!("orion-broker-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
+    let dir = Scratch::new("broker");
     let socket = dir.join("orion.sock");
 
     let local = tokio::task::LocalSet::new();
@@ -232,5 +231,4 @@ fn two_processes_exchange_values_and_the_broker_is_idle_afterward() {
             "both gone, so the topic and its memory are gone"
         );
     });
-    let _ = std::fs::remove_dir_all(dir);
 }

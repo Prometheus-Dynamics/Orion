@@ -32,6 +32,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 orion-measure = { path = "../../core/measure", features = ["alloc-counter", "sched"] }
+orion-scratch = { path = "../../testing/scratch" }
 orion-wire = { path = "../../core/wire" }
 rustix = { version = "1", default-features = false, features = ["std", "pty"] }
 tokio = { workspace = true, features = ["macros", "test-util"] }

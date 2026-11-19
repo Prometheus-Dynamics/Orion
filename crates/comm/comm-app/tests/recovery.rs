@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use orion_comm_app::{CommSettings, RecoverWith, Started, start_or_recover};
 use orion_config::{ConfigError, Source};
+use orion_scratch::Scratch;
 
 const WAIT: Duration = Duration::from_secs(15);
 
@@ -30,18 +31,8 @@ fn installed() -> bool {
     all
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("orion-comm-recovery-{name}-{}", std::process::id()));
-    if dir.exists() {
-        let _ = Command::new("chmod")
-            .args(["-R", "u+rwx"])
-            .arg(&dir)
-            .status();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("comm-recovery-{name}"))
 }
 
 fn helper() -> PathBuf {
@@ -79,17 +70,27 @@ fn settings(text: &str) -> Result<CommSettings, ConfigError> {
     CommSettings::from_source_with_view(&mut source, Path::new("/nonexistent/orion-test/security"))
 }
 
-/// As [`settings`], on a board whose security record says on.
-fn settings_on(text: &str) -> Result<CommSettings, ConfigError> {
+/// As [`settings`], on a board whose security record, in `dir`, says on.
+fn settings_on(dir: &Path, text: &str) -> Result<CommSettings, ConfigError> {
     let mut source = Source::parse(text, Vec::new())?;
-    CommSettings::from_source_with_view(&mut source, &secured())
+    CommSettings::from_source_with_view(&mut source, &secured(dir))
 }
 
-/// The board's security record, as a board with security on has it.
-fn secured() -> PathBuf {
-    let path = std::env::temp_dir().join(format!("orion-comm-security-{}", std::process::id()));
+/// The board's security record, as a board with security on has it, in `dir`.
+fn secured(dir: &Path) -> PathBuf {
+    let path = dir.join("security");
     std::fs::write(&path, "on\ngeneration 1\n").expect("security record");
     path
+}
+
+/// Makes a directory writable again when dropped, so that it can be removed with the test's
+/// directory, whether the test passed or panicked.
+struct Writable(PathBuf);
+
+impl Drop for Writable {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
 }
 
 fn options(
@@ -176,7 +177,7 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
             #[cfg(feature = "login-helper")]
             login: Default::default(),
         };
-        let with = || with_view(secured());
+        let with = || with_view(secured(&dir));
         let good = |state: &Path| {
             format!(
                 "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {1}\n\
@@ -245,8 +246,11 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
 
         // A broken state directory: it is a file.
         std::fs::write(dir.join("not-a-directory"), "x").expect("write");
-        let started =
-            start_or_recover(settings_on(&good(&dir.join("not-a-directory"))), with()).await;
+        let started = start_or_recover(
+            settings_on(&dir, &good(&dir.join("not-a-directory"))),
+            with(),
+        )
+        .await;
         let (addr, why) = in_recovery(&started).await;
         assert!(
             why.starts_with("state.dir ") && why.contains("cannot be made"),
@@ -262,7 +266,8 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
         // A trust store that is rubbish.
         std::fs::create_dir(dir.join("rubbish")).expect("dir");
         std::fs::write(dir.join("rubbish/node-identity.ed25519"), [1_u8; 7]).expect("write");
-        let started = start_or_recover(settings_on(&good(&dir.join("rubbish"))), with()).await;
+        let started =
+            start_or_recover(settings_on(&dir, &good(&dir.join("rubbish"))), with()).await;
         let (addr, _) = in_recovery(&started).await;
         assert_eq!(
             said(&ssh(&dir, addr, Some(&repairer), "echo in").await),
@@ -275,7 +280,9 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
             std::fs::create_dir(dir.join("full")).expect("dir");
             std::fs::set_permissions(dir.join("full"), std::fs::Permissions::from_mode(0o555))
                 .expect("mode");
-            let started = start_or_recover(settings_on(&good(&dir.join("full"))), with()).await;
+            let _writable = Writable(dir.join("full"));
+            let started =
+                start_or_recover(settings_on(&dir, &good(&dir.join("full"))), with()).await;
             let (addr, why) = in_recovery(&started).await;
             assert!(why.contains("cannot be written to"), "{why}");
             assert_eq!(
@@ -301,8 +308,6 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
                 "what went wrong\n"
             );
             drop(started);
-            std::fs::set_permissions(dir.join("full"), std::fs::Permissions::from_mode(0o755))
-                .expect("mode");
         }
 
         // A state partition that is not mounted: the directory would be on the root file
@@ -310,12 +315,12 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
         let device = |path: &Path| {
             std::os::unix::fs::MetadataExt::dev(&std::fs::metadata(path).expect("stat"))
         };
-        if device(&dir) == device(Path::new("/")) {
+        if device(dir.path()) == device(Path::new("/")) {
             let text = format!(
                 "{}state.require_mount = true\n",
                 good(&dir.join("data/orion"))
             );
-            let started = start_or_recover(settings_on(&text), with()).await;
+            let started = start_or_recover(settings_on(&dir, &text), with()).await;
             let (addr, why) = in_recovery(&started).await;
             assert!(why.contains("state.require_mount"), "{why}");
             assert!(
@@ -328,7 +333,6 @@ fn each_broken_state_ends_in_recovery_and_still_lets_you_in() {
             );
             drop(started);
         }
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 
@@ -378,7 +382,6 @@ fn a_comm_core_that_can_start_is_reached_with_ssh_through_a_child() {
             "from the desk\n"
         );
         drop(started);
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 
@@ -445,7 +448,7 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("state/last-good.carriers"),
-            security_view: secured(),
+            security_view: secured(&dir),
             #[cfg(feature = "login-helper")]
             login: Default::default(),
         };
@@ -459,7 +462,7 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
         );
 
         // A good start: the board says it is running, and its ways in are recorded.
-        let started = start_or_recover(settings_on(&good), with()).await;
+        let started = start_or_recover(settings_on(&dir, &good), with()).await;
         assert!(matches!(started, Started::Core(_)), "{started:?}");
         assert_eq!(board_state(&socket).await, (Some("running".into()), None));
         // The hello says the switch, as the board's record has it.
@@ -548,7 +551,6 @@ fn a_good_start_is_recorded_and_recovery_opens_its_ways_in_and_says_why() {
         drop(started);
         // Aborted tasks are dropped, and let go of the socket, when the runtime next runs.
         tokio::time::sleep(Duration::from_millis(50)).await;
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 
@@ -574,7 +576,7 @@ fn broken_settings_and_a_recovery_key_log_in_through_the_login_helper() {
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("no-record"),
-            security_view: secured(),
+            security_view: secured(&dir),
             login: orion_comm_app::login_helper::LoginSettings {
                 helper: Some(socket.clone()),
                 comm_user: rustix::process::getuid().as_raw().to_string(),

@@ -36,7 +36,6 @@ fn a_link_plugged_in_again_says_hello_again_as_the_same_program() {
     session.reconnect_over(read, write).expect("again");
     assert_eq!(session.reconnects(), 2);
     assert_eq!(who(&mut session, &[3]), "board");
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 /// Options with room for a few hellos said again.
@@ -61,7 +60,6 @@ fn a_hello_lost_on_the_link_is_said_again_until_it_is_welcomed() {
     let mut session = Session::over(read, write, None, "tool", patient(Duration::from_secs(10)))
         .expect("welcomed after the hello was said again");
     assert_eq!(who(&mut session, &[1]), "board");
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 #[test]
@@ -85,7 +83,6 @@ fn hellos_lost_again_and_again_are_said_again_on_a_capped_backoff() {
         "said again sooner than the backoff: {took:?}"
     );
     assert_eq!(who(&mut session, &[1]), "board");
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 #[test]
@@ -111,7 +108,6 @@ fn a_welcome_that_comes_late_is_followed_by_the_session_the_board_now_has() {
         "the later welcome is the session"
     );
     assert_eq!(who(&mut session, &[2]), "board");
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 #[test]
@@ -154,5 +150,4 @@ fn a_link_that_stays_silent_is_tried_again_with_new_halves_until_it_answers() {
     assert_eq!(session.reconnects(), 1);
     assert_ne!(session.welcomed().session, first);
     assert_eq!(who(&mut session, &[3]), "board");
-    let _ = std::fs::remove_dir_all(&board.dir);
 }

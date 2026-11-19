@@ -11,5 +11,8 @@ repository.workspace = true
 orion-check = { path = "../check" }
 orion-types = { path = "../types" }
 
+[dev-dependencies]
+orion-scratch = { path = "../../testing/scratch" }
+
 [lints]
 workspace = true

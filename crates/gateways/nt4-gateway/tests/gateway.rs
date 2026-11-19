@@ -15,6 +15,7 @@ use orion_config::Source;
 use orion_nt4::{
     Client, ClientConfig, ClientEvent, SubscribeOptions, Subscription, TopicEvent, Value,
 };
+use orion_scratch::Scratch;
 use tokio::time::timeout;
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -34,7 +35,8 @@ struct Board {
     nt4: SocketAddr,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
-    dir: PathBuf,
+    /// Last: the thread is joined before it goes, so nothing uses the directory after.
+    _dir: Scratch,
 }
 
 impl Board {
@@ -44,9 +46,7 @@ impl Board {
 
     /// With `on_ws`, the gateway shares the WebSocket listener instead of a port of its own.
     fn start_on(name: &str, on_ws: bool) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-nt4-gw-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new(&format!("nt4-gw-{name}"));
         let text = format!(
             "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n{1}",
             dir.display(),
@@ -89,7 +89,7 @@ impl Board {
             nt4,
             stop: Some(stop),
             thread: Some(thread),
-            dir,
+            _dir: dir,
         }
     }
 }
@@ -100,7 +100,6 @@ impl Drop for Board {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -417,7 +416,7 @@ fn an_nt4_client_reaches_the_gateway_on_the_websocket_port() {
 
 #[test]
 fn nt4_on_the_websocket_needs_a_websocket_listener() {
-    let dir = std::env::temp_dir().join(format!("orion-nt4-gw-no-ws-{}", std::process::id()));
+    let dir = Scratch::new("nt4-gw-no-ws");
     let text = format!(
         "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n{1}",
         dir.display(),
@@ -434,7 +433,6 @@ fn nt4_on_the_websocket_needs_a_websocket_listener() {
         .map(|_| ());
     let error = started.expect_err("nothing to share").to_string();
     assert!(error.contains("no ws.listen to share"), "{error}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

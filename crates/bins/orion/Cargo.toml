@@ -23,5 +23,8 @@ orion-log = { path = "../../core/log" }
 orion-node-app = { path = "../../node/node-app" }
 tracing.workspace = true
 
+[dev-dependencies]
+orion-scratch = { path = "../../testing/scratch" }
+
 [lints]
 workspace = true

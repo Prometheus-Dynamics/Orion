@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use orion_check::Security;
 use orion_keys::{Keys, KeysConfig, SharedKeys};
+use orion_scratch::Scratch;
 use orion_ssh::{Helper, Keeper, SshConfig, users};
 use orion_ssh_sandbox::protocol::{Answer, Ask, Want, recv, send};
 use orion_ssh_sandbox::{SandboxConfig, SandboxedSsh, monitor};
@@ -47,11 +48,8 @@ fn installed() -> bool {
     both
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-sandbox-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("sandbox-{name}"))
 }
 
 fn me() -> users::User {
@@ -298,7 +296,6 @@ fn everything_works_through_a_child_that_cannot_gain_rights() {
     until("the child is gone", || {
         server.children().is_empty() && server.connections() == 0
     });
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -349,7 +346,6 @@ fn a_child_that_dies_takes_only_its_own_connection() {
     until("no connections", || {
         server.connections() == 0 && server.children().is_empty()
     });
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A child's end of a keeper that is answering it, for a test that plays the child.
@@ -467,7 +463,6 @@ fn the_keeper_answers_only_what_a_child_in_that_state_may_ask() {
         took >= Duration::from_millis(550) && took < Duration::from_secs(5),
         "{took:?}"
     );
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// With a login helper, the connection's child and the sessions are the helper's to start:
@@ -552,7 +547,6 @@ fn with_a_login_helper_the_helper_starts_the_children_and_the_sessions() {
     assert!(matches!(helper.join(), Ok(Ok(()))));
     let ran = server.ssh(&server.key, &[], &["echo out"], "");
     assert_eq!(text(&ran.stdout), "");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Set when the test runs again inside its own user namespace.
@@ -740,5 +734,4 @@ fn each_kind_of_session_inside() {
         );
         assert_eq!(text(&open.join().expect("ssh").stdout), "done\n");
     });
-    let _ = std::fs::remove_dir_all(dir);
 }

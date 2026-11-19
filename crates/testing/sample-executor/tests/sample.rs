@@ -1,7 +1,7 @@
 //! The sample executor: what it does with real commands, and that it works with Orion, both
 //! inside a test and as a program of its own.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,6 +11,7 @@ use orion::executor::{Executor, WorkloadKind, WorkloadName, WorkloadState};
 use orion::workloads::{RestartPolicy, Workload};
 use orion::{Address, Orion};
 use orion_sample_executor::{Sample, run};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 
 fn kind() -> WorkloadKind {
@@ -21,11 +22,8 @@ fn name(text: &str) -> WorkloadName {
     text.parse().expect("name")
 }
 
-fn dir(test: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-sample-{test}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(test: &str) -> Scratch {
+    Scratch::new(&format!("sample-{test}"))
 }
 
 /// A command that writes its process id to `file` and then sleeps.

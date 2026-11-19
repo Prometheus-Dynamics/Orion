@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use orion::actions::{ActionCall, Outcome, Update};
 use orion::{Address, Orion};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 
 use crate::actions::{Logic, Provider, call, dir, settings};
@@ -15,7 +16,8 @@ use crate::actions::{Logic, Provider, call, dir, settings};
 const CONFIRM_MS: u64 = 300;
 
 /// A board, node logic with the short bound, the provider, and a caller.
-fn board(name: &str) -> (Board, Logic, Provider, Orion) {
+/// The directory comes first in the tuple: it is dropped last, after the board that is in it.
+fn board(name: &str) -> (Scratch, Board, Logic, Provider, Orion) {
     let dir = dir(name);
     let board = Board::start_for_node(&dir);
     let mut settings = settings(&dir);
@@ -24,7 +26,7 @@ fn board(name: &str) -> (Board, Logic, Provider, Orion) {
     let provider = Provider::start(board.socket());
     let caller =
         Orion::connect(&Address::Local(board.socket().to_owned()), "dashboard").expect("connect");
-    (board, logic, provider, caller)
+    (dir, board, logic, provider, caller)
 }
 
 fn with_deadline(args: &'static [u8], deadline_ms: u64) -> ActionCall<'static> {
@@ -36,7 +38,7 @@ fn with_deadline(args: &'static [u8], deadline_ms: u64) -> ActionCall<'static> {
 
 #[test]
 fn a_job_that_finished_as_its_deadline_passed_ends_as_it_finished() {
-    let (_board, _logic, _provider, caller) = board("stops-first");
+    let (_dir, _board, _logic, _provider, caller) = board("stops-first");
     let ended = caller
         .run(&with_deadline(b"first", 200))
         .expect("run")
@@ -50,7 +52,7 @@ fn a_job_that_finished_as_its_deadline_passed_ends_as_it_finished() {
 
 #[test]
 fn a_program_that_never_says_ends_indeterminate_within_the_bound() {
-    let (_board, _logic, _provider, caller) = board("stops-deaf");
+    let (_dir, _board, _logic, _provider, caller) = board("stops-deaf");
     let started = Instant::now();
     let ended = caller
         .run(&with_deadline(b"deaf", 200))
@@ -69,7 +71,7 @@ fn a_program_that_never_says_ends_indeterminate_within_the_bound() {
 
 #[test]
 fn orionctl_says_it_is_not_known_with_an_exit_code_of_its_own() {
-    let (board, _logic, _provider, _caller) = board("stops-ctl");
+    let (_dir, board, _logic, _provider, _caller) = board("stops-ctl");
     let words = [
         "--address",
         &board.socket().display().to_string(),
@@ -98,7 +100,7 @@ fn orionctl_says_it_is_not_known_with_an_exit_code_of_its_own() {
 
 #[test]
 fn stopping_with_jobs_under_way_is_bounded_and_each_ends_as_its_program_says() {
-    let (_board, logic, _provider, caller) = board("stops-stopping");
+    let (_dir, _board, logic, _provider, caller) = board("stops-stopping");
     let mut answers = caller.run(&call("open", b"long")).expect("run");
     let mut finished = caller.run(&call("open", b"first")).expect("run");
     let mut silent = caller.run(&call("open", b"deaf")).expect("run");

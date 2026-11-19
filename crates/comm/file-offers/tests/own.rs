@@ -13,6 +13,7 @@ use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_file_offers::{FileOffersService, OwnFiles, OwnName, Reading, Ready};
 use orion_files::index::{Entry, Index};
 use orion_files::{FileState, Files, OfferedBy};
+use orion_scratch::Scratch;
 use orion_server::{Comm, Error, Limits, Security, Sessions};
 use orion_unix::UnixCarrier;
 
@@ -62,10 +63,8 @@ impl OwnFiles for Fake {
 }
 
 /// A comm core whose own files are [`Fake`], in a thread of its own, on a socket of its own.
-fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
-    let dir = std::env::temp_dir().join(format!("orion-own-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>, Scratch) {
+    let dir = Scratch::new(&format!("own-{name}"));
     let socket = dir.join("orion.sock");
     let (ready, started) = mpsc::channel();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -93,7 +92,7 @@ fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
         });
     });
     started.recv().expect("the comm core starts");
-    (socket, stop)
+    (socket, stop, dir)
 }
 
 fn files(socket: &Path, name: &str) -> Files {
@@ -113,7 +112,7 @@ fn fetch(files: &Files, name: &str, have: &[u8]) -> (orion_files::Transfer, Vec<
 
 #[test]
 fn the_comm_core_s_own_index_is_one_a_client_reads() {
-    let (socket, _stop) = comm_core("index");
+    let (socket, _stop, _dir) = comm_core("index");
     let client = files(&socket, "collector");
     let (transfer, text) = fetch(&client, "own/index", &[]);
     assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
@@ -143,7 +142,7 @@ fn the_comm_core_s_own_index_is_one_a_client_reads() {
 
 #[test]
 fn an_own_file_is_given_whole_to_its_bound_and_paced_by_the_client() {
-    let (socket, _stop) = comm_core("big");
+    let (socket, _stop, _dir) = comm_core("big");
     let client = files(&socket, "collector");
     let (transfer, bytes) = fetch(&client, "own/big", &[]);
     assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
@@ -155,7 +154,7 @@ fn an_own_file_is_given_whole_to_its_bound_and_paced_by_the_client() {
 
 #[test]
 fn an_own_file_holds_its_bytes_for_a_fetch_that_goes_on() {
-    let (socket, _stop) = comm_core("held");
+    let (socket, _stop, _dir) = comm_core("held");
     let client = files(&socket, "collector");
     let (transfer, whole) = fetch(&client, "own/count", &[]);
     assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
@@ -172,7 +171,7 @@ fn an_own_file_holds_its_bytes_for_a_fetch_that_goes_on() {
 
 #[test]
 fn an_own_name_that_is_not_one_or_cannot_be_read_is_rejected_saying_so() {
-    let (socket, _stop) = comm_core("rejected");
+    let (socket, _stop, _dir) = comm_core("rejected");
     let client = files(&socket, "collector");
     let (transfer, _) = fetch(&client, "own/nothing", &[]);
     assert_eq!(transfer.state, FileState::Rejected);
@@ -184,7 +183,7 @@ fn an_own_name_that_is_not_one_or_cannot_be_read_is_rejected_saying_so() {
 
 #[test]
 fn no_program_may_offer_the_comm_core_s_own_prefix_or_one_under_it() {
-    let (socket, _stop) = comm_core("refused");
+    let (socket, _stop, _dir) = comm_core("refused");
     let program = files(&socket, "logger");
     for prefix in ["own/", "own/deeper/"] {
         let error = program.offer(prefix).expect_err("the comm core's");

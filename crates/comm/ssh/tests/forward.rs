@@ -155,7 +155,6 @@ fn a_connection_from_the_board_is_carried_both_ways() {
     assert_eq!((&one, &two), (b"FIRST", b"SECOND"));
     let _ = tunnel.kill();
     let _ = tunnel.wait();
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -184,5 +183,4 @@ fn forwarding_that_is_off_is_refused() {
     // A shell is still to be had.
     let ran = server.ssh(&me.name, Some(&admin), &["--", "echo in"], "");
     assert_eq!(text(&ran.stdout), "in\n");
-    let _ = std::fs::remove_dir_all(dir);
 }

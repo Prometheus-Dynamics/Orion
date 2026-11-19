@@ -17,6 +17,7 @@ use orion::topics::{FieldId, SampleTime, TopicDecl};
 use orion::types::HlcTimestamp;
 use orion::{Address, Options, Orion, Roles, fields};
 use orion_msg_records::{Label, NodeRecord};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use orion_wire::List;
 use orion_wire::body::encode_fields;
@@ -670,9 +671,7 @@ fn what_is_not_understood_is_said_before_any_board_is_asked() {
 
 #[test]
 fn operator_ask_with_and_without_the_enrollment_key() {
-    let dir = std::env::temp_dir().join(format!("orion-ctl-operator-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("ctl-operator");
     let board = Board::start_with(
         &dir,
         orion_stubs::Options {
@@ -723,5 +722,4 @@ fn operator_ask_with_and_without_the_enrollment_key() {
     let (code, _, err) = run(&line("operator enroll abc --as x"));
     assert_eq!(code, 2, "{err}");
     drop(board);
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -115,6 +115,7 @@ orion-connect = { path = "../../client/connect" }
 orion-files = { path = "../../client/files" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }
+orion-scratch = { path = "../../testing/scratch" }
 shm-ring = { workspace = true }
 shm-ring-doorbell = { workspace = true }
 rustix = { version = "1", default-features = false, features = ["std", "process"] }

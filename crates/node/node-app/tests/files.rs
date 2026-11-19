@@ -3,21 +3,19 @@
 //! place.
 
 use std::io::{Cursor, Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use orion::files::FileState;
 use orion::types::Error;
 use orion::{Address, ClientError, Orion};
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use tokio::sync::oneshot;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("node-{name}"))
 }
 
 fn settings(dir: &Path) -> NodeSettings {

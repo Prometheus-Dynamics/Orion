@@ -17,13 +17,18 @@ user_pref(\"media.ffmpeg.vaapi.enabled\", false);
 ";
 
 /// A headless browser on `url`, if one is installed. `profile` is an empty directory for it.
+/// The browser's temporary files go in `profile/tmp`, not the shared temporary directory: a
+/// profile that is removed takes them with it.
 #[must_use]
 pub fn browse(url: &str, profile: &Path) -> Option<Child> {
+    let temporary = profile.join("tmp");
+    std::fs::create_dir_all(&temporary).expect("the browser's temporary directory");
     // Nothing here runs on this machine's GPU: drawing, video and GL are all in software.
     let firefox = |program: &str| {
         std::fs::write(profile.join("user.js"), SOFTWARE_ONLY).ok()?;
         Command::new(program)
             .env("LIBGL_ALWAYS_SOFTWARE", "1")
+            .env("TMPDIR", &temporary)
             .args(["--headless", "--no-remote", "--new-instance", "--profile"])
             .arg(profile)
             .arg(url)
@@ -35,6 +40,7 @@ pub fn browse(url: &str, profile: &Path) -> Option<Child> {
     let chrome = |program: &str| {
         Command::new(program)
             .env("LIBGL_ALWAYS_SOFTWARE", "1")
+            .env("TMPDIR", &temporary)
             .args([
                 "--headless=new",
                 "--disable-gpu",

@@ -111,11 +111,11 @@ fn unhex(text: &str) -> Option<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_scratch::Scratch;
 
     #[test]
     fn a_pin_is_read_and_a_revoked_one_is_not() {
-        let dir = std::env::temp_dir().join(format!("orion-dial-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new("dial");
         let path = dir.join(TRUST_FILE);
         let (right, other) = ("ab".repeat(32), "cd".repeat(32));
         let node: NodeName = "right".parse().expect("name");
@@ -130,6 +130,5 @@ mod tests {
         assert_eq!(pinned(&path, &node).expect("read"), None);
         std::fs::write(&path, "peer right not-hex\n").expect("write");
         assert_eq!(pinned(&path, &node).expect("read"), None);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

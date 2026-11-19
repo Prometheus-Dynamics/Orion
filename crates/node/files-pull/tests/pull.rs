@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use orion_files_pull::{Fetch, MAX_PULLS, Pulls, Report, fetchable};
+use orion_scratch::Scratch;
 
 /// What the server is told to do.
 #[derive(Clone, Copy, Default)]
@@ -118,12 +119,8 @@ fn file() -> Vec<u8> {
         .collect()
 }
 
-fn part(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-files-pull-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("directory");
-    let path = dir.join(format!("{name}.part"));
-    let _ = std::fs::remove_file(&path);
-    path
+fn part(dir: &Scratch, name: &str) -> PathBuf {
+    dir.join(format!("{name}.part"))
 }
 
 /// Fetches and waits for how it ended.
@@ -151,7 +148,8 @@ fn fetch(pulls: &mut Pulls, url: &str, part: &Path, size: u64) -> Report {
 fn a_file_is_fetched_whole() {
     let data = file();
     let server = Server::start(data.clone(), Manner::default());
-    let part = part("whole");
+    let dir = Scratch::new("files-pull-whole");
+    let part = part(&dir, "whole");
     let mut pulls = Pulls::new();
     let report = fetch(&mut pulls, &server.url(), &part, data.len() as u64);
     assert_eq!(report, Report::Fetched { transfer: 7 });
@@ -174,7 +172,8 @@ fn a_fetch_that_broke_off_goes_on_where_the_server_allows() {
             ..Manner::default()
         },
     );
-    let part = part("resume");
+    let dir = Scratch::new("files-pull-resume");
+    let part = part(&dir, "resume");
     let mut pulls = Pulls::new();
     // The first try: the server hangs up part way.
     let report = fetch(&mut pulls, &server.url(), &part, data.len() as u64);
@@ -201,7 +200,8 @@ fn a_server_that_does_not_take_ranges_is_fetched_from_the_start() {
             ..Manner::default()
         },
     );
-    let part = part("no-ranges");
+    let dir = Scratch::new("files-pull-no-ranges");
+    let part = part(&dir, "no-ranges");
     let mut pulls = Pulls::new();
     let report = fetch(&mut pulls, &server.url(), &part, data.len() as u64);
     assert!(
@@ -225,7 +225,8 @@ fn a_server_that_does_not_take_ranges_is_fetched_from_the_start() {
 fn a_part_that_is_already_whole_is_not_fetched_again() {
     let data = file();
     let server = Server::start(data.clone(), Manner::default());
-    let part = part("already");
+    let dir = Scratch::new("files-pull-already");
+    let part = part(&dir, "already");
     std::fs::write(&part, &data).expect("part");
     let mut pulls = Pulls::new();
     let report = fetch(&mut pulls, &server.url(), &part, data.len() as u64);
@@ -241,6 +242,7 @@ fn a_part_that_is_already_whole_is_not_fetched_again() {
 #[test]
 fn what_a_server_gets_wrong_is_said() {
     let data = file();
+    let dir = Scratch::new("files-pull-wrong");
     let mut pulls = Pulls::new();
 
     // It has no such file.
@@ -251,7 +253,12 @@ fn what_a_server_gets_wrong_is_said() {
             ..Manner::default()
         },
     );
-    let report = fetch(&mut pulls, &server.url(), &part("404"), data.len() as u64);
+    let report = fetch(
+        &mut pulls,
+        &server.url(),
+        &part(&dir, "404"),
+        data.len() as u64,
+    );
     let Report::Failed { why, received, .. } = report else {
         panic!("{report:?}");
     };
@@ -265,7 +272,7 @@ fn what_a_server_gets_wrong_is_said() {
             ..Manner::default()
         },
     );
-    let too_much = part("too-much");
+    let too_much = part(&dir, "too-much");
     let report = fetch(&mut pulls, &server.url(), &too_much, data.len() as u64);
     let Report::Failed { why, .. } = report else {
         panic!("{report:?}");
@@ -275,7 +282,12 @@ fn what_a_server_gets_wrong_is_said() {
 
     // It sends less.
     let server = Server::start(data[..1000].to_vec(), Manner::default());
-    let report = fetch(&mut pulls, &server.url(), &part("short"), data.len() as u64);
+    let report = fetch(
+        &mut pulls,
+        &server.url(),
+        &part(&dir, "short"),
+        data.len() as u64,
+    );
     let Report::Failed { why, received, .. } = report else {
         panic!("{report:?}");
     };
@@ -291,7 +303,7 @@ fn what_a_server_gets_wrong_is_said() {
     let report = fetch(
         &mut pulls,
         &format!("http://{address}/file.bin"),
-        &part("nowhere"),
+        &part(&dir, "nowhere"),
         data.len() as u64,
     );
     let Report::Failed { why, .. } = report else {
@@ -303,6 +315,7 @@ fn what_a_server_gets_wrong_is_said() {
 #[test]
 fn a_fetch_says_how_far_it_is_and_only_so_many_run_at_once() {
     let data = file();
+    let dir = Scratch::new("files-pull-many");
     let slow = Manner {
         delay: Duration::from_millis(400),
         ..Manner::default()
@@ -313,7 +326,7 @@ fn a_fetch_says_how_far_it_is_and_only_so_many_run_at_once() {
         assert!(pulls.start(Fetch {
             transfer,
             url: server.url(),
-            part: part(&format!("many-{transfer}")),
+            part: part(&dir, &format!("many-{transfer}")),
             size: data.len() as u64,
         }));
         assert!(pulls.fetching(transfer));
@@ -321,7 +334,7 @@ fn a_fetch_says_how_far_it_is_and_only_so_many_run_at_once() {
     let one_more = Fetch {
         transfer: 99,
         url: server.url(),
-        part: part("many-99"),
+        part: part(&dir, "many-99"),
         size: data.len() as u64,
     };
     assert!(!pulls.start(one_more.clone()), "no room");

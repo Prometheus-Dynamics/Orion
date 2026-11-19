@@ -13,6 +13,7 @@ use std::time::Duration;
 use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_msg_topics::{Declare, Field, FieldType, Opened};
+use orion_scratch::Scratch;
 use orion_server::{
     Admits, Checked, Comm, Cx, Incoming, Limits, Policy, Security, Service, SessionId, Sessions,
     What,
@@ -97,10 +98,8 @@ impl Service for OldRings {
 }
 
 /// A comm core with only [`OldRings`], in its own thread, on a socket.
-fn old_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
-    let dir = std::env::temp_dir().join(format!("orion-old-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+fn old_core(name: &str) -> (Scratch, PathBuf, tokio::sync::oneshot::Sender<()>) {
+    let dir = Scratch::new(&format!("old-{name}"));
     let socket = dir.join("orion.sock");
     let (ready, started) = mpsc::channel();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -128,7 +127,7 @@ fn old_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
         });
     });
     started.recv().expect("the comm core starts");
-    (socket, stop)
+    (dir, socket, stop)
 }
 
 fn topics(socket: PathBuf) -> Topics {
@@ -151,7 +150,7 @@ fn layout(error: &TopicError) -> (&'static str, u64, u64) {
 
 #[test]
 fn every_place_a_ring_is_mapped_says_its_layout_and_this_clients() {
-    let (socket, _stop) = old_core("layout");
+    let (_dir, socket, _stop) = old_core("layout");
     let topics = topics(socket);
 
     let error = topics

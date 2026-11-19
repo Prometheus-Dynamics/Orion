@@ -21,6 +21,7 @@ tracing.workspace = true
 orion = { path = "../../client/orion", features = ["full"] }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-sample-executor = { path = "../../testing/sample-executor" }
+orion-scratch = { path = "../../testing/scratch" }
 orion-stubs = { path = "../../testing/stubs" }
 orion-wire = { path = "../../core/wire" }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }

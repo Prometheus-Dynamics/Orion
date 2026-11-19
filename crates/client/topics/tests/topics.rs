@@ -13,6 +13,7 @@ use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_measure::thread_counts;
 use orion_msg_topics::{Declare, Field, FieldType};
+use orion_scratch::Scratch;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_tcp::{TcpCarrier, TcpOptions};
 use orion_topics::{Status, TopicDecl, TopicError, Topics};
@@ -47,14 +48,13 @@ struct Board {
     network: std::net::SocketAddr,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
-    dir: PathBuf,
+    /// Removed when the board is dropped.
+    _dir: Scratch,
 }
 
 impl Board {
     fn start(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-topics-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new(&format!("topics-{name}"));
         let socket = dir.join("orion.sock");
         let (ready, started) = mpsc::channel();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -106,7 +106,7 @@ impl Board {
             network: started.recv().expect("the board starts"),
             stop: Some(stop),
             thread: Some(thread),
-            dir,
+            _dir: dir,
         }
     }
 
@@ -129,7 +129,6 @@ impl Drop for Board {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

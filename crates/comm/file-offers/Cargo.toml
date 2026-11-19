@@ -20,6 +20,7 @@ tracing.workspace = true
 [dev-dependencies]
 orion-connect = { path = "../../client/connect" }
 orion-files = { path = "../../client/files" }
+orion-scratch = { path = "../../testing/scratch" }
 orion-unix = { path = "../unix" }
 tokio = { workspace = true, features = ["rt", "time", "macros", "sync"] }
 

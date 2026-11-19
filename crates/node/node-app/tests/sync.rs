@@ -2,7 +2,7 @@
 //! one is on the other, a node that only the other can reach syncs too, and what changed
 //! while one was away arrives when it is back.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use orion::records::{Bytes, RecordClass, RecordEntry};
@@ -10,14 +10,14 @@ use orion::types::{Error, HlcTimestamp};
 use orion::{Address, ClientError, Identity, Orion};
 use orion_msg_records::NodeRecord;
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use orion_stubs::{Board, Security};
 use orion_wire::List;
 use orion_wire::body::encode_fields;
 use tokio::sync::oneshot;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn dir(name: &str) -> Scratch {
+    let dir = Scratch::new(&format!("node-{name}"));
     std::fs::create_dir_all(dir.join("state")).expect("directory");
     dir
 }

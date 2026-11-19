@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
+use orion_scratch::Scratch;
 use tokio::net::UdpSocket;
 
 use crate::config::{TimeConfig, TimeMode};
@@ -43,11 +44,8 @@ fn run(test: impl Future<Output = ()>) {
     tokio::task::LocalSet::new().block_on(&runtime, test);
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-time-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("time-{name}"))
 }
 
 fn config(mode: TimeMode, servers: Vec<String>) -> TimeConfig {
@@ -124,7 +122,6 @@ fn a_board_behind_its_peer_steps_after_two_agreeing_samples() {
         assert_eq!(syncer.status.source.as_deref(), Some(source.as_str()));
         assert!(saved.exists(), "the synchronized time is saved");
         assert!(syncer.poll >= Duration::from_secs(64));
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 
@@ -180,7 +177,6 @@ fn a_clock_behind_the_saved_time_moves_forward_to_it() {
     std::fs::write(&saved, (now_ms - ahead_ms).to_string()).expect("write");
     syncer.restore_saved_time();
     assert_eq!(clock.steps.borrow().len(), 1);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -286,7 +282,6 @@ fn the_synced_file_follows_the_sync_state() {
     assert_eq!(*clock.slews.borrow(), [1_000_000]);
     syncer.set_synced_file(false);
     assert!(!flag.exists(), "sync lost");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

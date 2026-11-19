@@ -12,6 +12,7 @@ use orion_executor::{ExecError, Executor, Serving, WorkloadKind, WorkloadName, W
 use orion_msg_workloads::{
     ExecutorInventory, ExecutorKill, ExecutorOffer, ExecutorReport, ExecutorStart, ExecutorStop,
 };
+use orion_scratch::Scratch;
 use orion_server::{
     Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Limits, Policy, Security, Service,
     SessionId, Sessions, What,
@@ -316,9 +317,7 @@ fn connect(socket: &std::path::Path) -> Session {
 
 #[test]
 fn a_sample_executor_starts_stops_and_reports_what_is_true() {
-    let dir = std::env::temp_dir().join(format!("orion-executor-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("executor");
     let mut board = Board::start(&dir);
 
     let client = Client::new(connect(&board.socket));
@@ -459,5 +458,4 @@ fn a_sample_executor_starts_stops_and_reports_what_is_true() {
     });
     assert!(sample.running.is_empty());
     drop(board);
-    let _ = std::fs::remove_dir_all(dir);
 }

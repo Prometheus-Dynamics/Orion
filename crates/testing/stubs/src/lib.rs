@@ -30,6 +30,7 @@ use orion_broker_proxy::BrokerProxy;
 use orion_device_gateway::DeviceGateway;
 use orion_keys::{Keys, KeysConfig, KeysService, SharedKeys};
 use orion_link_serial::{Serial, StreamCarrier};
+use orion_scratch::Scratch;
 use orion_server::{Admits, Comm, Limits, Policy};
 use orion_tcp::{TcpCarrier, TcpOptions};
 use orion_unix::UnixCarrier;
@@ -96,6 +97,9 @@ pub struct Board {
     /// Asks of the action router, in the board's thread.
     control: tokio::sync::mpsc::UnboundedSender<Control>,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// The directory [`Board::start`] made, removed when the board is dropped. Last, so it
+    /// goes after the thread has stopped.
+    scratch: Option<Scratch>,
 }
 
 /// What a test asks of the action router: each answers with the list's instance.
@@ -109,7 +113,11 @@ enum Control {
 /// come back on the same port. A port from that range (as port 0 gives) can be handed to any
 /// socket on the machine, an outgoing connection's own end among them, in the moment between a
 /// board stopping and starting again; a port below it goes only to a socket that names it.
-async fn listen_outside_the_ephemeral_range(options: TcpOptions) -> TcpCarrier {
+///
+/// # Panics
+///
+/// If no port there is free, or listening fails for another reason.
+pub async fn listen_outside_the_ephemeral_range(options: TcpOptions) -> TcpCarrier {
     let ephemeral = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")
         .ok()
         .and_then(|range| range.split_whitespace().next()?.parse::<u16>().ok())
@@ -151,11 +159,11 @@ impl Board {
             name.hash(&mut hasher);
             hasher.finish() as u32
         };
-        let dir = std::env::temp_dir().join(format!("orion-{hash:08x}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("the board's directory");
-        std::fs::write(dir.join("name"), name).expect("the board's name");
-        Self::start_in(&dir, Security::Off, None)
+        let scratch = Scratch::new(&format!("{hash:08x}"));
+        std::fs::write(scratch.join("name"), name).expect("the board's name");
+        let mut board = Self::start_in(&scratch, Security::Off, None);
+        board.scratch = Some(scratch);
+        board
     }
 
     /// Starts a board in `dir`, on `port` if it is to come back where it was.
@@ -458,6 +466,7 @@ impl Board {
             stop: Some(stop),
             control,
             thread: Some(thread),
+            scratch: None,
         }
     }
 

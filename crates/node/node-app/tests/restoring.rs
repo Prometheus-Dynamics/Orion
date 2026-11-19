@@ -1,7 +1,7 @@
 //! The gap after a restart: what was served before it is restoring, not ready and not missing,
 //! until the program that serves it is back or the wait for it is over.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use orion::actions::{ActionCall, Admits, Policy, Target};
@@ -10,14 +10,12 @@ use orion::records::RecordClass;
 use orion::types::{Error, HlcTimestamp};
 use orion::{Address, ClientError, Options, Orion, Roles};
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use tokio::sync::oneshot;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("node-{name}"))
 }
 
 fn settings(dir: &Path) -> NodeSettings {
@@ -197,7 +195,6 @@ fn what_was_served_is_restoring_after_the_comm_core_restarts_until_its_program_i
     );
     // Ready means it can be run: the run is taken.
     assert_eq!(run_refused(&dash, "arm.home").map(|e| e.to_string()), None);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -219,7 +216,6 @@ fn what_does_not_come_back_is_lost_and_not_found_when_the_wait_is_over() {
         arm(&dash) == Some(ResourceState::Lost)
     });
     assert_eq!(refused(&dash, "arm.home"), Error::NotFound);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -265,7 +261,6 @@ fn a_whole_node_that_restarts_knows_what_it_served_from_its_state_directory() {
         })) => {}
         Err(other) => panic!("{other}"),
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -282,7 +277,6 @@ fn a_first_boot_and_a_list_that_cannot_be_read_restore_nothing() {
         let _logic = Logic::start(settings(&dir));
         let dash = dashboard(&address);
         assert_eq!(refused(&dash, "arm.home"), Error::NotFound);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -323,5 +317,4 @@ fn a_read_of_one_resource_served_before_that_has_no_record_yet_is_restoring() {
             .get(RecordClass::Resource, "arm")
             .is_ok_and(|found| found.is_empty())
     });
-    let _ = std::fs::remove_dir_all(&dir);
 }

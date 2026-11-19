@@ -1,12 +1,13 @@
 //! Orion's precheck of the security switch: what it has against turning it on or off, asked
 //! of a running comm core and of recovery.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use orion::node::SecurityTo;
 use orion_comm_app::{CommCore, CommSettings, RecoverWith, recover};
 use orion_config::Source;
+use orion_scratch::Scratch;
 
 /// A recovery key, as the recovery keys file names one.
 const RECOVERY_KEY: &str =
@@ -20,9 +21,8 @@ fn run(test: impl Future<Output = ()>) {
     tokio::task::LocalSet::new().block_on(&runtime, test);
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-precheck-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn temp(name: &str) -> Scratch {
+    let dir = Scratch::new(&format!("precheck-{name}"));
     std::fs::create_dir_all(dir.join("keys")).expect("dir");
     dir
 }

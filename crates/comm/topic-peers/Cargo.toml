@@ -25,6 +25,8 @@ orion = { path = "../../client/orion" }
 orion-broker-proxy = { path = "../broker-proxy" }
 orion-keys = { path = "../keys" }
 orion-outbound = { path = "../outbound" }
+orion-scratch = { path = "../../testing/scratch" }
+orion-stubs = { path = "../../testing/stubs" }
 orion-time = { path = "../time" }
 orion-unix = { path = "../unix" }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "net"] }

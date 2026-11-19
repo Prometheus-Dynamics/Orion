@@ -13,6 +13,7 @@ use orion::{Address, Orion, fields};
 use orion_comm_app::{CommCore, CommSettings};
 use orion_config::Source;
 use orion_nt4::{Properties, Server, ServerConfig, ServerHandle, Value};
+use orion_scratch::Scratch;
 
 const WAIT: Duration = Duration::from_secs(15);
 
@@ -21,14 +22,13 @@ struct Board {
     socket: PathBuf,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
-    dir: PathBuf,
+    /// Last: the thread is joined before it goes, so nothing uses the directory after.
+    _dir: Scratch,
 }
 
 impl Board {
     fn start(name: &str, port: u16) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-nt4-cgw-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new(&format!("nt4-cgw-{name}"));
         let text = format!(
             "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n\
              nt4.server = 127.0.0.1:{port}\nnt4.name = coprocessor\nnt4.period_ms = 10\n\
@@ -59,7 +59,7 @@ impl Board {
             socket: started.recv().expect("the board starts"),
             stop: Some(stop),
             thread: Some(thread),
-            dir,
+            _dir: dir,
         }
     }
 }
@@ -70,7 +70,6 @@ impl Drop for Board {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

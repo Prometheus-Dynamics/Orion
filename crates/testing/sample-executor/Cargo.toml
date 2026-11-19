@@ -14,6 +14,7 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 
 [dev-dependencies]
 orion = { path = "../../client/orion", features = ["executor", "workloads"] }
+orion-scratch = { path = "../scratch" }
 orion-stubs = { path = "../stubs" }
 
 # Only `src/spawn.rs` uses `unsafe`: a command is made to die with its executor.

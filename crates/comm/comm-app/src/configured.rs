@@ -594,9 +594,7 @@ mod tests {
 
     #[test]
     fn a_file_others_could_write_is_not_served() {
-        let dir = std::env::temp_dir().join(format!("orion-offers-conf-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = orion_scratch::Scratch::new("offers-conf");
         let file = dir.join("offers.conf");
         std::fs::write(&file, "a/ k = path /etc/hostname bound 100\n").expect("file");
         let me = rustix::process::getuid().as_raw();

@@ -9,6 +9,7 @@ use orion_broker::{Broker, BrokerConfig};
 use orion_broker_buffers::BrokerBuffers;
 use orion_buffers::{Buffers, HoldLimits, Marks, NextBatch, Pool};
 use orion_connect::{Address, Client, ClientError, Options, Session};
+use orion_scratch::Scratch;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_topics::{TopicError, Topics};
 use orion_types::Error;
@@ -67,9 +68,7 @@ fn comm_core(socket: std::path::PathBuf) -> tokio::sync::oneshot::Sender<()> {
 
 #[test]
 fn a_program_s_own_ring_and_pool_become_a_buffer_topic() {
-    let dir = std::env::temp_dir().join(format!("orion-adopt-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("adopt");
     let socket = dir.join("orion.sock");
     let _stop = comm_core(socket.clone());
 
@@ -175,7 +174,6 @@ fn a_program_s_own_ring_and_pool_become_a_buffer_topic() {
         assert_eq!(seen, *desc);
     }
     assert!(seen.windows(2).all(|pair| pair[0] < pair[1]), "{seen:?}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -184,9 +182,7 @@ fn a_program_s_own_value_ring_becomes_a_topic() {
     use orion_topics::TopicDecl;
     use shm_ring::{Flags, Next};
 
-    let dir = std::env::temp_dir().join(format!("orion-adopt-value-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("adopt-value");
     let socket = dir.join("orion.sock");
     let _stop = comm_core(socket.clone());
 
@@ -271,14 +267,11 @@ fn a_program_s_own_value_ring_becomes_a_topic() {
     );
     // The same ring again is the topic carrying on.
     let _again = counter.adopt(&decl, &ring).expect("the same ring");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn orion_never_takes_a_slot_that_is_the_programs_own() {
-    let dir = std::env::temp_dir().join(format!("orion-adopt-slots-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("adopt-slots");
     let socket = dir.join("orion.sock");
     let _stop = comm_core(socket.clone());
 
@@ -342,5 +335,4 @@ fn orion_never_takes_a_slot_that_is_the_programs_own() {
     }
     assert!(frames.pool().is_none(), "never handed the pool");
     assert_eq!(table.readers(), 1);
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -9,6 +9,7 @@ use common::*;
 use orion_connect::{Address, ClientError, Roles};
 use orion_measure::thread_counts;
 use orion_msg_session::RejectReason;
+use orion_scratch::Scratch;
 
 // The counting allocator is the binary's, set once in tests/all.rs.
 
@@ -100,7 +101,6 @@ fn the_same_calls_work_on_the_boards_socket_the_network_and_a_link() {
         Session::over_link(link, "tool", options(None)).expect("link"),
         false,
     );
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 #[test]
@@ -173,7 +173,6 @@ fn a_signed_network_session_is_the_same_again_and_checks_who_is_there() {
         matches!(error, ClientError::Rejected(RejectReason::RoleNotOffered)),
         "{error}"
     );
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 #[test]
@@ -230,7 +229,6 @@ fn a_tool_with_a_key_signs_its_session_on_a_link() {
         Session::over_link(end(), "tool", options(copy())).expect("signed again"),
         false,
     );
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 #[test]
@@ -264,7 +262,10 @@ fn a_serial_address_names_the_key_its_board_must_prove() {
 
 #[test]
 fn there_is_one_way_back_and_it_never_gives_up() {
-    let mut board = Board::start("back", Security::Off);
+    // The test owns the directory, so dropping a board before the one started in it again
+    // leaves it in place.
+    let scratch = Scratch::new("connect-back");
+    let mut board = Board::start_in(scratch.to_path_buf(), Security::Off, None);
     let (dir, port) = (board.dir.clone(), board.network.port());
     for address in [
         Address::Local(board.socket.clone()),
@@ -414,7 +415,6 @@ fn a_link_the_program_opened_in_two_halves_carries_the_same_calls() {
         Session::over(read, write, None, "tool", options(None)).expect("halves"),
         false,
     );
-    let _ = std::fs::remove_dir_all(&board.dir);
 
     // Signed, and the board proves the key it was expected to have.
     let mut board = Board::start("halves-signed", Security::On);
@@ -430,7 +430,6 @@ fn a_link_the_program_opened_in_two_halves_carries_the_same_calls() {
         Session::over(read, write, Some(board.key), "tool", options(copy())).expect("signed");
     assert!(session.welcomed().max_frame <= 8192 - 32);
     exercise(session, false);
-    let _ = std::fs::remove_dir_all(&board.dir);
 
     // Another key than the one expected: refused, with both keys.
     let mut board = Board::start("halves-other", Security::On);
@@ -453,6 +452,5 @@ fn a_link_the_program_opened_in_two_halves_carries_the_same_calls() {
         Session::over(read, write, Some(board2.key), "tool", options(None)),
         Err(ClientError::Denied(_))
     ));
-    let _ = std::fs::remove_dir_all(&board.dir);
     let _ = std::fs::remove_dir_all(&board2.dir);
 }

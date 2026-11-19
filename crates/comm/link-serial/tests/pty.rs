@@ -12,6 +12,7 @@ use orion_link_serial::{LinkStats, Serial, StreamCarrier};
 use orion_measure::sched::thread_cpu_ns;
 use orion_measure::thread_counts;
 use orion_msg_session::{Hello, Ping, Pong, Reject, RejectReason, Welcome};
+use orion_scratch::Scratch;
 use orion_server::{Carrier, Connection, FdSet, FrameRead, FrameWrite};
 use orion_server::{Comm, Limits, Roles, Security};
 use orion_supervise::{Report, State, Status};
@@ -262,9 +263,7 @@ fn a_device_of_another_wire_revision_is_told_both_numbers() {
 #[test]
 fn a_link_is_opened_again_for_as_long_as_it_takes() {
     run(async {
-        let dir = std::env::temp_dir().join(format!("orion-link-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new("link");
         let port = dir.join("uart");
         // The device is not plugged in when the board starts.
         let board = board(port.clone(), 2000);
@@ -337,7 +336,6 @@ fn a_link_is_opened_again_for_as_long_as_it_takes() {
         device.hello().await;
         device.ping(3).await;
         assert_eq!(((board.stats)().opens, (board.stats)().connections), (2, 3));
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 

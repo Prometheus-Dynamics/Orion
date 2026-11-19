@@ -27,6 +27,7 @@ orion-action-list = { path = "../../node/action-list" }
 orion-outbound = { path = "../../comm/outbound" }
 orion-relay = { path = "../../comm/relay" }
 orion-reply = { path = "../../node/reply" }
+orion-scratch = { path = "../../testing/scratch" }
 orion-server = { path = "../../comm/server" }
 orion-tcp = { path = "../../comm/tcp" }
 orion-time = { path = "../../comm/time" }

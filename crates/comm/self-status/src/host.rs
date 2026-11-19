@@ -137,6 +137,7 @@ impl HostSource for ProcSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_scratch::Scratch;
 
     #[test]
     fn the_running_system_can_be_read() {
@@ -161,8 +162,7 @@ mod tests {
 
     #[test]
     fn a_tree_is_read_as_the_system_would_be() {
-        let root = std::env::temp_dir().join(format!("orion-host-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        let root = Scratch::new("host");
         for zone in ["thermal_zone0", "thermal_zone1", "cooling_device0"] {
             std::fs::create_dir_all(root.join("sys/class/thermal").join(zone)).expect("dir");
         }
@@ -181,7 +181,7 @@ mod tests {
         write("sys/class/thermal/thermal_zone1/temp", "52987\n");
         write("sys/class/thermal/cooling_device0/temp", "99999\n");
 
-        let mut source = ProcSource::with_root(&root);
+        let mut source = ProcSource::with_root(root.to_path_buf());
         let first = source.sample();
         assert_eq!(
             (first.uptime_s, first.mem_total_kb, first.mem_available_kb),
@@ -203,6 +203,5 @@ mod tests {
             ProcSource::with_root(&empty).sample(),
             HostSample::default()
         );
-        let _ = std::fs::remove_dir_all(root);
     }
 }

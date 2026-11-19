@@ -2,17 +2,16 @@
 //! what is on disk.
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use orion_keys::enroll::{operator_proof, proof};
 use orion_keys::{Identity, Keys, KeysConfig, KeysError, OperatorState, fingerprint, verify};
+use orion_scratch::Scratch;
 use orion_server::{Principal, Security, What};
 use orion_types::{KeyId, NodeName};
 
-fn directory(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("orion-keys-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
-    path
+fn directory(name: &str) -> Scratch {
+    Scratch::new(&format!("keys-{name}"))
 }
 
 fn config(dir: &Path) -> KeysConfig {
@@ -282,7 +281,6 @@ fn a_peer_is_pinned_to_one_key() {
 #[test]
 fn lines_a_newer_build_wrote_are_kept() {
     let dir = directory("unknown");
-    std::fs::create_dir_all(&dir).expect("dir");
     let key = "ab".repeat(32);
     std::fs::write(
         dir.join("trust"),
@@ -366,7 +364,6 @@ fn at_most_so_many_wait_and_none_waiting_is_dropped_for_another() {
         .operator_asks(&node(), next, "next", b"")
         .expect("room");
     assert_eq!(asked.state, OperatorState::Pending);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -403,5 +400,4 @@ fn a_flash_seeds_one_operator_who_may_do_everything_once() {
         );
         assert_eq!(std::fs::read_to_string(&seed).expect("left"), text);
     }
-    let _ = std::fs::remove_dir_all(dir);
 }

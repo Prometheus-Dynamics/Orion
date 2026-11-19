@@ -16,6 +16,7 @@ use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_files::{FileState, Files, Known, Pull, Step, digest};
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_msg_files::{FileBegin, FileChunk, FileCommit, FilePull, FileStatus};
+use orion_scratch::Scratch;
 use orion_server::{
     Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Limits, Policy, Security, Service, What,
 };
@@ -223,14 +224,13 @@ struct Board {
     outside: Arc<Outside>,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
-    dir: PathBuf,
+    /// Removed when the board is dropped.
+    dir: Scratch,
 }
 
 impl Board {
     fn start(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-files-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new(&format!("files-{name}"));
         let socket = dir.join("orion.sock");
         let outside = Arc::new(Outside::default());
         let (ready, started) = mpsc::channel();
@@ -290,7 +290,6 @@ impl Drop for Board {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

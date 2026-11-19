@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use orion_check::Security;
 use orion_keys::{Keys, KeysConfig, SharedKeys};
+use orion_scratch::Scratch;
 use orion_ssh::{Helper, Ssh, SshConfig, users};
 use orion_types::KeyId;
 
@@ -30,11 +31,8 @@ pub fn installed() -> bool {
     both
 }
 
-pub fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-ssh-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+pub fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("ssh-{name}"))
 }
 
 /// A key pair made by `ssh-keygen`: the private key's file and the public key's bytes.

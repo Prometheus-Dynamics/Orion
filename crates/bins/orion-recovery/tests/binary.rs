@@ -3,10 +3,12 @@
 //! up in recovery. If OpenSSH is not installed the tests that need it say so and pass.
 
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
+
+use orion_scratch::Scratch;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_orion-recovery");
 const WAIT: Duration = Duration::from_secs(20);
@@ -28,12 +30,8 @@ fn installed() -> bool {
     all
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("orion-recovery-bin-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("recovery-bin-{name}"))
 }
 
 fn me() -> String {
@@ -214,7 +212,6 @@ fn the_binary_is_a_comm_core_reached_with_ssh_and_scp() {
     drop(running);
     // Stopped when asked: nothing answers there any more.
     assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -258,7 +255,6 @@ fn with_a_broken_settings_file_it_stays_up_in_recovery() {
         anyone,
         "{record}"
     );
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -291,5 +287,4 @@ fn the_flasher_example_is_read_whole_and_starts() {
     // Security off, as the example says: in without a key.
     assert_eq!(said(&running.ssh(&dir, None, "echo in")), "in\n");
     drop(running);
-    let _ = std::fs::remove_dir_all(dir);
 }

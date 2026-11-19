@@ -15,6 +15,7 @@ use orion_broker::{Broker, BrokerConfig};
 use orion_broker_proxy::BrokerProxy;
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_outbound::{Outbound, OutboundLimits};
+use orion_scratch::Scratch;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_tcp::{TcpCarrier, TcpOptions};
 use orion_topic_peers::{Reach, Resolve, TopicPeers};
@@ -46,18 +47,15 @@ struct Node {
     network: SocketAddr,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// Last: the thread is joined before the directory goes.
+    _dir: Scratch,
 }
 
 impl Node {
     /// Starts the node `name`, whose clock is `ahead_ns` ahead of the machine's, on `port`
     /// if it is to come back where it was.
     fn start(test: &str, name: &'static str, map: &Map, ahead_ns: u64, port: Option<u16>) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "orion-topic-peers-{test}-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new(&format!("topic-peers-{test}-{name}"));
         let socket = dir.join("orion.sock");
         let (ready, started) = mpsc::channel();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -115,8 +113,15 @@ impl Node {
                 comm.add_service(BrokerProxy::new(&broker, anyone));
                 comm.add_service(broker);
                 let unix = UnixCarrier::bind(&path, Some(0o600), &[]).expect("socket");
-                let listen = SocketAddr::from(([127, 0, 0, 1], port.unwrap_or(0)));
-                let tcp = TcpCarrier::bind(listen, options).await.expect("listen");
+                // Below the ephemeral range, as `orion_stubs::Board`'s: the node started again
+                // on its port must find that port free (docs/flakes.md).
+                let tcp = match port {
+                    Some(port) => {
+                        let listen = SocketAddr::from(([127, 0, 0, 1], port));
+                        TcpCarrier::bind(listen, options).await.expect("listen")
+                    }
+                    None => orion_stubs::listen_outside_the_ephemeral_range(options).await,
+                };
                 ready.send(tcp.local_addr().expect("addr")).expect("ready");
                 let (on_socket, on_network) = (comm.clone(), comm);
                 tokio::task::spawn_local(async move { on_socket.serve(unix).await });
@@ -134,6 +139,7 @@ impl Node {
             network,
             stop: Some(stop),
             thread: Some(thread),
+            _dir: dir,
         }
     }
 

@@ -1,7 +1,7 @@
 //! Actions across two nodes: a run on one node for an action that lives on the other is
 //! carried there, decided at that node's door, and survives that node restarting.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -12,16 +12,14 @@ use orion::types::{Error, HlcTimestamp};
 use orion::{Address, ClientError, Identity, Orion};
 use orion_msg_records::NodeRecord;
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use orion_stubs::{Board, Security};
 use orion_wire::List;
 use orion_wire::body::encode_fields;
 use tokio::sync::oneshot;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("node-{name}"))
 }
 
 fn settings(dir: &Path, name: &str) -> NodeSettings {

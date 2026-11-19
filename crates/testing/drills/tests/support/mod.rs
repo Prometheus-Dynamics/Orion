@@ -9,11 +9,14 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use orion_scratch::Scratch;
+
 pub const DRILL: &str = env!("CARGO_BIN_EXE_orion-drill");
 
 /// A board's directory and settings. The programs are started from it.
 pub struct Board {
-    pub dir: PathBuf,
+    /// Removed when the board is dropped.
+    pub dir: Scratch,
     pub socket: PathBuf,
     pub settings: PathBuf,
     pub ssh: SocketAddr,
@@ -35,9 +38,7 @@ impl Board {
 
     /// A board called `node`.
     pub fn named(name: &str, node: &str, extra: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-drill-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("directory");
+        let dir = Scratch::new(&format!("drill-{name}"));
         let socket = dir.join("orion.sock");
         let (ssh, peer) = (free_port(), free_port());
         let uid = std::fs::metadata(&dir)
@@ -126,12 +127,6 @@ impl Board {
         let read = stream.read(&mut line).ok()?;
         let _ = stream.write_all(b"");
         Some(String::from_utf8_lossy(&line[..read]).trim().to_owned())
-    }
-}
-
-impl Drop for Board {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

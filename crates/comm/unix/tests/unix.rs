@@ -3,11 +3,12 @@
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
 use std::os::fd::OwnedFd;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
 use orion_msg_session::{Hello, Ping, Pong, Reject, RejectReason, Welcome};
+use orion_scratch::Scratch;
 use orion_server::{
     Admits, Checked, Comm, Cx, Error, FdSet, Incoming, Limits, Policy, Principal, Roles, Security,
     Service, What,
@@ -29,11 +30,8 @@ fn run(test: impl Future<Output = ()>) {
 }
 
 /// A fresh directory for one test's socket.
-fn directory(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("orion-unix-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
-    std::fs::create_dir_all(&path).expect("directory");
-    path
+fn directory(name: &str) -> Scratch {
+    Scratch::new(&format!("unix-{name}"))
 }
 
 /// Answers `GET` with who asked, and `PUT` by writing into the descriptor it was sent and
@@ -76,7 +74,7 @@ impl Service for Probe {
     }
 }
 
-/// An unnamed file to pass around.
+/// An unnamed file to pass around: unlinked as soon as it is made, so nothing is left.
 fn tempfile() -> std::fs::File {
     let path =
         std::env::temp_dir().join(format!("orion-unix-file-{}-{:p}", std::process::id(), &()));
@@ -166,7 +164,8 @@ impl Client {
 #[test]
 fn a_client_connects_asks_and_is_known_by_its_credentials() {
     run(async {
-        let path = directory("request").join("orion.sock");
+        let dir = directory("request");
+        let path = dir.join("orion.sock");
         let (comm, seen) = serve(&path, Limits::default());
         let mut client = Client::open(&path, Roles::CLIENT.and(Roles::PROVIDER)).await;
 
@@ -203,7 +202,8 @@ fn a_client_connects_asks_and_is_known_by_its_credentials() {
 #[test]
 fn descriptors_travel_both_ways() {
     run(async {
-        let path = directory("descriptors").join("orion.sock");
+        let dir = directory("descriptors");
+        let path = dir.join("orion.sock");
         let _server = serve(&path, Limits::default());
         let mut client = Client::open(&path, Roles::CLIENT).await;
 
@@ -230,7 +230,8 @@ fn descriptors_travel_both_ways() {
 #[test]
 fn a_client_of_another_wire_revision_is_told_both_numbers() {
     run(async {
-        let path = directory("revision").join("orion.sock");
+        let dir = directory("revision");
+        let path = dir.join("orion.sock");
         let _server = serve(&path, Limits::default());
         let other = orion_wire::INTERFACE_REVISION + 1;
         let mut client = Client::connect(&path).await;
@@ -249,7 +250,8 @@ fn a_client_of_another_wire_revision_is_told_both_numbers() {
 #[test]
 fn only_the_node_users_may_be_the_node_logic() {
     run(async {
-        let path = directory("roles").join("orion.sock");
+        let dir = directory("roles");
+        let path = dir.join("orion.sock");
         let _server = serve(&path, Limits::default());
         // This test does not run as root, and its user is not a node user.
         // (As root every role is offered, so there is nothing to see.)
@@ -263,7 +265,8 @@ fn only_the_node_users_may_be_the_node_logic() {
         }
 
         // With this user named as a node user, it may.
-        let path = directory("roles-node").join("orion.sock");
+        let node_dir = directory("roles-node");
+        let path = node_dir.join("orion.sock");
         let comm = Comm::new(
             "board".parse().expect("name"),
             Security::On,
@@ -325,7 +328,8 @@ fn a_reader_that_falls_behind_gets_every_frame_whole() {
     run(async {
         // The server sends far more than the socket holds while the client is not reading,
         // so sends are split across the socket's buffer. Every frame still arrives whole.
-        let path = directory("behind").join("orion.sock");
+        let dir = directory("behind");
+        let path = dir.join("orion.sock");
         let limits = Limits {
             outbox_bytes: 8 * 1024 * 1024,
             ..Limits::default()
@@ -349,7 +353,8 @@ fn a_reader_that_falls_behind_gets_every_frame_whole() {
 #[test]
 fn a_program_on_the_socket_is_kept_while_it_is_quiet_and_gone_when_it_hangs_up() {
     run(async {
-        let path = directory("quiet").join("orion.sock");
+        let dir = directory("quiet");
+        let path = dir.join("orion.sock");
         // Real time: the shortest deadlines a test may build.
         let limits = Limits {
             heartbeat_ms: 20,

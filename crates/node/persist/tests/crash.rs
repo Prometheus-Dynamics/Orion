@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use orion_msg_records::RecordClass;
 use orion_persist::{Disk, FORMAT, Loaded, Persist, Source};
+use orion_scratch::Scratch;
 use orion_store::{Record, Store, StoreConfig, Version};
 use orion_types::HlcTimestamp;
 
@@ -330,8 +331,7 @@ fn a_file_that_is_not_a_snapshot_never_stops_start_up() {
 
 #[test]
 fn a_store_comes_back_from_the_real_disk_as_it_was() {
-    let dir = std::env::temp_dir().join(format!("orion-persist-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = Scratch::new("persist");
     let name: orion_types::NodeName = "node-a".parse().expect("name");
     let mut store = Store::new(name.clone(), StoreConfig::default());
     for index in 0..300_u32 {
@@ -398,5 +398,4 @@ fn a_store_comes_back_from_the_real_disk_as_it_was() {
         (loaded.source, loaded.records.len()),
         (Source::Previous, store.len())
     );
-    let _ = std::fs::remove_dir_all(dir);
 }

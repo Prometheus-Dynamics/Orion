@@ -27,6 +27,7 @@ orion-broker = { path = "../../comm/broker" }
 orion-broker-proxy = { path = "../../comm/broker-proxy" }
 orion-keys = { path = "../../comm/keys" }
 orion-measure = { path = "../../core/measure", features = ["alloc-counter", "sched"] }
+orion-scratch = { path = "../../testing/scratch" }
 orion-server = { path = "../../comm/server" }
 orion-tcp = { path = "../../comm/tcp" }
 orion-unix = { path = "../../comm/unix" }

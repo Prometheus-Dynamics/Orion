@@ -31,6 +31,7 @@ use orion::{Address, Orion};
 use orion_comm_app::{CommSettings, RecoverWith, Started, recover, start_or_recover};
 use orion_config::Source;
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use tokio::sync::oneshot;
 
 /// How long a start may take before the test is told it failed.
@@ -135,7 +136,6 @@ pub enum State {
 /// A board in the test's process, until it is dropped. Dropping it stops node logic, then the
 /// comm core, and removes its directory.
 pub struct TestBoard {
-    dir: PathBuf,
     socket: PathBuf,
     state: State,
     network: Option<SocketAddr>,
@@ -144,6 +144,8 @@ pub struct TestBoard {
     node_settings: NodeSettings,
     node: Option<Service>,
     comm: Service,
+    /// The board's directory, removed last, after both services have stopped.
+    dir: Scratch,
 }
 
 impl std::fmt::Debug for TestBoard {
@@ -188,9 +190,7 @@ impl TestBoard {
     }
 
     fn begin(name: &str, options: &Options, forced: Option<String>) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-board-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("the board's directory");
+        let dir = Scratch::new(&format!("board-{name}"));
         let record = dir.join("security");
         match options.security {
             Security::NoRecord => {}
@@ -367,7 +367,7 @@ impl TestBoard {
     /// The board's directory: its state, its keys, its record and its socket.
     #[must_use]
     pub fn dir(&self) -> &Path {
-        &self.dir
+        self.dir.path()
     }
 }
 
@@ -375,7 +375,6 @@ impl Drop for TestBoard {
     fn drop(&mut self) {
         self.stop_node();
         self.comm.stop();
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

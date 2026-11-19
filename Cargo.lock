@@ -1199,6 +1199,7 @@ dependencies = [
  "orion-msg-workloads",
  "orion-provider",
  "orion-records",
+ "orion-scratch",
  "orion-stubs",
  "orion-topics",
  "orion-types",
@@ -1238,6 +1239,7 @@ dependencies = [
  "orion-check",
  "orion-connect",
  "orion-msg-actions",
+ "orion-scratch",
  "orion-server",
  "orion-stubs",
  "orion-types",
@@ -1255,6 +1257,7 @@ dependencies = [
  "orion-msg-records",
  "orion-node-app",
  "orion-sample-executor",
+ "orion-scratch",
  "orion-stubs",
  "orion-wire",
  "tokio",
@@ -1265,6 +1268,7 @@ dependencies = [
 name = "orion-audit"
 version = "1.0.1-dev"
 dependencies = [
+ "orion-scratch",
  "tracing",
 ]
 
@@ -1277,6 +1281,7 @@ dependencies = [
  "orion-ctl",
  "orion-log",
  "orion-node-app",
+ "orion-scratch",
  "tracing",
 ]
 
@@ -1288,6 +1293,7 @@ dependencies = [
  "orion-config",
  "orion-msg-session",
  "orion-msg-topics",
+ "orion-scratch",
  "orion-server",
  "orion-types",
  "orion-unix",
@@ -1342,6 +1348,7 @@ dependencies = [
  "orion-measure",
  "orion-msg-session",
  "orion-msg-topics",
+ "orion-scratch",
  "orion-server",
  "orion-topics",
  "orion-types",
@@ -1399,6 +1406,7 @@ dependencies = [
  "orion-outbound",
  "orion-recovery",
  "orion-relay",
+ "orion-scratch",
  "orion-self-status",
  "orion-server",
  "orion-shell",
@@ -1426,6 +1434,7 @@ name = "orion-config"
 version = "1.0.1-dev"
 dependencies = [
  "orion-check",
+ "orion-scratch",
  "orion-types",
 ]
 
@@ -1440,6 +1449,7 @@ dependencies = [
  "orion-measure",
  "orion-msg-session",
  "orion-net-handshake",
+ "orion-scratch",
  "orion-server",
  "orion-stubs",
  "orion-supervise",
@@ -1459,6 +1469,7 @@ dependencies = [
  "orion",
  "orion-msg-records",
  "orion-msg-topics",
+ "orion-scratch",
  "orion-stubs",
  "orion-wire",
 ]
@@ -1550,6 +1561,7 @@ dependencies = [
  "orion-device-topics",
  "orion-msg-files",
  "orion-node-app",
+ "orion-scratch",
  "orion-stubs",
  "orion-wire",
  "rustix",
@@ -1573,6 +1585,7 @@ name = "orion-dial"
 version = "1.0.1-dev"
 dependencies = [
  "orion-connect",
+ "orion-scratch",
  "orion-types",
 ]
 
@@ -1601,6 +1614,7 @@ dependencies = [
  "orion-device-core",
  "orion-device-topics",
  "orion-sample-executor",
+ "orion-scratch",
  "rustix",
 ]
 
@@ -1610,6 +1624,7 @@ version = "1.0.1-dev"
 dependencies = [
  "orion-connect",
  "orion-msg-workloads",
+ "orion-scratch",
  "orion-server",
  "orion-types",
  "orion-unix",
@@ -1639,6 +1654,7 @@ dependencies = [
  "orion-connect",
  "orion-files",
  "orion-msg-files",
+ "orion-scratch",
  "orion-server",
  "orion-types",
  "orion-unix",
@@ -1654,6 +1670,7 @@ version = "1.0.1-dev"
 dependencies = [
  "orion-msg-files",
  "orion-reply",
+ "orion-scratch",
  "orion-types",
  "orion-wire",
  "sha2",
@@ -1667,6 +1684,7 @@ dependencies = [
  "orion-connect",
  "orion-keys",
  "orion-msg-files",
+ "orion-scratch",
  "orion-server",
  "orion-tcp",
  "orion-types",
@@ -1680,6 +1698,7 @@ dependencies = [
 name = "orion-files-pull"
 version = "1.0.1-dev"
 dependencies = [
+ "orion-scratch",
  "tracing",
  "ureq",
 ]
@@ -1703,6 +1722,7 @@ dependencies = [
  "orion-keys",
  "orion-msg-session",
  "orion-msg-topics",
+ "orion-scratch",
  "orion-server",
  "orion-types",
  "orion-wire",
@@ -1733,6 +1753,7 @@ dependencies = [
  "orion-identity",
  "orion-msg-peers",
  "orion-msg-session",
+ "orion-scratch",
  "orion-server",
  "orion-types",
  "orion-wire",
@@ -1764,6 +1785,7 @@ dependencies = [
  "orion-measure",
  "orion-msg-session",
  "orion-net-handshake",
+ "orion-scratch",
  "orion-server",
  "orion-supervise",
  "orion-types",
@@ -1910,6 +1932,7 @@ dependencies = [
  "orion-reply",
  "orion-resources",
  "orion-sample-executor",
+ "orion-scratch",
  "orion-store",
  "orion-stubs",
  "orion-sync",
@@ -1927,6 +1950,7 @@ name = "orion-nt4"
 version = "1.0.1-dev"
 dependencies = [
  "orion-measure",
+ "orion-scratch",
  "orion-ws",
  "serde",
  "serde_json",
@@ -1945,6 +1969,7 @@ dependencies = [
  "orion-config",
  "orion-nt4",
  "orion-nt4-gateway",
+ "orion-scratch",
  "tokio",
  "tracing",
 ]
@@ -1959,6 +1984,7 @@ dependencies = [
  "orion-config",
  "orion-msg-topics",
  "orion-nt4",
+ "orion-scratch",
  "orion-types",
  "orion-values",
  "orion-wire",
@@ -2005,6 +2031,7 @@ name = "orion-persist"
 version = "1.0.1-dev"
 dependencies = [
  "orion-msg-records",
+ "orion-scratch",
  "orion-store",
  "orion-types",
  "orion-wire",
@@ -2041,6 +2068,7 @@ version = "1.0.1-dev"
 dependencies = [
  "orion-connect",
  "orion-msg-records",
+ "orion-scratch",
  "orion-server",
  "orion-types",
  "orion-unix",
@@ -2054,6 +2082,7 @@ version = "1.0.1-dev"
 dependencies = [
  "orion-check",
  "orion-keys",
+ "orion-scratch",
  "orion-ssh",
  "orion-types",
  "russh",
@@ -2069,6 +2098,7 @@ dependencies = [
  "orion-comm-app",
  "orion-config",
  "orion-log",
+ "orion-scratch",
  "tracing",
 ]
 
@@ -2121,9 +2151,14 @@ name = "orion-sample-executor"
 version = "1.0.1-dev"
 dependencies = [
  "orion",
+ "orion-scratch",
  "orion-stubs",
  "rustix",
 ]
+
+[[package]]
+name = "orion-scratch"
+version = "1.0.1-dev"
 
 [[package]]
 name = "orion-self-status"
@@ -2132,6 +2167,7 @@ dependencies = [
  "orion-broker",
  "orion-msg-session",
  "orion-msg-topics",
+ "orion-scratch",
  "orion-server",
  "orion-supervise",
  "orion-types",
@@ -2167,6 +2203,7 @@ dependencies = [
  "orion-config",
  "orion-keys",
  "orion-msg-session",
+ "orion-scratch",
  "orion-server",
  "orion-ssh",
  "orion-types",
@@ -2183,6 +2220,7 @@ dependencies = [
  "orion-check",
  "orion-config",
  "orion-keys",
+ "orion-scratch",
  "orion-ssh-forward",
  "orion-types",
  "postcard",
@@ -2208,6 +2246,7 @@ version = "1.0.1-dev"
 dependencies = [
  "orion-check",
  "orion-keys",
+ "orion-scratch",
  "orion-ssh",
  "orion-types",
  "postcard",
@@ -2225,6 +2264,7 @@ version = "1.0.1-dev"
 dependencies = [
  "orion-check",
  "orion-keys",
+ "orion-scratch",
  "orion-ssh",
  "orion-types",
  "russh",
@@ -2263,6 +2303,7 @@ dependencies = [
  "orion-outbound",
  "orion-relay",
  "orion-reply",
+ "orion-scratch",
  "orion-server",
  "orion-tcp",
  "orion-time",
@@ -2316,6 +2357,7 @@ dependencies = [
  "orion-comm-app",
  "orion-config",
  "orion-node-app",
+ "orion-scratch",
  "tokio",
 ]
 
@@ -2329,6 +2371,7 @@ dependencies = [
  "orion-msg-peers",
  "orion-msg-session",
  "orion-msg-topics",
+ "orion-scratch",
  "orion-server",
  "orion-types",
  "orion-unix",
@@ -2351,7 +2394,9 @@ dependencies = [
  "orion-msg-session",
  "orion-msg-topics",
  "orion-outbound",
+ "orion-scratch",
  "orion-server",
+ "orion-stubs",
  "orion-tcp",
  "orion-time",
  "orion-types",
@@ -2372,6 +2417,7 @@ dependencies = [
  "orion-keys",
  "orion-measure",
  "orion-msg-topics",
+ "orion-scratch",
  "orion-server",
  "orion-tcp",
  "orion-types",
@@ -2398,6 +2444,7 @@ name = "orion-unix"
 version = "1.0.1-dev"
 dependencies = [
  "orion-msg-session",
+ "orion-scratch",
  "orion-server",
  "orion-wire",
  "shm-fdpass",
@@ -2418,6 +2465,7 @@ name = "orion-web-tests"
 version = "1.0.1-dev"
 dependencies = [
  "orion",
+ "orion-scratch",
  "orion-stubs",
  "sha2",
  "socket2",
@@ -2467,6 +2515,7 @@ dependencies = [
  "orion-hello",
  "orion-keys",
  "orion-msg-session",
+ "orion-scratch",
  "orion-server",
  "orion-types",
  "orion-wire",

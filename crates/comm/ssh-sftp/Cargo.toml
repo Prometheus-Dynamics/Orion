@@ -16,6 +16,7 @@ tokio = { workspace = true, features = ["rt", "io-std", "io-util", "sync"] }
 [dev-dependencies]
 orion-check = { path = "../../core/check" }
 orion-keys = { path = "../keys" }
+orion-scratch = { path = "../../testing/scratch" }
 orion-types = { path = "../../core/types" }
 russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
 rustix = { version = "1", default-features = false, features = ["std", "process"] }

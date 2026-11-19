@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use orion_check::Security;
 use orion_recovery::{Recovery, RecoveryConfig};
+use orion_scratch::Scratch;
 use orion_ssh::{Helper, users};
 
 const WAIT: Duration = Duration::from_secs(15);
@@ -33,18 +34,18 @@ fn installed() -> bool {
     both
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-recovery-{name}-{}", std::process::id()));
-    if dir.exists() {
-        // What an earlier run made unwritable.
-        let _ = Command::new("chmod")
-            .args(["-R", "u+rwx"])
-            .arg(&dir)
-            .status();
-        let _ = std::fs::remove_dir_all(&dir);
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("recovery-{name}"))
+}
+
+/// Puts a directory's mode back when it goes, so a test that panics while the directory is
+/// read-only can still have it removed. Declared after the scratch, so it goes first.
+struct Mode(PathBuf);
+
+impl Drop for Mode {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
     }
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
 }
 
 fn me() -> users::User {
@@ -209,6 +210,7 @@ fn each_broken_state_still_lets_you_in() {
 
     // A disk nothing can be written to: the state directory is there and takes no file.
     std::fs::create_dir(dir.join("state")).expect("dir");
+    let _restore = Mode(dir.join("state"));
     std::fs::set_permissions(dir.join("state"), std::fs::Permissions::from_mode(0o555))
         .expect("mode");
     let board = Board::start(&dir, config(&dir, "the disk is full"));
@@ -255,7 +257,6 @@ fn each_broken_state_still_lets_you_in() {
     let board = Board::start(&dir, broken);
     let ran = board.ssh(&me.name, Some(&repairer), "echo \"in $0 at $PWD\"");
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "in /bin/sh at /\n");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -306,7 +307,6 @@ fn only_who_the_recovery_keys_say_and_never_wider() {
     let board = Board::start(&dir, open);
     assert!(board.lets_in(Some(&stranger)));
     assert!(board.lets_in(None));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -355,7 +355,6 @@ fn it_tries_again_at_the_same_pace_for_ever() {
         began.elapsed()
     );
     assert!(board.lets_in(Some(&repairer)));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -392,5 +391,4 @@ fn on_one_interface_recovery_is_open_there_and_nowhere_else() {
     let board = Board::start(&dir, there);
     assert!(board.lets_in(None));
     drop(board);
-    let _ = std::fs::remove_dir_all(dir);
 }

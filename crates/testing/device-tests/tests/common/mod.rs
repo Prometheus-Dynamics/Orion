@@ -9,6 +9,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
 use tokio::sync::oneshot;
 
@@ -25,11 +26,8 @@ pub fn pty() -> (File, PathBuf) {
     )
 }
 
-pub fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-device-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+pub fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("device-{name}"))
 }
 
 pub fn settings(dir: &Path) -> NodeSettings {

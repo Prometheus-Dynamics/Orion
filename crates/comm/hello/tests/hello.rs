@@ -11,6 +11,7 @@ use orion_hello::{
 use orion_keys::{Identity as Key, Keys, KeysConfig, SharedKeys, random};
 use orion_msg_session::{Hello, Identify, Identity, Refusal, Welcome};
 use orion_msg_topics::{Declare, Field, FieldType, Opened};
+use orion_scratch::Scratch;
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Limits, Principal, Roles, Security};
 use orion_types::KeyId;
@@ -413,8 +414,7 @@ fn the_document_says_what_the_board_is_doing_and_why_it_is_in_recovery() {
 
 #[test]
 fn the_document_says_the_boards_security_switch_as_its_record_has_it() {
-    let dir = std::env::temp_dir().join(format!("orion-hello-security-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("hello-security");
     let record = dir.join("security");
     let text = FieldType::Text.code();
     for (written, said) in [
@@ -458,5 +458,4 @@ fn the_document_says_the_boards_security_switch_as_its_record_has_it() {
             assert_eq!(facts, said, "{view}");
         });
     }
-    let _ = std::fs::remove_dir_all(dir);
 }

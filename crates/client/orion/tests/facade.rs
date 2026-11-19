@@ -12,6 +12,7 @@ use orion::records::{RecordClass, RecordEntry};
 use orion::topics::{FieldId, Next, SampleTime, Status, TopicDecl};
 use orion::types::HlcTimestamp;
 use orion::{Address, Orion, fields};
+use orion_scratch::Scratch;
 use orion_stubs::{Board, Options};
 
 #[test]
@@ -33,7 +34,8 @@ fn the_example_uses_each_role_through_the_facade_alone() {
 
 #[test]
 fn a_comm_core_that_restarts_stops_nothing_that_was_flowing() {
-    let mut board = Board::start("facade-restart");
+    let scratch = Scratch::new("facade-restart");
+    let mut board = Board::start_in(&scratch, orion_stubs::Security::Off, None);
     let (dir, port) = (board.dir().to_owned(), board.network().port());
     let address = Address::Local(board.socket().to_owned());
     let sensor = Orion::connect(&address, "sensor").expect("connect");
@@ -141,7 +143,6 @@ fn a_comm_core_that_restarts_stops_nothing_that_was_flowing() {
         .expect("the change");
     assert_eq!(change.key, "pump.main");
     drop(board);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -149,7 +150,8 @@ fn a_resource_is_said_again_only_once_its_actions_are_back() {
     use orion::actions::{ActionDecl, Admits, Policy, Target};
     use orion::provider::ResourceState;
 
-    let mut board = Board::start("facade-order");
+    let scratch = Scratch::new("facade-order");
+    let mut board = Board::start_in(&scratch, orion_stubs::Security::Off, None);
     let (dir, port) = (board.dir().to_owned(), board.network().port());
     let address = Address::Local(board.socket().to_owned());
     let options = orion::Options {
@@ -191,7 +193,6 @@ fn a_resource_is_said_again_only_once_its_actions_are_back() {
         .expect("get");
     assert!(found.is_empty(), "{found:?}");
     drop(board);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 fn orion_wire_bytes(bytes: &[u8]) -> orion::records::Bytes<'_> {
@@ -203,7 +204,8 @@ fn orion_wire_bytes(bytes: &[u8]) -> orion::records::Bytes<'_> {
 fn a_camera_offers_its_pool_again_to_a_comm_core_that_restarts() {
     use orion::buffers::{HoldLimits, NextBatch, Pool};
 
-    let mut board = Board::start("facade-pool");
+    let scratch = Scratch::new("facade-pool");
+    let mut board = Board::start_in(&scratch, orion_stubs::Security::Off, None);
     let (dir, port) = (board.dir().to_owned(), board.network().port());
     let address = Address::Local(board.socket().to_owned());
     let camera = Orion::connect(&address, "camera").expect("connect");
@@ -257,14 +259,11 @@ fn a_camera_offers_its_pool_again_to_a_comm_core_that_restarts() {
         );
     }
     drop(board);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn a_comm_core_set_to_wait_longer_is_waited_for_as_long() {
-    let dir = std::env::temp_dir().join(format!("orion-facade-idle-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("facade-idle");
     let options = Options {
         heartbeat_ms: 5000,
         idle_ms: 60_000,
@@ -278,7 +277,6 @@ fn a_comm_core_set_to_wait_longer_is_waited_for_as_long() {
     assert_eq!(welcomed.idle, Duration::from_secs(60));
     drop(orion);
     drop(board);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -321,9 +319,7 @@ fn the_nodes_key_is_asked_once_on_a_plain_session_and_kept() {
 
 #[test]
 fn an_operator_asks_to_be_enrolled_and_proves_the_enrollment_key() {
-    let dir = std::env::temp_dir().join(format!("orion-facade-enroll-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("facade-enroll");
     let board = Board::start_with(
         &dir,
         Options {
@@ -378,5 +374,4 @@ fn an_operator_asks_to_be_enrolled_and_proves_the_enrollment_key() {
     );
     drop(orion);
     drop(board);
-    let _ = std::fs::remove_dir_all(&dir);
 }

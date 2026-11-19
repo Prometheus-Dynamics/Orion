@@ -7,13 +7,13 @@ use std::time::{Duration, Instant};
 use orion::shell::{Event, Terminal};
 use orion_comm_app::{CommSettings, RecoverWith, Started, start_or_recover};
 use orion_config::{ConfigError, Source};
+use orion_scratch::Scratch;
 
 const WAIT: Duration = Duration::from_secs(10);
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-comm-shell-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+fn temp(name: &str) -> Scratch {
+    let dir = Scratch::new(&format!("comm-shell-{name}"));
+    secured(&dir);
     dir
 }
 
@@ -40,14 +40,14 @@ fn orion_ssh_users(uid: u32) -> String {
         .expect("the user running the tests has an account")
 }
 
-fn settings(text: &str) -> Result<CommSettings, ConfigError> {
+fn settings(dir: &Path, text: &str) -> Result<CommSettings, ConfigError> {
     let mut source = Source::parse(text, Vec::new())?;
-    CommSettings::from_source_with_view(&mut source, &secured())
+    CommSettings::from_source_with_view(&mut source, &dir.join("security"))
 }
 
-/// The board's security record, as a board with security on has it.
-fn secured() -> PathBuf {
-    let path = std::env::temp_dir().join(format!("orion-comm-security-{}", std::process::id()));
+/// The board's security record, as a board with security on has it, in `dir`.
+fn secured(dir: &Path) -> PathBuf {
+    let path = dir.join("security");
     std::fs::write(&path, "on\ngeneration 1\n").expect("security record");
     path
 }
@@ -126,13 +126,13 @@ fn a_tool_gets_a_shell_on_the_board_and_in_recovery() {
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("state/last-good.carriers"),
-            security_view: secured(),
+            security_view: dir.join("security"),
             #[cfg(feature = "login-helper")]
             login: Default::default(),
         };
 
         // Up as told: a command with its output, errors and code, input and its end.
-        let started = start_or_recover(settings(&good), with()).await;
+        let started = start_or_recover(settings(&dir, &good), with()).await;
         assert!(matches!(started, Started::Core(_)), "{started:?}");
         let (out, errors, code) =
             shell(&socket, "cat; echo bad >&2; exit 4", None, b"typed\n").await;
@@ -159,7 +159,7 @@ fn a_tool_gets_a_shell_on_the_board_and_in_recovery() {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // `shell = off`: no shell.
-        let off = start_or_recover(settings(&format!("{good}shell = off\n")), with()).await;
+        let off = start_or_recover(settings(&dir, &format!("{good}shell = off\n")), with()).await;
         assert!(matches!(off, Started::Core(_)), "{off:?}");
         let address: orion::Address = socket.display().to_string().parse().expect("address");
         let refused = tokio::task::spawn_blocking(move || {
@@ -183,11 +183,10 @@ fn a_tool_gets_a_shell_on_the_board_and_in_recovery() {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // In recovery, on the socket of the last good start: a shell still.
-        let started = start_or_recover(settings("node.name board\n[[[\n"), with()).await;
+        let started = start_or_recover(settings(&dir, "node.name board\n[[[\n"), with()).await;
         assert!(matches!(started, Started::Recovery(_)), "{started:?}");
         let (out, _, code) = shell(&socket, "echo in recovery", None, b"").await;
         assert_eq!((out.as_str(), code), ("in recovery\n", 0));
         drop(started);
-        let _ = std::fs::remove_dir_all(dir);
     });
 }

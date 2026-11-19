@@ -16,6 +16,7 @@ use orion_actions::{
     ActionCall, ActionDecl, Actions, Admits, Outcome, Policy, Request, Target, Update,
 };
 use orion_connect::{Address, Client, ClientError, Options, Session};
+use orion_scratch::Scratch;
 use orion_server::{Comm, Error, Limits, Security};
 use orion_stubs::router::Router;
 use orion_unix::UnixCarrier;
@@ -140,9 +141,7 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
     if std::env::var(ROLE).is_ok() {
         return;
     }
-    let dir = std::env::temp_dir().join(format!("orion-actions-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("actions");
     let socket = dir.join("orion.sock");
 
     let (ready, started) = mpsc::channel();
@@ -368,5 +367,4 @@ fn an_action_registered_from_another_process_runs_through_the_check() {
     if !is_root {
         assert!(refused >= 2, "{refused} refusals");
     }
-    let _ = std::fs::remove_dir_all(dir);
 }

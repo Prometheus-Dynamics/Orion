@@ -23,6 +23,5 @@ fn a_boards_port_is_never_one_the_kernel_hands_out_by_itself() {
         let again = Board::start_in(&dir, Security::Off, Some(port));
         assert_eq!(again.network().port(), port);
         drop(again);
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

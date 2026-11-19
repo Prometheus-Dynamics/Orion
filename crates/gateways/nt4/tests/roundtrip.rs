@@ -8,6 +8,7 @@ use orion_nt4::{
     Client, ClientConfig, ClientEvent, Properties, Server, ServerConfig, ServerEvent,
     SubscribeOptions, Subscription, TopicEvent, TopicOwner, Value,
 };
+use orion_scratch::Scratch;
 use tokio::time::timeout;
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -337,8 +338,8 @@ async fn a_lost_connection_drops_the_clock_estimate() {
 
 #[tokio::test]
 async fn persistent_topics_survive_a_server_restart() {
-    let path = std::env::temp_dir().join(format!("orion-nt4-test-{}.json", std::process::id()));
-    let _ = std::fs::remove_file(&path);
+    let dir = Scratch::new("nt4-restart");
+    let path = dir.join("persist.json");
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         persist_path: Some(path.clone()),
@@ -366,5 +367,4 @@ async fn persistent_topics_survive_a_server_restart() {
     assert_eq!(topic.value, Some(Value::Double(0.75)));
     assert_eq!(topic.owner, TopicOwner::Unpublished);
     assert!(server.handle().topic("/cfg/transient").is_none());
-    let _ = std::fs::remove_file(&path);
 }

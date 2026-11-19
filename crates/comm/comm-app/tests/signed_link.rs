@@ -12,14 +12,14 @@ use orion_comm_app::{CommSettings, RecoverWith, Started, start_or_recover};
 use orion_config::{ConfigError, Source};
 use orion_connect::Session;
 use orion_msg_session::{LinkOffer, LinkTransport};
+use orion_scratch::Scratch;
 use orion_wire::kind;
 
 const WAIT: Duration = Duration::from_secs(10);
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-signed-link-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+fn temp(name: &str) -> Scratch {
+    let dir = Scratch::new(&format!("signed-link-{name}"));
+    secured(&dir);
     dir
 }
 
@@ -42,14 +42,14 @@ fn me() -> String {
         .expect("the user running the tests has an account")
 }
 
-fn settings(text: &str) -> Result<CommSettings, ConfigError> {
+fn settings(dir: &Path, text: &str) -> Result<CommSettings, ConfigError> {
     let mut source = Source::parse(text, Vec::new())?;
-    CommSettings::from_source_with_view(&mut source, &secured())
+    CommSettings::from_source_with_view(&mut source, &dir.join("security"))
 }
 
-/// The board's security record, as a board with security on has it.
-fn secured() -> PathBuf {
-    let path = std::env::temp_dir().join(format!("orion-comm-security-{}", std::process::id()));
+/// The board's security record, as a board with security on has it, in `dir`.
+fn secured(dir: &Path) -> PathBuf {
+    let path = dir.join("security");
     std::fs::write(&path, "on\ngeneration 1\n").expect("security record");
     path
 }
@@ -187,14 +187,14 @@ fn a_tool_with_a_key_gets_a_shell_over_a_usb_link_with_security_on_and_in_recove
             helper: Some(helper()),
             retry: Duration::from_millis(100),
             last_good: dir.join("state/last-good.carriers"),
-            security_view: secured(),
+            security_view: dir.join("security"),
             #[cfg(feature = "login-helper")]
             login: Default::default(),
         };
         let operator = Identity::generate();
         let stranger = Identity::generate();
 
-        let started = start_or_recover(settings(&good), with()).await;
+        let started = start_or_recover(settings(&dir, &good), with()).await;
         assert!(matches!(started, Started::Core(_)), "{started:?}");
 
         // No key: the device on the link, which no shell is for.
@@ -228,7 +228,7 @@ fn a_tool_with_a_key_gets_a_shell_over_a_usb_link_with_security_on_and_in_recove
         // In recovery, on the link of the last good start: the recovery key may, the trust
         // store is not read, and another key may not.
         std::fs::write(dir.join("recovery_keys"), openssh(operator.public())).expect("keys");
-        let started = start_or_recover(settings("node.name board\n[[[\n"), with()).await;
+        let started = start_or_recover(settings(&dir, "node.name board\n[[[\n"), with()).await;
         assert!(matches!(started, Started::Recovery(_)), "{started:?}");
         let rescued = over_link(
             plug_in(&socket).await,
@@ -244,6 +244,5 @@ fn a_tool_with_a_key_gets_a_shell_over_a_usb_link_with_security_on_and_in_recove
             "{refused:?}"
         );
         drop(started);
-        let _ = std::fs::remove_dir_all(dir);
     });
 }

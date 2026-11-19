@@ -60,7 +60,7 @@ fn fetch_whole(fetching: Fetching<Cursor<Vec<u8>>>, size: u64, here: &mpsc::Send
 
 #[test]
 fn a_program_paused_past_its_timeout_with_chunks_out_still_gives_the_file() {
-    let (socket, _stop) = comm_core("paused-out");
+    let (socket, _stop, _dir) = comm_core("paused-out");
     let socket_for = socket.clone();
     let (ready, offered) = mpsc::channel();
     let (paused_tx, paused) = mpsc::channel();
@@ -97,7 +97,7 @@ fn a_program_paused_past_its_timeout_with_chunks_out_still_gives_the_file() {
 
 #[test]
 fn a_program_paused_past_its_timeout_with_nothing_owed_still_gives_the_file() {
-    let (socket, _stop) = comm_core("paused-owed");
+    let (socket, _stop, _dir) = comm_core("paused-owed");
     let socket_for = socket.clone();
     let (ready, offered) = mpsc::channel();
     let (here, all_here) = mpsc::channel::<()>();
@@ -161,7 +161,7 @@ impl std::io::Seek for Slow {
 
 #[test]
 fn a_gift_longer_than_its_timeout_lives_on_its_clients_word() {
-    let (socket, _stop) = comm_core("paused-word");
+    let (socket, _stop, _dir) = comm_core("paused-word");
     let socket_for = socket.clone();
     let (ready, offered) = mpsc::channel();
     let size = 2 << 20;

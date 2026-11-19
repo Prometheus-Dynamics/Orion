@@ -1,0 +1,12 @@
+[package]
+name = "orion-scratch"
+description = "A directory for one test: empty when it is made, gone when the test ends, passed or panicked."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

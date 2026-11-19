@@ -45,7 +45,7 @@ fn under_way(fetching: &mut Fetching<Cursor<Vec<u8>>>) -> u64 {
 
 #[test]
 fn a_gift_aborted_mid_transfer_ends_the_fetch_at_once_with_its_reason() {
-    let (socket, _stop) = comm_core("abort");
+    let (socket, _stop, _dir) = comm_core("abort");
     let socket_for = socket.clone();
     let (ready, offered) = mpsc::channel();
     let (abort, aborting) = mpsc::channel::<()>();
@@ -94,7 +94,7 @@ fn a_gift_aborted_mid_transfer_ends_the_fetch_at_once_with_its_reason() {
 
 #[test]
 fn a_gift_dropped_and_a_file_asked_and_never_answered_end_their_fetches_at_once() {
-    let (socket, _stop) = comm_core("dropped");
+    let (socket, _stop, _dir) = comm_core("dropped");
     let socket_for = socket.clone();
     let (ready, offered) = mpsc::channel();
     let (drop_gift, dropping) = mpsc::channel::<()>();
@@ -142,7 +142,7 @@ fn a_gift_dropped_and_a_file_asked_and_never_answered_end_their_fetches_at_once(
 
 #[test]
 fn a_fetch_aborted_is_over_in_the_comm_core_so_aborts_do_not_use_up_its_fetches() {
-    let (socket, _stop) = comm_core("aborts");
+    let (socket, _stop, _dir) = comm_core("aborts");
     let socket_for = socket.clone();
     let (ready, offered) = mpsc::channel();
     let bytes = content(1000);

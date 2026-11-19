@@ -1,7 +1,7 @@
 //! A lease contested through the comm core and node logic: a program on the board that holds a
 //! camera stops answering, another takes the camera, and the first is told who took it.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use orion::actions::{Admits, Policy};
@@ -13,6 +13,7 @@ use orion_msg_actions::{Run, Target};
 use orion_msg_records::{Changed, Get, LeaseRecord, Put};
 use orion_msg_session::Refusal;
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use orion_wire::body::encode_fields;
 use orion_wire::{Decode, List, kind};
@@ -21,11 +22,8 @@ use tokio::sync::oneshot;
 const HEARTBEAT_MS: u32 = 200;
 const QUIET_MS: u64 = 1_500;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("node-{name}"))
 }
 
 fn settings(dir: &Path) -> NodeSettings {

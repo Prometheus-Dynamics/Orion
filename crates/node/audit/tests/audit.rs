@@ -6,11 +6,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use orion_audit::{Audit, AuditConfig, Entry, Who};
+use orion_scratch::Scratch;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-audit-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("audit-{name}"))
 }
 
 fn files(path: &Path, keep: u32) -> Vec<PathBuf> {

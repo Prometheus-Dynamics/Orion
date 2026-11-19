@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use orion_check::Security;
 use orion_keys::{Keys, KeysConfig, SharedKeys};
+use orion_scratch::Scratch;
 use orion_ssh::{Helper, Ssh, SshConfig, Subsystem, users};
 use orion_types::KeyId;
 
@@ -30,9 +31,8 @@ fn installed() -> bool {
     all
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-sftp-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn temp(name: &str) -> Scratch {
+    let dir = Scratch::new(&format!("sftp-{name}"));
     std::fs::create_dir_all(dir.join("board")).expect("dir");
     std::fs::create_dir_all(dir.join("desk")).expect("dir");
     dir
@@ -297,7 +297,6 @@ fn sftp_puts_gets_lists_and_changes_files_as_the_user() {
         std::fs::set_permissions(board.join("closed"), std::fs::Permissions::from_mode(0o755))
             .expect("mode");
     }
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -364,7 +363,6 @@ fn scp_copies_files_and_directories_both_ways() {
     ]);
     assert!(!missing.status.success());
     assert!(!desk.join("nothing").exists());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -376,5 +374,4 @@ fn a_board_without_the_subsystem_says_so() {
     let server = Server::start(&dir, false);
     let ran = server.sftp("pwd\n");
     assert!(!ran.status.success());
-    let _ = std::fs::remove_dir_all(dir);
 }

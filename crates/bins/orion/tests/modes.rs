@@ -2,18 +2,17 @@
 //! file from the same settings, and the command line reaching them. The two services run
 //! their code from the same file.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
+
+use orion_scratch::Scratch;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_orion");
 const WAIT: Duration = Duration::from_secs(20);
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-bin-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("bin-{name}"))
 }
 
 /// Who runs the tests: node logic must be let in as this board's.
@@ -150,7 +149,6 @@ fn both_services_from_one_file_and_the_command_line_reaches_them() {
 
     assert!(node.stop(), "node logic stops cleanly");
     assert!(comm.stop(), "the comm core stops cleanly");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

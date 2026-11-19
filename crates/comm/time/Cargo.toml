@@ -23,6 +23,7 @@ orion-types = { path = "../../core/types" }
 
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
+orion-scratch = { path = "../../testing/scratch" }
 shm-ring-doorbell = { workspace = true }
 orion-unix = { path = "../unix" }
 tokio = { workspace = true, features = ["test-util"] }

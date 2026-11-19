@@ -4,7 +4,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener};
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -14,6 +14,7 @@ use orion_broker::{Broker, BrokerConfig};
 use orion_hello::Hello as HelloService;
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_msg_session::{Hello, Identify};
+use orion_scratch::Scratch;
 use orion_server::{Comm, Limits, Roles, Security};
 use orion_wire::{Body, Bytes, INTERFACE_REVISION, encode_body, kind};
 use orion_ws::{WsCarrier, WsListener, WsOptions};
@@ -111,13 +112,15 @@ fn serve(listener: TcpListener, page: String, report: mpsc::Sender<String>) {
     });
 }
 
-/// A headless browser on `url`, if one is installed.
-fn browse(url: &str, profile: &PathBuf) -> Option<Child> {
+/// A headless browser on `url`, if one is installed. Its temporary files go to `temp`: a
+/// new Firefox profile unpacks its built-in add-on there as `tmp-*.xpi`.
+fn browse(url: &str, profile: &Path, temp: &Path) -> Option<Child> {
     let firefox = |program: &str| {
         Command::new(program)
             .args(["--headless", "--no-remote", "--new-instance", "--profile"])
             .arg(profile)
             .arg(url)
+            .env("TMPDIR", temp)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -133,6 +136,7 @@ fn browse(url: &str, profile: &PathBuf) -> Option<Child> {
             ])
             .arg(format!("--user-data-dir={}", profile.display()))
             .arg(url)
+            .env("TMPDIR", temp)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -192,17 +196,17 @@ fn a_browser_connects_and_exchanges_frames() {
     let (report, reported) = mpsc::channel();
     serve(http, page(ws), report);
 
-    let profile = std::env::temp_dir().join(format!("orion-ws-browser-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&profile);
-    std::fs::create_dir_all(&profile).expect("profile");
-    let Some(mut browser) = browse(&format!("{origin}/"), &profile) else {
+    // One scratch for the browser's profile and its temporary files, removed when the test ends.
+    let scratch = Scratch::new("ws-browser");
+    let profile = scratch.join("profile");
+    std::fs::create_dir(&profile).expect("profile");
+    let Some(mut browser) = browse(&format!("{origin}/"), &profile, &scratch) else {
         println!("no browser is installed: the browser test was not run");
         return;
     };
     let result = reported.recv_timeout(Duration::from_secs(90));
     let _ = browser.kill();
     let _ = browser.wait();
-    let _ = std::fs::remove_dir_all(&profile);
     let result = result.expect("the page reported within ninety seconds");
     println!("the page reported: {result}");
     // Welcomed, then answered who the board is, over the subprotocol it asked for.

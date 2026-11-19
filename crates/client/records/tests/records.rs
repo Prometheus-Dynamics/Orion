@@ -13,6 +13,7 @@ use std::time::Duration;
 use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_msg_records::{Changed, Get, Put, Watch as WatchRequest};
 use orion_records::{Record, RecordClass, RecordEntry, Records, WATCH_QUEUE};
+use orion_scratch::Scratch;
 use orion_server::{
     Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Limits, Policy, Security, Service,
     SessionId, Sessions, What,
@@ -184,7 +185,8 @@ struct Board {
     socket: PathBuf,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
-    dir: PathBuf,
+    /// Removed when the board is dropped.
+    _dir: Scratch,
 }
 
 impl Board {
@@ -194,9 +196,7 @@ impl Board {
 
     /// A board that drops a session once one frame to it has waited `write_ms` to be taken.
     fn start_with(name: &str, write_ms: u32) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-records-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new(&format!("records-{name}"));
         let socket = dir.join("orion.sock");
         let (ready, started) = mpsc::channel();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -225,7 +225,7 @@ impl Board {
             socket,
             stop: Some(stop),
             thread: Some(thread),
-            dir,
+            _dir: dir,
         }
     }
 
@@ -252,7 +252,6 @@ impl Drop for Board {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

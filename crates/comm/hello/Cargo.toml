@@ -19,6 +19,7 @@ orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
 
 [dev-dependencies]
+orion-scratch = { path = "../../testing/scratch" }
 tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
 
 [lints]

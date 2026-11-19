@@ -1,7 +1,7 @@
 //! Node logic as the comm core's first client: it answers for the records, it can die without
 //! anything else on the board noticing, and it takes up where it was when it is back.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use orion::records::{Bytes, Record, RecordClass, RecordEntry, Records};
@@ -9,15 +9,13 @@ use orion::topics::{FieldId, Next, SampleTime, TopicDecl};
 use orion::types::{Error, HlcTimestamp};
 use orion::{Address, ClientError, Orion, fields};
 use orion_node_app::{Node, NodeSettings};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 
 use tokio::sync::oneshot;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("node-{name}"))
 }
 
 fn settings(dir: &Path, save_after: Duration) -> NodeSettings {
@@ -355,5 +353,4 @@ fn a_socket_path_too_long_stops_node_logic_before_it_tries() {
         words.starts_with("socket: ") && words.contains("107"),
         "{words}"
     );
-    let _ = std::fs::remove_dir_all(dir);
 }

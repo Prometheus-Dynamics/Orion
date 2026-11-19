@@ -17,6 +17,7 @@ use std::sync::mpsc;
 
 use orion_keys::{Keys, KeysConfig, SharedKeys};
 use orion_link_serial::{Serial, StreamCarrier};
+use orion_scratch::Scratch;
 use orion_server::{Comm, Limits};
 use orion_tcp::{TcpCarrier, TcpOptions};
 use orion_unix::UnixCarrier;
@@ -37,14 +38,16 @@ pub struct Board {
     pub stop: Option<tokio::sync::oneshot::Sender<()>>,
     pub thread: Option<std::thread::JoinHandle<()>>,
     pub dir: PathBuf,
+    /// The directory [`Board::start`] made, removed with the board. Last, after the thread.
+    scratch: Option<Scratch>,
 }
 
 impl Board {
     pub fn start(name: &str, security: Security) -> Self {
-        let dir = std::env::temp_dir().join(format!("orion-connect-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
-        Self::start_in(dir, security, None)
+        let scratch = Scratch::new(&format!("connect-{name}"));
+        let mut board = Self::start_in(scratch.to_path_buf(), security, None);
+        board.scratch = Some(scratch);
+        board
     }
 
     /// Starts a board in `dir`, on `port` if it is to come back where it was.
@@ -96,8 +99,15 @@ impl Board {
                     max_frame: 64 * 1024,
                     handshake: Duration::from_secs(5),
                 };
-                let listen = std::net::SocketAddr::from(([127, 0, 0, 1], port.unwrap_or(0)));
-                let tcp = TcpCarrier::bind(listen, options).await.expect("listen");
+                // Below the ephemeral range, as `orion_stubs::Board`'s: the test that starts it
+                // again on its port must find that port free (docs/flakes.md).
+                let tcp = match port {
+                    Some(port) => {
+                        let listen = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+                        TcpCarrier::bind(listen, options).await.expect("listen")
+                    }
+                    None => orion_stubs::listen_outside_the_ephemeral_range(options).await,
+                };
                 let network = tcp.local_addr().expect("addr");
                 let link = StreamCarrier::new(
                     "uart0".parse().expect("name"),
@@ -153,6 +163,7 @@ impl Board {
             stop: Some(stop),
             thread: Some(thread),
             dir,
+            scratch: None,
         }
     }
 
@@ -168,8 +179,8 @@ impl Board {
 
 impl Drop for Board {
     fn drop(&mut self) {
-        // The directory is left for the test to remove: a board started again in it must not
-        // lose its socket when the one before it is dropped.
+        // A board started in a directory of the test's keeps it: a board started again in it
+        // must not lose its socket when the one before it is dropped.
         self.stop();
     }
 }

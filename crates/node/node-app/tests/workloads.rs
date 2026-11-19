@@ -2,7 +2,7 @@
 //! side is restarted in turn. Orion restarting leaves runs alone and takes them back; an
 //! executor restarting with nothing has its workloads started again.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -12,14 +12,12 @@ use orion::workloads::{RestartPolicy, Workload, WorkloadState};
 use orion::{Address, Orion};
 use orion_node_app::{Node, NodeSettings};
 use orion_sample_executor::{Sample, run};
+use orion_scratch::Scratch;
 use orion_stubs::Board;
 use tokio::sync::oneshot;
 
-fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-node-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("directory");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("node-{name}"))
 }
 
 fn settings(dir: &Path) -> NodeSettings {

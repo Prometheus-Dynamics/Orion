@@ -19,6 +19,7 @@ orion-device-firmware = { path = "../../device/firmware" }
 orion-device-topics = { path = "../../device/topics" }
 orion-msg-files = { path = "../../core/msg-files" }
 orion-node-app = { path = "../../node/node-app" }
+orion-scratch = { path = "../scratch" }
 orion-stubs = { path = "../stubs" }
 orion-wire = { path = "../../core/wire" }
 rustix = { version = "1", default-features = false, features = ["std", "pty"] }

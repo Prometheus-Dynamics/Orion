@@ -104,12 +104,10 @@ fn try_writing(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_scratch::Scratch;
 
-    fn temp(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("orion-state-dirs-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        dir
+    fn temp(name: &str) -> Scratch {
+        Scratch::new(&format!("state-dirs-{name}"))
     }
 
     #[test]
@@ -136,13 +134,11 @@ mod tests {
             Path::new("/"),
         )
         .unwrap();
-        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
     fn a_directory_that_cannot_be_made_is_named_with_its_setting() {
         let base = temp("blocked");
-        fs::create_dir_all(&base).unwrap();
         // A file where a directory has to go.
         fs::write(base.join("file"), b"").unwrap();
         let error = prepare(
@@ -153,7 +149,6 @@ mod tests {
         .unwrap_err();
         assert!(error.starts_with("keys.dir "), "{error}");
         assert!(error.contains("cannot be made"), "{error}");
-        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
@@ -164,18 +159,15 @@ mod tests {
             return;
         }
         let base = temp("read-only");
-        fs::create_dir_all(&base).unwrap();
         fs::set_permissions(&base, fs::Permissions::from_mode(0o555)).unwrap();
-        let error = prepare(&[("state.dir", &base)], false, Path::new("/")).unwrap_err();
+        let error = prepare(&[("state.dir", base.path())], false, Path::new("/")).unwrap_err();
         fs::set_permissions(&base, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(error.contains("cannot be written to"), "{error}");
-        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
     fn with_a_mount_required_the_root_file_system_is_refused_before_anything_is_made() {
         let base = temp("mount");
-        fs::create_dir_all(&base).unwrap();
         let state = base.join("data/orion");
         // `base` stands for the root file system: the state directory would be on it.
         let error = prepare(&[("state.dir", &state)], true, &base).unwrap_err();
@@ -189,6 +181,5 @@ mod tests {
         assert!(!on_root(&state, Path::new("/proc")));
         prepare(&[("state.dir", &state)], true, Path::new("/proc")).unwrap();
         assert!(state.is_dir());
-        fs::remove_dir_all(base).unwrap();
     }
 }

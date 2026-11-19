@@ -15,6 +15,7 @@ use orion_broker_buffers::BrokerBuffers;
 use orion_buffers::{Buffers, HoldLimits, NextBatch, Pool};
 use orion_connect::{Address, Client, Options, Session};
 use orion_measure::thread_counts;
+use orion_scratch::Scratch;
 use orion_server::{Admits, Comm, Limits, Policy, Security};
 use orion_topics::{Status, TopicError, Topics};
 use orion_unix::UnixCarrier;
@@ -146,9 +147,7 @@ fn two_processes_pass_frames_without_a_copy() {
     if std::env::var(ROLE).is_ok() {
         return;
     }
-    let dir = std::env::temp_dir().join(format!("orion-buffers-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+    let dir = Scratch::new("buffers");
     let socket = dir.join("orion.sock");
 
     // The comm core, in its own thread.
@@ -287,7 +286,6 @@ fn two_processes_pass_frames_without_a_copy() {
     let requests = comm_core.join().expect("the comm core stops");
     // 400 MB of frames went by; the comm core handled a handful of requests.
     assert!(requests < 40, "{requests} requests for {FRAMES} frames");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

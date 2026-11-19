@@ -16,6 +16,7 @@ sha2 = { version = "0.11.0", default-features = false }
 tracing.workspace = true
 
 [dev-dependencies]
+orion-scratch = { path = "../../testing/scratch" }
 sha2 = { version = "0.11.0", default-features = false }
 
 [lints]

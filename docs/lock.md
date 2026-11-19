@@ -372,6 +372,9 @@ what to change.
 - **I34.** A gift counts its client's silence from the client's last word, only while the client
   owes an answer. A program that pauses between steps past its session's timeout no longer ends
   its gift `TimedOut`. Nothing a caller calls changes.
+- **I35.** Tests keep their files in `orion_scratch::Scratch`, removed when the test ends, passed
+  or panicked. `orion_stubs::Board::start` removes the directory it made when the board is
+  dropped; a board started in a caller's directory leaves it. Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

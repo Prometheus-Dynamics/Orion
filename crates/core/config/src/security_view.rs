@@ -106,22 +106,15 @@ impl fmt::Display for SecurityView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_scratch::Scratch;
 
     fn read(text: Option<&str>) -> SecurityView {
-        let dir = std::env::temp_dir().join(format!(
-            "orion-security-view-{}-{}",
-            std::process::id(),
-            text.map_or(0, str::len)
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new(&format!("security-view-{}", text.map_or(0, str::len)));
         let path = dir.join("security");
         if let Some(text) = text {
             std::fs::write(&path, text).expect("write");
         }
-        let view = SecurityView::read(&path);
-        let _ = std::fs::remove_dir_all(&dir);
-        view
+        SecurityView::read(&path)
     }
 
     #[test]
@@ -167,11 +160,9 @@ mod tests {
     #[test]
     fn a_record_that_cannot_be_read_is_on() {
         // A directory where the record should be: it is there, and it cannot be read.
-        let dir = std::env::temp_dir().join(format!("orion-security-dir-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = Scratch::new("security-dir");
         let view = SecurityView::read(&dir);
         assert_eq!(view.security, Security::On);
         assert!(view.fault.expect("fault").starts_with("it cannot be read"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

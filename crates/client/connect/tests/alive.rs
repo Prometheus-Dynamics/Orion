@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use orion_connect::{Address, ClientError, Options, Reply, Session};
 use orion_msg_session::{Pong, Welcome};
+use orion_scratch::Scratch;
 use orion_wire::body::encode_fields;
 use orion_wire::frame::{self, FrameHeader};
 use orion_wire::{INTERFACE_LEVEL, INTERFACE_REVISION, StreamDecoder, encode_frame, kind};
@@ -22,6 +23,8 @@ const HEARTBEAT_MS: u32 = 200;
 /// A comm core that welcomes, counts the pings it is sent, and answers them or not.
 struct Node {
     pings: Arc<AtomicU32>,
+    /// The directory of the node's socket, if it has one: removed with the node.
+    _dir: Option<Scratch>,
 }
 
 impl Node {
@@ -94,20 +97,16 @@ fn on_a_link(pongs: bool) -> (Node, UnixStream) {
             }
         }
     });
-    (Node { pings }, theirs)
+    (Node { pings, _dir: None }, theirs)
 }
 
 /// A node behind a socket on the board, and the socket's path.
 fn on_the_board(name: &str, pongs: bool) -> (Node, std::path::PathBuf) {
-    // A path of its own for each node, however its test is named: tests run side by side in
-    // one process, and two binding one path take each other's clients.
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    let path = std::env::temp_dir().join(format!(
-        "orion-alive-{name}-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    let _ = std::fs::remove_file(&path);
+    // A path of its own for each node, however its test is named (the scratch counts them):
+    // tests run side by side in one process, and two binding one path take each other's
+    // clients.
+    let dir = Scratch::new(&format!("alive-{name}"));
+    let path = dir.join("s");
     let listener = UnixListener::bind(&path).expect("socket");
     let pings = Arc::new(AtomicU32::new(0));
     let counted = Arc::clone(&pings);
@@ -127,7 +126,13 @@ fn on_the_board(name: &str, pongs: bool) -> (Node, std::path::PathBuf) {
             }
         }
     });
-    (Node { pings }, path)
+    (
+        Node {
+            pings,
+            _dir: Some(dir),
+        },
+        path,
+    )
 }
 
 struct Half(UnixStream);
@@ -205,13 +210,12 @@ fn a_comm_core_silent_on_the_boards_own_socket_is_kept_and_its_hang_up_is_heard(
     )
     .expect("kept");
     assert!(node.pings() >= 16, "{} pings", node.pings());
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn a_comm_core_that_closes_the_boards_socket_is_gone_at_once() {
-    let path = std::env::temp_dir().join(format!("orion-alive-closed-{}", std::process::id()));
-    let _ = std::fs::remove_file(&path);
+    let dir = Scratch::new("alive-closed");
+    let path = dir.join("s");
     let listener = UnixListener::bind(&path).expect("socket");
     let serving = std::thread::spawn(move || {
         let (stream, _) = listener.accept().expect("accept");
@@ -233,7 +237,6 @@ fn a_comm_core_that_closes_the_boards_socket_is_gone_at_once() {
         started.elapsed() < Duration::from_millis(u64::from(HEARTBEAT_MS)),
         "heard late"
     );
-    let _ = std::fs::remove_file(&path);
 }
 
 /// A session on the board's socket to a node that answers pings or not and nothing else, made
@@ -270,7 +273,7 @@ fn timed_out(error: &ClientError) -> bool {
 /// from the bound itself, so the test waits for no timeout to pass.
 #[test]
 fn by_default_an_answer_has_the_timeout() {
-    let (_node, path, session) = asking("timeout", true, Reply::default());
+    let (_node, _, session) = asking("timeout", true, Reply::default());
     assert_eq!(session.reply(), Reply::Timeout);
     let timeout = Options::default().timeout;
     let left = session.reply_left(Instant::now()).expect("time left");
@@ -280,21 +283,19 @@ fn by_default_an_answer_has_the_timeout() {
         .expect("an instant that long ago");
     let error = session.reply_left(begun).expect_err("its time is up");
     assert!(timed_out(&error), "{error}");
-    let _ = std::fs::remove_file(&path);
 }
 
 /// A bound of its own: an answer waits that long, whatever the connect timeout is.
 #[test]
 fn a_bound_of_its_own_is_kept_apart_from_the_connect_timeout() {
     let bound = Duration::from_millis(300);
-    let (_node, path, mut session) = asking("within", true, Reply::Within(bound));
+    let (_node, _, mut session) = asking("within", true, Reply::Within(bound));
     let (error, after) = unanswered(&mut session);
     assert!(timed_out(&error), "{error}");
     assert!(
         after >= bound && after < Options::default().timeout,
         "after {after:?}"
     );
-    let _ = std::fs::remove_file(&path);
 }
 
 /// While the node is heard from, an answer may take longer than the timeout and as long as the
@@ -305,14 +306,13 @@ fn while_the_node_is_heard_from_an_answer_waits_until_the_ceiling() {
     let reply = Reply::Alive {
         ceiling: Some(ceiling),
     };
-    let (node, path, mut session) = asking("ceiling", true, reply);
+    let (node, _, mut session) = asking("ceiling", true, reply);
     let (error, after) = unanswered(&mut session);
     assert!(timed_out(&error), "{error}");
     assert!(after >= ceiling && after < ceiling * 2, "after {after:?}");
     // Pinged all along, and heard from: never silent for its idle time.
     assert!(node.pings() >= 12, "{} pings", node.pings());
     assert!(session.silent_for() < Duration::from_millis(u64::from(HEARTBEAT_MS) * 3));
-    let _ = std::fs::remove_file(&path);
 }
 
 /// A node silent for the idle time it declared is gone, before any ceiling, on the board's own
@@ -322,7 +322,7 @@ fn a_node_silent_for_its_idle_time_is_gone_and_silent_for_says_so() {
     let reply = Reply::Alive {
         ceiling: Some(Duration::from_secs(30)),
     };
-    let (_node, path, mut session) = asking("idle", false, reply);
+    let (_node, _, mut session) = asking("idle", false, reply);
     let (error, _) = unanswered(&mut session);
     // Silence is counted from the last frame heard, the welcome, not from the question, which
     // came a moment later (longer on a loaded machine): measure what the rule is about.
@@ -334,14 +334,13 @@ fn a_node_silent_for_its_idle_time_is_gone_and_silent_for_says_so() {
         silent >= idle && silent < idle + Duration::from_secs(2),
         "silent for {silent:?}"
     );
-    let _ = std::fs::remove_file(&path);
 }
 
 /// The bound is the session's, kept until it is set again.
 #[test]
 fn the_reply_bound_is_kept_until_it_is_set_again() {
     let short = Reply::Within(Duration::from_millis(300));
-    let (_node, path, mut session) = asking("set", true, short);
+    let (_node, _, mut session) = asking("set", true, short);
     let ceiling = Duration::from_millis(1500);
     let longer = Reply::Alive {
         ceiling: Some(ceiling),
@@ -355,7 +354,6 @@ fn the_reply_bound_is_kept_until_it_is_set_again() {
     session.set_reply(short);
     let (_, after) = unanswered(&mut session);
     assert!(after < ceiling, "after {after:?}");
-    let _ = std::fs::remove_file(&path);
 }
 
 /// A node that takes the connection and never says hello: the client says it timed out, not
@@ -392,7 +390,7 @@ fn inside_a_runtime_an_answer_is_bounded_the_same_way() {
     let reply = Reply::Alive {
         ceiling: Some(ceiling),
     };
-    let (_node, path, mut session) = asking("async", true, reply);
+    let (_node, _, mut session) = asking("async", true, reply);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -409,5 +407,4 @@ fn inside_a_runtime_an_answer_is_bounded_the_same_way() {
     });
     assert!(timed_out(&error), "{error}");
     assert!(after >= ceiling && after < ceiling * 2, "after {after:?}");
-    let _ = std::fs::remove_file(&path);
 }

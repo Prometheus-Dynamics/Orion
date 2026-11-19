@@ -73,7 +73,7 @@ fn under_way(fetching: &mut Fetching<Cursor<Vec<u8>>>) {
 
 #[test]
 fn a_quiet_program_is_said_to_be_stalled_and_the_fetch_waits_it_out() {
-    let (socket, _stop) = comm_core("stalled");
+    let (socket, _stop, _dir) = comm_core("stalled");
     let size = 4 << 20;
     let (resume, resumed) = mpsc::channel();
     let (program, quiet) = quiet_giver(&socket, size, resumed);
@@ -130,7 +130,7 @@ fn a_quiet_program_is_said_to_be_stalled_and_the_fetch_waits_it_out() {
 
 #[test]
 fn a_fetch_given_a_limit_gives_up_on_a_quiet_program_saying_so() {
-    let (socket, _stop) = comm_core("give-up");
+    let (socket, _stop, _dir) = comm_core("give-up");
     let (resume, resumed) = mpsc::channel();
     let (program, quiet) = quiet_giver(&socket, 4 << 20, resumed);
     let client = impatient(&socket);

@@ -13,6 +13,7 @@ orion = { path = "../../client/orion" }
 orion-comm-app = { path = "../../comm/comm-app" }
 orion-config = { path = "../../core/config" }
 orion-node-app = { path = "../../node/node-app" }
+orion-scratch = { path = "../scratch" }
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
 
 [lints]

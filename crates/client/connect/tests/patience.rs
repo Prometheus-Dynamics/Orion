@@ -8,16 +8,14 @@ use crate::common;
 use common::*;
 use orion_connect::{Address, ClientError, Options, Patience, Roles, Session};
 use orion_msg_session::RejectReason;
+use orion_scratch::Scratch;
 use orion_server::Security;
 
 /// Longer than any one try, so a connect that gives up early is seen to.
 const BEFORE: Duration = Duration::from_millis(1500);
 
-fn dir(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-patience-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn dir(name: &str) -> Scratch {
+    Scratch::new(&format!("patience-{name}"))
 }
 
 #[test]
@@ -38,13 +36,12 @@ fn a_program_started_before_the_comm_core_is_welcomed_when_it_comes() {
     });
     std::thread::sleep(BEFORE);
     assert!(!waiting.is_finished(), "it gave up while nothing was there");
-    let board = Board::start_in(dir.clone(), Security::Off, None);
+    let board = Board::start_in(dir.to_path_buf(), Security::Off, None);
     let (session, waited) = waiting.join().expect("thread");
     let mut session = session.expect("welcomed once the comm core came");
     assert!(waited >= BEFORE, "{waited:?}");
     assert_eq!(who(&mut session, &[1]), "board");
     drop(board);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -67,7 +64,6 @@ fn a_refusal_ends_the_trying_at_once() {
         "tried again after an answer: {:?}",
         started.elapsed()
     );
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 #[test]
@@ -94,7 +90,6 @@ fn a_bounded_wait_and_a_single_try_end_when_they_say() {
         started.elapsed() < Duration::from_millis(200),
         "tried again"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -109,7 +104,6 @@ fn the_trying_is_told_how_it_goes_and_may_be_stopped() {
     .expect_err("stopped");
     assert!(error.is_lost(), "{error}");
     assert_eq!(seen, [(1, true), (2, true), (3, true)]);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -130,7 +124,6 @@ fn over_a_link_a_hello_is_said_again_past_one_timeout_until_it_is_welcomed() {
     };
     let mut session = Session::over(read, write, None, "tool", short).expect("welcomed");
     assert_eq!(who(&mut session, &[1]), "board");
-    let _ = std::fs::remove_dir_all(&board.dir);
 }
 
 #[test]
@@ -151,5 +144,4 @@ fn over_a_link_one_try_ends_with_its_timeout() {
     };
     let error = Session::over(read, write, None, "tool", once).expect_err("one try");
     assert!(error.is_lost(), "{error}");
-    let _ = std::fs::remove_dir_all(&board.dir);
 }

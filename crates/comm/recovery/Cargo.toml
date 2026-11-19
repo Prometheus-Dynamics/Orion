@@ -22,6 +22,7 @@ tokio = { workspace = true, features = ["rt", "time", "sync"] }
 tracing.workspace = true
 
 [dev-dependencies]
+orion-scratch = { path = "../../testing/scratch" }
 rustix = { version = "1", default-features = false, features = ["std", "process"] }
 tokio = { workspace = true, features = ["rt", "macros", "time", "net", "sync"] }
 

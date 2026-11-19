@@ -14,6 +14,7 @@ use std::time::Duration;
 use orion_connect::{Address, Client, Options, Session};
 use orion_file_offers::{FileOffersService, OwnFiles, OwnName, Reading, Ready};
 use orion_files::{FileState, Files, OfferedBy};
+use orion_scratch::Scratch;
 use orion_server::{Comm, Limits, Security, Sessions};
 use orion_unix::UnixCarrier;
 
@@ -62,10 +63,8 @@ impl OwnFiles for Configured {
     }
 }
 
-fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
-    let dir = std::env::temp_dir().join(format!("orion-conf-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
+fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>, Scratch) {
+    let dir = Scratch::new(&format!("conf-{name}"));
     let socket = dir.join("orion.sock");
     let (ready, started) = mpsc::channel();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -93,7 +92,7 @@ fn comm_core(name: &str) -> (PathBuf, tokio::sync::oneshot::Sender<()>) {
         });
     });
     started.recv().expect("the comm core starts");
-    (socket, stop)
+    (socket, stop, dir)
 }
 
 fn files(socket: &Path, name: &str) -> Files {
@@ -142,7 +141,7 @@ fn program(socket: &Path) -> (mpsc::Sender<()>, std::thread::JoinHandle<()>) {
 
 #[test]
 fn a_file_made_later_is_waited_for_by_every_fetch_of_it() {
-    let (socket, _stop) = comm_core("later");
+    let (socket, _stop, _dir) = comm_core("later");
     let fetches: Vec<_> = (0..2)
         .map(|_| {
             let socket = socket.clone();
@@ -160,14 +159,14 @@ fn a_file_made_later_is_waited_for_by_every_fetch_of_it() {
 
 #[test]
 fn a_file_not_made_is_rejected_saying_why() {
-    let (socket, _stop) = comm_core("fails");
+    let (socket, _stop, _dir) = comm_core("fails");
     let client = files(&socket, "collector");
     assert_eq!(fetch(&client, "sys/fails"), Err("it failed".into()));
 }
 
 #[test]
 fn a_program_takes_a_configured_prefix_over_while_its_session_lives() {
-    let (socket, _stop) = comm_core("over");
+    let (socket, _stop, _dir) = comm_core("over");
     let client = files(&socket, "collector");
     assert_eq!(fetch(&client, "sys/now"), Ok("configured".into()));
     let (offers, _) = client.offers().expect("offers");
@@ -202,7 +201,7 @@ fn a_program_takes_a_configured_prefix_over_while_its_session_lives() {
 
 #[test]
 fn a_fetch_under_way_keeps_the_side_it_began_with() {
-    let (socket, _stop) = comm_core("keeps");
+    let (socket, _stop, _dir) = comm_core("keeps");
     let socket_for = socket.clone();
     let waiting = std::thread::spawn(move || fetch(&files(&socket_for, "collector"), "sys/later"));
     // Asked for, and being made, when the program takes the prefix over.

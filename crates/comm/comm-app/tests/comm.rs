@@ -5,7 +5,7 @@
 mod common;
 
 use std::os::unix::net::UnixDatagram;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use common::{Client, Event, Wire};
@@ -13,6 +13,7 @@ use orion_comm_app::systemd::Notifier;
 use orion_comm_app::{CommCore, CommSettings, run_until};
 use orion_config::Source;
 use orion_msg_session::{Hello, Identify};
+use orion_scratch::Scratch;
 use orion_server::{FdSet, Roles};
 use orion_unix::UnixConnection;
 use orion_wire::{Body, Bytes, encode_body, frame, kind};
@@ -27,11 +28,8 @@ fn run(test: impl Future<Output = ()>) {
     tokio::task::LocalSet::new().block_on(&runtime, test);
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-comm-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("comm-{name}"))
 }
 
 fn settings(dir: &Path, extra: &str) -> CommSettings {
@@ -254,7 +252,6 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
         assert!(UnixConnection::connect(&socket).await.is_err());
         assert!(tokio::net::TcpStream::connect(addr).await.is_err());
         assert!(tokio::net::TcpStream::connect(ssh).await.is_err());
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 
@@ -340,7 +337,6 @@ fn the_service_manager_is_told_ready_alive_and_stopping() {
         let before = heard.len();
         listen(&mut heard);
         assert_eq!(heard.len(), before);
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 
@@ -434,9 +430,6 @@ fn a_comm_core_that_cannot_start_says_which_part_and_one_whose_network_address_i
             kind::WELCOME
         );
         drop(second);
-        let _ = std::fs::remove_dir_all(dir);
-        let _ = std::fs::remove_dir_all(other);
-        let _ = std::fs::remove_dir_all(third);
     });
 }
 
@@ -463,7 +456,6 @@ fn a_network_way_in_kept_to_an_interface_not_there_yet_waits_and_the_rest_runs()
         .await;
         let _topic = client.declare("served.meanwhile", 2).await;
         drop((client, core));
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 

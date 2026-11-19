@@ -184,9 +184,7 @@ mod tests {
 
     #[test]
     fn messages_reach_a_path_and_an_abstract_socket_and_nothing_else_is_taken() {
-        let dir = std::env::temp_dir().join(format!("orion-notify-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = orion_scratch::Scratch::new("notify");
         let path = dir.join("notify");
         let manager = UnixDatagram::bind(&path).expect("bind");
         let notifier = Notifier::connect(path.as_os_str()).expect("connect");
@@ -222,6 +220,5 @@ mod tests {
         Notifier::connect(OsStr::new(&format!("@{name}")))
             .expect("connect")
             .alive();
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

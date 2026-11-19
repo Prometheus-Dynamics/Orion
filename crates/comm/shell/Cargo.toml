@@ -24,6 +24,7 @@ tracing.workspace = true
 orion-check = { path = "../../core/check" }
 orion-config = { path = "../../core/config" }
 orion-keys = { path = "../keys" }
+orion-scratch = { path = "../../testing/scratch" }
 orion-types = { path = "../../core/types" }
 rustix = { version = "1", default-features = false, features = ["std", "process"] }
 tokio = { workspace = true, features = ["rt", "time", "macros"] }

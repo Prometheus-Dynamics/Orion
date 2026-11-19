@@ -3,11 +3,12 @@
 //! each opens on its address once it is free. Settings that cannot work still fail the start.
 
 use std::net::{SocketAddr, TcpListener as StdListener};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use orion_comm_app::{CommCore, CommSettings};
 use orion_config::Source;
+use orion_scratch::Scratch;
 use orion_server::Retry;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -20,11 +21,8 @@ fn run(test: impl Future<Output = ()>) {
     tokio::task::LocalSet::new().block_on(&runtime, test);
 }
 
-fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("orion-ways-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("dir");
-    dir
+fn temp(name: &str) -> Scratch {
+    Scratch::new(&format!("ways-{name}"))
 }
 
 fn settings(dir: &Path, extra: &str) -> CommSettings {
@@ -104,7 +102,6 @@ fn ways_in_on_taken_addresses_open_once_they_are_free_and_the_rest_runs_meanwhil
         let said = first_words(nt4_at, GET).await;
         assert!(said.starts_with("HTTP/1.1 "), "nt4: {said}");
         drop(core);
-        let _ = std::fs::remove_dir_all(dir);
     });
 }
 
@@ -120,6 +117,5 @@ fn settings_that_cannot_work_still_fail_the_start() {
         .await
         .expect_err("refused");
         assert!(error.to_string().starts_with("nt4.listen"), "{error}");
-        let _ = std::fs::remove_dir_all(dir);
     });
 }

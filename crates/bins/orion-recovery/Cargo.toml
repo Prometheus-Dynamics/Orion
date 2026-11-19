@@ -31,5 +31,8 @@ orion-config = { path = "../../core/config" }
 orion-log = { path = "../../core/log" }
 tracing.workspace = true
 
+[dev-dependencies]
+orion-scratch = { path = "../../testing/scratch" }
+
 [lints]
 workspace = true

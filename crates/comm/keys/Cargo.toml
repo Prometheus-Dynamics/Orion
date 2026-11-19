@@ -21,6 +21,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }
+orion-scratch = { path = "../../testing/scratch" }
 tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
 
 # The integration tests, in one binary: one link for the crate, not one for each file
