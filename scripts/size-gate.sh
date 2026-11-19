@@ -10,6 +10,8 @@
 #
 #   scripts/size-gate.sh               measure what changed; reuse a recorded measurement by key
 #   scripts/size-gate.sh --measure     build and measure everything, ignoring the keys
+#   scripts/size-gate.sh --release     every target, the release-only ones too, all measured: what
+#                                      a release must pass (docs/release.md)
 #   scripts/size-gate.sh --self-test   prove the keys and the reuse (no builds); the gate runs it
 #                                      when it measures, and when this script or the key's changes
 #
@@ -19,8 +21,11 @@
 # Always gated: the builds for this machine. Gated as well where they can be built: the static
 # musl files that go on a board, for each board target installed. Those need a C compiler for
 # the target (the SSH way in brings `ring`): CC_<triple> if set, else scripts/zigcc/<triple> when
-# `zig` is on PATH, and that zig must be 0.15.2 (another is refused, with what to do). armv7
-# and riscv64 build and are gated, and have not run on a board.
+# `zig` is on PATH, and that zig must be 0.15.2 (another is refused, with what to do).
+#
+# aarch64 is gated on every change. armv7 and riscv64 have never run on a board, so they are
+# gated before a release only (`--release`), not on every change. With `--release`, every
+# target must be built: one that cannot be built here fails, where the gate would skip it.
 #
 # A change that pushes a size past its limit either wins the bytes back or raises the
 # limit here, in the same commit, with the reason.
@@ -58,10 +63,11 @@ CAPI_HOST=740000
 #   aarch64-unknown-linux-musl      2,733,120        5,308,480
 #   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
+# The last column: gated on `every` change, or before a `release` only.
 BOARDS=(
-    "aarch64-unknown-linux-musl     2760000          5330000"
-    "armv7-unknown-linux-musleabihf 2810000          5350000"
-    "riscv64gc-unknown-linux-musl   3040000          5690000"
+    "aarch64-unknown-linux-musl     2760000          5330000   every"
+    "armv7-unknown-linux-musleabihf 2810000          5350000   release"
+    "riscv64gc-unknown-linux-musl   3040000          5690000   release"
 )
 # How long a full measurement holds before the gate makes another, in seconds.
 MEASURE_EVERY=86400
@@ -181,7 +187,18 @@ if [ "${1:-}" = "--self-test" ]; then
 fi
 
 measure="${SIZE_GATE_MEASURE:-0}"
-[ "${1:-}" = "--measure" ] && measure=1
+release=0
+for arg in "$@"; do
+    case "$arg" in
+        --measure) measure=1 ;;
+        # A release is measured whole: nothing reused.
+        --release) release=1 measure=1 ;;
+        *)
+            echo "usage: scripts/size-gate.sh [--measure] [--release] | --self-test" >&2
+            exit 2
+            ;;
+    esac
+done
 
 # Absolute: the path check builds from another directory, and a relative target directory would
 # put that build somewhere else than where it is read (CI sets none: `target`).
@@ -275,12 +292,26 @@ check_zig() {
     fi
     zig_checked=yes
 }
+# not_here <board> <why>: a board this machine cannot build. Skipped by the gate; a failure for
+# a release, which must measure every target.
+not_here() {
+    if [ "$release" = 1 ]; then
+        echo "    FAIL: $1 cannot be built here, and a release measures it: $2"
+        failures=$((failures + 1))
+    else
+        echo "    $1: not built here, $2"
+    fi
+}
 for line in "${BOARDS[@]}"; do
-    read -r board recovery_limit orion_limit <<< "$line"
+    read -r board recovery_limit orion_limit when <<< "$line"
+    if [ "$when" = release ] && [ "$release" = 0 ]; then
+        echo "    $board: before a release only (scripts/size-gate.sh --release)"
+        continue
+    fi
     triple=$(echo "$board" | tr 'a-z-' 'A-Z_')
     cc_var="CC_$(echo "$board" | tr '-' '_')"
     if ! grep -qx "$board" <<< "$installed"; then
-        echo "    $board: not built here, no Rust target"
+        not_here "$board" "no Rust target (rustup target add $board)"
         continue
     fi
     if [ -z "${!cc_var:-}" ]; then
@@ -289,7 +320,7 @@ for line in "${BOARDS[@]}"; do
             export "$cc_var=$PWD/scripts/zigcc/$board"
             export "AR_$(echo "$board" | tr '-' '_')=$PWD/scripts/zigcc/$board-ar"
         else
-            echo "    $board: not built here, no C compiler ($cc_var, or zig on PATH)"
+            not_here "$board" "no C compiler ($cc_var, or zig on PATH)"
             continue
         fi
     fi

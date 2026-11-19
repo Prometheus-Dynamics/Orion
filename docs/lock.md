@@ -348,6 +348,9 @@ what to change.
 - **I28.** The size gate's target directory is absolute, so its path check reads the build it
   made when `CARGO_TARGET_DIR` is unset (CI); when the bytes differ it reports where. Nothing a
   caller calls changes.
+- **I29.** The armv7 and riscv64 size builds run before a release only
+  (`scripts/size-gate.sh --release`, docs/release.md); x86_64 and aarch64 stay on every change.
+  Nothing a caller calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

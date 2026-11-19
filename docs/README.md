@@ -30,3 +30,4 @@
 - [design.md](design.md): the design, and [architecture.html](architecture.html), the same
   with drawings.
 - [prs/](prs/): what each PR built, what proved it, and where it differs from its brief.
+- [release.md](release.md): what a release passes beyond the gate.

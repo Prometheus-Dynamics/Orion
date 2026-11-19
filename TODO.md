@@ -214,6 +214,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I26](docs/prs/I26.md) The size key works on a machine that has not fetched the dependencies yet (wave 19; needs I25)
 - [x] [I27](docs/prs/I27.md) Every gate step has a bound, and leaves nothing running (wave 19; needs I26)
 - [x] [I28](docs/prs/I28.md) The size gate's path check reads the build it made, on CI as here (wave 19; needs I27)
+- [x] [I29](docs/prs/I29.md) armv7 and riscv64 size builds run before a release only (wave 19; needs I28)
 
 ## J. The stack around Orion
 

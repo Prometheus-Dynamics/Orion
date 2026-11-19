@@ -252,7 +252,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   lane matrix "feature matrix" 605 nice -n "$behind" scripts/feature-matrix.sh
   lane other-systems "no_std and the client on other systems" 416 other_systems
   if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
-    lane size "size gate" 1341 scripts/size-gate.sh
+    lane size "size gate" 610 scripts/size-gate.sh
   fi
   devices=()
   if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
