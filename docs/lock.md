@@ -402,6 +402,9 @@ what to change.
 - **I46.** The seven `shm-*` crates are pinned to the device library's `c8f1b3d2`, through the
   `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
   calls changes.
+- **I47.** The seven `shm-*` crates are pinned to the device library's `5ee2f64a`, through the
+  `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
+  calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
