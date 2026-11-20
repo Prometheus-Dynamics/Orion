@@ -399,6 +399,9 @@ what to change.
   "the program that offers it stopped giving it: it could not be read: <the error>". It no
   longer waits out the silence limit. `Gift::step` still returns the read's error. Nothing a
   program calls changes, and nothing new is on the wire.
+- **I46.** The seven `shm-*` crates are pinned to the device library's `c8f1b3d2`, through the
+  `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
+  calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
