@@ -3172,7 +3172,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 [[package]]
 name = "shm-fdpass"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=c65d234f602436ae93c36b4523f4eb340c2e2abc#c65d234f602436ae93c36b4523f4eb340c2e2abc"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b#0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b"
 dependencies = [
  "libc",
 ]
@@ -3180,7 +3180,7 @@ dependencies = [
 [[package]]
 name = "shm-ring"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=c65d234f602436ae93c36b4523f4eb340c2e2abc#c65d234f602436ae93c36b4523f4eb340c2e2abc"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b#0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b"
 dependencies = [
  "libc",
  "shm-sample-time",
@@ -3189,7 +3189,7 @@ dependencies = [
 [[package]]
 name = "shm-ring-buffers"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=c65d234f602436ae93c36b4523f4eb340c2e2abc#c65d234f602436ae93c36b4523f4eb340c2e2abc"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b#0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b"
 dependencies = [
  "libc",
  "shm-ring",
@@ -3198,7 +3198,7 @@ dependencies = [
 [[package]]
 name = "shm-ring-doorbell"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=c65d234f602436ae93c36b4523f4eb340c2e2abc#c65d234f602436ae93c36b4523f4eb340c2e2abc"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b#0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b"
 dependencies = [
  "libc",
  "shm-ring",
@@ -3207,7 +3207,7 @@ dependencies = [
 [[package]]
 name = "shm-ring-holds"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=c65d234f602436ae93c36b4523f4eb340c2e2abc#c65d234f602436ae93c36b4523f4eb340c2e2abc"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b#0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b"
 dependencies = [
  "shm-ring",
  "shm-ring-buffers",
@@ -3216,7 +3216,7 @@ dependencies = [
 [[package]]
 name = "shm-ring-time"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=c65d234f602436ae93c36b4523f4eb340c2e2abc#c65d234f602436ae93c36b4523f4eb340c2e2abc"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b#0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b"
 dependencies = [
  "shm-ring",
  "shm-ring-doorbell",
@@ -3225,7 +3225,7 @@ dependencies = [
 [[package]]
 name = "shm-sample-time"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=c65d234f602436ae93c36b4523f4eb340c2e2abc#c65d234f602436ae93c36b4523f4eb340c2e2abc"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b#0d37cc55ffee6dacf348e3aff4e2c1ba90e2a33b"
 dependencies = [
  "libc",
  "serde",
