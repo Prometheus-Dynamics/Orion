@@ -438,6 +438,9 @@ what to change.
 - **I56.** `Describing::action_kept(name, description, policy, keep)` and
   `Orion::register_action_kept(decl, policy, keep)`: kept runs (I50) for a provider's resource and
   through the facade. Additive; nothing on the wire changes.
+- **I57.** A run's deadline and its program's bound (`CONFIRM_MS` or the node's) count from the
+  end of the millisecond they were set in, so `Actions::next_deadline` and the tick that acts on
+  one are 1 ms later than before. Nothing on the wire changes, and nothing a program calls.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

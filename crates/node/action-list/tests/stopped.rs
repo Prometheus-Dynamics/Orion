@@ -9,15 +9,15 @@ use orion_action_list::CONFIRM_MS;
 use orion_msg_actions::{ActionResult, Cancel, CancelReason, Claim, Outcome};
 use orion_types::Error;
 
-/// A run with a deadline of 500 ms whose deadline has just passed: its program was told to
-/// stop, and nothing else was sent.
+/// A run with a deadline of 500 ms whose deadline has just passed (501 ms on, on a clock of whole
+/// ms): its program was told to stop, and nothing else was sent.
 fn past_its_deadline() -> (Bench, u64) {
     let mut bench = Bench::with_action();
     bench.run(CALLER, 7, 500, false).expect("run");
     let claim: Claim<'_> = bench.take(OWNER);
     let id = claim.call;
     bench.handle(CALLER, 7);
-    bench.now += 500;
+    bench.now += 501;
     bench.actions.tick(bench.now, &mut bench.sent);
     let cancel: Cancel = bench.take(OWNER);
     assert_eq!((cancel.call, cancel.reason), (id, CancelReason::Deadline));
@@ -43,12 +43,13 @@ fn a_run_its_program_finished_as_its_deadline_passed_ends_as_the_program_says() 
 #[test]
 fn a_run_whose_program_never_says_ends_indeterminate_at_the_bound() {
     let (mut bench, id) = past_its_deadline();
-    bench
-        .actions
-        .tick(bench.now + CONFIRM_MS - 1, &mut bench.sent);
+    bench.actions.tick(bench.now + CONFIRM_MS, &mut bench.sent);
+    // The bound counts from the end of the ms the program was told in: not short.
     assert!(bench.sent.frames.is_empty());
     assert_eq!(bench.actions.running(), 1);
-    bench.actions.tick(bench.now + CONFIRM_MS, &mut bench.sent);
+    bench
+        .actions
+        .tick(bench.now + CONFIRM_MS + 1, &mut bench.sent);
     let result: ActionResult<'_> = bench.take(CALLER);
     assert_eq!((result.outcome, result.code), (Outcome::Indeterminate, 0));
     assert!(result.detail.contains("not known"), "{}", result.detail);
@@ -68,10 +69,10 @@ fn the_bound_is_the_nodes_to_set() {
     bench.run(CALLER, 7, 500, false).expect("run");
     let _: Claim<'_> = bench.take(OWNER);
     bench.handle(CALLER, 7);
-    bench.actions.tick(bench.now + 500, &mut bench.sent);
+    bench.actions.tick(bench.now + 501, &mut bench.sent);
     let _: Cancel = bench.take(OWNER);
-    assert_eq!(bench.actions.next_deadline(), Some(bench.now + 800));
-    bench.actions.tick(bench.now + 800, &mut bench.sent);
+    assert_eq!(bench.actions.next_deadline(), Some(bench.now + 802));
+    bench.actions.tick(bench.now + 802, &mut bench.sent);
     let result: ActionResult<'_> = bench.take(CALLER);
     assert_eq!(result.outcome, Outcome::Indeterminate);
 }
@@ -96,13 +97,18 @@ fn stopping_waits_for_each_program_up_to_the_bound_and_takes_no_new_run() {
     // No new run while stopping.
     assert_eq!(bench.run(CALLER, 9, 0, false), Err(Error::Unavailable));
     // Its stop is bounded: by the bound at the latest.
-    assert_eq!(bench.actions.next_deadline(), Some(bench.now + CONFIRM_MS));
+    assert_eq!(
+        bench.actions.next_deadline(),
+        Some(bench.now + CONFIRM_MS + 1)
+    );
     // One program had finished its run: it ends as it finished.
     bench.result(finished, Outcome::Succeeded);
     let result: ActionResult<'_> = bench.take(CALLER);
     assert_eq!((result.call, result.outcome), (7, Outcome::Succeeded));
     // The other says nothing: not known, at the bound.
-    bench.actions.tick(bench.now + CONFIRM_MS, &mut bench.sent);
+    bench
+        .actions
+        .tick(bench.now + CONFIRM_MS + 1, &mut bench.sent);
     let result: ActionResult<'_> = bench.take(CALLER);
     assert_eq!((result.call, result.outcome), (8, Outcome::Indeterminate));
     // Every run has ended, and nothing is kept for a starter to come back to.

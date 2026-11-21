@@ -241,6 +241,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I50](docs/prs/I50.md) A detached run is kept while its program reconnects, and given back to it (wave 19; needs I54)
 - [x] [I52](docs/prs/I52.md) A fetch whose giver or comm core goes ends within a second, by test (wave 19; needs I50)
 - [x] [I56](docs/prs/I56.md) A provider's or the facade's action may be kept, and a new session of the same program is handed its runs (wave 19; needs I52)
+- [x] [I57](docs/prs/I57.md) A run's deadline and its program's bound are never short on a clock of whole milliseconds (wave 19; needs I56)
 
 ## J. The stack around Orion
 

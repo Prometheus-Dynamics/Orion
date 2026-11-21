@@ -21,6 +21,14 @@ use crate::Actions;
 /// even one that says it does not know, arrives first; well inside a service's 30 s to stop.
 pub const CONFIRM_MS: u64 = 10_000;
 
+/// When a bound of `ms` set at `now_ms` has passed, on a clock of whole milliseconds: from the
+/// end of the millisecond it was set in. A reading of `now_ms` is any time in that millisecond,
+/// so a bound counted from its start could pass up to a millisecond short; a deadline or a
+/// program's bound is never short, and up to a millisecond long.
+pub(crate) const fn after(now_ms: u64, ms: u64) -> u64 {
+    now_ms.saturating_add(ms).saturating_add(1)
+}
+
 /// Node logic told a run's program to stop: why, and until when it waits for its word.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Stop {
@@ -116,7 +124,7 @@ impl Actions {
         );
         run.deadline = None;
         run.stop = Some(Stop {
-            by_ms: now_ms.saturating_add(self.confirm_ms),
+            by_ms: after(now_ms, self.confirm_ms),
             reason,
         });
         let doing = if reason == CancelReason::Deadline {

@@ -631,8 +631,7 @@ impl Actions {
                     starter,
                     superseded: false,
                     last: None,
-                    deadline: (run.deadline_ms != 0)
-                        .then(|| now_ms.saturating_add(run.deadline_ms)),
+                    deadline: (run.deadline_ms != 0).then(|| stop::after(now_ms, run.deadline_ms)),
                     detached: run.detached,
                     stop: None,
                     held: None,

@@ -342,10 +342,12 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
     let claim: Claim<'_> = bench.take(OWNER);
     bench.handle(CALLER, 7);
     assert_eq!((claim.deadline_ms, claim.detached), (500, false));
-    assert_eq!(bench.actions.next_deadline(), Some(bench.now + 500));
-    bench.actions.tick(bench.now + 499, &mut bench.sent);
-    assert!(bench.sent.frames.is_empty());
+    // On a clock of whole ms the deadline counts from the end of the ms the run came in: a
+    // reading of 500 ms later may be 499.1 ms later, so it has not passed until 501.
+    assert_eq!(bench.actions.next_deadline(), Some(bench.now + 501));
     bench.actions.tick(bench.now + 500, &mut bench.sent);
+    assert!(bench.sent.frames.is_empty());
+    bench.actions.tick(bench.now + 501, &mut bench.sent);
     let cancel: Cancel = bench.take(OWNER);
     assert_eq!(
         (cancel.call, cancel.reason),
@@ -355,7 +357,7 @@ fn a_run_past_its_deadline_times_out_and_the_program_is_told_to_stop() {
     assert!(bench.sent.frames.is_empty());
     assert_eq!(
         bench.actions.next_deadline(),
-        Some(bench.now + 500 + CONFIRM_MS)
+        Some(bench.now + 501 + CONFIRM_MS + 1)
     );
     bench.result(claim.call, Outcome::Cancelled);
     let result: ActionResult<'_> = bench.take(CALLER);
@@ -599,7 +601,7 @@ fn a_detached_run_still_has_its_deadline_and_its_program() {
     // The program is told the run goes on without its caller.
     assert!(claim.detached);
     bench.gone(CALLER);
-    bench.now += 500;
+    bench.now += 501;
     bench.actions.tick(bench.now, &mut bench.sent);
     let cancel: Cancel = bench.take(OWNER);
     assert_eq!(cancel.call, claim.call);
