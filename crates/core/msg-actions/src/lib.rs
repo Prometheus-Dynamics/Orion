@@ -55,6 +55,14 @@ body! {
         pub policy: Policy,
         /// A description for people.
         pub description: &'a str,
+        ;
+        /// How long node logic keeps a detached run of this action going when this program's
+        /// session is lost, in milliseconds, for the program to reconnect, register the
+        /// action again as the same identity and be given the run back (a [`Claim`] with
+        /// `kept`). Zero, and from a program that does not say: not kept, the run ends as
+        /// failed at once. Node logic takes no more than its own limit. A program asks for it
+        /// only of a node at level 6.
+        pub keep_ms: u32,
     }
 }
 
@@ -107,6 +115,11 @@ body! {
         /// [`CallerGone`] for its session does not end it. False from a host that does not
         /// say.
         pub detached: bool,
+        /// A run this program's identity was given before its session was lost, kept for it
+        /// and given back now that it registered the action again: the same `call`, to go on
+        /// and say how it ends. `args` are not sent again. Sent only to a program that asked
+        /// for its runs to be kept (`Register::keep_ms`); false from a host that does not say.
+        pub kept: bool,
     }
 }
 

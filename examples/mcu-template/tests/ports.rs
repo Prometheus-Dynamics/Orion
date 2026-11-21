@@ -76,6 +76,7 @@ fn claim(peer: &mut Peer) -> Vec<u8> {
         caller: "",
         session: 0,
         detached: false,
+        kept: false,
     })
 }
 

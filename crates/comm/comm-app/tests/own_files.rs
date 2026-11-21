@@ -136,7 +136,10 @@ fn a_running_comm_core_offers_its_own_files_with_secrets_left_out() {
         assert_eq!(fetched[2], "running\n");
         assert!(fetched[3].contains(" collector local:"), "{}", fetched[3]);
         assert!(
-            fetched[4].contains("\ninterface_level 5\n"),
+            fetched[4].contains(&format!(
+                "\ninterface_level {}\n",
+                orion_wire::INTERFACE_LEVEL
+            )),
             "{}",
             fetched[4]
         );

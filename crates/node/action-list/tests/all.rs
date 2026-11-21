@@ -10,6 +10,8 @@ mod caller_gone;
 mod ended;
 #[path = "handles.rs"]
 mod handles;
+#[path = "kept.rs"]
+mod kept;
 #[path = "list.rs"]
 mod list;
 #[path = "stopped.rs"]

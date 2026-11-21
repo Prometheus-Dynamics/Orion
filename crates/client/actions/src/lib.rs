@@ -130,6 +130,11 @@ pub enum Request {
         /// session, keep it running until it ends or its deadline passes. False from a node
         /// that does not say.
         detached: bool,
+        /// A run this program was doing when its session was lost, kept by node logic and
+        /// given back after [`Actions::restore`] (an action registered with
+        /// [`Actions::register_kept`]): the same `call`, `args` empty. Go on with the job and
+        /// finish it.
+        kept: bool,
     },
     /// Stop this run. Finish it as [`Outcome::Cancelled`], or as whatever it had become: a run
     /// that finished first says so. Node logic waits a bound for the answer when it stopped
@@ -157,6 +162,7 @@ struct Listed {
     target: Target,
     policy: Policy,
     description: String,
+    keep_ms: u32,
 }
 
 /// One run this program started, as far as it has been told.
@@ -178,6 +184,8 @@ struct State {
     listed: Vec<Listed>,
     requests: VecDeque<Request>,
     next_call: u64,
+    /// The `seq` each run's finish went as, for [`Registration::refused`].
+    finished: Vec<(u64, u16)>,
 }
 
 impl State {
@@ -279,6 +287,7 @@ impl Handler for State {
                     caller: claim.caller.to_owned(),
                     session: claim.session,
                     detached: claim.detached,
+                    kept: claim.kept,
                 });
             }
             kind::ACTION_CANCEL => {
@@ -426,6 +435,37 @@ impl Actions {
         action: &ActionDecl<'_>,
         policy: Policy,
     ) -> Result<Registration, ClientError> {
+        self.register_keeping(action, policy, 0)
+    }
+
+    /// As [`Actions::register`], and node logic keeps this action's detached runs going for
+    /// up to `keep` when this program's session is lost (no more than the node's limit, a
+    /// minute). After [`Actions::restore`] as the same identity, each run still kept is here
+    /// again as a [`Request::Run`] with `kept`; one not back by `keep` ends
+    /// [`Outcome::Indeterminate`]. A lost session is the error a call returns, `is_lost`:
+    /// hold the jobs of these runs then, do not cancel them.
+    ///
+    /// # Errors
+    ///
+    /// [`ClientError::Level`] from a node below [`Feature::KeptRuns`]'s level, and as
+    /// [`Actions::register`].
+    pub fn register_kept(
+        &self,
+        action: &ActionDecl<'_>,
+        policy: Policy,
+        keep: Duration,
+    ) -> Result<Registration, ClientError> {
+        self.client.needs(Feature::KeptRuns)?;
+        let keep_ms = u32::try_from(keep.as_millis()).unwrap_or(u32::MAX).max(1);
+        self.register_keeping(action, policy, keep_ms)
+    }
+
+    fn register_keeping(
+        &self,
+        action: &ActionDecl<'_>,
+        policy: Policy,
+        keep_ms: u32,
+    ) -> Result<Registration, ClientError> {
         let seq = self.client.send(&Register {
             name: action
                 .name
@@ -434,6 +474,7 @@ impl Actions {
             target: action.target.clone(),
             policy,
             description: action.description,
+            keep_ms,
         })?;
         self.client
             .answered(seq, || self.state.borrow_mut().taken(seq))?;
@@ -442,6 +483,7 @@ impl Actions {
             target: action.target.clone(),
             policy,
             description: action.description.to_owned(),
+            keep_ms,
         });
         Ok(Registration {
             client: self.client.clone(),
@@ -453,15 +495,20 @@ impl Actions {
 impl Actions {
     /// Registers every action again with a comm core that has no memory of this session.
     /// Call it after [`orion_connect::Session::reconnect`]. Runs that were under way are not
-    /// brought back: whoever started one is told how it ended by whoever now holds it.
+    /// brought back, but for an action registered with [`Actions::register_kept`]: when this
+    /// returns, every run node logic kept for this program is waiting in the [`Registration`]
+    /// as a [`Request::Run`] with `kept`. A run it was doing that is not there was not kept.
     ///
     /// # Errors
     ///
     /// If the comm core refuses an action it took before, or the connection broke again.
     pub fn restore(&self) -> Result<(), ClientError> {
         // An answer from the session that broke is no answer to this one, which may use the
-        // same numbers.
+        // same numbers, and what was asked of this program then belongs to that session. Runs
+        // kept for it arrive with each registration's answer, and stay.
         self.state.borrow_mut().registered.clear();
+        self.state.borrow_mut().requests.clear();
+        self.state.borrow_mut().finished.clear();
         let count = self.state.borrow().listed.len();
         for index in 0..count {
             let seq = {
@@ -475,13 +522,12 @@ impl Actions {
                     target: listed.target.clone(),
                     policy: listed.policy,
                     description: &listed.description,
+                    keep_ms: listed.keep_ms,
                 })?
             };
             self.client
                 .answered(seq, || self.state.borrow_mut().taken(seq))?;
         }
-        // What was asked of this program before belongs to a session that is gone.
-        self.state.borrow_mut().requests.clear();
         Ok(())
     }
 }
@@ -704,7 +750,7 @@ impl Registration {
         output: &[u8],
         detail: &str,
     ) -> Result<(), ClientError> {
-        self.client.send(&ActionResult {
+        let seq = self.client.send(&ActionResult {
             call,
             outcome,
             output: Bytes(output),
@@ -714,6 +760,28 @@ impl Registration {
             run: 0,
             action: "",
         })?;
+        let mut state = self.state.borrow_mut();
+        state.finished.retain(|(finished, _)| *finished != call);
+        state.finished.push((call, seq));
         Ok(())
+    }
+
+    /// Why node logic refused how run `call` ended, if it did and it has arrived: a kept run
+    /// that had already ended (its program not back in time) is refused, naming how it
+    /// ended. Read once.
+    ///
+    /// # Errors
+    ///
+    /// If the connection broke.
+    pub fn refused(&mut self, call: u64) -> Result<Option<ClientError>, ClientError> {
+        self.client.drain()?;
+        let seq = self
+            .state
+            .borrow()
+            .finished
+            .iter()
+            .find(|(finished, _)| *finished == call)
+            .map(|(_, seq)| *seq);
+        Ok(seq.and_then(|seq| self.client.refusal(seq)))
     }
 }

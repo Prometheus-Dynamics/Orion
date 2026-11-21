@@ -17,7 +17,8 @@ pub(super) fn samples(out: &mut Vec<Sample>) {
             name: action(),
             target: Target::Node(node("left")),
             policy,
-            description: "restart it"
+            description: "restart it",
+            keep_ms: 10_000
         }
     );
     sample!(
@@ -42,7 +43,8 @@ pub(super) fn samples(out: &mut Vec<Sample>) {
             deadline_ms: 5000,
             caller: "local:1000",
             session: 3,
-            detached: true
+            detached: true,
+            kept: true
         }
     );
     sample!(

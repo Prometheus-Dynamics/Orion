@@ -100,6 +100,7 @@ safely ignore have no level.
 | 3 | The error `run gone` (23) | (told to a session: see below) |
 | 4 | `FileOffers`: `FILE_OFFER`, `FILE_FETCH`, `FILE_OFFERS` | Not answer |
 | 5 | `SecurityPrecheck`: `SECURITY_PRECHECK` | Not answer |
+| 6 | `KeptRuns`: `Register.keep_ms`, `Claim.kept` | End the program's detached runs as failed when its session is lost |
 
 **Errors have levels too.** An error code added after level 1 is told only to a session that said
 it is at that code's level or above. A session below it is told what it was told before the code

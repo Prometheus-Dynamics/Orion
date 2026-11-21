@@ -46,9 +46,12 @@ use orion_types::{ActionName, Error, NodeName};
 use orion_wire::{Bytes, kind};
 
 mod attach;
+mod kept;
 mod stop;
 
 use attach::fresh_instance;
+use kept::Held;
+pub use kept::MAX_KEEP_MS;
 pub use stop::CONFIRM_MS;
 use stop::Stop;
 
@@ -128,6 +131,10 @@ struct Listed {
     /// The registration as it came: the same again is the same action, anything else is
     /// another program's attempt at the name.
     registration: Vec<u8>,
+    /// How long its detached runs are kept when its program's session is lost; zero for not.
+    keep_ms: u64,
+    /// Who registered it: who may take its kept runs back.
+    by: Starter,
 }
 
 #[derive(Debug)]
@@ -154,6 +161,11 @@ struct Running {
     detached: bool,
     /// Node logic told its program to stop, and waits for its word until then.
     stop: Option<Stop>,
+    /// Its program's session is lost, and it is kept for that program.
+    held: Option<Held>,
+    /// Who asked, as the program was told it, and the caller's token: for a `Claim` again.
+    principal: String,
+    token: u64,
 }
 
 /// The list.
@@ -186,6 +198,8 @@ pub struct Actions {
     confirm_ms: u64,
     /// Node logic is stopping: no new run is taken.
     closing: bool,
+    /// Runs that ended because their program did not come back in time.
+    lost: VecDeque<u64>,
 }
 
 /// A caller: a session, or one session behind a peer's.
@@ -235,6 +249,7 @@ impl Actions {
             ended_tokens: Vec::new(),
             confirm_ms: CONFIRM_MS,
             closing: false,
+            lost: VecDeque::new(),
         }
     }
 
@@ -343,6 +358,7 @@ impl Actions {
         self.tokens.clear();
         self.given.clear();
         self.ended_tokens.clear();
+        self.lost.clear();
     }
 
     /// How many detached runs that ended are kept for their starter.
@@ -362,8 +378,44 @@ impl Actions {
     pub fn next_deadline(&self) -> Option<u64> {
         self.running
             .iter()
-            .filter_map(|run| run.stop.map_or(run.deadline, |stop| Some(stop.by_ms)))
+            .filter_map(|run| match (&run.held, run.stop) {
+                (Some(held), _) => Some(held.until_ms),
+                (None, Some(stop)) => Some(stop.by_ms),
+                (None, None) => run.deadline,
+            })
             .min()
+    }
+
+    /// The run at `at` is doing `message`: its events are told, it is its last word if it is
+    /// detached, and its caller is told if attached.
+    pub(crate) fn doing(
+        &mut self,
+        at: usize,
+        percent: u8,
+        message: &str,
+        data: &[u8],
+        out: &mut dyn Out,
+    ) -> Result<(), Error> {
+        self.event(at, percent, message, None);
+        let instance = self.instance;
+        let run = &mut self.running[at];
+        if run.detached {
+            run.last = Some((percent, message.to_owned(), data.to_vec()));
+        }
+        if let Some(caller) = run.caller {
+            out.push(
+                caller,
+                &Progress {
+                    call: run.call,
+                    percent,
+                    message,
+                    data: Bytes(data),
+                    instance,
+                    run: run.id,
+                },
+            )?;
+        }
+        Ok(())
     }
 
     fn event(&mut self, at: usize, percent: u8, message: &str, outcome: Option<Outcome>) {
@@ -469,12 +521,18 @@ impl Actions {
                 {
                     Some(same) if same.owner == from && same.registration == asked.payload => {}
                     Some(_) => return Err(Error::AlreadyExists),
-                    None => self.listed.push(Listed {
-                        name: register.name.clone(),
-                        target: register.target.clone(),
-                        owner: from,
-                        registration: asked.payload.to_vec(),
-                    }),
+                    None => {
+                        let by = Starter::of(asked);
+                        self.give_back(from, &by, (&register.name, &register.target), now_ms, out);
+                        self.listed.push(Listed {
+                            name: register.name.clone(),
+                            target: register.target.clone(),
+                            owner: from,
+                            registration: asked.payload.to_vec(),
+                            keep_ms: u64::from(register.keep_ms),
+                            by,
+                        });
+                    }
                 }
                 out.send(
                     from,
@@ -547,6 +605,7 @@ impl Actions {
                         caller: &principal,
                         session,
                         detached: run.detached,
+                        kept: false,
                     },
                 )?;
                 if !self.given.contains(&(owner, session)) {
@@ -576,6 +635,9 @@ impl Actions {
                         .then(|| now_ms.saturating_add(run.deadline_ms)),
                     detached: run.detached,
                     stop: None,
+                    held: None,
+                    principal,
+                    token: session,
                 });
                 self.event(self.running.len() - 1, 255, "claimed", None);
                 Ok(())
@@ -585,30 +647,7 @@ impl Actions {
                 let Some(at) = self.owned(progress.call, from)? else {
                     return Ok(());
                 };
-                self.event(at, progress.percent, progress.message, None);
-                let run = &mut self.running[at];
-                if run.detached {
-                    run.last = Some((
-                        progress.percent,
-                        progress.message.to_owned(),
-                        progress.data.0.to_vec(),
-                    ));
-                }
-                if let Some(caller) = run.caller {
-                    let (call, id) = (run.call, run.id);
-                    out.push(
-                        caller,
-                        &Progress {
-                            call,
-                            percent: progress.percent,
-                            message: progress.message,
-                            data: progress.data,
-                            instance: self.instance,
-                            run: id,
-                        },
-                    )?;
-                }
-                Ok(())
+                self.doing(at, progress.percent, progress.message, progress.data.0, out)
             }
             kind::ACTION_RESULT => {
                 let result: ActionResult<'_> = asked.body()?;
@@ -629,7 +668,11 @@ impl Actions {
                         .iter()
                         .position(|run| run.origin == Some(from) && run.call == cancel.call),
                 };
-                let run = &self.running[at.ok_or(Error::NotFound)?];
+                let at = at.ok_or(Error::NotFound)?;
+                if self.cancel_held(at, reason_of(asked, cancel.reason)) {
+                    return Ok(());
+                }
+                let run = &self.running[at];
                 out.send(
                     run.owner,
                     &Cancel {
@@ -662,11 +705,14 @@ impl Actions {
 
     /// The run `id`, if `from` is the program that runs it. `None` for a run that already
     /// ended: a program may well say something of a run a moment after it timed out.
-    fn owned(&self, id: u64, from: u32) -> Result<Option<usize>, Error> {
+    fn owned(&mut self, id: u64, from: u32) -> Result<Option<usize>, Error> {
         match self.running.iter().position(|run| run.id == id) {
-            Some(at) if self.running[at].owner == from => Ok(Some(at)),
+            // A held run's program is between sessions: whoever has its old number is not it.
+            Some(at) if self.running[at].owner == from && self.running[at].held.is_none() => {
+                Ok(Some(at))
+            }
             Some(_) => Err(Error::Denied),
-            None if id != 0 && id <= self.next => Ok(None),
+            None if id != 0 && id <= self.next => self.late(id),
             None => Err(Error::NotFound),
         }
     }
@@ -675,11 +721,14 @@ impl Actions {
     /// the runs it asked for are cancelled unless they are detached, and every program that
     /// was given a run from it is told.
     pub fn gone(&mut self, session: u32, now_ms: u64, out: &mut dyn Out) {
-        self.listed.retain(|listed| listed.owner != session);
         self.given.retain(|(owner, _)| *owner != session);
         let mut at = 0;
         while at < self.running.len() {
-            if self.running[at].owner == session {
+            if self.keep(at, session, now_ms, out) {
+                at += 1;
+                continue;
+            }
+            if self.running[at].owner == session && self.running[at].held.is_none() {
                 self.end(
                     at,
                     (Outcome::Failed, 0),
@@ -710,6 +759,8 @@ impl Actions {
             }
             at += 1;
         }
+        // Its actions go once its runs are dealt with: whether a run is kept is read from them.
+        self.listed.retain(|listed| listed.owner != session);
         // After its runs are dealt with: then the session itself, and every session a peer
         // carried runs for over it.
         while let Some(at) = self

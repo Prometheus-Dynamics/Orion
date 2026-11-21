@@ -80,6 +80,7 @@ pub(crate) fn register(me: &NodeName) -> Option<Register<'static>> {
         target: Target::Node(me.clone()),
         policy: Policy::new(Admits::LOCAL.and(Admits::OPERATOR)),
         description: "sends a file the node keeps to the program that receives its destination",
+        keep_ms: 0,
     })
 }
 

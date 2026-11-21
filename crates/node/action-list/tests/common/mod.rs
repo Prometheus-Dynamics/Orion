@@ -91,6 +91,18 @@ impl Bench {
     }
 
     pub fn register(&mut self, from: u32, name: &str, target: Target) -> Result<(), Error> {
+        self.register_keeping(from, name, target, 0)
+    }
+
+    /// As [`Bench::register`], asking for its detached runs to be kept `keep_ms` when the
+    /// program's session is lost.
+    pub fn register_keeping(
+        &mut self,
+        from: u32,
+        name: &str,
+        target: Target,
+        keep_ms: u32,
+    ) -> Result<(), Error> {
         self.ask(
             from,
             &Register {
@@ -98,6 +110,7 @@ impl Bench {
                 target,
                 policy: Policy::new(Admits::LOCAL),
                 description: "sets the speed",
+                keep_ms,
             },
         )
     }

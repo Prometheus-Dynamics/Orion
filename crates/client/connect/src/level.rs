@@ -32,11 +32,14 @@ pub enum Feature {
     FileOffers,
     /// The comm core asked what it has against turning the board's security switch.
     SecurityPrecheck,
+    /// A detached run kept for its program while the program's session is lost, and given
+    /// back when it registers the action again.
+    KeptRuns,
 }
 
 impl Feature {
     /// Every feature, for tables and tests.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::SubscribeFromLatest,
         Self::Shell,
         Self::SignedLink,
@@ -45,6 +48,7 @@ impl Feature {
         Self::RunHandle,
         Self::FileOffers,
         Self::SecurityPrecheck,
+        Self::KeptRuns,
     ];
 
     /// The lowest level that has it.
@@ -59,6 +63,7 @@ impl Feature {
             Self::RunHandle => 3,
             Self::FileOffers => 4,
             Self::SecurityPrecheck => 5,
+            Self::KeptRuns => 6,
         }
     }
 
@@ -74,6 +79,7 @@ impl Feature {
             Self::RunHandle => "a run named by its handle",
             Self::FileOffers => "a file offered on the board",
             Self::SecurityPrecheck => "a precheck of the security switch",
+            Self::KeptRuns => "a detached run kept while its program reconnects",
         }
     }
 }

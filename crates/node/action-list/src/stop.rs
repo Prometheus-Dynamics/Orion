@@ -25,7 +25,7 @@ pub const CONFIRM_MS: u64 = 10_000;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Stop {
     pub(crate) by_ms: u64,
-    reason: CancelReason,
+    pub(crate) reason: CancelReason,
 }
 
 impl Actions {
@@ -43,10 +43,15 @@ impl Actions {
     pub fn stopping(&mut self, now_ms: u64, out: &mut dyn Out) {
         self.closing = true;
         self.ended.clear();
-        for at in 0..self.running.len() {
+        let mut at = 0;
+        while at < self.running.len() {
+            if self.end_held(at, true, now_ms, out) {
+                continue;
+            }
             if self.running[at].stop.is_none() {
                 self.tell_to_stop(at, CancelReason::Stopping, now_ms, out);
             }
+            at += 1;
         }
     }
 
@@ -61,7 +66,15 @@ impl Actions {
     pub fn tick(&mut self, now_ms: u64, out: &mut dyn Out) {
         let mut at = 0;
         while at < self.running.len() {
+            if self.end_held(at, false, now_ms, out) {
+                continue;
+            }
             let run = &self.running[at];
+            if run.held.is_some() {
+                // Its program is between sessions: nothing to tell until it is back.
+                at += 1;
+                continue;
+            }
             if let Some(stop) = run.stop {
                 if stop.by_ms <= now_ms {
                     let why = if stop.reason == CancelReason::Deadline {
@@ -84,7 +97,13 @@ impl Actions {
     }
 
     /// Tells the program of the run at `at` to stop, for `reason`, and waits for its word.
-    fn tell_to_stop(&mut self, at: usize, reason: CancelReason, now_ms: u64, out: &mut dyn Out) {
+    pub(crate) fn tell_to_stop(
+        &mut self,
+        at: usize,
+        reason: CancelReason,
+        now_ms: u64,
+        out: &mut dyn Out,
+    ) {
         let run = &mut self.running[at];
         let _ = out.send(
             run.owner,

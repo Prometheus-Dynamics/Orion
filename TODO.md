@@ -238,6 +238,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I51](docs/prs/I51.md) The shared-memory ring crates come from the device library at 0d37cc55 (wave 19; needs I49)
 - [x] [I53](docs/prs/I53.md) What a program said before it closed is handled, though a write to it failed first (wave 19; needs I51)
 - [x] [I54](docs/prs/I54.md) A child killed on purpose for a system call leaves no core dump (wave 19; needs I53)
+- [x] [I50](docs/prs/I50.md) A detached run is kept while its program reconnects, and given back to it (wave 19; needs I54)
 
 ## J. The stack around Orion
 

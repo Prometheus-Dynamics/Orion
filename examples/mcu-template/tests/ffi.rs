@@ -153,6 +153,7 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         caller: "",
         session: 9,
         detached: true,
+        kept: false,
     });
     feed(&claim);
     // A second while the first waits is turned away at once.
@@ -165,6 +166,7 @@ fn a_c_firmware_declares_publishes_and_answers_runs() {
         caller: "",
         session: 0,
         detached: false,
+        kept: false,
     });
     feed(&second);
     exchange(&mut peer, &mut reader);

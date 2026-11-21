@@ -55,6 +55,7 @@ fn the_same_name_with_another_policy_from_its_owner_is_refused() {
             target: fan(),
             policy: Policy::new(Admits::ANYONE),
             description: "sets the speed",
+            keep_ms: 0,
         },
     );
     assert_eq!(changed, Err(Error::AlreadyExists));

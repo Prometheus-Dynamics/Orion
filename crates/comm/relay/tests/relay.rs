@@ -149,6 +149,7 @@ fn register(name: &str, admits: Admits) -> Register<'static> {
         target: fan(),
         policy: Policy::new(admits),
         description: "",
+        keep_ms: 0,
     }
 }
 

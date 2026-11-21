@@ -341,6 +341,8 @@ any program that connects adds its own.
 | `run.handle()` | The run's handle, which names it whatever becomes of this session |
 | `actions.attach_handle(handle)` | Comes back to the detached run a handle names |
 | `actions.register(decl, policy)` | Adds an action. The policy is required |
+| `actions.register_kept(decl, policy, keep)` | The same, and its detached runs are kept for up to `keep` while this program's session is lost |
+| `registration.refused(call)` | Whether node logic refused this program's finish of a run, and why |
 | `registration.poll()`, `.wait(for)` | The next run handed to this program, a request to stop one, or a caller gone |
 | `registration.progress(..)`, `.finish(..)` | Says how a run is doing, and how it ended |
 | `registration.finish_with_code(call, outcome, code, ..)` | The same, with the action's own status code |
@@ -410,6 +412,26 @@ kept as 16 bytes (`to_bytes`, `from_bytes`) or as text (`<16 hex>-<16 hex>`, by 
 took, detached or not. Once one has, the number is refused as `NotFound`, saying to use the handle. A
 node too old to give handles gives none, and `run.handle()` is `None`; so is a run carried to
 another node.
+
+**Kept runs.** A program whose job outlives a lost session (hardware still moving, say)
+registers with `actions.register_kept(decl, policy, keep)`. It needs a node at level 6
+(`Feature::KeptRuns`): below it, nothing is sent. When that program's session is lost, each
+detached run of that action it was doing is kept for `keep`, at most a minute
+(`MAX_KEEP_MS`). It is not ended:
+
+- its caller, attached, is told progress starting `restoring:`, and `restored:` when the program
+  is back;
+- a cancel asked meanwhile is kept and given to the program when it is back; a deadline that
+  passed meanwhile has the program told to stop as soon as it is back;
+- the program is back when a session of the same identity calls `actions.restore()`. Each run
+  kept for it comes again as a `Request::Run` with `kept: true`, the same `call`, no arguments
+  and the deadline left, before the registration is answered. Go on and finish it as usual;
+- a program not back within `keep` has the run end `Indeterminate` (6), code 0, with words
+  saying its session was lost and did not come back. A finish it sends after that is refused as
+  `RunGone`, naming that ending: `registration.refused(call)` reads it.
+
+While the session is lost, every call fails with an error whose `is_lost()` is true: hold the
+jobs, do not cancel them. Node logic stopping ends every kept run `Indeterminate` at once.
 
 A program that is not taking its runs does not have them pile up: 64 wait, and the next is
 answered as rejected, busy, at once.

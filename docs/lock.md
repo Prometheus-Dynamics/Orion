@@ -426,6 +426,13 @@ what to change.
   write found it gone first. Nothing on the wire changes, and nothing a program calls.
 - **I54.** `orion_measure::sched::without_system_calls`'s child leaves no core dump when it is
   killed for a system call. Nothing else changes.
+- **I50.** Kept runs (**Add**, level 6, `INTERFACE_LEVEL` 6): `Register` gains an appended
+  `keep_ms: u32` and `Claim` an appended `kept: bool` (older bytes are a prefix of the new);
+  `Actions::register_kept`, `Registration::refused`, `Request::Run { kept }` (a struct pattern
+  without `..` gains a field), `Feature::KeptRuns` (a `match` on `Feature` without `_` gains an
+  arm), `orion_action_list::MAX_KEEP_MS`. A struct literal of `Register` or `Claim` gains a
+  field. `Actions::restore` keeps the runs handed to it while it restores. No shared-memory
+  layout changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

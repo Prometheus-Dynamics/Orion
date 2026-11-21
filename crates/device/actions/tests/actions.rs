@@ -74,6 +74,7 @@ fn claim_as(
         caller: "operator:9f3c",
         session: 5,
         detached,
+        kept: false,
     };
     orion_device_host::Host::default().frame(&claim)
 }
