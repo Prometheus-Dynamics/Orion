@@ -9,7 +9,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use orion_connect::{Address, Client, ClientError, Options, Session};
 use orion_file_offers::FileOffersService;
@@ -381,14 +381,71 @@ fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
         }
     }
     asked_rx.recv().expect("asked");
+    let cut_at = Instant::now();
     cut();
+    // As soon as the comm core sees the program's link close: well inside the client's own
+    // silence limit (5 s), which is all it would have without being told.
     let ended = loop {
         if let Step::Done(transfer) = fetching.step(Duration::from_millis(50)).expect("step") {
             break transfer;
         }
+        let waited = cut_at.elapsed();
+        assert!(waited < Duration::from_secs(1), "not told after {waited:?}");
     };
     assert_eq!(ended.state, FileState::Rejected);
     assert_eq!(ended.detail, "the program that offers it went");
+    go.send(()).expect("go");
+    program.join().expect("program");
+}
+
+#[test]
+fn a_fetch_whose_comm_core_goes_ends_as_a_lost_session_at_once() {
+    let (socket, stop, _dir) = comm_core("core-gone");
+    let (ready, offered) = mpsc::channel();
+    let (asked_tx, asked_rx) = mpsc::channel();
+    let (go, gone) = mpsc::channel::<()>();
+    let socket_for = socket.clone();
+    let program = std::thread::spawn(move || {
+        let files = files(&socket_for, "logger");
+        let mut offer = files.offer("logs/").expect("offer");
+        ready.send(()).expect("ready");
+        let asked = offer.next(WAIT).expect("next").expect("asked");
+        let mut gift = asked.give(Cursor::new(content(1 << 20))).expect("give");
+        let _ = gift.step(Duration::from_millis(10)).expect("step");
+        asked_tx.send(()).expect("asked");
+        gone.recv().expect("go");
+    });
+    offered.recv().expect("offered");
+    let client = files(&socket, "collector");
+    let mut fetching = client
+        .start_fetch("logs/kernel", Cursor::new(Vec::new()), 0)
+        .expect("fetch");
+    loop {
+        if let Step::Progress { received, .. } =
+            fetching.step(Duration::from_millis(20)).expect("step")
+            && received > 0
+        {
+            break;
+        }
+    }
+    asked_rx.recv().expect("asked");
+    // The comm core goes mid-gift: its sockets close with it.
+    let stopped_at = Instant::now();
+    stop.send(()).expect("stop");
+    let error = loop {
+        match fetching.step(Duration::from_millis(50)) {
+            Ok(Step::Done(transfer)) => panic!("ended as {transfer:?}, not as a lost session"),
+            Ok(_) => assert!(
+                stopped_at.elapsed() < WAIT,
+                "the fetch never saw its session go"
+            ),
+            Err(error) => break error,
+        }
+    };
+    // As soon as its socket closes: well inside its silence limit (5 s).
+    let took = stopped_at.elapsed();
+    assert!(error.is_lost(), "{error}");
+    assert!(took < Duration::from_secs(1), "told after {took:?}");
     go.send(()).expect("go");
     program.join().expect("program");
 }

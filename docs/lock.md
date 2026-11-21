@@ -433,6 +433,8 @@ what to change.
   arm), `orion_action_list::MAX_KEEP_MS`. A struct literal of `Register` or `Claim` gains a
   field. `Actions::restore` keeps the runs handed to it while it restores. No shared-memory
   layout changes.
+- **I52.** Tests only: a fetch whose giving program dies, or whose comm core goes, ends within a
+  second, each held by a test. Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
