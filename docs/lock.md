@@ -424,6 +424,8 @@ what to change.
 - **I53.** A client that says something and closes while the comm core is writing to it is heard:
   what it sent before it closed is handled before its session ends, where it was dropped when the
   write found it gone first. Nothing on the wire changes, and nothing a program calls.
+- **I54.** `orion_measure::sched::without_system_calls`'s child leaves no core dump when it is
+  killed for a system call. Nothing else changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -16,7 +16,8 @@ pub enum SystemCalls {
 /// The child is a `fork` of this process with a seccomp filter that allows only `exit`. It
 /// shares nothing writable with the parent except shared mappings, so `body` should work on
 /// those: a ring, a doorbell. `body` must not allocate, lock or print: in a forked child of a
-/// threaded process those can hang, and all of them are system calls anyway.
+/// threaded process those can hang, and all of them are system calls anyway. A child killed
+/// for a system call leaves no core dump.
 pub fn without_system_calls(body: impl FnOnce() -> bool) -> SystemCalls {
     let allow_exit_only = [
         // Load the system call number.
@@ -49,16 +50,24 @@ pub fn without_system_calls(body: impl FnOnce() -> bool) -> SystemCalls {
         len: allow_exit_only.len() as u16,
         filter: allow_exit_only.as_ptr().cast_mut(),
     };
-    // SAFETY: the child only installs the filter (plain `prctl` calls on a program that
-    // outlives them), runs `body` under the contract above and leaves through a raw `exit`,
-    // never returning into the caller's frames. The parent only waits for it.
+    // SAFETY: the child only sets its core limit and installs the filter (plain `setrlimit` and
+    // `prctl` calls on values that outlive them), runs `body` under the contract above and
+    // leaves through a raw `exit`, never returning into the caller's frames. The parent only
+    // waits for it.
     let status = unsafe {
         let child = libc::fork();
         if child < 0 {
             return SystemCalls::Failed;
         }
         if child == 0 {
-            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0
+            // Killed by SIGSYS on purpose: no core dump of it. A limit of exactly 1 is what has
+            // the kernel skip a dump to a pipe (a crash handler) as well as to a file.
+            let one = libc::rlimit {
+                rlim_cur: 1,
+                rlim_max: 1,
+            };
+            if libc::setrlimit(libc::RLIMIT_CORE, &raw const one) != 0
+                || libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0
                 || libc::prctl(
                     libc::PR_SET_SECCOMP,
                     libc::SECCOMP_MODE_FILTER,
