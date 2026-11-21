@@ -630,6 +630,26 @@ impl Orion {
         Ok(self.actions.register(action, policy)?)
     }
 
+    /// As [`Orion::register_action`], and node logic keeps the action's detached runs going for
+    /// up to `keep` (a minute at most) while this program is between sessions. A program of
+    /// the same identity that registers the action again, through this session restored or a
+    /// new one, is handed each run still kept, as an [`actions::Request::Run`] with `kept`.
+    /// One not back in time ends indeterminate.
+    ///
+    /// # Errors
+    ///
+    /// As [`Orion::register_action`], and a node below the kept runs' level
+    /// (`ClientError::Level`, nothing sent).
+    #[cfg(feature = "actions")]
+    pub fn register_action_kept(
+        &self,
+        action: &actions::ActionDecl<'_>,
+        policy: actions::Policy,
+        keep: std::time::Duration,
+    ) -> Result<actions::Registration, Error> {
+        Ok(self.actions.register_kept(action, policy, keep)?)
+    }
+
     /// Opens a shell on the board as `account`: its login shell, or `command` for that shell
     /// to run, on `terminal` if one is given. With security on, a program on the board gets
     /// its own account (root any), and an operator one it was granted (`login`, or

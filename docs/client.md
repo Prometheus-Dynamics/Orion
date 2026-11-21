@@ -423,15 +423,22 @@ detached run of that action it was doing is kept for `keep`, at most a minute
   is back;
 - a cancel asked meanwhile is kept and given to the program when it is back; a deadline that
   passed meanwhile has the program told to stop as soon as it is back;
-- the program is back when a session of the same identity calls `actions.restore()`. Each run
-  kept for it comes again as a `Request::Run` with `kept: true`, the same `call`, no arguments
-  and the deadline left, before the registration is answered. Go on and finish it as usual;
+- the program is back when a session of the same identity (the same kind of caller, user and
+  program name) registers the action again: this session through `actions.restore()`, or a new
+  one. Each run kept for it comes again as a `Request::Run` with `kept: true`, the same `call`,
+  no arguments and the deadline left, before the registration is answered. Go on and finish it
+  as usual. A new session can do this only once node logic has seen the old one go: until then
+  the action is still the old session's, and registering it is refused as taken;
 - a program not back within `keep` has the run end `Indeterminate` (6), code 0, with words
   saying its session was lost and did not come back. A finish it sends after that is refused as
   `RunGone`, naming that ending: `registration.refused(call)` reads it.
 
 While the session is lost, every call fails with an error whose `is_lost()` is true: hold the
 jobs, do not cancel them. Node logic stopping ends every kept run `Indeterminate` at once.
+
+A provider asks the same of a resource's action with `describing.action_kept(name,
+description, policy, keep)`, and the facade with `orion.register_action_kept(decl, policy,
+keep)`. Both need the same level, and fail the same way below it.
 
 A program that is not taking its runs does not have them pile up: 64 wait, and the next is
 answered as rejected, busy, at once.

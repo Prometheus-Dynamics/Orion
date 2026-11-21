@@ -4,6 +4,9 @@
 #[cfg(feature = "full")]
 #[path = "facade.rs"]
 mod facade;
+#[cfg(feature = "actions")]
+#[path = "kept.rs"]
+mod kept;
 #[cfg(feature = "full")]
 #[path = "older.rs"]
 mod older;

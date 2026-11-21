@@ -240,6 +240,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I54](docs/prs/I54.md) A child killed on purpose for a system call leaves no core dump (wave 19; needs I53)
 - [x] [I50](docs/prs/I50.md) A detached run is kept while its program reconnects, and given back to it (wave 19; needs I54)
 - [x] [I52](docs/prs/I52.md) A fetch whose giver or comm core goes ends within a second, by test (wave 19; needs I50)
+- [x] [I56](docs/prs/I56.md) A provider's or the facade's action may be kept, and a new session of the same program is handed its runs (wave 19; needs I52)
 
 ## J. The stack around Orion
 

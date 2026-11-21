@@ -6,6 +6,7 @@ version.workspace = true
 license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+autotests = false
 
 [dependencies]
 orion-actions = { path = "../actions" }
@@ -21,6 +22,10 @@ orion-wire = { path = "../../core/wire" }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 shm-ring = { workspace = true }
 orion-stubs = { path = "../../testing/stubs" }
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [lints]
 workspace = true

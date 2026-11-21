@@ -435,6 +435,9 @@ what to change.
   layout changes.
 - **I52.** Tests only: a fetch whose giving program dies, or whose comm core goes, ends within a
   second, each held by a test. Nothing a program calls changes.
+- **I56.** `Describing::action_kept(name, description, policy, keep)` and
+  `Orion::register_action_kept(decl, policy, keep)`: kept runs (I50) for a provider's resource and
+  through the facade. Additive; nothing on the wire changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

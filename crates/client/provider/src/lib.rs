@@ -14,6 +14,7 @@
 //! `fan.left.speed` and the action `fan.left.set`.
 
 use std::fmt;
+use std::time::Duration;
 
 use orion_actions::{ActionDecl, Actions, Policy, Registration, Target};
 use orion_connect::{Client, ClientError};
@@ -155,15 +156,46 @@ impl Describing {
         description: &str,
         policy: Policy,
     ) -> Result<(), ClientError> {
+        self.action_keeping(name, description, policy, None)
+    }
+
+    /// As [`Describing::action`], and node logic keeps the action's detached runs going for up
+    /// to `keep` while this program is between sessions: a program of the same identity that
+    /// registers the action again, through a session restored or a new one, is handed each
+    /// run still kept, as a [`orion_actions::Request::Run`] with `kept`, on
+    /// [`Resource::requests`]. See [`Actions::register_kept`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Actions::register_kept`]: [`ClientError::Level`] from a node below
+    /// [`orion_connect::Feature::KeptRuns`]'s level, with nothing sent.
+    pub fn action_kept(
+        &mut self,
+        name: &str,
+        description: &str,
+        policy: Policy,
+        keep: Duration,
+    ) -> Result<(), ClientError> {
+        self.action_keeping(name, description, policy, Some(keep))
+    }
+
+    fn action_keeping(
+        &mut self,
+        name: &str,
+        description: &str,
+        policy: Policy,
+        keep: Option<Duration>,
+    ) -> Result<(), ClientError> {
         let full = format!("{}.{name}", self.name);
-        let registration = self.provider.actions.register(
-            &ActionDecl {
-                name: &full,
-                target: Target::Resource(self.name.clone()),
-                description,
-            },
-            policy,
-        )?;
+        let decl = ActionDecl {
+            name: &full,
+            target: Target::Resource(self.name.clone()),
+            description,
+        };
+        let registration = match keep {
+            Some(keep) => self.provider.actions.register_kept(&decl, policy, keep)?,
+            None => self.provider.actions.register(&decl, policy)?,
+        };
         self.requests = Some(registration);
         self.actions.push(full);
         Ok(())
