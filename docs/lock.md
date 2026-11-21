@@ -415,6 +415,9 @@ what to change.
 - **I48.** The seven `shm-*` crates are pinned to the device library's `c65d234f`, through the
   `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
   calls changes.
+- **I49.** A gate lane or the feature matrix that selects nothing fails instead of passing,
+  and a change to `scripts/size-gate.sh` measures every size again. Nothing a program calls
+  changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

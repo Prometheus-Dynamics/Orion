@@ -234,6 +234,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I44](docs/prs/I44.md) The comm core's tests run as each shipped binary builds it (wave 19; needs I47)
 - [x] [I45](docs/prs/I45.md) A build lane item that passed on exactly these inputs is not run again (wave 19; needs I44)
 - [x] [I48](docs/prs/I48.md) The shared-memory ring crates come from the device library at c65d234f (wave 19; needs I45)
+- [x] [I49](docs/prs/I49.md) A selection that matches nothing fails, and the size key holds the size gate's script (wave 19; needs I48)
 
 ## J. The stack around Orion
 

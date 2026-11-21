@@ -152,6 +152,7 @@ if [ "${1:-}" = "--self-test" ]; then
         ".cargo/config.toml|# planted|rocav" \
         "rust-toolchain.toml|# planted|rocav" \
         "scripts/size-key.py|# planted|rocav" \
+        "scripts/size-gate.sh|# planted|rocav" \
         "scripts/zigcc/aarch64-unknown-linux-musl|# planted|a" \
         "docs/lock.md|planted|" \
         "TODO.md|planted|"; do

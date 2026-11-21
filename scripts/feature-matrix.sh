@@ -21,6 +21,14 @@ for package in json.load(sys.stdin)["packages"]:
     print(name, "--all-features")
 ' "$@")
 
+# A selection that matches nothing is a failure, never a pass: a listing that failed (the
+# process substitution above hides its status) or a crate name that matches no crate with
+# features would otherwise check nothing and say so as passed.
+if [ "${#builds[@]}" -eq 0 ]; then
+  echo "feature matrix: no build selected${*:+ for $*}: nothing was checked" >&2
+  exit 1
+fi
+
 # In the gate (GATE_LANE_STATE_DIR set), a build that passed before on exactly these inputs is
 # not made again (scripts/lane-reuse.py), and each that passes is recorded. Asked for crates by
 # name, every build runs.

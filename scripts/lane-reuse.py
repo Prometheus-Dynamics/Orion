@@ -38,6 +38,9 @@ repository's common git directory, shared by its worktrees: `orion-lane-records/
 holding a line with the hash of the scripts above, which an older or hand-made record lacks and
 so is never read as a pass.
 
+A lane that selects no item fails (`plan` and `status`), never passes: only `--drop LANE:WHY`
+leaves a lane out, and the gate's line says `not-run(WHY)`.
+
 A lane is never reused for longer than this: one whose last full run is 10 or more commits
 behind HEAD, or 3 days old, runs in full, every item, and so does one that has never run in full
 here, and every lane when GATE_LANE_REUSE=0. An item with no key (a kind this script does not
@@ -331,6 +334,10 @@ def behind(lane):
 
 
 def plan(lane, state, items):
+    if not items:
+        # A lane that selects nothing checked nothing: it fails, and is never recorded as
+        # passed. A lane left out on purpose is `--drop LANE:WHY`, which says not-run.
+        sys.exit(f"lane-reuse.py: {lane} selected no item: nothing would be checked")
     keys = Keys()
     why = behind(lane)
     reused = 0
@@ -379,6 +386,8 @@ def record(state, item):
 
 def status(lane, state):
     rows = read_state(state)
+    if not rows:
+        sys.exit(f"lane-reuse.py: {lane} had no item: not passed")
     reused = sum(1 for _, _, how in rows if how == "reused")
     if reused == 0:
         os.makedirs(records(), exist_ok=True)

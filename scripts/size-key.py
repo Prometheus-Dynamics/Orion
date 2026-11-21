@@ -10,7 +10,8 @@ A build's key is a hash of everything that can change the bytes it makes:
   root `Cargo.toml` (profiles, features, patches, workspace dependencies), `rust-toolchain.toml`,
   every cargo config file cargo reads (`.cargo/config.toml` here and in each directory above it,
   and in CARGO_HOME), and where CARGO_HOME is (a dependency's paths are in its panic messages);
-- this script, so a change to what a key holds measures everything again;
+- this script and scripts/size-gate.sh (what it builds, and how), so a change to either
+  measures everything again;
 - the toolchain (`rustc -vV`, `cargo -V`), the package, the target, and the C compiler and
   linker: `cc --version` for this machine, zig's version and the wrapper scripts for a board;
 - every environment variable a build or a build script reads by convention (CARGO_*, RUST*,
@@ -147,7 +148,10 @@ class Workspace:
     def shared(self):
         if self.shared_cache is None:
             inputs = [("key version", KEY_VERSION)]
-            for name in ("Cargo.lock", "Cargo.toml", "rust-toolchain.toml", "scripts/size-key.py"):
+            # size-gate.sh builds what is measured (its profiles, flags and toolchains): a change
+            # to it measures everything again.
+            names = ("Cargo.lock", "Cargo.toml", "rust-toolchain.toml", "scripts/size-key.py", "scripts/size-gate.sh")
+            for name in names:
                 inputs.append((name, file_digest(os.path.join(self.root, name))))
             for path in cargo_configs(self.root):
                 shown = path.replace(self.root, "<root>", 1) if path.startswith(self.root) else path
