@@ -70,7 +70,14 @@ async fn expect(connection: &mut UnixConnection, want: u8) -> Vec<u8> {
     }
 }
 
+/// Subscribes and waits for the topic to open: a topic that never opens fails the test, not hangs it.
 async fn watch(client: &mut Client, topic: &str) -> Reader {
+    tokio::time::timeout(Duration::from_secs(10), subscribe(client, topic))
+        .await
+        .unwrap_or_else(|_| panic!("{topic} never opened"))
+}
+
+async fn subscribe(client: &mut Client, topic: &str) -> Reader {
     let seq = client.subscribe(topic, None, &[]).await;
     loop {
         match client.next().await {
@@ -88,6 +95,8 @@ async fn watch(client: &mut Client, topic: &str) -> Reader {
     }
 }
 
+/// Only the status topics (the `self-status` feature) are read field by field.
+#[cfg(feature = "self-status")]
 fn int(reader: &mut Reader, field: u16) -> Option<i64> {
     reader
         .latest(FieldId(field))
@@ -95,6 +104,8 @@ fn int(reader: &mut Reader, field: u16) -> Option<i64> {
         .map(i64::from_le_bytes)
 }
 
+/// Waits a few seconds for a status topic (the `self-status` feature) to show something.
+#[cfg(feature = "self-status")]
 async fn until(what: &str, mut done: impl FnMut() -> bool) {
     for _ in 0..2000 {
         if done() {
@@ -109,26 +120,32 @@ async fn until(what: &str, mut done: impl FnMut() -> bool) {
 fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
     run(async {
         let dir = temp("alone");
-        // No node logic, no other program, nothing on the links it is told about.
-        let extra = format!(
-            "peer.listen = 127.0.0.1:0\nssh.listen = 127.0.0.1:0\nssh.sandbox = false\nlinks.serial = uart0={}/no-such-port\nlinks.usb = usb0\nlinks.can = can9=no-such-can:0x100:0x180:1-2\n",
-            dir.display()
+        // No node logic, no other program, nothing on the links it is told about: those built
+        // in (a link that is not is warned about, in `a_link_not_built_in_is_warned_about`).
+        let mut extra = String::from(
+            "peer.listen = 127.0.0.1:0\nssh.listen = 127.0.0.1:0\nssh.sandbox = false\n",
         );
+        let mut parts = vec!["orion.sock", "127.0.0.1:", "topics", "hello", "network"];
+        if cfg!(feature = "self-status") {
+            parts.push("status");
+        }
+        if cfg!(feature = "link-serial") {
+            extra += &format!("links.serial = uart0={}/no-such-port\n", dir.display());
+            parts.push("serial link");
+        }
+        if cfg!(feature = "link-usb") {
+            extra += "links.usb = usb0\n";
+            parts.push("usb link");
+        }
+        if cfg!(feature = "link-can") {
+            extra += "links.can = can9=no-such-can:0x100:0x180:1-2\n";
+            parts.push("can bus");
+        }
         let core = CommCore::start(settings(&dir, &extra))
             .await
             .expect("start");
         let summary = core.summary();
-        for part in [
-            "orion.sock",
-            "127.0.0.1:",
-            "topics",
-            "hello",
-            "status",
-            "network",
-            "serial link",
-            "usb link",
-            "can bus",
-        ] {
+        for part in parts {
             assert!(summary.contains(part), "{summary}");
         }
 
@@ -198,24 +215,36 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
         );
 
         // The board's vital signs and the comm core's own counters are topics too.
-        let mut host = watch(&mut subscriber, "orion.host").await;
-        until("the host is read", || int(&mut host, 0).is_some()).await;
-        assert!(int(&mut host, 0).expect("uptime") > 0 && int(&mut host, 1).expect("memory") > 0);
-        let mut counters = watch(&mut subscriber, "orion.comm").await;
-        until("the comm core counts itself", || {
-            int(&mut counters, 0) == Some(3)
-        })
-        .await;
+        #[cfg(feature = "self-status")]
+        {
+            let mut host = watch(&mut subscriber, "orion.host").await;
+            until("the host is read", || int(&mut host, 0).is_some()).await;
+            assert!(
+                int(&mut host, 0).expect("uptime") > 0 && int(&mut host, 1).expect("memory") > 0
+            );
+            let mut counters = watch(&mut subscriber, "orion.comm").await;
+            until("the comm core counts itself", || {
+                int(&mut counters, 0) == Some(3)
+            })
+            .await;
+        }
 
-        // A link with nothing on it keeps trying, and says so, without disturbing anything.
-        let mut link = watch(&mut subscriber, "orion.state.link.uart0").await;
-        until("the serial link is retrying", || {
-            int(&mut link, 0) == Some(2)
-        })
-        .await;
-        let mut bus = watch(&mut subscriber, "orion.state.link.can9").await;
-        until("the CAN bus is retrying", || int(&mut bus, 0) == Some(2)).await;
-        assert!(int(&mut link, 1).expect("failures") >= 1);
+        // A link with nothing on it keeps trying, and says so (on its status topic), without
+        // disturbing anything.
+        #[cfg(all(feature = "self-status", feature = "link-serial"))]
+        {
+            let mut link = watch(&mut subscriber, "orion.state.link.uart0").await;
+            until("the serial link is retrying", || {
+                int(&mut link, 0) == Some(2)
+            })
+            .await;
+            assert!(int(&mut link, 1).expect("failures") >= 1);
+        }
+        #[cfg(all(feature = "self-status", feature = "link-can"))]
+        {
+            let mut bus = watch(&mut subscriber, "orion.state.link.can9").await;
+            until("the CAN bus is retrying", || int(&mut bus, 0) == Some(2)).await;
+        }
 
         // The network way in answers as well.
         let addr = core.peer_addr().expect("listening");
@@ -253,6 +282,40 @@ fn the_comm_core_starts_alone_and_serves_hello_and_topics() {
         assert!(tokio::net::TcpStream::connect(addr).await.is_err());
         assert!(tokio::net::TcpStream::connect(ssh).await.is_err());
     });
+}
+
+/// A link this build does not have is warned about, not taken; one it has is taken without a
+/// word. Each build checks the links it leaves out, whatever its features.
+#[test]
+fn a_link_not_built_in_is_warned_about() {
+    let links = [
+        (
+            "links.serial",
+            "uart0=/dev/null",
+            cfg!(feature = "link-serial"),
+        ),
+        ("links.usb", "usb0", cfg!(feature = "link-usb")),
+        (
+            "links.can",
+            "can9=no-such-can:0x100:0x180:1-2",
+            cfg!(feature = "link-can"),
+        ),
+        (
+            "links.sealed",
+            "far=127.0.0.1:1",
+            cfg!(feature = "link-sealed"),
+        ),
+    ];
+    for (key, value, built) in links {
+        let text = format!("node.name = board\n{key} = {value}\n");
+        let mut source = Source::parse(&text, Vec::new()).expect("source");
+        CommSettings::from_source(&mut source).expect(key);
+        let warned = source
+            .warnings()
+            .iter()
+            .any(|warning| warning.to_string().contains(key));
+        assert_eq!(warned, !built, "{key}: {:?}", source.warnings());
+    }
 }
 
 fn orion_tcp_options(core: &CommCore) -> orion_tcp::TcpOptions {
@@ -376,11 +439,14 @@ fn a_comm_core_that_cannot_start_says_which_part_and_one_whose_network_address_i
         .await;
         let _topic = on_second.declare("served.meanwhile", 2).await;
         // A bus whose identifiers cannot work.
-        let third = temp("twice-c");
-        let error = CommCore::start(settings(&third, "links.can = can0=can0:0x7FF:0x100:1\n"))
-            .await
-            .expect_err("refused");
-        assert!(error.to_string().starts_with("links.can"), "{error}");
+        #[cfg(feature = "link-can")]
+        {
+            let third = temp("twice-c");
+            let error = CommCore::start(settings(&third, "links.can = can0=can0:0x7FF:0x100:1\n"))
+                .await
+                .expect_err("refused");
+            assert!(error.to_string().starts_with("links.can"), "{error}");
+        }
 
         // The first is still serving.
         let mut client = Client::open(

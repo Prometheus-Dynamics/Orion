@@ -405,6 +405,9 @@ what to change.
 - **I47.** The seven `shm-*` crates are pinned to the device library's `5ee2f64a`, through the
   `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
   calls changes.
+- **I44.** The gate also runs the comm core's tests with the features each shipped binary
+  builds it with (`orion-bin`, `orion-recovery-bin`), and those binaries' tests alone, beside the
+  `--all-features` run. The comm core's tests hold under each. Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

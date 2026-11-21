@@ -189,6 +189,25 @@ tests() {
   fi
 }
 
+# The comm core's tests again, built as each shipped binary builds it, and those binaries' own
+# tests alone, so with only what they ship. `--all-features` above is no build that ships: a
+# test that holds only with every feature on, or a part that needs one the binary leaves out,
+# shows only here. scripts/shipped-features.py reads the sets from the binaries' manifests.
+shipped_tests() {
+  local binary line args run=(cargo test)
+  if cargo nextest --version > /dev/null 2>&1; then
+    run=(cargo nextest run --no-tests=fail)
+  fi
+  for binary in orion-bin orion-recovery-bin; do
+    line="$(scripts/shipped-features.py "$binary" orion-comm-app)" || return 1
+    read -ra args <<< "$line"
+    echo "    orion-comm-app as $binary builds it: ${args[*]}"
+    "${run[@]}" -p orion-comm-app "${args[@]}" || return 1
+    echo "    $binary alone"
+    "${run[@]}" -p "$binary" || return 1
+  done
+}
+
 # Every filter in .config/nextest.toml (a priority, a test group) matches a test: a test renamed
 # or moved into a shared binary would otherwise lose it without a word. Against the list nextest
 # gives for the binaries the tests just ran; nothing to check without nextest.
@@ -299,7 +318,7 @@ other_systems() {
 }
 
 # The functions a step runs in a shell of its own (`bounded`), and what they call.
-export -f lockfile tests test_filters other_systems timed
+export -f lockfile tests shipped_tests test_filters other_systems timed
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
@@ -333,6 +352,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
 
   main clippy 163 cargo clippy --workspace --all-targets --all-features -- -D warnings
   main tests 630 tests
+  main "the shipped builds' tests" 300 shipped_tests
   main "test filters" 8 test_filters
   main "the check compiled out" 17 cargo test -q -p orion-check --no-default-features --lib
   # In this shell, where the lanes are its children: each step in them has its own bound.

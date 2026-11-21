@@ -231,6 +231,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I43](docs/prs/I43.md) A gift whose file cannot be read ends the fetch at once, saying so (wave 19; needs I42)
 - [x] [I46](docs/prs/I46.md) The shared-memory ring crates come from the device library at c8f1b3d2 (wave 19; needs I43)
 - [x] [I47](docs/prs/I47.md) The shared-memory ring crates come from the device library at 5ee2f64a (wave 19; needs I46)
+- [x] [I44](docs/prs/I44.md) The comm core's tests run as each shipped binary builds it (wave 19; needs I47)
 
 ## J. The stack around Orion
 
