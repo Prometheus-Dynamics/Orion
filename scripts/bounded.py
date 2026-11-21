@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Runs one gate step within a bound, and leaves nothing of it running.
+"""Runs one gate step within its bounds, and leaves nothing of it running.
 
-    bounded.py SECONDS LABEL -- COMMAND...
+    bounded.py SECONDS LABEL [--cpu CPU_SECONDS] [--stall SECONDS] -- COMMAND...
     bounded.py --self-test
 
 The step runs in a session and process group of its own, with /dev/null for input and a file
@@ -15,7 +15,7 @@ found. When the step ends with processes still running, or passes its bound, eac
 under this script is sent TERM, and KILL a few seconds later if it is still running. Exit
 status:
 
-- past its bound: 124, with `TIMED OUT: LABEL` and the bound;
+- past a bound: 124, with `TIMED OUT`, which bound, and what the step had used;
 - ended, but processes it started were still running: 125, naming each (they are ended too);
 - ended, but it left something in its TMPDIR: 125, naming each entry;
 - otherwise the step's own.
@@ -25,11 +25,22 @@ Each step gets a TMPDIR of its own, empty, with a short name (a socket under it 
 gate's tests left 176 entries, 139 MB, in a shared one, and a full tmpfs fails unrelated steps
 with errors that say nothing of it. Whatever is left is named, then removed.
 
+A step has up to three bounds, and a report that says which it passed:
+
+- slow: it used more than `--cpu` CPU seconds, its whole tree's (every process under this
+  script, and what those that ended had used);
+- stalled: its tree used no CPU for `--stall` seconds (under 0.1 CPU seconds in all): a hang,
+  found in that time, however long its other bounds;
+- SECONDS of wall time: a wide backstop. With `--cpu`, a step past it had used less CPU than its
+  bound and was still moving, so it is reported starved: given too little of the machine.
+
+A step that ends says the CPU seconds it used.
+
 TERM, INT or HUP to this script ends the step and every process under it the same way.
 
 `--self-test` plants a sleeper, a process that ignores TERM, an orphan that holds the output,
-a stop from outside and a step that leaves a file in its TMPDIR, and checks each ends within its
-bound with nothing left running, and the leftover is named.
+a stop from outside, a step that leaves a file in its TMPDIR, a stalled step, a slow one and a
+starved one, and checks each ends within its bound with nothing left running, named as it ended.
 """
 
 import ctypes
@@ -45,10 +56,23 @@ import time
 # Seconds between TERM and KILL. The self-test shortens it for its own runs.
 GRACE = float(os.environ.get("ORION_BOUND_GRACE", "5"))
 PR_SET_CHILD_SUBREAPER = 36
+TICK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+# How often the step's CPU is read, and the least it must use in a stall bound to be moving.
+SAMPLE = 1.0
+MOVING = 0.1
 
 
 class Bound(Exception):
     pass
+
+
+class Watch:
+    """What the step has used, and which bound it passed: read by a thread beside the wait."""
+
+    def __init__(self, cpu, stall):
+        self.cpu, self.stall = cpu, stall
+        self.used = 0.0
+        self.passed = None
 
 
 class Stopped(Exception):
@@ -141,6 +165,56 @@ def anything_left(subreaper, group):
         return True
 
 
+def children_of(pid):
+    found = []
+    try:
+        for task in os.listdir(f"/proc/{pid}/task"):
+            with open(f"/proc/{pid}/task/{task}/children") as file:
+                found.extend(int(child) for child in file.read().split())
+    except OSError:
+        pass
+    return found
+
+
+def tree_cpu(root):
+    """CPU seconds used by everything under ROOT: each process below it, live or a zombie,
+    with what it waited for, and what ROOT itself waited for. A process is counted by whoever
+    waits for it, once. Only ROOT's tree is read, not every process on the machine: this runs
+    every second, beside every step."""
+    ticks, todo = 0, children_of(root)
+    while todo:
+        pid = todo.pop()
+        try:
+            with open(f"/proc/{pid}/stat", "rb") as file:
+                stat = file.read()
+        except OSError:
+            continue
+        ticks += sum(int(f) for f in stat[stat.rindex(b")") + 2 :].split()[11:15])
+        todo.extend(children_of(pid))
+    mine = os.times()
+    return ticks / TICK + mine.children_user + mine.children_system
+
+
+def watch(state, done):
+    """Reads the step's CPU until DONE is set; past `--cpu`, or not moving for `--stall`,
+    says which and raises the alarm, which ends the step."""
+    me = os.getpid()
+    moved_at, moved_from = time.monotonic(), 0.0
+    while not done.wait(SAMPLE):
+        state.used = max(state.used, tree_cpu(me))
+        now = time.monotonic()
+        if state.used - moved_from >= MOVING:
+            moved_at, moved_from = now, state.used
+        if state.cpu is not None and state.used > state.cpu:
+            state.passed = "slow"
+        elif state.stall is not None and now - moved_at >= state.stall:
+            state.passed = "stalled"
+        else:
+            continue
+        os.kill(me, signal.SIGALRM)
+        return
+
+
 def reap():
     while True:
         try:
@@ -198,11 +272,16 @@ def copy(path, stop, out):
             stop.wait(0.1)
 
 
-def run(bound, label, command):
+def run(bound, label, command, cpu=None, stall=None):
     subreaper = become_subreaper()
+    state = Watch(cpu, stall)
+    done = threading.Event()
+    watcher = threading.Thread(target=watch, args=(state, done), daemon=True)
 
     def on_alarm(number, frame):
-        raise Bound()
+        # The watcher's alarm can land just as the step ends: it has ended, within its bounds.
+        if not done.is_set():
+            raise Bound()
 
     def on_stop(number, frame):
         raise Stopped(number)
@@ -216,8 +295,10 @@ def run(bound, label, command):
     stop = threading.Event()
     copier = threading.Thread(target=copy, args=(log.name, stop, sys.stdout.buffer), daemon=True)
     group = None
+    started = time.monotonic()
 
     def drain():
+        done.set()
         stop.set()
         if copier.is_alive():
             copier.join()
@@ -239,13 +320,17 @@ def run(bound, label, command):
                 print(f"    {label}: cannot run {command[0]}: {error}", flush=True)
                 return 127
             group = child.pid
+            started = time.monotonic()
             copier.start()
+            watcher.start()
             status = None
             while status is None:
                 ended, raw = os.waitpid(-1, 0)
                 if ended == child.pid:
                     status = os.waitstatus_to_exitcode(raw)
                     child.returncode = status
+            done.set()
+            used = max(state.used, tree_cpu(os.getpid()))
             left = []
             if anything_left(subreaper, group):
                 left = [(pid, command_line(pid)) for pid in under(os.getpid())]
@@ -253,6 +338,7 @@ def run(bound, label, command):
                 end_all(group)
             signal.alarm(0)
             drain()
+            print(f"    {label}: {used:.1f} CPU-s", flush=True)
             if left:
                 print(f"    {label}: ended, but left these running (now ended):", flush=True)
                 for pid, line in left:
@@ -268,10 +354,24 @@ def run(bound, label, command):
                 return 125
             return 128 - status if status < 0 else status
         except Bound:
+            done.set()
+            used = max(state.used, tree_cpu(os.getpid()))
+            took = time.monotonic() - started
             end_all(group)
             drain()
             how = "every process under it" if subreaper else "its process group"
-            print(f"    {label}: TIMED OUT after {bound} s (bound {bound} s); {how} ended", flush=True)
+            if state.passed == "slow":
+                why = f"slow: {used:.1f} CPU-s used, past its bound of {cpu} CPU-s"
+            elif state.passed == "stalled":
+                why = f"stalled: no CPU used for {stall} s, {used:.1f} CPU-s in all"
+            elif cpu is not None:
+                why = (
+                    f"starved: past its backstop of {bound} s, with {used:.1f} CPU-s used of"
+                    f" its {cpu} and still moving"
+                )
+            else:
+                why = f"past its bound of {bound} s, with {used:.1f} CPU-s used"
+            print(f"    {label}: TIMED OUT after {took:.0f} s, {why}; {how} ended", flush=True)
             return 124
         except Stopped as stopped:
             signal.alarm(0)
@@ -292,7 +392,8 @@ def self_test():
     env = dict(os.environ, ORION_BOUND_GRACE="1")
     me = [sys.executable, os.path.abspath(__file__)]
     cases = {
-        # name: (bound, shell command, exit wanted, most seconds, what the output must hold)
+        # name: (bound, shell command, exit wanted, most seconds, what the output must hold);
+        # a bound may carry the step's other bounds: "SECONDS --cpu N --stall N".
         "passes its status and output": (20, "echo out; echo err >&2; exit 3", 3, 10, "err"),
         "a sleeper": (1, f"exec -a {marker}-sleeper sleep 1000", 124, 6, "TIMED OUT"),
         "one that ignores TERM, in a session of its own": (
@@ -324,6 +425,32 @@ def self_test():
             10,
             f"left these in its TMPDIR (now removed):\n      {marker}-left",
         ),
+        # Its tree uses no CPU: ended at its stall bound, long before its others.
+        "a stalled one": (
+            "100 --cpu 100 --stall 2",
+            f"exec -a {marker}-stalled sleep 1000",
+            124,
+            6,
+            "stalled: no CPU used for 2 s",
+        ),
+        # A child spins, under a parent that waits: the child's CPU counts.
+        "a slow one": (
+            "100 --cpu 1 --stall 100",
+            f"bash -c 'exec -a {marker}-slow bash -c \"while :; do :; done\"'; true",
+            124,
+            6,
+            "slow: ",
+        ),
+        # Within its CPU and moving, past its wall time.
+        "a starved one": (
+            "2 --cpu 100 --stall 100",
+            f"exec -a {marker}-starved bash -c 'while :; do sleep 0.05; : $((i++)); done'",
+            124,
+            7,
+            "starved: past its backstop of 2 s",
+        ),
+        # A step that ends says what it used.
+        "says what it used": (20, "exit 0", 0, 10, " CPU-s"),
     }
     # A case's time counts from when its step runs, seen by the name its process takes: on a
     # loaded machine the interpreter alone can take seconds to start (docs/flakes.md).
@@ -332,6 +459,9 @@ def self_test():
         "one that ignores TERM, in a session of its own": f"{marker}-deaf",
         "an orphan holding the output": f"{marker}-orphan",
         "a stop from outside": f"{marker}-stop",
+        "a stalled one": f"{marker}-stalled",
+        "a slow one": f"{marker}-slow",
+        "a starved one": f"{marker}-starved",
     }
     results, failures = {}, []
 
@@ -355,7 +485,7 @@ def self_test():
     def one(name, bound, script, stopped=False):
         start = time.monotonic()
         process = subprocess.Popen(
-            me + [str(bound), name, "--", "bash", "-c", script],
+            me + str(bound).split(" ", 1)[:1] + [name] + str(bound).split()[1:] + ["--", "bash", "-c", script],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=env,
@@ -426,13 +556,26 @@ def self_test():
     return 0
 
 
+USAGE = "usage: bounded.py SECONDS LABEL [--cpu CPU_SECONDS] [--stall SECONDS] -- COMMAND..."
+
+
 def main(argv):
     if argv == ["--self-test"]:
         return self_test()
-    if len(argv) < 4 or argv[2] != "--" or not argv[0].isdigit() or int(argv[0]) < 1:
-        print("usage: bounded.py SECONDS LABEL -- COMMAND...", file=sys.stderr)
+    if len(argv) < 4 or not argv[0].isdigit() or int(argv[0]) < 1:
+        print(USAGE, file=sys.stderr)
         return 2
-    return run(int(argv[0]), argv[1], argv[3:])
+    options, at = {}, 2
+    while at + 1 < len(argv) and argv[at] in ("--cpu", "--stall") and argv[at] not in options:
+        if not argv[at + 1].isdigit() or int(argv[at + 1]) < 1:
+            print(f"{argv[at]} takes whole seconds, at least 1, not {argv[at + 1]!r}", file=sys.stderr)
+            return 2
+        options[argv[at]] = int(argv[at + 1])
+        at += 2
+    if at + 1 >= len(argv) or argv[at] != "--":
+        print(USAGE, file=sys.stderr)
+        return 2
+    return run(int(argv[0]), argv[1], argv[at + 1 :], options.get("--cpu"), options.get("--stall"))
 
 
 if __name__ == "__main__":

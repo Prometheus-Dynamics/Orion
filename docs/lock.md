@@ -441,6 +441,10 @@ what to change.
 - **I57.** A run's deadline and its program's bound (`CONFIRM_MS` or the node's) count from the
   end of the millisecond they were set in, so `Actions::next_deadline` and the tick that acts on
   one are 1 ms later than before. Nothing on the wire changes, and nothing a program calls.
+- **I55.** `scripts/bounded.py` takes `--cpu` and `--stall` bounds beside its wall bound and
+  says which a step passed: slow, stalled or starved. The gate ends a step whose processes use
+  no CPU for a minute as stalled, and each step says its CPU seconds. Every wall bound is as it
+  was. Nothing built changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

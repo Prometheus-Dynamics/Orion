@@ -50,13 +50,18 @@ done
 # leaves can hold the gate's output open. Each step has a TMPDIR of its own, and fails if it
 # leaves anything there.
 #
+# A hang is found apart from that bound: a step whose processes use no CPU for a minute
+# (STALL_SECONDS) has stalled, and is ended then, named so, however long its bound. Each step
+# says the CPU seconds it used.
+#
 # A step written without its number does not run (exit 2): it would be bounded by nothing
 # anyone chose. On a machine slower than any these numbers came from, GATE_STEP_BOUND_SCALE (a
-# whole number, 1 if unset) multiplies every bound.
+# whole number, 1 if unset) multiplies every bound, the stall's among them.
 #
 # bounded <label> <slowest seconds> <command...>: a command, or a function of this script.
+STALL_SECONDS=60
 bounded() {
-  local label="$1" scale="${GATE_STEP_BOUND_SCALE:-1}" bound
+  local label="$1" scale="${GATE_STEP_BOUND_SCALE:-1}" bound stall
   if ! [[ "${2:-}" =~ ^[1-9][0-9]*$ ]]; then
     echo "$label: no bound: '${2:-}' is not its slowest time in seconds" >&2
     exit 2
@@ -69,10 +74,12 @@ bounded() {
   shift 2
   [ "$bound" -ge 60 ] || bound=60
   bound=$((bound * scale))
+  stall=$((STALL_SECONDS * scale))
   if declare -F "$1" > /dev/null; then
-    scripts/bounded.py "$bound" "$label" -- bash -c 'set -euo pipefail; "$@"' "$label" "$@"
+    scripts/bounded.py "$bound" "$label" --stall "$stall" -- \
+      bash -c 'set -euo pipefail; "$@"' "$label" "$@"
   else
-    scripts/bounded.py "$bound" "$label" -- "$@"
+    scripts/bounded.py "$bound" "$label" --stall "$stall" -- "$@"
   fi
 }
 
@@ -264,7 +271,7 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
 fi
 
 main "push guard" 3 scripts/push.sh --self-test
-main "step bounds self-test" 3 scripts/bounded.py --self-test
+main "step bounds self-test" 4 scripts/bounded.py --self-test
 # A step with no number, or a scale that is not one, refuses to run.
 bounds_refuse() {
   local number scale status
