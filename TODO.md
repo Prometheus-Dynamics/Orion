@@ -243,7 +243,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I56](docs/prs/I56.md) A provider's or the facade's action may be kept, and a new session of the same program is handed its runs (wave 19; needs I52)
 - [x] [I57](docs/prs/I57.md) A run's deadline and its program's bound are never short on a clock of whole milliseconds (wave 19; needs I56)
 - [x] [I55](docs/prs/I55.md) A gate step that stops using CPU is ended as stalled within a minute, and each step says its CPU seconds (wave 19; needs I57)
-- [ ] I55b Each gate step is bounded by three times its slowest green CPU seconds, measured here and in CI (wave 19; needs I55)
+- [x] [I55b](docs/prs/I55b.md) Each gate step is bounded by three times its slowest green CPU seconds, measured here and in CI (wave 19; needs I55)
 
 ## J. The stack around Orion
 

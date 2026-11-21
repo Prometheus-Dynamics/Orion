@@ -445,6 +445,9 @@ what to change.
   says which a step passed: slow, stalled or starved. The gate ends a step whose processes use
   no CPU for a minute as stalled, and each step says its CPU seconds. Every wall bound is as it
   was. Nothing built changes.
+- **I55b.** Each gate step's number is `WALL:CPU`; past three times its CPU number (at least
+  60 CPU seconds) a step is ended as slow. A step without both numbers does not run. Every wall
+  bound is as it was. Nothing built changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

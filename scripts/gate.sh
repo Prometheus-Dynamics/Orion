@@ -42,48 +42,55 @@ done
 # Debug and test builds are incremental (cargo's default): a change rebuilds only what it
 # touched. The steps whose output is measured pin it off themselves.
 
-# Each step has a bound: three times the slowest it has taken in a gate that passed, here or in
-# CI, and never under a minute. That slowest time is the number after each step's label. A step
+# Each step has two bounds, from the two numbers after its label, WALL:CPU: the slowest it has
+# taken in a gate that passed, here or in CI, in seconds and in CPU seconds (its whole process
+# tree's, as scripts/bounded.py counts them; the CPU number from cold builds too, with nothing
+# reused). Each bound is three times its number, and never under a minute. Past its CPU bound a
+# step is slow; past its wall bound with CPU to spare it was starved of the machine. A step
 # runs under scripts/bounded.py, in a session of its own, its output through a file: past its
-# bound, it and everything it started are ended (TERM, then KILL) and the gate fails, naming
-# it. A step that ends with a process of its own still running fails too, so no process it
+# bounds, it and everything it started are ended (TERM, then KILL) and the gate fails, naming
+# it and which bound it passed. A step that ends with a process of its own still running fails too, so no process it
 # leaves can hold the gate's output open. Each step has a TMPDIR of its own, and fails if it
 # leaves anything there.
 #
-# A hang is found apart from that bound: a step whose processes use no CPU for a minute
+# A hang is found apart from those bounds: a step whose processes use no CPU for a minute
 # (STALL_SECONDS) has stalled, and is ended then, named so, however long its bound. Each step
 # says the CPU seconds it used.
 #
-# A step written without its number does not run (exit 2): it would be bounded by nothing
+# A step written without its numbers does not run (exit 2): it would be bounded by nothing
 # anyone chose. On a machine slower than any these numbers came from, GATE_STEP_BOUND_SCALE (a
 # whole number, 1 if unset) multiplies every bound, the stall's among them.
 #
-# bounded <label> <slowest seconds> <command...>: a command, or a function of this script.
+# bounded <label> <slowest seconds>:<slowest CPU seconds> <command...>: a command, or a
+# function of this script.
 STALL_SECONDS=60
 bounded() {
-  local label="$1" scale="${GATE_STEP_BOUND_SCALE:-1}" bound stall
-  if ! [[ "${2:-}" =~ ^[1-9][0-9]*$ ]]; then
-    echo "$label: no bound: '${2:-}' is not its slowest time in seconds" >&2
+  local label="$1" scale="${GATE_STEP_BOUND_SCALE:-1}" bound cpu stall
+  if ! [[ "${2:-}" =~ ^([1-9][0-9]*):([1-9][0-9]*)$ ]]; then
+    echo "$label: no bounds: '${2:-}' is not its slowest seconds and CPU seconds, WALL:CPU" >&2
     exit 2
   fi
+  bound=$((BASH_REMATCH[1] * 3))
+  cpu=$((BASH_REMATCH[2] * 3))
   if ! [[ "$scale" =~ ^[1-9][0-9]*$ ]]; then
     echo "$label: GATE_STEP_BOUND_SCALE must be a whole number, not '$scale'" >&2
     exit 2
   fi
-  bound=$(($2 * 3))
   shift 2
   [ "$bound" -ge 60 ] || bound=60
+  [ "$cpu" -ge 60 ] || cpu=60
   bound=$((bound * scale))
+  cpu=$((cpu * scale))
   stall=$((STALL_SECONDS * scale))
   if declare -F "$1" > /dev/null; then
-    scripts/bounded.py "$bound" "$label" --stall "$stall" -- \
+    scripts/bounded.py "$bound" "$label" --cpu "$cpu" --stall "$stall" -- \
       bash -c 'set -euo pipefail; "$@"' "$label" "$@"
   else
-    scripts/bounded.py "$bound" "$label" --stall "$stall" -- "$@"
+    scripts/bounded.py "$bound" "$label" --cpu "$cpu" --stall "$stall" -- "$@"
   fi
 }
 
-# step <label> <slowest seconds> <command...>
+# step <label> <slowest seconds>:<slowest CPU seconds> <command...>
 step() {
   local label="$1" start
   echo "==> $label"
@@ -140,7 +147,7 @@ end_lanes() {
 }
 trap end_lanes EXIT
 
-# lane <name> <label> <slowest seconds> <command...> [-- <label> <slowest seconds> <command...>]...
+# lane <name> <label> <WALL:CPU> <command...> [-- <label> <WALL:CPU> <command...>]...
 # The whole gate runs each beside the rest. Asked for that lane alone, it runs it, in front.
 lane() {
   local name="$1"
@@ -270,19 +277,19 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
   checked_tree="$(tree_now)"
 fi
 
-main "push guard" 3 scripts/push.sh --self-test
-main "step bounds self-test" 4 scripts/bounded.py --self-test
+main "push guard" 3:1 scripts/push.sh --self-test
+main "step bounds self-test" 4:5 scripts/bounded.py --self-test
 # A step with no number, or a scale that is not one, refuses to run.
 bounds_refuse() {
   local number scale status
-  for number in x "" 0; do
+  for number in x "" 0 5 5: :5 0:5 5:0 5:x; do
     status=0
     (bounded probe "$number" true) > /dev/null 2>&1 || status=$?
     [ "$status" -eq 2 ] || { echo "a bound of '$number': exit $status, not 2" >&2; return 1; }
   done
   for scale in 1.5 0 2; do
     status=0
-    (GATE_STEP_BOUND_SCALE="$scale" bounded probe 1 true) > /dev/null 2>&1 || status=$?
+    (GATE_STEP_BOUND_SCALE="$scale" bounded probe 1:1 true) > /dev/null 2>&1 || status=$?
     [ "$status" -eq "$([ "$scale" = 2 ] && echo 0 || echo 2)" ] ||
       { echo "a scale of '$scale': exit $status" >&2; return 1; }
   done
@@ -293,14 +300,14 @@ fi
 
 # Checks that build nothing come first: they fail fastest.
 if [ -x scripts/check-boundaries.sh ]; then
-  main boundaries 6 scripts/check-boundaries.sh
-  main boundaries-self-test 12 scripts/check-boundaries.sh --self-test
+  main boundaries 6:2 scripts/check-boundaries.sh
+  main boundaries-self-test 12:2 scripts/check-boundaries.sh --self-test
 fi
-main "test filters self-test" 1 scripts/check-test-filters.py --self-test
-main "test files" 1 scripts/check-test-filters.py --files
+main "test filters self-test" 1:1 scripts/check-test-filters.py --self-test
+main "test files" 1:1 scripts/check-test-filters.py --files
 
 if [ -x scripts/check-links.sh ]; then
-  main links 2 scripts/check-links.sh
+  main links 2:1 scripts/check-links.sh
 fi
 
 # The client builds on Windows and macOS as well as Linux. Clippy for each, tests included:
@@ -390,8 +397,8 @@ export -f lockfile tests shipped_tests test_filters other_systems timed lane_ite
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
-  main lockfile 8 lockfile
-  main format 12 cargo fmt --all --check
+  main lockfile 8:2 lockfile
+  main format 12:3 cargo fmt --all --check
 
   # Beside the rest, each in target directories of its own. The size gate goes last of all
   # when a crate the shipped files hold changes: each of its builds ends in a fat-LTO link of one
@@ -401,29 +408,29 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   behind=10
   export behind
   # Every crate with optional features: none, each alone, all.
-  lane matrix "feature matrix" 605 nice -n "$behind" scripts/feature-matrix.sh
-  lane other-systems "no_std and the client on other systems" 416 other_systems
+  lane matrix "feature matrix" 605:1535 nice -n "$behind" scripts/feature-matrix.sh
+  lane other-systems "no_std and the client on other systems" 416:157 other_systems
   if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
-    lane size "size gate" 610 scripts/size-gate.sh
+    lane size "size gate" 610:1812 scripts/size-gate.sh
   fi
   devices=()
   if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
-    devices+=("device size" 422 nice -n "$behind" env CARGO_TARGET_DIR="$target_dir/device-lane" bash -c 'set -euo pipefail; device_size' --)
+    devices+=("device size" 422:110 nice -n "$behind" env CARGO_TARGET_DIR="$target_dir/device-lane" bash -c 'set -euo pipefail; device_size' --)
   fi
   if [ -x scripts/mcu-template.sh ] && [ -d examples/mcu-template ]; then
-    devices+=("mcu template" 140 env CARGO_TARGET_DIR="$target_dir" scripts/mcu-template.sh --)
+    devices+=("mcu template" 140:144 env CARGO_TARGET_DIR="$target_dir" scripts/mcu-template.sh --)
   fi
   if [ -x scripts/packaging-check.sh ] && [ -d packaging ]; then
-    devices+=(packaging 6 scripts/packaging-check.sh --)
+    devices+=(packaging 6:1 scripts/packaging-check.sh --)
   fi
   [ "${#devices[@]}" -gt 0 ] && lane devices "${devices[@]}"
 
-  main clippy 163 cargo clippy --workspace --all-targets --all-features -- -D warnings
-  main tests 630 tests
-  main "the shipped builds' tests" 300 shipped_tests
-  main "test filters" 8 test_filters
-  main "nothing built reads the gate's own variables" 5 scripts/lane-reuse.py own-vars
-  main "the check compiled out" 17 cargo test -q -p orion-check --no-default-features --lib
+  main clippy 163:371 cargo clippy --workspace --all-targets --all-features -- -D warnings
+  main tests 630:647 tests
+  main "the shipped builds' tests" 300:349 shipped_tests
+  main "test filters" 8:6 test_filters
+  main "nothing built reads the gate's own variables" 5:1 scripts/lane-reuse.py own-vars
+  main "the check compiled out" 17:17 cargo test -q -p orion-check --no-default-features --lib
   # In this shell, where the lanes are its children: each step in them has its own bound.
   if [ -z "$part" ] || [ "$part" = main ]; then
     timed "the steps beside" join_lanes
@@ -432,7 +439,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   # installed. Alone, last: a target's budget is time, so what runs beside it would cut how
   # much it tries.
   if [ -d testing/fuzz ] && command -v cargo-fuzz > /dev/null && rustup toolchain list | grep -q '^nightly'; then
-    main "fuzz, short budget" 148 scripts/fuzz-short.sh
+    main "fuzz, short budget" 148:264 scripts/fuzz-short.sh
   fi
 else
   echo "no crates yet"
