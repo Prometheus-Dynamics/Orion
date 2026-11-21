@@ -408,6 +408,10 @@ what to change.
 - **I44.** The gate also runs the comm core's tests with the features each shipped binary
   builds it with (`orion-bin`, `orion-recovery-bin`), and those binaries' tests alone, beside the
   `--all-features` run. The comm core's tests hold under each. Nothing a program calls changes.
+- **I45.** The gate's build lanes skip an item that passed before on exactly its inputs
+  (`scripts/lane-reuse.py`), and say what each lane did in a `Gate-Lanes:` line the commit
+  carries. `scripts/gate.sh --drop LANE:WHY`, `scripts/lanes-behind.sh` and
+  `scripts/release-check.sh` are new. CI runs every lane in full. Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

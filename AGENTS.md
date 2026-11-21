@@ -35,6 +35,13 @@ The work is a pre-planned list of PRs into `next`.
   exact tree it checked, and the script refuses any commit to `next` whose tree has no stamp:
   whoever lands runs the gate on the tree they will commit, and changes nothing until it ends.
   A working branch `pr/<id>` pushes without a stamp.
+- The build lanes (the feature matrix, the no_std and other-system checks, the device sizes)
+  skip an item that passed before on exactly its inputs (`scripts/lane-reuse.py`), and the
+  gate prints a `Gate-Lanes:` line saying what each lane did. Put that line in the commit: the
+  push refuses a commit whose stamp holds a line the message lacks. `--drop LANE:WHY` leaves a
+  lane out, said so in the line. A lane 10 commits or 3 days past its last full run runs in full
+  and cannot be dropped (`scripts/lanes-behind.sh`); `GATE_LANE_REUSE=0` runs every lane in
+  full. A release needs every lane passed in full at its commit (`scripts/release-check.sh`).
 - `scripts/check-changed.sh` runs the gate's own format, clippy, tests and feature matrix for the
   crates you changed and every crate that depends on them. `scripts/prune-target.sh --delete`,
   run right after a gate passes, removes what the gate's debug builds no longer use.

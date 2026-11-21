@@ -4,22 +4,41 @@
 #   scripts/gate.sh                 everything; stamps the tree for scripts/push.sh if it passes
 #   scripts/gate.sh --part <part>   one part, and no stamp: `main` (every step not in a lane), or
 #                                   a lane: `matrix`, `other-systems`, `size`, `devices`
+#   scripts/gate.sh --drop LANE:WHY a lane not run, recorded so (`not-run(WHY)`); a lane behind
+#                                   (scripts/lane-reuse.py behind) cannot be dropped
 #
 # The parts together are the whole gate. CI runs each on a machine of its own, at once.
+#
+# In the build lanes, an item that passed before on exactly these inputs is not run again
+# (scripts/lane-reuse.py: the feature matrix's builds, the no_std and other-system checks, the
+# device sizes); a lane behind runs in full. The tree's stamp holds what each lane did, the
+# `Gate-Lanes:` line the commit carries (scripts/push.sh checks it).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 part=""
-if [ "$#" -gt 0 ]; then
-  case "${1:-} ${2:-}" in
+declare -A dropped=()
+usage="usage: scripts/gate.sh [--part main|matrix|other-systems|size|devices] [--drop LANE:WHY]..."
+while [ "$#" -gt 0 ]; do
+  case "$1 ${2:-}" in
     "--part main" | "--part matrix" | "--part other-systems" | "--part size" | "--part devices")
       part="$2"
       ;;
+    --drop\ matrix:?* | --drop\ other-systems:?* | --drop\ size:?* | --drop\ devices:?*)
+      dropped[${2%%:*}]="${2#*:}"
+      ;;
     *)
-      echo "usage: scripts/gate.sh [--part main|matrix|other-systems|size|devices]" >&2
+      echo "$usage" >&2
       exit 2
       ;;
   esac
-fi
+  shift 2
+done
+for name in "${!dropped[@]}"; do
+  if [ "$name" != size ] && why="$(scripts/lane-reuse.py behind "$name")" && [[ "$why" != *"may reuse" ]]; then
+    echo "--drop $name: it cannot be dropped: $why" >&2
+    exit 2
+  fi
+done
 # Debug and test builds are incremental (cargo's default): a change rebuilds only what it
 # touched. The steps whose output is measured pin it off themselves.
 
@@ -90,6 +109,10 @@ main() {
 target_dir="${CARGO_TARGET_DIR:-$PWD/target}"
 export target_dir
 lane_logs="$(mktemp -d)"
+# What each build lane reused (scripts/lane-reuse.py), outside every step's own TMPDIR.
+GATE_LANE_STATE_DIR="$lane_logs/state"
+mkdir -p "$GATE_LANE_STATE_DIR"
+export GATE_LANE_STATE_DIR
 lane_pids=()
 lane_names=()
 set -m
@@ -115,6 +138,10 @@ trap end_lanes EXIT
 lane() {
   local name="$1"
   shift
+  if [ -n "${dropped[$name]:-}" ]; then
+    echo "==> lane $name: not run: ${dropped[$name]}"
+    return
+  fi
   if [ "$part" = "$name" ]; then
     lane_steps "$@"
   elif [ -z "$part" ]; then
@@ -298,27 +325,61 @@ other_systems() {
   done
   timed "no_std groups build as their crates alone" \
     scripts/same-features.py "$CARGO_TARGET_DIR/same-features" --no-default-features "${targets[@]}" -- "${groups[@]}"
+  local clients=orion-connect,orion-topics,orion-records,orion-actions,orion-files,orion-executor,orion-provider,orion-ctl,orion-capi,orion
+  local items=() others=(x86_64-pc-windows-msvc x86_64-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin)
+  for target in "${targets[@]}"; do
+    for group in "${groups[@]}"; do
+      items+=("check $target $group")
+    done
+  done
+  for target in "${others[@]}"; do
+    items+=("clippy $target $clients")
+  done
+  local state="$GATE_LANE_STATE_DIR/other-systems"
+  scripts/lane-reuse.py plan other-systems "$state" "${items[@]}"
   for target in "${targets[@]}"; do
     for group in "${groups[@]}"; do
       packages=()
       for crate in ${group//,/ }; do
         packages+=(-p "$crate")
       done
-      timed "$group on $target" cargo check -q "${packages[@]}" --no-default-features --target "$target"
+      lane_item "$state" "check $target $group" "$group on $target" \
+        cargo check -q "${packages[@]}" --no-default-features --target "$target"
     done
   done
-  for crate in orion-connect orion-topics orion-records orion-actions orion-files orion-executor \
-    orion-provider orion-ctl orion-capi orion; do
+  for crate in ${clients//,/ }; do
     client+=(-p "$crate")
   done
-  for target in x86_64-pc-windows-msvc x86_64-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin; do
-    timed "client on $target" cargo clippy -q "${client[@]}" --all-features --all-targets \
-      --target "$target" -- -D warnings
+  for target in "${others[@]}"; do
+    lane_item "$state" "clippy $target $clients" "client on $target" \
+      cargo clippy -q "${client[@]}" --all-features --all-targets --target "$target" -- -D warnings
   done
+  scripts/lane-reuse.py status other-systems "$state" > "$state.status"
+}
+
+# lane_item STATE ITEM LABEL COMMAND...: COMMAND, timed, unless ITEM passed before on these inputs
+# (STATE, from `scripts/lane-reuse.py plan`); recorded once it passes.
+lane_item() {
+  local state="$1" item="$2" label="$3"
+  shift 3
+  if awk -F'\t' -v item="$item" '$1 == item && $3 == "reused" {f = 1} END {exit !f}' "$state"; then
+    echo "    $label: reused"
+    return 0
+  fi
+  timed "$label" "$@"
+  scripts/lane-reuse.py record "$state" "$item"
+}
+
+# The device sizes, unless they passed before on these inputs.
+device_size() {
+  local state="$GATE_LANE_STATE_DIR/devices"
+  scripts/lane-reuse.py plan devices "$state" device-size
+  lane_item "$state" device-size "device size" scripts/device-size.sh
+  scripts/lane-reuse.py status devices "$state" > "$state.status"
 }
 
 # The functions a step runs in a shell of its own (`bounded`), and what they call.
-export -f lockfile tests shipped_tests test_filters other_systems timed
+export -f lockfile tests shipped_tests test_filters other_systems timed lane_item device_size
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
@@ -340,7 +401,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   fi
   devices=()
   if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
-    devices+=("device size" 422 nice -n "$behind" env CARGO_TARGET_DIR="$target_dir/device-lane" scripts/device-size.sh --)
+    devices+=("device size" 422 nice -n "$behind" env CARGO_TARGET_DIR="$target_dir/device-lane" bash -c 'set -euo pipefail; device_size' --)
   fi
   if [ -x scripts/mcu-template.sh ] && [ -d examples/mcu-template ]; then
     devices+=("mcu template" 140 env CARGO_TARGET_DIR="$target_dir" scripts/mcu-template.sh --)
@@ -354,6 +415,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   main tests 630 tests
   main "the shipped builds' tests" 300 shipped_tests
   main "test filters" 8 test_filters
+  main "nothing built reads the gate's own variables" 5 scripts/lane-reuse.py own-vars
   main "the check compiled out" 17 cargo test -q -p orion-check --no-default-features --lib
   # In this shell, where the lanes are its children: each step in them has its own bound.
   if [ -z "$part" ] || [ "$part" = main ]; then
@@ -373,14 +435,27 @@ if [ -n "$part" ]; then
   echo "gate part $part passed (a part is not stamped)"
   exit 0
 fi
+# What each lane did: passed, passed with some items reused (`passed(K-of-N-reused)`), or not
+# run, and why. The commit carries this line; the stamp holds it, for scripts/push.sh to check.
+lanes_line="Gate-Lanes: main=passed"
+for name in matrix other-systems size devices; do
+  if [ -n "${dropped[$name]:-}" ]; then
+    lanes_line+=" $name=not-run(${dropped[$name]// /-})"
+  elif [ -f "$GATE_LANE_STATE_DIR/$name.status" ]; then
+    lanes_line+=" $name=$(cat "$GATE_LANE_STATE_DIR/$name.status")"
+  else
+    lanes_line+=" $name=passed"
+  fi
+done
 if [ -n "$checked_tree" ]; then
   if [ "$(tree_now)" = "$checked_tree" ]; then
     stamps="$(git rev-parse --git-dir)/orion-gate-passed"
     mkdir -p "$stamps"
-    touch "$stamps/$checked_tree"
+    echo "$lanes_line" > "$stamps/$checked_tree"
   else
     echo "the tree changed while the gate ran: not stamped, so it cannot be pushed" >&2
     exit 1
   fi
 fi
+echo "$lanes_line"
 echo "gate passed"

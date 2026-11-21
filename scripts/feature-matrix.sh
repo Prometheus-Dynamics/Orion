@@ -21,6 +21,15 @@ for package in json.load(sys.stdin)["packages"]:
     print(name, "--all-features")
 ' "$@")
 
+# In the gate (GATE_LANE_STATE_DIR set), a build that passed before on exactly these inputs is
+# not made again (scripts/lane-reuse.py), and each that passes is recorded. Asked for crates by
+# name, every build runs.
+state=""
+if [ -n "${GATE_LANE_STATE_DIR:-}" ] && [ "$#" -eq 0 ]; then
+  state="$GATE_LANE_STATE_DIR/matrix"
+  scripts/lane-reuse.py plan matrix "$state" "${builds[@]}"
+fi
+
 # The builds go to SHARDS lanes, each with a target directory of its own under this one, all
 # at once: cargo holds a target directory for one build at a time. A build is always in the
 # same lane, so each lane keeps what it built last time.
@@ -34,11 +43,16 @@ lane() {
   for i in "${!builds[@]}"; do
     [ $((i % shards)) -eq "$shard" ] || continue
     read -r crate flags <<< "${builds[$i]}"
+    if [ -n "$state" ] && awk -F'\t' -v b="${builds[$i]}" '$1 == b && $3 == "reused" {f = 1} END {exit !f}' "$state"; then
+      continue
+    fi
     # shellcheck disable=SC2086
     if ! CARGO_TARGET_DIR="$lanes/$shard" cargo check -q --locked -p "$crate" $flags 2> "$logs/$shard.err"; then
       echo "FAILED: cargo check -p $crate $flags"
       grep -E '^error' -A6 "$logs/$shard.err" | head -40
       failed=$((failed + 1))
+    elif [ -n "$state" ]; then
+      scripts/lane-reuse.py record "$state" "${builds[$i]}"
     fi
   done
   echo "$failed" > "$logs/$shard.failed"
@@ -57,3 +71,6 @@ for ((shard = 0; shard < shards; shard++)); do
 done
 echo "feature matrix: ${#builds[@]} builds, $failed failed"
 [ "$failed" -eq 0 ]
+if [ -n "$state" ]; then
+  scripts/lane-reuse.py status matrix "$state" > "$state.status"
+fi

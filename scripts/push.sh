@@ -47,6 +47,16 @@ if [ "${1:-}" = "--self-test" ]; then
   if "$here/push.sh" origin next > "$work/out" 2>&1; then
     echo "self-test FAILED: an unstamped commit landed after a working-branch push"; exit 1
   fi
+  # A stamp that holds the gate's line: the commit must carry it.
+  git fetch -q origin next && git reset -q --hard FETCH_HEAD
+  echo five > file && git commit -qam five
+  echo "Gate-Lanes: main=passed matrix=passed(3-of-4-reused)" > "$(stamps)/$(git rev-parse 'HEAD^{tree}')"
+  if "$here/push.sh" origin next > "$work/out" 2>&1; then
+    echo "self-test FAILED: a commit without the gate's line was pushed"; exit 1
+  fi
+  grep -q "lacks the gate's line" "$work/out" || { echo "self-test FAILED: wrong refusal"; cat "$work/out"; exit 1; }
+  git commit -q --amend -m "five" -m "Gate-Lanes: main=passed matrix=passed(3-of-4-reused)"
+  "$here/push.sh" origin next > "$work/out" 2>&1 || { echo "self-test FAILED: a commit with the gate's line was refused"; cat "$work/out"; exit 1; }
   echo "push guard self-test passed"
   exit 0
 fi
@@ -67,6 +77,10 @@ for commit in $(git rev-list "$range"); do
   tree="$(git rev-parse "$commit^{tree}")"
   if [ ! -e "$(stamps)/$tree" ]; then
     echo "refused: the gate has not passed on $(git log -1 --format='%h %s' "$commit")" >&2
+    missing=1
+  elif [ -s "$(stamps)/$tree" ] && ! git log -1 --format=%B "$commit" | grep -qxF "$(cat "$(stamps)/$tree")"; then
+    # What the lanes did goes with the commit, as the gate said it.
+    echo "refused: $(git log -1 --format='%h' "$commit") lacks the gate's line: $(cat "$(stamps)/$tree")" >&2
     missing=1
   fi
 done
