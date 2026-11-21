@@ -43,6 +43,8 @@ pub struct Seen {
     pub watcher: Option<SessionId>,
     /// What it was told of sessions going quiet: how long, or zero when heard again.
     pub quiet: Vec<(SessionId, u64)>,
+    /// Whether each frame it sent to the watcher was taken.
+    pub to_watcher: Vec<bool>,
 }
 
 /// A service on the record kinds, one behaviour each.
@@ -96,9 +98,10 @@ impl Service for Probe {
             _ => {
                 let watcher = seen.watcher.ok_or(Error::NotFound)?;
                 let now_ms = cx.now_ms();
-                let _ = cx
+                let sent = cx
                     .sessions()
                     .send(watcher, &Pong { now_ms }, Delivery::MayDrop);
+                seen.to_watcher.push(sent.is_ok());
                 Ok(())
             }
         }

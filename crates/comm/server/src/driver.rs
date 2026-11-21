@@ -1,6 +1,7 @@
 //! The tasks that move frames between connections and the core.
 
 use std::cell::RefCell;
+use std::io;
 use std::os::fd::OwnedFd;
 use std::rc::Rc;
 use std::time::Duration;
@@ -20,6 +21,10 @@ use crate::{Carrier, Connection, FrameRead, FrameWrite, Limits, Service};
 
 /// How many frames a session's reader handles before it lets the others run.
 const TURN: u32 = 32;
+
+/// The most frames read from a session whose program closed its end: what it sent before it
+/// closed, and no more.
+const LAST_WORDS: u32 = 1024;
 
 /// The comm core's server. Cloning shares it. Everything it does happens on the thread, and
 /// inside the `LocalSet`, it was made on.
@@ -178,7 +183,12 @@ impl Comm {
         loop {
             let received = tokio::select! {
                 received = receive(deadline, read.recv(&mut buf, &mut fds)) => received,
-                () = stop.notified() => break,
+                () = stop.notified() => {
+                    if self.core.borrow().sessions.is_gone(session) {
+                        self.last_words(session, &mut read, &mut buf).await;
+                    }
+                    break;
+                }
             };
             let len = match received {
                 Ok(Ok(Some(len))) => len,
@@ -315,6 +325,26 @@ impl Comm {
         core.drops.push_back(dropped);
     }
 
+    /// Handles what `session`'s program sent before it closed its end, as far as it is already
+    /// here: a client that says why it stops and goes is heard, not taken as gone without a
+    /// word. Up to [`LAST_WORDS`] frames, none waited for.
+    async fn last_words(&self, session: SessionId, read: &mut impl FrameRead, buf: &mut [u8]) {
+        for _ in 0..LAST_WORDS {
+            let mut fds = FdSet::default();
+            let Ok(Ok(Some(len))) = timeout(Duration::ZERO, read.recv(buf, &mut fds)).await else {
+                return;
+            };
+            let now_ms = self.now_ms();
+            let flow = self
+                .core
+                .borrow_mut()
+                .receive(session, &buf[..len], &mut fds, now_ms);
+            if flow == Flow::Close {
+                return;
+            }
+        }
+    }
+
     async fn write(self, session: SessionId, wake: Rc<Notify>, mut write: impl FrameWrite) {
         let write_ms =
             Duration::from_millis(u64::from(self.core.borrow().sessions.limits.write_ms));
@@ -343,9 +373,21 @@ impl Comm {
                             error: error.kind(),
                         },
                     };
-                    // Stop the reader too.
                     let mut core = self.core.borrow_mut();
                     core.stats.dropped += 1;
+                    if matches!(
+                        why,
+                        Dropped::WriteFailed {
+                            error: io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset,
+                            ..
+                        }
+                    ) {
+                        // Its program closed its end: what it said before it went is still
+                        // read.
+                        core.sessions.gone(session, why);
+                        return;
+                    }
+                    // Stop the reader too.
                     core.sessions.end(session, Some(why));
                     return;
                 }

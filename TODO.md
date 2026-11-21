@@ -236,6 +236,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I48](docs/prs/I48.md) The shared-memory ring crates come from the device library at c65d234f (wave 19; needs I45)
 - [x] [I49](docs/prs/I49.md) A selection that matches nothing fails, and the size key holds the size gate's script (wave 19; needs I48)
 - [x] [I51](docs/prs/I51.md) The shared-memory ring crates come from the device library at 0d37cc55 (wave 19; needs I49)
+- [x] [I53](docs/prs/I53.md) What a program said before it closed is handled, though a write to it failed first (wave 19; needs I51)
 
 ## J. The stack around Orion
 

@@ -421,6 +421,9 @@ what to change.
 - **I51.** The seven `shm-*` crates are pinned to the device library's `0d37cc55`, through the
   `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
   calls changes.
+- **I53.** A client that says something and closes while the comm core is writing to it is heard:
+  what it sent before it closed is handled before its session ends, where it was dropped when the
+  write found it gone first. Nothing on the wire changes, and nothing a program calls.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -179,6 +179,9 @@ pub(crate) struct Entry {
     pub(crate) outbox: Outbox,
     out_seq: u16,
     pub(crate) closing: bool,
+    /// Its program closed its end: nothing more reaches it, and what it sent before it closed
+    /// is still read and handled before the session is closed.
+    pub(crate) gone: bool,
     /// Why the comm core is ending it: the first reason given.
     pub(crate) why: Option<Dropped>,
     /// Wakes the session's writer: something to send, or closing.
@@ -303,6 +306,7 @@ impl Sessions {
             outbox: Outbox::default(),
             out_seq: 0,
             closing: false,
+            gone: false,
             why: None,
             wake: Rc::new(Notify::new()),
             stop: Rc::new(Notify::new()),
@@ -381,6 +385,11 @@ impl Sessions {
         else {
             return Err(Error::NotFound);
         };
+        if entry.gone {
+            // As a frame written a moment before the program closed: it reaches nobody, and
+            // the session's end says so once what the program sent last is handled.
+            return Ok(());
+        }
         let mut fds = fds.into_iter().peekable();
         if fds.peek().is_some() && !entry.info.passes_descriptors {
             return Err(Error::Unsupported);
@@ -429,6 +438,21 @@ impl Sessions {
         if let Some(entry) = self.entry_mut(session) {
             entry.why.get_or_insert(why);
         }
+    }
+
+    /// `session`'s program closed its end, as a write to it found: its reader is stopped, and
+    /// handles what is already there from it before the session is closed.
+    pub(crate) fn gone(&mut self, session: SessionId, why: Dropped) {
+        if let Some(entry) = self.entry_mut(session) {
+            entry.why.get_or_insert(why);
+            entry.gone = true;
+            entry.stop.notify_one();
+        }
+    }
+
+    /// Whether `session`'s program closed its end.
+    pub(crate) fn is_gone(&self, session: SessionId) -> bool {
+        self.entry(session).is_some_and(|entry| entry.gone)
     }
 
     pub(crate) fn end(&mut self, session: SessionId, why: Option<Dropped>) {

@@ -214,3 +214,91 @@ fn a_session_whose_writes_stall_or_fail_is_dropped_saying_which_and_on_what() {
         );
     });
 }
+
+#[test]
+fn what_a_program_said_before_it_closed_is_handled_though_a_write_to_it_failed_first() {
+    use orion_server::{Connection, FrameWrite};
+    run(async {
+        let board = board(Security::Off, Limits::default());
+        for round in 0..8_u64 {
+            let client = Client::open(&board, USER).await;
+            let ids: Vec<SessionId> = board
+                .comm
+                .with(|sessions, _| sessions.iter().map(|info| info.id).collect());
+            let [id] = ids[..] else {
+                panic!("one session open, not {ids:?}");
+            };
+            // Its program closes its end for reading, then says one last thing and goes. The
+            // comm core has something for it already, so its write finds the program gone
+            // before its reader reaches the last word: the order a client that gives up and
+            // exits meets while a program is still sending to it.
+            let (read, mut write) = Connection::split(client.connection);
+            drop(read);
+            board
+                .comm
+                .with(|sessions, _| sessions.send(id, &Pong { now_ms: 1 }, Delivery::Must))
+                .expect("queued");
+            let before = board.seen.borrow().callers.len();
+            write
+                .send(&ask_frame(kind::GET, round), &[])
+                .await
+                .expect("sent");
+            drop(write);
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            assert_eq!(
+                board.seen.borrow().callers.len(),
+                before + 1,
+                "round {round}: what it said before it went was not handled"
+            );
+        }
+        // Each is still said to have gone at the comm core's write to it.
+        let whys = whys(&board);
+        assert_eq!(whys.len(), 8, "{whys:?}");
+        assert!(
+            whys.iter().all(|why| matches!(
+                why,
+                Dropped::WriteFailed {
+                    kind: kind::PONG,
+                    error: std::io::ErrorKind::BrokenPipe
+                }
+            )),
+            "{whys:?}"
+        );
+    });
+}
+
+#[test]
+fn a_frame_for_a_program_that_closed_is_taken_until_what_it_said_last_is_handled() {
+    use orion_server::{Connection, FrameWrite};
+    run(async {
+        let board = board(Security::Off, Limits::default());
+        let mut watcher = Client::open(&board, USER).await;
+        watcher.ask(kind::WATCH, 0, &[]).await;
+        let mut other = Client::open(&board, USER).await;
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        let id = board.seen.borrow().watcher.expect("watching");
+
+        // The watcher closes its end for reading, a write to it finds that, another session
+        // sends it something, and only then is the watcher's last word read: the order of a
+        // client that gives up and exits while the program giving it a file sends a chunk.
+        // What it is sent meanwhile is taken, as by a socket a moment before its peer closed,
+        // so nobody acts on it being gone before its last word is heard.
+        let (read, mut write) = Connection::split(watcher.connection);
+        drop(read);
+        board
+            .comm
+            .with(|sessions, _| sessions.send(id, &Pong { now_ms: 1 }, Delivery::Must))
+            .expect("queued");
+        other.ask(kind::FILE_CHUNK, 0, &[]).await;
+        write
+            .send(&ask_frame(kind::GET, 9), &[])
+            .await
+            .expect("sent");
+        drop(write);
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        let seen = board.seen.borrow();
+        assert_eq!(seen.to_watcher, [true]);
+        assert_eq!(seen.callers.len(), 1, "its last word was handled");
+        assert_eq!(seen.closed, [id]);
+    });
+}
