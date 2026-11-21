@@ -412,6 +412,9 @@ what to change.
   (`scripts/lane-reuse.py`), and say what each lane did in a `Gate-Lanes:` line the commit
   carries. `scripts/gate.sh --drop LANE:WHY`, `scripts/lanes-behind.sh` and
   `scripts/release-check.sh` are new. CI runs every lane in full. Nothing a program calls changes.
+- **I48.** The seven `shm-*` crates are pinned to the device library's `c65d234f`, through the
+  `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
+  calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -233,6 +233,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I47](docs/prs/I47.md) The shared-memory ring crates come from the device library at 5ee2f64a (wave 19; needs I46)
 - [x] [I44](docs/prs/I44.md) The comm core's tests run as each shipped binary builds it (wave 19; needs I47)
 - [x] [I45](docs/prs/I45.md) A build lane item that passed on exactly these inputs is not run again (wave 19; needs I44)
+- [x] [I48](docs/prs/I48.md) The shared-memory ring crates come from the device library at c65d234f (wave 19; needs I45)
 
 ## J. The stack around Orion
 
