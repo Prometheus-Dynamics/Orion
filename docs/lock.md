@@ -474,6 +474,10 @@ what to change.
 - **I66.** The seven `shm-*` crates are pinned to the device library's `a6251ecf`, through the
   `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
   calls changes.
+- **I67.** `docs/client.md` says how long a push waits for the board: each answer within the
+  bound from the board's last change while sending, and the commit's check within twelve
+  `Options::timeout`s under the default, so a long commit needs `Reply::Alive` or `Within`.
+  Docs only; nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -471,6 +471,24 @@ said. It returns `Waiting` (the board has not said how much it has), `Progress {
 }`, or `Done(transfer)`. Between steps the program makes its other calls on the same session,
 including other pushes. `push` is `start_push` stepped to the end.
 
+**How long a push waits for the board** follows `Options::reply` (see above), with two clocks:
+
+- *While it begins and sends*, each answer is due within the bound counted from the board's last
+  change of what it says about the transfer (in practice, its count of bytes received). Under
+  the default `Reply::Timeout` that is `Options::timeout`, 5 s. The same status sent again does
+  not restart it, so a receiver that stops answering chunks for that long ends the push with a
+  timed-out `ClientError::Io`.
+- *Once every byte is there*, the push waits for the board's check from when it sent the commit,
+  and nothing the board says meanwhile but `Committed` or `Rejected` moves that start. Under
+  `Reply::Timeout` the wait is twelve `Options::timeout`s, 60 s by default; past it the push ends
+  with a timed-out `ClientError::Io` on its own. Under `Reply::Within(bound)` it is `bound`, and
+  under `Reply::Alive { ceiling }` it lasts as long as the node is heard from, up to `ceiling`.
+
+A destination whose receiver does long work at the commit, such as writing a device image, needs
+`set_reply(Reply::Alive { ceiling })` or `Reply::Within(bound)` with a ceiling or bound above
+that work's longest time, set before the push. The receiver only has to go on pumping its session
+meanwhile.
+
 `files.pull(..)` asks the board to fetch the file itself from a URL, check it and put it in
 place. Only the request and the board's reports cross the connection.
 
