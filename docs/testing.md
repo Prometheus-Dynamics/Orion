@@ -86,6 +86,27 @@ assert_eq!(done.state, FileState::Committed);
 Under `Reply::Timeout` the same push ends with a timed-out `ClientError::Io` after twelve
 timeouts, 4.8 s here.
 
+## An action that is never answered
+
+`board.hold_action(name, target)` starts a program on the board that registers the action
+`name` on `target` and is handed every run of it, but answers none: no progress and no end. It
+is a device whose call never comes back. It pumps its session all the while, so the comm core
+and node logic go on answering the caller, pings and all, and the run stays open until the
+caller's own bound ends it. `asked()` counts the runs it has been handed. It needs node logic.
+When the returned `HeldAction` is dropped its program goes, and node logic ends each run it left
+open as failed, "the program that runs it went away".
+
+Use it to test how a program bounds a call that hangs, for example a device call made while a
+commit is held:
+
+```rust
+let target = Target::Node("board".parse()?);
+let held = board.hold_action("arm.call", target.clone());
+let mut run = orion.run(&ActionCall { name: "arm.call", target, args: b"", deadline_ms: 0, detached: false })?;
+assert!(run.finish(Duration::from_secs(2)).is_err()); // timed out: nothing answered
+assert_eq!(held.asked(), 1);
+```
+
 ## And `orion-stubs`
 
 `orion-stubs` is Orion's own: a comm core put together from its parts, with small stand-ins

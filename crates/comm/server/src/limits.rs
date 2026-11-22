@@ -35,7 +35,7 @@ impl Default for Limits {
         Self {
             max_sessions: 256,
             max_frame: 64 * 1024,
-            outbox_bytes: 256 * 1024,
+            outbox_bytes: orion_wire::OUTBOX_BYTES,
             heartbeat_ms: 2000,
             idle_ms: 0,
             hello_ms: 5000,

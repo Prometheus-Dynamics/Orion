@@ -12,6 +12,7 @@ orion-msg-actions = { path = "../../core/msg-actions" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-server = { path = "../server" }
 orion-wire = { path = "../../core/wire" }
+tracing.workspace = true
 
 [dev-dependencies]
 orion-msg-records = { path = "../../core/msg-records" }

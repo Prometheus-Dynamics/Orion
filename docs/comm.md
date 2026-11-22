@@ -14,7 +14,11 @@ travel on it, and moves whole frames. The server knows nothing else about it.
 
 **Sessions.** A connection becomes a session with `Hello` and `Welcome`. A session has:
 
-- a bounded outbox (`comm.outbox_bytes`, 256 KiB): what waits to be sent to it;
+- a bounded outbox (`comm.outbox_bytes`, 256 KiB): what waits to be sent to it. A frame that
+  must be sent and does not fit drops the session. That includes node logic's own session when
+  a client's requests to it pile up, so it is never set below what a push keeps on its way: six
+  chunks of 32 KiB and one more (`docs/client.md`). The comm core warns, naming the session
+  whose request did not fit;
 - a deadline to say hello (`comm.hello_ms`, 5 s);
 - a heartbeat (`comm.heartbeat_ms`, 2 s), and a deadline to be heard from (`comm.idle_ms`). Zero,
   the default, is three heartbeats, and never under one second. A value that is set must be at

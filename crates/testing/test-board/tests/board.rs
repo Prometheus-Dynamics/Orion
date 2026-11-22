@@ -232,3 +232,94 @@ fn a_commit_answered_after_twelve_timeouts_ends_committed_under_alive_and_timed_
     );
     assert!(held.answered() >= 1);
 }
+
+/// Pushes `data` to `destination` on its own session, under the client's defaults, by
+/// `deadline`.
+fn push_by(
+    board: &TestBoard,
+    destination: &str,
+    data: &[u8],
+    deadline: Instant,
+) -> Result<Transfer, String> {
+    let orion = board.connect("pusher").map_err(|error| error.to_string())?;
+    let files = orion.files();
+    let mut pushing = files
+        .start_push(destination, Cursor::new(data), None)
+        .map_err(|error| error.to_string())?;
+    let mut had = 0;
+    loop {
+        match pushing.step(Duration::from_millis(50)) {
+            Ok(Step::Done(transfer)) => return Ok(transfer),
+            Ok(Step::Progress { received, .. }) => had = received,
+            Ok(_) => {}
+            Err(error) => return Err(format!("{error} with {had} bytes there")),
+        }
+        if Instant::now() > deadline {
+            return Err(format!("not done in time, with {had} bytes there"));
+        }
+    }
+}
+
+#[test]
+fn pushes_through_node_logic_to_a_receiver_all_commit() {
+    // A push keeps a window of chunks on their way, and the comm core passes each to node
+    // logic, and node logic to the receiver, as a frame that must be sent. A window that
+    // did not fit in a session's outbox dropped node logic, or the receiver, whenever either
+    // was a moment slow to read, and the push then went nowhere: a quarter to a third of
+    // these, before. Twenty, so that no more than one run in a few hundred passes by luck.
+    let board = TestBoard::start("pushes");
+    let held = board.hold_commits("slots/", Duration::from_millis(300));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let sizes = [100_000_usize, 1_000_000, 4_000_000];
+    for (i, size) in sizes.iter().cycle().take(20).enumerate() {
+        let data = vec![u8::try_from(i).expect("small"); *size];
+        let transfer = push_by(&board, &format!("slots/{i}.img"), &data, deadline)
+            .unwrap_or_else(|why| panic!("push {i} of {size} bytes: {why}"));
+        assert_eq!(
+            transfer.state,
+            FileState::Committed,
+            "push {i}: {}",
+            transfer.detail
+        );
+    }
+    assert_eq!(held.answered(), 20);
+}
+
+#[test]
+fn an_action_left_unanswered_stays_open_while_the_board_answers() {
+    use orion::actions::{ActionCall, Outcome, Target};
+
+    let board = TestBoard::start("unanswered");
+    let target = Target::Node("board".parse().expect("a name"));
+    let held = board.hold_action("arm.call", target.clone());
+    let caller = board.connect("caller").expect("connect");
+    let mut run = caller
+        .run(&ActionCall {
+            name: "arm.call",
+            target,
+            args: b"",
+            deadline_ms: 0,
+            detached: false,
+        })
+        .expect("run");
+    // Unanswered for a while, and the board answers the caller all along.
+    let quiet = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < quiet {
+        match run
+            .wait(Duration::from_millis(100))
+            .expect("the run is open")
+        {
+            None => {}
+            Some(update) => panic!("an unanswered run was told {update:?}"),
+        }
+        assert_eq!(caller.node().expect("the board answers").name, "board");
+    }
+    assert_eq!(held.asked(), 1);
+    // Its program gone, node logic ends the run: nothing is left waiting forever.
+    drop(held);
+    let finished = run
+        .finish(Duration::from_secs(10))
+        .expect("ended once its program is gone");
+    assert_eq!(finished.outcome, Outcome::Failed);
+    assert_eq!(finished.detail, "the program that runs it went away");
+}

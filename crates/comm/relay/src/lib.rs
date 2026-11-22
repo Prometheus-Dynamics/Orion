@@ -423,7 +423,16 @@ impl Relay {
             caller: &self.caller,
             payload: Bytes(payload),
         };
-        if sessions.send(node, &request, Delivery::Must).is_err() {
+        if let Err(error) = sessions.send(node, &request, Delivery::Must) {
+            if matches!(error, Error::Busy) {
+                let name = sessions.get(from).map_or("", |info| info.name.as_str());
+                tracing::warn!(
+                    "node logic was not reading: a request of kind {kind:#04x} from session \
+                     {name} ({}) did not fit in its outbox, so node logic is dropped and what \
+                     it was passing is forgotten",
+                    from.0
+                );
+            }
             return false;
         }
         self.passed.insert(from);

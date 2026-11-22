@@ -52,9 +52,19 @@ pub use orion_msg_files::FileState;
 /// The most bytes of a file in one message.
 pub const CHUNK: usize = 32 * 1024;
 /// How many chunks may be on their way without an answer.
-pub(crate) const WINDOW: u64 = 8;
+///
+/// The comm core passes each to node logic, and node logic to a program that receives it, as one
+/// frame that must be sent: one that does not fit in that session's outbox ends the session,
+/// and every transfer it was passing with it. So a whole window stays under the comm core's
+/// default outbox ([`orion_wire::OUTBOX_BYTES`]) with a chunk's worth to spare.
+pub(crate) const WINDOW: u64 = 6;
 /// The bytes of a chunk's message that are not the file's.
 pub(crate) const CHUNK_OVERHEAD: usize = 64;
+
+const _: () = assert!(
+    (WINDOW as usize + 1) * (CHUNK + CHUNK_OVERHEAD) <= orion_wire::OUTBOX_BYTES as usize,
+    "a push's window, and one chunk's worth of anything else, must fit in a session's outbox"
+);
 
 /// Where a transfer is, as the board last said.
 #[derive(Clone, Debug, PartialEq, Eq)]

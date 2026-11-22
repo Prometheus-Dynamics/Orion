@@ -35,8 +35,10 @@ use orion_scratch::Scratch;
 use tokio::sync::oneshot;
 
 mod held;
+mod unanswered;
 
 pub use held::HeldCommits;
+pub use unanswered::HeldAction;
 
 /// How long a start may take before the test is told it failed.
 const START: Duration = Duration::from_secs(20);
@@ -379,6 +381,19 @@ impl TestBoard {
     #[must_use]
     pub fn hold_commits(&self, prefix: &str, hold: Duration) -> HeldCommits {
         held::start(&self.socket, prefix, hold)
+    }
+
+    /// A program on the board that registers the action `name` on `target`, is handed every
+    /// run of it, and answers none, pumping its session meanwhile: a device whose call never
+    /// comes back. For a test of how a caller bounds its own wait for a run while the board
+    /// stays heard. Node logic must run.
+    ///
+    /// # Panics
+    ///
+    /// If it cannot connect or register the action.
+    #[must_use]
+    pub fn hold_action(&self, name: &str, target: orion::actions::Target) -> HeldAction {
+        unanswered::start(&self.socket, name, target)
     }
 
     /// The board's directory: its state, its keys, its record and its socket.

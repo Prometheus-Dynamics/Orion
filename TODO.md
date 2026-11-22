@@ -255,6 +255,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I66](docs/prs/I66.md) The shared-memory ring crates come from the device library at a6251ecf (wave 19; needs I65)
 - [x] [I67](docs/prs/I67.md) The client docs say how long a push waits for the board, and what a long commit needs (wave 19; needs I66)
 - [x] [I68](docs/prs/I68.md) The test board has a receiver that answers a commit late (wave 19; needs I67)
+- [x] [I69](docs/prs/I69.md) A push's window fits in a session's outbox, and the test board can leave an action unanswered (wave 19; needs I68)
 
 ## J. The stack around Orion
 

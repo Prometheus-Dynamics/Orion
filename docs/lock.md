@@ -481,6 +481,12 @@ what to change.
 - **I68.** `orion-test-board` has `TestBoard::hold_commits(prefix, hold)`: a receiver on the
   board that answers each commit `hold` late while its session stays pumped, for testing a
   pushing client's `Reply`. Test support only; nothing a shipped program calls changes.
+- **I69.** A push keeps six chunks on their way, not eight, so its window fits in a session's
+  outbox at the default; `orion_wire::OUTBOX_BYTES` (**Add**) is that default, and the files
+  client checks the window against it at compile time. The comm core warns, naming the session,
+  when node logic is dropped because a request to it did not fit. `orion-test-board` has
+  `TestBoard::hold_action(name, target) -> HeldAction`: an action whose runs are never answered.
+  Nothing on the wire changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

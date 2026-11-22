@@ -452,8 +452,12 @@ is there, and only then is put where it belongs. The wire names a destination, n
 rejected with why. A push resumes: the transfer's number comes from the file's digest and its
 destination, so the same file to the same place is the same transfer, and beginning it again is
 answered with how many bytes the board already has. After a broken connection, reconnect and
-push again; nothing the board has is sent twice. At most eight chunks of 32 KiB are on their
-way at once, so a push neither fills the connection nor waits for an answer to each chunk. The
+push again; nothing the board has is sent twice. At most six chunks of 32 KiB are on their
+way at once, so a push neither fills the connection nor waits for an answer to each chunk. Six
+is what fits in a session's outbox at the comm core's default (`comm.outbox_bytes`, 256 KiB)
+with a chunk to spare: the comm core passes each chunk to node logic, and node logic to a
+program that receives it, and a session whose outbox a chunk does not fit is dropped. A board
+whose `comm.outbox_bytes` is set lower than that loses pushes. The
 file is hashed before anything is sent; the session is looked after meanwhile, however long
 that takes.
 

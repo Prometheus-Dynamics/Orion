@@ -23,6 +23,11 @@ pub const INTERFACE_REVISION: u16 = 1;
 /// above. Additions an older side may safely ignore need no level. See `docs/wire.md`.
 pub const INTERFACE_LEVEL: u16 = 6;
 
+/// How many bytes may wait to be sent to one session unless the comm core's settings say
+/// otherwise (`comm.outbox_bytes`). A frame that must be sent and doesn't fit ends the session,
+/// so whatever keeps frames on their way to a session unanswered keeps them well under this.
+pub const OUTBOX_BYTES: u32 = 256 * 1024;
+
 /// Header length: version, kind, and the little-endian sequence number.
 pub const HEADER_LEN: usize = 4;
 
