@@ -1003,7 +1003,9 @@ its two identifiers are the bus's base pair plus that address, so lower addresse
 arbitration. Each device is its own session, known as `<bus>.<address>`; one that stops talking
 loses its session and the others are not touched. A whole frame that a session is not reading
 is dropped and counted: one slow session does not hold the bus. The socket receives only the
-identifiers of the bus's devices, and is opened again every 250 ms after it fails.
+identifiers of the bus's devices, and is opened again every 250 ms after it fails. A bus's
+frames are at most 4096 bytes, what its reassembler takes: as on a serial or USB link, a session
+on it is never sent a larger one, and an answer too large is refused, a hello saying its size.
 
 ## Devices as resources
 

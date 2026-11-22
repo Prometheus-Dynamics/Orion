@@ -23,7 +23,12 @@ tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
 tracing.workspace = true
 
 [dev-dependencies]
+orion-broker = { path = "../broker" }
+orion-hello = { path = "../hello" }
+orion-keys = { path = "../keys" }
 orion-msg-session = { path = "../../core/msg-session" }
+orion-msg-topics = { path = "../../core/msg-topics" }
+shm-ring = { workspace = true }
 orion-wire = { path = "../../core/wire" }
 tokio = { workspace = true, features = ["macros", "test-util"] }
 

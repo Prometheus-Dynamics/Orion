@@ -13,7 +13,7 @@ use orion_supervise::{Report, State, Status};
 use orion_wire::{Body, CanLinkIds, Decode, Reassembler, SegmentMtu, Segmenter, encode_body, kind};
 use tokio::sync::Notify;
 
-fn run(test: impl Future<Output = ()>) {
+pub(super) fn run(test: impl Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .start_paused(true)
@@ -24,7 +24,7 @@ fn run(test: impl Future<Output = ()>) {
 
 /// The wires of a bus, as the board's socket and the devices see them.
 #[derive(Default)]
-struct Wires {
+pub(super) struct Wires {
     to_board: RefCell<VecDeque<CanFrame>>,
     to_devices: RefCell<VecDeque<CanFrame>>,
     board_wake: Notify,
@@ -34,7 +34,7 @@ struct Wires {
     opened_for: RefCell<Vec<CanLinkIds>>,
 }
 
-struct BoardSocket(Rc<Wires>);
+pub(super) struct BoardSocket(Rc<Wires>);
 
 impl CanIo for BoardSocket {
     async fn recv(&self) -> io::Result<CanFrame> {
@@ -59,7 +59,7 @@ impl CanIo for BoardSocket {
     }
 }
 
-struct Interface(Rc<Wires>);
+pub(super) struct Interface(pub(super) Rc<Wires>);
 
 impl OpenCan for Interface {
     type Io = BoardSocket;
@@ -78,19 +78,19 @@ impl OpenCan for Interface {
 }
 
 /// One device on the bus.
-struct Device {
+pub(super) struct Device {
     wires: Rc<Wires>,
     ids: CanLinkIds,
     mtu: SegmentMtu,
     reassembler: Box<Reassembler<1024>>,
-    payload: Vec<u8>,
+    pub(super) payload: Vec<u8>,
     seq: u16,
     /// Drops the segment with this number of the next message sent.
     lose: Option<usize>,
 }
 
 impl Device {
-    fn new(wires: &Rc<Wires>, base: CanLinkIds, address: u32, fd: bool) -> Self {
+    pub(super) fn new(wires: &Rc<Wires>, base: CanLinkIds, address: u32, fd: bool) -> Self {
         Self {
             wires: wires.clone(),
             ids: CanLinkIds::for_address(base, address).expect("ids"),
@@ -106,7 +106,7 @@ impl Device {
         }
     }
 
-    fn send<B: Body>(&mut self, body: &B) {
+    pub(super) fn send<B: Body>(&mut self, body: &B) {
         self.seq += 1;
         let mut frame = [0_u8; 256];
         let len = encode_body(body, self.seq, &mut frame).expect("encode");
@@ -130,7 +130,7 @@ impl Device {
     }
 
     /// The kind of the next frame the board sends this device.
-    async fn next(&mut self) -> u8 {
+    pub(super) async fn next(&mut self) -> u8 {
         loop {
             let mine = {
                 let mut bus = self.wires.to_devices.borrow_mut();
@@ -189,9 +189,9 @@ struct Board {
     states: States,
 }
 
-const BASE: CanLinkIds = CanLinkIds::new(0x100, 0x180, false);
+pub(super) const BASE: CanLinkIds = CanLinkIds::new(0x100, 0x180, false);
 
-fn bus(fd: bool) -> CanBus {
+pub(super) fn bus(fd: bool) -> CanBus {
     CanBus {
         name: "can0".into(),
         interface: "can0".into(),

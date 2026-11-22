@@ -457,8 +457,10 @@ impl<I: CanIo + 'static> Connection for CanConnection<I> {
         false
     }
 
+    /// What a bus's reassembler takes. Whatever a device says it takes, a larger frame
+    /// would not arrive.
     fn max_frame(&self) -> Option<u32> {
-        None
+        Some(MAX_FRAME as u32)
     }
 }
 

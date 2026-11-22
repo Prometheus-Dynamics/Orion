@@ -1767,11 +1767,16 @@ dependencies = [
 name = "orion-link-can"
 version = "1.0.1-dev"
 dependencies = [
+ "orion-broker",
+ "orion-hello",
+ "orion-keys",
  "orion-msg-session",
+ "orion-msg-topics",
  "orion-server",
  "orion-supervise",
  "orion-types",
  "orion-wire",
+ "shm-ring",
  "socketcan",
  "tokio",
  "tracing",

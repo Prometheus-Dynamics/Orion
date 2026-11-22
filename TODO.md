@@ -248,6 +248,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I59](docs/prs/I59.md) A hello fact may be up to 1024 bytes, and one that is longer is logged once (wave 19; needs I58)
 - [x] [I60](docs/prs/I60.md) A hello too large for a link is refused, saying its size and the limit (wave 19; needs I59)
 - [x] [I61](docs/prs/I61.md) The sample executor's command takes its shell's children with it (wave 19; needs I60)
+- [x] [I62](docs/prs/I62.md) A hello too large for a CAN bus is refused, saying its size and the limit (wave 19; needs I61)
 
 ## J. The stack around Orion
 

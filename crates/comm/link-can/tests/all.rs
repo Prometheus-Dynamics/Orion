@@ -3,5 +3,7 @@
 
 #[path = "bus.rs"]
 mod bus;
+#[path = "hello.rs"]
+mod hello;
 #[path = "vcan.rs"]
 mod vcan;
