@@ -847,10 +847,11 @@ a nonce) and is answered (`Identity`):
   decide: a tool that knows the board checks the key, one that does not learns it here.
 - **Orion invents no board facts.** A program that knows one publishes it as a topic named
   `hello.<fact>`; the document carries the newest value of each, in name order, up to 64 facts of
-  256 bytes. When that program goes, its facts go.
+  1024 bytes. A longer value is left out, and the log says so once, with the fact's name, its
+  size and the limit. When that program goes, its facts go.
 - **What the board is doing is Orion's own,** as two text facts among the rest, signed with
   them: `state` (`running`; `flasher` when `hello.state = flasher`; `recovery`) and, in
-  recovery, `recovery_why`, the reason, cut to 256 bytes. A program that declares the topic
+  recovery, `recovery_why`, the reason, cut to 1024 bytes. A program that declares the topic
   `hello.state` or `hello.recovery_why` is refused, `denied`, with words that say these are the
   node's own; a fact by either name that reaches the document another way is left out. A tool
   knows a board in recovery, and why, from its first question (`Node::state`,

@@ -451,6 +451,9 @@ what to change.
 - **I58.** The seven `shm-*` crates are pinned to the device library's `7b4fdb25`, through the
   `.git` URL. No other package changes, and no shared-memory code that Orion builds changes.
   Nothing a program calls changes.
+- **I59.** A hello fact may be up to 1024 bytes, where it was 256; a longer one is still left
+  out, and the log now says so once for each fact. `recovery_why` is cut to 1024 bytes. Nothing
+  on the wire changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

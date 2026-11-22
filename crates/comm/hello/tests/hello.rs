@@ -148,7 +148,7 @@ impl Client {
             fields: List::new(&fields),
             history: 2,
             expiry_ms: 0,
-            max_payload: 512,
+            max_payload: 2048,
             on_subscribe: Default::default(),
         };
         self.send(&declare).await;
@@ -320,7 +320,7 @@ fn facts_other_programs_publish_are_in_the_document_and_go_when_they_go() {
             );
         }
         let _long = driver
-            .publish_fact("hello.long", FieldType::Bytes, &[7; 300])
+            .publish_fact("hello.long", FieldType::Bytes, &[7; MAX_FACT_BYTES + 1])
             .await;
         let _slots = driver
             .publish_fact("hello.slots", FieldType::Int, &2_i64.to_le_bytes())
@@ -367,6 +367,62 @@ fn facts_other_programs_publish_are_in_the_document_and_go_when_they_go() {
 }
 
 #[test]
+fn a_fact_of_up_to_the_limit_is_carried_and_a_longer_one_is_left_out_and_logged_once() {
+    run(async {
+        orion_log::install();
+        let log = orion_log::Window::new(orion_log::WINDOW_BYTES);
+        let (_keys, connector) = board(Security::Off);
+        let mut asker = Client::open(connector.connect(USER)).await;
+        let nonce = [2_u8; 8];
+        let mut bridge = Client::open(connector.connect(USER)).await;
+        let _at_limit = bridge
+            .publish_fact("hello.at_limit", FieldType::Bytes, &[1; MAX_FACT_BYTES])
+            .await;
+        let _over = bridge
+            .publish_fact("hello.over", FieldType::Bytes, &[2; MAX_FACT_BYTES + 1])
+            .await;
+        // What a device library offers: 302 bytes of text.
+        let offers = "a".repeat(302);
+        let _offers = bridge
+            .publish_fact("hello.offers", FieldType::Text, offers.as_bytes())
+            .await;
+
+        let text = FieldType::Text.code();
+        for _ in 0..2 {
+            let payload = asker.identify(&nonce).await.to_vec();
+            let identity = verify(&payload, &nonce).expect("genuine");
+            assert_eq!(
+                facts(&identity),
+                [
+                    (
+                        "at_limit",
+                        FieldType::Bytes.code(),
+                        &[1; MAX_FACT_BYTES][..]
+                    ),
+                    ("offers", text, offers.as_bytes()),
+                    ("state", text, b"running"),
+                ]
+            );
+        }
+
+        // Asked twice, the log says once which fact was left out, its size and the limit.
+        let log = String::from_utf8(log.read()).expect("text");
+        let said: Vec<&str> = log
+            .lines()
+            .filter(|line| line.contains("left out of the hello"))
+            .collect();
+        assert_eq!(
+            said,
+            [format!(
+                "WARN  orion_hello: hello.over: {} bytes is over the {MAX_FACT_BYTES} bytes a \
+                 fact may be: left out of the hello",
+                MAX_FACT_BYTES + 1
+            )]
+        );
+    });
+}
+
+#[test]
 fn the_document_says_what_the_board_is_doing_and_why_it_is_in_recovery() {
     run(async {
         let (_keys, connector, state) = board_in(Security::On);
@@ -391,7 +447,7 @@ fn the_document_says_what_the_board_is_doing_and_why_it_is_in_recovery() {
         );
 
         // A reason too long for a fact is cut, on a character.
-        state.set(BoardState::Recovery("\u{e9}".repeat(200)));
+        state.set(BoardState::Recovery("\u{e9}".repeat(MAX_FACT_BYTES)));
         let payload = asker.identify(&nonce).await.to_vec();
         let identity = verify(&payload, &nonce).expect("genuine");
         let why = facts(&identity)[0].2;

@@ -17,8 +17,10 @@ shm-ring = { workspace = true }
 orion-server = { path = "../server" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
+tracing.workspace = true
 
 [dev-dependencies]
+orion-log = { path = "../../core/log" }
 orion-scratch = { path = "../../testing/scratch" }
 tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
 

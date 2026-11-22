@@ -45,13 +45,15 @@ use orion_types::NodeName;
 use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, Decode, FrameView, INTERFACE_REVISION, List, kind};
 use shm_ring::{FieldId, Reader};
+use tracing::warn;
 
 /// What a board fact's topic name starts with.
 pub const FACT_PREFIX: &str = "hello.";
 /// The most facts a document carries.
 pub const MAX_FACTS: usize = 64;
-/// The longest fact value, in bytes. Longer ones are left out.
-pub const MAX_FACT_BYTES: usize = 256;
+/// The longest fact value, in bytes. Longer ones are left out, and the log says so once for
+/// each fact.
+pub const MAX_FACT_BYTES: usize = 1024;
 use orion_keys::hello::signed_bytes;
 pub use orion_keys::hello::{MAX_NONCE, verify};
 
@@ -121,6 +123,8 @@ struct Fact {
     ty: u8,
     reader: Reader,
     value: Vec<u8>,
+    /// The log has said this fact is too long to carry.
+    told_too_long: bool,
 }
 
 /// The hello service.
@@ -226,15 +230,25 @@ impl Hello {
                 ty: field.ty.code(),
                 reader,
                 value: Vec::new(),
+                told_too_long: false,
             });
         }
         drop(topics);
         for fact in &mut self.facts {
             fact.value.clear();
-            if let Some(sample) = fact.reader.latest(FieldId(0))
-                && sample.payload.len() <= MAX_FACT_BYTES
-            {
+            let Some(sample) = fact.reader.latest(FieldId(0)) else {
+                continue;
+            };
+            let bytes = sample.payload.len();
+            if bytes <= MAX_FACT_BYTES {
                 fact.value.extend_from_slice(sample.payload);
+            } else if !fact.told_too_long {
+                fact.told_too_long = true;
+                warn!(
+                    "hello.{}: {bytes} bytes is over the {MAX_FACT_BYTES} bytes a fact may be: \
+                     left out of the hello",
+                    fact.name
+                );
             }
         }
         // In name order, so the same board gives the same document whatever started first.

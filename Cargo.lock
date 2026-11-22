@@ -1720,6 +1720,7 @@ dependencies = [
  "orion-broker",
  "orion-config",
  "orion-keys",
+ "orion-log",
  "orion-msg-session",
  "orion-msg-topics",
  "orion-scratch",
@@ -1728,6 +1729,7 @@ dependencies = [
  "orion-wire",
  "shm-ring",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
