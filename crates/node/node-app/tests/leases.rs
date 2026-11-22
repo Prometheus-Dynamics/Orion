@@ -85,7 +85,11 @@ fn provide(orion: &Orion) -> Resource {
             .resource("cam.front", "camera")
             .expect("name");
         let acted = describing.action("focus", "Focuses the lens", Policy::new(Admits::LOCAL));
-        match acted.and_then(|()| describing.publish(ResourceState::Ready)) {
+        match acted.and_then(|()| {
+            describing
+                .publish(ResourceState::Ready)
+                .map_err(ClientError::from)
+        }) {
             Ok(resource) => return resource,
             // Node logic is not there yet.
             Err(ClientError::Refused {

@@ -94,7 +94,11 @@ fn provide(orion: &Orion) -> Resource {
             )
             .expect("topic");
         let acted = describing.action("focus", "Focuses the lens", Policy::new(Admits::LOCAL));
-        let published = acted.and_then(|()| describing.publish(ResourceState::Ready));
+        let published = acted.and_then(|()| {
+            describing
+                .publish(ResourceState::Ready)
+                .map_err(ClientError::from)
+        });
         match published {
             Ok(resource) => return resource,
             // Node logic is not there yet.

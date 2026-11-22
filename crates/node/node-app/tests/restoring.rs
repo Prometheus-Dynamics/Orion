@@ -81,7 +81,11 @@ fn provide(orion: &Orion) -> Resource {
     loop {
         let mut describing = orion.provider().resource("arm", "arm").expect("name");
         let acted = describing.action("home", "Homes the arm", Policy::new(Admits::ANYONE));
-        match acted.and_then(|()| describing.publish(ResourceState::Ready)) {
+        match acted.and_then(|()| {
+            describing
+                .publish(ResourceState::Ready)
+                .map_err(ClientError::from)
+        }) {
             Ok(resource) => return resource,
             // Node logic is not there yet.
             Err(ClientError::Refused {

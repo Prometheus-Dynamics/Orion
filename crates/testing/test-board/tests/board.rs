@@ -425,33 +425,7 @@ fn a_put_while_node_logic_is_behind_is_busy_and_node_logic_stays() {
             &resource_value("before", "slowpoke", b""),
         )])
         .expect("node logic takes a put");
-    // Node logic slow to read, and a program that sends puts without waiting for their answers
-    // until what waits for node logic fills its outbox.
-    let delay = orion_node_app::slow::delay("slowpoke");
-    delay.store(300, Ordering::Relaxed);
-    let filler = board.connect("filler").expect("connect");
-    // Small fills, so what is left of the outbox is less than the late put needs.
-    let fills: Vec<(String, Vec<u8>)> = (0..800)
-        .map(|i| {
-            let key = format!("fill-{i}");
-            let value = resource_value(&key, "slowpoke", &[7_u8; 1_000]);
-            (key, value)
-        })
-        .collect();
-    for (i, (key, value)) in fills.iter().enumerate() {
-        filler
-            .client()
-            .send(&orion_msg_records::Put {
-                records: orion_wire::List::new(&[resource(key, value)]),
-            })
-            .expect("send");
-        if i % 16 == 0 {
-            // The filler reads what it is told, its refusals among it: it is not the one
-            // that is behind.
-            filler.client().drain().expect("the filler's session");
-        }
-    }
-    filler.client().drain().expect("the filler's session");
+    let (delay, filler) = slow_and_full(&board, "slowpoke");
     let busy = writer.records().put(&[resource(
         "late",
         &resource_value("late", "slowpoke", &[1_u8; 16_000]),
@@ -509,4 +483,146 @@ fn a_workload_refused_is_found_by_wait() {
         }) => {}
         other => panic!("node logic away refuses the put, and wait says so: {other:?}"),
     }
+}
+
+/// Makes node logic of the board `node` slow to read, and has a program send it puts without
+/// waiting for their answers until what waits for node logic fills its outbox. The returned
+/// delay is set to 0 to let node logic catch up; the filler is dropped first, as it would not
+/// read the answers then.
+fn slow_and_full(
+    board: &TestBoard,
+    node: &str,
+) -> (std::sync::Arc<std::sync::atomic::AtomicU64>, orion::Orion) {
+    let delay = orion_node_app::slow::delay(node);
+    delay.store(300, std::sync::atomic::Ordering::Relaxed);
+    let filler = board.connect("filler").expect("connect");
+    // Small fills, so what is left of the outbox is less than what the test then sends needs.
+    let fills: Vec<(String, Vec<u8>)> = (0..800)
+        .map(|i| {
+            let key = format!("fill-{i}");
+            let value = resource_value(&key, node, &[7_u8; 1_000]);
+            (key, value)
+        })
+        .collect();
+    for (i, (key, value)) in fills.iter().enumerate() {
+        filler
+            .client()
+            .send(&orion_msg_records::Put {
+                records: orion_wire::List::new(&[resource(key, value)]),
+            })
+            .expect("send");
+        if i % 16 == 0 {
+            // The filler reads what it is told, its refusals among it: it is not the one
+            // that is behind.
+            filler.client().drain().expect("the filler's session");
+        }
+    }
+    filler.client().drain().expect("the filler's session");
+    (delay, filler)
+}
+
+/// Waits until node logic has caught up: it has written the first fill.
+fn caught_up(orion: &orion::Orion) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while orion
+        .records()
+        .get(RecordClass::Resource, "fill-0")
+        .expect("node logic answers")
+        .is_empty()
+    {
+        assert!(Instant::now() < deadline, "node logic never caught up");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_publish_turned_away_as_busy_gives_its_description_back_to_publish_again() {
+    use orion::provider::ResourceState;
+    use std::sync::atomic::Ordering;
+
+    let board = TestBoard::start_with(
+        "slow-publish",
+        Options {
+            name: "slow-publish".to_owned(),
+            conf: "comm.outbox_bytes = 70000".to_owned(),
+            ..Options::default()
+        },
+    );
+    let program = board.connect("camera").expect("connect");
+    // A record larger than what is left of the full outbox.
+    let label = "x".repeat(2_000);
+    let describing = program
+        .provider()
+        .resource("cam", "camera")
+        .expect("named")
+        .label("note", &label);
+    let (delay, filler) = slow_and_full(&board, "slow-publish");
+    let unpublished = describing
+        .publish(ResourceState::Ready)
+        .expect_err("turned away while node logic is behind");
+    assert!(unpublished.error.is_busy(), "{}", unpublished.error);
+    drop(filler);
+    delay.store(0, Ordering::Relaxed);
+    caught_up(&program);
+    let _cam = unpublished
+        .describing
+        .publish(ResourceState::Ready)
+        .expect("published the second time");
+    let found = program.resources("cam").expect("found");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].state, ResourceState::Ready);
+    // What was declared came back with it.
+    assert!(
+        found[0]
+            .labels
+            .iter()
+            .any(|(key, value)| key == "note" && *value == label),
+        "{:?}",
+        found[0].labels
+    );
+}
+
+#[test]
+fn a_withdraw_turned_away_as_busy_is_finished_by_withdrawing_again() {
+    use orion::provider::ResourceState;
+    use std::sync::atomic::Ordering;
+
+    let board = TestBoard::start_with(
+        "slow-withdraw",
+        Options {
+            name: "slow-withdraw".to_owned(),
+            conf: "comm.outbox_bytes = 70000".to_owned(),
+            ..Options::default()
+        },
+    );
+    let program = board.connect("camera").expect("connect");
+    let label = "x".repeat(2_000);
+    let mut describing = program
+        .provider()
+        .resource("cam", "camera")
+        .expect("named")
+        .label("note", &label);
+    let count = [orion::topics::Field {
+        name: "count",
+        ty: orion::topics::FieldType::Text,
+        unit: "",
+        type_name: "",
+    }];
+    let _frames = describing.topic("frames", &count, 4, 16).expect("declared");
+    let cam = describing.publish(ResourceState::Ready).expect("published");
+    let (delay, filler) = slow_and_full(&board, "slow-withdraw");
+    let unwithdrawn = cam
+        .withdraw()
+        .expect_err("turned away while node logic is behind");
+    assert!(unwithdrawn.error.is_busy(), "{}", unwithdrawn.error);
+    drop(filler);
+    delay.store(0, Ordering::Relaxed);
+    caught_up(&program);
+    // The topic went the first time: the second withdraw only writes the record gone.
+    unwithdrawn
+        .resource
+        .withdraw()
+        .expect("withdrawn the second time");
+    let found = program.resources("cam").expect("asked");
+    assert!(found.is_empty(), "{found:?}");
 }

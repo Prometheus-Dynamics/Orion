@@ -496,6 +496,11 @@ what to change.
   sends again. `ClientError::is_busy`, `orion::Error::is_busy` (**Add**); `Workloads::wait`
   returns the put's refusal (**Change**: it never did). `orion-node-app` feature `slow` (tests
   only). Nothing on the wire changes; level 6.
+- **I71.** `Describing::publish` fails with `Unpublished { error,
+  describing }` and `Resource::withdraw` with `Unwithdrawn { error, resource }` (**Change**:
+  both were `ClientError`; each turns into one with `From`, and into `orion::Error`): the
+  description or the resource comes back, to try again. A withdraw tried again does not
+  withdraw its topics twice. Nothing on the wire changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

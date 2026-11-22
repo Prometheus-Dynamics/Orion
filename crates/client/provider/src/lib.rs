@@ -206,8 +206,10 @@ impl Describing {
     ///
     /// # Errors
     ///
-    /// If the store refuses the record, or the connection broke.
-    pub fn publish(self, state: ResourceState) -> Result<Resource, ClientError> {
+    /// If the store refuses the record, or the connection broke: [`Unpublished`], which gives
+    /// the description back, to publish again (after a `busy` refusal,
+    /// [`ClientError::is_busy`], a moment later). It turns into the [`ClientError`] for `?`.
+    pub fn publish(self, state: ResourceState) -> Result<Resource, Unpublished> {
         let mut resource = Resource {
             provider: self.provider,
             name: self.name,
@@ -217,8 +219,76 @@ impl Describing {
             labels: self.labels,
             requests: self.requests,
         };
-        resource.write(state, false)?;
-        Ok(resource)
+        match resource.write(state, false) {
+            Ok(()) => Ok(resource),
+            Err(error) => Err(Unpublished {
+                error,
+                describing: Box::new(Self {
+                    provider: resource.provider,
+                    name: resource.name,
+                    kind: resource.kind,
+                    topics: resource.topics,
+                    actions: resource.actions,
+                    labels: resource.labels,
+                    requests: resource.requests,
+                }),
+            }),
+        }
+    }
+}
+
+/// A resource that was not published: why, and its description to publish again.
+#[derive(Debug)]
+pub struct Unpublished {
+    /// Why.
+    pub error: ClientError,
+    /// The description, as it was.
+    pub describing: Box<Describing>,
+}
+
+impl fmt::Display for Unpublished {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} was not published: {}",
+            self.describing.name, self.error
+        )
+    }
+}
+
+impl std::error::Error for Unpublished {}
+
+impl From<Unpublished> for ClientError {
+    fn from(unpublished: Unpublished) -> Self {
+        unpublished.error
+    }
+}
+
+/// A resource that was not withdrawn: why, and the resource, to withdraw again. The topics
+/// already withdrawn stay so, and are not withdrawn again.
+#[derive(Debug)]
+pub struct Unwithdrawn {
+    /// Why.
+    pub error: ClientError,
+    /// The resource, still written down.
+    pub resource: Box<Resource>,
+}
+
+impl fmt::Display for Unwithdrawn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} was not withdrawn: {}",
+            self.resource.name, self.error
+        )
+    }
+}
+
+impl std::error::Error for Unwithdrawn {}
+
+impl From<Unwithdrawn> for ClientError {
+    fn from(unwithdrawn: Unwithdrawn) -> Self {
+        unwithdrawn.error
     }
 }
 
@@ -301,12 +371,29 @@ impl Resource {
     ///
     /// # Errors
     ///
-    /// If the comm core or the store refuses, or the connection broke.
-    pub fn withdraw(mut self) -> Result<(), ClientError> {
-        for topic in &self.topics {
-            self.provider.topics.withdraw(topic)?;
+    /// If the comm core or the store refuses, or the connection broke: [`Unwithdrawn`], which
+    /// gives the resource back. Withdrawing it again finishes what this did not: the topics
+    /// already withdrawn are not withdrawn again, and the record is written gone. After a
+    /// `busy` refusal ([`ClientError::is_busy`]) that is a moment later. It turns into the
+    /// [`ClientError`] for `?`.
+    pub fn withdraw(mut self) -> Result<(), Unwithdrawn> {
+        while let Some(topic) = self.topics.first() {
+            // A topic this session no longer publishes is withdrawn already: not an error.
+            if let Err(error) = self.provider.topics.withdraw(topic) {
+                return Err(Unwithdrawn {
+                    error,
+                    resource: Box::new(self),
+                });
+            }
+            self.topics.remove(0);
         }
-        self.write(ResourceState::Lost, true)
+        match self.write(ResourceState::Lost, true) {
+            Ok(()) => Ok(()),
+            Err(error) => Err(Unwithdrawn {
+                error,
+                resource: Box::new(self),
+            }),
+        }
     }
 }
 

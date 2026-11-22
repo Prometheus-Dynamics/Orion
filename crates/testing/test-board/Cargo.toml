@@ -9,7 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-orion = { path = "../../client/orion", features = ["files", "actions", "workloads"] }
+orion = { path = "../../client/orion", features = ["files", "actions", "workloads", "provider"] }
 orion-comm-app = { path = "../../comm/comm-app" }
 orion-config = { path = "../../core/config" }
 orion-node-app = { path = "../../node/node-app" }

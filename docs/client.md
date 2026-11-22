@@ -97,9 +97,11 @@ A program that is handed busy waits a moment and makes the call again, on the sa
 error for which `is_busy()` is true never has `is_lost()` true, so a program that reconnects on
 `is_lost()` keeps its session through busy. A run that got busy was never started, and must be
 run again: its `Run` says busy once and nothing after. A provider's `set_state` that got busy is
-not written and is called again. At this revision a provider's `publish` or `withdraw` that
-got busy has taken its handle. After `publish`, the declaration is made again. After
-`withdraw`, its topics are withdrawn already and its record is not yet written gone. Every other request
+not written and is called again. A provider's `publish` that fails gives its description back
+(`Unpublished { error, describing }`), and `describing.publish(..)` is called again. A
+`withdraw` that fails gives the resource back (`Unwithdrawn { error, resource }`), and
+`resource.withdraw()` again finishes it: topics already withdrawn are not withdrawn again, and
+the record is written gone. Both turn into the `ClientError` for `?`. Every other request
 node logic answers is never turned away for want of room: a standing one (a watch, an action
 registered, a receiver, an executor's offer) or one nothing waits for an answer to (an action's
 progress and result, a cancel, a receiver's status, a workload said, an executor's report). For

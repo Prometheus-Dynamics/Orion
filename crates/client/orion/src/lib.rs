@@ -181,6 +181,20 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+#[cfg(feature = "provider")]
+impl From<orion_provider::Unpublished> for Error {
+    fn from(unpublished: orion_provider::Unpublished) -> Self {
+        Self::Client(unpublished.error)
+    }
+}
+
+#[cfg(feature = "provider")]
+impl From<orion_provider::Unwithdrawn> for Error {
+    fn from(unwithdrawn: orion_provider::Unwithdrawn) -> Self {
+        Self::Client(unwithdrawn.error)
+    }
+}
+
 impl From<ClientError> for Error {
     fn from(error: ClientError) -> Self {
         Self::Client(error)

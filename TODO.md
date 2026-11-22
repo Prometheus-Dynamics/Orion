@@ -257,6 +257,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I68](docs/prs/I68.md) The test board has a receiver that answers a commit late (wave 19; needs I67)
 - [x] [I69](docs/prs/I69.md) A push's window fits in a session's outbox, and the test board can leave an action unanswered (wave 19; needs I68)
 - [x] [I70](docs/prs/I70.md) A full outbox turns a request away as busy instead of dropping node logic, and a push goes back and sends again (wave 19; needs I69)
+- [x] [I71](docs/prs/I71.md) A provider's publish or withdraw that fails gives its description or resource back to try again (wave 19; needs I70)
 
 ## J. The stack around Orion
 
