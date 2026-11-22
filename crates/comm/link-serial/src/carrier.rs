@@ -499,6 +499,16 @@ impl<S: ByteStream + 'static> Connection for StreamConnection<S> {
     fn local(&self) -> bool {
         false
     }
+
+    /// What the far end's decoder takes, less what sealing adds on a signed session. Whatever
+    /// the far end says it takes, a larger frame would not arrive.
+    fn max_frame(&self) -> Option<u32> {
+        let room = match self.signed {
+            Some(_) => MAX_FRAME - orion_msg_session::LINK_SEALED_OVERHEAD,
+            None => MAX_FRAME,
+        };
+        Some(room as u32)
+    }
 }
 
 /// The reading half.

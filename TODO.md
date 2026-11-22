@@ -246,6 +246,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I55b](docs/prs/I55b.md) Each gate step is bounded by three times its slowest green CPU seconds, measured here and in CI (wave 19; needs I55)
 - [x] [I58](docs/prs/I58.md) The shared-memory ring crates come from the device library at 7b4fdb25 (wave 19; needs I55b)
 - [x] [I59](docs/prs/I59.md) A hello fact may be up to 1024 bytes, and one that is longer is logged once (wave 19; needs I58)
+- [x] [I60](docs/prs/I60.md) A hello too large for a link is refused, saying its size and the limit (wave 19; needs I59)
 
 ## J. The stack around Orion
 

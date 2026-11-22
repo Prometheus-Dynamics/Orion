@@ -191,6 +191,10 @@ impl Connection for MemConnection {
         self.local
     }
 
+    fn max_frame(&self) -> Option<u32> {
+        None
+    }
+
     fn split(self) -> (MemRead, MemWrite) {
         (self.read, self.write)
     }

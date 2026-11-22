@@ -55,6 +55,12 @@ pub trait Connection {
     /// the compiler is what makes sure it does.
     fn local(&self) -> bool;
 
+    /// The largest frame the carrier can take to the other end, if it has a limit of its own:
+    /// a link's. A session on it is never sent a larger one; an answer that would be is
+    /// refused instead, so the caller hears why. `None` for a carrier that takes any frame
+    /// the server sends. No default, for the reason [`Connection::local`] has none.
+    fn max_frame(&self) -> Option<u32>;
+
     /// Splits into the two halves, which are driven by separate tasks.
     fn split(self) -> (Self::Read, Self::Write);
 }

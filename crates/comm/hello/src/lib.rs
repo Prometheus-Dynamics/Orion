@@ -43,6 +43,7 @@ use orion_server::{
 };
 use orion_types::NodeName;
 use orion_wire::body::encode_fields;
+use orion_wire::frame::frame_len;
 use orion_wire::{Bytes, Decode, FrameView, INTERFACE_REVISION, List, kind};
 use shm_ring::{FieldId, Reader};
 use tracing::warn;
@@ -51,6 +52,11 @@ use tracing::warn;
 pub const FACT_PREFIX: &str = "hello.";
 /// The most facts a document carries.
 pub const MAX_FACTS: usize = 64;
+/// The most a document can be, encoded: every fact at its longest, with room for its name,
+/// and the rest of the document.
+const MAX_DOCUMENT: usize = MAX_FACTS * (MAX_FACT_BYTES + 128) + 1024;
+/// What the signature adds to a document encoded without one: an ed25519 signature's bytes.
+const SIGNATURE_LEN: usize = 64;
 /// The longest fact value, in bytes. Longer ones are left out, and the log says so once for
 /// each fact.
 pub const MAX_FACT_BYTES: usize = 1024;
@@ -336,12 +342,26 @@ impl Service for Hello {
         };
         // Someone on the board who gave no nonce is not checking a signature: skip the cost.
         let wanted = !identify.nonce.is_empty() || !cx.caller().passes_descriptors;
+        // Encoded once with no signature: all but its last byte, the empty signature's length,
+        // is what gets signed.
+        self.payload.resize(MAX_DOCUMENT, 0);
+        let len = encode_fields(&identity, &mut self.payload)?;
+        // Too large for the caller's frames, a link's among them: refused, saying so, where it
+        // would otherwise be dropped on the way or end the session.
+        let frame = frame_len(len + if wanted { SIGNATURE_LEN } else { 0 });
+        let limit = cx.caller().max_frame as usize;
+        if frame > limit {
+            drop(keys);
+            return cx.refuse(
+                Error::BufferTooSmall,
+                &format!(
+                    "the hello is {frame} bytes, over the {limit} bytes a frame to this \
+                     session may be"
+                ),
+            );
+        }
         let signature;
         if wanted {
-            self.payload.resize(cx.caller().max_frame as usize, 0);
-            // Encoded once with no signature: all but its last byte, the empty signature's
-            // length, is what gets signed.
-            let len = encode_fields(&identity, &mut self.payload)?;
             signature = keys
                 .identity()
                 .sign(&signed_bytes(&self.payload[..len - 1]));

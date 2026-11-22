@@ -209,6 +209,10 @@ impl Connection for UnixConnection {
         true
     }
 
+    fn max_frame(&self) -> Option<u32> {
+        None
+    }
+
     fn split(self) -> (UnixRead, UnixWrite) {
         (UnixRead(self.stream.clone()), UnixWrite(self.stream))
     }

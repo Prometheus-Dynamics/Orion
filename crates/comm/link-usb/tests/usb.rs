@@ -5,11 +5,11 @@ use std::os::fd::OwnedFd;
 use std::rc::Rc;
 use std::time::Duration;
 
-use orion_link_serial::{LinkStats, StreamCarrier};
+use orion_link_serial::{LinkStats, MAX_FRAME, StreamCarrier};
 use orion_link_usb::UsbLinks;
 use orion_measure::{CountingAlloc, thread_counts};
 use orion_msg_session::{
-    Hello, LinkOffer, LinkTaken, LinkTransport, Ping, Pong, Refusal, Reject, RejectReason,
+    Hello, LinkOffer, LinkTaken, LinkTransport, Ping, Pong, Refusal, Reject, RejectReason, Welcome,
 };
 use orion_server::mem::{self, MemConnection, MemConnector};
 use orion_server::{Comm, Error, FdSet, Grants, Limits, Principal, Roles, Security, What};
@@ -238,15 +238,21 @@ impl Device {
     }
 
     async fn hello(&mut self) {
+        self.hello_taking(512).await;
+    }
+
+    /// Says hello as a device that takes frames of up to `max_frame`; the welcome comes back.
+    async fn hello_taking(&mut self, max_frame: u32) -> Welcome {
         self.send(&Hello {
             name: "sensor",
             roles: Roles::DEVICE,
-            max_frame: 512,
+            max_frame,
             revision: 1,
             level: 0,
         })
         .await;
         assert_eq!(self.next().await, Some(kind::WELCOME));
+        Welcome::decode(&self.payload[..self.payload_len]).expect("welcome")
     }
 
     async fn ping(&mut self, now_ms: u64) {
@@ -582,5 +588,31 @@ fn an_end_descriptor_takes_the_endpoints_back_and_all_three_are_closed() {
         );
         device.hello().await;
         device.ping(3).await;
+    });
+}
+
+#[test]
+fn a_device_that_says_it_takes_more_than_the_link_carries_is_sent_no_more_than_the_link_carries() {
+    run(async {
+        let board = board();
+        let mut owner = Owner::open(board.connector.connect(ROOT)).await;
+        let (mut device, handle) = Device::stream();
+        assert_eq!(
+            owner
+                .offer("usb0", LinkTransport::Stream, vec![handle])
+                .await,
+            Ok(kind::LINK_TAKEN)
+        );
+        // It says 64 KiB; the far end's decoder of a link takes 8 KiB. Its session's frames are
+        // the link's, so an answer too large for them is refused, not sent to be lost.
+        let welcome = device.hello_taking(64 * 1024).await;
+        assert_eq!(welcome.max_frame as usize, MAX_FRAME);
+        let carried = board.comm.with(|sessions, _| {
+            sessions
+                .iter()
+                .find(|session| matches!(session.principal, Principal::Device(_)))
+                .map(|session| session.max_frame)
+        });
+        assert_eq!(carried, Some(MAX_FRAME as u32));
     });
 }

@@ -158,6 +158,8 @@ pub struct SessionInfo {
     pub level: u16,
     /// The largest frame it takes.
     pub max_frame: u32,
+    /// The largest frame its carrier takes, `u32::MAX` for no limit of its own.
+    pub carries: u32,
     /// Whether descriptors can be sent to it.
     pub passes_descriptors: bool,
     /// Whether it has said hello.
@@ -274,6 +276,7 @@ impl Sessions {
         offers: Roles,
         passes_descriptors: bool,
         local: bool,
+        carries: Option<u32>,
     ) -> Option<SessionId> {
         if self.live >= self.limits.max_sessions {
             return None;
@@ -295,7 +298,10 @@ impl Sessions {
                 name: String::new(),
                 roles: Roles(0),
                 level: 0,
-                max_frame: self.limits.max_frame,
+                max_frame: carries.map_or(self.limits.max_frame, |carries| {
+                    carries.min(self.limits.max_frame)
+                }),
+                carries: carries.unwrap_or(u32::MAX),
                 passes_descriptors,
                 open: false,
                 dropped: 0,

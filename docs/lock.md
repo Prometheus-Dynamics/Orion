@@ -454,6 +454,10 @@ what to change.
 - **I59.** A hello fact may be up to 1024 bytes, where it was 256; a longer one is still left
   out, and the log now says so once for each fact. `recovery_why` is cut to 1024 bytes. Nothing
   on the wire changes.
+- **I60.** A session on a serial or USB link is never sent a frame over 8192 bytes (8160
+  signed), whatever its hello says it takes; an answer too large is refused `buffer_too_small`.
+  A hello too large says its size and the limit. `orion_server::Connection` gains `max_frame`.
+  Nothing on the wire changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

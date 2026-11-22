@@ -207,6 +207,10 @@ impl Connection for TcpConnection {
     fn local(&self) -> bool {
         false
     }
+
+    fn max_frame(&self) -> Option<u32> {
+        None
+    }
 }
 
 fn connection(

@@ -963,6 +963,13 @@ Recovery takes signed sessions on its links too. Its trust store holds the recov
 (`recovery.keys`) and nothing else, each an operator granted `login`, read again every couple of
 seconds: a person with a recovery key gets a shell over the USB cable of a board in recovery.
 
+**A link's frames are at most 8192 bytes**, what the far end's decoder takes, and on a signed
+session 32 fewer, for the seal. A session on a link is never sent a larger frame, whatever its
+hello says it takes: the welcome's `max_frame` is the smaller of the two. An answer too large is
+refused instead, `buffer_too_small`, so the caller hears why rather than waiting for a frame
+that could not arrive. A hello too large says so with its size and the limit: `the hello is
+<n> bytes, over the <limit> bytes a frame to this session may be`.
+
 **A link never gives up.** A port that can't be opened, or that fails, is opened again 250 ms
 later, for as long as the program runs. A link is a way into the machine, and ways in are not
 backed off. Its state (running, or retrying and when) is reported as it changes.

@@ -456,6 +456,10 @@ impl<I: CanIo + 'static> Connection for CanConnection<I> {
     fn local(&self) -> bool {
         false
     }
+
+    fn max_frame(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// The reading half.

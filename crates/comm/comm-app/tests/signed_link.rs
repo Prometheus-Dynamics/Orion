@@ -1,6 +1,7 @@
 //! A signed session on a USB link, end to end: a tool that holds an operator's key gets a shell
 //! on a board with security on, over the link and nothing else, and in recovery with a recovery
-//! key. Without a key it is the link's device, and gets none.
+//! key. Without a key it is the link's device, and gets none. A hello too large for the link is
+//! refused, saying its size and the limit, on either session.
 
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
@@ -11,9 +12,9 @@ use orion::{Identity, Options};
 use orion_comm_app::{CommSettings, RecoverWith, Started, start_or_recover};
 use orion_config::{ConfigError, Source};
 use orion_connect::Session;
-use orion_msg_session::{LinkOffer, LinkTransport};
+use orion_msg_session::{Identify, LinkOffer, LinkTransport};
 use orion_scratch::Scratch;
-use orion_wire::kind;
+use orion_wire::{Bytes, kind};
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -243,6 +244,117 @@ fn a_tool_with_a_key_gets_a_shell_over_a_usb_link_with_security_on_and_in_recove
             refused.as_ref().is_err_and(|why| why.contains("Denied")),
             "{refused:?}"
         );
+        drop(started);
+    });
+}
+
+/// Over the link at `tool`, signed with `identity` if any, asks for the hello: `Ok` if it came,
+/// or the words of the refusal.
+async fn hello_over_link(tool: OwnedFd, identity: Option<&Identity>) -> Result<(), String> {
+    let identity = identity.map(|identity| Identity::from_secret(&identity.secret()));
+    tokio::task::spawn_blocking(move || {
+        let options = Options {
+            identity,
+            ..Options::default()
+        };
+        let mut session =
+            Session::over_link(tool, "tool", options).map_err(|error| error.to_string())?;
+        let seq = session
+            .send(&Identify {
+                nonce: Bytes(&[3; 16]),
+            })
+            .map_err(|error| error.to_string())?;
+        match session.answer(seq, kind::IDENTITY) {
+            Ok(_) => Ok(()),
+            Err(orion_connect::ClientError::Refused { error, detail }) => {
+                Err(format!("{error:?}: {detail}"))
+            }
+            Err(error) => panic!("neither the hello nor a refusal: {error}"),
+        }
+    })
+    .await
+    .expect("asked")
+}
+
+#[test]
+fn a_hello_too_large_for_the_link_is_refused_saying_its_size_and_the_limit() {
+    run(async {
+        let dir = temp("too-large");
+        let socket = dir.join("board.sock");
+        let text = format!(
+            "node.name = board\nsocket = {}\nstate.dir = {}/state\nlinks.usb = usb0\n",
+            socket.display(),
+            dir.display(),
+        );
+        let started = start_or_recover(settings(&dir, &text), RecoverWith::default()).await;
+        assert!(matches!(started, Started::Core(_)), "{started:?}");
+        let key = Identity::generate();
+
+        // A small hello comes, on either session.
+        assert_eq!(hello_over_link(plug_in(&socket).await, None).await, Ok(()));
+        assert_eq!(
+            hello_over_link(plug_in(&socket).await, Some(&key)).await,
+            Ok(())
+        );
+
+        // A program on the board publishes ten facts of 1000 bytes: the hello is over 10 KB.
+        let address: orion::Address = socket.display().to_string().parse().expect("address");
+        // The program stays up, its facts with it, until `stop` is dropped.
+        let (ready_tx, ready) = std::sync::mpsc::channel();
+        let (stop, stopped) = std::sync::mpsc::channel::<()>();
+        let program = std::thread::spawn(move || {
+            let orion = orion::Orion::connect(&address, "facts").expect("connect");
+            let mut kept = Vec::new();
+            for at in 0..10 {
+                let name = format!("hello.fact{at}");
+                let mut fact = orion
+                    .declare(&orion::topics::TopicDecl {
+                        name: &name,
+                        fields: &orion::fields![value: Text],
+                        history: 1,
+                        expiry_ms: 0,
+                        max_payload: 1024,
+                        on_subscribe: Default::default(),
+                    })
+                    .expect("declare");
+                fact.publish(
+                    orion::topics::FieldId(0),
+                    orion::topics::SampleTime::ZERO,
+                    &[b'f'; 1000],
+                )
+                .expect("publish");
+                kept.push(fact);
+            }
+            ready_tx.send(()).expect("ready");
+            let _ = stopped.recv();
+            drop((kept, orion));
+        });
+        tokio::task::spawn_blocking(move || ready.recv().expect("published"))
+            .await
+            .expect("published");
+
+        // Plain, the link's frames are 8192 bytes; signed, 32 fewer, for the seal. Either way
+        // the caller is told, with the hello's size and the limit, and the session goes on.
+        let plain = hello_over_link(plug_in(&socket).await, None).await;
+        let signed = hello_over_link(plug_in(&socket).await, Some(&key)).await;
+        for (said, limit) in [(&plain, 8192), (&signed, 8160)] {
+            let said = said.as_ref().expect_err("refused");
+            assert!(said.starts_with("BufferTooSmall: the hello is "), "{said}");
+            assert!(
+                said.ends_with(&format!(
+                    "bytes, over the {limit} bytes a frame to this session may be"
+                )),
+                "{said}"
+            );
+            let size: usize = said["BufferTooSmall: the hello is ".len()..]
+                .split(' ')
+                .next()
+                .and_then(|size| size.parse().ok())
+                .expect("a size");
+            assert!(size > 10_000, "{said}");
+        }
+        drop(stop);
+        program.join().expect("the program ends");
         drop(started);
     });
 }

@@ -522,6 +522,10 @@ impl Connection for WsConnection {
     fn local(&self) -> bool {
         false
     }
+
+    fn max_frame(&self) -> Option<u32> {
+        None
+    }
 }
 
 impl Carrier for WsCarrier {

@@ -121,6 +121,7 @@ impl Server {
             connection.offers(),
             connection.passes_descriptors(),
             connection.local(),
+            connection.max_frame(),
         );
         match id {
             Some(_) => self.stats.opened += 1,
@@ -268,8 +269,11 @@ impl Server {
         info.name.extend(hello.name.chars().take(64));
         info.roles = hello.roles;
         info.level = hello.level;
-        // Never below what the server's own answers need.
-        info.max_frame = hello.max_frame.clamp(256, limits.max_frame);
+        // Never below what the server's own answers need, nor above what its carrier takes.
+        info.max_frame = hello
+            .max_frame
+            .clamp(256, limits.max_frame)
+            .min(info.carries);
         info.open = true;
         let welcome = Welcome {
             node: self.node.clone(),
