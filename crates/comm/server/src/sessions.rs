@@ -38,6 +38,10 @@ pub enum Delivery {
     /// The frame is one of a stream and the next one supersedes it. With no room, it is
     /// dropped and counted.
     MayDrop,
+    /// The frame is another session's request passed on: with no room it is not sent, and the
+    /// session it was for goes on as it was. The caller tells the request's sender `Busy`, so
+    /// one session's traffic never gets another dropped.
+    Refuse,
 }
 
 /// Why the comm core ended a session. A session its own program closed has none.
@@ -409,6 +413,7 @@ impl Sessions {
         if !entry.outbox.push(&self.scratch[..len], fds, limit) {
             match delivery {
                 Delivery::MayDrop => entry.info.dropped += 1,
+                Delivery::Refuse => {}
                 Delivery::Must => {
                     entry.why.get_or_insert(Dropped::OutboxFull {
                         kind,

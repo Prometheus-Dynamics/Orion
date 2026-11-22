@@ -47,7 +47,7 @@ fn asked<B: Body>(from: u32, body: &B, into: &mut Vec<u8>) -> usize {
 impl Bench {
     fn new() -> Self {
         Self {
-            sinks: Sinks::new(),
+            sinks: Sinks::default(),
             sent: Sent::default(),
         }
     }

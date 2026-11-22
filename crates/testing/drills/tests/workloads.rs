@@ -59,12 +59,13 @@ fn reaches(orion: &Orion, file: &Path, state: WorkloadState) {
     let started = std::time::Instant::now();
     loop {
         put(orion, file);
-        let reached = orion
-            .workloads()
-            .wait(NAME, Duration::from_millis(200), |tracked| {
-                tracked.state == state
-            })
-            .expect("wait");
+        let reached = found(
+            orion
+                .workloads()
+                .wait(NAME, Duration::from_millis(200), |tracked| {
+                    tracked.state == state
+                }),
+        );
         if reached.is_some() {
             return;
         }
@@ -186,4 +187,20 @@ fn orion_dies_whole_and_takes_back_what_kept_running() {
     assert!(alive(first));
     clean(&subscriber);
     orion.workloads().remove(NAME, true).expect("remove");
+}
+
+/// What a wait found, where a put refused because node logic is away, or busy, is one to make
+/// again.
+fn found(
+    waited: Result<Option<orion::workloads::Tracked>, orion::ClientError>,
+) -> Option<orion::workloads::Tracked> {
+    match waited {
+        Ok(found) => found,
+        Err(error)
+            if error.is_busy() || error.refusal() == Some(orion::types::Error::Unavailable) =>
+        {
+            None
+        }
+        Err(error) => panic!("wait: {error}"),
+    }
 }

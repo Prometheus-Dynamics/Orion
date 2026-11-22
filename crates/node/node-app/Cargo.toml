@@ -12,6 +12,8 @@ repository.workspace = true
 default = ["pull"]
 # Fetching a file from a URL. This brings in the one HTTP client, and rustls.
 pull = ["dep:orion-files-pull"]
+# For tests only, in no shipped build: node logic made slow to read, on purpose (`slow`).
+slow = []
 
 [dependencies]
 orion-action-forward = { path = "../action-forward" }

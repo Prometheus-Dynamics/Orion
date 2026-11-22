@@ -367,6 +367,13 @@ again in the slot. `orion-files-sink` is how such a program takes them.
   checks the digest; it says committed or rejected.
 - **Nothing is kept.** The node stores none of the file and holds a chunk only for the call
   that brought it. Memory does not grow with the file.
+- **Within the receiver's outbox.** What has been sent to a receiver and not yet answered,
+  across every transfer to it, stays within its session's outbox in the comm core, less one
+  chunk's room. Node logic takes that figure from `comm.outbox_bytes`, and never above its
+  default, in case only one of the two restarted since it changed. A chunk past it is
+  refused to its sender as `busy`, and so is a chunk after one that was turned away, so what
+  the receiver is sent stays in order. A sender that goes back sends again chunks that are on
+  their way already; those are not sent twice.
 - **A sender that comes back** in a new session and begins the same transfer again is the one
   told from then on.
 - **A receiver that goes** takes its prefixes with it. Whoever was sending to it is told the

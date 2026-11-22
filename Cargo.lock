@@ -2364,8 +2364,10 @@ dependencies = [
  "orion",
  "orion-comm-app",
  "orion-config",
+ "orion-msg-records",
  "orion-node-app",
  "orion-scratch",
+ "orion-wire",
  "tokio",
 ]
 

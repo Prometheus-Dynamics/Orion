@@ -323,3 +323,190 @@ fn an_action_left_unanswered_stays_open_while_the_board_answers() {
     assert_eq!(finished.outcome, Outcome::Failed);
     assert_eq!(finished.detail, "the program that runs it went away");
 }
+
+/// A board whose sessions each have half the default outbox: less than one push's window, so
+/// every push is turned away as busy along the way, by the comm core on the way to node logic
+/// and by node logic on the way to a receiver.
+fn small_outbox(name: &str) -> TestBoard {
+    TestBoard::start_with(
+        name,
+        Options {
+            conf: "comm.outbox_bytes = 131072".to_owned(),
+            ..Options::default()
+        },
+    )
+}
+
+/// `pushers` pushes of 4 MB at once, under `prefix`, each by the same deadline.
+fn at_once(board: &TestBoard, prefix: &str, pushers: usize) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    std::thread::scope(|scope| {
+        let pushes: Vec<_> = (0..pushers)
+            .map(|i| {
+                scope.spawn(move || {
+                    let data = vec![u8::try_from(i).expect("small"); 4_000_000];
+                    push_by(
+                        board,
+                        &format!("{prefix}{pushers}-{i}.img"),
+                        &data,
+                        deadline,
+                    )
+                })
+            })
+            .collect();
+        for (i, push) in pushes.into_iter().enumerate() {
+            let transfer = push
+                .join()
+                .expect("a push")
+                .unwrap_or_else(|why| panic!("push {i} of {pushers} to {prefix}: {why}"));
+            assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
+        }
+    });
+}
+
+#[test]
+fn pushes_at_once_past_a_full_outbox_are_paced_not_lost() {
+    // To the node's own store: the comm core turns chunks away while node logic's outbox is
+    // full, and node logic is never dropped for it.
+    let board = small_outbox("paced");
+    at_once(&board, "files/", 2);
+    at_once(&board, "files/", 4);
+    // To a receiver: node logic turns chunks away while what is on its way to the receiver
+    // would not fit in its outbox.
+    let held = board.hold_commits("slots/", Duration::from_millis(100));
+    at_once(&board, "slots/", 2);
+    at_once(&board, "slots/", 4);
+    assert_eq!(held.answered(), 6);
+    assert!(board.node_runs());
+}
+
+/// A resource record's value for `key` on `node`, carrying `attributes`.
+fn resource_value(key: &str, node: &str, attributes: &[u8]) -> Vec<u8> {
+    let record = orion_msg_records::ResourceRecord {
+        name: key.parse().expect("a name"),
+        kind: "test",
+        node: node.parse().expect("a name"),
+        state: orion_msg_records::ResourceState::Ready,
+        attributes: orion_wire::Bytes(attributes),
+    };
+    let mut value = vec![0_u8; attributes.len() + 512];
+    let len = orion_wire::body::encode_fields(&record, &mut value).expect("encode");
+    value.truncate(len);
+    value
+}
+
+fn resource<'a>(key: &'a str, value: &'a [u8]) -> orion::records::RecordEntry<'a> {
+    orion::records::RecordEntry {
+        class: RecordClass::Resource,
+        key,
+        stamp: orion::types::HlcTimestamp::ZERO,
+        deleted: false,
+        value: orion::records::Bytes(value),
+    }
+}
+
+#[test]
+fn a_put_while_node_logic_is_behind_is_busy_and_node_logic_stays() {
+    use std::sync::atomic::Ordering;
+
+    let board = TestBoard::start_with(
+        "slowpoke",
+        Options {
+            name: "slowpoke".to_owned(),
+            conf: "comm.outbox_bytes = 70000".to_owned(),
+            ..Options::default()
+        },
+    );
+    let writer = board.connect("writer").expect("connect");
+    writer
+        .records()
+        .put(&[resource(
+            "before",
+            &resource_value("before", "slowpoke", b""),
+        )])
+        .expect("node logic takes a put");
+    // Node logic slow to read, and a program that sends puts without waiting for their answers
+    // until what waits for node logic fills its outbox.
+    let delay = orion_node_app::slow::delay("slowpoke");
+    delay.store(300, Ordering::Relaxed);
+    let filler = board.connect("filler").expect("connect");
+    // Small fills, so what is left of the outbox is less than the late put needs.
+    let fills: Vec<(String, Vec<u8>)> = (0..800)
+        .map(|i| {
+            let key = format!("fill-{i}");
+            let value = resource_value(&key, "slowpoke", &[7_u8; 1_000]);
+            (key, value)
+        })
+        .collect();
+    for (i, (key, value)) in fills.iter().enumerate() {
+        filler
+            .client()
+            .send(&orion_msg_records::Put {
+                records: orion_wire::List::new(&[resource(key, value)]),
+            })
+            .expect("send");
+        if i % 16 == 0 {
+            // The filler reads what it is told, its refusals among it: it is not the one
+            // that is behind.
+            filler.client().drain().expect("the filler's session");
+        }
+    }
+    filler.client().drain().expect("the filler's session");
+    let busy = writer.records().put(&[resource(
+        "late",
+        &resource_value("late", "slowpoke", &[1_u8; 16_000]),
+    )]);
+    // The filler goes before node logic catches up: it would not read the answers.
+    drop(filler);
+    delay.store(0, Ordering::Relaxed);
+    match busy {
+        Err(error) => assert!(error.is_busy(), "turned away as busy, not {error:?}"),
+        Ok(_) => panic!("a put while node logic's outbox is full is turned away"),
+    }
+    // Node logic was not dropped for it: it answers at once, and what it was sent is there.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let got = writer
+            .records()
+            .get(RecordClass::Resource, "fill-0")
+            .expect("node logic answers");
+        if !got.is_empty() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "fill-0 never written");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let late = writer
+        .records()
+        .get(RecordClass::Resource, "late")
+        .expect("node logic answers");
+    assert!(late.is_empty(), "a put turned away is not written");
+    assert!(board.node_runs());
+}
+
+#[test]
+fn a_workload_refused_is_found_by_wait() {
+    use orion::workloads::{RestartPolicy, Workload};
+
+    let mut board = TestBoard::start("refused-workload");
+    board.stop_node();
+    let operator = board.connect("operator").expect("connect");
+    let workload = Workload {
+        name: "sleeper",
+        kind: "process",
+        spec: b"sleep 1",
+        node: None,
+        restart: RestartPolicy::Never,
+    };
+    operator.workloads().put(&workload).expect("said");
+    match operator
+        .workloads()
+        .wait("sleeper", Duration::from_secs(5), |_| true)
+    {
+        Err(ClientError::Refused {
+            error: Error::Unavailable,
+            ..
+        }) => {}
+        other => panic!("node logic away refuses the put, and wait says so: {other:?}"),
+    }
+}

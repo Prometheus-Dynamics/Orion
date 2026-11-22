@@ -46,6 +46,8 @@ pub struct Tracked {
 #[derive(Default)]
 struct State {
     tracked: Vec<Tracked>,
+    /// Each workload said, and the request that said it last: its refusal is found there.
+    said: Vec<(String, u16)>,
 }
 
 impl Handler for State {
@@ -100,8 +102,8 @@ impl Workloads {
     ///
     /// # Errors
     ///
-    /// If a name is not one, or the connection broke. A refusal is found by
-    /// [`Workloads::wait`].
+    /// If a name is not one, or the connection broke. A refusal, `busy` among them, is found
+    /// by [`Workloads::wait`].
     pub fn put(&self, workload: &Workload<'_>) -> Result<(), ClientError> {
         self.put_needing(workload, &[])
     }
@@ -127,7 +129,7 @@ impl Workloads {
             });
         }
         self.forget(workload.name);
-        self.client.send(&WorkloadPut {
+        let seq = self.client.send(&WorkloadPut {
             name: workload.name.parse().map_err(name)?,
             kind: workload.kind.parse().map_err(name)?,
             spec: Bytes(workload.spec),
@@ -137,6 +139,9 @@ impl Workloads {
             cpus: Bytes(&[]),
             restart: workload.restart,
         })?;
+        let mut state = self.state.borrow_mut();
+        state.said.retain(|(said, _)| said != workload.name);
+        state.said.push((workload.name.to_owned(), seq));
         Ok(())
     }
 
@@ -184,7 +189,8 @@ impl Workloads {
     ///
     /// # Errors
     ///
-    /// If the connection broke.
+    /// If the board refused what [`Workloads::put`] said of it (a `busy` refusal,
+    /// [`ClientError::is_busy`], is to be said again), or the connection broke.
     pub fn wait(
         &self,
         name: &str,
@@ -193,6 +199,23 @@ impl Workloads {
     ) -> Result<Option<Tracked>, ClientError> {
         let deadline = Instant::now() + wait;
         loop {
+            let said = self
+                .state
+                .borrow()
+                .said
+                .iter()
+                .find(|(said, _)| said == name)
+                .map(|(_, seq)| *seq);
+            if let Some(seq) = said {
+                self.client.drain()?;
+                if let Some(error) = self.client.refusal(seq) {
+                    self.state
+                        .borrow_mut()
+                        .said
+                        .retain(|(said, _)| said != name);
+                    return Err(error);
+                }
+            }
             if let Some(tracked) = self.status(name)?
                 && reached(&tracked)
             {

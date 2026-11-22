@@ -9,7 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-orion = { path = "../../client/orion", features = ["files", "actions"] }
+orion = { path = "../../client/orion", features = ["files", "actions", "workloads"] }
 orion-comm-app = { path = "../../comm/comm-app" }
 orion-config = { path = "../../core/config" }
 orion-node-app = { path = "../../node/node-app" }
@@ -18,3 +18,10 @@ tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Node logic made slow on purpose, for the tests here only: a dev-dependency's features stay out
+# of every build but this crate's tests.
+orion-node-app = { path = "../../node/node-app", features = ["slow"] }
+orion-msg-records = { path = "../../core/msg-records" }
+orion-wire = { path = "../../core/wire" }

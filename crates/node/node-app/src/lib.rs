@@ -27,6 +27,8 @@ mod pull;
 pub mod records;
 mod send;
 mod served;
+#[cfg(feature = "slow")]
+pub mod slow;
 
 use std::cell::RefCell;
 use std::io;
@@ -72,6 +74,11 @@ pub struct NodeSettings {
     pub files_dir: PathBuf,
     /// `files.max_size`: the largest file taken, in bytes.
     pub files_max_size: u64,
+    /// `comm.outbox_bytes`, the comm core's, and never above its default: how much may wait
+    /// to be sent to a program that receives files, which node logic keeps chunks within.
+    /// The smaller of the two, so that a setting changed while only one of the comm core and
+    /// node logic restarted does not have node logic send more than the comm core holds.
+    pub outbox_bytes: u32,
     /// `workloads.stop_grace_ms`: how long a run that was asked to stop is given before
     /// it is told to end.
     pub stop_grace: Duration,
@@ -126,6 +133,9 @@ impl NodeSettings {
             audit,
             files_dir,
             files_max_size: source.get("files.max_size", 16_u64 << 30)?,
+            outbox_bytes: source
+                .get("comm.outbox_bytes", orion_wire::OUTBOX_BYTES)?
+                .min(orion_wire::OUTBOX_BYTES),
             stop_grace: Duration::from_millis(source.get("workloads.stop_grace_ms", 10_000_u64)?),
             placement_grace: Duration::from_millis(
                 source.get("workloads.placement_grace_ms", 10_000_u64)?,
@@ -248,6 +258,7 @@ impl Node {
         )?;
         let peers = peers::Peers::new(name.clone(), links, settings.config.state_dir.clone());
         let mut logic = Logic::new(store, name, files, audit, dialer, stop_grace, peers);
+        logic.sinks = orion_files_sink::Sinks::new(settings.outbox_bytes);
         let (served, said) = served::Served::load(&settings.config.state_dir);
         info!("{said}");
         logic.served = served;

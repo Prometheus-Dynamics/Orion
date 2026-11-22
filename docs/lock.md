@@ -487,6 +487,15 @@ what to change.
   when node logic is dropped because a request to it did not fit. `orion-test-board` has
   `TestBoard::hold_action(name, target) -> HeldAction`: an action whose runs are never answered.
   Nothing on the wire changes.
+- **I70.** A request a sender hears the refusal of (a push's three kinds, `FilePull`, `Put`,
+  `Get`, `ActionRun`, `ActionAttach`, `PeerStatus`, `PeerForgive`) is refused `busy` when node
+  logic's outbox has no room, and node logic is not dropped for it; `Delivery::Refuse`
+  (**Add**) in `orion-server`. Node logic keeps chunks to a receiver within its outbox
+  (`Sinks::new(outbox_bytes)`, **Change**: it took nothing; `Sinks::default()` for the
+  default; `NodeSettings::outbox_bytes`, **Add**). A push turned away as busy goes back and
+  sends again. `ClientError::is_busy`, `orion::Error::is_busy` (**Add**); `Workloads::wait`
+  returns the put's refusal (**Change**: it never did). `orion-node-app` feature `slow` (tests
+  only). Nothing on the wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

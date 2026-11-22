@@ -110,6 +110,8 @@ pub(crate) struct Logic {
     pub(crate) actions: Actions,
     pub(crate) files: Files,
     pub(crate) sinks: Sinks,
+    #[cfg(feature = "slow")]
+    slow: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// The runs of `files.send`.
     pub(crate) sends: Sends,
     pub(crate) workloads: Workloads,
@@ -210,6 +212,8 @@ impl Logic {
             &OnBoard(&files),
             0,
         );
+        #[cfg(feature = "slow")]
+        let slow = crate::slow::delay(node.as_str());
         Self {
             workloads,
             reviewed_commits: 0,
@@ -219,7 +223,9 @@ impl Logic {
             peers,
             actions: Actions::new(node),
             files,
-            sinks: Sinks::new(),
+            sinks: Sinks::default(),
+            #[cfg(feature = "slow")]
+            slow,
             sends: Sends::default(),
             #[cfg(feature = "pull")]
             pulling: crate::pull::Pulling::default(),
@@ -596,6 +602,8 @@ impl Handler for Logic {
     }
 
     fn handle(&mut self, frame: &Incoming<'_>, cx: &mut Cx<'_>) -> Result<(), ClientError> {
+        #[cfg(feature = "slow")]
+        crate::slow::wait(&self.slow);
         let now = self.now_ms();
         match frame.kind() {
             kind::ACTION_CLAIM => {

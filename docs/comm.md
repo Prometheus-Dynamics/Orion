@@ -15,10 +15,14 @@ travel on it, and moves whole frames. The server knows nothing else about it.
 **Sessions.** A connection becomes a session with `Hello` and `Welcome`. A session has:
 
 - a bounded outbox (`comm.outbox_bytes`, 256 KiB): what waits to be sent to it. A frame that
-  must be sent and does not fit drops the session. That includes node logic's own session when
-  a client's requests to it pile up, so it is never set below what a push keeps on its way: six
-  chunks of 32 KiB and one more (`docs/client.md`). The comm core warns, naming the session
-  whose request did not fit;
+  must be sent and does not fit drops the session: it was not reading. A request passed on to
+  node logic is not such a frame. When node logic's outbox has no room for it, the request is
+  refused to its sender as `busy` and node logic goes on, so one client's traffic never has
+  node logic dropped. Node logic keeps what it passes to a program that receives files within
+  that program's outbox the same way. What is left to drop node logic is node logic itself not
+  taking a frame for `comm.write_ms`, which the comm core warns about by name. A push keeps six
+  chunks of 32 KiB on their way (`docs/client.md`); below that, pushes are slowed by being
+  turned away, not lost;
 - a deadline to say hello (`comm.hello_ms`, 5 s);
 - a heartbeat (`comm.heartbeat_ms`, 2 s), and a deadline to be heard from (`comm.idle_ms`). Zero,
   the default, is three heartbeats, and never under one second. A value that is set must be at

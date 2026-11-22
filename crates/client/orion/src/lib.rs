@@ -154,6 +154,19 @@ impl Error {
             Self::Topic(_) => false,
         }
     }
+
+    /// Whether the board turned the call away only for now, having no room for it yet: the
+    /// same call made again later may be taken. Never a final no.
+    #[must_use]
+    pub const fn is_busy(&self) -> bool {
+        match self {
+            Self::Client(error) => error.is_busy(),
+            #[cfg(feature = "topics")]
+            Self::Topic(orion_topics::TopicError::Client(error)) => error.is_busy(),
+            #[cfg(feature = "topics")]
+            Self::Topic(_) => false,
+        }
+    }
 }
 
 impl fmt::Display for Error {

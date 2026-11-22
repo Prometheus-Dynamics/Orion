@@ -252,6 +252,20 @@ impl ClientError {
                 Self::Rejected(RejectReason::Busy | RejectReason::NoSession)
             )
     }
+
+    /// Whether the board turned the request away only for now: it had no room for it yet, and
+    /// the same request asked again later may be taken. Never a final no, and never
+    /// [`ClientError::is_lost`]: the session is fine, and is kept.
+    #[must_use]
+    pub const fn is_busy(&self) -> bool {
+        matches!(
+            self,
+            Self::Refused {
+                error: orion_types::Error::Busy,
+                ..
+            }
+        )
+    }
 }
 
 #[cfg(test)]
@@ -278,6 +292,23 @@ mod tests {
         assert_eq!(bare.to_string(), "refused: busy");
         assert_eq!(bare.refusal(), Some(Error::Busy));
         assert_eq!(ClientError::Lost.refusal(), None);
+    }
+
+    #[test]
+    fn busy_is_never_lost_and_lost_is_never_busy() {
+        let busy = ClientError::refused(Error::Busy, "");
+        assert!(busy.is_busy() && !busy.is_lost());
+        let lost = [
+            ClientError::Lost,
+            ClientError::Io(std::io::ErrorKind::TimedOut.into()),
+            ClientError::Io(std::io::ErrorKind::BrokenPipe.into()),
+        ];
+        for error in lost {
+            assert!(error.is_lost() && !error.is_busy(), "{error}");
+        }
+        // A final refusal is neither.
+        let denied = ClientError::refused(Error::Denied, "");
+        assert!(!denied.is_busy() && !denied.is_lost());
     }
 
     #[test]

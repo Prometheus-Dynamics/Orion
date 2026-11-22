@@ -53,7 +53,11 @@ enum Phase {
     /// Begun, and waiting to hear how much the board has.
     Begin { seq: u16, nothing: Transfer },
     /// Sending chunks, a few at a time.
-    Sending { status: Transfer, sent: u64 },
+    Sending {
+        status: Transfer,
+        sent: u64,
+        busy: Busy,
+    },
     /// Every byte is there: waiting for the board's check.
     Commit { seq: u16, since: Instant },
     /// Said how it ended.
@@ -67,6 +71,7 @@ pub struct Pushing<S> {
     source: S,
     transfer: u64,
     known: Known,
+    destination: orion_types::FileName,
     phase: Phase,
     buffer: Vec<u8>,
     /// When the board was last heard about this transfer.
@@ -121,7 +126,7 @@ impl Files {
                 Known { digest, size }
             }
         };
-        let name = destination
+        let name: orion_types::FileName = destination
             .parse()
             .map_err(|_| ClientError::Protocol("a destination that is not a name"))?;
         let transfer = number(&known.digest, destination);
@@ -129,7 +134,7 @@ impl Files {
         let nothing = self.status(transfer);
         let seq = self.client.send(&FileBegin {
             transfer,
-            destination: name,
+            destination: name.clone(),
             size: known.size,
             digest: known.digest,
         });
@@ -149,6 +154,7 @@ impl Files {
             source,
             transfer,
             known,
+            destination: name,
             phase: Phase::Begin { seq, nothing },
             buffer: vec![0; chunk],
             last_heard: Instant::now(),
@@ -287,18 +293,34 @@ impl<S: Read + Seek> Pushing<S> {
                     self.source.seek(SeekFrom::Start(sent))?;
                     self.last_heard = Instant::now();
                     let received = now.received;
-                    self.phase = Phase::Sending { status: now, sent };
+                    self.phase = Phase::Sending {
+                        status: now,
+                        sent,
+                        busy: Busy::default(),
+                    };
                     return Ok(self.progress(received));
                 }
                 if let Some(error) = self.files.client.refusal(*seq) {
-                    return Err(error);
+                    if !busy(&error) {
+                        return Err(error);
+                    }
+                    // Not taken yet: asked again after a moment, within the same bound.
+                    self.files.client.reply_left(self.last_heard)?;
+                    self.files.client.pump(BUSY_FIRST.min(wait))?;
+                    *seq = self.files.client.send(&FileBegin {
+                        transfer: self.transfer,
+                        destination: self.destination.clone(),
+                        size: self.known.size,
+                        digest: self.known.digest,
+                    })?;
+                    return Ok(Step::Waiting);
                 }
                 // Heard about the transfer last then: a wait for an answer since.
                 self.files.client.reply_left(self.last_heard)?;
                 self.files.client.pump(wait)?;
                 Ok(Step::Waiting)
             }
-            Phase::Sending { status, sent } => {
+            Phase::Sending { status, sent, busy } => {
                 if status.state != FileState::Receiving {
                     // Rejected part way, or already complete from an earlier try.
                     return Ok(Step::Done(status.clone()));
@@ -309,22 +331,45 @@ impl<S: Read + Seek> Pushing<S> {
                 }
                 // A few chunks on their way, and no more: the board's answers pace the sender.
                 let chunk = self.buffer.len() as u64;
-                while *sent < size && *sent - status.received < WINDOW * chunk {
+                while busy.until.is_none_or(|until| Instant::now() >= until)
+                    && *sent < size
+                    && *sent - status.received < WINDOW * chunk
+                {
+                    busy.until = None;
                     let want = ((size - *sent) as usize).min(self.buffer.len());
                     self.source.read_exact(&mut self.buffer[..want])?;
-                    self.files.client.send(&FileChunk {
+                    let seq = self.files.client.send(&FileChunk {
                         transfer: self.transfer,
                         offset: *sent,
                         data: Bytes(&self.buffer[..want]),
                     })?;
+                    busy.on_way.push((seq, *sent));
                     *sent += want as u64;
+                    busy.most = busy.most.max(*sent);
                 }
-                self.files.client.pump(wait)?;
+                let paused = busy.until.map_or(wait, |until| {
+                    until.saturating_duration_since(Instant::now())
+                });
+                self.files.client.pump(wait.min(paused))?;
+                if let Some(error) = busy.refused(&self.files.client) {
+                    return Err(error);
+                }
+                if busy.until.is_some() {
+                    // Turned away as busy: go back to where the board last said it was.
+                    *sent = status.received;
+                    self.source.seek(SeekFrom::Start(*sent))?;
+                }
                 let now = self.files.status(self.transfer);
                 if now != *status {
-                    if now.received < status.received || now.received > *sent {
+                    if now.received < status.received || now.received > busy.most.max(*sent) {
                         return Err(ClientError::Protocol("a transfer that went backwards"));
                     }
+                    if now.received > *sent {
+                        // Chunks sent before a busy one, answered after going back.
+                        *sent = now.received;
+                        self.source.seek(SeekFrom::Start(*sent))?;
+                    }
+                    busy.answered(now.received, chunk);
                     *status = now;
                     self.last_heard = Instant::now();
                 } else {
@@ -338,8 +383,11 @@ impl<S: Read + Seek> Pushing<S> {
                 if matches!(now.state, FileState::Committed | FileState::Rejected) {
                     return Ok(Step::Done(now));
                 }
-                if let Some(error) = self.files.client.refusal(*seq) {
-                    return Err(error);
+                let refused = self.files.client.refusal(*seq);
+                if let Some(error) = &refused
+                    && !busy(error)
+                {
+                    return Err(refused.expect("just matched"));
                 }
                 // Checking the digest of a large file takes the board a while: twelve
                 // timeouts, or whatever bound the caller set.
@@ -356,6 +404,14 @@ impl<S: Read + Seek> Pushing<S> {
                         self.files.client.reply_left(*since)?
                     }
                 };
+                if refused.is_some() {
+                    // Not taken yet: asked again after a moment, within the same bound.
+                    self.files.client.pump(left.min(wait).min(BUSY_FIRST))?;
+                    *seq = self.files.client.send(&FileCommit {
+                        transfer: self.transfer,
+                    })?;
+                    return Ok(self.progress(size));
+                }
                 self.files.client.pump(left.min(wait))?;
                 Ok(self.progress(size))
             }
@@ -387,5 +443,57 @@ impl<S> Drop for Pushing<S> {
         if !matches!(self.phase, Phase::Over) {
             self.files.forget(self.transfer);
         }
+    }
+}
+
+/// The chunks of a push on their way, and whether the board turned one away as busy: its
+/// comm core, or the program that receives the file, had no room for it yet.
+#[derive(Debug, Default)]
+struct Busy {
+    /// Each chunk's request and where it starts, until the board has it.
+    on_way: Vec<(u16, u64)>,
+    /// When to send again, after a chunk was turned away.
+    until: Option<Instant>,
+    /// The furthest any chunk sent reaches: the board may yet answer up to there.
+    most: u64,
+    /// How long to wait after the next one: doubles each time, and starts again once the
+    /// board takes something.
+    backoff: Duration,
+}
+
+/// Whether the board turned a request away only for now: its comm core, or the program that
+/// receives the file, had no room for it yet.
+const fn busy(error: &ClientError) -> bool {
+    error.is_busy()
+}
+
+/// The first wait after a chunk is turned away as busy, and the longest.
+const BUSY_FIRST: Duration = Duration::from_millis(20);
+const BUSY_MOST: Duration = Duration::from_millis(320);
+
+impl Busy {
+    /// The refusal of a chunk on its way that is not busy, which ends the push. A busy one
+    /// sets the wait, and forgets every chunk on its way: they are sent again.
+    fn refused(&mut self, client: &orion_connect::Client) -> Option<ClientError> {
+        let mut busy = false;
+        for (seq, _) in &self.on_way {
+            match client.refusal(*seq) {
+                Some(error) if self::busy(&error) => busy = true,
+                Some(error) => return Some(error),
+                None => {}
+            }
+        }
+        if busy {
+            self.on_way.clear();
+            self.backoff = (self.backoff * 2).clamp(BUSY_FIRST, BUSY_MOST);
+            self.until = Some(Instant::now() + self.backoff);
+        }
+        None
+    }
+
+    /// The board has `received` bytes: the chunks before that are not waited on any more.
+    fn answered(&mut self, received: u64, chunk: u64) {
+        self.on_way.retain(|(_, offset)| offset + chunk > received);
+        self.backoff = Duration::ZERO;
     }
 }

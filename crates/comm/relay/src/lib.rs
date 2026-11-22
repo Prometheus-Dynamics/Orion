@@ -31,6 +31,39 @@ use orion_server::{
 };
 use orion_wire::{Bytes, Decode, FrameView, body, kind};
 
+mod told;
+use told::told;
+
+/// The kinds refused to their sender as busy when node logic's outbox has no room, rather than
+/// node logic dropped: those whose sender hears the refusal. A push's three go back and send
+/// again; a request answered to the program, as a get or a run is, hands it the refusal. The
+/// rest are standing requests, which a refusal would end without a word, or words nobody
+/// waits an answer to, which a refusal would lose: for those node logic is still dropped, and
+/// they are passed again, or written again, when it is back.
+const REFUSED_WHEN_FULL: &[u8] = &[
+    kind::FILE_BEGIN,
+    kind::FILE_CHUNK,
+    kind::FILE_COMMIT,
+    kind::FILE_PULL,
+    kind::PUT,
+    kind::GET,
+    kind::ACTION_RUN,
+    kind::ACTION_ATTACH,
+    kind::PEER_STATUS,
+    kind::PEER_FORGIVE,
+];
+
+/// Whether a request reached node logic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Passed {
+    /// It is on its way.
+    Yes,
+    /// Node logic's outbox had no room: not sent, and node logic goes on.
+    Busy,
+    /// Node logic could not be sent it, and is gone.
+    Gone,
+}
+
 /// How many standing requests are kept for one session. One more is refused as busy.
 pub const MAX_STANDING: usize = 1024;
 
@@ -388,7 +421,8 @@ impl Relay {
         self.answers[(kind >> 6) as usize] & (1 << (kind & 63)) != 0
     }
 
-    /// Passes one request to node logic. `false` if node logic could not be sent it.
+    /// Passes one request to node logic, as `delivery` says to when its outbox has no room.
+    #[allow(clippy::too_many_arguments)]
     fn pass(
         &mut self,
         sessions: &mut Sessions,
@@ -397,9 +431,10 @@ impl Relay {
         seq: u16,
         kind: u8,
         payload: &[u8],
-    ) -> bool {
+        delivery: Delivery,
+    ) -> Passed {
         let Some(info) = sessions.get(from) else {
-            return true;
+            return Passed::Yes;
         };
         self.caller.clear();
         let mut uid = 0;
@@ -423,20 +458,26 @@ impl Relay {
             caller: &self.caller,
             payload: Bytes(payload),
         };
-        if let Err(error) = sessions.send(node, &request, Delivery::Must) {
-            if matches!(error, Error::Busy) {
-                let name = sessions.get(from).map_or("", |info| info.name.as_str());
-                tracing::warn!(
-                    "node logic was not reading: a request of kind {kind:#04x} from session \
-                     {name} ({}) did not fit in its outbox, so node logic is dropped and what \
-                     it was passing is forgotten",
-                    from.0
-                );
+        match sessions.send(node, &request, delivery) {
+            Ok(()) => {
+                self.passed.insert(from);
+                Passed::Yes
             }
-            return false;
+            // Not sent, and node logic goes on: the sender is told to try again.
+            Err(Error::Busy) if delivery == Delivery::Refuse => Passed::Busy,
+            Err(error) => {
+                if matches!(error, Error::Busy) {
+                    let name = sessions.get(from).map_or("", |info| info.name.as_str());
+                    tracing::warn!(
+                        "node logic was not reading: a request of kind {kind:#04x} from \
+                         session {name} ({}) did not fit in its outbox, so node logic is \
+                         dropped and what it was passing is forgotten",
+                        from.0
+                    );
+                }
+                Passed::Gone
+            }
         }
-        self.passed.insert(from);
-        true
     }
 
     fn keep(
@@ -549,16 +590,19 @@ impl Relay {
             let _ = cx.sessions().send(session, &back, Delivery::Must);
         }
         let standing = std::mem::take(&mut self.standing);
+        // Node logic has just come and is to take these: one that does not read them is
+        // dropped, and they are passed to the next.
         for request in &standing {
             if self.answered(request.kind)
-                && !self.pass(
+                && self.pass(
                     cx.sessions(),
                     node,
                     request.session,
                     request.seq,
                     request.kind,
                     &request.payload,
-                )
+                    Delivery::Must,
+                ) != Passed::Yes
             {
                 break;
             }
@@ -652,7 +696,17 @@ impl Service for Relay {
                 Err(Error::Unavailable)
             };
         };
-        if self.pass(cx.sessions(), node, from, seq, kind, payload) {
+        let delivery = if REFUSED_WHEN_FULL.contains(&kind) {
+            Delivery::Refuse
+        } else {
+            Delivery::Must
+        };
+        let passed = self.pass(cx.sessions(), node, from, seq, kind, payload, delivery);
+        if passed == Passed::Busy {
+            // Node logic is behind: the sender hears it, and asks again.
+            return Err(Error::Busy);
+        }
+        if passed == Passed::Yes {
             let ends = self.route(kind).map_or(Ends::Nothing, |route| route.ends);
             if ends != Ends::Nothing && !standing {
                 if self.waiting.len() >= MAX_WAITING {
@@ -707,62 +761,24 @@ impl Service for Relay {
     }
 }
 
-/// Node logic's refusal as a session at `level` is to be told it, if that is not as it came.
-fn told<'a>(answer: &NodeAnswer<'a>, level: u16) -> Option<Refusal<'a>> {
-    if answer.kind != kind::REFUSAL {
-        return None;
-    }
-    let refusal = Refusal::decode(answer.payload.0).ok()?;
-    let error = refusal.error()?;
-    let told = orion_server::spoken(error, level);
-    (told != error).then(|| Refusal {
-        request_seq: refusal.request_seq,
-        code: told.code(),
-        detail: told.as_str(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use orion_wire::body::encode_fields;
-
     use super::*;
 
-    fn refusal(error: Error, buf: &mut [u8]) -> usize {
-        let refusal = Refusal {
-            request_seq: 7,
-            code: error.code(),
-            detail: error.as_str(),
-        };
-        encode_fields(&refusal, buf).expect("encode")
-    }
-
     #[test]
-    fn a_refusal_from_node_logic_is_told_as_the_sessions_level_hears_it() {
-        let mut buf = [0_u8; 128];
-        let len = refusal(Error::Restoring, &mut buf);
-        let answer = |kind| NodeAnswer {
-            session: 1,
-            kind,
-            may_drop: false,
-            payload: Bytes(&buf[..len]),
-        };
-        // Below the level: not found, under the same request.
-        let older = told(&answer(kind::REFUSAL), orion_server::RESTORING_LEVEL - 1).expect("told");
-        assert_eq!(
-            (older.request_seq, older.error(), older.detail),
-            (7, Some(Error::NotFound), Error::NotFound.as_str())
-        );
-        // At the level, and for anything that is not a refusal: as it came.
-        assert!(told(&answer(kind::REFUSAL), orion_server::RESTORING_LEVEL).is_none());
-        assert!(told(&answer(kind::PONG), 0).is_none());
-        let len = refusal(Error::Busy, &mut buf);
-        let busy = NodeAnswer {
-            session: 1,
-            kind: kind::REFUSAL,
-            may_drop: false,
-            payload: Bytes(&buf[..len]),
-        };
-        assert!(told(&busy, 0).is_none());
+    fn no_kind_refused_when_node_logic_is_full_is_a_standing_request() {
+        for route in routes() {
+            assert!(
+                !(route.standing && REFUSED_WHEN_FULL.contains(&route.kind)),
+                "{:#04x} stands, and a refusal would end it without a word",
+                route.kind
+            );
+        }
+        for kind in REFUSED_WHEN_FULL {
+            assert!(
+                routes().iter().any(|route| route.kind == *kind),
+                "{kind:#04x}"
+            );
+        }
     }
 }

@@ -78,6 +78,38 @@ whose provider has not said it again has the state `Restoring`, never `Ready`. W
 its actions are `NotFound`. A node below level 2 says `NotFound` throughout, and a client built
 before level 2 is told `NotFound` by any node.
 
+**When the board is busy.** The comm core passes some requests on to node logic. When node logic
+is behind, and its outbox in the comm core has no room for one of these, the comm core turns
+that request away as `busy` (`Refused { error: Busy }`; `is_busy()` is true) and node logic goes
+on. Busy is never a final no: the same request asked again later may be taken. Which requests
+it can come back for, and what this client does with it:
+
+| Request | Called through | On busy |
+|---|---|---|
+| `FileBegin`, `FileChunk`, `FileCommit` | `files.push`, `start_push` | asked again by the push itself within its own bound ("Files") |
+| `FilePull` | `files.pull` | handed to the program |
+| `Put` | `records.put`, a provider's `Resource::write` | handed to the program; the record is not written |
+| `Get` | `records.get` | handed to the program |
+| `ActionRun`, `ActionAttach` | `orion.run`, `attach`, `attach_handle` | the run's first read (`poll`, `wait`, `finish`) hands it to the program; the run never started |
+| `PeerStatus`, `PeerForgive` | `node().peers`, `orion.forgive` | handed to the program |
+
+A program that is handed busy waits a moment and makes the call again, on the same session: an
+error for which `is_busy()` is true never has `is_lost()` true, so a program that reconnects on
+`is_lost()` keeps its session through busy. A run that got busy was never started, and must be
+run again: its `Run` says busy once and nothing after. A provider's `set_state` that got busy is
+not written and is called again. At this revision a provider's `publish` or `withdraw` that
+got busy has taken its handle. After `publish`, the declaration is made again. After
+`withdraw`, its topics are withdrawn already and its record is not yet written gone. Every other request
+node logic answers is never turned away for want of room: a standing one (a watch, an action
+registered, a receiver, an executor's offer) or one nothing waits for an answer to (an action's
+progress and result, a cancel, a receiver's status, a workload said, an executor's report). For
+those the comm core still ends node logic's session as one that was not reading, and node logic,
+back, is passed the standing ones again and has the rest said again (`NodeBack`), as after any
+restart of it. In C the busy refusal is `ORION_E_REFUSED`, with "busy" in `orion_last_error()`,
+and `orion` on the command line exits 1 with "refused: busy". Neither tells it from a final
+refusal by its code. A client older than this is handed the same refusal, with no `is_busy` to
+ask.
+
 The sections below are the crates the handle is made of.
 
 ## Connecting
@@ -455,9 +487,14 @@ answered with how many bytes the board already has. After a broken connection, r
 push again; nothing the board has is sent twice. At most six chunks of 32 KiB are on their
 way at once, so a push neither fills the connection nor waits for an answer to each chunk. Six
 is what fits in a session's outbox at the comm core's default (`comm.outbox_bytes`, 256 KiB)
-with a chunk to spare: the comm core passes each chunk to node logic, and node logic to a
-program that receives it, and a session whose outbox a chunk does not fit is dropped. A board
-whose `comm.outbox_bytes` is set lower than that loses pushes. The
+with a chunk to spare. When the board has no room for a chunk yet (node logic is behind, or
+the program that receives the file is), it turns the chunk away as `busy`. The push then goes
+back to where the board last said it was and sends from there after a short wait: 20 ms,
+doubling to 320 ms, starting again once the board takes something. A `FileBegin` or
+`FileCommit` turned away as busy is asked again after 20 ms. None of it renews the push's
+bound: a board that stays busy ends the push as one that went quiet would. A client older
+than this does not read a chunk's refusal; its push stops moving, ends at its bound, and
+carries on from the board's count when pushed again. The
 file is hashed before anything is sent; the session is looked after meanwhile, however long
 that takes.
 

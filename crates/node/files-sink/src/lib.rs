@@ -19,6 +19,14 @@
 //! their turn. What waits is what the sender has in flight, a few chunks, and no more than
 //! [`MAX_WAITING`] bytes of a transfer. A sender that begins again, because it heard nothing,
 //! is passed on at once: whatever waited is dropped, and the receiver says where to go on.
+//!
+//! A receiver that takes any chunk is sent each as it comes, and what is on its way to it,
+//! sent and not yet answered, is kept within its session's outbox in the comm core: a frame
+//! that does not fit there would end the receiver's session. A chunk that would take it past
+//! that, across every transfer to the receiver, is refused as busy, and the sender goes back
+//! to where the receiver last said it was. What is sent stays in order: a chunk after one that
+//! was turned away is turned away too, and a chunk already on its way, sent again by a sender
+//! that went back, is not sent twice.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -43,6 +51,10 @@ pub const MAX_WAITING: usize = 1 << 20;
 /// Room for what a chunk carries besides its bytes.
 const CHUNK_FIELDS: usize = 32;
 
+/// What a receiver's outbox keeps free of chunks: one more chunk's frame as a push sends it
+/// (32 KiB and its envelope), for the answers and everything else on their way.
+const SPARE: usize = 32 * 1024 + 64;
+
 #[derive(Debug)]
 struct Sink {
     prefix: String,
@@ -64,6 +76,16 @@ struct Passing {
     /// The frames that wait for it, as kind and body.
     waiting: VecDeque<(u8, Vec<u8>)>,
     waiting_bytes: usize,
+    /// For a receiver that takes any chunk: from where the receiver last said it was (or the
+    /// first chunk sent since the transfer began) to the end of the last chunk sent.
+    on_way: Option<(u64, u64)>,
+}
+
+impl Passing {
+    /// Bytes sent to the receiver and not yet answered.
+    fn unanswered(&self) -> u64 {
+        self.on_way.map_or(0, |(from, to)| to.saturating_sub(from))
+    }
 }
 
 impl Passing {
@@ -113,10 +135,18 @@ impl Passing {
 }
 
 /// The receivers of one node, and the transfers passing through to them.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Sinks {
     sinks: Vec<Sink>,
     passing: BTreeMap<u64, Passing>,
+    /// The most bytes of chunks on their way to one receiver.
+    room: u64,
+}
+
+impl Default for Sinks {
+    fn default() -> Self {
+        Self::new(orion_wire::OUTBOX_BYTES)
+    }
 }
 
 impl Sinks {
@@ -124,10 +154,15 @@ impl Sinks {
     /// [`Sinks::pass`] before the node's own store takes them.
     pub const KINDS: &'static [u8] = &[kind::FILE_SINK, kind::FILE_STATUS];
 
-    /// No receivers.
+    /// No receivers, on a comm core whose sessions each have `outbox_bytes` of outbox
+    /// (`comm.outbox_bytes`).
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(outbox_bytes: u32) -> Self {
+        Self {
+            sinks: Vec::new(),
+            passing: BTreeMap::new(),
+            room: (outbox_bytes as usize).saturating_sub(SPARE) as u64,
+        }
     }
 
     /// How many prefixes are asked for.
@@ -214,6 +249,9 @@ impl Sinks {
                 if matches!(status.state, FileState::Committed | FileState::Rejected) {
                     self.passing.remove(&status.transfer);
                 } else {
+                    if let Some((from, _)) = &mut passing.on_way {
+                        *from = (*from).max(status.received);
+                    }
                     passing.answer_owed = false;
                     passing.feed(out);
                 }
@@ -260,6 +298,7 @@ impl Sinks {
                         answer_owed: false,
                         waiting: VecDeque::new(),
                         waiting_bytes: 0,
+                        on_way: None,
                     },
                 );
                 begin.transfer
@@ -268,12 +307,47 @@ impl Sinks {
             kind::FILE_COMMIT => asked.body::<FileCommit>()?.transfer,
             _ => return Ok(false),
         };
-        let Some(passing) = self.passing.get_mut(&transfer) else {
+        let Some(passing) = self.passing.get(&transfer) else {
             return Ok(false);
         };
+        let sink = passing.sink;
+        let chunk = if passing.max_chunk == 0 && asked.kind == kind::FILE_CHUNK {
+            let chunk = FileChunk::decode(asked.payload)?;
+            Some((chunk.offset, chunk.offset + chunk.data.0.len() as u64))
+        } else {
+            None
+        };
+        if let Some((offset, end)) = chunk {
+            if let Some((from, to)) = passing.on_way {
+                if offset >= from && end <= to {
+                    // On its way already: the sender went back after a refusal.
+                    return Ok(true);
+                }
+                if offset > to {
+                    // One before it was turned away: what is on its way stays in order, and
+                    // the sender goes back.
+                    return Err(Error::Busy);
+                }
+            }
+            let unanswered: u64 = self
+                .passing
+                .values()
+                .filter(|other| other.sink == sink)
+                .map(Passing::unanswered)
+                .sum();
+            if unanswered + (end - offset) > self.room {
+                return Err(Error::Busy);
+            }
+        }
+        let passing = self.passing.get_mut(&transfer).expect("looked up above");
         // Whoever sent this is who is told next: a sender that came back in a new session.
         passing.sender = asked.session;
         if passing.max_chunk == 0 {
+            if let Some((offset, end)) = chunk {
+                let (from, to) = passing.on_way.get_or_insert((offset, offset));
+                *from = (*from).min(offset);
+                *to = (*to).max(end);
+            }
             out.frame(passing.sink, asked.kind, asked.payload, false);
         } else {
             passing.hold(asked.kind, asked.payload)?;
