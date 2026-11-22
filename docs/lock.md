@@ -458,6 +458,9 @@ what to change.
   signed), whatever its hello says it takes; an answer too large is refused `buffer_too_small`.
   A hello too large says its size and the limit. `orion_server::Connection` gains `max_frame`.
   Nothing on the wire changes.
+- **I61.** The sample executor runs each command in a process group of its own, and stops and
+  kills it as that group, so a child its shell started ends with it. Nothing a program calls
+  changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

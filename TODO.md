@@ -247,6 +247,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I58](docs/prs/I58.md) The shared-memory ring crates come from the device library at 7b4fdb25 (wave 19; needs I55b)
 - [x] [I59](docs/prs/I59.md) A hello fact may be up to 1024 bytes, and one that is longer is logged once (wave 19; needs I58)
 - [x] [I60](docs/prs/I60.md) A hello too large for a link is refused, saying its size and the limit (wave 19; needs I59)
+- [x] [I61](docs/prs/I61.md) The sample executor's command takes its shell's children with it (wave 19; needs I60)
 
 ## J. The stack around Orion
 

@@ -22,6 +22,10 @@
 //! A command dies with the executor that started it (`PR_SET_PDEATHSIG`): an executor that is
 //! killed leaves nothing running that a new one would not know of, and start again.
 //!
+//! A command is its shell and whatever the shell starts. Each is started in a process group of
+//! its own, and is stopped and killed as that group: a child of the shell ends with it rather
+//! than running on. Only the group the executor made is ever signalled.
+//!
 //! [`run`] is the program around it: connect, offer, take turns, and connect again with the
 //! same inventory when the connection breaks, so that Orion takes back what kept running.
 
@@ -31,13 +35,14 @@ mod spawn;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use orion::executor::{ExecError, Executor, WorkloadKind, WorkloadName, WorkloadState};
 use orion::{Address, ClientError, Options, Orion, Roles};
-use rustix::process::{Pid, Signal, kill_process};
+use rustix::process::{Pid, Signal, kill_process_group};
 
 /// One command.
 struct Run {
@@ -63,10 +68,12 @@ impl std::fmt::Debug for Sample {
     }
 }
 
+/// Sends `signal` to the command `child` leads: its own process group, which it was started
+/// in. Called only while the child is not yet reaped, so its number is still its own.
 fn signal(child: &Child, signal: Signal) {
-    if let Some(pid) = i32::try_from(child.id()).ok().and_then(Pid::from_raw) {
-        // A child that has already exited has nobody to hear it.
-        let _ = kill_process(pid, signal);
+    if let Some(group) = i32::try_from(child.id()).ok().and_then(Pid::from_raw) {
+        // A group that has already ended has nobody to hear it.
+        let _ = kill_process_group(group, signal);
     }
 }
 
@@ -111,7 +118,11 @@ impl Executor for Sample {
             let _ = old.child.wait();
         }
         let mut sh = Command::new("sh");
-        sh.arg("-c").arg(command).stdin(Stdio::null());
+        // A group of its own, led by the shell: the number of the group is the shell's.
+        sh.arg("-c")
+            .arg(command)
+            .stdin(Stdio::null())
+            .process_group(0);
         spawn::dies_with_this_process(&mut sh);
         let child = sh
             .spawn()

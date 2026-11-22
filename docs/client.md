@@ -573,8 +573,9 @@ more, which is how Orion takes back runs that carried on without it, by name. Wh
 has started again it asks (`ExecutorAsk`), and the next turn answers with the whole inventory.
 
 **An example to read.** `crates/testing/sample-executor` is the smallest working executor: a
-workload's spec is a shell command, which it runs as a child process. `stop` is `SIGTERM`,
-`kill` is `SIGKILL`, and the inventory is what is true of the children: running, stopping,
+workload's spec is a shell command, which it runs as a child process in a process group of its
+own. `stop` is `SIGTERM` and `kill` is `SIGKILL`, each to that group, so what the shell started
+ends with it. The inventory is what is true of the children: running, stopping,
 failed if one exited with an error, and no longer listed once one has ended. Its `run` is the
 program around an executor: connect, offer, take turns, and when the connection breaks connect
 again and offer what is still running. It is also a program,

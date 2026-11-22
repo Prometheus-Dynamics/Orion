@@ -115,6 +115,56 @@ fn a_command_that_will_not_stop_is_stopping_until_it_is_killed() {
     until("it is dead", || !alive(pid));
 }
 
+/// A command whose shell starts a child and waits for it: the shell's id in `dir/pid`, the
+/// child's in `dir/child`.
+fn parent_of_one(dir: &Path) -> String {
+    format!(
+        "sleep 300 & echo $! > {}; echo $$ > {}; wait",
+        dir.join("child").display(),
+        dir.join("pid").display()
+    )
+}
+
+#[test]
+fn a_command_stopped_killed_or_left_behind_takes_its_shells_children_with_it() {
+    let dir = dir("children");
+    // Stopped: the child is asked too, and goes with its shell.
+    let mut sample = Sample::new(vec![kind()]);
+    sample
+        .start(&name("stopped"), parent_of_one(&dir).as_bytes())
+        .expect("start");
+    let (shell, child) = (pid(&dir.join("pid")), pid(&dir.join("child")));
+    assert!(alive(child));
+    sample.stop(&name("stopped"));
+    until("the stopped command's shell is gone", || !alive(shell));
+    until("the stopped command's child is gone", || !alive(child));
+    assert_eq!(state(&sample, "stopped"), None);
+
+    // Killed.
+    for file in ["pid", "child"] {
+        std::fs::remove_file(dir.join(file)).expect("remove");
+    }
+    sample
+        .start(&name("killed"), parent_of_one(&dir).as_bytes())
+        .expect("start");
+    let (shell, child) = (pid(&dir.join("pid")), pid(&dir.join("child")));
+    sample.kill(&name("killed"));
+    assert!(!alive(shell));
+    until("the killed command's child is gone", || !alive(child));
+
+    // Left behind by an executor that ends.
+    for file in ["pid", "child"] {
+        std::fs::remove_file(dir.join(file)).expect("remove");
+    }
+    sample
+        .start(&name("left"), parent_of_one(&dir).as_bytes())
+        .expect("start");
+    let (shell, child) = (pid(&dir.join("pid")), pid(&dir.join("child")));
+    drop(sample);
+    assert!(!alive(shell));
+    until("the left command's child is gone", || !alive(child));
+}
+
 #[test]
 fn how_a_command_ends_is_what_the_inventory_says() {
     let mut sample = Sample::new(vec![kind()]);
