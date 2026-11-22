@@ -258,6 +258,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I69](docs/prs/I69.md) A push's window fits in a session's outbox, and the test board can leave an action unanswered (wave 19; needs I68)
 - [x] [I70](docs/prs/I70.md) A full outbox turns a request away as busy instead of dropping node logic, and a push goes back and sends again (wave 19; needs I69)
 - [x] [I71](docs/prs/I71.md) A provider's publish or withdraw that fails gives its description or resource back to try again (wave 19; needs I70)
+- [x] [I73](docs/prs/I73.md) The shared-memory ring crates come from the device library at bbb3c420 (wave 19; needs I71)
 
 ## J. The stack around Orion
 

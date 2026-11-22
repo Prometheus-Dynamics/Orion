@@ -501,6 +501,9 @@ what to change.
   both were `ClientError`; each turns into one with `From`, and into `orion::Error`): the
   description or the resource comes back, to try again. A withdraw tried again does not
   withdraw its topics twice. Nothing on the wire changes.
+- **I73.** The seven `shm-*` crates are pinned to the device library's `bbb3c420`, through the
+  `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
+  calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
