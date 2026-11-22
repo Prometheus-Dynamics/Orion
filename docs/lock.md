@@ -448,6 +448,9 @@ what to change.
 - **I55b.** Each gate step's number is `WALL:CPU`; past three times its CPU number (at least
   60 CPU seconds) a step is ended as slow. A step without both numbers does not run. Every wall
   bound is as it was. Nothing built changes.
+- **I58.** The seven `shm-*` crates are pinned to the device library's `7b4fdb25`, through the
+  `.git` URL. No other package changes, and no shared-memory code that Orion builds changes.
+  Nothing a program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
