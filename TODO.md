@@ -251,6 +251,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I62](docs/prs/I62.md) A hello too large for a CAN bus is refused, saying its size and the limit (wave 19; needs I61)
 - [x] [I63](docs/prs/I63.md) The last ports found free and let go are held until they are listened on (wave 19; needs I62)
 - [x] [I64](docs/prs/I64.md) Tidy: I2 reads as dropped, and the vcan test is said to go untested in the gate (wave 19; needs I63)
+- [x] [I65](docs/prs/I65.md) The PR list reads every brief again, and the gate keeps it so (wave 19; needs I64)
 
 ## J. The stack around Orion
 

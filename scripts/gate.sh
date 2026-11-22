@@ -305,6 +305,9 @@ if [ -x scripts/check-boundaries.sh ]; then
 fi
 main "test filters self-test" 1:1 scripts/check-test-filters.py --self-test
 main "test files" 1:1 scripts/check-test-filters.py --files
+# Every PR brief reads: an id for a name, a status, and needs that name briefs. AGENTS.md sends
+# whoever picks up a PR to this list, so it must not rot unseen.
+main "pr list" 1:1 scripts/pr-status.py --offline
 
 if [ -x scripts/check-links.sh ]; then
   main links 2:1 scripts/check-links.sh
