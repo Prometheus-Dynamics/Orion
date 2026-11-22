@@ -471,6 +471,9 @@ what to change.
 - **I65.** `scripts/pr-status.py` reads every brief again (both header forms, ids like `C35a`,
   dropped PRs), and the gate runs it `--offline`, failing on a brief it cannot read. Nothing
   built changes.
+- **I66.** The seven `shm-*` crates are pinned to the device library's `a6251ecf`, through the
+  `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
+  calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

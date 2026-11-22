@@ -13,13 +13,13 @@ homepage = "https://github.com/Prometheus-Dynamics/Orion"
 
 [workspace.dependencies]
 # The shared-memory ring family, hosted with the device library (J2).
-shm-sample-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "7b4fdb255826fe2c00caadd5716e807c31364b12" }
-shm-ring = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "7b4fdb255826fe2c00caadd5716e807c31364b12" }
-shm-ring-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "7b4fdb255826fe2c00caadd5716e807c31364b12" }
-shm-ring-doorbell = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "7b4fdb255826fe2c00caadd5716e807c31364b12" }
-shm-ring-buffers = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "7b4fdb255826fe2c00caadd5716e807c31364b12" }
-shm-ring-holds = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "7b4fdb255826fe2c00caadd5716e807c31364b12" }
-shm-fdpass = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "7b4fdb255826fe2c00caadd5716e807c31364b12" }
+shm-sample-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "a6251ecfb815752880f399e4e137634d022d4a2d" }
+shm-ring = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "a6251ecfb815752880f399e4e137634d022d4a2d" }
+shm-ring-time = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "a6251ecfb815752880f399e4e137634d022d4a2d" }
+shm-ring-doorbell = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "a6251ecfb815752880f399e4e137634d022d4a2d" }
+shm-ring-buffers = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "a6251ecfb815752880f399e4e137634d022d4a2d" }
+shm-ring-holds = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "a6251ecfb815752880f399e4e137634d022d4a2d" }
+shm-fdpass = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "a6251ecfb815752880f399e4e137634d022d4a2d" }
 libc = "0.2"
 postcard = { version = "1.1.3", default-features = false }
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }
