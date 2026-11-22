@@ -466,6 +466,8 @@ what to change.
   changes.
 - **I63.** The drills' board ports and `forward.rs`'s `-L` port are held, bound and not
   listening, until their program listens there. Tests only; nothing built changes.
+- **I64.** Tidy: I2 is marked dropped in `TODO.md`, and `docs/comm.md` says the CAN test over
+  `vcan0` is not run by the gate. Nothing built changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

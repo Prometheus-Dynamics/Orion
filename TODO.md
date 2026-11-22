@@ -187,7 +187,7 @@ The device side on the same wire, with its size gate.
 One binary, packaging, the graph bridge (dropped), failure drills and the hardware proof.
 
 - [x] [I1](docs/prs/I1.md) One binary (wave 13; needs C15, E18, D11)
-- [ ] [I2](docs/prs/I2.md) Graph bridge, dropped (wave 10; needs D2, D3)
+- [x] [I2](docs/prs/I2.md) Graph bridge: dropped, its history in git (wave 10; needs D2, D3)
 - [x] [I3](docs/prs/I3.md) Sample executor (wave 9; needs D7)
 - [x] [I4](docs/prs/I4.md) Packaging (wave 14; needs I1)
 - [x] [I5](docs/prs/I5.md) Failure drills (wave 14; needs I1, I3)
@@ -250,6 +250,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I61](docs/prs/I61.md) The sample executor's command takes its shell's children with it (wave 19; needs I60)
 - [x] [I62](docs/prs/I62.md) A hello too large for a CAN bus is refused, saying its size and the limit (wave 19; needs I61)
 - [x] [I63](docs/prs/I63.md) The last ports found free and let go are held until they are listened on (wave 19; needs I62)
+- [x] [I64](docs/prs/I64.md) Tidy: I2 reads as dropped, and the vcan test is said to go untested in the gate (wave 19; needs I63)
 
 ## J. The stack around Orion
 

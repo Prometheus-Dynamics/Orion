@@ -1006,6 +1006,9 @@ is dropped and counted: one slow session does not hold the bus. The socket recei
 identifiers of the bus's devices, and is opened again every 250 ms after it fails. A bus's
 frames are at most 4096 bytes, what its reassembler takes: as on a serial or USB link, a session
 on it is never sent a larger one, and an answer too large is refused, a hello saying its size.
+The bus's tests run on a bus in memory everywhere. Its one test over the kernel's CAN sockets
+(`crates/comm/link-can/tests/vcan.rs`) needs a `vcan0` interface. The gate's machine has none, so
+there the test finds none, says `UNTESTED` and passes having tested nothing.
 
 ## Devices as resources
 
