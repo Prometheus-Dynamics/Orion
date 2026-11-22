@@ -249,6 +249,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I60](docs/prs/I60.md) A hello too large for a link is refused, saying its size and the limit (wave 19; needs I59)
 - [x] [I61](docs/prs/I61.md) The sample executor's command takes its shell's children with it (wave 19; needs I60)
 - [x] [I62](docs/prs/I62.md) A hello too large for a CAN bus is refused, saying its size and the limit (wave 19; needs I61)
+- [x] [I63](docs/prs/I63.md) The last ports found free and let go are held until they are listened on (wave 19; needs I62)
 
 ## J. The stack around Orion
 

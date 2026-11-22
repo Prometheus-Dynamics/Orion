@@ -464,6 +464,8 @@ what to change.
 - **I62.** A session on a CAN bus is never sent a frame over 4096 bytes, whatever its hello
   says it takes; an answer too large is refused, and a hello says its size. Nothing on the wire
   changes.
+- **I63.** The drills' board ports and `forward.rs`'s `-L` port are held, bound and not
+  listening, until their program listens there. Tests only; nothing built changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

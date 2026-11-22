@@ -3,7 +3,8 @@
 #![allow(dead_code)] // Each drill uses part of it.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -21,13 +22,21 @@ pub struct Board {
     pub settings: PathBuf,
     pub ssh: SocketAddr,
     pub peer: SocketAddr,
+    /// The two ports, held for as long as the board is.
+    _held: [OwnedFd; 2],
 }
 
-/// A port nothing listens on now.
-pub fn free_port() -> SocketAddr {
-    TcpListener::bind("127.0.0.1:0")
-        .and_then(|listener| listener.local_addr())
-        .expect("a port")
+/// A port held for the board: bound and not listening, for as long as the socket lives. A port
+/// merely found free can be handed to another socket before the board's program listens there.
+/// Bound with SO_REUSEADDR, as the comm core binds its listeners, the hold does not stop the
+/// program listening there.
+pub fn held_port() -> (OwnedFd, SocketAddr) {
+    use rustix::net::{AddressFamily, SocketType, bind, getsockname, socket, sockopt};
+    let held = socket(AddressFamily::INET, SocketType::STREAM, None).expect("socket");
+    sockopt::set_socket_reuseaddr(&held, true).expect("reuse");
+    bind(&held, &SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).expect("bind");
+    let addr = SocketAddrV4::try_from(getsockname(&held).expect("addr")).expect("an address");
+    (held, SocketAddr::V4(addr))
 }
 
 impl Board {
@@ -40,7 +49,7 @@ impl Board {
     pub fn named(name: &str, node: &str, extra: &str) -> Self {
         let dir = Scratch::new(&format!("drill-{name}"));
         let socket = dir.join("orion.sock");
-        let (ssh, peer) = (free_port(), free_port());
+        let ((ssh_held, ssh), (peer_held, peer)) = (held_port(), held_port());
         let uid = std::fs::metadata(&dir)
             .map(|meta| std::os::unix::fs::MetadataExt::uid(&meta))
             .expect("uid");
@@ -62,6 +71,7 @@ impl Board {
             settings,
             ssh,
             peer,
+            _held: [ssh_held, peer_held],
         }
     }
 

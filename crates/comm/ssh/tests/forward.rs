@@ -84,12 +84,15 @@ fn a_connection_from_the_board_is_carried_both_ways() {
         (Some(255), "")
     );
 
-    // `-L`: a port on the client's machine that is the service, for any program there.
-    let local = TcpListener::bind("127.0.0.1:0")
-        .expect("listen")
-        .local_addr()
-        .expect("addr")
-        .port();
+    // `-L`: a port on the client's machine that is the service, for any program there. The
+    // port is held, bound and not listening, until the test ends: one found free and let go can
+    // be handed to another socket before `ssh` listens there. With SO_REUSEADDR, as `ssh` binds
+    // its forwards, the hold does not stop `ssh` listening there.
+    let held = tokio::net::TcpSocket::new_v4().expect("socket");
+    held.set_reuseaddr(true).expect("reuse");
+    held.bind("127.0.0.1:0".parse().expect("addr"))
+        .expect("bind");
+    let local = held.local_addr().expect("addr").port();
     let mut tunnel = Command::new("ssh")
         .args(["-F", "/dev/null", "-p", &server.addr.port().to_string()])
         .args([
