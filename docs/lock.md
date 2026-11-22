@@ -478,6 +478,9 @@ what to change.
   bound from the board's last change while sending, and the commit's check within twelve
   `Options::timeout`s under the default, so a long commit needs `Reply::Alive` or `Within`.
   Docs only; nothing a program calls changes.
+- **I68.** `orion-test-board` has `TestBoard::hold_commits(prefix, hold)`: a receiver on the
+  board that answers each commit `hold` late while its session stays pumped, for testing a
+  pushing client's `Reply`. Test support only; nothing a shipped program calls changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -254,6 +254,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I65](docs/prs/I65.md) The PR list reads every brief again, and the gate keeps it so (wave 19; needs I64)
 - [x] [I66](docs/prs/I66.md) The shared-memory ring crates come from the device library at a6251ecf (wave 19; needs I65)
 - [x] [I67](docs/prs/I67.md) The client docs say how long a push waits for the board, and what a long commit needs (wave 19; needs I66)
+- [x] [I68](docs/prs/I68.md) The test board has a receiver that answers a commit late (wave 19; needs I67)
 
 ## J. The stack around Orion
 

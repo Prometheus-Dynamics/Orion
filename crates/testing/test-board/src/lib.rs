@@ -34,6 +34,10 @@ use orion_node_app::{Node, NodeSettings};
 use orion_scratch::Scratch;
 use tokio::sync::oneshot;
 
+mod held;
+
+pub use held::HeldCommits;
+
 /// How long a start may take before the test is told it failed.
 const START: Duration = Duration::from_secs(20);
 
@@ -362,6 +366,19 @@ impl TestBoard {
     #[must_use]
     pub const fn node_runs(&self) -> bool {
         self.node.is_some()
+    }
+
+    /// A program on the board that receives every file whose destination starts with `prefix`
+    /// and answers each commit `hold` after it is asked, pumping its session meanwhile: a
+    /// receiver whose device work at the commit takes that long. For a test of what a pushing
+    /// client does with a late answer ([`orion::Reply`]). Node logic must run.
+    ///
+    /// # Panics
+    ///
+    /// If it cannot connect or become the receiver for `prefix`.
+    #[must_use]
+    pub fn hold_commits(&self, prefix: &str, hold: Duration) -> HeldCommits {
+        held::start(&self.socket, prefix, hold)
     }
 
     /// The board's directory: its state, its keys, its record and its socket.

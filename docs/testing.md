@@ -60,6 +60,32 @@ Nothing is stood in for. A client is answered, and refused, by the same code as 
 - Settings that do not parse panic the test: recovery would then serve the board's usual
   socket, not the test's.
 
+## A receiver that answers late
+
+`board.hold_commits(prefix, hold)` starts a program on the board that receives every file whose
+destination starts with `prefix`, as board management does with a boot slot, and answers each
+commit `hold` after it was asked, committed or rejected by the file's digest. It pumps its session
+all the while, so the comm core and node logic go on answering the pushing client, pings and all:
+it is a receiver whose device work at the commit takes `hold`. It needs node logic, and stops when
+the returned `HeldCommits` is dropped; `answered()` counts the commits it has answered.
+
+Use it to test what a pushing client does with a late commit (see "How long a push waits for the
+board" in [client.md](client.md)). With a short `Options::timeout` the test stays short:
+
+```rust
+let held = board.hold_commits("slots/", Duration::from_secs(6));
+let orion = Orion::connect_with(&board.address(), "updater", orion::Options {
+    timeout: Duration::from_millis(400),
+    ..orion::Options::default()
+})?;
+orion.set_reply(Reply::Alive { ceiling: Some(Duration::from_secs(30)) });
+let done = orion.files().push("slots/b.img", &mut source, |_, _| {})?;
+assert_eq!(done.state, FileState::Committed);
+```
+
+Under `Reply::Timeout` the same push ends with a timed-out `ClientError::Io` after twelve
+timeouts, 4.8 s here.
+
 ## And `orion-stubs`
 
 `orion-stubs` is Orion's own: a comm core put together from its parts, with small stand-ins
