@@ -20,7 +20,9 @@ login-helper = ["dep:postcard", "dep:serde", "dep:shm-fdpass"]
 orion-check = { path = "../../core/check" }
 orion-config = { path = "../../core/config" }
 orion-keys = { path = "../keys" }
+orion-server = { path = "../server" }
 orion-ssh-forward = { path = "../ssh-forward", optional = true }
+orion-tcp = { path = "../tcp" }
 orion-types = { path = "../../core/types" }
 postcard = { workspace = true, features = ["alloc"], optional = true }
 serde = { workspace = true, features = ["alloc", "derive"], optional = true }

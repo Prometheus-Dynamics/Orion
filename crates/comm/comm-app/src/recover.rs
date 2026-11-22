@@ -166,7 +166,7 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
         Some(settings) => settings.shell.clone(),
         None => Some(orion_ssh::SshConfig {
             listen: SocketAddr::from(([0, 0, 0, 0], 0)),
-            interface: None,
+            interfaces: Vec::new(),
             host_key: PathBuf::new(),
             helper: helper.clone(),
             subsystems: Vec::new(),
@@ -243,7 +243,7 @@ pub fn recover(settings: Option<&CommSettings>, why: String, with: RecoverWith) 
     let ssh = Recovery::start(RecoveryConfig {
         listen,
         // Only from settings that were read: ones that could not be say nothing.
-        interface: ssh.and_then(|ssh| ssh.interface.clone()),
+        interfaces: ssh.map(|ssh| ssh.interfaces.clone()).unwrap_or_default(),
         keys_file: settings.map_or(with.keys_file, |settings| settings.recovery_keys.clone()),
         host_key,
         helper,

@@ -112,7 +112,7 @@ fn recovery_ssh(settings: Option<&CommSettings>, program: PathBuf) -> orion_ssh:
     }
     orion_ssh::SshConfig {
         listen: std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
-        interface: None,
+        interfaces: Vec::new(),
         host_key: PathBuf::new(),
         helper,
         subsystems,

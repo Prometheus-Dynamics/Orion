@@ -72,7 +72,7 @@ impl Server {
     ) -> Self {
         let mut config = SshConfig {
             listen: "127.0.0.1:0".parse().expect("addr"),
-            interface: None,
+            interfaces: Vec::new(),
             host_key: dir.join("host_key"),
             helper: Helper {
                 program: env!("CARGO_BIN_EXE_orion-ssh-helper").into(),

@@ -39,8 +39,8 @@ pub fn text(settings: &CommSettings) -> String {
     #[cfg(feature = "ssh")]
     if let Some(ssh) = &settings.ssh {
         line("ssh.listen", &ssh.listen);
-        if let Some(interface) = &ssh.interface {
-            line("ssh.interface", interface);
+        if !ssh.interfaces.is_empty() {
+            line("ssh.interface", &ssh.interfaces.join(", "));
         }
     }
     #[cfg(feature = "recovery")]

@@ -6,6 +6,9 @@ mod comm;
 #[cfg(all(feature = "offers", feature = "recovery"))]
 #[path = "configured.rs"]
 mod configured;
+#[cfg(all(feature = "tcp", feature = "ssh"))]
+#[path = "interfaces.rs"]
+mod interfaces;
 #[cfg(all(feature = "offers", feature = "recovery"))]
 #[path = "own_files.rs"]
 mod own_files;

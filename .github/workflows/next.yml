@@ -44,11 +44,14 @@ jobs:
           tool: cargo-nextest
       # Ubuntu's AppArmor gives a user namespace made by an unconfined program no capabilities,
       # and the sandbox test that checks what each kind of session holds needs them in one of
-      # its own. This runner is the test's, and thrown away after.
+      # its own. The test of ways in kept to interfaces makes dummy interfaces in a network
+      # namespace of its own, and a namespace cannot load the module. The gate fails such a
+      # test that could not run. This runner is the tests', and thrown away after.
       - run: |
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
+          sudo modprobe dummy
       # CI measures every size build, whatever its key says, and checks each against the record
       # its key has (scripts/size-gate.sh): the run that finds a key missing an input.
       - run: ./scripts/gate.sh --part ${{ matrix.part }}

@@ -46,7 +46,7 @@ fn caller() -> Principal {
 fn ssh_config() -> SshConfig {
     SshConfig {
         listen: "127.0.0.1:0".parse().expect("addr"),
-        interface: None,
+        interfaces: Vec::new(),
         host_key: std::env::temp_dir().join("orion-shell-unused-host-key"),
         helper: Helper {
             program: env!("CARGO_BIN_EXE_orion-shell-helper").into(),

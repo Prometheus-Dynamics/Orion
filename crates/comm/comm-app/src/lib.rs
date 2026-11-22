@@ -21,6 +21,8 @@ mod helper;
 pub mod last_good;
 #[cfg(feature = "login-helper")]
 pub mod login_helper;
+#[cfg(feature = "tcp")]
+mod network;
 #[cfg(feature = "nt4")]
 mod nt4_ws;
 #[cfg(feature = "offers")]
@@ -313,9 +315,6 @@ impl CommCore {
             .map_err(|error| failed(format!("socket {}", socket.display()), error))?;
         serve(&mut tasks, Carriers::Unix(unix));
 
-        // The network way in.
-        #[allow(unused_mut)]
-        let mut peer_addr = None;
         #[cfg(feature = "tcp")]
         let tcp_options = orion_tcp::TcpOptions {
             security,
@@ -333,40 +332,19 @@ impl CommCore {
             });
             orion_topic_peers::TopicPeers::start(&comm, &topics, tcp_options.clone(), table)
         };
+        // The network way in.
         #[cfg(feature = "tcp")]
-        if let Some(addr) = settings.config.peer_listen {
-            parts.push("network");
-            let listen = orion_tcp::Listen {
-                addr,
-                interface: settings.peer_interface.clone(),
-            };
-            match orion_tcp::TcpCarrier::listen(&listen, tcp_options.clone()) {
-                Ok(carrier) => {
-                    peer_addr = carrier.local_addr().ok();
-                    serve(&mut tasks, Carriers::Tcp(carrier));
-                }
-                // A way in that cannot open yet is not a comm core that cannot start: it
-                // tries again, and the rest runs meanwhile. It is announced at the address it
-                // was given.
-                Err(error) if orion_server::may_clear(&error) => {
-                    peer_addr = Some(addr);
-                    let (comm, options, retry) =
-                        (comm.clone(), tcp_options.clone(), settings.listen_retry);
-                    tasks.push(tokio::task::spawn_local(async move {
-                        let carrier =
-                            orion_tcp::TcpCarrier::listen_retrying(&listen, options, retry).await;
-                        comm.serve(Carriers::Tcp(carrier)).await;
-                    }));
-                }
-                Err(error) => return Err(failed(format!("peer.listen {listen}"), error)),
+        let peer_addr = {
+            if settings.config.peer_listen.is_some() {
+                parts.push("network");
             }
-        }
+            network::open(&settings, &tcp_options, &comm, &mut tasks)?
+        };
         #[cfg(not(feature = "tcp"))]
-        if settings.config.peer_listen.is_some() {
-            return Err(failed("peer.listen", "this build has no network way in"));
-        }
-        #[cfg(not(feature = "tcp"))]
-        let _ = &settings.peer_interface;
+        let peer_addr = match settings.config.peer_listen {
+            Some(_) => return Err(failed("peer.listen", "this build has no network way in")),
+            None => None,
+        };
 
         #[cfg(all(feature = "ws", feature = "nt4"))]
         let mut nt4_on_ws: Option<nt4_ws::Nt4OnWs> = None;

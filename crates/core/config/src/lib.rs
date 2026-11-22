@@ -248,6 +248,31 @@ impl Source {
             .collect()
     }
 
+    /// A comma-separated list of network interface names (`usb0, eth0`), each as the kernel
+    /// takes one: 1 to 15 bytes, with no `/` or space. A name said twice is refused.
+    ///
+    /// # Errors
+    ///
+    /// A name the kernel would not take, or one said twice.
+    pub fn interfaces(&mut self, key: &str) -> Result<Vec<String>, ConfigError> {
+        let names: Vec<String> = self.list(key)?;
+        for (at, name) in names.iter().enumerate() {
+            if name.len() > 15 || name.contains(|ch: char| ch == '/' || ch.is_whitespace()) {
+                return Err(ConfigError {
+                    key: key.into(),
+                    message: format!("{name:?} is not an interface name"),
+                });
+            }
+            if names[..at].contains(name) {
+                return Err(ConfigError {
+                    key: key.into(),
+                    message: format!("{name:?} is said twice"),
+                });
+            }
+        }
+        Ok(names)
+    }
+
     /// What was set, as `key = value`, one a line with where it came from, for a person to
     /// read on a board in trouble. The value of a key that may hold a secret is left out, by
     /// its name ([`may_be_secret`]): it says `(left out)`. Everything not set is its default.

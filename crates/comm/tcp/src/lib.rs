@@ -50,7 +50,7 @@ use orion_net_handshake::{
 
 mod listen;
 
-pub use listen::{Listen, Retry};
+pub use listen::{Listen, Retry, kept, still_kept};
 
 /// The roles a connection over the network may ask for.
 const NETWORK_ROLES: Roles = Roles::CLIENT.and(Roles::PEER);
@@ -384,6 +384,8 @@ pub struct TcpCarrier {
     options: TcpOptions,
     ready: mpsc::Receiver<TcpConnection>,
     done: mpsc::Sender<TcpConnection>,
+    /// The interface the socket is kept to, if it is kept to one.
+    follow: Option<listen::Follow>,
 }
 
 impl TcpCarrier {
@@ -403,6 +405,7 @@ impl TcpCarrier {
             options,
             ready,
             done,
+            follow: None,
         }
     }
 
@@ -421,8 +424,19 @@ impl Carrier for TcpCarrier {
 
     async fn accept(&mut self) -> io::Result<TcpConnection> {
         loop {
+            let gone = async {
+                match &mut self.follow {
+                    Some(follow) => follow.gone(&self.listener).await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
                 Some(connection) = self.ready.recv() => return Ok(connection),
+                () = gone => {
+                    if let Some(follow) = &mut self.follow {
+                        self.listener = follow.again().await;
+                    }
+                }
                 accepted = self.listener.accept() => {
                     let (stream, from) = accepted?;
                     // Each handshake is its own task with its own deadline, so a connection

@@ -43,9 +43,10 @@ pub const KEYS_FILE: &str = "/etc/orion/recovery_keys";
 pub struct RecoveryConfig {
     /// Where to listen: the first of these that can be, each time it tries.
     pub listen: Vec<SocketAddr>,
-    /// The one network interface to listen on, if the board's settings were read and named
-    /// one (`ssh.interface`): recovery is never open wider than the board is.
-    pub interface: Option<String>,
+    /// The network interfaces to listen on, if the board's settings were read and named them
+    /// (`ssh.interface`), one listener kept to each: recovery is never open wider than the
+    /// board is. Empty for the address alone.
+    pub interfaces: Vec<String>,
     /// The public keys that may log in, one OpenSSH public key a line.
     pub keys_file: PathBuf,
     /// The board's host key, if it can be read. One is made for the run if not.
@@ -195,7 +196,7 @@ impl Recovery {
                 for listen in &config.listen {
                     let ssh = SshConfig {
                         listen: *listen,
-                        interface: config.interface.clone(),
+                        interfaces: config.interfaces.clone(),
                         host_key: config.host_key.clone(),
                         helper: config.helper.clone(),
                         subsystems: config.subsystems.clone(),
@@ -219,11 +220,13 @@ impl Recovery {
                     match started {
                         Ok(server) => {
                             let at = server.local_addr();
-                            match &config.interface {
-                                Some(interface) => info!(
-                                    "recovery: SSH is open on {at}, on {interface} only (once it is there)"
-                                ),
-                                None => info!("recovery: SSH is open on {at}"),
+                            if config.interfaces.is_empty() {
+                                info!("recovery: SSH is open on {at}");
+                            } else {
+                                info!(
+                                    "recovery: SSH is open on {at}, on {} only (each once it is there)",
+                                    config.interfaces.join(", ")
+                                );
                             }
                             *running
                                 .local_addr

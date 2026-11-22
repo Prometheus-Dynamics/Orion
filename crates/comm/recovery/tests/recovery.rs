@@ -71,7 +71,7 @@ fn keygen(dir: &Path, name: &str) -> (PathBuf, String) {
 fn config(dir: &Path, why: &str) -> RecoveryConfig {
     RecoveryConfig {
         listen: vec!["127.0.0.1:0".parse().expect("addr")],
-        interface: None,
+        interfaces: Vec::new(),
         keys_file: dir.join("recovery_keys"),
         host_key: dir.join("state/ssh_host_ed25519_key"),
         helper: Helper {
@@ -376,7 +376,7 @@ fn on_one_interface_recovery_is_open_there_and_nowhere_else() {
     let port = held.local_addr().expect("addr").port();
     let mut absent = config(&dir, "the interface is not there yet");
     absent.listen = vec![SocketAddr::from(([127, 0, 0, 1], port))];
-    absent.interface = Some("orionnone0".to_owned());
+    absent.interfaces = vec!["orionnone0".to_owned()];
     absent.security = Security::Off;
     let board = Board::start(&dir, absent);
     std::thread::sleep(Duration::from_millis(500));
@@ -386,7 +386,7 @@ fn on_one_interface_recovery_is_open_there_and_nowhere_else() {
 
     // On one that is there, it lets in as the settings say: security off, no key.
     let mut there = config(&dir, "on lo");
-    there.interface = Some("lo".to_owned());
+    there.interfaces = vec!["lo".to_owned()];
     there.security = Security::Off;
     let board = Board::start(&dir, there);
     assert!(board.lets_in(None));

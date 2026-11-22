@@ -60,7 +60,7 @@ fn me() -> users::User {
 fn config(dir: &Path) -> SshConfig {
     SshConfig {
         listen: "127.0.0.1:0".parse().expect("addr"),
-        interface: None,
+        interfaces: Vec::new(),
         host_key: dir.join("host_key"),
         helper: Helper {
             program: env!("CARGO_BIN_EXE_orion-sandbox-helper").into(),
@@ -557,7 +557,8 @@ const INSIDE: &str = "ORION_SANDBOX_RIGHTS_INSIDE";
 /// and never can, its bounding set empty. Becoming other accounts needs root, so the test
 /// runs itself again in a user namespace of its own, as that namespace's root, with the
 /// user's subordinate ids as the other accounts. Where that is not allowed it says so and
-/// passes; the board run asks the same of the real thing.
+/// passes, unless `NAMESPACE_TESTS=required` is set, as the gate sets it: there it fails. The
+/// board run asks the same of the real thing.
 #[cfg(feature = "login-helper")]
 #[test]
 fn each_kind_of_session_holds_what_it_should_and_no_more() {
@@ -567,6 +568,7 @@ fn each_kind_of_session_holds_what_it_should_and_no_more() {
         return;
     }
     if !installed() {
+        not_tried("OpenSSH is not installed");
         return;
     }
     let unshare = || {
@@ -581,7 +583,7 @@ fn each_kind_of_session_holds_what_it_should_and_no_more() {
             .is_ok_and(|status| status.success())
     };
     if !runs(unshare().arg("true")) {
-        println!("no user namespace with subordinate ids here: what sessions hold was not tried");
+        not_tried("no user namespace with subordinate ids here");
         return;
     }
     // A namespace can be made and its root still hold no capabilities: Ubuntu's AppArmor
@@ -589,10 +591,7 @@ fn each_kind_of_session_holds_what_it_should_and_no_more() {
     // none, and emptying a bounding set is then refused. Asked of `setpriv` where it is installed.
     let setpriv = Command::new("setpriv").arg("--version").output().is_ok();
     if setpriv && !runs(unshare().args(["setpriv", "--bounding-set", "-all", "true"])) {
-        println!(
-            "a user namespace here holds no capabilities (AppArmor's unprivileged_userns): \
-             what sessions hold was not tried"
-        );
+        not_tried("a user namespace here holds no capabilities (AppArmor's unprivileged_userns)");
         return;
     }
     let ran = unshare()
@@ -611,6 +610,16 @@ fn each_kind_of_session_holds_what_it_should_and_no_more() {
         said.contains("rights: every kind of session checked"),
         "{said}"
     );
+}
+
+/// Says why what sessions hold could not be tried here. Where `NAMESPACE_TESTS=required` is
+/// set, as the gate sets it, that fails the test: there it must run.
+fn not_tried(why: &str) {
+    assert!(
+        std::env::var_os("NAMESPACE_TESTS").is_none_or(|said| said != "required"),
+        "this test must run here, and cannot: {why}"
+    );
+    println!("{why}: what sessions hold was not tried");
 }
 
 /// A process's `Uid`, `CapPrm`, `CapEff`, `CapBnd` and `NoNewPrivs`, from its status.

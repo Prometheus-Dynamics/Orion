@@ -116,6 +116,14 @@ main() {
   fi
 }
 
+# The tests that make namespaces of their own (interfaces made and taken away; accounts that
+# hold what they should and no more) say so and pass on a machine that cannot make one. The
+# gate's machines can, so here one that could not run fails, saying why. Not ORION_: every
+# ORION_ variable is a setting to the programs the tests start. Not GATE_: those are kept out of
+# the lanes' keys, and nothing built may read them (lane-reuse.py own-vars); this one is read by
+# tests alone, which run in the main part, never reused.
+export NAMESPACE_TESTS=required
+
 # Steps that build in target directories of their own run beside the rest, each in a lane: a
 # process group of its own, its output kept in a file and printed, with its time, once every
 # lane has ended. A lane runs its steps one after another and stops at the first that fails.

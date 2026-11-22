@@ -63,7 +63,7 @@ async fn erased(
         }
         Err(error) if may_clear(&error) => {
             tasks.push(tokio::task::spawn_local(async move {
-                let server = open_retrying(way, &at, retry, async || start().await).await;
+                let server = open_retrying(way, &at, retry, &mut start).await;
                 let task = then(&server).map(Abort);
                 // Held until the comm core's tasks are aborted, which drops them.
                 let _kept = (server, task);

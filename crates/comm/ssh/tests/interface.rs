@@ -38,7 +38,7 @@ fn an_interface_alone_turns_ssh_on_at_port_22_of_that_interface() {
     let config = SshConfig::from_source(&mut source, Path::new("/tmp"), helper)
         .expect("read")
         .expect("ssh is on");
-    assert_eq!(config.interface.as_deref(), Some("usb0"));
+    assert_eq!(config.interfaces, ["usb0"]);
     assert_eq!(config.listen, SocketAddr::from(([0, 0, 0, 0], 22)));
 }
 
@@ -65,7 +65,7 @@ fn an_interface_that_is_not_there_is_waited_for_not_given_up_on() {
     let (held, port) = held_port();
     let server = Server::start(&dir, Security::Off, keys(), |config| {
         config.listen = SocketAddr::from(([127, 0, 0, 1], port));
-        config.interface = Some("orionnone0".to_owned());
+        config.interfaces = vec!["orionnone0".to_owned()];
     });
     // Started, and open nowhere: not on the address alone, which would be wider.
     assert_eq!(server.addr.port(), port);

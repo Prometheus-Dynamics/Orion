@@ -504,6 +504,11 @@ what to change.
 - **I73.** The seven `shm-*` crates are pinned to the device library's `bbb3c420`, through the
   `.git` URL. No other package changes, and no shared-memory code changes. Nothing a program
   calls changes.
+- **I72.** `peer.interface` and `ssh.interface` take a list, one listener kept to each by name,
+  and a listener follows its interface when it is made again. `SshConfig::interface` and
+  `RecoveryConfig::interface` are `interfaces: Vec<String>`; `TcpCarrier::listen` takes a
+  `Retry`; `orion_ssh::Listeners` is new and `listen_when_there` is gone. Settings only on the
+  wire's side: no frame changes, and the level stays 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

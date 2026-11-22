@@ -56,13 +56,14 @@ The name in brackets is the cargo feature that carries the part.
 | `socket.mode` | `0660` | its permission bits: who on the board can connect at all |
 | `socket.node_uids` | none | users whose programs may be the node logic, besides root |
 | `peer.listen` | off | where other nodes and people's tools connect (`tcp`) |
-| `peer.interface` | any | the one network interface `peer.listen` takes connections from (`eth0`, `usb0`); needs `peer.listen` |
+| `peer.interface` | any | the network interfaces `peer.listen` takes connections from, one listener kept to each (`usb0, eth0`); needs `peer.listen` |
 | `comm.*`, `topics.*` | | the server's and the broker's limits |
 | `outbound.max_bytes` | 131072 | what may wait to be sent to one subscriber without a ring (`outbound`) |
 | `ws.listen` | off | where browsers connect (`ws`) |
 | `ws.origins` | any | the pages that may connect, by origin |
 | `ws.send_buffer` | 262144 | the most bytes the kernel may hold for one browser that has not taken them; 0 leaves it to the kernel |
 | `ssh.listen` | off | where SSH clients connect (`ssh`) |
+| `ssh.interface` | any | the network interfaces SSH is open on, one listener kept to each at `ssh.listen`'s port, 22 if not set (`usb0, eth0`); turns SSH on by itself |
 | `ssh.host_key` | `<state.dir>/ssh_host_ed25519_key` | the host key, made if it is not there |
 | `ssh.helper` | this program | the program sessions run in |
 | `ssh.forward` | `true` | whether someone logged in may ask for connections from the board (`ssh-forward`) |

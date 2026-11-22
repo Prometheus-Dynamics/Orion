@@ -40,11 +40,15 @@ pub fn may_clear(error: &io::Error) -> bool {
 
 /// Opens `way` at `at` with `open`, waiting as `retry` says between tries until it opens. Says
 /// so once when it cannot, and once when it opens after that.
-pub async fn open_retrying<T>(
+///
+/// `open` is a closure that gives a future, not an async closure: the future of an async
+/// closure held across an `.await` is not seen to be `Send` for every lifetime, and a way in
+/// that is tried again in a task of its own needs it to be.
+pub async fn open_retrying<T, F: Future<Output = io::Result<T>>>(
     way: &str,
-    at: &dyn Display,
+    at: &(dyn Display + Sync),
     retry: Retry,
-    mut open: impl AsyncFnMut() -> io::Result<T>,
+    mut open: impl FnMut() -> F,
 ) -> T {
     let mut tries = Tries {
         way,
@@ -68,7 +72,7 @@ pub async fn open_retrying<T>(
 /// does not carry its own copy.
 struct Tries<'a> {
     way: &'a str,
-    at: &'a dyn Display,
+    at: &'a (dyn Display + Sync),
     retry: Retry,
     wait: Duration,
     warned: bool,

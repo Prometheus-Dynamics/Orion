@@ -39,9 +39,9 @@ pub struct CommSettings {
     /// `time.*`: time sync.
     #[cfg(feature = "time")]
     pub time: orion_time::TimeConfig,
-    /// `peer.interface`: the one network interface the network way in takes connections
-    /// from (`eth0`, `usb0`). Any unless it is said.
-    pub peer_interface: Option<String>,
+    /// `peer.interface`: the network interfaces the network way in takes connections from
+    /// (`usb0, eth0`), one listener kept to each. Any unless it is said.
+    pub peer_interfaces: Vec<String>,
     /// How long a way in that listens on an address of its own (network, WebSocket, SSH,
     /// NT4) waits before it tries again when it cannot open.
     pub listen_retry: orion_server::Retry,
@@ -220,25 +220,13 @@ impl CommSettings {
                 "needs peer.listen: that is what is announced".into(),
             ));
         }
-        let peer_interface = match source.text("peer.interface") {
-            None | Some("") => None,
-            Some(_) if config.peer_listen.is_none() => {
-                return Err(error(
-                    "peer.interface",
-                    "needs peer.listen: it says which interface that listens on".into(),
-                ));
-            }
-            // As the kernel takes an interface's name: 1 to 15 bytes, no `/` or space.
-            Some(name)
-                if name.len() > 15 || name.contains(|ch: char| ch == '/' || ch.is_whitespace()) =>
-            {
-                return Err(error(
-                    "peer.interface",
-                    format!("{name:?} is not an interface name"),
-                ));
-            }
-            Some(name) => Some(name.to_owned()),
-        };
+        let peer_interfaces = source.interfaces("peer.interface")?;
+        if !peer_interfaces.is_empty() && config.peer_listen.is_none() {
+            return Err(error(
+                "peer.interface",
+                "needs peer.listen: it says which interface that listens on".into(),
+            ));
+        }
         let board_state = match source.text("hello.state") {
             None | Some("running") => orion_hello::BoardState::Running,
             Some("flasher") => orion_hello::BoardState::Flasher,
@@ -260,7 +248,7 @@ impl CommSettings {
             socket_mode,
             node_uids: source.list("socket.node_uids")?,
             status_interval,
-            peer_interface,
+            peer_interfaces,
             listen_retry: orion_server::Retry::default(),
             #[cfg(feature = "time")]
             time: orion_time::TimeConfig::from_source(source)?,
@@ -380,7 +368,7 @@ fn shell_only(config: &Config, source: &mut Source) -> Result<orion_ssh::SshConf
     };
     Ok(orion_ssh::SshConfig {
         listen: std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
-        interface: None,
+        interfaces: Vec::new(),
         host_key: config.state_dir.join("ssh_host_ed25519_key"),
         helper: orion_ssh::Helper {
             program,
@@ -441,16 +429,20 @@ mod tests {
     }
 
     #[test]
-    fn the_network_way_in_may_be_kept_to_one_interface() {
+    fn the_network_way_in_may_be_kept_to_interfaces() {
         let (settings, _) =
             parse("peer.listen = 0.0.0.0:9200\npeer.interface = usb0\n").expect("settings");
-        assert_eq!(settings.peer_interface.as_deref(), Some("usb0"));
-        assert_eq!(parse("").expect("settings").0.peer_interface, None);
+        assert_eq!(settings.peer_interfaces, ["usb0"]);
+        assert!(parse("").expect("settings").0.peer_interfaces.is_empty());
+        let (settings, _) =
+            parse("peer.listen = 0.0.0.0:9200\npeer.interface = usb0, eth0\n").expect("two");
+        assert_eq!(settings.peer_interfaces, ["usb0", "eth0"]);
         // Nothing to keep to an interface, and names the kernel would not take.
         for bad in [
             "peer.interface = usb0\n",
             "peer.listen = 0.0.0.0:9200\npeer.interface = a-name-of-16-byt\n",
             "peer.listen = 0.0.0.0:9200\npeer.interface = ../eth0\n",
+            "peer.listen = 0.0.0.0:9200\npeer.interface = eth0, usb0, eth0\n",
         ] {
             assert_eq!(parse(bad).expect_err(bad).key, "peer.interface");
         }

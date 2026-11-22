@@ -41,7 +41,7 @@ fn a_taken_address_is_tried_again_until_it_is_free() {
             interface: None,
         };
         // Taken: refused at once, as itself.
-        let error = TcpCarrier::listen(&listen, options()).expect_err("taken");
+        let error = TcpCarrier::listen(&listen, options(), QUICK).expect_err("taken");
         assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
 
         let opening = tokio::task::spawn_local(async move {
@@ -67,7 +67,7 @@ fn the_way_in_listens_on_one_interface_when_told_and_none_that_is_not_there() {
             addr: "127.0.0.1:0".parse().expect("addr"),
             interface: Some("lo".to_owned()),
         };
-        let carrier = TcpCarrier::listen(&on_loopback, options()).expect("on lo");
+        let carrier = TcpCarrier::listen(&on_loopback, options(), QUICK).expect("on lo");
         let addr = carrier.local_addr().expect("addr");
         std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).expect("reached");
 
@@ -76,7 +76,7 @@ fn the_way_in_listens_on_one_interface_when_told_and_none_that_is_not_there() {
             addr: "127.0.0.1:0".parse().expect("addr"),
             interface: Some("orion-none0".to_owned()),
         };
-        let error = TcpCarrier::listen(&nowhere, options()).expect_err("no such interface");
+        let error = TcpCarrier::listen(&nowhere, options(), QUICK).expect_err("no such interface");
         assert_eq!(error.raw_os_error(), Some(19), "ENODEV: {error}");
         assert_eq!(nowhere.to_string(), "127.0.0.1:0 on orion-none0");
 
@@ -86,7 +86,7 @@ fn the_way_in_listens_on_one_interface_when_told_and_none_that_is_not_there() {
                 addr: "0.0.0.0:0".parse().expect("addr"),
                 interface: Some(other.clone()),
             };
-            let carrier = TcpCarrier::listen(&elsewhere, options()).expect("on another");
+            let carrier = TcpCarrier::listen(&elsewhere, options(), QUICK).expect("on another");
             let port = carrier.local_addr().expect("addr").port();
             let loopback = SocketAddr::from(([127, 0, 0, 1], port));
             assert!(

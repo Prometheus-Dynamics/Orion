@@ -531,10 +531,14 @@ read. Both the running comm core and recovery answer it.
 
 `crates/comm/ssh` (`orion-ssh`). The comm core answers SSH itself, on `ssh.listen`; a person's
 ordinary `ssh` connects to it. It is off unless `ssh.listen` or `ssh.interface` is set.
-`ssh.interface` keeps it to one network interface whatever its address (`SO_BINDTODEVICE`), on
-`ssh.listen`'s port (22 if not set); an interface that is not there yet, such as a USB gadget's
-network that comes up after the comm core, is waited for, and SSH opens on it when it comes.
-Recovery keeps to the same interface when the settings were read.
+`ssh.interface` keeps it to network interfaces whatever their addresses (`SO_BINDTODEVICE`), a
+list (`usb0, eth0`) with one listener kept to each, on `ssh.listen`'s port (22 if not set). Each
+follows its interface as the network way in's do (see "Where it listens"), looking every second:
+one that is not
+there yet, such as a USB gadget's network that comes up after the comm core, is waited for and
+said once, by its name, without holding up the others, and one that goes or is made again is
+listened on again once it is there. Recovery keeps to the same interfaces when the settings
+were read.
 
 - **Logins go through the one check.** The client proves it holds a key. The trust store says
   whose key it is, and the check decides whether that operator may log in: an operator
@@ -610,8 +614,8 @@ listened on yet is not among them: the network, WebSocket, SSH and NT4 ways in e
   open in recovery as it always is, so it can be fixed over the network; a record that is
   damaged or cannot be read is on.
 - **Never wider.** With security on and no recovery keys, nobody gets in, and that is logged.
-  Settings that were read and name `ssh.interface` keep every address recovery tries to that
-  interface.
+  Settings that were read and name `ssh.interface` keep every address recovery tries to those
+  interfaces, one listener kept to each.
 - **Nothing written.** The host key is the board's if it can be read, and one for the run if
   not. A session needs no home directory, and an account whose shell is gone gets `/bin/sh`.
   If the account files themselves are gone and the comm core is root, or has a login helper,
@@ -805,14 +809,32 @@ be forged.
 - Each handshake is its own task with its own deadline (`comm.hello_ms`). A connection that says
   nothing, or something else, holds up nobody.
 
-**Where it listens.** `peer.listen` is the address. `peer.interface` keeps it to one network
-interface (`SO_BINDTODEVICE`), as `ssh.interface` does for SSH: a connection that arrives on any
-other is not taken. A way in that cannot open (an interface not up yet, such as a USB gadget's
-network that comes up after the comm core, an address the board does not have yet, a port
-another program still holds) does not stop the comm core: everything else starts, the reason is
-logged once at warn with the address, and the listener is tried again every 5 seconds, then
-every 10, until it opens, which is logged too. Only the comm core itself failing to start means
-recovery. Discovery announces the address as it was given meanwhile.
+**Where it listens.** `peer.listen` is the address. `peer.interface` keeps it to network
+interfaces (`SO_BINDTODEVICE`), as `ssh.interface` does for SSH: a list (`usb0, eth0`), with one
+listener kept to each at `peer.listen`, and a connection that arrives on any other is not taken.
+An interface is followed by its name, not its address: with `peer.listen = 0.0.0.0:9200` a
+listener kept to `eth0` takes connections at whatever address `eth0` has, a DHCP lease that
+comes late or changes, or a link-local fallback, with nothing to listen on again.
+
+- **One not there yet.** A way in that cannot open (an interface not up yet, such as a USB
+  gadget's network that comes up after the comm core, an address the board does not have yet, a
+  port another program still holds) does not stop the comm core, nor the other interfaces'
+  listeners: everything else starts, the reason is logged once at warn with the address and the
+  interface's name, and the listener is tried again every 5 seconds, then every 10, until it
+  opens, which is logged too. One that never comes holds up nothing. Only the comm core itself
+  failing to start means recovery.
+- **One made again.** The kernel keeps a socket to an interface by its index, not its name. An
+  interface taken away and made again under the same name (a USB gadget's network when the
+  gadget is rebuilt) has a new index, and a socket kept to the old one takes nothing from it and
+  says nothing. So each listener looks every 5 seconds whether its interface's name still has
+  the index it was kept to; when it has another, or none, it says so at warn, by the name, and
+  listens again as above, with no restart.
+- **IPv4.** `0.0.0.0` listens for IPv4 alone. IPv6 on the same interfaces would take a second
+  listener on each, on `[::]` with `IPV6_V6ONLY` so the two do not clash, and a second address
+  to say where; there is none.
+- **Discovery** announces `peer.listen` as it was given, whatever the interfaces: with
+  `0.0.0.0` that is no address a peer can use. Announcing each interface's own address is not
+  done.
 
 The WebSocket (`ws.listen`), SSH (`ssh.listen`) and NT4 (`nt4.listen`) ways in do the same, each
 on its own: the address taken or not on the board yet, a port that needs a capability, or the

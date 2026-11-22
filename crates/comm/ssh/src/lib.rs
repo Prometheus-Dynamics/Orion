@@ -27,6 +27,7 @@ mod door;
 pub mod helper;
 pub mod hostkey;
 mod keeper;
+mod listen;
 #[cfg(feature = "login-helper")]
 pub mod login;
 mod session;
@@ -48,12 +49,12 @@ use russh::keys::{PrivateKey, PublicKey};
 use russh::server::{Auth, ChannelOpenHandle, Handler, Msg, Session};
 use russh::{Channel, ChannelId, MethodKind, MethodSet, Preferred};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
 pub use door::{Door, Local};
 pub use keeper::{Admitted, Io, Keeper, Started, Terminal, Wanted};
+pub use listen::{Listeners, absent, listen};
 use session::{Input, Running};
 
 /// Who may log in: an operator, and only one that has been granted it.
@@ -115,9 +116,10 @@ pub struct Subsystem {
 pub struct SshConfig {
     /// `ssh.listen`: where SSH clients connect.
     pub listen: SocketAddr,
-    /// `ssh.interface`: the one network interface SSH is open on, whatever its address
-    /// (`SO_BINDTODEVICE`). One that is not there yet is waited for.
-    pub interface: Option<String>,
+    /// `ssh.interface`: the network interfaces SSH is open on, whatever their addresses
+    /// (`SO_BINDTODEVICE`), one listener kept to each. One that is not there yet is waited
+    /// for, and one that goes or is made again is listened on again. Empty for `listen` alone.
+    pub interfaces: Vec<String>,
     /// `ssh.host_key`: the host key, in OpenSSH's format. Made if it is not there.
     pub host_key: PathBuf,
     /// The program sessions run in.
@@ -154,11 +156,11 @@ impl SshConfig {
         helper: Helper,
     ) -> Result<Option<Self>, ConfigError> {
         let listen: Option<SocketAddr> = source.optional("ssh.listen")?;
-        let interface: Option<String> = source.optional("ssh.interface")?;
-        let on = listen.is_some() || interface.is_some();
+        let interfaces = source.interfaces("ssh.interface")?;
+        let on = listen.is_some() || !interfaces.is_empty();
         let config = Self {
             listen: listen.unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 22))),
-            interface,
+            interfaces,
             host_key: source
                 .optional("ssh.host_key")?
                 .unwrap_or_else(|| state_dir.join("ssh_host_ed25519_key")),
@@ -172,53 +174,6 @@ impl SshConfig {
             login: Duration::from_millis(source.get("ssh.login_ms", 60_000_u64)?.max(1000)),
         };
         Ok(on.then_some(config))
-    }
-}
-
-/// Listens on `listen`, and only on the network interface named `interface` if there is one.
-///
-/// # Errors
-///
-/// If it cannot be listened on; [`absent`] says whether that is for want of the interface.
-pub fn listen(listen: SocketAddr, interface: Option<&str>) -> std::io::Result<TcpListener> {
-    let socket = if listen.is_ipv4() {
-        tokio::net::TcpSocket::new_v4()?
-    } else {
-        tokio::net::TcpSocket::new_v6()?
-    };
-    socket.set_reuseaddr(true)?;
-    if let Some(name) = interface {
-        socket.bind_device(Some(name.as_bytes()))?;
-    }
-    socket.bind(listen)?;
-    socket.listen(1024)
-}
-
-/// Whether listening failed because the interface it was to be on is not there (yet).
-#[must_use]
-pub fn absent(error: &std::io::Error) -> bool {
-    error.raw_os_error() == Some(rustix::io::Errno::NODEV.raw_os_error())
-}
-
-/// Listens as [`listen`] does, waiting for an interface that is not there yet: a USB
-/// gadget's network comes up after the comm core does. Tries every second, and says so
-/// once.
-pub async fn listen_when_there(at: SocketAddr, interface: &str) -> TcpListener {
-    let mut said = false;
-    loop {
-        match listen(at, Some(interface)) {
-            Ok(listener) => {
-                tracing::info!("ssh: {interface} is there; open on it at {at}");
-                return listener;
-            }
-            Err(error) => {
-                if !said {
-                    tracing::info!("ssh: waiting for {interface} to listen on: {error}");
-                    said = true;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        }
     }
 }
 
@@ -725,20 +680,8 @@ impl Ssh {
         let host_key = hostkey::load_or_make(&config.host_key)
             .map_err(|error| std::io::Error::new(error.kind(), format!("no host key: {error}")))?;
         let protocol = protocol(host_key);
-        let (at, interface) = (config.listen, config.interface.clone());
-        let listener = match listen(at, interface.as_deref()) {
-            Ok(listener) => Some(listener),
-            Err(error) if interface.is_some() && absent(&error) => None,
-            Err(error) => return Err(error),
-        };
-        let local_addr = listener.as_ref().map_or(Ok(at), TcpListener::local_addr)?;
-        match (&listener, &interface) {
-            (Some(_), Some(interface)) => {
-                tracing::info!("ssh: on {interface} only, open on {local_addr}")
-            }
-            (Some(_), None) => tracing::info!("ssh: open on {local_addr}"),
-            (None, _) => {}
-        }
+        let mut listeners = Listeners::start(config.listen, &config.interfaces)?;
+        let local_addr = listeners.local_addr();
         let places = Places::new(&config);
         let login = config.login;
         let keeper = Keeper::new(config, security, keys, local_addr);
@@ -747,19 +690,9 @@ impl Ssh {
         let keeper = Arc::new(keeper);
         let room = places.clone();
         let task = tokio::spawn(async move {
-            let listener = match (listener, interface) {
-                (Some(listener), _) => listener,
-                (None, Some(interface)) => listen_when_there(at, &interface).await,
-                (None, None) => unreachable!("only a named interface is waited for"),
-            };
             loop {
-                let (stream, peer) = match listener.accept().await {
-                    Ok(accepted) => accepted,
-                    Err(error) => {
-                        debug!(%error, "ssh: a connection could not be accepted");
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        continue;
-                    }
+                let Some((stream, peer)) = listeners.accept().await else {
+                    return;
                 };
                 let Some((connection, waiting)) = room.take() else {
                     debug!("ssh: {peer} turned away: too many connections");

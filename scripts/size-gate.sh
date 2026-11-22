@@ -57,12 +57,20 @@ RECOVERY_HOST=3270000
 ORION_HOST=6590000
 CAPI_HOST=740000
 # A board's files, static musl. aarch64, the one run on a board: orion-recovery as measured at
-# C31 (files the settings name, paths and commands: +40,400 since C30, after a cut;
-# docs/prs/C31.md), orion as measured at I50 (runs kept while their program reconnects:
-# +7,696 over I54's 5,322,664, after a cut of 1,320; docs/prs/I50.md); the others as at C41,
-# until they run on one:
+# I72 (docs/prs/I72.md), measured on 2026-11-22; its limit was not raised. I72 is 2,759,704,
+# +20,144 over I71's 2,739,560: a listener for each interface on the network and SSH ways in,
+# each following its interface when it is made again. By crate, before the last cut: orion_ssh
+# +7.4 KB (one task per interface: 5.0 KB), orion_comm_app +4.7 KB, orion_tcp +1.8 KB, std
+# +1.5 KB, orion_config +1.4 KB, tokio -1.4 KB. Cut: SSH using the network way in's listener
+# (-424 with a merged log line), and one structured tracing field (`on = ...`) said in the
+# message instead (-1,696). Look at structured fields first: that one field cost 1,696 bytes
+# here. The known next cut: one listener type in orion-tcp that accepts and listens again by
+# itself, for both ways in (about 1.4 KB). The limit is not raised without a table like this.
+# Orion as measured at I50 (runs kept while their program reconnects: +7,696 over I54's
+# 5,322,664, after a cut of 1,320; docs/prs/I50.md); the others as at C41, until they run on
+# one:
 #                                   orion-recovery   orion
-#   aarch64-unknown-linux-musl      2,733,120        5,330,360
+#   aarch64-unknown-linux-musl      2,759,704        5,330,360
 #   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
 # The last column: gated on `every` change, or before a `release` only.
