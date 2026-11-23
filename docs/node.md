@@ -378,7 +378,16 @@ again in the slot. `orion-files-sink` is how such a program takes them.
   told from then on.
 - **A receiver that goes** takes its prefixes with it. Whoever was sending to it is told the
   transfer is rejected, "the program that receives it went away". The destination is then a
-  place in the node's own store again.
+  place in the node's own store again, unless the image says otherwise:
+- **Prefixes the image says are receivers'** (`files.receivers = slots/, devices/`) are never
+  the store's. A file begun under one while no receiver has asked for it, because the receiver
+  is still starting or has gone, is refused `unavailable`, in words: `nothing receives
+  slots/b.img yet: slots/ is a receiver's`. A chunk or commit still on its way to a receiver
+  that went is refused the same way: `the program that received it went away: begin it again`.
+  The sender asks again, and the file goes to the receiver when it is there. Without the
+  setting, a file that arrives before its receiver is stored by the node and answered as
+  committed, and the receiver never sees it. A prefix is one or more parts of a name ending in
+  `/`; anything else in the setting is an error at start.
 - At most 64 prefixes and 256 transfers passing through at once; one more is `busy`.
 - **A receiver with little room**, a microcontroller on a serial line, names the largest
   chunk it takes in `FileSink` (`max_chunk`; 0 for any). It is then sent one frame at a

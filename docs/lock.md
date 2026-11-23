@@ -564,6 +564,12 @@ what to change.
 - **I88.** The seven `shm-*` crates are pinned to the device library's `6c8568d0`. No other
   package changes, and no shared-memory code changes. Nothing a program calls changes; level 6.
   The size limit of `orion` for a board is 5,550,000, was 5,510,000, for the clock row.
+- **I87.** `files.receivers` (**Add**): a `FileBegin` under a listed prefix with no receiver,
+  and a chunk or commit on its way to one that went, is refused `Unavailable` with words. A
+  push whose `FileBegin` is refused `Unavailable` asks again for up to twelve timeouts, then
+  ends `Unavailable`, `nothing received <prefix> within <bound>` (**Change**: was handed to
+  the program at once, from a board whose node logic was away). `Sinks::with_receivers`,
+  `Sinks::take_said`, `NodeSettings::files_receivers` (**Add**). No wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

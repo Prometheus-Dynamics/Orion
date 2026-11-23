@@ -455,7 +455,10 @@ impl Logic {
             match self.roots.pass(asked, out) {
                 Ok(false) => match self.sinks.pass(asked, out) {
                     Ok(false) => self.files.request(asked, out),
-                    passed => passed.map(|_| ()),
+                    passed => {
+                        self.said = self.sinks.take_said();
+                        passed.map(|_| ())
+                    }
                 },
                 passed => passed.map(|_| ()),
             }

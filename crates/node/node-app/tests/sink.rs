@@ -331,3 +331,25 @@ fn a_receiver_that_goes_ends_the_transfer_and_the_prefix_is_the_stores_again() {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+
+#[test]
+fn the_receivers_prefixes_are_read_and_one_that_is_not_a_prefix_is_refused() {
+    let read = |text: &str| {
+        let mut source = orion_config::Source::parse(text, []).expect("source");
+        NodeSettings::from_source(&mut source).map(|settings| settings.files_receivers)
+    };
+    assert_eq!(read("").expect("none"), Vec::<String>::new());
+    assert_eq!(
+        read("files.receivers = slots/, devices/cam/\n").expect("two"),
+        ["slots/", "devices/cam/"]
+    );
+    for bad in ["slots", "/", "a/../b/"] {
+        let refused = read(&format!("files.receivers = {bad}\n")).expect_err(bad);
+        assert_eq!(refused.key, "files.receivers", "{bad}");
+        assert!(
+            refused.message.contains("is not a prefix"),
+            "{}",
+            refused.message
+        );
+    }
+}

@@ -5,6 +5,8 @@
 mod board;
 #[path = "modes.rs"]
 mod modes;
+#[path = "receivers.rs"]
+mod receivers;
 #[path = "roots.rs"]
 mod roots;
 #[path = "sinks.rs"]

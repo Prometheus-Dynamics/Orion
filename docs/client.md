@@ -545,6 +545,16 @@ including other pushes. `push` is `start_push` stepped to the end.
   with a timed-out `ClientError::Io` on its own. Under `Reply::Within(bound)` it is `bound`, and
   under `Reply::Alive { ceiling }` it lasts as long as the node is heard from, up to `ceiling`.
 
+**A push that nothing takes yet.** A board refuses a `FileBegin` as `unavailable` while what
+would take the file is not there: node logic still starting, or a destination the image says is
+a receiver's (`files.receivers`) whose receiver has not asked for it yet. The push asks again
+a few times a second, for up to twelve `Options::timeout`s (60 s by default) from the first such
+refusal. If the receiver comes, the push goes on as if it had been there. If the time runs out,
+the push ends refused, still `Unavailable`: `nothing received slots/ within 60s` for a
+receiver's prefix, or `the board did not take <destination> within 60s: ...` otherwise. That
+is never `is_lost()`: the board answered throughout, and its receiver never came up, which is
+not a network fault.
+
 A destination whose receiver does long work at the commit, such as writing a device image, needs
 `set_reply(Reply::Alive { ceiling })` or `Reply::Within(bound)` with a ceiling or bound above
 that work's longest time, set before the push. The receiver only has to go on pumping its session

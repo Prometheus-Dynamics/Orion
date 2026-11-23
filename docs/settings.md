@@ -108,6 +108,7 @@ The name in brackets is the cargo feature that carries the part.
 | `records.max_drift_ms` | 300000 | a stamp from a peer further ahead than this is refused |
 | `files.dir` | `files` in `state.dir` | where files sent to this node go |
 | `files.max_size` | 16 GiB | the largest file taken |
+| `files.receivers` | none | prefixes that belong to programs that receive files, as `slots/, devices/`: a file under one is never stored by the node, and is refused `unavailable` until its receiver is there (`docs/node.md`, "Files that go straight to a receiver") |
 | `files.root.<name>` | none | a root clients reach as `roots/<name>/`: `<directory> rw` or `<directory> ro`, one line each (`docs/node.md`, "The image's roots") |
 | `workloads.stop_grace_ms` | 10000 | how long a run asked to stop is given before it is told to end |
 | `workloads.placement_grace_ms` | 10000 | how long a node that would take over a workload waits for its node to come back |

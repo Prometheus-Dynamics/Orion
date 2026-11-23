@@ -77,6 +77,10 @@ pub struct NodeSettings {
     /// `files.root.<name> = <directory> rw|ro`: the roots, one line each, which clients reach
     /// as `roots/<name>/` ([`orion_file_roots`]). None unless the image names them.
     pub roots: Vec<orion_file_roots::Root>,
+    /// `files.receivers`: the prefixes that belong to programs that receive files. A file for
+    /// one of them is never stored here: with no receiver there yet, it is refused as
+    /// unavailable. None unless the image names them.
+    pub files_receivers: Vec<String>,
     /// `comm.outbox_bytes`, the comm core's, and never above its default: how much may wait
     /// to be sent to a program that receives files, which node logic keeps chunks within.
     /// The smaller of the two, so that a setting changed while only one of the comm core and
@@ -101,6 +105,21 @@ pub struct NodeSettings {
     /// `audit.file`: the audit log. `audit.log` in the state directory unless it is said;
     /// `off` for none.
     pub audit: Option<AuditConfig>,
+}
+
+/// `files.receivers`: each a prefix as a receiver asks for one, one or more parts of a name
+/// ending in `/`.
+fn receivers(source: &mut Source) -> Result<Vec<String>, ConfigError> {
+    let prefixes = source.list::<String>("files.receivers")?;
+    match prefixes.iter().find(|prefix| {
+        !prefix.ends_with('/') || prefix.split('/').any(|part| part == "..") || prefix.len() < 2
+    }) {
+        Some(bad) => Err(ConfigError {
+            key: "files.receivers".into(),
+            message: format!("{bad:?} is not a prefix: one or more parts of a name, ending in /"),
+        }),
+        None => Ok(prefixes),
+    }
 }
 
 impl NodeSettings {
@@ -137,6 +156,7 @@ impl NodeSettings {
             files_dir,
             files_max_size: source.get("files.max_size", 16_u64 << 30)?,
             roots: orion_file_roots::from_source(source)?,
+            files_receivers: receivers(source)?,
             outbox_bytes: source
                 .get("comm.outbox_bytes", orion_wire::OUTBOX_BYTES)?
                 .min(orion_wire::OUTBOX_BYTES),
@@ -263,7 +283,8 @@ impl Node {
         )?;
         let peers = peers::Peers::new(name.clone(), links, settings.config.state_dir.clone());
         let mut logic = Logic::new(store, name, files, audit, dialer, stop_grace, peers);
-        logic.sinks = orion_files_sink::Sinks::new(settings.outbox_bytes);
+        logic.sinks = orion_files_sink::Sinks::new(settings.outbox_bytes)
+            .with_receivers(settings.files_receivers.clone());
         logic.roots = orion_file_roots::Roots::new(settings.roots.clone(), settings.files_max_size);
         let (served, said) = served::Served::load(&settings.config.state_dir);
         info!("{said}");

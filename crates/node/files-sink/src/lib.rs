@@ -27,6 +27,12 @@
 //! to where the receiver last said it was. What is sent stays in order: a chunk after one that
 //! was turned away is turned away too, and a chunk already on its way, sent again by a sender
 //! that went back, is not sent twice.
+//!
+//! The image can say which prefixes are receivers' (`files.receivers`). A file for one of them
+//! is never the node's own store's: begun while no receiver has asked for it (the receiver is
+//! still starting, or went away), it is refused as unavailable, in words, and the sender asks
+//! again. Without that, a file that arrives before its receiver would be stored here and
+//! answered as committed, while the receiver never saw it.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -71,6 +77,8 @@ struct Passing {
     sender: u32,
     /// The receiver's limit, as it was when the transfer began.
     max_chunk: u32,
+    /// Under a prefix the image says is a receiver's.
+    reserved: bool,
     /// Whether a frame was sent to a receiver that takes one at a time and is not answered.
     answer_owed: bool,
     /// The frames that wait for it, as kind and body.
@@ -141,6 +149,12 @@ pub struct Sinks {
     passing: BTreeMap<u64, Passing>,
     /// The most bytes of chunks on their way to one receiver.
     room: u64,
+    /// The prefixes that are receivers', whether one has asked or not (`files.receivers`).
+    receivers: Vec<String>,
+    /// Transfers under those prefixes whose receiver went away, newest last.
+    lost: VecDeque<u64>,
+    /// Why the last request was refused, in words.
+    said: Option<String>,
 }
 
 impl Default for Sinks {
@@ -162,7 +176,32 @@ impl Sinks {
             sinks: Vec::new(),
             passing: BTreeMap::new(),
             room: (outbox_bytes as usize).saturating_sub(SPARE) as u64,
+            receivers: Vec::new(),
+            lost: VecDeque::new(),
+            said: None,
         }
+    }
+
+    /// The same, with `prefixes` as receivers' whether one has asked for them or not: a file
+    /// under one is never the node's own store's.
+    #[must_use]
+    pub fn with_receivers(mut self, prefixes: Vec<String>) -> Self {
+        self.receivers = prefixes;
+        self
+    }
+
+    /// Why the last request was refused, in words, if it said.
+    pub const fn take_said(&mut self) -> Option<String> {
+        self.said.take()
+    }
+
+    /// The receivers' prefix `destination` is under, if the image named one.
+    fn receivers_prefix(&self, destination: &str) -> Option<&str> {
+        self.receivers
+            .iter()
+            .map(String::as_str)
+            .filter(|prefix| destination.starts_with(prefix))
+            .max_by_key(|prefix| prefix.len())
     }
 
     /// How many prefixes are asked for.
@@ -181,6 +220,7 @@ impl Sinks {
     pub fn forget_sessions(&mut self) {
         self.sinks.clear();
         self.passing.clear();
+        self.lost.clear();
     }
 
     /// The receiver for `destination`: the one with the longest prefix it starts with.
@@ -278,11 +318,22 @@ impl Sinks {
                     ..
                 }) = self.sink_for(begin.destination.as_str())
                 else {
+                    self.passing.remove(&begin.transfer);
+                    // A receiver's, by the image's word, with none here yet or any more:
+                    // not the store's. The sender asks again.
+                    if let Some(prefix) = self.receivers_prefix(begin.destination.as_str()) {
+                        self.said = Some(format!(
+                            "nothing receives {} yet: {prefix} is a receiver's",
+                            begin.destination.as_str()
+                        ));
+                        return Err(Error::Unavailable);
+                    }
                     // Not a receiver's. If it was passing through one that has since gone,
                     // it starts over in the store.
-                    self.passing.remove(&begin.transfer);
                     return Ok(false);
                 };
+                let reserved = self.receivers_prefix(begin.destination.as_str()).is_some();
+                self.lost.retain(|lost| *lost != begin.transfer);
                 if !self.passing.contains_key(&begin.transfer)
                     && self.passing.len() >= MAX_TRANSFERS
                 {
@@ -295,6 +346,7 @@ impl Sinks {
                         sink,
                         sender: asked.session,
                         max_chunk,
+                        reserved,
                         answer_owed: false,
                         waiting: VecDeque::new(),
                         waiting_bytes: 0,
@@ -308,6 +360,10 @@ impl Sinks {
             _ => return Ok(false),
         };
         let Some(passing) = self.passing.get(&transfer) else {
+            if self.lost.contains(&transfer) {
+                self.said = Some("the program that received it went away: begin it again".into());
+                return Err(Error::Unavailable);
+            }
             return Ok(false);
         };
         let sink = passing.sink;
@@ -368,7 +424,17 @@ impl Sinks {
             .map(|(transfer, passing)| (*transfer, passing.sender))
             .collect();
         for (transfer, sender) in orphaned {
-            self.passing.remove(&transfer);
+            if self
+                .passing
+                .remove(&transfer)
+                .is_some_and(|passing| passing.reserved)
+            {
+                // What is still on its way for it is not the store's either.
+                if self.lost.len() >= MAX_TRANSFERS {
+                    self.lost.pop_front();
+                }
+                self.lost.push_back(transfer);
+            }
             if sender != session {
                 let _ = out.send(
                     sender,

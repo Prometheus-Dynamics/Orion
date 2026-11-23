@@ -77,6 +77,8 @@ pub struct Pushing<S> {
     /// When the board was last heard about this transfer.
     last_heard: Instant,
     timeout: Duration,
+    /// Since when the board has said nothing takes the file yet.
+    absent: Option<Instant>,
     /// The file, and its size and change time when the push began, to be the same at the end.
     unchanged: Option<(PathBuf, (u64, SystemTime))>,
 }
@@ -159,6 +161,7 @@ impl Files {
             buffer: vec![0; chunk],
             last_heard: Instant::now(),
             timeout: self.client.session(|session| session.timeout()),
+            absent: None,
             unchanged: None,
         })
     }
@@ -301,12 +304,23 @@ impl<S: Read + Seek> Pushing<S> {
                     return Ok(self.progress(received));
                 }
                 if let Some(error) = self.files.client.refusal(*seq) {
-                    if !busy(&error) {
+                    if error.refusal() == Some(orion_types::Error::Unavailable) {
+                        // Nothing takes it yet: the program that receives it, or node logic,
+                        // is still starting. Asked again, for as long as a commit may take.
+                        let bound = self.timeout * 12;
+                        if self.absent.get_or_insert_with(Instant::now).elapsed() >= bound {
+                            return Err(never_taken(&self.destination, bound, &error));
+                        }
+                        self.files.client.pump(BUSY_MOST.min(wait))?;
+                        // The board answered: the wait for its next answer starts now.
+                        self.last_heard = Instant::now();
+                    } else if busy(&error) {
+                        // Not taken yet: asked again after a moment, within the same bound.
+                        self.files.client.reply_left(self.last_heard)?;
+                        self.files.client.pump(BUSY_FIRST.min(wait))?;
+                    } else {
                         return Err(error);
                     }
-                    // Not taken yet: asked again after a moment, within the same bound.
-                    self.files.client.reply_left(self.last_heard)?;
-                    self.files.client.pump(BUSY_FIRST.min(wait))?;
                     *seq = self.files.client.send(&FileBegin {
                         transfer: self.transfer,
                         destination: self.destination.clone(),
@@ -465,6 +479,33 @@ struct Busy {
 /// receives the file, had no room for it yet.
 fn busy(error: &ClientError) -> bool {
     error.is_busy()
+}
+
+/// What a push ends with when the board said, for all of `bound`, that nothing takes
+/// `destination` yet: still `Unavailable`, and never a lost connection, so a program can say
+/// the board's receiver never came up, which is not a network fault.
+fn never_taken(
+    destination: &orion_types::FileName,
+    bound: Duration,
+    last: &ClientError,
+) -> ClientError {
+    let words = match last {
+        ClientError::Refused { detail, .. } => detail.as_str(),
+        _ => "",
+    };
+    // The board names the receivers' prefix: `nothing receives <name> yet: <prefix> is a
+    // receiver's`.
+    let prefix = words
+        .rsplit_once(": ")
+        .and_then(|(_, tail)| tail.strip_suffix(" is a receiver's"));
+    let said = match prefix {
+        Some(prefix) => format!("nothing received {prefix} within {bound:?}"),
+        None => format!(
+            "the board did not take {} within {bound:?}: {words}",
+            destination.as_str()
+        ),
+    };
+    ClientError::refused(orion_types::Error::Unavailable, &said)
 }
 
 /// The first wait after a chunk is turned away as busy, and the longest.

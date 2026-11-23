@@ -393,3 +393,74 @@ fn a_receiver_that_names_a_chunk_size_is_sent_pieces_one_at_a_time() {
     assert_eq!((to, kind), (SENDER, kind::FILE_STATUS));
     assert!(bench.sent.frames.is_empty(), "the dropped chunk was sent");
 }
+
+/// With `slots/` named as a receiver's by the image, and no receiver there yet.
+fn reserved() -> Bench {
+    Bench {
+        sinks: Sinks::default().with_receivers(vec!["slots/".to_owned()]),
+        sent: Sent::default(),
+    }
+}
+
+#[test]
+fn a_file_for_a_receiver_that_is_not_there_is_refused_in_words_and_never_the_stores() {
+    let mut bench = reserved();
+    // Nobody receives slots/ yet: not the store's, and the sender is told to ask again.
+    assert_eq!(
+        bench.begin(SENDER, 1, "slots/b.img"),
+        Err(Error::Unavailable)
+    );
+    assert_eq!(
+        bench.sinks.take_said().as_deref(),
+        Some("nothing receives slots/b.img yet: slots/ is a receiver's")
+    );
+    assert_eq!(bench.sinks.passing(), 0);
+    assert!(bench.sent.frames.is_empty());
+    // What the image did not name is the store's, as ever.
+    assert_eq!(bench.begin(SENDER, 2, "logs/a.txt"), Ok(false));
+    assert_eq!(bench.sinks.take_said(), None);
+    // The receiver comes: the same file, begun again, goes to it.
+    bench.sink(MANAGER, "slots/").expect("sink");
+    bench.sent.frames.clear();
+    assert_eq!(bench.begin(SENDER, 1, "slots/b.img"), Ok(true));
+    assert_eq!(bench.took().0, MANAGER);
+}
+
+#[test]
+fn what_is_still_on_its_way_to_a_receiver_that_went_is_refused_until_it_is_begun_again() {
+    let mut bench = reserved();
+    bench.sink(MANAGER, "slots/").expect("sink");
+    assert_eq!(bench.begin(SENDER, 1, "slots/b.img"), Ok(true));
+    bench.sinks.gone(MANAGER, &mut bench.sent);
+    bench.sent.frames.clear();
+    // A chunk and the commit that were on their way: not the store's.
+    let chunk = FileChunk {
+        transfer: 1,
+        offset: 0,
+        data: Bytes(&[7; 10]),
+    };
+    assert_eq!(bench.pass(SENDER, &chunk), Err(Error::Unavailable));
+    assert_eq!(
+        bench.sinks.take_said().as_deref(),
+        Some("the program that received it went away: begin it again")
+    );
+    assert_eq!(
+        bench.pass(SENDER, &FileCommit { transfer: 1 }),
+        Err(Error::Unavailable)
+    );
+    // Begun again with no receiver: still refused. With one: it goes on, chunks and all.
+    assert_eq!(
+        bench.begin(SENDER, 1, "slots/b.img"),
+        Err(Error::Unavailable)
+    );
+    bench.sink(OTHER, "slots/").expect("sink");
+    assert_eq!(bench.begin(SENDER, 1, "slots/b.img"), Ok(true));
+    assert_eq!(bench.pass(SENDER, &chunk), Ok(true));
+
+    // Without the image's word, a transfer whose receiver went starts over in the store.
+    let mut plain = Bench::with_sink();
+    assert_eq!(plain.begin(SENDER, 1, "slots/b.img"), Ok(true));
+    plain.sinks.gone(MANAGER, &mut plain.sent);
+    assert_eq!(plain.pass(SENDER, &chunk), Ok(false));
+    assert_eq!(plain.begin(SENDER, 1, "slots/b.img"), Ok(false));
+}
