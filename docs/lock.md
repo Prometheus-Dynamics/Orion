@@ -512,6 +512,9 @@ what to change.
 - **I74.** A test of a program that goes quiet mid-fetch lets it go on once the client has said
   it is quiet, not after a time counted from the program's first sight of progress. Tests only;
   nothing built changes.
+- **I75.** `orion-node-app` feature `slow` (tests only) gains `slow::unanswered_gets(node) ->
+  Arc<Unanswered>` (`hold`, `release`, `asked`): record gets node logic leaves unanswered.
+  Nothing in a shipped build changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

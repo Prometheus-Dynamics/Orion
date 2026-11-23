@@ -626,3 +626,63 @@ fn a_withdraw_turned_away_as_busy_is_finished_by_withdrawing_again() {
     let found = program.resources("cam").expect("asked");
     assert!(found.is_empty(), "{found:?}");
 }
+
+/// Node logic that is passed a get and never answers it, while the comm core goes on answering
+/// the caller's pings: node logic stuck, the board alive. Under `Reply::Timeout` the get ends
+/// at the client's bound; under `Reply::Alive` it waits past many bounds, the session heard
+/// all along, and ends only when node logic goes and the comm core refuses it.
+#[test]
+fn a_get_node_logic_never_answers_ends_at_the_bound_under_timeout_and_waits_under_alive() {
+    let mut board = TestBoard::start_with(
+        "deaf-get",
+        Options {
+            name: "deafget".to_owned(),
+            heartbeat_ms: Some(500),
+            ..Options::default()
+        },
+    );
+    let gets = orion_node_app::slow::unanswered_gets("deafget");
+    gets.hold("stuck");
+    let options = || orion::Options {
+        timeout: TIMEOUT,
+        ..orion::Options::default()
+    };
+
+    let timed = Orion::connect_with(&board.address(), "timed", options()).expect("connect");
+    let began = Instant::now();
+    match timed.records().get(RecordClass::Resource, "stuck/a") {
+        Err(ClientError::Io(error)) => assert_eq!(error.kind(), ErrorKind::TimedOut, "{error}"),
+        other => panic!("under Reply::Timeout the unanswered get times out: {other:?}"),
+    }
+    let took = began.elapsed();
+    assert!(
+        took >= TIMEOUT && took < TIMEOUT * 5,
+        "ended at the bound: {took:?}"
+    );
+    // Node logic answers everything else meanwhile, on the same session.
+    timed
+        .records()
+        .get(RecordClass::Resource, "other")
+        .expect("a get not held is answered");
+
+    let address = board.address();
+    let waiting = std::thread::spawn(move || {
+        let alive = Orion::connect_with(&address, "alive", options()).expect("connect");
+        alive.set_reply(Reply::Alive {
+            ceiling: Some(Duration::from_secs(60)),
+        });
+        alive.records().get(RecordClass::Resource, "stuck/b")
+    });
+    // Many bounds, and more than the idle window (three heartbeats): only pings are heard.
+    std::thread::sleep(TIMEOUT * 8);
+    assert!(!waiting.is_finished(), "under Reply::Alive the get waits");
+    assert_eq!(gets.asked(), 2);
+    board.stop_node();
+    match waiting.join().expect("the get") {
+        Err(ClientError::Refused {
+            error: Error::Unavailable,
+            ..
+        }) => {}
+        other => panic!("node logic gone, the waiting get is refused: {other:?}"),
+    }
+}

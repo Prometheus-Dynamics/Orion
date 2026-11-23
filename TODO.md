@@ -261,6 +261,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I73](docs/prs/I73.md) The shared-memory ring crates come from the device library at bbb3c420 (wave 19; needs I71)
 - [x] [I72](docs/prs/I72.md) The network and SSH ways in take a list of interfaces, and follow each when it is made again (wave 19; needs I73)
 - [x] [I74](docs/prs/I74.md) A test of a quiet program lets it go on once the client has said it is quiet (wave 19; needs I72)
+- [x] [I75](docs/prs/I75.md) Node logic can be left deaf to some record gets, for a test of a caller's bound (wave 19; needs I74)
 
 ## J. The stack around Orion
 

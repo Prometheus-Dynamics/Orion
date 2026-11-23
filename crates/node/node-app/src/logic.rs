@@ -112,6 +112,8 @@ pub(crate) struct Logic {
     pub(crate) sinks: Sinks,
     #[cfg(feature = "slow")]
     slow: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    #[cfg(feature = "slow")]
+    unanswered: std::sync::Arc<crate::slow::Unanswered>,
     /// The runs of `files.send`.
     pub(crate) sends: Sends,
     pub(crate) workloads: Workloads,
@@ -213,7 +215,10 @@ impl Logic {
             0,
         );
         #[cfg(feature = "slow")]
-        let slow = crate::slow::delay(node.as_str());
+        let (slow, unanswered) = (
+            crate::slow::delay(node.as_str()),
+            crate::slow::unanswered_gets(node.as_str()),
+        );
         Self {
             workloads,
             reviewed_commits: 0,
@@ -224,6 +229,8 @@ impl Logic {
             actions: Actions::new(node),
             files,
             sinks: Sinks::default(),
+            #[cfg(feature = "slow")]
+            unanswered,
             #[cfg(feature = "slow")]
             slow,
             sends: Sends::default(),
@@ -628,6 +635,10 @@ impl Handler for Logic {
                 return Ok(());
             }
             _ => {}
+        }
+        #[cfg(feature = "slow")]
+        if frame.kind() == kind::NODE_REQUEST && self.unanswered.takes(&frame.body()?) {
+            return Ok(());
         }
         let mut scratch = std::mem::take(&mut self.scratch);
         let mut through = Through {

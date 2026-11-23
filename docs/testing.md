@@ -107,6 +107,38 @@ assert!(run.finish(Duration::from_secs(2)).is_err()); // timed out: nothing answ
 assert_eq!(held.asked(), 1);
 ```
 
+## A request node logic never answers
+
+A record get that node logic is passed and never answers, while it answers everything else and
+the comm core answers the caller's pings: node logic stuck, the board alive. The comm core
+does not answer such a get itself; it refuses it only when node logic's session ends. Under
+`Reply::Timeout` the get ends at the client's bound; under `Reply::Alive` it waits as long as
+the board is heard, up to its `ceiling`, so a caller that must not wait that long sets a
+shorter bound before it.
+
+It is node logic's `slow` feature, for tests only and in no shipped build:
+
+```toml
+[dev-dependencies]
+orion-node-app = { git = "<Orion's repository>", branch = "next", features = ["slow"] }
+```
+
+`orion_node_app::slow::unanswered_gets(node)` gives the setting for the board's node logic,
+by the board's name (`Options::name`; `board` unless set, so give each test a name of its
+own). `hold(prefix)` leaves every get whose prefix starts with `prefix` unanswered from then
+on, `release()` answers gets again (those already left stay unanswered), and `asked()` counts
+those left. Stopping node logic (`board.stop_node()`) refuses each one left as unavailable.
+
+```rust
+let board = TestBoard::start_with("stuck", Options { name: "stuck".to_owned(), ..Options::default() });
+let gets = orion_node_app::slow::unanswered_gets("stuck");
+gets.hold("config/");
+let orion = board.connect("my-program")?;
+orion.set_reply(Reply::Within(Duration::from_millis(500)));
+assert!(orion.records().get(RecordClass::Resource, "config/arm").is_err()); // timed out
+assert_eq!(gets.asked(), 1);
+```
+
 ## And `orion-stubs`
 
 `orion-stubs` is Orion's own: a comm core put together from its parts, with small stand-ins
