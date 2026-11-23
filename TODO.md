@@ -267,6 +267,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I78](docs/prs/I78.md) Several receivers of files on one session, each handed its own (wave 19; needs I77)
 - [x] [I79](docs/prs/I79.md) Any file's name carried, escaped, and names up to 255 bytes (wave 19; needs I78)
 - [x] [I80](docs/prs/I80.md) A computer gives the board its clock, and the board names whose it took (wave 19; needs I79)
+- [x] [I84](docs/prs/I84.md) The NT4 server's clock is a shared base: its offset is said, and values carry the time of their sample (wave 19; needs I90)
 - [x] [I90](docs/prs/I90.md) The shared-memory ring crates come from the device library at e199fcb9 (wave 19; needs I89)
 - [x] [I89](docs/prs/I89.md) The shared-memory ring crates come from the device library at 16a5c7d1 (wave 19; needs I83)
 - [x] [I83](docs/prs/I83.md) The gateway and the NT4 server are time sources, and the clock is served on the interfaces named (wave 19; needs I82)

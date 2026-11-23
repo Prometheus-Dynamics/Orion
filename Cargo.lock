@@ -2011,6 +2011,7 @@ dependencies = [
  "orion-nt4",
  "orion-nt4-gateway",
  "orion-scratch",
+ "shm-ring",
  "tokio",
  "tracing",
 ]

@@ -368,3 +368,45 @@ async fn persistent_topics_survive_a_server_restart() {
     assert_eq!(topic.owner, TopicOwner::Unpublished);
     assert!(server.handle().topic("/cfg/transient").is_none());
 }
+
+#[tokio::test]
+async fn the_server_keeps_the_time_a_client_gives_a_value_and_stamps_its_own() {
+    let server = start_server().await;
+    let host = server.handle();
+    let mut camera = connect(&server, "camera").await;
+    // The clock estimate first: a value set before it waits for it.
+    timeout(WAIT, async {
+        while !matches!(
+            camera.next_event().await,
+            Some(ClientEvent::TimeSync { .. })
+        ) {}
+    })
+    .await
+    .unwrap();
+    let watcher = connect(&server, "watcher").await;
+    let mut seen = watcher
+        .handle()
+        .subscribe(&["/cam/"], prefix())
+        .expect("subscribe");
+    let target = camera.handle().publish("/cam/target", "double").unwrap();
+    // Measured a while ago, at a time of zero, and ahead of the server's clock: each kept
+    // as the client gave it, in what the server holds and in what a subscriber is sent.
+    for (value, at) in [(1.0, 123_456), (2.0, 0), (3.0, i64::MAX / 2)] {
+        target.set_at(Value::Double(value), Some(at)).unwrap();
+        wait_for_value(&server, "/cam/target", Value::Double(value)).await;
+        assert_eq!(host.topic("/cam/target").unwrap().timestamp_us, Some(at));
+        let event = next_match(&mut seen, |event| {
+            matches!(event, TopicEvent::Value { value: got, .. } if *got == Value::Double(value))
+        })
+        .await;
+        assert!(
+            matches!(event, TopicEvent::Value { timestamp_us, .. } if timestamp_us == at),
+            "{event:?}"
+        );
+    }
+    // A value set at the server itself is stamped with the server's clock, now.
+    let before = orion_nt4::now_micros();
+    host.set_value("/cam/local", Value::Int(7)).unwrap();
+    let at = host.topic("/cam/local").unwrap().timestamp_us.unwrap();
+    assert!((before..=orion_nt4::now_micros()).contains(&at), "{at}");
+}

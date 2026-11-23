@@ -13,7 +13,8 @@
 //! - **State is a topic**, `orion.time`: `mode`, `synced`, `source`, `offset_ms`, `delay_ms`,
 //!   `stratum`, `last_action`, `error`, and `monotonic_to_wall_ns`, which added to a sample
 //!   time here gives its wall time. Published when it changes; the last by more than a
-//!   millisecond.
+//!   millisecond. And, while the NT4 gateway is joined to a server, `nt4_offset_us` and
+//!   `nt4_rtt_us`: that server's clock less this board's sample clock.
 //!
 //! The rules for what to do with an offset are in `discipline`; `docs/comm.md` has the whole
 //! account.
@@ -66,7 +67,7 @@ fn monotonic_to_wall_ns() -> i64 {
     wall.saturating_sub(SampleTime::now().as_nanos() as i64)
 }
 
-const FIELDS: [(&str, FieldType, &str); 9] = [
+const FIELDS: [(&str, FieldType, &str); 11] = [
     ("mode", FieldType::Text, ""),
     ("synced", FieldType::Bool, ""),
     ("source", FieldType::Text, ""),
@@ -76,6 +77,8 @@ const FIELDS: [(&str, FieldType, &str); 9] = [
     ("last_action", FieldType::Text, ""),
     ("error", FieldType::Text, ""),
     ("monotonic_to_wall_ns", FieldType::Int, "ns"),
+    ("nt4_offset_us", FieldType::Int, "us"),
+    ("nt4_rtt_us", FieldType::Int, "us"),
 ];
 
 /// `text`, cut to what a field holds, on a character boundary.
@@ -111,8 +114,18 @@ impl StatusTopic {
             .is_some_and(|last| (last - offset_now).abs() <= MOVED_NS);
         let same =
             |is: fn(&TimeStatus, &TimeStatus) -> bool| last.is_some_and(|last| is(last, status));
+        // The NT4 server's clock: no bytes once the server is lost, and nothing before the
+        // first is known.
+        let nt4 = status
+            .nt4
+            .map(|(offset, rtt)| (offset.to_le_bytes(), rtt.to_le_bytes()));
+        let nt4_same = last.map_or(status.nt4.is_none(), |last| last.nt4 == status.nt4);
+        let (nt4_offset, nt4_rtt): (&[u8], &[u8]) = match &nt4 {
+            Some((offset, rtt)) => (offset, rtt),
+            None => (&[], &[]),
+        };
         // An error that went away is published as empty text.
-        let fields: [(bool, Option<&[u8]>); 9] = [
+        let fields: [(bool, Option<&[u8]>); 11] = [
             (same(|a, b| a.mode == b.mode), Some(cut(status.mode))),
             (same(|a, b| a.synced == b.synced), Some(&synced)),
             (
@@ -140,6 +153,8 @@ impl StatusTopic {
                 Some(cut(status.error.as_deref().unwrap_or(""))),
             ),
             (clocks_same, Some(&clocks)),
+            (nt4_same, Some(nt4_offset)),
+            (nt4_same, Some(nt4_rtt)),
         ];
         let changed: Vec<(FieldId, &[u8])> = fields
             .iter()
@@ -154,6 +169,25 @@ impl StatusTopic {
         if self.publisher.publish(SampleTime::now(), &changed).is_ok() {
             self.last = Some(status.clone());
             self.last_offset = Some(offset_now);
+        }
+    }
+}
+
+/// Where the NT4 gateway says how the server's clock compares with this board's: it goes into
+/// `orion.time` as `nt4_offset_us` and `nt4_rtt_us`, at once.
+#[derive(Clone)]
+pub struct FarClock {
+    status: Rc<RefCell<TimeStatus>>,
+    topic: Rc<RefCell<Option<StatusTopic>>>,
+}
+
+impl FarClock {
+    /// The server's clock less this board's sample clock and the round trip it was measured
+    /// with, in microseconds; `None` when the server is lost.
+    pub fn set(&self, clock: Option<(i64, i64)>) {
+        self.status.borrow_mut().nt4 = clock;
+        if let Some(topic) = &mut *self.topic.borrow_mut() {
+            topic.publish(&self.status.borrow());
         }
     }
 }
@@ -230,8 +264,15 @@ pub struct TimeSync {
     synced_file: Option<PathBuf>,
     view: TimeView,
     serving: Option<std::net::SocketAddr>,
+    far: FarClock,
     /// The clock to mark unsynchronized when this stops, if it was disciplined.
     disciplined: Option<Rc<dyn Clock>>,
+}
+
+impl std::fmt::Debug for FarClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FarClock")
+    }
 }
 
 impl std::fmt::Debug for dyn Clock {
@@ -313,8 +354,13 @@ impl TimeSync {
             measuring: config.mode != TimeMode::Off,
         };
         let mut disciplined = None;
+        let shared_topic = Rc::new(RefCell::new(None));
+        let far = FarClock {
+            status: status.clone(),
+            topic: shared_topic.clone(),
+        };
         if config.mode != TimeMode::Off {
-            let mut topic = match topics {
+            *shared_topic.borrow_mut() = match topics {
                 Some(topics) => Some(StatusTopic {
                     last_offset: None,
                     publisher: LocalPublisher::declare(
@@ -362,7 +408,9 @@ impl TimeSync {
                     .await;
                     syncer.apply(result);
                     operator.set_poll(syncer.poll);
-                    if let Some(topic) = &mut topic {
+                    // The NT4 gateway's word is kept where everyone reads it.
+                    syncer.status.nt4 = shared.borrow().nt4;
+                    if let Some(topic) = &mut *shared_topic.borrow_mut() {
                         topic.publish(&syncer.status);
                     }
                     shared.borrow_mut().clone_from(&syncer.status);
@@ -379,6 +427,7 @@ impl TimeSync {
             synced_file,
             view,
             serving,
+            far,
             disciplined,
         })
     }
@@ -393,6 +442,12 @@ impl TimeSync {
     #[must_use]
     pub fn status(&self) -> TimeStatus {
         self.view.status.borrow().clone()
+    }
+
+    /// Where the NT4 gateway says how its server's clock compares with this board's.
+    #[must_use]
+    pub fn far_clock(&self) -> FarClock {
+        self.far.clone()
     }
 
     /// What others say of the clock, kept up to date while this runs.

@@ -207,7 +207,7 @@ fn handle_frame(state: &mut State, client: u64, frame: Frame) {
     }
     let result = u32::try_from(frame.id)
         .map_err(|_| Error::Decode(format!("negative publisher uid {}", frame.id)))
-        .and_then(|pubuid| state.client_value(client, pubuid, frame.value));
+        .and_then(|pubuid| state.client_value(client, pubuid, frame.value, frame.timestamp_us));
     if let Err(e) = result {
         state.warn(Some(client), e.to_string());
     }

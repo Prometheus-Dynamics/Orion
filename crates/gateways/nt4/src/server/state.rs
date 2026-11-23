@@ -334,9 +334,15 @@ impl State {
         }
     }
 
-    /// A value from a client, on its publisher uid. Ignored (with an error) unless the client
-    /// owns the topic and the type matches.
-    pub fn client_value(&mut self, client: u64, pubuid: u32, value: Value) -> Result<()> {
+    /// A value from a client, on its publisher uid, with the time the client gave it. Ignored
+    /// (with an error) unless the client owns the topic and the type matches.
+    pub fn client_value(
+        &mut self,
+        client: u64,
+        pubuid: u32,
+        value: Value,
+        timestamp_us: i64,
+    ) -> Result<()> {
         let name = self
             .clients
             .get(&client)
@@ -359,17 +365,20 @@ impl State {
                 got: value.default_type_name(),
             });
         }
-        self.store_value(&name, value, Some(client))
+        self.store_value(&name, value, Some((client, timestamp_us)))
     }
 
-    /// Stores a value (server time now) and fans it out to every client that wants it.
+    /// Stores a value and fans it out to every client that wants it. A client's value keeps
+    /// the time the client gave it, whatever that is (zero, or ahead of this clock), as ntcore
+    /// keeps it: it is when the value was measured. One set here is stamped now.
     pub fn store_value(
         &mut self,
         name: &str,
         value: Value,
-        from_client: Option<u64>,
+        from_client: Option<(u64, i64)>,
     ) -> Result<()> {
-        let timestamp_us = now_micros();
+        let timestamp_us = from_client.map_or_else(now_micros, |(_, at)| at);
+        let from_client = from_client.map(|(client, _)| client);
         let (id, owner, persistent) = {
             let topic = self
                 .topics

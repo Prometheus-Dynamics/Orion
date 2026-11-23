@@ -583,6 +583,12 @@ what to change.
 - **I89.** The seven `shm-*` crates are pinned to the device library's `16a5c7d1`. No other
   package changes, and no shared-memory code changes. Nothing a program calls changes; level 6.
 - **I90.** The same, to `e199fcb9`. Nothing a program calls changes; level 6.
+- **I84.** `orion.time` gains `nt4_offset_us` and `nt4_rtt_us` (**Add**). The NT4 client
+  gateway stamps a value with its sample's time on the server's clock (**Change**: was when it
+  was sent). Orion's NT4 server keeps the time a client gives a value (**Change**: it stamped
+  each with its own clock on arrival). `Publisher::set_at`, `ClientGateway::start_telling`,
+  `FarClock` in both crates, `TimeSync::far_clock`, `TimeStatus::nt4` (**Add**); `Far::set`
+  takes the sample's time (**Change**). No Orion wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -28,12 +28,17 @@ struct Board {
 
 impl Board {
     fn start(name: &str, port: u16) -> Self {
+        Self::start_with(name, port, "")
+    }
+
+    /// The same, with `more` settings.
+    fn start_with(name: &str, port: u16, more: &str) -> Self {
         let dir = Scratch::new(&format!("nt4-cgw-{name}"));
         let text = format!(
             "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n\
              nt4.server = 127.0.0.1:{port}\nnt4.name = coprocessor\nnt4.period_ms = 10\n\
              nt4.publish = tank.level:litres=double@/Tank/level, tank.alarm:text=string@/Tank/alarm\n\
-             nt4.accept = robot.state:enabled=boolean@/Robot/enabled, robot.state:mode=string@/Robot/mode\n",
+             nt4.accept = robot.state:enabled=boolean@/Robot/enabled, robot.state:mode=string@/Robot/mode\n{more}",
             dir.display()
         );
         let mut source = Source::parse(&text, Vec::new()).expect("source");
@@ -240,6 +245,16 @@ fn a_board_joins_a_server_and_the_mapping_works_both_ways() {
             "double"
         );
         assert!(level_above(&host, litres + 2.0).await % 0.5 == 0.0);
+        // The tank counts its own sample times, which are not on the board's clock: its
+        // values are stamped as they are sent on.
+        let stamped = host
+            .topic("/Tank/level")
+            .and_then(|topic| topic.timestamp_us)
+            .expect("stamped");
+        assert!(
+            (orion_nt4::now_micros() - stamped).abs() < 5_000_000,
+            "{stamped}"
+        );
 
         // The server's topics are published on the board, as they are and as they change.
         on_board.has((0, &[0])).await;
@@ -290,6 +305,130 @@ fn a_board_joins_a_server_and_the_mapping_works_both_ways() {
 
         told.stop.store(true, Ordering::Relaxed);
         running.join().expect("the programs end");
+    });
+}
+
+/// The server's clock less this board's sample clock, in microseconds, as this process
+/// reads both: the server here is in this process.
+fn true_offset_us() -> i64 {
+    orion_nt4::now_micros() - (SampleTime::now().as_nanos() / 1_000) as i64
+}
+
+#[test]
+fn the_servers_clock_is_a_shared_base_said_in_orion_time_and_values_carry_their_own_time() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let first = server(0).await;
+        let port = first.local_addr().port();
+        let host = first.handle();
+        let board = Board::start_with(
+            "clock",
+            port,
+            "time.sync = report\ntime.servers = operator\ntime.synced_file = off\n",
+        );
+        let orion = Orion::connect(&Address::Local(board.socket.clone()), "tank").expect("connect");
+        let mut time = orion.subscribe("orion.time").expect("subscribe");
+        let mut said = |orion: &Orion| -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+            orion.pump(Duration::from_millis(5)).expect("pump");
+            let field = |time: &mut orion::topics::Subscriber, at: u16| {
+                time.latest(FieldId(at))
+                    .map(|sample| sample.payload.to_vec())
+            };
+            (field(&mut time, 9), field(&mut time, 10))
+        };
+        let number = |bytes: &[u8]| i64::from_le_bytes(bytes.try_into().expect("eight bytes"));
+
+        // Joined: the offset to the server's clock, and the round trip it was measured with.
+        let tried = Instant::now();
+        let (offset, rtt) = loop {
+            if let (Some(offset), Some(rtt)) = said(&orion)
+                && offset.len() == 8
+            {
+                break (number(&offset), number(&rtt));
+            }
+            assert!(
+                tried.elapsed() < WAIT,
+                "orion.time never said the offset: {:?}, clients {:?}",
+                said(&orion),
+                host.clients()
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        assert!((offset - true_offset_us()).abs() < 20_000, "{offset}");
+        assert!((0..1_000_000).contains(&rtt), "{rtt}");
+
+        // A value measured a while before it is published is stamped, on the server's
+        // clock, with when it was measured: not with when the gateway sent it on.
+        let mut level = orion
+            .declare(&TopicDecl {
+                name: "tank.level",
+                fields: &fields![litres: Float "l"],
+                history: 8,
+                expiry_ms: 0,
+                max_payload: 8,
+                on_subscribe: Default::default(),
+            })
+            .expect("declare");
+        // Measured 300 ms ago, which the server's clock, started with the server, must reach
+        // back to.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let measured = SampleTime::now().as_nanos() - 300_000_000;
+        level
+            .publish(
+                FieldId(0),
+                SampleTime::from_nanos(measured),
+                &4.5_f64.to_le_bytes(),
+            )
+            .expect("publish");
+        let tried = Instant::now();
+        let stamped = loop {
+            orion.pump(Duration::from_millis(5)).expect("pump");
+            if let Some(topic) = host.topic("/Tank/level")
+                && topic.value == Some(Value::Double(4.5))
+            {
+                break topic.timestamp_us.expect("stamped");
+            }
+            assert!(tried.elapsed() < WAIT, "the level never reached the server");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        let expected = (measured / 1_000) as i64 + true_offset_us();
+        assert!(
+            (stamped - expected).abs() < 20_000,
+            "stamped {stamped}, measured at {expected} on the server's clock"
+        );
+
+        // The server lost: the two fields are said with nothing in them.
+        drop(first);
+        let tried = Instant::now();
+        loop {
+            if let (Some(offset), Some(rtt)) = said(&orion)
+                && offset.is_empty()
+                && rtt.is_empty()
+            {
+                break;
+            }
+            assert!(
+                tried.elapsed() < WAIT,
+                "orion.time never cleared the offset"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        // And said again when another comes up in its place.
+        let _second = server(port).await;
+        let tried = Instant::now();
+        loop {
+            if said(&orion).0.is_some_and(|offset| offset.len() == 8) {
+                break;
+            }
+            assert!(
+                tried.elapsed() < WAIT,
+                "orion.time never said the offset again"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
     });
 }
 

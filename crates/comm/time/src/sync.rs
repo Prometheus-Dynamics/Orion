@@ -43,6 +43,9 @@ pub struct TimeStatus {
     pub last_action: &'static str,
     /// Why the last poll gave no sample.
     pub error: Option<String>,
+    /// The NT4 server's clock less this board's sample clock, and the round trip it was
+    /// measured with, in microseconds, while the NT4 gateway is joined to a server.
+    pub nt4: Option<(i64, i64)>,
 }
 
 /// The served clock as one byte: 0 unsynchronized, 1 to 15 synchronized at that stratum.

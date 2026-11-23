@@ -13,6 +13,7 @@ orion-broker = { path = "../../comm/broker" }
 orion-config = { path = "../../core/config" }
 orion-nt4 = { path = "../nt4", default-features = false, features = ["client"] }
 orion-nt4-gateway = { path = "../nt4-gateway" }
+shm-ring = { workspace = true }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
 tracing.workspace = true
 

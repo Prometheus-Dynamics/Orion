@@ -19,8 +19,16 @@ use crate::mapping::{Entry, field_type};
 pub trait Far {
     /// Sets the NT4 topic of `entry`, which is number `at` of the fields that go to NT4.
     /// `first` if the topic is not announced: it has no value yet, or was withdrawn.
+    /// `at_ns` is the time the value's sample belongs to, on this board's sample clock.
     /// Whether the value was taken.
-    fn set(&mut self, at: usize, entry: &Entry, value: orion_nt4::Value, first: bool) -> bool;
+    fn set(
+        &mut self,
+        at: usize,
+        entry: &Entry,
+        value: orion_nt4::Value,
+        at_ns: u64,
+        first: bool,
+    ) -> bool;
 
     /// Withdraws the NT4 topic of `entry`: its value expired.
     fn withdraw(&mut self, at: usize, entry: &Entry);
@@ -134,12 +142,13 @@ impl Out {
             if head != 0 && head != self.seen {
                 self.seen = head;
                 self.seen_at = now;
-                let value = reader
-                    .latest(field)
-                    .and_then(|sample| convert::to_nt4(ty, sample.payload, &self.entry.nt_type));
+                let value = reader.latest(field).and_then(|sample| {
+                    let value = convert::to_nt4(ty, sample.payload, &self.entry.nt_type)?;
+                    Some((value, sample.time.as_nanos()))
+                });
                 match value {
-                    Some(value) => {
-                        if far.set(at, &self.entry, value, !self.live) {
+                    Some((value, at_ns)) => {
+                        if far.set(at, &self.entry, value, at_ns, !self.live) {
                             self.live = true;
                             counters.sent += 1;
                         } else {

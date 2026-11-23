@@ -46,7 +46,14 @@ pub use orion_nt4::{SUBPROTOCOL_V4_0, SUBPROTOCOL_V4_1};
 struct Table(ServerHandle);
 
 impl Far for Table {
-    fn set(&mut self, _at: usize, entry: &Entry, value: orion_nt4::Value, first: bool) -> bool {
+    fn set(
+        &mut self,
+        _at: usize,
+        entry: &Entry,
+        value: orion_nt4::Value,
+        _at_ns: u64,
+        first: bool,
+    ) -> bool {
         if first {
             let made = self
                 .0

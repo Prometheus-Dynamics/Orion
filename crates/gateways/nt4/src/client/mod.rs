@@ -306,6 +306,17 @@ impl Publisher {
     /// Sets the value, timestamped with the server clock estimate. Fails if the value does not
     /// fit the topic's type (for example a `Double` on an `int` topic).
     pub fn set(&self, value: Value) -> Result<()> {
+        let now = self
+            .handle
+            .time_offset_us()
+            .map(|offset| now_micros() + offset);
+        self.set_at(value, now)
+    }
+
+    /// Sets the value with `timestamp_us` on the server's clock: when the value was measured,
+    /// for a value that was measured before now. `None` while the server's clock is not known:
+    /// the value is sent, stamped then, once it is.
+    pub fn set_at(&self, value: Value, timestamp_us: Option<i64>) -> Result<()> {
         if value.type_id() != self.type_id {
             return Err(Error::TypeMismatch {
                 topic: self.name.to_string(),
@@ -313,10 +324,6 @@ impl Publisher {
                 got: value.default_type_name(),
             });
         }
-        let timestamp_us = self
-            .handle
-            .time_offset_us()
-            .map(|offset| now_micros() + offset);
         self.handle.send(Command::Set {
             pubuid: self.pubuid,
             timestamp_us,

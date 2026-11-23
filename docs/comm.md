@@ -352,6 +352,10 @@ the gateway, the rest stay Orion's.
   with the next sample: NT4 clients do not go on reading a value nobody stands behind. Age
   is counted from when the gateway read the sample. A topic without an expiry keeps its
   last value in NT4.
+- **A client's value keeps the time the client gave it.** The server holds it and sends it on
+  with that time, whatever it is: zero, or ahead of the server's clock. That is when the value
+  was measured, and it is what ntcore's server does (2025.3.2). A value set on the board,
+  through the mapping, is stamped with the server's clock when it is set.
 - **From NT4.** For each topic named in `nt4.accept` the comm core declares a topic of its
   own, with one field for each mapped name, and publishes what NT4 clients write to those
   names. Programs here subscribe to it like any other topic. A value of another type than
@@ -376,6 +380,24 @@ published here. The client reconnects on its own: what the board publishes is se
 each topic's last value with it, and the accepted topics are subscribed to again. A value
 that expires stops being published there until its next sample. `nt4.server` and
 `nt4.listen` together are refused: a board is a server or a client of one.
+
+**The server's clock is a shared base.** NT4 gives each client the server's clock, in
+microseconds, and every value a time on it. That clock is not a date: on a controller it
+counts from when the controller started. It is what two boards and the controller can compare
+times on, with no date anywhere.
+
+- **Each value the gateway publishes carries the time of its sample** on that clock: when it
+  was measured here, not when the gateway sent it on. A sample whose time is not on this
+  board's sample clock (ahead of now, or over a minute before it: a program that counts its
+  own) is stamped as it is sent.
+- **The offset is said in `orion.time`:** `nt4_offset_us`, the server's clock less this board's
+  sample clock (`CLOCK_MONOTONIC`), and `nt4_rtt_us`, the round trip it was measured with. A
+  program adds `nt4_offset_us` to a sample time here, in microseconds, and has the time on the
+  server's clock. It is said again when the estimate moves by 250 µs or more. While the server
+  is lost both are said with no bytes: a reader takes a value that is not 8 bytes as none.
+  They are there only where `orion.time` is: with `time.sync` on.
+- **Microseconds**, as NT4 4.1 says and as released ntcore counts (2024.3.2, 2025.3.2). The
+  unreleased ntcore counts nanoseconds; a server built from it would need this looked at again.
 
 A topic that comes from NT4 holds state, not a stream: a program that subscribes after the
 value was published reads it with `latest`.
@@ -1025,7 +1047,9 @@ operator that proved its key. When the operator's session ends, the next source 
 **State** is the topic `orion.time`, published when it changes: `mode`, `synced`, `source`,
 `offset_ms`, `delay_ms`, `stratum`, `last_action`, `error`, and `monotonic_to_wall_ns`: added to
 a sample time on this board, which is on `CLOCK_MONOTONIC`, it gives the wall time. It is
-published again when it has moved by more than a millisecond. `TimeRequest` says which clock to
+published again when it has moved by more than a millisecond. `nt4_offset_us` and `nt4_rtt_us`
+are the NT4 server's clock, while the NT4 gateway is joined to one ("As a client of a server
+somewhere else"). `TimeRequest` says which clock to
 answer with: the wall clock for time sync, the monotonic one for a topic link. `time.synced_file`
 (`/run/orion/time-synced`) exists while the board disciplines the clock and it is synchronized.
 

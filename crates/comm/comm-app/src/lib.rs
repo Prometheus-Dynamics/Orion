@@ -25,6 +25,8 @@ pub mod last_good;
 pub mod login_helper;
 #[cfg(feature = "tcp")]
 mod network;
+#[cfg(feature = "nt4-client")]
+mod nt4_client;
 #[cfg(feature = "nt4")]
 mod nt4_ws;
 #[cfg(feature = "offers")]
@@ -478,15 +480,14 @@ impl CommCore {
         let nt4_client = match settings.nt4_client.clone() {
             Some(config) => {
                 parts.push("nt4 client");
-                let server = format!("nt4.server {}:{}", config.host, config.port);
-                Some(
-                    orion_nt4_client_gateway::ClientGateway::start(&topics, config)
-                        .map_err(|error| failed(server, error))?,
-                )
+                #[cfg(feature = "time")]
+                let far = time.as_ref().map(orion_time::TimeSync::far_clock);
+                #[cfg(not(feature = "time"))]
+                let far = None;
+                Some(nt4_client::start(&topics, config, far)?)
             }
             None => None,
         };
-
         #[cfg(feature = "discovery")]
         let discovery = match (settings.discovery, peer_addr) {
             (true, Some(addr)) => {

@@ -15,7 +15,7 @@
 
 #![cfg(target_os = "linux")]
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use orion_broker::Topics;
@@ -97,18 +97,50 @@ struct Publications {
     handle: ClientHandle,
     /// One for each field that goes to NT4, while it is published.
     published: Vec<Option<Publisher>>,
+    /// The server's clock less this board's sample clock, in microseconds, while it is known.
+    base_us: Rc<Cell<Option<i64>>>,
+}
+
+/// The server's clock compared with this board's, while the server is there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FarClock {
+    /// The server's clock less this board's sample clock (`CLOCK_MONOTONIC`), in microseconds:
+    /// added to a sample time here, in microseconds, it gives the time on the server's clock.
+    /// A shared base to compare times on, not a date: the server's clock counts from when it
+    /// started.
+    pub offset_us: i64,
+    /// The round trip of the exchange it was measured with, in microseconds.
+    pub rtt_us: i64,
+}
+
+/// How long before now a sample's time may be and still be taken as when it was measured.
+const STAMP_WITHIN_US: i64 = 60_000_000;
+
+/// This board's sample clock, in microseconds.
+fn sample_clock_us() -> i64 {
+    (shm_ring::SampleTime::now().as_nanos() / 1_000) as i64
 }
 
 impl Far for Publications {
-    fn set(&mut self, at: usize, entry: &Entry, value: Value, first: bool) -> bool {
+    fn set(&mut self, at: usize, entry: &Entry, value: Value, at_ns: u64, first: bool) -> bool {
         let Some(slot) = self.published.get_mut(at) else {
             return false;
         };
         if first || slot.is_none() {
             *slot = self.handle.publish(&entry.nt_name, &entry.nt_type).ok();
         }
+        // On the server's clock, when the sample was measured, not when it is sent on. A
+        // sample whose time is not on this board's clock (ahead of now, or long before: a
+        // program that counts its own) is stamped as sent.
+        let (at_us, now_us) = ((at_ns / 1_000) as i64, sample_clock_us());
+        let at_us = if (0..STAMP_WITHIN_US).contains(&(now_us - at_us)) {
+            at_us
+        } else {
+            now_us
+        };
+        let stamp = self.base_us.get().map(|base| at_us + base);
         slot.as_ref()
-            .is_some_and(|publisher| publisher.set(value).is_ok())
+            .is_some_and(|publisher| publisher.set_at(value, stamp).is_ok())
     }
 
     fn withdraw(&mut self, at: usize, _entry: &Entry) {
@@ -149,6 +181,20 @@ impl ClientGateway {
     ///
     /// If a topic that comes from NT4 cannot be declared: its name is taken.
     pub fn start(topics: &Rc<RefCell<Topics>>, config: Nt4ClientConfig) -> std::io::Result<Self> {
+        Self::start_telling(topics, config, |_| {})
+    }
+
+    /// As [`ClientGateway::start`], telling `told` the server's clock compared with this
+    /// board's each time it is measured anew, and `None` when the server is lost.
+    ///
+    /// # Errors
+    ///
+    /// As [`ClientGateway::start`].
+    pub fn start_telling(
+        topics: &Rc<RefCell<Topics>>,
+        config: Nt4ClientConfig,
+        told: impl Fn(Option<FarClock>) + 'static,
+    ) -> std::io::Result<Self> {
         config.mapping.check().map_err(std::io::Error::other)?;
         let Mapping {
             period,
@@ -180,9 +226,11 @@ impl ClientGateway {
         let running = state.clone();
         let (host, port) = (config.host, config.port);
         let task = tokio::task::spawn_local(async move {
+            let base_us = Rc::new(Cell::new(None));
             let mut far = Publications {
                 handle,
                 published: (0..fields).map(|_| None).collect(),
+                base_us: base_us.clone(),
             };
             let mut period = tokio::time::interval(period);
             period.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -206,7 +254,17 @@ impl ClientGateway {
                             info!("nt4: joined the server at {host}:{port}");
                             running.borrow_mut().connected = true;
                         }
+                        Some(ClientEvent::TimeSync { offset_us, rtt_us }) => {
+                            // The client's own clock and the board's both only go forward
+                            // together: the difference between them is read here, once.
+                            let offset_us = offset_us + orion_nt4::now_micros() - sample_clock_us();
+                            base_us.set(Some(offset_us));
+                            told(Some(FarClock { offset_us, rtt_us }));
+                        }
                         Some(ClientEvent::Disconnected { reason }) => {
+                            if base_us.take().is_some() {
+                                told(None);
+                            }
                             if std::mem::take(&mut running.borrow_mut().connected) {
                                 info!("nt4: lost the server at {host}:{port}: {reason}");
                             } else {
