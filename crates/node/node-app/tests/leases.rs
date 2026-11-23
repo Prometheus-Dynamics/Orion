@@ -192,20 +192,27 @@ fn a_program_that_stops_answering_loses_its_lease_to_a_claimant_and_is_told_by_w
     .expect("connect");
     let _camera = provide(&driver);
 
-    // The detector holds the camera, and answers.
+    // The detector holds the camera, and answers. The recorder is connected first, so that
+    // only its claim, and no connecting, lies between the detector's last word and it.
     let mut detector = connect(&address, "detector");
+    let mut recorder = connect(&address, "recorder");
     // The detector is last heard after this: its quiet starts no earlier.
     let sent = Instant::now();
     assert_eq!(claim(&mut detector, "workload:detector"), Answer::Done);
-    let mut recorder = connect(&address, "recorder");
-    let Answer::Refused(code, words) = claim(&mut recorder, "workload:recorder") else {
-        panic!("taken from a holder that answers");
-    };
-    assert_eq!(code, Error::Busy.code());
-    assert!(
-        words.starts_with("cam.front is held by workload:detector since "),
-        "{words}"
-    );
+    match claim(&mut recorder, "workload:recorder") {
+        Answer::Refused(code, words) => {
+            assert_eq!(code, Error::Busy.code());
+            assert!(
+                words.starts_with("cam.front is held by workload:detector since "),
+                "{words}"
+            );
+        }
+        // On a machine so loaded that the claim came after the detector had been quiet long
+        // enough, it is rightly taken at once: what the code promises is that it is not taken
+        // before then, which is checked below either way.
+        Answer::Done if sent.elapsed() >= Duration::from_millis(QUIET_MS) => {}
+        other => panic!("taken from a holder that answers: {other:?}"),
+    }
 
     // The detector stops answering: its program no longer pumps the session. Once it has been
     // quiet long enough, the recorder's claim takes the camera, and not before: measured from

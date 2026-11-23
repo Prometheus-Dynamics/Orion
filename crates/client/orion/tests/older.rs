@@ -88,3 +88,78 @@ fn an_older_node_is_asked_for_nothing_it_would_get_wrong() {
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(node.heard(), [kind::TOPIC_DECLARE, kind::ACTION_RUN]);
 }
+
+/// A board one level below writes based on a version: everything else works with it, and a
+/// write based on a version is not sent to it, because it would write whatever is there.
+#[test]
+fn a_level_6_board_takes_plain_writes_and_is_never_sent_one_based_on_a_version() {
+    use orion::records::{RecordClass, RecordEntry};
+    use orion::types::HlcTimestamp;
+    use orion::workloads::{RestartPolicy, Workload};
+
+    let dir = orion_scratch::Scratch::new("older-level-6");
+    let board = orion_stubs::Board::start_with(
+        &dir,
+        orion_stubs::Options {
+            level: 6,
+            ..orion_stubs::Options::default()
+        },
+    );
+    let orion =
+        Orion::connect(&orion::Address::Local(board.socket().to_owned()), "tool").expect("connect");
+    let based_on = |error: &ClientError| {
+        matches!(
+            error,
+            ClientError::Level {
+                feature: Feature::BasedOn,
+                needs: 7,
+                node: 6
+            }
+        )
+    };
+    let workload = Workload {
+        name: "nightly",
+        kind: "script",
+        spec: b"tidy",
+        node: None,
+        restart: RestartPolicy::Never,
+    };
+
+    // A plain put and a plain remove: as ever. Its status has no stamp: zero.
+    orion.workloads().put(&workload).expect("sent");
+    let told = orion
+        .workloads()
+        .wait("nightly", Duration::from_secs(10), |_| true)
+        .expect("not refused")
+        .expect("told where it is");
+    assert_eq!(told.stamp, HlcTimestamp::ZERO);
+
+    // Based on a version: not sent, saying why.
+    let stamp = HlcTimestamp::new(5, 0, 1);
+    let error = orion
+        .workloads()
+        .put_based_on(&workload, &[], stamp)
+        .expect_err("not sent");
+    assert!(based_on(&error), "{error:?}");
+    assert!(error.to_string().contains("level 7"), "{error}");
+    let error = orion
+        .workloads()
+        .remove_based_on("nightly", false, stamp)
+        .expect_err("not sent");
+    assert!(based_on(&error), "{error:?}");
+
+    // The same for a record: a stamp on an entry is not sent; none is.
+    let entry = |stamp| RecordEntry {
+        class: RecordClass::Node,
+        key: "elsewhere",
+        stamp,
+        deleted: true,
+        value: orion::records::Bytes(&[]),
+    };
+    let error = orion.records().put(&[entry(stamp)]).expect_err("not sent");
+    assert!(based_on(&error), "{error:?}");
+    // Plain, it is sent: whatever the board says of it, it is not a matter of level.
+    if let Err(error) = orion.records().put(&[entry(HlcTimestamp::ZERO)]) {
+        assert!(!matches!(error, ClientError::Level { .. }), "{error:?}");
+    }
+}

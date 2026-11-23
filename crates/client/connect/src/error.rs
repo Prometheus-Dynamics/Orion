@@ -265,6 +265,21 @@ impl ClientError {
             if detail == orion_types::Error::Busy.as_str())
     }
 
+    /// Whether a write that said which version it was based on was refused because the record
+    /// is no longer that one: another wrote it since, or it is there where this write was to
+    /// make it. Nothing was written. Read the record again and decide; the words say when
+    /// each was written.
+    #[must_use]
+    pub const fn is_stale(&self) -> bool {
+        matches!(
+            self,
+            Self::Refused {
+                error: orion_types::Error::Stale,
+                ..
+            }
+        )
+    }
+
     /// Whether the board turned the request away because another holds what it asked for: a
     /// resource under another's lease, a file prefix another offers. Asking again soon gets the
     /// same answer; the words, which name the holder, are for whoever decides what to do.
@@ -328,6 +343,9 @@ mod tests {
         // A final refusal is neither.
         let denied = ClientError::refused(Error::Denied, "");
         assert!(!denied.is_busy() && !denied.is_lost() && !denied.is_held());
+        let stale = ClientError::refused(Error::Stale, "x was written at 5 ms");
+        assert!(stale.is_stale() && !stale.is_busy() && !stale.is_held() && !stale.is_lost());
+        assert!(!denied.is_stale());
     }
 
     #[test]

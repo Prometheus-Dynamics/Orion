@@ -241,6 +241,17 @@ impl Records {
                         // What should run is said with `WorkloadPut`, which also starts it.
                         return Err(Error::Denied);
                     }
+                    // A stamp on an entry is what the write was based on: made only if the
+                    // record still has it. None of the write is made otherwise.
+                    let now = self.store.version(entry.class, entry.key);
+                    let now = now.map_or(HlcTimestamp::ZERO, |version| version.stamp);
+                    if entry.stamp != HlcTimestamp::ZERO && entry.stamp != now {
+                        self.detail = Some(format!(
+                            "{} was written at {} ms: this write was based on {} ms",
+                            entry.key, now.physical_ms, entry.stamp.physical_ms
+                        ));
+                        return Err(Error::Stale);
+                    }
                     match self
                         .resources
                         .check(&self.store, &caller, &entry, clock, in_flight)

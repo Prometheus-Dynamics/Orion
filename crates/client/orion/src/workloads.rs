@@ -9,8 +9,9 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
+use orion_connect::{Client, ClientError, Cx, Feature, Handler, Incoming};
 use orion_msg_workloads::{NeededFile, WorkloadPut, WorkloadRemove, WorkloadStatus};
+use orion_types::HlcTimestamp;
 use orion_wire::{Bytes, List, kind};
 
 pub use orion_msg_workloads::{RestartPolicy, WorkloadState};
@@ -41,6 +42,10 @@ pub struct Tracked {
     pub node: Option<String>,
     /// A description for people.
     pub detail: String,
+    /// The stamp of the workload's record as the node holds it: what a later
+    /// [`Workloads::put_based_on`] is based on. Zero from a node below level 7, or when the
+    /// node holds no record of it.
+    pub stamp: HlcTimestamp,
 }
 
 #[derive(Default)]
@@ -62,6 +67,7 @@ impl Handler for State {
             state: status.state,
             node: status.node.map(|node| node.to_string()),
             detail: status.detail.to_owned(),
+            stamp: status.stamp,
         };
         match self
             .tracked
@@ -120,6 +126,38 @@ impl Workloads {
         workload: &Workload<'_>,
         files: &[(&str, [u8; 32])],
     ) -> Result<(), ClientError> {
+        self.send_put(workload, files, None)
+    }
+
+    /// As [`Workloads::put_needing`], but only if the workload's record is still the one
+    /// this is based on: `based_on` is the stamp it was read with ([`Tracked::stamp`]), or
+    /// zero to make a workload and never replace one. If another wrote it since, nothing is
+    /// written and [`Workloads::wait`] gives the refusal ([`ClientError::is_stale`]).
+    ///
+    /// The node that takes the write checks this. It holds for writers through one board.
+    /// Two boards that each take a write based on the same stamp both make it, and the later
+    /// stands.
+    ///
+    /// # Errors
+    ///
+    /// As [`Workloads::put`]. [`ClientError::Level`], with nothing sent, from a node below
+    /// level 7: it would write whatever is there.
+    pub fn put_based_on(
+        &self,
+        workload: &Workload<'_>,
+        files: &[(&str, [u8; 32])],
+        based_on: HlcTimestamp,
+    ) -> Result<(), ClientError> {
+        self.client.needs(Feature::BasedOn)?;
+        self.send_put(workload, files, Some(based_on))
+    }
+
+    fn send_put(
+        &self,
+        workload: &Workload<'_>,
+        files: &[(&str, [u8; 32])],
+        based_on: Option<HlcTimestamp>,
+    ) -> Result<(), ClientError> {
         let name = |_| ClientError::Protocol("a name that is not one");
         let mut needed = Vec::with_capacity(files.len());
         for (file, digest) in files {
@@ -138,11 +176,17 @@ impl Workloads {
             labels: List::new(&[]),
             cpus: Bytes(&[]),
             restart: workload.restart,
+            based_on,
         })?;
-        let mut state = self.state.borrow_mut();
-        state.said.retain(|(said, _)| said != workload.name);
-        state.said.push((workload.name.to_owned(), seq));
+        self.said(workload.name, seq);
         Ok(())
+    }
+
+    /// Keeps the request that last said something of `name`: its refusal is found there.
+    fn said(&self, name: &str, seq: u16) {
+        let mut state = self.state.borrow_mut();
+        state.said.retain(|(said, _)| said != name);
+        state.said.push((name.to_owned(), seq));
     }
 
     /// Says a workload should stop existing. Its record stays until the run is really gone,
@@ -152,12 +196,40 @@ impl Workloads {
     ///
     /// If the name is not one, or the connection broke.
     pub fn remove(&self, name: &str, force: bool) -> Result<(), ClientError> {
-        self.client.send(&WorkloadRemove {
+        self.send_remove(name, force, None)
+    }
+
+    /// As [`Workloads::remove`], but only if the workload's record is still the one this is
+    /// based on, as [`Workloads::put_based_on`]. A refusal is found by [`Workloads::wait`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Workloads::remove`]. [`ClientError::Level`], with nothing sent, from a node
+    /// below level 7.
+    pub fn remove_based_on(
+        &self,
+        name: &str,
+        force: bool,
+        based_on: HlcTimestamp,
+    ) -> Result<(), ClientError> {
+        self.client.needs(Feature::BasedOn)?;
+        self.send_remove(name, force, Some(based_on))
+    }
+
+    fn send_remove(
+        &self,
+        name: &str,
+        force: bool,
+        based_on: Option<HlcTimestamp>,
+    ) -> Result<(), ClientError> {
+        let seq = self.client.send(&WorkloadRemove {
             name: name
                 .parse()
                 .map_err(|_| ClientError::Protocol("a name that is not one"))?,
             force,
+            based_on,
         })?;
+        self.said(name, seq);
         Ok(())
     }
 

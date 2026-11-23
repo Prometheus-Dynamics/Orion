@@ -121,7 +121,7 @@ move is the program's choice; an address in a label still works on the same boar
 | `PutArtifact`, `RemoveArtifact`, `ArtifactRecord` with a content type, a size and labels | no artifact record. A file a workload needs is a file: pushed with `files().push(..)`, and named, with its SHA-256, in `workloads().put_needing(workload, files)`. Orion starts the workload only when each is in place | changed |
 | An artifact's labels (a name, a revision) read back by other programs | the workload's spec, which only its executor reads, or a resource the program publishes | yours |
 | `RemoveResource`, `RemoveProvider`, `RemoveExecutor` (cleanup after a node was renamed) | a resource is taken away by its provider, or is `Lost` when the provider is gone. There are no provider or executor records to remove | removed |
-| Retrying on `Rejected` because the revision moved | nothing to retry: two writers of one record are settled by its stamp, the later write standing | **gap** if two writers must not overwrite each other unseen |
+| Retrying on `Rejected` because the revision moved | a write may say which version it is based on: `workloads().put_based_on(.., stamp)`, `remove_based_on`, or a stamp on an entry of `records().put`. Refused as stale (`is_stale()`) if the record was written since, with nothing written. A zero stamp on a workload means "make it, never replace one". It is strict on one board, and last write wins across boards | exists |
 
 ## Workloads and their config
 
@@ -257,8 +257,9 @@ decided.
 
 1. **A workload that exists but should not run.** `dev` had `DesiredState::Stopped`; `next`
    has a workload or no workload.
-2. **Compare before write.** `dev` refused a write made against an old revision; `next`
-   settles two writers by stamp, and the earlier write is lost without a word.
+2. **Compare before write: closed.** A write may say which version it is based on, and is
+   refused as stale if the record was written since. It is strict on one board, and last
+   write wins across boards.
 3. **One number for "something changed".** `dev` had a revision for the whole state.
 4. **History for a remote subscriber.** `dev` streams could backfill the last N milliseconds
    and carry on from a cursor; a `next` subscriber sent messages starts from now or from the

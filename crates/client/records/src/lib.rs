@@ -228,10 +228,25 @@ impl Records {
     /// Writes records, and returns them as the store kept them: each with the stamp it was
     /// given. A record with `deleted` set says the record is gone.
     ///
+    /// An entry's own `stamp` says what the write is based on. Zero writes whatever is
+    /// there. Any other stamp, the one a record was read with, writes only if the record
+    /// still has it: if another wrote it since, none of the write is made and it is refused
+    /// as stale ([`ClientError::is_stale`]). The node that takes the write checks this, so
+    /// it holds for writers through one board; two boards that each take a write based on
+    /// the same stamp both make it, and the later stands.
+    ///
     /// # Errors
     ///
-    /// If the store refuses the write, or the connection broke.
+    /// If the store refuses the write, or the connection broke. [`ClientError::Level`], with
+    /// nothing sent, for a write based on a stamp to a node below level 7: it would write
+    /// whatever is there.
     pub fn put(&self, records: &[RecordEntry<'_>]) -> Result<Vec<Record>, ClientError> {
+        if records
+            .iter()
+            .any(|entry| entry.stamp != HlcTimestamp::ZERO)
+        {
+            self.client.needs(orion_connect::Feature::BasedOn)?;
+        }
         let seq = self.client.send(&Put {
             records: List::new(records),
         })?;

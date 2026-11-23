@@ -561,13 +561,15 @@ fn workloads(out: &mut Vec<Sample>) {
             labels: List::new(&labels),
             cpus: Bytes(&[0b0100]),
             restart: RestartPolicy::OnFailure,
+            based_on: None,
         }
     );
     sample!(
         out,
         WorkloadRemove {
             name: workload("vision"),
-            force: true
+            force: true,
+            based_on: None,
         }
     );
     sample!(
@@ -576,7 +578,8 @@ fn workloads(out: &mut Vec<Sample>) {
             name: workload("vision"),
             state: WorkloadState::Running,
             node: None,
-            detail: "ok"
+            detail: "ok",
+            stamp: orion_types::HlcTimestamp::ZERO,
         }
     );
     let kinds = [OfferedKind { kind: work_kind() }];

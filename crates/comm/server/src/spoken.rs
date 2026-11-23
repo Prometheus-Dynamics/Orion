@@ -14,6 +14,8 @@ pub const LEASE_LOST_LEVEL: u16 = 2;
 pub const LAYOUT_LEVEL: u16 = 2;
 /// The level from which a session is told [`Error::RunGone`].
 pub const RUN_GONE_LEVEL: u16 = 3;
+/// The level from which a session is told [`Error::Stale`].
+pub const STALE_LEVEL: u16 = 7;
 
 /// `error` as a session at `level` is told it.
 #[must_use]
@@ -27,6 +29,9 @@ pub const fn spoken(error: Error, level: u16) -> Error {
         Error::Layout if level < LAYOUT_LEVEL => Error::Malformed,
         // Before the level, a run that is not there was only ever not found.
         Error::RunGone if level < RUN_GONE_LEVEL => Error::NotFound,
+        // Before the level no write said what it was based on. One that carried a stamp all
+        // the same is told the nearest thing it knows.
+        Error::Stale if level < STALE_LEVEL => Error::AlreadyExists,
         other => other,
     }
 }
@@ -51,7 +56,7 @@ mod tests {
         for error in Error::ALL {
             if !matches!(
                 error,
-                Error::Restoring | Error::LeaseLost | Error::Layout | Error::RunGone
+                Error::Restoring | Error::LeaseLost | Error::Layout | Error::RunGone | Error::Stale
             ) {
                 assert_eq!(spoken(*error, 0), *error);
             }
@@ -77,6 +82,8 @@ mod tests {
         assert_eq!(spoken(Error::RunGone, RUN_GONE_LEVEL), Error::RunGone);
         assert_eq!(spoken(Error::RunGone, RUN_GONE_LEVEL - 1), Error::NotFound);
         assert_eq!(spoken(Error::RunGone, 0), Error::NotFound);
+        assert_eq!(spoken(Error::Stale, STALE_LEVEL), Error::Stale);
+        assert_eq!(spoken(Error::Stale, STALE_LEVEL - 1), Error::AlreadyExists);
     }
 
     #[test]
@@ -85,5 +92,6 @@ mod tests {
         const { assert!(LEASE_LOST_LEVEL <= orion_wire::INTERFACE_LEVEL) }
         const { assert!(LAYOUT_LEVEL <= orion_wire::INTERFACE_LEVEL) }
         const { assert!(RUN_GONE_LEVEL <= orion_wire::INTERFACE_LEVEL) }
+        const { assert!(STALE_LEVEL <= orion_wire::INTERFACE_LEVEL) }
     }
 }

@@ -97,6 +97,7 @@ impl Bench {
                 labels: List::new(&[]),
                 cpus: Bytes(&[0b11]),
                 restart: RestartPolicy::Always,
+                based_on: None,
             },
         )
     }
@@ -219,6 +220,7 @@ fn a_remove_stops_it_and_the_record_goes_when_the_run_has() {
             &WorkloadRemove {
                 name: name("a"),
                 force: false,
+                based_on: None,
             },
         )
         .expect("remove");
@@ -242,7 +244,8 @@ fn a_remove_stops_it_and_the_record_goes_when_the_run_has() {
             OTHER,
             &WorkloadRemove {
                 name: name("a"),
-                force: false
+                force: false,
+                based_on: None,
             }
         ),
         Err(Error::NotFound)
@@ -264,6 +267,7 @@ fn a_forced_remove_drops_the_record_and_has_the_run_killed() {
             &WorkloadRemove {
                 name: name("a"),
                 force: true,
+                based_on: None,
             },
         )
         .expect("remove");
@@ -371,6 +375,7 @@ fn a_workload_for_another_node_is_kept_and_not_run_here() {
             &WorkloadRemove {
                 name: name("elsewhere"),
                 force: false,
+                based_on: None,
             },
         )
         .expect("remove");
@@ -495,6 +500,7 @@ fn a_workload_waits_for_its_files_and_says_which() {
         labels: List::new(&[]),
         cpus: Bytes(&[]),
         restart: RestartPolicy::Always,
+        based_on: None,
     };
     let mut payload = vec![0_u8; 1024];
     let len = encode_fields(&put, &mut payload).expect("encode");
@@ -567,4 +573,108 @@ fn a_workload_waits_for_its_files_and_says_which() {
         again.tracker().held(&name("detector")),
         Some("waiting for file models/detector.bin and 1 more")
     );
+}
+
+/// A put of the workload `detector` with `spec`, based on `based_on`.
+fn based(spec: &'static [u8], based_on: Option<orion_types::HlcTimestamp>) -> WorkloadPut<'static> {
+    WorkloadPut {
+        name: name("detector"),
+        kind: "graph".parse().expect("kind"),
+        spec: Bytes(spec),
+        files: List::new(&[]),
+        node: Some(me()),
+        labels: List::new(&[]),
+        cpus: Bytes(&[]),
+        restart: RestartPolicy::Always,
+        based_on,
+    }
+}
+
+#[test]
+fn a_write_based_on_a_stamp_is_made_only_if_the_record_still_has_it() {
+    use orion_types::HlcTimestamp;
+    let mut bench = Bench::new();
+    let stamp = |bench: &Bench| {
+        bench
+            .store
+            .get(RecordClass::Workload, "detector")
+            .map(|version| version.stamp)
+    };
+    let spec = |bench: &Bench| {
+        let version = bench.store.get(RecordClass::Workload, "detector")?;
+        let put = WorkloadPut::decode(&version.value).expect("a workload");
+        // What a write was based on is not kept: the record is what should run.
+        assert_eq!(put.based_on, None);
+        Some(put.spec.0.to_vec())
+    };
+
+    // Based on a stamp where there is none: refused, in words, and nothing made.
+    let old = HlcTimestamp::new(5, 0, 1);
+    assert_eq!(
+        bench.ask(OPERATOR, &based(b"a", Some(old))),
+        Err(Error::Stale)
+    );
+    assert_eq!(
+        bench.workloads.take_said().as_deref(),
+        Some("detector is not there: this write was based on one written at 5 ms")
+    );
+    assert_eq!(stamp(&bench), None);
+
+    // To make it, where there is none: made. The asker is told the stamp it now has.
+    bench
+        .ask(OPERATOR, &based(b"a", Some(HlcTimestamp::ZERO)))
+        .expect("made");
+    let made = stamp(&bench).expect("a record");
+    let told: Vec<HlcTimestamp> = bench
+        .took(kind::WORKLOAD_STATUS)
+        .into_iter()
+        .map(|(_, payload)| WorkloadStatus::decode(&payload).expect("status").stamp)
+        .collect();
+    assert!(
+        !told.is_empty() && told.iter().all(|stamp| *stamp == made),
+        "{told:?}"
+    );
+
+    // To make it again: refused, and what is there stays.
+    assert_eq!(
+        bench.ask(OTHER, &based(b"b", Some(HlcTimestamp::ZERO))),
+        Err(Error::Stale)
+    );
+    let said = bench.workloads.take_said().expect("words");
+    assert!(
+        said.starts_with("detector is there already, written at "),
+        "{said}"
+    );
+    assert_eq!(spec(&bench).as_deref(), Some(&b"a"[..]));
+
+    // Based on the stamp it has: written. Based on that stamp again: refused.
+    bench.now += 5;
+    bench
+        .ask(OPERATOR, &based(b"b", Some(made)))
+        .expect("written");
+    let edited = stamp(&bench).expect("a record");
+    assert!(edited > made);
+    assert_eq!(
+        bench.ask(OTHER, &based(b"c", Some(made))),
+        Err(Error::Stale)
+    );
+    let said = bench.workloads.take_said().expect("words");
+    assert!(said.starts_with("detector was written at "), "{said}");
+    assert_eq!(spec(&bench).as_deref(), Some(&b"b"[..]));
+
+    // A remove based on the old stamp is refused; one based on what is there is made.
+    let remove = |based_on| WorkloadRemove {
+        name: name("detector"),
+        force: true,
+        based_on,
+    };
+    assert_eq!(bench.ask(OTHER, &remove(Some(made))), Err(Error::Stale));
+    assert_eq!(spec(&bench).as_deref(), Some(&b"b"[..]));
+    bench.ask(OTHER, &remove(Some(edited))).expect("removed");
+
+    // Based on nothing: written whatever is there, as before, and the record is the bytes
+    // that were sent.
+    bench.ask(OPERATOR, &based(b"d", None)).expect("written");
+    bench.ask(OTHER, &based(b"e", None)).expect("written");
+    assert_eq!(spec(&bench).as_deref(), Some(&b"e"[..]));
 }

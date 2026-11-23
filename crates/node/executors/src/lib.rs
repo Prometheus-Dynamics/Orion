@@ -35,7 +35,8 @@ use orion_msg_workloads::{
 };
 use orion_reply::{Asked, Out};
 use orion_store::Store;
-use orion_types::{Error, NodeName, WorkloadKind, WorkloadName};
+use orion_types::{Error, HlcTimestamp, NodeName, WorkloadKind, WorkloadName};
+use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, Decode, kind};
 use orion_workloads::{Command, Put, Reported, Tracker, Workload};
 
@@ -61,6 +62,13 @@ impl Board for Everything {
     fn has(&self, _name: &str, _digest: &[u8; 32]) -> bool {
         true
     }
+}
+
+/// The stamp of the record of the workload `name`, zero if there is none.
+fn stamp(store: &Store, name: &WorkloadName) -> HlcTimestamp {
+    store
+        .get(RecordClass::Workload, name.as_str())
+        .map_or(HlcTimestamp::ZERO, |version| version.stamp)
 }
 
 /// An executor: the kinds it offered, and whether it has said what it has.
@@ -96,6 +104,8 @@ pub struct Workloads {
     askers: BTreeMap<WorkloadName, Vec<u32>>,
     /// Which node runs a workload that names none.
     placement: orion_placement::Coordinator,
+    /// Why the last request was refused, in words.
+    said: Option<String>,
     /// Workloads let go because another node runs them: their records stay.
     released: BTreeSet<WorkloadName>,
     /// The kinds this node last said its executors run.
@@ -132,6 +142,7 @@ impl Workloads {
             executors: BTreeMap::new(),
             askers: BTreeMap::new(),
             placement,
+            said: None,
             released: BTreeSet::new(),
             said_kinds: None,
             place_due: true,
@@ -223,7 +234,7 @@ impl Workloads {
         askers.push(session);
     }
 
-    fn tell_one(&self, session: u32, name: &WorkloadName, out: &mut dyn Out) {
+    fn tell_one(&self, store: &Store, session: u32, name: &WorkloadName, out: &mut dyn Out) {
         let Some(tracked) = self.tracker.get(name) else {
             return;
         };
@@ -234,8 +245,40 @@ impl Workloads {
                 state: tracked.state,
                 node: Some(self.me.clone()),
                 detail: &tracked.detail,
+                stamp: stamp(store, name),
             },
         );
+    }
+
+    /// Why the last request was refused, in words, if it said.
+    pub const fn take_said(&mut self) -> Option<String> {
+        self.said.take()
+    }
+
+    /// Whether a write of `name` that says it is based on `based_on` may be made: the record
+    /// still has that stamp, or, for zero, there is none. If not, [`Error::Stale`], in words.
+    fn based(
+        &mut self,
+        store: &Store,
+        name: &WorkloadName,
+        based_on: Option<HlcTimestamp>,
+    ) -> Result<(), Error> {
+        let Some(based_on) = based_on else {
+            return Ok(());
+        };
+        let now = stamp(store, name);
+        if now == based_on {
+            return Ok(());
+        }
+        let (now, based) = (now.physical_ms, based_on.physical_ms);
+        self.said = Some(if now == 0 {
+            format!("{name} is not there: this write was based on one written at {based} ms")
+        } else if based == 0 {
+            format!("{name} is there already, written at {now} ms: this write was to make it")
+        } else {
+            format!("{name} was written at {now} ms: this write was based on {based} ms")
+        });
+        Err(Error::Stale)
     }
 
     /// Carries what the tracker decided: commands to executors, changes to whoever asked,
@@ -282,6 +325,7 @@ impl Workloads {
                     state: change.state,
                     node: Some(self.me.clone()),
                     detail: &change.detail,
+                    stamp: stamp(store, &change.name),
                 };
                 for asker in askers {
                     let _ = out.send(*asker, &status);
@@ -319,12 +363,31 @@ impl Workloads {
                 let put: WorkloadPut<'_> = asked.body()?;
                 let workload = Workload::from_put(&put)?;
                 let name = workload.name.clone();
-                // What should run is a record: kept, saved, and known to the other nodes.
+                self.based(store, &name, put.based_on)?;
+                // What should run is a record: kept, saved, and known to the other nodes. As
+                // it was sent, but for what the write was based on: that is of this one write,
+                // and no part of what should run.
+                let unbased;
+                let record = if put.based_on.is_some() {
+                    let mut bytes = vec![0_u8; asked.payload.len() + 8];
+                    let len = encode_fields(
+                        &WorkloadPut {
+                            based_on: None,
+                            ..put.clone()
+                        },
+                        &mut bytes,
+                    )?;
+                    bytes.truncate(len);
+                    unbased = bytes;
+                    unbased.as_slice()
+                } else {
+                    asked.payload
+                };
                 let same = store
                     .get(RecordClass::Workload, name.as_str())
-                    .is_some_and(|version| version.value == asked.payload);
+                    .is_some_and(|version| version.value == record);
                 if !same {
-                    store.put(RecordClass::Workload, name.as_str(), asked.payload, wall_ms);
+                    store.put(RecordClass::Workload, name.as_str(), record, wall_ms);
                 }
                 self.ask(&name, from);
                 if workload.node.is_none() {
@@ -337,7 +400,7 @@ impl Workloads {
                     self.place(store, board, now_ms, wall_ms, out);
                     if self.tracker.get(&name).is_some() {
                         if unchanged {
-                            self.tell_one(from, &name, out);
+                            self.tell_one(store, from, &name, out);
                         }
                         return Ok(());
                     }
@@ -353,6 +416,7 @@ impl Workloads {
                     return out.send(
                         from,
                         &WorkloadStatus {
+                            stamp: stamp(store, &name),
                             name,
                             state: WorkloadState::Pending,
                             node: owner,
@@ -375,6 +439,7 @@ impl Workloads {
                     return out.send(
                         from,
                         &WorkloadStatus {
+                            stamp: stamp(store, &name),
                             name,
                             state: WorkloadState::Pending,
                             node: workload.node.clone(),
@@ -388,13 +453,14 @@ impl Workloads {
                 if self.tracker.put(workload, now_ms) == Put::Unchanged {
                     // Nothing changed, so nothing is said by the tracker: the asker is told
                     // where it is.
-                    self.tell_one(from, &name, out);
+                    self.tell_one(store, from, &name, out);
                 }
                 self.carry(store, wall_ms, out);
                 Ok(())
             }
             kind::WORKLOAD_REMOVE => {
                 let remove: WorkloadRemove = asked.body()?;
+                self.based(store, &remove.name, remove.based_on)?;
                 if self.tracker.get(&remove.name).is_none() {
                     // Not run here. If there is a record of it, for another node, it goes.
                     return store

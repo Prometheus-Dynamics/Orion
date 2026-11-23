@@ -46,6 +46,7 @@ impl Tracker {
             state: tracked.state,
             node: Some(self.node.clone()),
             detail: &tracked.detail,
+            stamp: orion_types::HlcTimestamp::ZERO,
         };
         for session in &tracked.asked {
             let _ = sessions.send(*session, &status, Delivery::Must);

@@ -77,6 +77,12 @@ Its settings are in [`docs/settings.md`](settings.md).
   apart at first and at most a second. Watches are forgotten: they belonged to sessions that
   ended with the comm core, and their programs ask again when they reconnect.
 
+- **Based on a version.** An entry of a client's `Put` that carries a stamp is written only if
+  the record still has that stamp; otherwise none of the `Put` is made, and it is refused
+  `stale` with when each was written. A workload's `WorkloadPut` and `WorkloadRemove` say the
+  same with `based_on`, where zero means "there is none yet". What a put was based on is not
+  kept in the workload's record. The check is this node's: across nodes the later write still
+  stands.
 - **Resources.** A write of a resource or a lease is held to the rules of resources (below)
   before the store takes it, and a write is all or nothing: one entry refused refuses them
   all.

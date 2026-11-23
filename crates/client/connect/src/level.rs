@@ -35,11 +35,14 @@ pub enum Feature {
     /// A detached run kept for its program while the program's session is lost, and given
     /// back when it registers the action again.
     KeptRuns,
+    /// A write that says which version of a record it is based on, and is refused if the
+    /// record is no longer that one.
+    BasedOn,
 }
 
 impl Feature {
     /// Every feature, for tables and tests.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::SubscribeFromLatest,
         Self::Shell,
         Self::SignedLink,
@@ -49,6 +52,7 @@ impl Feature {
         Self::FileOffers,
         Self::SecurityPrecheck,
         Self::KeptRuns,
+        Self::BasedOn,
     ];
 
     /// The lowest level that has it.
@@ -64,6 +68,7 @@ impl Feature {
             Self::FileOffers => 4,
             Self::SecurityPrecheck => 5,
             Self::KeptRuns => 6,
+            Self::BasedOn => 7,
         }
     }
 
@@ -80,6 +85,7 @@ impl Feature {
             Self::FileOffers => "a file offered on the board",
             Self::SecurityPrecheck => "a precheck of the security switch",
             Self::KeptRuns => "a detached run kept while its program reconnects",
+            Self::BasedOn => "a write based on a version of the record",
         }
     }
 }

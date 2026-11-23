@@ -2403,6 +2403,7 @@ dependencies = [
  "orion-comm-app",
  "orion-config",
  "orion-msg-records",
+ "orion-msg-workloads",
  "orion-node-app",
  "orion-scratch",
  "orion-wire",

@@ -568,7 +568,8 @@ fn workload_put_and_remove() {
     assert_eq!(out.lines().last(), Some("nightly is Gone on board"));
     let (code, _, err) = ctl(&board, "workload remove nightly");
     assert_eq!(code, 1);
-    assert!(err.contains("did not get there") || err.is_empty());
+    // Not there any more: said at once, as the board says it.
+    assert!(err.contains("not found"), "{err}");
     let (code, _, err) = ctl(&board, "workload put nightly");
     assert_eq!(code, 2);
     assert!(err.starts_with("orion: missing --kind"), "{err}");

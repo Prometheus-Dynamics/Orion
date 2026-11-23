@@ -85,6 +85,10 @@ errors! {
     /// A run handle from before node logic last started: the run it named is gone with that
     /// start, and the handle names nothing now. Whatever the run did is not known here.
     RunGone = 23, "the node restarted since: that run is gone";
+    /// A write said which version it was based on, and the record is no longer that one:
+    /// another wrote it since, or it is there where the writer said there was none. Nothing
+    /// was written. Read it again and decide.
+    Stale = 24, "written since: read it again";
 }
 
 impl fmt::Display for Error {
@@ -120,5 +124,6 @@ mod tests {
         assert_eq!(Error::Layout.code(), 21);
         assert_eq!(Error::LeaseLost.code(), 22);
         assert_eq!(Error::RunGone.code(), 23);
+        assert_eq!(Error::Stale.code(), 24);
     }
 }

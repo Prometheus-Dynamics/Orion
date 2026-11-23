@@ -107,6 +107,10 @@ CAPI_HOST=740000
 # not everyone's, and with security off anyone on the network can send that request. Not to
 # be asked again without something new. I92 also has what is in orion-recovery, by section
 # and crate, and what could come out: its margin is under 5,000 bytes.
+# Ruled by the user, 2026-11-23: the separate orion-recovery binary is kept. It stays built and
+# its tests stay in the gate; nothing is cut from it and it is not built with abort. Its size
+# for a board is held to its limit by `--release` (I93), which a release must pass
+# (docs/release.md, step 2). Not to be raised again.
 # The others as at C41, until they run on one; armv7 and riscv64 were not measured at I76 or
 # I77 and will be about as much larger at the next release's measurement:
 #                                   orion-recovery   orion

@@ -513,7 +513,8 @@ impl Logic {
             });
         }
         if let Err(error) = answered {
-            match self.said.take().or_else(|| self.records.take_detail()) {
+            let said = self.said.take().or_else(|| self.records.take_detail());
+            match said.or_else(|| self.workloads.take_said()) {
                 Some(words) => out.refuse_with(asked, error, &words),
                 None => out.refuse(asked, error),
             }

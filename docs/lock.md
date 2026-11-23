@@ -599,6 +599,13 @@ what to change.
   (**Add**). No wire changes; level 6.
 - **I93.** The gate only. `orion-recovery` for a board is held to its size limit before a
   release, not on every change. No interface changes.
+- **I97.** Writes based on a version (**Add**, level 7, `INTERFACE_LEVEL` 7): `WorkloadPut`
+  and `WorkloadRemove` gain an appended `based_on`, `WorkloadStatus` an appended `stamp`; a
+  stamp on an entry of a client's `Put`, ignored before, is now what the write is based on
+  (**Change**). `Error::Stale` (24, level 7; `already exists` below it). `Feature::BasedOn`,
+  `ClientError::is_stale`, `Workloads::put_based_on` and `remove_based_on`, `Tracked::stamp`
+  (**Add**). A `remove` of a workload that is not there is refused to `wait` at once
+  (**Change**: it ran out its time). Strict on one board; last write wins across boards.
 - **I96.** A document only, `docs/from-dev.md`. No interface changes.
 - **I94.** A lint only: `clippy::unwrap_used` is denied outside tests in the comm core's and
   node logic's crates. No interface changes.

@@ -745,6 +745,7 @@ fn a_workload_is_what_its_put_says() {
         labels: List::new(&labels),
         cpus: Bytes(&[0b1100]),
         restart: RestartPolicy::OnFailure,
+        based_on: None,
     };
     let workload = Workload::from_put(&put).expect("workload");
     assert_eq!(workload.spec, b"spec");

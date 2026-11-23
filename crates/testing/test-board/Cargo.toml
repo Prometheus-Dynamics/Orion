@@ -25,6 +25,7 @@ workspace = true
 # of every build but this crate's tests.
 orion-node-app = { path = "../../node/node-app", features = ["slow"] }
 orion-msg-records = { path = "../../core/msg-records" }
+orion-msg-workloads = { path = "../../core/msg-workloads" }
 orion-wire = { path = "../../core/wire" }
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
 

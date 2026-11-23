@@ -372,6 +372,19 @@ and the calls say so there. The comm core sets the two sides up and then sees no
 | `watch.poll()`, `watch.wait(for)` | The next change |
 | `watch.newest()` | The stamp to watch from next time |
 
+**A write based on what was read.** Two writers of one record are otherwise settled by its
+stamp: the later write stands, and the earlier is lost with nothing said. A writer that must
+not lose one says what its write is based on. An entry's own `stamp`, as the record was read
+with, means "write only if the record still has this stamp". If another wrote it since, none of
+the `put` is made and it is refused as stale: `is_stale()` is true, and the words say when each
+was written. The writer reads the record again and decides. A zero stamp writes whatever is
+there, as every write did before. It needs a node at level 7: below it the call fails with
+`ClientError::Level` and sends nothing.
+
+**This is strict on one board, and last write wins across boards.** The node that takes the
+write makes the check. Two boards that each take a write based on the same stamp both make it,
+and peer sync then keeps the later one. `based_on` is not cluster-wide.
+
 Watches are pushed. A watcher is sent each change in the order it was made and asks for nothing
 again. A program that reads too slowly for too long does not grow without bound: its watch
 holds 1,024 changes, then stops taking them, and once the program has read what it holds the
@@ -727,6 +740,15 @@ workload should exist: a name, a kind (which picks the executor), a spec only th
 reads, and what to do when it ends. `remove` says it should stop existing; its record stays
 until the run is really gone, unless forced. `status` and `wait` give where it is: pending,
 starting, running, stopping, gone, or failed or lost.
+
+`put_based_on(workload, files, stamp)` writes only if the workload's record is still the one
+the write is based on: `stamp` is `Tracked::stamp`, the stamp the node last said the record
+has, or the record's own from `records().get(RecordClass::Workload, name)`. A zero stamp means
+"make it, and never replace one". `remove_based_on(name, force, stamp)` removes on the same
+condition. A write refused as stale (`is_stale()`) is found by `wait`, and nothing was
+written. As for records, this is strict on one board, and last write wins across boards. A
+`remove` of a workload that is not there is now refused at once, `not found`, where `wait`
+used to run out its time.
 
 `put_needing(workload, files)` is `put` for a workload that needs files: each a destination on
 the board and the SHA-256 of what must be there. Orion starts it only when every one is in

@@ -21,7 +21,7 @@ pub const INTERFACE_REVISION: u16 = 1;
 /// side that says none is at 0. It goes up by one for every addition whose meaning an older side
 /// would change by ignoring it, and a client asks for such a thing only of a node at its level or
 /// above. Additions an older side may safely ignore need no level. See `docs/wire.md`.
-pub const INTERFACE_LEVEL: u16 = 6;
+pub const INTERFACE_LEVEL: u16 = 7;
 
 /// How many bytes may wait to be sent to one session unless the comm core's settings say
 /// otherwise (`comm.outbox_bytes`). A frame that must be sent and doesn't fit ends the session,

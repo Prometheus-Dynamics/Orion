@@ -101,6 +101,8 @@ safely ignore have no level.
 | 4 | `FileOffers`: `FILE_OFFER`, `FILE_FETCH`, `FILE_OFFERS` | Not answer |
 | 5 | `SecurityPrecheck`: `SECURITY_PRECHECK` | Not answer |
 | 6 | `KeptRuns`: `Register.keep_ms`, `Claim.kept` | End the program's detached runs as failed when its session is lost |
+| 7 | `BasedOn`: `WorkloadPut.based_on`, `WorkloadRemove.based_on`, a stamp on an entry of a client's `Put` | Write whatever is there, though the writer said to write only if it had not changed |
+| 7 | The error `stale` (24) | (told to a session: see below) |
 
 **Errors have levels too.** An error code added after level 1 is told only to a session that said
 it is at that code's level or above. A session below it is told what it was told before the code
@@ -109,7 +111,17 @@ so a client of an older build never meets a code it does not know. `lease lost` 
 too, and a session below it is told `busy`. `layout` (21), a ring offered by a publisher built
 against another shared-memory layout, is level 2, and a session below it is told `malformed`.
 `run gone` (23), a run handle from before node logic last started, is level 3, and a session
-below it is told `not found`.
+below it is told `not found`. `stale` (24), a write refused because the record is no longer the
+one it was based on, is level 7. A session below it never asks for such a write; one that put a
+stamp on an entry all the same is told `already exists`.
+
+**Levels mixed, both ways, at level 7.** A level-6 client and a level-7 node: the client's
+`WorkloadPut` and `WorkloadRemove` have no `based_on`, which the node reads as "based on
+nothing", and the node's `WorkloadStatus` has a stamp appended, which the client does not
+read. A level-7 client and a level-6 node: a write based on nothing carries one byte more,
+which the node does not read; a write based on a version is not sent at all
+(`ClientError::Level`), because that node would write whatever is there. `WorkloadStatus` from
+it has no stamp, read as zero.
 `orion_server::spoken` is the one place this is decided, for the comm core's own refusals and
 for node logic's. Words sent with a refusal go only with the code they were written for: a
 session told the older code is told that code's own words.
