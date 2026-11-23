@@ -77,6 +77,23 @@ pub fn slew(offset_ns: i64, max_error_ns: i64) -> io::Result<()> {
     Ok(())
 }
 
+/// Marks the clock unsynchronized (`STA_UNSYNC` set): nothing keeps it now, so the kernel
+/// stops copying it to the hardware clock (`RTC_SYSTOHC`). The time itself is left alone.
+///
+/// # Errors
+///
+/// The kernel's: most often no permission.
+pub fn unsync() -> io::Result<()> {
+    let mut timex = timex();
+    timex.modes = libc::ADJ_STATUS;
+    timex.status = libc::STA_UNSYNC;
+    // SAFETY: `timex` is a valid, exclusively borrowed struct.
+    if unsafe { libc::adjtimex(&raw mut timex) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -282,3 +282,32 @@ fn ways_in_on_loopback_alone_are_not_announced() {
         assert!(!core.summary().contains("mdns"), "{}", core.summary());
     });
 }
+
+/// Measuring the time: `orion/state` says the clock is not set, which sources were tried and
+/// what the last try found.
+#[cfg(feature = "time")]
+#[test]
+fn the_state_says_whether_the_clock_is_set_and_what_was_tried() {
+    run(async {
+        let dir = temp("clock");
+        let view = dir.join("security");
+        std::fs::write(&view, "off\ngeneration 1\n").expect("security record");
+        let text = format!(
+            "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n\
+             time.sync = report\ntime.servers = operator\ntime.synced_file = off\n",
+            dir.display()
+        );
+        let mut source = Source::parse(&text, Vec::new()).expect("source");
+        let settings = CommSettings::from_source_with_view(&mut source, &view).expect("settings");
+        let core = CommCore::start(settings).await.expect("start");
+        let (fetched, _) = fetch(core.socket(), &["orion/state"]).await;
+        let said = &fetched[0];
+        assert!(said.starts_with("running\n"), "{said}");
+        let clock = said.lines().nth(1).unwrap_or_default();
+        assert!(
+            clock
+                .starts_with("clock: not set (time.sync = report; sources tried: operator; last: "),
+            "{said}"
+        );
+    });
+}

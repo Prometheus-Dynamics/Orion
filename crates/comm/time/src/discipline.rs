@@ -143,6 +143,12 @@ pub trait Clock {
     ///
     /// The kernel's: most often no permission.
     fn slew(&self, offset_ns: i64, max_error_ns: i64) -> std::io::Result<()>;
+    /// Marks the clock unsynchronized, leaving its time alone: nothing vouches for it now.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's: most often no permission.
+    fn unsync(&self) -> std::io::Result<()>;
 }
 
 /// The kernel clock: `clock_settime` and `adjtimex`, which need `CAP_SYS_TIME`.
@@ -156,6 +162,10 @@ impl Clock for KernelClock {
 
     fn slew(&self, offset_ns: i64, max_error_ns: i64) -> std::io::Result<()> {
         clock::slew(offset_ns, max_error_ns)
+    }
+
+    fn unsync(&self) -> std::io::Result<()> {
+        clock::unsync()
     }
 }
 

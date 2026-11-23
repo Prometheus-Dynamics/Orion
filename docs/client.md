@@ -231,7 +231,9 @@ and made for the question, `clock()` how its clock compares, `sync_peers()` and 
 where its sync with other boards is. `offer_time(stratum)` gives the board this program's clock:
 the board asks for it when it polls, and the session answers whenever it is pumped, by any call or
 `pump(wait)`, for as long as it lasts (`times_asked()` counts). It needs what `docs/comm.md`,
-"Time sync", says: `operator` in the board's `time.servers`, and `clock.set` with security on. `enroll(public_key, name, enrollment_key)` asks the board to
+"Time sync", says: `operator` in the board's `time.servers`, and `clock.set` with security on.
+`node().clock()` says whether the board's clock is set, `synced` or `unset`, so a tool can offer
+the time when it is not (`orion-ctl node time` says so). `enroll(public_key, name, enrollment_key)` asks the board to
 let an operator in: from root on the board for any key, at once; from the operator itself, on a
 session signed with that key, at once with the cluster's enrollment key (only a proof made from
 it is sent) and `Pending` until approved without. The answer (`node::Enrollment`) has the state,

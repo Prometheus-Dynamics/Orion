@@ -121,3 +121,21 @@ fn with_security_on_only_an_operator_granted_clock_set_gives_the_time() {
         format!("operator bench-pc (key {granted_key}…)")
     );
 }
+
+#[test]
+fn a_board_measuring_the_time_says_its_clock_is_not_set_until_a_source_answers() {
+    let board = TestBoard::start_with(
+        "time-unset",
+        Options {
+            conf: CONF.to_owned(),
+            ..Options::default()
+        },
+    );
+    let pc = board.connect("bench-pc").expect("connect");
+    // Reported, never set: a board that only reports leaves the clock to another.
+    assert_eq!(pc.node().expect("node").clock(), Some("unset"));
+    // A board that measures no time says nothing of it.
+    let quiet = TestBoard::start("time-quiet");
+    let pc = quiet.connect("bench-pc").expect("connect");
+    assert_eq!(pc.node().expect("node").clock(), None);
+}

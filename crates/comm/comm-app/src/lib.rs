@@ -203,8 +203,15 @@ impl CommCore {
             &broker,
             settings.broker.declare,
         ));
+        // The clock, as the time sync says it: in `orion/state`, the hello and the announcement.
+        #[cfg(feature = "time")]
+        let clock = time.as_ref().map(orion_time::TimeSync::view);
+        #[cfg(all(feature = "offers", feature = "time"))]
+        let line = clock.clone().map(own_files::Line::clock);
+        #[cfg(all(feature = "offers", not(feature = "time")))]
+        let line = None;
         #[cfg(feature = "offers")]
-        comm.add_service(own_files::running(&comm, &settings)?);
+        comm.add_service(own_files::running(&comm, &settings, line)?);
         // Devices on links, each a resource with what it declared and registered.
         #[cfg(feature = "devices")]
         let devices = {
@@ -233,6 +240,8 @@ impl CommCore {
         }
         let hello = Hello::new(node.clone(), keys.clone(), Some(topics.clone()))
             .with_security(&settings.config.security_view);
+        #[cfg(feature = "time")]
+        let hello = hello.with_clock(move || clock.as_ref().and_then(orion_time::TimeView::word));
         comm.add_service(hello.in_state(settings.board_state.clone()));
         comm.add_service(KeysService::new(node.clone(), keys.clone()));
         #[cfg(feature = "recovery")]

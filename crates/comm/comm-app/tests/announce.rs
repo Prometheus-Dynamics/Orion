@@ -192,6 +192,26 @@ async fn scenario() {
     drop(core);
     sleep(Duration::from_millis(300)).await;
 
+    // Measuring the time: whether the clock is set, here not, as nothing answers.
+    let dir = Scratch::new("announce-clock");
+    let timed = format!(
+        "{only}time.sync = report\ntime.servers = 127.0.0.1:9\ntime.synced_file = off\n\
+         time.rtc = off\n"
+    );
+    let core = CommCore::start(settings(dir.path(), &timed))
+        .await
+        .expect("start");
+    claimed(&core, "cam").await;
+    let browse = answered(&question("_orion._tcp.local", PTR)).await;
+    let said = txt(&browse, "cam._orion._tcp.local");
+    assert_eq!(
+        said.last().map(String::as_str),
+        Some("clock=unset"),
+        "{said:?}"
+    );
+    drop(core);
+    sleep(Duration::from_millis(300)).await;
+
     // `mdns = false`: nothing.
     let dir = Scratch::new("announce-off");
     let core = CommCore::start(settings(dir.path(), "mdns = false\n"))

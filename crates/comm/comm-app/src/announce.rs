@@ -4,7 +4,7 @@
 //!
 //! Recovery announces nothing: it is not built in.
 
-use orion_mdns::{Announce, Named, OrionTxt, Reach, Service, Settings};
+use orion_mdns::{Announce, Named, OrionTxt, Reach, Retell, Service, Settings};
 use tokio::sync::oneshot;
 use tracing::warn;
 
@@ -24,6 +24,70 @@ fn security(view: &orion_config::SecurityView) -> &'static str {
         (false, orion_config::Security::On) => "on",
         (false, orion_config::Security::Off) => "off",
     }
+}
+
+/// What the clock says, as the time sync has it.
+#[cfg(feature = "time")]
+type Clock = orion_time::TimeView;
+
+/// No time sync built: nothing to say.
+#[cfg(not(feature = "time"))]
+#[derive(Debug)]
+enum Clock {}
+
+#[cfg(not(feature = "time"))]
+impl Clock {
+    fn word(&self) -> Option<&'static str> {
+        match *self {}
+    }
+}
+
+/// What `_orion._tcp`'s TXT strings are made of, but the clock.
+struct TxtParts {
+    node: String,
+    key: [u8; 32],
+    cluster: String,
+    port: u16,
+    state: &'static str,
+    security: &'static str,
+}
+
+impl TxtParts {
+    fn txt(&self, clock: Option<&str>) -> Result<Vec<Vec<u8>>, String> {
+        orion_mdns::orion_txt(&OrionTxt {
+            node: &self.node,
+            key: &self.key,
+            wire: orion_wire::PROTOCOL_VERSION,
+            revision: orion_wire::INTERFACE_REVISION,
+            level: orion_wire::INTERFACE_LEVEL,
+            cluster: &self.cluster,
+            port: self.port,
+            state: self.state,
+            security: self.security,
+            clock,
+        })
+    }
+}
+
+/// The TXT strings again whenever the clock's word is no longer `said`.
+#[cfg(feature = "time")]
+fn follow(parts: TxtParts, clock: Clock, mut said: Option<&'static str>) -> Retell {
+    Retell {
+        kind: orion_mdns::ORION,
+        txt: Box::new(move || {
+            let now = clock.word();
+            if now == said {
+                return None;
+            }
+            said = now;
+            parts.txt(now).ok()
+        }),
+    }
+}
+
+#[cfg(not(feature = "time"))]
+fn follow(_: TxtParts, clock: Clock, _: Option<&'static str>) -> Retell {
+    match clock {}
 }
 
 /// Why `_orion._tcp` is not announced, as the settings are: a cluster name too long for one.
@@ -64,19 +128,26 @@ pub(crate) fn start(settings: &CommSettings, core: &crate::CommCore) -> Option<A
     let node = settings.config.node_name.to_string();
     let key = keys.lock().identity().public();
     let mut services = Vec::new();
+    let mut retell = None;
+    #[cfg(feature = "time")]
+    let clock = core.time().map(orion_time::TimeSync::view);
+    #[cfg(not(feature = "time"))]
+    let clock: Option<Clock> = None;
     if let Some(peer) = peer {
-        let txt = OrionTxt {
-            node: &node,
-            key: &key,
-            wire: orion_wire::PROTOCOL_VERSION,
-            revision: orion_wire::INTERFACE_REVISION,
-            level: orion_wire::INTERFACE_LEVEL,
-            cluster: &settings.keys.cluster,
+        let parts = TxtParts {
+            node: node.clone(),
+            key,
+            cluster: settings.keys.cluster.clone(),
             port: peer.port(),
             state: settings.board_state.word(),
             security: security(&settings.config.security_view),
         };
-        match orion_mdns::orion_txt(&txt) {
+        let word = clock.as_ref().and_then(Clock::word);
+        let told = parts.txt(word);
+        if let (Ok(_), Some(clock)) = (&told, clock) {
+            retell = Some(follow(parts, clock, word));
+        }
+        match told {
             Ok(txt) => services.push(Service {
                 kind: orion_mdns::ORION,
                 port: peer.port(),
@@ -130,6 +201,7 @@ pub(crate) fn start(settings: &CommSettings, core: &crate::CommCore) -> Option<A
         announce,
         interfaces,
         named.clone(),
+        retell,
         async move {
             let _ = stopped.await;
         },

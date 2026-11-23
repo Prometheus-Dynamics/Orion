@@ -62,6 +62,8 @@ pub struct OrionTxt<'a> {
     pub state: &'a str,
     /// `on`, `off` or `damaged`.
     pub security: &'a str,
+    /// `synced` or `unset`, when the board's time sync measures; changed as the clock does.
+    pub clock: Option<&'a str>,
 }
 
 /// `bytes` as lowercase hex.
@@ -99,6 +101,7 @@ pub fn orion_txt(txt: &OrionTxt<'_>) -> Result<Vec<Vec<u8>>, String> {
         ("security", txt.security.to_owned()),
     ]
     .into_iter()
+    .chain(txt.clock.map(|clock| ("clock", clock.to_owned())))
     .map(|(key, value)| format!("{key}={value}").into_bytes())
     .collect())
 }
@@ -148,12 +151,27 @@ impl Named {
     }
 }
 
+/// A service's TXT strings as they change. `txt` is asked each time the interfaces are looked
+/// at ([`FOLLOW`]), and gives the strings when they have changed: they are announced again.
+pub struct Retell {
+    /// The service's type, as [`ORION`].
+    pub kind: &'static str,
+    pub txt: Box<dyn FnMut() -> Option<Vec<Vec<u8>>>>,
+}
+
+impl std::fmt::Debug for Retell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Retell({})", self.kind)
+    }
+}
+
 /// Runs the responder until `stop` finishes, and says goodbye. Must be run inside a
-/// `LocalSet`.
+/// `LocalSet`. With `retell`, a service's TXT strings are announced again when they change.
 pub async fn run(
     announce: Announce,
     settings: Settings,
     named: Named,
+    mut retell: Option<Retell>,
     stop: impl Future<Output = ()>,
 ) {
     let seed = announce
@@ -173,6 +191,11 @@ pub async fn run(
         if Instant::now() >= follow {
             follow = Instant::now() + FOLLOW;
             look(&settings, &mut open, &mut responder, &tell, &mut told);
+            if let Some(retell) = &mut retell
+                && let Some(txt) = (retell.txt)()
+            {
+                responder.retell(retell.kind, txt, Instant::now().into_std());
+            }
         }
         let due = Instant::from_std(responder.due()).min(follow);
         tokio::select! {

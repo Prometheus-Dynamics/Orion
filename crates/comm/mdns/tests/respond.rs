@@ -475,6 +475,7 @@ fn txt<'a>(cluster: &'a str, node: &'a str, key: &'a [u8; 32]) -> OrionTxt<'a> {
         port: u16::MAX,
         state: "flasher",
         security: "damaged",
+        clock: Some("synced"),
     }
 }
 
@@ -486,7 +487,7 @@ fn the_orion_txt_record_fits_and_an_older_reader_reads_it() {
     let strings = orion_txt(&txt(&cluster, &node, &key)).expect("fits");
     assert!(strings.iter().all(|s| s.len() <= 255));
     let size: usize = strings.iter().map(|s| s.len() + 1).sum();
-    assert!(size <= 465, "{size} bytes");
+    assert!(size <= 478, "{size} bytes");
     let too_long = "c".repeat(MAX_CLUSTER + 1);
     let why = orion_txt(&txt(&too_long, &node, &key)).expect_err("too long");
     assert!(why.contains("253 bytes"), "{why}");
@@ -549,4 +550,47 @@ fn a_service_is_announced_only_where_it_can_be_reached() {
         service.reach.addr = "127.0.0.1".parse().expect("addr");
     }
     assert!(!alone.reaches(&interface(2, 2)));
+}
+
+#[test]
+fn txt_strings_that_change_are_announced_again_and_the_same_ones_are_not() {
+    let (mut responder, now) = claimed(Instant::now());
+    // Long enough for the claim's own announcements to be done.
+    let now = now + Duration::from_secs(5);
+    assert!(answered(&run(&mut responder, now, now + Duration::from_secs(2))).is_empty());
+    let set = vec![b"v=2".to_vec(), b"clock=synced".to_vec()];
+    responder.retell(ORION, set.clone(), now);
+    let sent = run(&mut responder, now, now + Duration::from_secs(3));
+    let told: Vec<&Send> = answered(&sent)
+        .into_iter()
+        .filter(|send| {
+            send.to.is_none()
+                && send
+                    .message
+                    .answers
+                    .iter()
+                    .any(|r| matches!(&r.data, Data::Txt(t) if *t == set))
+        })
+        .collect();
+    // Announced twice, as at the start (RFC 6762 §8.3).
+    assert_eq!(told.len(), 2, "{sent:?}");
+    let now = now + Duration::from_secs(3);
+    responder.retell(ORION, set, now);
+    responder.retell("_none._tcp", Vec::new(), now);
+    assert!(answered(&run(&mut responder, now, now + Duration::from_secs(3))).is_empty());
+}
+
+#[test]
+fn the_clock_key_is_there_only_when_the_clock_is_measured() {
+    let key = [1; 32];
+    let has_clock = |txt: &OrionTxt<'_>| {
+        orion_txt(txt)
+            .expect("fits")
+            .iter()
+            .any(|s| s.starts_with(b"clock="))
+    };
+    let mut told = txt("lab", "cam", &key);
+    assert!(has_clock(&told));
+    told.clock = None;
+    assert!(!has_clock(&told));
 }

@@ -32,6 +32,7 @@ const TRUSTED: KeyId = KeyId([7; 32]);
 struct FakeClock {
     steps: RefCell<Vec<i64>>,
     slews: RefCell<Vec<i64>>,
+    unsyncs: std::cell::Cell<usize>,
 }
 
 impl Clock for FakeClock {
@@ -42,6 +43,11 @@ impl Clock for FakeClock {
 
     fn slew(&self, offset_ns: i64, _max_error_ns: i64) -> std::io::Result<()> {
         self.slews.borrow_mut().push(offset_ns);
+        Ok(())
+    }
+
+    fn unsync(&self) -> std::io::Result<()> {
+        self.unsyncs.set(self.unsyncs.get() + 1);
         Ok(())
     }
 }
@@ -111,6 +117,7 @@ fn config(mode: TimeMode, servers: &[&str]) -> TimeConfig {
         mode,
         servers: servers.iter().map(|server| (*server).to_owned()).collect(),
         synced_file: None,
+        rtc: None,
         ..TimeConfig::default()
     }
 }
@@ -408,5 +415,24 @@ fn a_board_that_does_not_list_operators_takes_no_offer() {
         .await;
         operator.send(&TimeOffer { stratum: 3 }).await;
         assert_eq!(operator.refused().await, Some(Error::Unsupported));
+    });
+}
+
+#[test]
+fn a_sync_that_disciplined_the_clock_says_on_stopping_that_nothing_keeps_it() {
+    run(false, async {
+        let disciplining = board(config(TimeMode::Discipline, &["127.0.0.1:9"]));
+        let view = disciplining.sync.view();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // At start: what a run before this one left is not believed.
+        assert_eq!(disciplining.clock.unsyncs.get(), 1);
+        assert_eq!(view.word(), Some("unset"));
+        drop(disciplining.sync);
+        assert_eq!(disciplining.clock.unsyncs.get(), 2);
+        // Only reporting, it never touched the clock, and says nothing of it.
+        let reporting = board(config(TimeMode::Report, &["127.0.0.1:9"]));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(reporting.sync);
+        assert_eq!(reporting.clock.unsyncs.get(), 0);
     });
 }

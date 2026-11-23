@@ -95,6 +95,15 @@ impl Node {
         }
     }
 
+    /// Whether the board's clock is set: `synced` while its time sync holds the clock
+    /// synchronized, `unset` until a source answers (the normal state after power-up on a board
+    /// with no clock battery; [`crate::Orion::offer_time`] gives it this computer's). `None`
+    /// from a board that measures no time, or is too old to say.
+    #[must_use]
+    pub fn clock(&self) -> Option<&str> {
+        self.fact_text("clock")
+    }
+
     fn fact_text(&self, name: &str) -> Option<&str> {
         self.facts
             .iter()
@@ -461,5 +470,12 @@ mod tests {
         // An older board, or a word this build does not know: not told.
         assert_eq!(node(&[("state", "running")]).security(), Security::NotTold);
         assert_eq!(node(&[("security", "maybe")]).security(), Security::NotTold);
+    }
+
+    #[test]
+    fn whether_the_clock_is_set_is_read_from_the_boards_facts() {
+        assert_eq!(node(&[("clock", "unset")]).clock(), Some("unset"));
+        assert_eq!(node(&[("clock", "synced")]).clock(), Some("synced"));
+        assert_eq!(node(&[("state", "running")]).clock(), None);
     }
 }

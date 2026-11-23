@@ -71,12 +71,15 @@ pub const RECOVERY_WHY_FACT: &str = "recovery_why";
 pub const SECURITY_FACT: &str = "security";
 /// Orion's fact: the generation of the board's security record, when it was read.
 pub const SECURITY_GENERATION_FACT: &str = "security_generation";
+/// Orion's fact, when the board's time sync measures: `synced` or `unset`.
+pub const CLOCK_FACT: &str = "clock";
 /// Orion's own facts: a program's fact by one of these names is left out.
-const OWN_FACTS: [&str; 4] = [
+const OWN_FACTS: [&str; 5] = [
     STATE_FACT,
     RECOVERY_WHY_FACT,
     SECURITY_FACT,
     SECURITY_GENERATION_FACT,
+    CLOCK_FACT,
 ];
 /// The number of the text field type, as facts carry it.
 const TEXT: u8 = 4;
@@ -142,6 +145,8 @@ pub struct Hello {
     state: SharedState,
     /// The `security` fact, and `security_generation`, if told.
     security: Option<(&'static str, Option<String>)>,
+    /// The `clock` fact as it is when asked, if told.
+    clock: Option<Box<dyn Fn() -> Option<&'static str>>>,
     payload: Vec<u8>,
 }
 
@@ -163,6 +168,7 @@ impl Hello {
             facts: Vec::new(),
             state: SharedState(Rc::new(RefCell::new(BoardState::Running))),
             security: None,
+            clock: None,
             payload: Vec::new(),
         }
     }
@@ -188,6 +194,14 @@ impl Hello {
             .filter(|_| view.fault.is_none())
             .map(|generation| generation.to_string());
         self.security = Some((word, generation));
+        self
+    }
+
+    /// The same, saying the board's clock as `word` has it when asked: `synced` or `unset`, or
+    /// nothing. Without this the document says nothing of it.
+    #[must_use]
+    pub fn with_clock(mut self, word: impl Fn() -> Option<&'static str> + 'static) -> Self {
+        self.clock = Some(Box::new(word));
         self
     }
 
@@ -311,6 +325,13 @@ impl Service for Hello {
                     value: Bytes(generation.as_bytes()),
                 });
             }
+        }
+        if let Some(word) = self.clock.as_ref().and_then(|clock| clock()) {
+            fields.push(IdentityField {
+                name: CLOCK_FACT,
+                ty: TEXT,
+                value: Bytes(word.as_bytes()),
+            });
         }
         fields.extend(
             self.facts

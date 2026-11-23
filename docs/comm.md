@@ -868,6 +868,7 @@ a nonce) and is answered (`Identity`):
 | Clock, milliseconds since 1970 | Orion |
 | `state`: `running`, `recovery` or `flasher`; in recovery, `recovery_why` | Orion |
 | `security`: `on`, `off` or `damaged`; `security_generation` | Orion, from the board's record |
+| `clock`: `synced` or `unset`, when the time sync measures | Orion, from the time sync |
 | Facts about the board: name, type, value | Other programs |
 | The asker's nonce | The question |
 | Signature | The node's key, over a fixed label and everything before this field |
@@ -893,6 +894,8 @@ a nonce) and is answered (`Identity`):
   `off` with no generation. Recovery says them too. The broker reserves `hello.security` and
   `hello.security_generation` as it does `hello.state`. A tool reads them with `Node::security`,
   which is `Security::NotTold` from an older board.
+- **So is whether its clock is set,** as the text fact `clock` (see [Time sync](#time-sync)),
+  asked of the time sync each time the document is made. The broker reserves `hello.clock`.
 - **Anyone may ask**, a key that has been granted nothing included.
 - **Always answers.** It is in the comm core and needs nothing else running.
 - Someone on the board who gives no nonce is not checking a signature and gets the document
@@ -942,8 +945,31 @@ clock, so it is safe next to another daemon. `discipline` also adjusts the clock
 synchronized. A larger offset is stepped, but only once two samples agree within 0.1 s. After the
 first synchronization the clock is never stepped backwards. Answers that took over 1 s are not
 used. Polling starts at 2 s, then runs from `time.poll_min_ms` (64 s) doubling to
-`time.poll_max_ms` (1024 s) while the offset stays under 50 ms. The last synchronized time is
-saved in the state directory; at start a clock behind it is stepped forward to it.
+`time.poll_max_ms` (1024 s) while the offset stays under 50 ms.
+
+**At start**, two floors: the last synchronized time, saved in the state directory, and the
+hardware clock (`time.rtc`, `/sys/class/rtc/rtc0/since_epoch`; `off` for none). A clock behind
+the later of them is stepped forward to it. A hardware clock before this build existed (1970,
+after power-up with no clock battery) is no floor. Neither floor vouches for the clock: the saved
+time stays the anchor for peers, and the clock is not synchronized until a source answers.
+
+**What the kernel is told.** While disciplining, a slew or step marks the clock synchronized
+(`STA_UNSYNC` cleared), so a kernel built with `RTC_SYSTOHC` copies it to the hardware clock
+every 11 minutes. At start, when the clock has lost its sources, and when the time sync stops,
+it is marked unsynchronized, and nothing is copied. The sources are lost after 8 polls in a row
+with no answer, as NTP's reach register has a server gone: the clock is then no longer said to
+be synchronized here, to the kernel, or to those it serves, and the time-synced file goes. The
+rule against backward steps stays. Reporting never tells the kernel anything.
+
+**Not set is the normal state** after power-up on a board with no clock battery. Nothing refuses
+for want of time; the board says where it is:
+
+- the hello document's `clock` fact, `synced` or `unset` (`Node::clock`);
+- the announcement's `clock=` key, the same word, announced again within 2 s of a change;
+- a line in `orion/state`: `clock: synced from <source>`, or `clock: not set (sources tried:
+  ...; last: ...)`, with `time.sync = report;` first when the board only reports.
+
+None of them is there when `time.sync = off`.
 
 **Wrong sources** are passed over for the next in rank: any source whose time is before this
 build existed, and a fleet peer over a day behind or over 400 days past the last synchronized
@@ -1161,11 +1187,12 @@ board's name; what to connect to is in its SRV record and the host's addresses.
 | `level` | the additive level it speaks (`Welcomed::level`) |
 | `state` | `running` or `flasher` (recovery announces nothing) |
 | `security` | `on`, `off` or `damaged`, as the hello document says |
+| `clock` | `synced` or `unset`, as the hello document says; only when the time sync measures. Announced again when it changes |
 
 - **Keys are read by name, in any case, and a key a reader does not know is left.** A key added
   keeps `v`; `v` changes only when a key changes meaning. A reader of layout 2 that predates
   `level`, `state` and `security` reads the record whole and leaves those three.
-- **At most 465 bytes**: a 63-byte name, a 252-byte cluster and the longest values. The whole
+- **At most 478 bytes**: a 63-byte name, a 252-byte cluster and the longest values. The whole
   answer for `_orion._tcp` is about 800 bytes, in one packet.
 - **A cluster name longer than 252 bytes** is more than a TXT string carries. `_orion._tcp` is
   then not announced; the board's name and SSH still are. The log says so at start, naming

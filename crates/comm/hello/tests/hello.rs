@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use orion_broker::{Broker, BrokerConfig, NODE_FACTS};
 use orion_hello::{
-    BoardState, FACT_PREFIX, Hello as HelloService, MAX_FACT_BYTES, RECOVERY_WHY_FACT,
+    BoardState, CLOCK_FACT, FACT_PREFIX, Hello as HelloService, MAX_FACT_BYTES, RECOVERY_WHY_FACT,
     SECURITY_FACT, SECURITY_GENERATION_FACT, STATE_FACT, SharedState, verify,
 };
 use orion_keys::{Identity as Key, Keys, KeysConfig, SharedKeys, random};
@@ -40,13 +40,18 @@ fn board(security: Security) -> (SharedKeys, MemConnector) {
 }
 
 fn board_in(security: Security) -> (SharedKeys, MemConnector, SharedState) {
-    board_told(security, None)
+    board_told(security, None, None)
 }
 
-/// A board whose hello says its security record as `view`, if given.
+/// The word a board's clock has, set by a test.
+type ClockWord = Rc<std::cell::Cell<Option<&'static str>>>;
+
+/// A board whose hello says its security record as `view`, if given, and its clock as `clock`
+/// has it, if given.
 fn board_told(
     security: Security,
     view: Option<&orion_config::SecurityView>,
+    clock: Option<ClockWord>,
 ) -> (SharedKeys, MemConnector, SharedState) {
     let keys = SharedKeys::new(Keys::open(KeysConfig::in_memory("lab"), security).expect("keys"));
     let node: orion_types::NodeName = "board".parse().expect("name");
@@ -60,6 +65,9 @@ fn board_told(
     let mut hello = HelloService::new(node, keys.clone(), Some(broker.topics()));
     if let Some(view) = view {
         hello = hello.with_security(view);
+    }
+    if let Some(clock) = clock {
+        hello = hello.with_clock(move || clock.get());
     }
     let state = hello.state();
     comm.add_service(hello);
@@ -258,6 +266,7 @@ fn the_broker_reserves_the_names_of_the_nodes_own_facts() {
             format!("{FACT_PREFIX}{RECOVERY_WHY_FACT}").as_str(),
             format!("{FACT_PREFIX}{SECURITY_FACT}").as_str(),
             format!("{FACT_PREFIX}{SECURITY_GENERATION_FACT}").as_str(),
+            format!("{FACT_PREFIX}{CLOCK_FACT}").as_str(),
         ]
     );
 }
@@ -501,7 +510,7 @@ fn the_document_says_the_boards_security_switch_as_its_record_has_it() {
         }
         let view = orion_config::SecurityView::read(&record);
         run(async {
-            let (_keys, connector, _) = board_told(view.security, Some(&view));
+            let (_keys, connector, _) = board_told(view.security, Some(&view), None);
             let mut tool =
                 Client::open(connector.connect_without_descriptors(Principal::Anonymous)).await;
             let nonce: [u8; 32] = random();
@@ -514,4 +523,40 @@ fn the_document_says_the_boards_security_switch_as_its_record_has_it() {
             assert_eq!(facts, said, "{view}");
         });
     }
+}
+
+#[test]
+fn the_document_says_whether_the_boards_clock_is_set_as_it_is_when_asked() {
+    run(async {
+        let clock: ClockWord = Rc::new(std::cell::Cell::new(Some("unset")));
+        let (_keys, connector, _) = board_told(Security::Off, None, Some(clock.clone()));
+        let mut tool =
+            Client::open(connector.connect_without_descriptors(Principal::Anonymous)).await;
+        let text = FieldType::Text.code();
+        // After power-up on a board with no clock battery.
+        assert_eq!(
+            said(&mut tool).await,
+            [("clock".to_owned(), text, b"unset".to_vec())]
+        );
+        clock.set(Some("synced"));
+        assert_eq!(
+            said(&mut tool).await,
+            [("clock".to_owned(), text, b"synced".to_vec())]
+        );
+        // Nothing measured: nothing said.
+        clock.set(None);
+        assert_eq!(said(&mut tool).await, []);
+    });
+}
+
+/// The `clock` fact the board says now.
+async fn said(tool: &mut Client) -> Vec<(String, u8, Vec<u8>)> {
+    let nonce: [u8; 32] = random();
+    let payload = tool.identify(&nonce).await.to_vec();
+    let identity = verify(&payload, &nonce).expect("signed with the rest");
+    facts(&identity)
+        .into_iter()
+        .filter(|(name, _, _)| *name == CLOCK_FACT)
+        .map(|(name, ty, value)| (name.to_owned(), ty, value.to_vec()))
+        .collect()
 }

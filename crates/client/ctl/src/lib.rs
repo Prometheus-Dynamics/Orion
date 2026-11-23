@@ -263,6 +263,13 @@ fn node_time(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         "the board's clock is {:.3} ms {which} this computer's (round trip {delay_ms:.3} ms)",
         offset_ms.abs()
     )?;
+    if orion.node()?.clock() == Some("unset") {
+        writeln!(
+            out,
+            "the board says its clock is not set: `orion-ctl node offer-time` gives it this \
+             computer's"
+        )?;
+    }
     Ok(())
 }
 

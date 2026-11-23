@@ -203,6 +203,29 @@ impl Responder {
         });
     }
 
+    /// Gives the service of type `kind` the TXT strings `txt`. Changed, they are announced
+    /// again on every interface (RFC 6762 §8.4), once the names are its own.
+    pub fn retell(&mut self, kind: &str, txt: Vec<Vec<u8>>, now: Instant) {
+        let Some(service) = self
+            .announce
+            .services
+            .iter_mut()
+            .find(|service| service.kind == kind)
+        else {
+            return;
+        };
+        if service.txt == txt {
+            return;
+        }
+        service.txt = txt;
+        if self.up() {
+            let on: Vec<u32> = self.interfaces.iter().map(|i| i.index).collect();
+            for interface in on {
+                self.announce_on(interface, now);
+            }
+        }
+    }
+
     /// The name it has, or is probing for.
     #[must_use]
     pub fn name(&self) -> &str {

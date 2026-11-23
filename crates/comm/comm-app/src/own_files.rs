@@ -6,7 +6,8 @@
 //! - `orion/log`: the newest lines of the comm core's log (`log.window_bytes`);
 //! - `orion/settings`: what was set and where, the values of keys that may be secret left out;
 //! - `orion/last-good.carriers`: the record of the last good start, as recovery reads it;
-//! - `orion/state`: `running`, `flasher`, or `recovery` and why;
+//! - `orion/state`: `running`, `flasher`, or `recovery` and why, and the clock's state when the
+//!   time sync measures it (`clock: not set (sources tried: ...)`);
 //! - `orion/sessions`: who is connected, as what;
 //! - `orion/version`: this build, its interface revision and level, and a digest of its wire.
 
@@ -37,6 +38,7 @@ const VERSION_BYTES: u64 = 4 * 1024;
 pub(crate) fn running(
     comm: &Comm,
     settings: &CommSettings,
+    clock: Option<Line>,
 ) -> Result<FileOffersService, crate::StartError> {
     #[allow(unused_mut)]
     let mut state = format!("{}\n", settings.board_state.word());
@@ -44,7 +46,9 @@ pub(crate) fn running(
     if let Some(why) = crate::announce::withheld(settings) {
         state.push_str(&format!("mdns: {why}\n"));
     }
-    match OrionFiles::new(Some(settings), state).service(comm, Some(settings)) {
+    let mut files = OrionFiles::new(Some(settings), state);
+    files.clock = clock;
+    match files.service(comm, Some(settings)) {
         (service, None) => Ok(service),
         (_, Some(why)) => Err(crate::error::failed("offers.file", why)),
     }
@@ -66,6 +70,23 @@ pub(crate) fn in_recovery(
     service
 }
 
+/// A line of `orion/state` made when it is read: the clock's.
+pub(crate) struct Line(Box<dyn Fn() -> String>);
+
+impl Line {
+    /// The clock's line, as `view` has it when read.
+    #[cfg(feature = "time")]
+    pub(crate) fn clock(view: orion_time::TimeView) -> Self {
+        Self(Box::new(move || view.state_line()))
+    }
+}
+
+impl std::fmt::Debug for Line {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Line")
+    }
+}
+
 /// The comm core's own files.
 #[derive(Debug)]
 pub(crate) struct OrionFiles {
@@ -74,6 +95,8 @@ pub(crate) struct OrionFiles {
     settings: String,
     state_dir: PathBuf,
     state: String,
+    /// The clock's line, after the rest.
+    clock: Option<Line>,
 }
 
 impl OrionFiles {
@@ -94,6 +117,7 @@ impl OrionFiles {
                 |settings| settings.config.state_dir.clone(),
             ),
             state,
+            clock: None,
         }
     }
 
@@ -152,7 +176,10 @@ impl OwnFiles for OrionFiles {
                     Reading::Now,
                 );
             }
-            "state" => self.state.clone(),
+            "state" => match &self.clock {
+                Some(line) => format!("{}{}", self.state, (line.0)()),
+                None => self.state.clone(),
+            },
             "sessions" => sessions_text(sessions),
             "version" => version_text(),
             _ => return Reading::Not(format!("{name}: no such file")),

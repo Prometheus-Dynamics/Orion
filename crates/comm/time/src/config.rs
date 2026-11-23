@@ -9,6 +9,7 @@ use orion_config::{ConfigError, Source};
 use crate::operator::OPERATOR_SOURCE;
 
 const DEFAULT_SYNCED_FILE: &str = "/run/orion/time-synced";
+const DEFAULT_RTC: &str = "/sys/class/rtc/rtc0/since_epoch";
 /// Another Orion node over UDP. `tcp://` is always one: only Orion answers SNTP over TCP.
 pub(crate) const PEER_SCHEME: &str = "peer://";
 pub(crate) const TCP_SCHEME: &str = "tcp://";
@@ -45,6 +46,9 @@ pub struct TimeConfig {
     /// `time.synced_file`: exists while the clock is disciplined and synchronized. `off` for
     /// none.
     pub synced_file: Option<PathBuf>,
+    /// `time.rtc`: the hardware clock's seconds since 1970, read once at start as a floor the
+    /// clock is moved forward to. `off` for none.
+    pub rtc: Option<PathBuf>,
 }
 
 impl Default for TimeConfig {
@@ -57,6 +61,7 @@ impl Default for TimeConfig {
             min_poll: Duration::from_secs(64),
             max_poll: Duration::from_secs(1024),
             synced_file: Some(PathBuf::from(DEFAULT_SYNCED_FILE)),
+            rtc: Some(PathBuf::from(DEFAULT_RTC)),
         }
     }
 }
@@ -135,6 +140,11 @@ impl TimeConfig {
             Some(path) if !path.is_empty() => Some(PathBuf::from(path)),
             _ => default.synced_file,
         };
+        let rtc = match source.text("time.rtc") {
+            Some("off") => None,
+            Some(path) if !path.is_empty() => Some(PathBuf::from(path)),
+            _ => default.rtc,
+        };
         Ok(Self {
             mode,
             servers,
@@ -143,6 +153,7 @@ impl TimeConfig {
             min_poll,
             max_poll,
             synced_file,
+            rtc,
         })
     }
 
@@ -171,7 +182,7 @@ mod tests {
     #[test]
     fn sources_get_the_ntp_port_unless_they_name_one() {
         let config = parse(
-            "time.sync = report\ntime.servers = operator, pool.example.org, peer://10.0.0.2, tcp://10.0.0.2:4123, [fe80::1]:99, fe80::1\ntime.serve = 0.0.0.0:4123\ntime.synced_file = off\n",
+            "time.sync = report\ntime.servers = operator, pool.example.org, peer://10.0.0.2, tcp://10.0.0.2:4123, [fe80::1]:99, fe80::1\ntime.serve = 0.0.0.0:4123\ntime.synced_file = off\ntime.rtc = off\n",
         )
         .expect("config");
         assert_eq!(config.mode, TimeMode::Report);
@@ -188,6 +199,7 @@ mod tests {
         );
         assert_eq!(config.serve, Some("0.0.0.0:4123".parse().expect("addr")));
         assert_eq!(config.synced_file, None);
+        assert_eq!(config.rtc, None);
         assert!(config.enabled());
     }
 

@@ -38,7 +38,7 @@ use orion_server::Comm;
 use shm_ring::{FieldId, SampleTime};
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{info, warn};
 
 pub use config::{TimeConfig, TimeMode};
 pub use discipline::{Clock, KernelClock};
@@ -157,13 +157,86 @@ impl StatusTopic {
     }
 }
 
+/// The longest `orion/state` line about the clock. Longer is cut.
+const MAX_LINE: usize = 1024;
+
+/// What others in the comm core say of the clock: the hello document's `clock` fact, the
+/// announcement's `clock=` key and `orion/state`'s `clock:` line.
+#[derive(Clone, Debug)]
+pub struct TimeView {
+    status: Rc<RefCell<TimeStatus>>,
+    servers: Rc<[String]>,
+    measuring: bool,
+}
+
+impl TimeView {
+    /// `synced` while this board's time sync holds the clock synchronized, `unset` otherwise:
+    /// after power-up on a board with no clock battery, the normal state until a source
+    /// answers. `None` when nothing is measured (`time.sync = off`).
+    #[must_use]
+    pub fn word(&self) -> Option<&'static str> {
+        self.measuring.then(|| {
+            if self.status.borrow().synced {
+                "synced"
+            } else {
+                "unset"
+            }
+        })
+    }
+
+    /// The `orion/state` line, ending in a newline, or nothing when nothing is measured.
+    #[must_use]
+    pub fn state_line(&self) -> String {
+        if !self.measuring {
+            return String::new();
+        }
+        let status = self.status.borrow();
+        let mut line = match (&status.source, status.synced) {
+            (Some(source), true) => format!("clock: synced from {source}"),
+            _ => {
+                let only = if status.mode == "report" {
+                    "time.sync = report; "
+                } else {
+                    ""
+                };
+                let last = match (&status.error, status.last_action) {
+                    (Some(error), _) => error.as_str(),
+                    (None, "none" | "") => "not asked yet",
+                    (None, action) => action,
+                };
+                format!(
+                    "clock: not set ({only}sources tried: {}; last: {last})",
+                    self.servers.join(", ")
+                )
+            }
+        };
+        if line.len() > MAX_LINE {
+            let mut end = MAX_LINE;
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            line.truncate(end);
+        }
+        line.push('\n');
+        line
+    }
+}
+
 /// The running time sync. Dropping it stops it.
 #[derive(Debug)]
 pub struct TimeSync {
     tasks: Vec<JoinHandle<()>>,
     synced_file: Option<PathBuf>,
-    status: Rc<RefCell<TimeStatus>>,
+    view: TimeView,
     serving: Option<std::net::SocketAddr>,
+    /// The clock to mark unsynchronized when this stops, if it was disciplined.
+    disciplined: Option<Rc<dyn Clock>>,
+}
+
+impl std::fmt::Debug for dyn Clock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Clock")
+    }
 }
 
 fn context(what: &str, addr: std::net::SocketAddr, error: &std::io::Error) -> std::io::Error {
@@ -259,6 +332,12 @@ impl TimeSync {
             )));
         }
         let status = Rc::new(RefCell::new(TimeStatus::default()));
+        let view = TimeView {
+            status: status.clone(),
+            servers: config.servers.clone().into(),
+            measuring: config.mode != TimeMode::Off,
+        };
+        let mut disciplined = None;
         if config.mode != TimeMode::Off {
             let mut topic = match topics {
                 Some(topics) => Some(StatusTopic {
@@ -290,7 +369,9 @@ impl TimeSync {
                 .first()
                 .is_some_and(|server| server == OPERATOR_SOURCE);
             let saved_time = state_dir.map(|dir| dir.join(SAVED_TIME_FILE));
-            let mut syncer = Syncer::new(config, clock, served, saved_time, timesyncd);
+            let mut syncer = Syncer::new(config, clock.clone(), served, saved_time, timesyncd);
+            status.borrow_mut().clone_from(&syncer.status);
+            disciplined = syncer.disciplining.then_some(clock);
             let (comm, operator, shared) = (comm.clone(), operator.clone(), status.clone());
             tasks.push(tokio::task::spawn_local(async move {
                 syncer.restore_saved_time();
@@ -319,8 +400,9 @@ impl TimeSync {
         Ok(Self {
             tasks,
             synced_file,
-            status,
+            view,
             serving,
+            disciplined,
         })
     }
 
@@ -333,7 +415,13 @@ impl TimeSync {
     /// What the sync knew after its last poll.
     #[must_use]
     pub fn status(&self) -> TimeStatus {
-        self.status.borrow().clone()
+        self.view.status.borrow().clone()
+    }
+
+    /// What others say of the clock, kept up to date while this runs.
+    #[must_use]
+    pub fn view(&self) -> TimeView {
+        self.view.clone()
     }
 }
 
@@ -343,5 +431,11 @@ impl Drop for TimeSync {
             task.abort();
         }
         remove_synced_file(self.synced_file.as_deref());
+        // Nothing keeps the clock now.
+        if let Some(clock) = &self.disciplined
+            && let Err(error) = clock.unsync()
+        {
+            warn!(%error, "could not tell the kernel the clock is not synchronized");
+        }
     }
 }

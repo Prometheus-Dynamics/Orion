@@ -548,6 +548,14 @@ what to change.
   operator is `operator <name>`, and `(key <8 hex>…)` (**Change**: was `operator`). An
   operator refused for want of a grant is told `denied: needs the grant <grant>` (**Change**:
   was `denied`; the code is the same). No wire changes; level 6.
+- **I81.** The hello fact `clock` (`synced`, `unset`) and `Node::clock` (**Add**); the broker
+  reserves `hello.clock`, so a program declaring it is refused (**Change**). The announcement's
+  `clock=` key, announced again within 2 s of a change; the record is at most 478 bytes, was 465, and
+  stays layout 2 (**Add**). `orion/state` gains a `clock:` line (**Add**). `time.rtc`
+  (**Add**). `Clock::unsync` on the time sync's clock trait, `TimeSync::view` and `TimeView`
+  (**Add**); `orion_mdns::run` takes a `Retell` and `OrionTxt` a `clock` (**Change**).
+  Disciplining, the kernel is told unsynchronized at start, after 8 unanswered polls, and on
+  stopping (**Change**). No wire kinds change; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

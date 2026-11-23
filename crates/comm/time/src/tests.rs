@@ -13,7 +13,7 @@ use crate::config::{TimeConfig, TimeMode};
 use crate::discipline::{Clock, implausible};
 use crate::operator::OperatorTime;
 use crate::sntp::{self, ServedClock};
-use crate::sync::{FIRST_POLL, SAVED_TIME_FILE, ServedState, Syncer, best_sample};
+use crate::sync::{FIRST_POLL, LOST_AFTER, SAVED_TIME_FILE, ServedState, Syncer, best_sample};
 
 const S: i64 = 1_000_000_000;
 
@@ -22,6 +22,7 @@ const S: i64 = 1_000_000_000;
 pub(crate) struct FakeClock {
     pub(crate) steps: RefCell<Vec<i64>>,
     pub(crate) slews: RefCell<Vec<i64>>,
+    pub(crate) unsyncs: std::cell::Cell<usize>,
 }
 
 impl Clock for FakeClock {
@@ -32,6 +33,11 @@ impl Clock for FakeClock {
 
     fn slew(&self, offset_ns: i64, _max_error_ns: i64) -> std::io::Result<()> {
         self.slews.borrow_mut().push(offset_ns);
+        Ok(())
+    }
+
+    fn unsync(&self) -> std::io::Result<()> {
+        self.unsyncs.set(self.unsyncs.get() + 1);
         Ok(())
     }
 }
@@ -53,6 +59,7 @@ fn config(mode: TimeMode, servers: Vec<String>) -> TimeConfig {
         mode,
         servers,
         synced_file: None,
+        rtc: None,
         ..TimeConfig::default()
     }
 }
@@ -306,4 +313,143 @@ fn a_clock_this_board_synchronized_is_served_one_stratum_down() {
     )));
     assert_eq!(served.served(false), ServedClock::Synced(3));
     assert_eq!(served.served(true), ServedClock::Synced(3));
+}
+
+#[test]
+fn a_clock_behind_the_hardware_clock_moves_forward_to_it_and_1970_is_no_floor() {
+    let dir = temp("rtc");
+    let rtc = dir.join("since_epoch");
+    let saved = dir.join(SAVED_TIME_FILE);
+    let now_s = (sntp::unix_now_ns() / 1_000_000_000) as i64;
+    let mut config = config(TimeMode::Discipline, vec!["127.0.0.1:9".to_owned()]);
+    config.rtc = Some(rtc.clone());
+    let clock = Rc::new(FakeClock::default());
+    let mut syncer = syncer(config, &clock, Some(saved.clone()), false);
+    // A hardware clock an hour ahead, and a saved time a minute ahead: the later one wins.
+    std::fs::write(&rtc, format!("{}\n", now_s + 3_600)).expect("write");
+    std::fs::write(&saved, ((now_s + 60) * 1000).to_string()).expect("write");
+    syncer.restore_saved_time();
+    let steps = clock.steps.borrow().clone();
+    assert_eq!(steps.len(), 1);
+    assert!((steps[0] / 1_000_000_000 - 3_600).abs() < 5, "{steps:?}");
+    // The saved time is still the anchor for peers, not the hardware clock.
+    assert_eq!(syncer.saved_ms, Some((now_s + 60) * 1000));
+    // After power-up with no battery: 1970, no floor; the saved time is used.
+    std::fs::write(&rtc, "4\n").expect("write");
+    syncer.restore_saved_time();
+    let steps = clock.steps.borrow().clone();
+    assert_eq!(steps.len(), 2);
+    assert!((steps[1] / 1_000_000_000 - 60).abs() < 5, "{steps:?}");
+    // Neither ahead: nothing moves.
+    std::fs::remove_file(&saved).expect("remove");
+    syncer.restore_saved_time();
+    assert_eq!(clock.steps.borrow().len(), 2);
+}
+
+#[test]
+fn the_kernel_hears_unsynchronized_at_start_and_when_the_sources_go_quiet() {
+    let served = ServedState::default();
+    let clock = Rc::new(FakeClock::default());
+    let mut syncer = Syncer::new(
+        config(TimeMode::Discipline, vec!["127.0.0.1:9".to_owned()]),
+        clock.clone(),
+        served.clone(),
+        None,
+        false,
+    );
+    // What a run before this one left is not believed.
+    syncer.restore_saved_time();
+    assert_eq!(clock.unsyncs.get(), 1);
+    let sample = sntp::Sample {
+        offset_ns: 1_000,
+        delay_ns: 1_000,
+        stratum: 2,
+    };
+    syncer.apply(Ok(("a".to_owned(), sample)));
+    assert!(syncer.status.synced);
+    for _ in 1..LOST_AFTER {
+        syncer.apply(Err("no server answered".to_owned()));
+    }
+    assert!(syncer.status.synced, "a few quiet polls are not a loss");
+    assert_eq!(clock.unsyncs.get(), 1);
+    assert_eq!(served.served(true), ServedClock::Synced(3));
+    syncer.apply(Err("no server answered".to_owned()));
+    assert!(!syncer.status.synced);
+    assert_eq!(syncer.status.last_action, "lost its sources");
+    assert_eq!(clock.unsyncs.get(), 2);
+    // Served as unsynchronized: a board serving as the authority is that again.
+    assert_eq!(served.served(true), ServedClock::Authority);
+    // More quiet polls tell the kernel nothing more; an answer syncs again.
+    syncer.apply(Err("no server answered".to_owned()));
+    assert_eq!(clock.unsyncs.get(), 2);
+    syncer.apply(Ok(("a".to_owned(), sample)));
+    assert!(syncer.status.synced);
+    assert_eq!(clock.slews.borrow().len(), 2);
+}
+
+#[test]
+fn reporting_never_tells_the_kernel_anything() {
+    let clock = Rc::new(FakeClock::default());
+    let mut syncer = syncer(
+        config(TimeMode::Report, vec!["127.0.0.1:9".to_owned()]),
+        &clock,
+        None,
+        false,
+    );
+    syncer.restore_saved_time();
+    for _ in 0..=LOST_AFTER {
+        syncer.apply(Err("no server answered".to_owned()));
+    }
+    assert_eq!(clock.unsyncs.get(), 0);
+}
+
+#[test]
+fn what_others_say_of_the_clock() {
+    let status = Rc::new(std::cell::RefCell::new(crate::TimeStatus {
+        mode: "discipline",
+        last_action: "none",
+        error: Some("10.0.0.1:123: no answer".to_owned()),
+        ..crate::TimeStatus::default()
+    }));
+    let view = crate::TimeView {
+        status: status.clone(),
+        servers: vec!["operator".to_owned(), "10.0.0.1:123".to_owned()].into(),
+        measuring: true,
+    };
+    assert_eq!(view.word(), Some("unset"));
+    assert_eq!(
+        view.state_line(),
+        "clock: not set (sources tried: operator, 10.0.0.1:123; last: 10.0.0.1:123: no answer)\n"
+    );
+    {
+        let mut status = status.borrow_mut();
+        status.synced = true;
+        status.source = Some("10.0.0.1:123".to_owned());
+        status.error = None;
+    }
+    assert_eq!(view.word(), Some("synced"));
+    assert_eq!(view.state_line(), "clock: synced from 10.0.0.1:123\n");
+    status.borrow_mut().mode = "report";
+    status.borrow_mut().synced = false;
+    assert!(
+        view.state_line()
+            .starts_with("clock: not set (time.sync = report; sources tried: operator, "),
+        "{}",
+        view.state_line()
+    );
+    let off = crate::TimeView {
+        measuring: false,
+        ..view.clone()
+    };
+    assert_eq!(off.word(), None);
+    // Before the first poll.
+    status.borrow_mut().error = None;
+    status.borrow_mut().last_action = "none";
+    let fresh = view;
+    assert!(
+        fresh.state_line().ends_with("; last: not asked yet)\n"),
+        "{}",
+        fresh.state_line()
+    );
+    assert_eq!(off.state_line(), "");
 }

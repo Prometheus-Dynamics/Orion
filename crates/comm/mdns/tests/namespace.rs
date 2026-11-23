@@ -7,12 +7,14 @@
 //! taking packets from the other's (`accept_local`), and a dummy, `mdc`. Where that cannot be
 //! done it says so and passes, unless `NAMESPACE_TESTS=required` is set, as the gate sets it.
 
+use std::cell::RefCell;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::process::{Command, Stdio};
+use std::rc::Rc;
 use std::time::Duration;
 
 use orion_mdns::packet::{A, Data, IN, Message, Name, PTR, Question, SRV, TXT};
-use orion_mdns::{Announce, GROUP, Named, ORION, PORT, Reach, SSH, Service, Settings};
+use orion_mdns::{Announce, GROUP, Named, ORION, PORT, Reach, Retell, SSH, Service, Settings};
 use rustix::net::sockopt;
 use tokio::net::UdpSocket;
 use tokio::sync::oneshot;
@@ -163,10 +165,16 @@ async fn scenario() {
     };
     let a = Named::default();
     let (stop_a, stopped_a) = oneshot::channel::<()>();
+    let retold: Rc<RefCell<Option<Vec<Vec<u8>>>>> = Rc::default();
+    let asked = retold.clone();
     let a_ran = tokio::task::spawn_local(orion_mdns::run(
         announce("aaaa"),
         only("mda"),
         a.clone(),
+        Some(Retell {
+            kind: ORION,
+            txt: Box::new(move || asked.borrow_mut().take()),
+        }),
         async move {
             let _ = stopped_a.await;
         },
@@ -186,6 +194,23 @@ async fn scenario() {
     assert!(browse.answers.iter().any(|r| r.data.kind() == PTR));
     assert!(browse.additional.iter().any(|r| r.data.kind() == SRV));
     assert!(browse.additional.iter().any(|r| r.data.kind() == TXT));
+    // Its TXT strings changed (the clock set): a browse after says the new ones.
+    let set = vec![b"v=2".to_vec(), b"clock=synced".to_vec()];
+    *retold.borrow_mut() = Some(set.clone());
+    sleep(orion_mdns::FOLLOW + Duration::from_millis(200)).await;
+    let browse = answered(
+        "mdb",
+        &question("_orion._tcp.local", PTR),
+        Duration::from_secs(3),
+    )
+    .await;
+    assert!(
+        browse
+            .additional
+            .iter()
+            .any(|r| matches!(&r.data, Data::Txt(t) if *t == set)),
+        "{browse:?}"
+    );
     // On an interface it was not given, nothing: even with another there in the group, which
     // has the kernel take the group's packets on that interface (and hand them to any socket
     // in the group that is not kept to its own).
@@ -200,6 +225,7 @@ async fn scenario() {
         announce("bbbb"),
         only("mdb"),
         b.clone(),
+        None,
         async move {
             let _ = stopped_b.await;
         },
