@@ -252,6 +252,11 @@ frame that are its own, and whoever is waiting on the session pumps it: every fr
 goes to the part it belongs to, so a part waiting for its answer never loses another part's
 frame. A refusal is kept until whoever sent the request asks for it.
 
+**One handle for each part on a session.** A frame goes to the first part that has its kind,
+so a second handle for the same part (a second `Files`, `Records` or `Topics` made on one
+`Client`) hears nothing. `Client::add` says so once, on standard error, naming the kinds. The
+handles `Orion` gives (`orion.files()`, `orion.records()` and the rest) are one each.
+
 A client is one thread's. A program that talks to the comm core from several threads opens a
 session in each; sessions are cheap.
 
@@ -542,6 +547,10 @@ hands it a `Begin` (answer with how many bytes of that transfer it already has),
 `Chunk`, then `Commit`; it answers each with `sink.status(transfer, received, state, detail)`.
 Its answers pace the sender, so it is never handed more than a few chunks ahead of what it has
 answered for.
+
+One session can hold several prefixes: each `files.sink(prefix)` gives a receiver of its own,
+and each is handed only the files under its prefix (the longest, where two match), as the node
+chooses. A prefix another session holds is refused as `already exists`.
 
 **Files from a board.** A program on the board offers the files under a prefix, and a client
 anywhere fetches one by name; the comm core hands each fetch to the program offering the longest

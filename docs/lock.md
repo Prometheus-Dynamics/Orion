@@ -530,6 +530,10 @@ what to change.
   `CommCore::mdns_name` and `MdnsDiscoveryBackend::browse_only` (**Add**); with the responder
   built in, discovery browses only. `orion/state` gains an `mdns:` line when `_orion._tcp` is
   withheld. No wire changes; level 6.
+- **I78.** Several `files.sink(prefix)` on one session each get the files under their own
+  prefix (**Change**: before, the first was handed the files of all of them). `Client::add` says
+  once on standard error when a part is added for kinds another already has. No API change, no
+  wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

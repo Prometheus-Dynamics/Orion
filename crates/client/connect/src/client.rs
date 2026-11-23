@@ -43,6 +43,8 @@ pub(crate) struct Inner {
     /// Whether [`Client::node_key`] waits for the node's answer to Identify, and the answer.
     pub(crate) asking: Cell<bool>,
     pub(crate) identity: RefCell<Option<Vec<u8>>>,
+    /// Whether a handler added for kinds another has was warned of.
+    warned: Cell<bool>,
 }
 
 /// One session, shared. Cloning gives another handle on the same one.
@@ -69,12 +71,23 @@ impl Client {
             next_refusal: Cell::new(0),
             asking: Cell::new(false),
             identity: RefCell::new(None),
+            warned: Cell::new(false),
         }))
     }
 
     /// Registers the part that owns some kinds of frame. Not from inside a handler.
+    ///
+    /// **One handle for each part on a session.** A frame goes to the first part that has its
+    /// kind, so a second handle for the same part (a second `Files`, `Records` or `Topics` on
+    /// one client) hears nothing. The first time a part is added for kinds another already
+    /// has, it is said once, on standard error, naming the kinds.
     pub fn add(&self, handler: Rc<RefCell<dyn Handler>>) {
-        self.0.handlers.borrow_mut().push(handler);
+        let mut handlers = self.0.handlers.borrow_mut();
+        if let Some(said) = warning(&handlers, handler.borrow().kinds(), &self.0.warned) {
+            // Written whole, without formatting: the C library carries this too.
+            let _ = std::io::Write::write_all(&mut std::io::stderr(), &said);
+        }
+        handlers.push(handler);
     }
 
     /// Sends `body` and returns the sequence number it went with. Not from inside a handler,
@@ -225,5 +238,90 @@ impl Client {
     /// Does something with the session itself. Not from inside a handler.
     pub fn session<R>(&self, with: impl FnOnce(&mut Session) -> R) -> R {
         with(&mut self.0.session.borrow_mut())
+    }
+}
+
+/// What to say of a part added for `kinds` beside `handlers`: once for a session, as `warned`
+/// keeps, and only if another part already has some of them. The kinds are named by number,
+/// as `orion_wire::kind` lists them: their names would bring the wire's whole table of kinds
+/// into every program, the C library's too.
+fn warning(
+    handlers: &[Rc<RefCell<dyn Handler>>],
+    kinds: &[u8],
+    warned: &Cell<bool>,
+) -> Option<Vec<u8>> {
+    let taken = shadowed(handlers, kinds);
+    if taken.is_empty() || warned.replace(true) {
+        return None;
+    }
+    let mut said = b"orion: a second handle on this session for kinds".to_vec();
+    for kind in taken {
+        let hex = |digit: u8| b"0123456789abcdef"[usize::from(digit)];
+        said.extend_from_slice(&[b' ', b'0', b'x', hex(kind >> 4), hex(kind & 15)]);
+    }
+    said.extend_from_slice(
+        b" will hear nothing: those frames go to the first. Keep one handle for each part on \
+          a session.\n",
+    );
+    Some(said)
+}
+
+/// The kinds in `kinds` that a handler in `handlers` already has.
+fn shadowed(handlers: &[Rc<RefCell<dyn Handler>>], kinds: &[u8]) -> Vec<u8> {
+    kinds
+        .iter()
+        .copied()
+        .filter(|kind| {
+            handlers.iter().any(|known| {
+                known
+                    .try_borrow()
+                    .is_ok_and(|known| known.kinds().contains(kind))
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Part(&'static [u8]);
+
+    impl Handler for Part {
+        fn kinds(&self) -> &'static [u8] {
+            self.0
+        }
+
+        fn handle(&mut self, _: &Incoming<'_>, _: &mut Cx<'_>) -> Result<(), ClientError> {
+            Ok(())
+        }
+    }
+
+    fn part(kinds: &'static [u8]) -> Rc<RefCell<dyn Handler>> {
+        Rc::new(RefCell::new(Part(kinds)))
+    }
+
+    #[test]
+    fn a_part_added_for_kinds_another_has_is_told_by_their_numbers() {
+        let first = [part(&[kind::FILE_STATUS, kind::FILE_SINK_READY])];
+        assert_eq!(
+            shadowed(&first, &[kind::FILE_SINK_READY, kind::FILE_BEGIN]),
+            [kind::FILE_SINK_READY]
+        );
+        assert!(shadowed(&first, &[kind::PUT]).is_empty());
+        assert!(shadowed(&[], &[kind::FILE_STATUS]).is_empty());
+
+        // Said once for a session, naming the kinds, and only when some are taken.
+        let warned = Cell::new(false);
+        assert_eq!(warning(&first, &[kind::PUT], &warned), None);
+        let said = warning(&first, &[kind::FILE_STATUS, kind::FILE_SINK_READY], &warned);
+        let said = String::from_utf8(said.expect("said")).expect("text");
+        let named = format!(
+            "for kinds 0x{:02x} 0x{:02x} will hear nothing",
+            kind::FILE_STATUS,
+            kind::FILE_SINK_READY
+        );
+        assert!(said.contains(&named) && said.ends_with(".\n"), "{said}");
+        assert_eq!(warning(&first, &[kind::FILE_STATUS], &warned), None);
     }
 }

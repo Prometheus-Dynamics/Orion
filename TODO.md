@@ -264,6 +264,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I75](docs/prs/I75.md) Node logic can be left deaf to some record gets, for a test of a caller's bound (wave 19; needs I74)
 - [x] [I76](docs/prs/I76.md) The image's roots, fetched, pushed, listed and changed over the Orion session (wave 19; needs I75)
 - [x] [I77](docs/prs/I77.md) The board announced by name on the local network, over mDNS (wave 19; needs I76)
+- [x] [I78](docs/prs/I78.md) Several receivers of files on one session, each handed its own (wave 19; needs I77)
 
 ## J. The stack around Orion
 

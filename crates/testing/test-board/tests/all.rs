@@ -5,3 +5,5 @@
 mod board;
 #[path = "roots.rs"]
 mod roots;
+#[path = "sinks.rs"]
+mod sinks;

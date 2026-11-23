@@ -138,11 +138,42 @@ pub enum Handed {
     },
 }
 
+/// The receivers of one session: one part hears for all of them, and hands each what is its.
 #[derive(Default)]
 struct SinkState {
     /// The `seq` of each request to be a receiver that has been answered.
     ready: Vec<u16>,
-    handed: VecDeque<Handed>,
+    /// Each receiver's prefix and what it has been handed, in the order they were made.
+    sinks: Vec<(String, VecDeque<Handed>)>,
+    /// The receiver of each transfer begun and not yet committed.
+    transfers: Vec<(u64, usize)>,
+}
+
+impl SinkState {
+    /// The receiver of `destination`: the one with the longest prefix it starts with, as the
+    /// node chooses, or the first.
+    fn of_destination(&self, destination: &str) -> usize {
+        self.sinks
+            .iter()
+            .enumerate()
+            .filter(|(_, (prefix, _))| destination.starts_with(prefix.as_str()))
+            .max_by_key(|(_, (prefix, _))| prefix.len())
+            .map_or(0, |(at, _)| at)
+    }
+
+    /// The receiver of `transfer`: the one it began with, or the first.
+    fn of_transfer(&self, transfer: u64) -> usize {
+        self.transfers
+            .iter()
+            .find(|(known, _)| *known == transfer)
+            .map_or(0, |(_, at)| *at)
+    }
+
+    fn hand(&mut self, at: usize, handed: Handed) {
+        if let Some((_, queue)) = self.sinks.get_mut(at) {
+            queue.push_back(handed);
+        }
+    }
 }
 
 impl Handler for SinkState {
@@ -163,26 +194,42 @@ impl Handler for SinkState {
             }
             kind::FILE_BEGIN => {
                 let begin: FileBegin = frame.body()?;
-                self.handed.push_back(Handed::Begin {
-                    transfer: begin.transfer,
-                    destination: begin.destination.to_string(),
-                    size: begin.size,
-                    digest: begin.digest,
-                });
+                let at = self.of_destination(begin.destination.as_str());
+                self.transfers.retain(|(known, _)| *known != begin.transfer);
+                self.transfers.push((begin.transfer, at));
+                self.hand(
+                    at,
+                    Handed::Begin {
+                        transfer: begin.transfer,
+                        destination: begin.destination.to_string(),
+                        size: begin.size,
+                        digest: begin.digest,
+                    },
+                );
             }
             kind::FILE_CHUNK => {
                 let chunk: FileChunk<'_> = frame.body()?;
-                self.handed.push_back(Handed::Chunk {
-                    transfer: chunk.transfer,
-                    offset: chunk.offset,
-                    data: chunk.data.0.to_vec(),
-                });
+                let at = self.of_transfer(chunk.transfer);
+                self.hand(
+                    at,
+                    Handed::Chunk {
+                        transfer: chunk.transfer,
+                        offset: chunk.offset,
+                        data: chunk.data.0.to_vec(),
+                    },
+                );
             }
             _ => {
                 let commit: FileCommit = frame.body()?;
-                self.handed.push_back(Handed::Commit {
-                    transfer: commit.transfer,
-                });
+                let at = self.of_transfer(commit.transfer);
+                self.transfers
+                    .retain(|(known, _)| *known != commit.transfer);
+                self.hand(
+                    at,
+                    Handed::Commit {
+                        transfer: commit.transfer,
+                    },
+                );
             }
         }
         Ok(())
@@ -196,6 +243,8 @@ impl Handler for SinkState {
 pub struct Sink {
     client: Client,
     state: Rc<RefCell<SinkState>>,
+    /// Which of the session's receivers this is.
+    at: usize,
 }
 
 impl fmt::Debug for Sink {
@@ -213,7 +262,13 @@ impl Sink {
     pub fn next(&mut self, wait: Duration) -> Result<Option<Handed>, ClientError> {
         let deadline = Instant::now() + wait;
         loop {
-            if let Some(handed) = self.state.borrow_mut().handed.pop_front() {
+            let next = self
+                .state
+                .borrow_mut()
+                .sinks
+                .get_mut(self.at)
+                .and_then(|(_, queue)| queue.pop_front());
+            if let Some(handed) = next {
                 return Ok(Some(handed));
             }
             let left = deadline.saturating_duration_since(Instant::now());
@@ -313,6 +368,9 @@ pub struct Files {
     hearing: Rc<Cell<bool>>,
     /// The number the next fetch is given, but for its top bit.
     next_fetch: Rc<Cell<u64>>,
+    /// The receivers of this session, and whether they are heard for yet.
+    sinks: Rc<RefCell<SinkState>>,
+    sinking: Rc<Cell<bool>>,
 }
 
 impl fmt::Debug for Files {
@@ -339,6 +397,8 @@ impl Files {
             fetches,
             hearing: Rc::new(Cell::new(false)),
             next_fetch: Rc::new(Cell::new(start)),
+            sinks: Rc::new(RefCell::new(SinkState::default())),
+            sinking: Rc::new(Cell::new(false)),
         }
     }
 
@@ -347,18 +407,35 @@ impl Files {
     /// # Errors
     ///
     /// If the board refuses: another program receives that prefix, or this one may not.
+    ///
+    /// A session may be the receiver of several prefixes: each [`Sink`] is handed the files
+    /// whose destination's longest prefix is its own, as the board chooses.
     pub fn sink(&self, prefix: &str) -> Result<Sink, ClientError> {
-        let state = Rc::new(RefCell::new(SinkState::default()));
-        self.client.add(state.clone());
+        let state = self.sinks.clone();
+        if !self.sinking.replace(true) {
+            self.client.add(state.clone());
+        }
         let seq = self.client.send(&FileSink {
             prefix,
             max_chunk: 0,
         })?;
         self.client
             .answered(seq, || state.borrow().ready.contains(&seq))?;
+        let at = {
+            let mut sinks = state.borrow_mut();
+            // Asked again for a prefix it has: the same receiver.
+            match sinks.sinks.iter().position(|(known, _)| known == prefix) {
+                Some(at) => at,
+                None => {
+                    sinks.sinks.push((prefix.to_owned(), VecDeque::new()));
+                    sinks.sinks.len() - 1
+                }
+            }
+        };
         Ok(Sink {
             client: self.client.clone(),
             state,
+            at,
         })
     }
 
