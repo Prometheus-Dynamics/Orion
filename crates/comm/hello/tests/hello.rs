@@ -414,11 +414,14 @@ fn a_fact_of_up_to_the_limit_is_carried_and_a_longer_one_is_left_out_and_logged_
             );
         }
 
-        // Asked twice, the log says once which fact was left out, its size and the limit.
+        // Asked twice, the log says once which fact was left out, its size and the limit. The
+        // log is the process's: only what it says of this test's own facts is looked at.
         let log = String::from_utf8(log.read()).expect("text");
+        let own = ["hello.at_limit", "hello.over", "hello.offers"];
         let said: Vec<&str> = log
             .lines()
             .filter(|line| line.contains("left out of the hello"))
+            .filter(|line| own.iter().any(|fact| line.contains(&format!(" {fact}: "))))
             .collect();
         assert_eq!(
             said,

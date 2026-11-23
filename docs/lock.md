@@ -556,6 +556,7 @@ what to change.
   (**Add**); `orion_mdns::run` takes a `Retell` and `OrionTxt` a `clock` (**Change**).
   Disciplining, the kernel is told unsynchronized at start, after 8 unanswered polls, and on
   stopping (**Change**). No wire kinds change; level 6.
+- **I85.** A test only. No interface changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
