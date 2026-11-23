@@ -212,9 +212,18 @@ pub struct Sessions {
     pub(crate) limits: Limits,
     scratch: Vec<u8>,
     payload: Vec<u8>,
+    /// Requests that made a service panic: each cost its session, and no other.
+    panics: u64,
 }
 
 impl Sessions {
+    /// How many requests have made a service panic since the comm core started. Each was
+    /// contained: its session was dropped and the rest went on.
+    #[must_use]
+    pub const fn panics(&self) -> u64 {
+        self.panics
+    }
+
     /// How much may wait to be sent to one session (`comm.outbox_bytes`): a service that
     /// passes a stream on keeps what it has on the way under it.
     #[must_use]
@@ -230,6 +239,7 @@ impl Sessions {
             limits,
             scratch: vec![0; limits.max_frame as usize + 8],
             payload: Vec::new(),
+            panics: 0,
         }
     }
 
@@ -446,6 +456,9 @@ impl Sessions {
 
     /// Notes why `session` is being ended, unless a reason was given already.
     pub(crate) fn dropped(&mut self, session: SessionId, why: Dropped) {
+        if why == Dropped::Panicked {
+            self.panics += 1;
+        }
         if let Some(entry) = self.entry_mut(session) {
             entry.why.get_or_insert(why);
         }

@@ -133,7 +133,7 @@ fn a_running_comm_core_offers_its_own_files_with_secrets_left_out() {
             "{said}"
         );
         assert!(!said.contains("very-secret-key"), "{said}");
-        assert_eq!(fetched[2], "running\n");
+        assert_eq!(fetched[2], "running\npanics contained: 0\n");
         assert!(fetched[3].contains(" collector local:"), "{}", fetched[3]);
         assert!(
             fetched[4].contains(&format!(
@@ -218,7 +218,10 @@ fn recovery_offers_the_comm_core_s_own_files_and_says_why() {
             &["orion/state", "orion/settings", "orion/last-good.carriers"],
         )
         .await;
-        assert_eq!(fetched[0], "recovery\nwhy: the broker would not start\n");
+        assert_eq!(
+            fetched[0],
+            "recovery\nwhy: the broker would not start\npanics contained: 0\n"
+        );
         assert!(
             fetched[1].contains("ssh.host_key = (left out)"),
             "{}",
@@ -251,7 +254,8 @@ fn a_cluster_too_long_to_announce_is_said_in_the_state() {
         assert_eq!(
             fetched[0],
             "running\nmdns: setting `cluster` is 253 bytes, and an announcement carries 252 at \
-             most: `_orion._tcp` is not announced; the board's name and SSH still are\n"
+             most: `_orion._tcp` is not announced; the board's name and SSH still are\n\
+             panics contained: 0\n"
         );
         // A responder would have claimed its name by now: none was started.
         tokio::time::sleep(Duration::from_millis(1500)).await;
@@ -334,7 +338,7 @@ fn settings_nothing_reads_are_said_in_the_state_and_the_hello() {
         let (fetched, _) = fetch(core.socket(), &["orion/state"]).await;
         assert_eq!(
             fetched[0],
-            "running\nsettings not read: topcis.max, ORION_TYPO\n"
+            "running\nsettings not read: topcis.max, ORION_TYPO\npanics contained: 0\n"
         );
         let socket = core.socket().to_owned();
         let said = tokio::task::spawn_blocking(move || {
@@ -354,7 +358,7 @@ fn settings_nothing_reads_are_said_in_the_state_and_the_hello() {
         let dir = temp("all-read");
         let core = CommCore::start(self::settings(&dir)).await.expect("start");
         let (fetched, _) = fetch(core.socket(), &["orion/state"]).await;
-        assert_eq!(fetched[0], "running\n");
+        assert_eq!(fetched[0], "running\npanics contained: 0\n");
         let socket = core.socket().to_owned();
         let said = tokio::task::spawn_blocking(move || {
             let orion = orion::Orion::connect(&Address::Local(socket), "tool").expect("connect");

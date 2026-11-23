@@ -329,6 +329,8 @@ fn a_session_that_misbehaves_cannot_stall_another() {
         let sent = flooding.await.expect("flooder");
         assert!(sent > 100, "{sent}");
         assert_eq!(board.comm.stats().panics, 1);
+        // And where a service reads it, to say it on the board.
+        assert_eq!(board.comm.with(|sessions, _| sessions.panics()), 1);
         assert_eq!(
             board.seen.borrow().closed.len(),
             3,

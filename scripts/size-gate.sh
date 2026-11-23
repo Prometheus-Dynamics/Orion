@@ -101,6 +101,12 @@ CAPI_HOST=740000
 # 40,000 for the whole clock row (docs/prs/I88.md has the table). The figure is a ratchet,
 # not the room there is: the slot the file ships in has room to spare. A limit is kept at
 # least 4,000 bytes above what was last measured: with less, a change of no source can trip it.
+# Asked three times and answered at I92 (docs/prs/I92.md): built with panic = "abort", orion
+# for a board is 876,064 bytes smaller (15.9%), orion-recovery 392,688 (14.2%), liborion_c.so
+# 28,352 (3.9%). Not taken: unwinding is what lets one request's panic cost one session and
+# not everyone's, and with security off anyone on the network can send that request. Not to
+# be asked again without something new. I92 also has what is in orion-recovery, by section
+# and crate, and what could come out: its margin is under 5,000 bytes.
 # The others as at C41, until they run on one; armv7 and riscv64 were not measured at I76 or
 # I77 and will be about as much larger at the next release's measurement:
 #                                   orion-recovery   orion

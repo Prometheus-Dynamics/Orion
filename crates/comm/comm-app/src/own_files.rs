@@ -8,7 +8,8 @@
 //! - `orion/last-good.carriers`: the record of the last good start, as recovery reads it;
 //! - `orion/state`: `running`, `flasher`, or `recovery` and why, and the clock's state when the
 //!   time sync measures it (`clock: not set (sources tried: ...)`), and the settings that
-//!   were given and are not read (`settings not read: a, b`);
+//!   were given and are not read (`settings not read: a, b`), and how many requests have
+//!   made a service panic and been contained (`panics contained: 0`);
 //! - `orion/sessions`: who is connected, as what;
 //! - `orion/version`: this build, its interface revision and level, and a digest of its wire.
 
@@ -188,10 +189,16 @@ impl OwnFiles for OrionFiles {
                     Reading::Now,
                 );
             }
-            "state" => match &self.clock {
-                Some(line) => format!("{}{}", self.state, (line.0)()),
-                None => self.state.clone(),
-            },
+            "state" => {
+                let clock = self.clock.as_ref().map(|line| (line.0)());
+                // Always said, none too: a board can be asked whether one ever was.
+                format!(
+                    "{}{}panics contained: {}\n",
+                    self.state,
+                    clock.unwrap_or_default(),
+                    sessions.panics()
+                )
+            }
             "sessions" => sessions_text(sessions),
             "version" => version_text(),
             _ => return Reading::Not(format!("{name}: no such file")),

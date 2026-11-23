@@ -595,6 +595,8 @@ what to change.
   nothing reads is logged as an error (**Change**: was a warning). A lease that cannot be read
   is refused `Busy` with words (**Change**: was bare). The gate refuses a target directory
   another worktree built in (`scripts/target-owner.sh`). No wire changes; level 6.
+- **I92.** `orion/state` always ends `panics contained: N` (**Add**). `Sessions::panics`
+  (**Add**). No wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
