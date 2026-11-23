@@ -582,6 +582,7 @@ what to change.
   (**Change**: write it with its port). No wire changes; level 6.
 - **I89.** The seven `shm-*` crates are pinned to the device library's `16a5c7d1`. No other
   package changes, and no shared-memory code changes. Nothing a program calls changes; level 6.
+- **I90.** The same, to `e199fcb9`. Nothing a program calls changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
