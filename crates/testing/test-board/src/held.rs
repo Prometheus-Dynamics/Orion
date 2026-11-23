@@ -28,7 +28,8 @@ pub struct HeldCommits {
 }
 
 impl HeldCommits {
-    /// How many commits it has answered so far, committed or rejected.
+    /// How many commits it has answered so far, committed or rejected: each is counted before
+    /// it is told, so a pusher that has heard its answer finds it counted.
     #[must_use]
     pub fn answered(&self) -> usize {
         self.answered.load(Ordering::Relaxed)
@@ -91,6 +92,9 @@ pub(crate) fn start(socket: &Path, prefix: &str, hold: Duration) -> HeldCommits 
             while !stopping.load(Ordering::Relaxed) {
                 let now = Instant::now();
                 for answer in due.extract_if(.., |answer| answer.at <= now) {
+                    // Counted before it is told: a pusher that hears it and asks how many were
+                    // answered finds this one among them.
+                    counting.fetch_add(1, Ordering::Relaxed);
                     let told = sink.status(
                         answer.transfer,
                         answer.received,
@@ -100,7 +104,6 @@ pub(crate) fn start(socket: &Path, prefix: &str, hold: Duration) -> HeldCommits 
                     if told.is_err() {
                         return;
                     }
-                    counting.fetch_add(1, Ordering::Relaxed);
                 }
                 let Ok(handed) = sink.next(Duration::from_millis(20)) else {
                     return;

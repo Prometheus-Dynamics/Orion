@@ -9,10 +9,11 @@ use orion_audit::{Audit, Entry, Who};
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_dial::Dialer;
 use orion_executors::Workloads;
+use orion_file_roots::Roots;
 use orion_file_store::Files;
 use orion_files_sink::Sinks;
 use orion_msg_actions::{Cancel, Claim, Register, Run, Target};
-use orion_msg_files::{FileBegin, FileCommit, FileStatus};
+use orion_msg_files::{FileBegin, FileCommit, FileFetch, FileStatus, FileTaken};
 use orion_msg_peers::PeerForgive;
 use orion_msg_records::{NodeRecord, Put, RecordClass, ResourceRecord};
 use orion_msg_session::{NodeAnswer, NodeGone, NodeQuiet, NodeRequest};
@@ -110,6 +111,8 @@ pub(crate) struct Logic {
     pub(crate) actions: Actions,
     pub(crate) files: Files,
     pub(crate) sinks: Sinks,
+    /// The image's roots, `roots/<name>/`.
+    pub(crate) roots: Roots,
     #[cfg(feature = "slow")]
     slow: std::sync::Arc<std::sync::atomic::AtomicU64>,
     #[cfg(feature = "slow")]
@@ -229,6 +232,7 @@ impl Logic {
             actions: Actions::new(node),
             files,
             sinks: Sinks::default(),
+            roots: Roots::new(Vec::new(), 0),
             #[cfg(feature = "slow")]
             unanswered,
             #[cfg(feature = "slow")]
@@ -329,6 +333,7 @@ impl Logic {
         self.actions.forget_sessions();
         self.forwards.forget_sessions();
         self.sinks.forget_sessions();
+        self.roots.gives.forget();
         self.sends.forget();
         self.workloads.forget_sessions(now);
         #[cfg(feature = "pull")]
@@ -444,11 +449,14 @@ impl Logic {
         } else if Sinks::KINDS.contains(&asked.kind) {
             self.sinks.request(asked, out)
         } else if Files::KINDS.contains(&asked.kind) {
-            // A file for a receiver goes straight to it. Any other is the store's.
-            match self.sinks.pass(asked, out) {
-                Ok(true) => Ok(()),
-                Ok(false) => self.files.request(asked, out),
-                Err(error) => Err(error),
+            // A file for a root is the root's, one for a receiver goes straight to it, and
+            // any other is the store's.
+            match self.roots.pass(asked, out) {
+                Ok(false) => match self.sinks.pass(asked, out) {
+                    Ok(false) => self.files.request(asked, out),
+                    passed => passed.map(|_| ()),
+                },
+                passed => passed.map(|_| ()),
             }
         } else if let Some(words) = self.lost_action(asked) {
             self.said = Some(words);
@@ -560,7 +568,13 @@ fn done(asked: &Asked<'_>) -> Option<(&'static str, String)> {
         }
         kind::ACTION_RUN => {
             let run: Run<'_> = asked.body().ok()?;
-            Some(("run", format!("{} {}", run.name, target(&run.target))))
+            let mut what = format!("{} {}", run.name, target(&run.target));
+            // What a run on the roots changes is said with it.
+            if orion_file_roots::actions::ours(run.name.as_str()) {
+                let args = String::from_utf8_lossy(&run.args.0[..run.args.0.len().min(300)]);
+                let _ = write!(what, " {args}");
+            }
+            Some(("run", what))
         }
         kind::ACTION_CANCEL => {
             let cancel: Cancel = asked.body().ok()?;
@@ -605,6 +619,9 @@ impl Handler for Logic {
             kind::ACTION_CLAIM,
             kind::ACTION_CANCEL,
             kind::FILE_STATUS,
+            kind::FILE_FETCH,
+            kind::FILE_TAKEN,
+            kind::FILE_OFFERED,
         ]
     }
 
@@ -615,6 +632,9 @@ impl Handler for Logic {
         match frame.kind() {
             kind::ACTION_CLAIM => {
                 let claim: Claim<'_> = frame.body()?;
+                if orion_file_roots::actions::ours(claim.name.as_str()) {
+                    return self.roots.claim(&claim, &mut Via::Cx(cx));
+                }
                 return self
                     .sends
                     .claim(&claim, &self.files, &self.sinks, now, &mut Via::Cx(cx));
@@ -627,6 +647,15 @@ impl Handler for Logic {
                 let status: FileStatus<'_> = frame.body()?;
                 return self.sends.status(&status, now, &mut Via::Cx(cx));
             }
+            kind::FILE_FETCH => {
+                let fetch: FileFetch<'_> = frame.body()?;
+                return self.roots.fetch(&fetch, &mut Via::Cx(cx));
+            }
+            kind::FILE_TAKEN => {
+                let taken: FileTaken<'_> = frame.body()?;
+                return self.roots.gives.taken(&taken, &mut Via::Cx(cx));
+            }
+            kind::FILE_OFFERED => return Ok(()),
             kind::NODE_QUIET => {
                 let quiet: NodeQuiet = frame.body()?;
                 self.records
@@ -654,6 +683,7 @@ impl Handler for Logic {
             self.records
                 .gone(gone.session, wall().as_millis() as u64, &mut through);
             self.files.gone(gone.session);
+            self.roots.gone(gone.session);
             self.forwards.gone(gone.session);
             self.peers.gone(
                 gone.session,

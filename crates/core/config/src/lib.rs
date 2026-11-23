@@ -248,6 +248,20 @@ impl Source {
             .collect()
     }
 
+    /// Every key under `prefix` (`files.root.`), as the rest of its name and its text, in the
+    /// order of their names, each marked as read. The rest is lowercased, with `_` for `.`.
+    pub fn prefixed(&mut self, prefix: &str) -> Vec<(String, String)> {
+        let prefix = canonical(prefix);
+        self.entries
+            .range_mut(prefix.clone()..)
+            .take_while(|(key, _)| key.starts_with(&prefix))
+            .map(|(key, entry)| {
+                entry.read = true;
+                (key[prefix.len()..].to_owned(), entry.value.clone())
+            })
+            .collect()
+    }
+
     /// A comma-separated list of network interface names (`usb0, eth0`), each as the kernel
     /// takes one: 1 to 15 bytes, with no `/` or space. A name said twice is refused.
     ///
@@ -455,6 +469,29 @@ mod tests {
         assert_eq!(config.peer_listen, None);
         assert!(config.peer_connect.is_empty());
         assert!(source.warnings().is_empty());
+    }
+
+    #[test]
+    fn keys_under_a_prefix_are_found_in_order_and_read() {
+        let text =
+            "files.root.logs = /var/log ro\nfiles.root.app = /data/app rw\nfiles.rooted = x\n";
+        let mut source =
+            Source::parse(text, env(&[("ORION_FILES_ROOT_CAL", "/data/cal rw")])).unwrap();
+        let found = source.prefixed("files.root.");
+        let found: Vec<(&str, &str)> = found
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("app", "/data/app rw"),
+                ("cal", "/data/cal rw"),
+                ("logs", "/var/log ro")
+            ]
+        );
+        let unread: Vec<String> = source.warnings().iter().map(|w| w.key.clone()).collect();
+        assert_eq!(unread, ["files.rooted"]);
     }
 
     #[test]

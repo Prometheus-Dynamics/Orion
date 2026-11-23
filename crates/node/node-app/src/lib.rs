@@ -74,6 +74,9 @@ pub struct NodeSettings {
     pub files_dir: PathBuf,
     /// `files.max_size`: the largest file taken, in bytes.
     pub files_max_size: u64,
+    /// `files.root.<name> = <directory> rw|ro`: the roots, one line each, which clients reach
+    /// as `roots/<name>/` ([`orion_file_roots`]). None unless the image names them.
+    pub roots: Vec<orion_file_roots::Root>,
     /// `comm.outbox_bytes`, the comm core's, and never above its default: how much may wait
     /// to be sent to a program that receives files, which node logic keeps chunks within.
     /// The smaller of the two, so that a setting changed while only one of the comm core and
@@ -133,6 +136,7 @@ impl NodeSettings {
             audit,
             files_dir,
             files_max_size: source.get("files.max_size", 16_u64 << 30)?,
+            roots: orion_file_roots::from_source(source)?,
             outbox_bytes: source
                 .get("comm.outbox_bytes", orion_wire::OUTBOX_BYTES)?
                 .min(orion_wire::OUTBOX_BYTES),
@@ -225,6 +229,7 @@ impl Node {
         let files = Files::open(FilesConfig {
             root: settings.files_dir.clone(),
             max_size: settings.files_max_size,
+            own: None,
         })
         .map_err(|error| StartError {
             what: "files directory",
@@ -259,6 +264,7 @@ impl Node {
         let peers = peers::Peers::new(name.clone(), links, settings.config.state_dir.clone());
         let mut logic = Logic::new(store, name, files, audit, dialer, stop_grace, peers);
         logic.sinks = orion_files_sink::Sinks::new(settings.outbox_bytes);
+        logic.roots = orion_file_roots::Roots::new(settings.roots.clone(), settings.files_max_size);
         let (served, said) = served::Served::load(&settings.config.state_dir);
         info!("{said}");
         logic.served = served;
@@ -388,6 +394,7 @@ impl Node {
             let now = logic.now_ms();
             logic.actions.tick(now, &mut direct);
             logic.files.poll(&mut direct);
+            logic.roots.poll(&mut direct);
             logic.forwards.poll(&mut direct);
             logic.restarts(&mut direct);
             logic.fetches(&mut direct);
@@ -399,6 +406,7 @@ impl Node {
             let mut logic = self.logic.borrow_mut();
             let now = logic.now_ms();
             logic.sends.tick(now, &mut send::Via::Client(client))?;
+            logic.roots.gives.poll(&mut send::Via::Client(client))?;
         }
         if let Some(progress) = progress {
             logic::publish(progress, &events, self.logic.borrow().actions.running());
@@ -463,6 +471,24 @@ impl Node {
         {
             return Some(error);
         }
+        // The roots, if the image named any: offered as a program offers a prefix, with their
+        // actions registered as a program's are.
+        let offer = self.logic.borrow().roots.offer();
+        let offered = match offer {
+            Some(offer) => match client.send(&offer) {
+                Ok(seq) => Some(seq),
+                Err(error) => return Some(error),
+            },
+            None => None,
+        };
+        if offered.is_some() {
+            for register in orion_file_roots::actions::registers(&self.settings.config.node_name) {
+                if let Err(error) = client.send(&register) {
+                    return Some(error);
+                }
+            }
+        }
+        let mut offered = offered;
         let mut progress = match Topics::new(&client).declare(&TopicDecl {
             name: ACTIONS_TOPIC,
             fields: &logic::ACTION_FIELDS,
@@ -483,6 +509,10 @@ impl Node {
         loop {
             if let Err(error) = client.drain() {
                 return (!stopping).then_some(error);
+            }
+            if let Some(refused) = offered.and_then(|seq| client.refusal(seq)) {
+                warn!("the roots are not given: {refused}");
+                offered = None;
             }
             if let Err(error) = self.turn(&client, progress.as_mut()) {
                 return (!stopping).then_some(error);
@@ -512,7 +542,11 @@ impl Node {
                 // A run is under way on another node: what its helper heard is asked for.
                 wait = wait.min(Duration::from_millis(5));
             }
-            if self.logic.borrow().files.verifying() {
+            if self.logic.borrow().roots.gives.active() {
+                // A file is being given: a client that went quiet is let go.
+                wait = wait.min(Duration::from_millis(1_000));
+            }
+            if self.logic.borrow().files.verifying() || self.logic.borrow().roots.busy() {
                 // A helper is checking a digest: what it found is asked for soon.
                 wait = wait.min(Duration::from_millis(5));
             }

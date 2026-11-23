@@ -1,9 +1,15 @@
-//! The helper that checks a file against its digest and puts it in place.
+//! The helper that checks a file against its digest and puts it in place, beneath the store.
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::Read;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
+
+use rustix::fs::{
+    AtFlags, CWD, FileType, Mode, OFlags, ResolveFlags, fsync, mkdirat, openat2, renameat, statat,
+};
+use rustix::io::Errno;
 
 use sha2::{Digest, Sha256};
 
@@ -69,31 +75,93 @@ fn check(job: &Job) -> Result<(), String> {
     part.sync_all()
         .map_err(failed("the file cannot be synced"))?;
     drop(part);
-    let parent = job
+    let relative = job
         .destination
-        .parent()
-        .ok_or_else(|| "the destination has no directory".to_owned())?;
-    fs::create_dir_all(parent).map_err(failed("its directory cannot be made"))?;
-    inside(parent, &job.root)?;
-    if job.destination.is_dir() {
-        return Err("the destination is a directory".to_owned());
-    }
-    fs::rename(&job.part, &job.destination).map_err(failed("it cannot be put in place"))?;
-    if let Ok(directory) = File::open(parent) {
-        let _ = directory.sync_all();
-    }
-    Ok(())
+        .strip_prefix(&job.root)
+        .map_err(|_| "the destination is outside the store".to_owned())?;
+    place(&job.part, &job.root, relative)
 }
 
-/// Refuses a destination that a link on the way takes out of the store.
-fn inside(parent: &Path, root: &Path) -> Result<(), String> {
-    let (parent, root) = (
-        fs::canonicalize(parent).map_err(|error| format!("its directory: {error}"))?,
-        fs::canonicalize(root).map_err(|error| format!("the store: {error}"))?,
-    );
-    if parent.starts_with(&root) {
-        Ok(())
+/// Where a step of the way out of the store ends: refused, as outside.
+fn outside(error: Errno) -> bool {
+    matches!(error, Errno::XDEV | Errno::LOOP)
+}
+
+/// Opens `relative`, a directory under `root`, beneath it: a link, `..` or magic link that
+/// leads out is refused by the kernel, not by a look at the names.
+fn beneath(root: &OwnedFd, relative: &Path, read: bool) -> Result<OwnedFd, Errno> {
+    let flags = if read {
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC
     } else {
-        Err("the destination is outside the store".to_owned())
+        OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC
+    };
+    let relative = if relative.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        relative
+    };
+    openat2(
+        root,
+        relative,
+        flags,
+        Mode::empty(),
+        ResolveFlags::BENEATH | ResolveFlags::NO_MAGICLINKS,
+    )
+}
+
+/// Puts `part` at `relative` under `root`, making the directories on the way, each beneath
+/// the store, and syncs the directory it went into.
+pub(crate) fn place(part: &Path, root: &Path, relative: &Path) -> Result<(), String> {
+    let failed = |what: &'static str| move |error: Errno| format!("{what}: {error}");
+    let named = |error: Errno| {
+        if outside(error) {
+            "the destination is outside the store".to_owned()
+        } else {
+            format!("its directory cannot be made: {error}")
+        }
+    };
+    let store = rustix::fs::open(
+        root,
+        OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(failed("the store"))?;
+    let name = relative
+        .file_name()
+        .ok_or_else(|| "the destination has no name".to_owned())?;
+    let parent = relative.parent().unwrap_or(Path::new(""));
+    let directory = match beneath(&store, parent, false) {
+        Ok(directory) => directory,
+        Err(Errno::NOENT) => {
+            // Each step is made in the one before it, which was opened beneath the store.
+            let mut at = PathBuf::new();
+            let mut directory = beneath(&store, &at, false).map_err(named)?;
+            for step in parent.components() {
+                at.push(step);
+                directory = match beneath(&store, &at, false) {
+                    Ok(next) => next,
+                    Err(Errno::NOENT) => {
+                        match mkdirat(&directory, step.as_os_str(), Mode::from_raw_mode(0o755)) {
+                            Ok(()) | Err(Errno::EXIST) => {}
+                            Err(error) => return Err(named(error)),
+                        }
+                        beneath(&store, &at, false).map_err(named)?
+                    }
+                    Err(error) => return Err(named(error)),
+                };
+            }
+            directory
+        }
+        Err(error) => return Err(named(error)),
+    };
+    if statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW)
+        .is_ok_and(|stat| FileType::from_raw_mode(stat.st_mode) == FileType::Directory)
+    {
+        return Err("the destination is a directory".to_owned());
     }
+    renameat(CWD, part, &directory, name).map_err(failed("it cannot be put in place"))?;
+    if let Ok(synced) = beneath(&store, parent, true) {
+        let _ = fsync(synced);
+    }
+    Ok(())
 }

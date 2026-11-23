@@ -12,6 +12,7 @@ orion-msg-files = { path = "../../core/msg-files" }
 orion-reply = { path = "../reply" }
 orion-types = { path = "../../core/types" }
 orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 sha2 = { version = "0.11.0", default-features = false }
 tracing.workspace = true
 

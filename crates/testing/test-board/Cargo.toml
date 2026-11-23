@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "orion-test-board"
 description = "A whole board for a consumer's tests: the real comm core and real node logic, in the test's own process."
 edition.workspace = true
@@ -25,3 +26,8 @@ workspace = true
 orion-node-app = { path = "../../node/node-app", features = ["slow"] }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-wire = { path = "../../core/wire" }
+
+# The integration tests, in one binary (tests/all.rs).
+[[test]]
+name = "all"
+path = "tests/all.rs"

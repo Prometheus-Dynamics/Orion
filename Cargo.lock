@@ -1665,6 +1665,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "orion-file-roots"
+version = "1.0.1-dev"
+dependencies = [
+ "orion-check",
+ "orion-config",
+ "orion-connect",
+ "orion-file-store",
+ "orion-msg-actions",
+ "orion-msg-files",
+ "orion-reply",
+ "orion-scratch",
+ "orion-types",
+ "orion-wire",
+ "rustix",
+ "sha2",
+ "tracing",
+]
+
+[[package]]
 name = "orion-file-store"
 version = "1.0.1-dev"
 dependencies = [
@@ -1673,6 +1692,7 @@ dependencies = [
  "orion-scratch",
  "orion-types",
  "orion-wire",
+ "rustix",
  "sha2",
  "tracing",
 ]
@@ -1924,6 +1944,7 @@ dependencies = [
  "orion-ctl",
  "orion-dial",
  "orion-executors",
+ "orion-file-roots",
  "orion-file-store",
  "orion-files-pull",
  "orion-files-sink",

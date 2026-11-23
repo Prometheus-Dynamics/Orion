@@ -45,6 +45,7 @@ Nothing is stood in for. A client is answered, and refused, by the same code as 
 | `heartbeat_ms` | the board's | `comm.heartbeat_ms`. Set it long on a loaded machine, so a slow moment is not a lost session |
 | `node` | on | Node logic, or the comm core alone |
 | `operator` | none | A public key the board trusts with everything from the start, seeded as a flash seeds one (`operator.seed`, see [comm.md](comm.md)) |
+| `granted` | none | Operators the board trusts with less than everything, from the start: `Granted { key, read, actions }`, as an administrator would have granted them (`actions` are names, or prefixes ending in `*`) |
 | `conf` | empty | More `orion.conf` lines (see [settings.md](settings.md)). A key set here replaces the board's own line for it |
 
 ## Taking parts away
@@ -67,7 +68,7 @@ destination starts with `prefix`, as board management does with a boot slot, and
 commit `hold` after it was asked, committed or rejected by the file's digest. It pumps its session
 all the while, so the comm core and node logic go on answering the pushing client, pings and all:
 it is a receiver whose device work at the commit takes `hold`. It needs node logic, and stops when
-the returned `HeldCommits` is dropped; `answered()` counts the commits it has answered.
+the returned `HeldCommits` is dropped; `answered()` counts the commits it has answered, each counted before it is told, so a pusher that has heard its answer finds it counted.
 
 Use it to test what a pushing client does with a late commit (see "How long a push waits for the
 board" in [client.md](client.md)). With a short `Options::timeout` the test stays short:

@@ -611,6 +611,16 @@ the record of its last good start, listed in `orion/index` (`docs/comm.md`). `of
 prefix `OfferedBy::Configured`, and as the program's while a program offers it. A client
 fetches them as any other.
 
+**The image's roots, `roots/`.** A board whose image names roots (`files.root.<name>` in its
+settings) has node logic offer `roots/`: `roots/<name>/<path>` is fetched as any offered file,
+and `roots/<name>/index` is the root's index. A push to `roots/<name>/<path>` lands there, in
+place only once whole and checked, unless the root is read-only. Listing, removing, making a
+directory and renaming are node logic's actions, `files.list`, `files.remove`, `files.mkdir`
+and `files.rename`, run with `orion.run` with text arguments. `offers()` lists `roots/` as node
+logic's. The names, grants, words and what the actions give are in `docs/node.md`, "The image's
+roots". A file manager on a PC builds its tree from `files.list`, and a backup fetches each file
+of a root's index.
+
 ## The executor role
 
 `orion-executor`. An executor is any program that connects and says "I run this kind of

@@ -76,6 +76,9 @@ pub struct Options {
     /// An operator the board trusts with everything from the start: its public key, seeded as a
     /// flash seeds one (`operator.seed` in `keys.dir`). None by default.
     pub operator: Option<[u8; 32]>,
+    /// Operators the board trusts with less than everything, from the start, as an
+    /// administrator would have granted them. None by default.
+    pub granted: Vec<Granted>,
     /// More `orion.conf` lines, read by both. Anything a board reads may be set: `leases.quiet_ms`,
     /// `enrollment.key`, `topics.max`. A key set here replaces the board's own line for it.
     pub conf: String,
@@ -90,9 +93,22 @@ impl Default for Options {
             heartbeat_ms: None,
             node: true,
             operator: None,
+            granted: Vec::new(),
             conf: String::new(),
         }
     }
+}
+
+/// An operator trusted with some things: to read or not, and the actions it may run (a name,
+/// or a prefix ending in `*`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Granted {
+    /// Its public key.
+    pub key: [u8; 32],
+    /// Whether it may read: records, topics, and files to fetch.
+    pub read: bool,
+    /// The actions it may run.
+    pub actions: Vec<String>,
 }
 
 /// What the comm core's thread says once it is up.
@@ -209,6 +225,28 @@ impl TestBoard {
             std::fs::create_dir_all(&keys).expect("the keys directory");
             let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
             std::fs::write(keys.join("operator.seed"), format!("{hex}\n")).expect("the seed");
+        }
+        if !options.granted.is_empty() {
+            let keys = dir.join("keys");
+            std::fs::create_dir_all(&keys).expect("the keys directory");
+            let mut trust = "# Orion trust store.\n".to_owned();
+            for (index, granted) in options.granted.iter().enumerate() {
+                let hex: String = granted
+                    .key
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect();
+                let actions = if granted.actions.is_empty() {
+                    "-".to_owned()
+                } else {
+                    granted.actions.join(",")
+                };
+                trust.push_str(&format!(
+                    "operator {hex} enrolled {} 0 granted-{index} {actions}\n",
+                    u8::from(granted.read)
+                ));
+            }
+            std::fs::write(keys.join("trust"), trust).expect("the trust store");
         }
         let text = conf(&dir, options);
         // Settings that do not parse would send recovery to the board's usual socket, outside

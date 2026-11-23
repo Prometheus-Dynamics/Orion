@@ -36,6 +36,10 @@ pub struct FilesConfig {
     pub root: PathBuf,
     /// The largest file taken.
     pub max_size: u64,
+    /// The one directory under `root` that holds the store's own things (its parts and its
+    /// note of what it put in place), which no file may take. `None`: `.incoming` and
+    /// `.placed`, each at the top of `root`.
+    pub own: Option<&'static str>,
 }
 
 impl FilesConfig {
@@ -45,6 +49,17 @@ impl FilesConfig {
         Self {
             root: root.to_owned(),
             max_size: 16 << 30,
+            own: None,
+        }
+    }
+
+    /// Files under `root`, the store's own things in `root/<own>`.
+    #[must_use]
+    pub fn hidden(root: &Path, own: &'static str, max_size: u64) -> Self {
+        Self {
+            root: root.to_owned(),
+            max_size,
+            own: Some(own),
         }
     }
 }
@@ -106,6 +121,8 @@ struct Receiving {
 pub struct Files {
     config: FilesConfig,
     incoming: PathBuf,
+    /// The note of what it put in place.
+    placed_path: PathBuf,
     transfers: BTreeMap<u64, Receiving>,
     found: Receiver<verify::Found>,
     finder: Sender<verify::Found>,
@@ -121,11 +138,12 @@ pub struct Files {
 const PLACED: &str = ".placed";
 
 /// Whether a destination is one of the store's own names, which no file may take.
-fn own(destination: &FileName) -> bool {
-    matches!(
-        destination.as_str().split('/').next(),
-        Some(".incoming" | PLACED)
-    )
+fn own(config: &FilesConfig, destination: &FileName) -> bool {
+    let first = destination.as_str().split('/').next();
+    match config.own {
+        Some(own) => first == Some(own),
+        None => matches!(first, Some(".incoming" | PLACED)),
+    }
 }
 
 /// Reads the note of what is in place: `<digest in hex> <size> <destination>` a line.
@@ -173,13 +191,20 @@ impl Files {
     ///
     /// If the directories cannot be made.
     pub fn open(config: FilesConfig) -> io::Result<Self> {
-        let incoming = config.root.join(".incoming");
+        let (incoming, placed_path) = match config.own {
+            Some(own) => (
+                config.root.join(own).join("incoming"),
+                config.root.join(own).join("placed"),
+            ),
+            None => (config.root.join(".incoming"), config.root.join(PLACED)),
+        };
         fs::create_dir_all(&incoming)?;
         let (finder, found) = mpsc::channel();
-        let placed = read_placed(&config.root.join(PLACED));
+        let placed = read_placed(&placed_path);
         Ok(Self {
             config,
             incoming,
+            placed_path,
             transfers: BTreeMap::new(),
             found,
             finder,
@@ -243,11 +268,10 @@ impl Files {
             text.push_str(&format!(" {size} {name}\n"));
         }
         // Written beside and renamed, so it is whole or the one before.
-        let (path, next) = (
-            self.config.root.join(PLACED),
-            self.incoming.join("placed.next"),
-        );
-        if let Err(error) = fs::write(&next, text).and_then(|()| fs::rename(&next, &path)) {
+        let next = self.incoming.join("placed.next");
+        if let Err(error) =
+            fs::write(&next, text).and_then(|()| fs::rename(&next, &self.placed_path))
+        {
             warn!("what is in place could not be noted: {error}");
         }
     }
@@ -301,23 +325,37 @@ impl Files {
     }
 
     fn begin(&mut self, asked: &Asked<'_>, out: &mut dyn Out) -> Result<(), Error> {
-        let begin: FileBegin = asked.body()?;
+        self.begin_as(asked.session, asked.body()?, out)
+    }
+
+    /// Answers `session`'s `begin` as if it had come in a request: for a caller that names
+    /// the destination in this store as other than the request did.
+    ///
+    /// # Errors
+    ///
+    /// [`Error`] for the caller, as a refusal.
+    pub fn begin_as(
+        &mut self,
+        session: u32,
+        begin: FileBegin,
+        out: &mut dyn Out,
+    ) -> Result<(), Error> {
         let transfer = begin.transfer;
         let meta = Meta {
             destination: begin.destination,
             size: begin.size,
             digest: begin.digest,
         };
-        if own(&meta.destination) {
+        if own(&self.config, &meta.destination) {
             // The store's own directory, where parts are kept.
             return out.send(
-                asked.session,
+                session,
                 &status(transfer, 0, FileState::Rejected, "not a place for files"),
             );
         }
         if meta.size > self.config.max_size {
             return out.send(
-                asked.session,
+                session,
                 &status(
                     transfer,
                     0,
@@ -352,10 +390,7 @@ impl Files {
                 }
                 Err(error) => {
                     let detail = format!("the file cannot be kept: {error}");
-                    return out.send(
-                        asked.session,
-                        &status(transfer, 0, FileState::Rejected, &detail),
-                    );
+                    return out.send(session, &status(transfer, 0, FileState::Rejected, &detail));
                 }
             }
         }
@@ -365,7 +400,7 @@ impl Files {
         } else {
             FileState::Receiving
         };
-        out.send(asked.session, &status(transfer, known.received, state, ""))
+        out.send(session, &status(transfer, known.received, state, ""))
     }
 
     fn chunk(&mut self, asked: &Asked<'_>, out: &mut dyn Out) -> Result<(), Error> {
@@ -478,7 +513,7 @@ impl Files {
             size,
             digest,
         };
-        if own(&meta.destination) {
+        if own(&self.config, &meta.destination) {
             return Err("not a place for files".to_owned());
         }
         if size > self.config.max_size {

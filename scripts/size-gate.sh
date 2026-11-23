@@ -66,16 +66,22 @@ CAPI_HOST=740000
 # message instead (-1,696). Look at structured fields first: that one field cost 1,696 bytes
 # here. The known next cut: one listener type in orion-tcp that accepts and listens again by
 # itself, for both ways in (about 1.4 KB). The limit is not raised without a table like this.
-# Orion as measured at I50 (runs kept while their program reconnects: +7,696 over I54's
-# 5,322,664, after a cut of 1,320; docs/prs/I50.md); the others as at C41, until they run on
-# one:
+# Orion as measured at I76 (the files service, roots/<name>/: +54,976 over I75's 5,353,368,
+# after a cut of 10,112; docs/prs/I76.md), its limit raised from 5,360,000. By crate: node logic
+# +15.8 KB (the roots' actions, fetches and pushes, inlined where node logic handles frames),
+# orion_file_store +7.7 KB (placed beneath the store; its functions no longer inlined, with two
+# callers), orion_file_roots +6.6 KB, std +2.7 KB, rustix +2.3 KB (openat2, reading
+# directories). Cut first: the index in the order it is read, not sorted (a sort of its own),
+# and the helpers that read a file for its digest polled by their threads, not over a channel
+# (-10,112 together). The others as at C41, until they run on one; armv7 and riscv64 were not
+# measured at I76 and will be about as much larger at the next release's measurement:
 #                                   orion-recovery   orion
-#   aarch64-unknown-linux-musl      2,759,704        5,330,360
+#   aarch64-unknown-linux-musl      2,759,704        5,408,344
 #   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
 # The last column: gated on `every` change, or before a `release` only.
 BOARDS=(
-    "aarch64-unknown-linux-musl     2760000          5360000   every"
+    "aarch64-unknown-linux-musl     2760000          5430000   every"
     "armv7-unknown-linux-musleabihf 2810000          5350000   release"
     "riscv64gc-unknown-linux-musl   3040000          5690000   release"
 )

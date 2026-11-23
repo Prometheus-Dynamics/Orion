@@ -72,6 +72,12 @@ impl Via<'_, '_> {
     }
 }
 
+impl orion_file_roots::Link for Via<'_, '_> {
+    fn send<B: Body>(&mut self, body: &B) -> Result<(), ClientError> {
+        Via::send(self, body).map(|_| ())
+    }
+}
+
 /// The registration of the action on node `me`: programs on the board and operators with a
 /// grant may run it.
 pub(crate) fn register(me: &NodeName) -> Option<Register<'static>> {

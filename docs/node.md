@@ -389,7 +389,8 @@ again in the slot. `orion-files-sink` is how such a program takes them.
 
 ## Sending a kept file to a receiver: `files.send`
 
-Node logic has one action of its own. `files.send` on the node, with `FileSend { file, to }`
+Node logic has actions of its own: `files.send`, and the actions on the image's roots (next
+section). `files.send` on the node, with `FileSend { file, to }`
 as its arguments, sends the file the node keeps at `file` to the destination `to`, which a
 receiver asked for. It is how an image put on the board once reaches a device's firmware
 slot, and as many devices as it is run for.
@@ -408,6 +409,84 @@ slot, and as many devices as it is run for.
 - **Retries.** With no answer for 2 seconds the transfer is begun again, and the receiver says
   where it is. After 5 such tries the run fails, "the receiver stopped answering".
 - **Cancelled** runs stop sending; the receiver keeps what it has, to resume.
+
+## The image's roots: `roots/<name>/`
+
+The image lets clients reach directories of its choosing, its roots, and nothing else. Each is
+one line of the settings, `files.root.<name> = <directory> rw` (or `ro`); the environment's
+`ORION_FILES_ROOT_<NAME>` says the same. A name is 1 to 32 of `a-z`, `0-9`, `-` and `_`. A file
+in a root is `roots/<name>/<path>`, in the namespace that push and fetch already use, and is
+reached the same way with security on or off: the switch decides who, the roots decide where.
+`orion-file-roots`.
+
+- **Where.** Every open, listing, removal and rename goes through `openat2` with
+  `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` from the root's directory, opened again for each.
+  A `..`, an absolute link or a magic link that leads out is refused by the kernel: "outside
+  the root". A link that stays inside is followed. The root's directory itself is the image's
+  to make, with the ownership it wants: readable by node logic's account, and writable for
+  `rw`.
+- **Fetch.** Node logic offers `roots/` as a program offers a prefix (`FileOffer`), and gives
+  each file as a program does. A helper thread reads the file once for its digest; then up to
+  8 chunks of up to 32 KiB are on their way, paced by the client's `FileTaken`. A slow client,
+  or a node logic slow to read, holds the file back, and nothing is dropped. A file that grows
+  while it is given is given as it was when it was read for its digest; one that shrinks is
+  aborted, saying so. At most 64 files are given at once. A client that owes an answer and
+  says nothing for a minute is let go. A fetch goes on from what the client has (`have`).
+- **The index.** `roots/<name>/index` is the root's index, in the format of
+  `orion_files::index`: every file under the root, its size as its bound, each `user-data`.
+  It is in the order the directories are read, a directory's own files before those under it.
+  Links, pipes and devices are not in it, nor the root's `.orion`. Files whose names Orion
+  does not carry (below) and files more than 32 directories down are left out, and node logic
+  warns how many. A root of more than 65,536 files is refused an index: list it instead. A
+  file at the top of a root named `index` is the index's name, so it cannot be fetched.
+  A file that grows after the index was made is larger than its bound: a fetch held to the
+  bound refuses it, and the index fetched again has the new size.
+- **Push.** Node logic receives `roots/<name>/<path>` itself, ahead of any program's receiver
+  and of the node's own store. The bytes go to a part file in the root's own `.orion`
+  directory, on the root's file system, and only when every byte is there and the digest
+  matches is it renamed into place, with the directories on the way made beneath the root.
+  A push that breaks off never replaces the file it was for. Its part survives node logic
+  restarting, and pushing the same file again goes on from it. A root marked `ro` refuses
+  every push, whoever asks: "the root is read-only".
+- **The actions** (their arguments are text, words split by spaces; what `files.list` gives is
+  text too):
+
+  | Action | Arguments | Does |
+  |---|---|---|
+  | `files.list` | none | the roots: `root rw <name>` a line |
+  | `files.list` | `roots/<root>/<dir> [<after>]` | up to 128 entries of `<dir>`, by name, after `<after>` if given: `<kind> <size> <mtime> <name>` a line, `kind` one of `file`, `dir`, `link`, `other`, the size of a file only, `mtime` in seconds since 1970. Then `more` if there are more, and `unnamed <n>` for entries whose names Orion does not carry |
+  | `files.remove` | `roots/<root>/<path>` | removes a file, a link (not what it leads to) or an empty directory |
+  | `files.mkdir` | `roots/<root>/<path>` | makes one directory, in one that is there |
+  | `files.rename` | `roots/<root>/<from> roots/<root>/<to> [replace]` | renames within one root; what is at `<to>` is replaced only with `replace` |
+
+  A run that cannot be done ends `Rejected` (its arguments, a read-only root, another root)
+  or `Failed` (what the file system said), with the words in its detail.
+- **Grants.** A fetch needs `read` (`What::Read("files")`); a push needs everything
+  (`What::Write("files")`); each action needs its own grant (`files.list`, or `files.*` for
+  all four). The actions admit programs on the board and operators. With security off,
+  everyone may do everything. A run on a root is audited with its arguments.
+- **Names.** A name is one Orion carries: at most 127 bytes in all (`roots/<root>/` counts),
+  of `A-Z a-z 0-9 . _ - :` and `/`, with no empty part, `.` or `..`. A file whose name has a
+  space or anything outside these can be listed (as `unnamed`) but not fetched, pushed or
+  changed. The root's own `.orion` is never listed, and no name may be under it.
+
+**The words**, as a client is told them: `no such root: <name>`, `the root is read-only`,
+`not found`, `outside the root`, `not a file`, `not a directory`, `there already`, `the
+directory is not empty`, `the file's permissions do not allow it`, `the root's file system is
+read-only`, `the root's file system is full`, `.orion is the root's own`, `<name> is not a name
+Orion carries`, `a root is not a file: its index is roots/<name>/index`, `a root is not changed:
+only what is in it`, `a file is renamed only within its root`, `busy: 64 files are being given`.
+A push placed through a link that leads out is `the destination is outside the store`.
+
+**A restore that breaks off.** A whole root is restored by pushing each file and then removing
+what the backup does not have (comparing `files.list` with it). Each file is whole: the old one
+or the new one, never a mix. A restore broken off halfway leaves the root partly restored: some
+files new, the rest old, files the backup does not have not yet removed, and the push under way
+as a part in `.orion`, out of sight. Nothing on the board marks the root as being restored.
+The client that restores knows how far it got, and says so ("<root>: 140 of 312 files restored;
+restore again to finish"); restoring again pushes every file again (a file already there is
+sent again whole) and resumes the one that was under way. A staged restore that makes the root
+change all at once is proposed, not built, in `docs/prs/I76.md`.
 
 ## The audit log
 

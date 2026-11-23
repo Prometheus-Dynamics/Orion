@@ -271,6 +271,7 @@ fn a_file_larger_than_the_node_takes_is_rejected_at_begin() {
         files: Files::open(FilesConfig {
             root: dir.to_path_buf(),
             max_size: 10,
+            own: None,
         })
         .expect("store"),
         sent: Sent::default(),

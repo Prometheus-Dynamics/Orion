@@ -24,6 +24,7 @@ orion-config = { path = "../../core/config" }
 orion-dial = { path = "../dial" }
 orion-connect = { path = "../../client/connect", features = ["tokio"] }
 orion-executors = { path = "../executors" }
+orion-file-roots = { path = "../file-roots" }
 orion-file-store = { path = "../file-store" }
 orion-files-pull = { path = "../files-pull", optional = true }
 orion-files-sink = { path = "../files-sink" }

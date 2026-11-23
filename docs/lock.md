@@ -515,6 +515,14 @@ what to change.
 - **I75.** `orion-node-app` feature `slow` (tests only) gains `slow::unanswered_gets(node) ->
   Arc<Unanswered>` (`hold`, `release`, `asked`): record gets node logic leaves unanswered.
   Nothing in a shipped build changes.
+- **I76.** `files.root.<name> = <directory> rw|ro` (**Add**): node logic offers `roots/` and
+  receives pushes to it, ahead of receivers and its store, and registers `files.list`,
+  `files.remove`, `files.mkdir` and `files.rename` (text arguments and output, in
+  `docs/node.md`). `orion-file-roots` is new. `Source::prefixed`, `FilesConfig::own`,
+  `FilesConfig::hidden`, `Files::begin_as`, `NodeSettings::roots`,
+  `orion_test_board::Options::granted` and `Granted` (**Add**). The store places a file beneath
+  itself with `openat2` (**Change**: a link with an absolute target back inside is now refused
+  too). No new wire kinds; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
