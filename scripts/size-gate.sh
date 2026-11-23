@@ -95,15 +95,21 @@ CAPI_HOST=740000
 # +4.1 KB (musl's getifaddrs), tracing_core +1.9 KB, tokio -2.2 KB. Cut first: linear lists
 # for its sockets, announcement times and once-a-second record times, not hash and B-tree maps;
 # no sort of an interface's addresses; three debug lines with fields (-17,008 together).
+# Orion as measured at I88 (5,510,072: the clock row so far, I80 and I81, +13,896 after a cut
+# of 8,600, and +848 when the shm pins moved with no source changed: the rev is in the crates'
+# identity, and the link came out a little different), its limit raised from 5,510,000 by
+# 40,000 for the whole clock row (docs/prs/I88.md has the table). The figure is a ratchet,
+# not the room there is: the slot the file ships in has room to spare. A limit is kept at
+# least 4,000 bytes above what was last measured: with less, a change of no source can trip it.
 # The others as at C41, until they run on one; armv7 and riscv64 were not measured at I76 or
 # I77 and will be about as much larger at the next release's measurement:
 #                                   orion-recovery   orion
-#   aarch64-unknown-linux-musl      2,759,704        5,487,024
+#   aarch64-unknown-linux-musl      2,763,440        5,510,072
 #   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
 # The last column: gated on `every` change, or before a `release` only.
 BOARDS=(
-    "aarch64-unknown-linux-musl     2770000          5510000   every"
+    "aarch64-unknown-linux-musl     2770000          5550000   every"
     "armv7-unknown-linux-musleabihf 2810000          5350000   release"
     "riscv64gc-unknown-linux-musl   3040000          5690000   release"
 )

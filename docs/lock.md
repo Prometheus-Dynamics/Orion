@@ -561,6 +561,9 @@ what to change.
   leaves (**Change**: was `0755` less the umask). `ClientError::is_held`, `orion::Error::is_held`
   (**Add**). `is_busy` is true only for a `Busy` refusal with no words of its own, and both are
   no longer `const` (**Change**: was true for every `Busy`). No wire changes; level 6.
+- **I88.** The seven `shm-*` crates are pinned to the device library's `6c8568d0`. No other
+  package changes, and no shared-memory code changes. Nothing a program calls changes; level 6.
+  The size limit of `orion` for a board is 5,550,000, was 5,510,000, for the clock row.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

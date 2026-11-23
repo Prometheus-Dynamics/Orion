@@ -267,6 +267,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I78](docs/prs/I78.md) Several receivers of files on one session, each handed its own (wave 19; needs I77)
 - [x] [I79](docs/prs/I79.md) Any file's name carried, escaped, and names up to 255 bytes (wave 19; needs I78)
 - [x] [I80](docs/prs/I80.md) A computer gives the board its clock, and the board names whose it took (wave 19; needs I79)
+- [x] [I88](docs/prs/I88.md) The shared-memory ring crates come from the device library at 6c8568d0 (wave 19; needs I86)
 - [x] [I86](docs/prs/I86.md) Directories made as files are, busy told from held, and a way in listening before its interface has an address (wave 19; needs I85)
 - [x] [I85](docs/prs/I85.md) The hello limit test counts only its own log lines (wave 19; needs I81)
 - [x] [I81](docs/prs/I81.md) The board says whether its clock is set, takes the hardware clock as a floor, and tells the kernel only what it knows (wave 19; needs I80)
