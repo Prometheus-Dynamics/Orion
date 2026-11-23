@@ -113,9 +113,13 @@ CAPI_HOST=740000
 #   aarch64-unknown-linux-musl      2,763,440        5,510,072
 #   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
-# The last column: gated on `every` change, or before a `release` only.
+# The fourth column: gated on `every` change, or before a `release` only. A fifth, where there
+# is one, is the same for orion-recovery alone. On aarch64 it is `release` since I93: no image
+# carries orion-recovery, and a limit on a file nothing ships should not force a raise on a
+# change to code it shares with orion. It is still built and held to its limit here on every
+# change for this machine, its tests run in the gate, and a release measures it for a board.
 BOARDS=(
-    "aarch64-unknown-linux-musl     2770000          5550000   every"
+    "aarch64-unknown-linux-musl     2770000          5550000   every     release"
     "armv7-unknown-linux-musleabihf 2810000          5350000   release"
     "riscv64gc-unknown-linux-musl   3040000          5690000   release"
 )
@@ -354,7 +358,7 @@ not_here() {
     fi
 }
 for line in "${BOARDS[@]}"; do
-    read -r board recovery_limit orion_limit when <<< "$line"
+    read -r board recovery_limit orion_limit when recovery_when <<< "$line"
     if [ "$when" = release ] && [ "$release" = 0 ]; then
         echo "    $board: before a release only (scripts/size-gate.sh --release)"
         continue
@@ -377,8 +381,12 @@ for line in "${BOARDS[@]}"; do
     fi
     linker="CARGO_TARGET_${triple}_LINKER"
     export "$linker=${!linker:-rust-lld}"
-    plan "recovery-$board" orion-recovery-bin orion-recovery \
-        "orion-recovery for a board ($board, static)" "$recovery_limit" "$board"
+    if [ "${recovery_when:-$when}" = release ] && [ "$release" = 0 ]; then
+        echo "    orion-recovery for a board ($board): before a release only (scripts/size-gate.sh --release)"
+    else
+        plan "recovery-$board" orion-recovery-bin orion-recovery \
+            "orion-recovery for a board ($board, static)" "$recovery_limit" "$board"
+    fi
     plan "orion-$board" orion-bin orion "orion for a board ($board, static)" "$orion_limit" "$board"
 done
 

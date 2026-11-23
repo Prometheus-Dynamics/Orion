@@ -597,6 +597,8 @@ what to change.
   another worktree built in (`scripts/target-owner.sh`). No wire changes; level 6.
 - **I92.** `orion/state` always ends `panics contained: N` (**Add**). `Sessions::panics`
   (**Add**). No wire changes; level 6.
+- **I93.** The gate only. `orion-recovery` for a board is held to its size limit before a
+  release, not on every change. No interface changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

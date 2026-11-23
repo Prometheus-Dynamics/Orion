@@ -7,7 +7,7 @@ released and pastes what it printed into the release notes.
 1. **The gate.** `scripts/gate.sh` passes on the tree being released.
 2. **Every size, on every target.** `scripts/size-gate.sh --release` passes. It builds and
    measures each shipped file for this machine and for each board target, nothing reused, and
-   fails on any over its budget. The every-change gate measures this machine and aarch64.
+   fails on any over its budget. The every-change gate measures this machine and `orion` for aarch64; `orion-recovery` for aarch64 is measured here.
    armv7 and riscv64 have never run on a board, so they are measured here only, before a
    release. A target this machine cannot build fails the step; it is not skipped. It needs:
    - the Rust targets: `rustup target add aarch64-unknown-linux-musl
