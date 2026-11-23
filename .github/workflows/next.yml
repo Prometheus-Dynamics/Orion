@@ -52,6 +52,9 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           sudo modprobe dummy
+      # The test of a sandbox that refuses openat2 loads its filter with bwrap, and the gate
+      # fails it where it cannot run.
+      - run: command -v bwrap || sudo apt-get install -y --no-install-recommends bubblewrap
       # CI measures every size build, whatever its key says, and checks each against the record
       # its key has (scripts/size-gate.sh): the run that finds a key missing an input.
       - run: ./scripts/gate.sh --part ${{ matrix.part }}

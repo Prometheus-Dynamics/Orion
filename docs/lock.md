@@ -606,6 +606,7 @@ what to change.
   `ClientError::is_stale`, `Workloads::put_based_on` and `remove_based_on`, `Tracked::stamp`
   (**Add**). A `remove` of a workload that is not there is refused to `wait` at once
   (**Change**: it ran out its time). Strict on one board; last write wins across boards.
+- **I99.** Tests and the CI job only. No interface changes.
 - **I98.** `packaging/systemd/orion-node.service` no longer sets `RestrictSUIDSGID=yes`
   (**Break** for an image that copies the unit: take the new one, or files in a root fail under
   systemd). Where `openat2` is refused, node logic's refusals name it and the hello carries the

@@ -418,3 +418,33 @@ fn a_node_nobody_knows_leaves_its_subscriber_waiting() {
     publish(&mut own, 1, 2.0);
     assert_eq!(read(&mut own_reading, 1), [(1, 2.0)]);
 }
+
+#[test]
+fn a_publisher_is_told_when_the_only_listener_is_on_another_node_and_when_it_goes() {
+    let map = Map::default();
+    let left = Node::start("watched", "left", &map, 0, None);
+    let right = Node::start("watched", "right", &map, 0, None);
+    let sensor = right.connect("sensor");
+    let mut level = level(&sensor, "tank.level");
+    assert_eq!(subscribers(&mut level), 0, "nobody listens yet");
+
+    // A program on the other board asks: the publisher has one listener, the link.
+    let far = left.connect("dashboard");
+    let mut far_reading = far.subscribe("right/tank.level").expect("subscribe");
+    until("the publisher is told of the other board", || {
+        subscribers(&mut level) == 1
+    });
+    until("the far subscriber has the topic", || {
+        far_reading.wait(Duration::from_millis(10)).expect("wait");
+        far_reading.status() == Status::Live
+    });
+    publish(&mut level, 7, 1.5);
+    assert_eq!(read(&mut far_reading, 1), [(7, 1.5)]);
+
+    // It goes: nobody listens, and the publisher is told.
+    drop(far_reading);
+    drop(far);
+    until("the other board no longer asks", || {
+        subscribers(&mut level) == 0
+    });
+}

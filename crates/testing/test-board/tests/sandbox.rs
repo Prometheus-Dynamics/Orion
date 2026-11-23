@@ -5,7 +5,8 @@
 //!
 //! The test runs itself again under a seccomp filter of its own that answers `openat2` with
 //! "not implemented" and lets every other call through. `bwrap` loads the filter. Where
-//! `bwrap` cannot be run it says so and passes: that it cannot is not this test's to decide.
+//! `bwrap` cannot be run it says it was skipped, unless `NAMESPACE_TESTS=required` is set, as
+//! the gate sets it: there it fails, saying why.
 
 use std::io::Cursor;
 use std::process::{Command, Stdio};
@@ -144,7 +145,13 @@ fn where_openat2_is_refused_the_board_says_so_by_name_and_not_function_not_imple
     let filter_file = dir.join("filter.bin");
     std::fs::write(&filter_file, filter()).expect("the filter");
     if let Some(why) = cannot(&filter_file) {
-        println!("{why}: the sandbox was not tried");
+        // The gate, and so CI, sets this: there the test must run. It guards a fault seen on
+        // a board, and a test that passes where it cannot run guards nothing.
+        assert!(
+            std::env::var_os("NAMESPACE_TESTS").is_none_or(|said| said != "required"),
+            "this test must run here, and cannot: {why}"
+        );
+        println!("{why}: SKIPPED, the sandbox was not tried");
         return;
     }
     let ran = Command::new("sh")

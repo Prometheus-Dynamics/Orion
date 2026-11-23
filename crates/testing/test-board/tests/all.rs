@@ -17,3 +17,5 @@ mod sandbox;
 mod sinks;
 #[path = "time.rs"]
 mod time;
+#[path = "watched.rs"]
+mod watched;
