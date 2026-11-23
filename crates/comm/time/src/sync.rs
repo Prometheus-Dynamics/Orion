@@ -10,7 +10,7 @@ use orion_measure::clock;
 use orion_server::Comm;
 use tracing::{debug, info, warn};
 
-use crate::config::{PEER_SCHEME, TCP_SCHEME, TimeConfig, TimeMode};
+use crate::config::{GATEWAY_SOURCE, NT4_SOURCE, PEER_SCHEME, TCP_SCHEME, TimeConfig, TimeMode};
 use crate::discipline::{Action, Clock, Discipline, EARLIEST_PLAUSIBLE_MS, implausible};
 use crate::operator::{OPERATOR_SOURCE, OperatorTime};
 use crate::sntp::{self, ServedClock};
@@ -80,6 +80,28 @@ pub(crate) fn remove_synced_file(path: Option<&Path>) {
     }
 }
 
+/// The default route's gateway in `routes`, the kernel's IPv4 route table as
+/// `/proc/net/route` gives it: of the routes to everywhere through a gateway, the one with the
+/// lowest metric.
+pub(crate) fn gateway_in(routes: &str) -> Option<std::net::Ipv4Addr> {
+    /// The route goes through a gateway.
+    const RTF_GATEWAY: u32 = 2;
+    routes
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let hex = |at: usize| u32::from_str_radix(fields.get(at)?, 16).ok();
+            let (destination, gateway, flags) = (hex(1)?, hex(2)?, hex(3)?);
+            let metric: u32 = fields.get(6)?.parse().ok()?;
+            (destination == 0 && flags & RTF_GATEWAY != 0 && gateway != 0)
+                // Written as the bytes are in memory: the first byte of the address is last.
+                .then(|| (metric, std::net::Ipv4Addr::from(gateway.swap_bytes())))
+        })
+        .min_by_key(|(metric, _)| *metric)
+        .map(|(_, gateway)| gateway)
+}
+
 /// The decimal number a file holds, if it holds one.
 fn number_in(path: &Path) -> Option<i64> {
     std::fs::read_to_string(path).ok()?.trim().parse().ok()
@@ -100,6 +122,7 @@ pub(crate) async fn best_sample(
     comm: Option<&Comm>,
     saved_ms: Option<i64>,
     but: Option<&str>,
+    nt4_host: Option<&str>,
 ) -> Result<(String, sntp::Sample), String> {
     let mut last_error = String::from("no server answered");
     for server in servers.iter().filter(|server| Some(server.as_str()) != but) {
@@ -118,12 +141,32 @@ pub(crate) async fn best_sample(
             }
             continue;
         }
+        // Found each time it is asked: the network a board is on changes under it.
+        let named = match server.as_str() {
+            GATEWAY_SOURCE => {
+                let routes = std::fs::read_to_string("/proc/net/route").unwrap_or_default();
+                match gateway_in(&routes) {
+                    Some(gateway) => Some(format!("{gateway}:123")),
+                    None => {
+                        last_error = format!("{server}: there is no default route");
+                        continue;
+                    }
+                }
+            }
+            NT4_SOURCE => match nt4_host {
+                Some(host) => Some(host.to_owned()),
+                None => continue,
+            },
+            _ => None,
+        };
         let (carrier, host, fleet_peer) = match (
             server.strip_prefix(TCP_SCHEME),
             server.strip_prefix(PEER_SCHEME),
+            &named,
         ) {
-            (Some(host), _) => (sntp::Carrier::Tcp, host, true),
-            (_, Some(host)) => (sntp::Carrier::Udp, host, true),
+            (Some(host), ..) => (sntp::Carrier::Tcp, host, true),
+            (_, Some(host), _) => (sntp::Carrier::Udp, host, true),
+            (_, _, Some(host)) => (sntp::Carrier::Udp, host.as_str(), false),
             _ => (sntp::Carrier::Udp, server.as_str(), false),
         };
         let addrs = match tokio::net::lookup_host(host).await {

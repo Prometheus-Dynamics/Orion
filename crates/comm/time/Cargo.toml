@@ -15,6 +15,7 @@ orion-msg-peers = { path = "../../core/msg-peers" }
 orion-msg-topics = { path = "../../core/msg-topics" }
 shm-ring = { workspace = true }
 orion-server = { path = "../server" }
+rustix = { version = "1", default-features = false, features = ["std", "net"] }
 orion-wire = { path = "../../core/wire" }
 tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "rt", "macros"] }
 tracing.workspace = true

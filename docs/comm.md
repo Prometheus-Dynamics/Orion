@@ -936,6 +936,13 @@ daemon.
 | `peer://host[:port]` | another Orion node serving its clock |
 | `tcp://host:port` | the same, asked over TCP, so time crosses TCP-only paths |
 | `operator` | the clock of a connected operator who offers it |
+| `gateway` | the default route's gateway, asked as an NTP server: a radio or controller often is one. Found again each time it is asked |
+| `nt4` | the host `nt4.server` names, asked as an NTP server at port 123 |
+
+A source that does not answer is passed over for the next, with nothing in the log: `gateway`
+on a network with no way out, or whose gateway serves no time, costs one question a poll. What
+was tried last is in `orion.time`'s `error` and in `orion/state`. `nt4` with no `nt4.server` is
+an error at start.
 
 **Modes**, in `time.sync`: `report` measures the offset and publishes it, never touching the
 clock, so it is safe next to another daemon. `discipline` also adjusts the clock; it needs
@@ -980,11 +987,28 @@ None of them is there when `time.sync = off`.
 build existed, and a fleet peer over a day behind or over 400 days past the last synchronized
 time.
 
-**Serving.** `time.serve = addr:port` serves the clock as SNTP over UDP and TCP. The answer says
+**Serving.** `time.serve = addr:port` serves the clock as SNTP over UDP and TCP.
+`time.interface = eth0, usb0` keeps it to those interfaces by name, as `peer.interface` keeps
+the network way in: sockets of its own on each, opened when the interface is there and again
+when it is made again; one that is not there holds up nothing and is said once. The answer says
 how good the clock is: its source's stratum plus one when this board synchronized it, stratum 3
 when another daemon did, stratum 10 with `time.serve_authority`, and "unsynchronized" otherwise,
-which clients ignore. Over a session anyone may send `TimeRequest` and gets the board's clock
+which clients ignore: boards that have no time do not take each other's and call it
+synchronized. When one of them gets the time, it serves it one stratum down, and the others
+take it at their next poll. Over a session anyone may send `TimeRequest` and gets the board's clock
 back in `TimeReply`.
+
+**For an image.** A board with no clock battery, on a network that may have no server at all:
+
+```
+time.sync = discipline
+time.servers = operator, gateway, nt4, peer://<another board>
+time.serve = 0.0.0.0:123
+time.interface = <the interfaces the other boards are on>
+```
+
+No `time.serve_authority`: a board with no time of its own is not a reference. With nothing
+answering, the board says `clock: not set` and nothing is refused for want of time.
 
 **An operator's clock.** The operator sends `TimeOffer` with its stratum (`orion.offer_time`,
 `orion node offer-time`). Offering the time is the same power as setting it, so with security on

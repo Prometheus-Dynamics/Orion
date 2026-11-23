@@ -3,7 +3,8 @@
 //!
 //! - **Sources**, in rank order (`time.servers`): `host[:port]` is an NTP server (RFC 4330),
 //!   `peer://host[:port]` another Orion node serving its clock, `tcp://host:port` one asked over
-//!   TCP, and `operator` the clock of a connected operator who offers it.
+//!   TCP, `operator` the clock of a connected operator who offers it, `gateway` the default
+//!   route's gateway and `nt4` the host of `nt4.server`, each asked as an NTP server.
 //! - **Modes** (`time.sync`): `report` measures the offset and publishes it, and never touches
 //!   the clock. `discipline` also slews or steps it; that needs `CAP_SYS_TIME`, and falls back to
 //!   `report` while `systemd-timesyncd` runs.
@@ -22,6 +23,7 @@
 mod config;
 mod discipline;
 mod operator;
+mod serve;
 mod sntp;
 mod sync;
 #[cfg(test)]
@@ -36,11 +38,10 @@ use orion_broker::{LocalPublisher, Topics};
 use orion_msg_topics::FieldType;
 use orion_server::Comm;
 use shm_ring::{FieldId, SampleTime};
-use tokio::net::{TcpListener, UdpSocket};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
-pub use config::{TimeConfig, TimeMode};
+pub use config::{GATEWAY_SOURCE, NT4_SOURCE, TimeConfig, TimeMode};
 pub use discipline::{Clock, KernelClock};
 pub use operator::{CLOCK_SET, OPERATOR_SOURCE};
 pub use sync::TimeStatus;
@@ -239,10 +240,6 @@ impl std::fmt::Debug for dyn Clock {
     }
 }
 
-fn context(what: &str, addr: std::net::SocketAddr, error: &std::io::Error) -> std::io::Error {
-    std::io::Error::new(error.kind(), format!("time.serve {addr} ({what}): {error}"))
-}
-
 impl TimeSync {
     /// Starts the time service and the sync loop, as configured, with the kernel's clock. Must
     /// be called inside the comm core's `LocalSet`.
@@ -290,46 +287,24 @@ impl TimeSync {
         let mut tasks = Vec::new();
         let mut serving = None;
         if let Some(addr) = config.serve {
-            // Both sockets are on one port. Asked for any port, the datagram socket gets
-            // one, and the listener needs the same number, which something else may hold:
-            // then another is tried.
-            let tries = if addr.port() == 0 { 16 } else { 1 };
-            let mut bound = None;
-            let mut last = None;
-            for _ in 0..tries {
-                let udp = std::net::UdpSocket::bind(addr)
-                    .and_then(|socket| socket.set_nonblocking(true).map(|()| socket))
-                    .map_err(|error| context("udp", addr, &error))?;
-                let on = udp.local_addr().unwrap_or(addr);
-                match std::net::TcpListener::bind(on)
-                    .and_then(|listener| listener.set_nonblocking(true).map(|()| listener))
-                {
-                    Ok(tcp) => {
-                        bound = Some((udp, tcp, on));
-                        break;
-                    }
-                    Err(error) => last = Some(context("tcp", on, &error)),
-                }
-            }
-            let Some((udp, tcp, addr)) = bound else {
-                return Err(last.unwrap_or_else(|| std::io::Error::other("time.serve: no port")));
-            };
-            let udp = UdpSocket::from_std(udp).map_err(|error| context("udp", addr, &error))?;
-            let tcp = TcpListener::from_std(tcp).map_err(|error| context("tcp", addr, &error))?;
-            serving = Some(addr);
             let authority = config.serve_authority;
-            info!(%addr, authority, "serving the clock over SNTP");
-            let (for_udp, for_tcp) = (served.clone(), served.clone());
-            tasks.push(tokio::task::spawn_local(sntp::serve(
-                udp,
-                move || for_udp.served(authority),
-                sntp::NtpTime::now,
-            )));
-            tasks.push(tokio::task::spawn_local(sntp::serve_tcp(
-                tcp,
-                move || for_tcp.served(authority),
-                sntp::NtpTime::now,
-            )));
+            serving = Some(addr);
+            if config.serve_interfaces.is_empty() {
+                let (udp, tcp, on, _) = serve::open(addr, None)?;
+                serving = Some(on);
+                info!(addr = %on, authority, "serving the clock over SNTP");
+                tasks.extend(serve::serve(udp, tcp, &served, authority));
+            }
+            // One that is not there yet holds up nothing: each is its own to open.
+            for name in &config.serve_interfaces {
+                tasks.push(tokio::task::spawn_local(serve::keep(
+                    addr,
+                    name.clone(),
+                    served.clone(),
+                    authority,
+                    config.serve_retry,
+                )));
+            }
         }
         let status = Rc::new(RefCell::new(TimeStatus::default()));
         let view = TimeView {
@@ -382,6 +357,7 @@ impl TimeSync {
                         Some(&comm),
                         syncer.saved_ms,
                         syncer.but.as_deref(),
+                        syncer.config.nt4_host.as_deref(),
                     )
                     .await;
                     syncer.apply(result);

@@ -576,6 +576,10 @@ what to change.
   node wrote is written again, its end moved, when the wall clock is stepped (**Change**).
   `orion_resources::shift_leases`, `Sync::clock_stepped`, `Store::wrote` (**Add**). No wire
   changes; level 6.
+- **I83.** `gateway` and `nt4` in `time.servers`, and `time.interface` (**Add**).
+  `TimeConfig::serve_interfaces`, `serve_retry` and `nt4_host`; `GATEWAY_SOURCE`, `NT4_SOURCE`
+  (**Add**). A host named `gateway` or `nt4` can no longer be written bare in `time.servers`
+  (**Change**: write it with its port). No wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

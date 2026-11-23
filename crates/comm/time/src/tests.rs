@@ -86,6 +86,7 @@ async fn poll(syncer: &mut Syncer) {
         None,
         None,
         syncer.but.as_deref(),
+        syncer.config.nt4_host.as_deref(),
     )
     .await;
     syncer.apply(result);
@@ -228,6 +229,7 @@ fn a_tcp_source_answers_like_the_udp_one() {
             None,
             None,
             None,
+            None,
         )
         .await
         .expect("sample");
@@ -270,9 +272,16 @@ fn a_wrong_peer_is_passed_over_for_the_next_source() {
         let right = peer_source(0).await;
         let saved = (sntp::unix_now_ns() / 1_000_000) as i64;
         let servers = vec![format!("peer://{wrong}"), right.to_string()];
-        let (source, _) = best_sample(&servers, &OperatorTime::default(), None, Some(saved), None)
-            .await
-            .expect("the second source answers");
+        let (source, _) = best_sample(
+            &servers,
+            &OperatorTime::default(),
+            None,
+            Some(saved),
+            None,
+            None,
+        )
+        .await
+        .expect("the second source answers");
         assert_eq!(source, right.to_string());
     });
 }
@@ -514,5 +523,86 @@ fn once_synchronized_a_far_step_waits_for_a_second_source_and_one_alone_never_st
         let steps = clock.steps.borrow().clone();
         assert_eq!(steps.len(), 1);
         assert!((steps[0] - far).abs() < S / 10, "{steps:?}");
+    });
+}
+
+#[test]
+fn the_default_routes_gateway_is_read_from_the_kernels_table() {
+    use crate::sync::gateway_in;
+    let routes = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n\
+        wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0\n\
+        eth0\t00000000\t0122220A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n\
+        eth0\t0022220A\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n";
+    // The one with the lowest metric: 10.34.34.1, not 192.168.1.1.
+    assert_eq!(
+        gateway_in(routes),
+        Some("10.34.34.1".parse().expect("addr"))
+    );
+    // A network with no way out, as a field network often is: none.
+    let local = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n\
+        eth0\t0022220A\t00000000\t0001\t0\t0\t100\t00FFFFFF\n";
+    assert_eq!(gateway_in(local), None);
+    assert_eq!(gateway_in(""), None);
+}
+
+#[test]
+fn the_nt4_server_is_asked_as_an_ntp_server_and_a_source_that_is_not_there_is_passed_over() {
+    run(async {
+        let far_host = peer_source(2 * S).await.to_string();
+        // `gateway` on a machine whose gateway serves no time, or that has none, and then
+        // `nt4`: the first is passed over, quietly, and the second answers.
+        let servers = vec!["gateway".to_owned(), "nt4".to_owned()];
+        let (source, sample) = best_sample(
+            &servers,
+            &OperatorTime::default(),
+            None,
+            None,
+            None,
+            Some(&far_host),
+        )
+        .await
+        .expect("the nt4 server answers");
+        assert_eq!(source, "nt4");
+        assert!((sample.offset_ns - 2 * S).abs() < S / 10, "{sample:?}");
+        // Held to the build's date as any server is, not to the saved time as a peer is.
+        let saved = (sntp::unix_now_ns() / 1_000_000) as i64 + 30 * 86_400_000;
+        let far = best_sample(
+            &servers[1..],
+            &OperatorTime::default(),
+            None,
+            Some(saved),
+            None,
+            Some(&far_host),
+        )
+        .await;
+        assert!(far.is_ok(), "{far:?}");
+    });
+}
+
+#[test]
+fn boards_with_no_time_do_not_take_each_others_and_call_it_synced() {
+    run(async {
+        // A camera that has not synchronized serves its clock as unsynchronized.
+        let socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
+        let camera = socket.local_addr().expect("addr").to_string();
+        tokio::task::spawn_local(sntp::serve(
+            socket,
+            || ServedClock::Unsynced,
+            sntp::NtpTime::now,
+        ));
+        let clock = Rc::new(FakeClock::default());
+        let mut other = syncer(
+            config(TimeMode::Discipline, vec![format!("peer://{camera}")]),
+            &clock,
+            None,
+            false,
+        );
+        for _ in 0..3 {
+            poll(&mut other).await;
+        }
+        assert!(!other.status.synced);
+        assert!(clock.steps.borrow().is_empty() && clock.slews.borrow().is_empty());
+        let said = other.status.error.clone().unwrap_or_default();
+        assert!(said.contains("not synchronized"), "{said}");
     });
 }

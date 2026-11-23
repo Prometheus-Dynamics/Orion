@@ -29,6 +29,7 @@ const DONE: &str = "interfaces: every way in followed its interfaces";
 
 const PEER: u16 = 9200;
 const SSH: u16 = 2222;
+const TIME: u16 = 4123;
 
 fn own_test(name: &str) -> String {
     match module_path!().split_once("::") {
@@ -76,6 +77,37 @@ async fn taken_within(addr: SocketAddr, within: Duration) {
     }
 }
 
+/// Whether the clock is served at `addr`: an SNTP question there is answered as a server
+/// answers.
+async fn tells_the_time(addr: SocketAddr) -> bool {
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        .await
+        .expect("bind");
+    // Version 4, a client's question.
+    let mut question = [0_u8; 48];
+    question[0] = (4 << 3) | 3;
+    if socket.send_to(&question, addr).await.is_err() {
+        return false;
+    }
+    let mut answer = [0_u8; 64];
+    matches!(
+        tokio::time::timeout(Duration::from_millis(500), socket.recv_from(&mut answer)).await,
+        Ok(Ok((48, _))) if answer[0] & 7 == 4
+    )
+}
+
+/// Waits until the clock is served at `addr`, or fails the test after `within`.
+async fn told_within(addr: SocketAddr, within: Duration) {
+    if !cfg!(feature = "time") {
+        return;
+    }
+    let deadline = Instant::now() + within;
+    while !tells_the_time(addr).await {
+        assert!(Instant::now() < deadline, "no clock served at {addr}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// What SSH says first at `addr`.
 async fn banner(addr: SocketAddr) -> String {
     let mut stream = TcpStream::connect(addr).await.expect("connect");
@@ -88,11 +120,17 @@ async fn banner(addr: SocketAddr) -> String {
 }
 
 fn settings(dir: &Path) -> CommSettings {
+    // A build with no time sync does not read its keys.
+    let time = if cfg!(feature = "time") {
+        format!("time.serve = 0.0.0.0:{TIME}\ntime.interface = orion0, onever\n")
+    } else {
+        String::new()
+    };
     let text = format!(
         "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n\
          peer.listen = 0.0.0.0:{PEER}\npeer.interface = orion0, orion1, onever, obare\n\
          ssh.listen = 0.0.0.0:{SSH}\nssh.interface = orion0, orion1, onever, obare\n\
-         ssh.sandbox = false\n",
+         ssh.sandbox = false\n{time}",
         dir.display()
     );
     let mut source = Source::parse(&text, Vec::new()).expect("source");
@@ -147,14 +185,19 @@ fn inside() {
             "the network way in on orion2, not named"
         );
         assert!(!takes(at(2, SSH)).await, "ssh on orion2, not named");
+        // The clock is served where `time.interface` says, and nowhere else.
+        told_within(at(0, TIME), Duration::from_secs(5)).await;
+        assert!(!tells_the_time(at(1, TIME)).await, "the clock on orion1");
 
         // The one that is not there is tried again many times, and said once each.
         tokio::time::sleep(Duration::from_millis(2500)).await;
         let said = naming(&log, "onever");
-        assert_eq!(said.len(), 2, "once for each way in: {said:#?}");
+        let ways = if cfg!(feature = "time") { 3 } else { 2 };
+        assert_eq!(said.len(), ways, "once for each way in: {said:#?}");
 
         // The one with no address was listened on from the start, with nothing tried again
-        // (a try that failed would be said, by its name): its address comes, and the listener already there takes the connection.
+        // (a try that failed would be said, by its name): its address comes, and the listener
+        // already there takes the connection.
         let said = naming(&log, "obare");
         assert!(
             said.iter().all(|line| line.contains("obare: open on ")),
@@ -173,6 +216,7 @@ fn inside() {
         taken_within(at(0, SSH), Duration::from_secs(10)).await;
         let said = banner(at(0, SSH)).await;
         assert!(said.starts_with("SSH-2.0-"), "ssh on orion0 again: {said}");
+        told_within(at(0, TIME), Duration::from_secs(10)).await;
         // The other went on meanwhile.
         assert!(takes(at(1, PEER)).await, "orion1 went on");
 
@@ -180,6 +224,7 @@ fn inside() {
         make("onever", 3);
         taken_within(at(3, PEER), Duration::from_secs(10)).await;
         taken_within(at(3, SSH), Duration::from_secs(10)).await;
+        told_within(at(3, TIME), Duration::from_secs(10)).await;
         drop(core);
     });
     println!("{DONE}");

@@ -180,7 +180,10 @@ impl CommCore {
             let started = orion_time::TimeSync::start(
                 &comm,
                 Some(&topics),
-                settings.time.clone(),
+                orion_time::TimeConfig {
+                    serve_retry: settings.listen_retry.first,
+                    ..settings.time.clone()
+                },
                 Some(&settings.config.state_dir),
             );
             Some(started.map_err(|error| failed("time sync", error))?)

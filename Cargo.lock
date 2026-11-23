@@ -2424,6 +2424,7 @@ dependencies = [
  "orion-types",
  "orion-unix",
  "orion-wire",
+ "rustix",
  "shm-ring",
  "shm-ring-doorbell",
  "tokio",
