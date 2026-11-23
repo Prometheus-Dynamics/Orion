@@ -244,7 +244,8 @@ impl CommCore {
             comm.add_service(orion_shell::ShellOff);
         }
         let hello = Hello::new(node.clone(), keys.clone(), Some(topics.clone()))
-            .with_security(&settings.config.security_view);
+            .with_security(&settings.config.security_view)
+            .with_unread(&settings.unread);
         #[cfg(feature = "time")]
         let hello = hello.with_clock(move || clock.as_ref().and_then(orion_time::TimeView::word));
         comm.add_service(hello.in_state(settings.board_state.clone()));
@@ -770,9 +771,7 @@ pub async fn run_until(
 #[cfg(feature = "systemd")]
 pub fn run(settings: CommSettings, unknown: &[orion_config::Warning]) -> Result<(), StartError> {
     use tokio::signal::unix::{SignalKind, signal};
-    for warning in unknown {
-        tracing::warn!("{warning}");
-    }
+    let settings = settings.told_unread(unknown);
     say_security(&settings.config.security_view);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

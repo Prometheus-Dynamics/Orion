@@ -575,6 +575,8 @@ its topics and runs its actions. The records are the store's and reach every nod
   its holder or root frees it". A lease that has ended holds nothing, and anyone may clear it.
   A holder whose session ended (or whom a restart of node logic forgot) writes its lease again,
   which renews it, and then frees it.
+- **A lease that cannot be read is still said to be held:** `<resource> is held: its lease
+  cannot be read`, so a caller that waits out a bare `busy` does not wait this out.
 - **A refusal as busy says who.** It names the holder and since when (the lease's stamp), and
   why the lease could not be taken: its holder is answering, has not been quiet long enough,
   has a run under way, or its lease ends on its own.

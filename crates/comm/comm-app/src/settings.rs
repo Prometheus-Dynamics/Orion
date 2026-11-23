@@ -119,6 +119,11 @@ pub struct CommSettings {
     /// What was set and where, the values of keys that may be secret left out
     /// ([`Source::said`]): the comm core's own `orion/settings`.
     pub said: String,
+    /// The settings that were given and that neither service reads, each as it was written: a
+    /// key of the file, a variable of the environment. Not from the settings themselves:
+    /// whoever starts the comm core says them ([`crate::run_or_recover`]). The board says
+    /// them in `orion/state` and in its hello.
+    pub unread: Vec<String>,
     /// `log.window_bytes`: how many bytes of the newest log lines are kept, for `orion/log`.
     pub log_window_bytes: usize,
     /// `offers.file`: the files the comm core serves while no program offers their prefix.
@@ -160,6 +165,17 @@ impl std::str::FromStr for SealedLink {
 }
 
 impl CommSettings {
+    /// These, with what was set and nobody reads (`unknown`) kept in them, and logged as
+    /// errors: the board then says it in `orion/state` and in its hello.
+    #[must_use]
+    pub fn told_unread(mut self, unknown: &[orion_config::Warning]) -> Self {
+        for warning in unknown {
+            tracing::error!("{warning}: it is not read, and changes nothing");
+        }
+        self.unread = unknown.iter().map(|warning| warning.key.clone()).collect();
+        self
+    }
+
     /// Takes the comm core's settings out of `source`.
     ///
     /// # Errors
@@ -341,6 +357,7 @@ impl CommSettings {
             #[cfg(feature = "shell")]
             shell: None,
             said: source.said(),
+            unread: Vec::new(),
             log_window_bytes: source.get("log.window_bytes", orion_log::WINDOW_BYTES)?,
             offers_file: source.get("offers.file", "/etc/orion/offers.conf".into())?,
             offers_user: source.optional("offers.user")?,

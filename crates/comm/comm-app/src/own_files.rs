@@ -7,7 +7,8 @@
 //! - `orion/settings`: what was set and where, the values of keys that may be secret left out;
 //! - `orion/last-good.carriers`: the record of the last good start, as recovery reads it;
 //! - `orion/state`: `running`, `flasher`, or `recovery` and why, and the clock's state when the
-//!   time sync measures it (`clock: not set (sources tried: ...)`);
+//!   time sync measures it (`clock: not set (sources tried: ...)`), and the settings that
+//!   were given and are not read (`settings not read: a, b`);
 //! - `orion/sessions`: who is connected, as what;
 //! - `orion/version`: this build, its interface revision and level, and a digest of its wire.
 
@@ -41,7 +42,7 @@ pub(crate) fn running(
     clock: Option<Line>,
 ) -> Result<FileOffersService, crate::StartError> {
     #[allow(unused_mut)]
-    let mut state = format!("{}\n", settings.board_state.word());
+    let mut state = format!("{}\n{}", settings.board_state.word(), unread(settings));
     #[cfg(feature = "announce")]
     if let Some(why) = crate::announce::withheld(settings) {
         state.push_str(&format!("mdns: {why}\n"));
@@ -62,7 +63,10 @@ pub(crate) fn in_recovery(
     settings: Option<&CommSettings>,
     why: &str,
 ) -> FileOffersService {
-    let state = format!("recovery\nwhy: {why}\n");
+    let state = format!(
+        "recovery\nwhy: {why}\n{}",
+        settings.map(unread).unwrap_or_default()
+    );
     let (service, not) = OrionFiles::new(settings, state).service(comm, settings);
     if let Some(not) = not {
         tracing::warn!("recovery: the files the settings name are not served: {not}");
@@ -85,6 +89,14 @@ impl std::fmt::Debug for Line {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Line")
     }
+}
+
+/// The line that says which settings were given and are not read, if any were.
+fn unread(settings: &CommSettings) -> String {
+    if settings.unread.is_empty() {
+        return String::new();
+    }
+    format!("settings not read: {}\n", settings.unread.join(", "))
 }
 
 /// The comm core's own files.

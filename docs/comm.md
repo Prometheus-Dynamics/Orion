@@ -891,6 +891,7 @@ a nonce) and is answered (`Identity`):
 | `state`: `running`, `recovery` or `flasher`; in recovery, `recovery_why` | Orion |
 | `security`: `on`, `off` or `damaged`; `security_generation` | Orion, from the board's record |
 | `clock`: `synced` or `unset`, when the time sync measures | Orion, from the time sync |
+| `settings_unread`: the settings given that nothing reads, when there are any | Orion |
 | Facts about the board: name, type, value | Other programs |
 | The asker's nonce | The question |
 | Signature | The node's key, over a fixed label and everything before this field |
@@ -918,6 +919,9 @@ a nonce) and is answered (`Identity`):
   which is `Security::NotTold` from an older board.
 - **So is whether its clock is set,** as the text fact `clock` (see [Time sync](#time-sync)),
   asked of the time sync each time the document is made. The broker reserves `hello.clock`.
+- **So are settings nothing reads,** as the text fact `settings_unread`: each key or variable
+  as it was written, `, ` between, cut to 1024 bytes; not there when there are none. The
+  broker reserves `hello.settings_unread`. `docs/settings.md` says the rest.
 - **Anyone may ask**, a key that has been granted nothing included.
 - **Always answers.** It is in the comm core and needs nothing else running.
 - Someone on the board who gives no nonce is not checking a signature and gets the document

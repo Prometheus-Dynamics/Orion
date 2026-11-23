@@ -6,7 +6,7 @@ use std::rc::Rc;
 use orion_broker::{Broker, BrokerConfig, NODE_FACTS};
 use orion_hello::{
     BoardState, CLOCK_FACT, FACT_PREFIX, Hello as HelloService, MAX_FACT_BYTES, RECOVERY_WHY_FACT,
-    SECURITY_FACT, SECURITY_GENERATION_FACT, STATE_FACT, SharedState, verify,
+    SECURITY_FACT, SECURITY_GENERATION_FACT, SETTINGS_UNREAD_FACT, STATE_FACT, SharedState, verify,
 };
 use orion_keys::{Identity as Key, Keys, KeysConfig, SharedKeys, random};
 use orion_msg_session::{Hello, Identify, Identity, Refusal, Welcome};
@@ -267,6 +267,7 @@ fn the_broker_reserves_the_names_of_the_nodes_own_facts() {
             format!("{FACT_PREFIX}{SECURITY_FACT}").as_str(),
             format!("{FACT_PREFIX}{SECURITY_GENERATION_FACT}").as_str(),
             format!("{FACT_PREFIX}{CLOCK_FACT}").as_str(),
+            format!("{FACT_PREFIX}{SETTINGS_UNREAD_FACT}").as_str(),
         ]
     );
 }

@@ -73,13 +73,16 @@ pub const SECURITY_FACT: &str = "security";
 pub const SECURITY_GENERATION_FACT: &str = "security_generation";
 /// Orion's fact, when the board's time sync measures: `synced` or `unset`.
 pub const CLOCK_FACT: &str = "clock";
+/// Orion's fact, when settings were given that nothing reads: their names, `, ` between.
+pub const SETTINGS_UNREAD_FACT: &str = "settings_unread";
 /// Orion's own facts: a program's fact by one of these names is left out.
-const OWN_FACTS: [&str; 5] = [
+const OWN_FACTS: [&str; 6] = [
     STATE_FACT,
     RECOVERY_WHY_FACT,
     SECURITY_FACT,
     SECURITY_GENERATION_FACT,
     CLOCK_FACT,
+    SETTINGS_UNREAD_FACT,
 ];
 /// The number of the text field type, as facts carry it.
 const TEXT: u8 = 4;
@@ -145,6 +148,8 @@ pub struct Hello {
     state: SharedState,
     /// The `security` fact, and `security_generation`, if told.
     security: Option<(&'static str, Option<String>)>,
+    /// The `settings_unread` fact, if there is something to say.
+    unread: Option<String>,
     /// The `clock` fact as it is when asked, if told.
     clock: Option<Box<dyn Fn() -> Option<&'static str>>>,
     payload: Vec<u8>,
@@ -168,6 +173,7 @@ impl Hello {
             facts: Vec::new(),
             state: SharedState(Rc::new(RefCell::new(BoardState::Running))),
             security: None,
+            unread: None,
             clock: None,
             payload: Vec::new(),
         }
@@ -194,6 +200,20 @@ impl Hello {
             .filter(|_| view.fault.is_none())
             .map(|generation| generation.to_string());
         self.security = Some((word, generation));
+        self
+    }
+
+    /// The same, saying which settings were given that nothing reads, each as it was written.
+    /// With none, the document says nothing of it. Cut to what a fact carries.
+    #[must_use]
+    pub fn with_unread(mut self, names: &[String]) -> Self {
+        let mut said = names.join(", ");
+        let mut end = said.len().min(MAX_FACT_BYTES);
+        while !said.is_char_boundary(end) {
+            end -= 1;
+        }
+        said.truncate(end);
+        self.unread = Some(said).filter(|said| !said.is_empty());
         self
     }
 
@@ -325,6 +345,13 @@ impl Service for Hello {
                     value: Bytes(generation.as_bytes()),
                 });
             }
+        }
+        if let Some(unread) = &self.unread {
+            fields.push(IdentityField {
+                name: SETTINGS_UNREAD_FACT,
+                ty: TEXT,
+                value: Bytes(unread.as_bytes()),
+            });
         }
         if let Some(word) = self.clock.as_ref().and_then(|clock| clock()) {
             fields.push(IdentityField {

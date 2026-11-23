@@ -88,6 +88,11 @@ The work is a pre-planned list of PRs into `next`.
   that made it slower, with the reason.
 - Start a new worktree's target directory with `scripts/seed-target.sh FROM TO`, from another
   worktree's: a copy, never a share, and on btrfs a clone that costs no space.
+- A target directory belongs to one worktree. cargo decides what is fresh by file times, so
+  one built from another worktree's files can hold crates taken as fresh for sources that are
+  not yours. The gate refuses a target directory another worktree built in
+  (`scripts/target-owner.sh`), and takes over one that was seeded, after giving your files
+  the time now.
 
 ## Rules
 

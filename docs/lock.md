@@ -589,6 +589,12 @@ what to change.
   each with its own clock on arrival). `Publisher::set_at`, `ClientGateway::start_telling`,
   `FarClock` in both crates, `TimeSync::far_clock`, `TimeStatus::nt4` (**Add**); `Far::set`
   takes the sample's time (**Change**). No Orion wire changes; level 6.
+- **I91.** The hello fact `settings_unread` and `Node::settings_unread` (**Add**); the broker
+  reserves `hello.settings_unread` (**Change**). `orion/state` gains `settings not read: ...`
+  (**Add**). `CommSettings::unread` and `CommSettings::told_unread` (**Add**). A setting
+  nothing reads is logged as an error (**Change**: was a warning). A lease that cannot be read
+  is refused `Busy` with words (**Change**: was bare). The gate refuses a target directory
+  another worktree built in (`scripts/target-owner.sh`). No wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

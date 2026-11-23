@@ -104,6 +104,14 @@ impl Node {
         self.fact_text("clock")
     }
 
+    /// The settings the board was given that it does not read, each as it was written (a key
+    /// of its file, a variable of its environment), `, ` between: a typo, or a setting for
+    /// another build. `None` when there are none, or from a board too old to say.
+    #[must_use]
+    pub fn settings_unread(&self) -> Option<&str> {
+        self.fact_text("settings_unread")
+    }
+
     fn fact_text(&self, name: &str) -> Option<&str> {
         self.facts
             .iter()
@@ -477,5 +485,8 @@ mod tests {
         assert_eq!(node(&[("clock", "unset")]).clock(), Some("unset"));
         assert_eq!(node(&[("clock", "synced")]).clock(), Some("synced"));
         assert_eq!(node(&[("state", "running")]).clock(), None);
+        let typos = node(&[("settings_unread", "topcis.max, ORION_TYPO")]);
+        assert_eq!(typos.settings_unread(), Some("topcis.max, ORION_TYPO"));
+        assert_eq!(node(&[("state", "running")]).settings_unread(), None);
     }
 }

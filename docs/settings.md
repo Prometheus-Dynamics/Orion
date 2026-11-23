@@ -5,10 +5,21 @@ Both services, `orion comm` and `orion node`, read one file of `key = value` lin
 the file: a key's name in capitals, with `_` for `.`, after `ORION_` (`peer.listen` is
 `ORION_PEER_LISTEN`, `socket.node_uids` is `ORION_SOCKET_NODE_UIDS`). A line starting with `#` is a comment.
 
-A key that neither service reads is logged by both when they start, so a typo is seen; a key
-that only the other one reads is not. A key for a part that is not built in is a key nobody
-reads. A value that does not parse stops the start and names the key; the comm core then opens
-the recovery way in (`docs/comm.md`, "Recovery").
+A key of the file or a variable of the environment that neither service reads does not stop the
+start: a slot rolled back to an older build must still come up with a newer file. The board
+says it where a person looking at the board sees it:
+
+- a line in `orion/state`: `settings not read: topcis.max, ORION_TYPO`, each as it was written;
+- the hello fact `settings_unread`, the same list (`Node::settings_unread`);
+- an error in each service's log, one for each.
+
+A key that only the other service reads is not one of them. A key for a part that is not built
+in is: nobody reads it.
+
+A value that does not parse stops the start and names the key. The comm core then opens the
+recovery way in (`docs/comm.md`, "Recovery"), and its hello says `recovery` and why. Node logic
+logs `the settings cannot be read: ...` and ends; the service manager starts it again, and the
+comm core stays up meanwhile.
 
 `packaging/systemd/orion.conf.example` is the file a board starts from.
 

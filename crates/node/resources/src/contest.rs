@@ -206,8 +206,14 @@ impl Contest {
         now_ms: u64,
         in_flight: &dyn Fn(u32, &[String]) -> bool,
     ) -> Result<Taken, Refused> {
-        let version = store.get(RecordClass::Lease, resource).ok_or(Error::Busy)?;
-        let lease = LeaseRecord::decode(&version.value).map_err(|_| Error::Busy)?;
+        // Held, by a lease that cannot be said: still in words, so that a caller that asks
+        // again on a bare `busy` (want of room) does not wait this out.
+        let unread = || Refused {
+            error: Error::Busy,
+            words: Some(format!("{resource} is held: its lease cannot be read")),
+        };
+        let version = store.get(RecordClass::Lease, resource).ok_or_else(unread)?;
+        let lease = LeaseRecord::decode(&version.value).map_err(|_| unread())?;
         let mut words = format!(
             "{resource} is held by {} since {} ms",
             lease.holder, version.stamp.physical_ms
@@ -251,5 +257,30 @@ impl Contest {
             from: holder,
             by: by.to_owned(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orion_store::StoreConfig;
+
+    #[test]
+    fn a_lease_that_cannot_be_read_is_refused_in_words_as_held() {
+        let mut store = Store::new("board".parse().expect("name"), StoreConfig::default());
+        let contest = Contest::new(10_000);
+        let refused = |store: &Store| {
+            contest
+                .contest(store, 1, "cam.front", "workload:a", 0, &|_, _| false)
+                .expect_err("held")
+        };
+        let said = Refused {
+            error: Error::Busy,
+            words: Some("cam.front is held: its lease cannot be read".to_owned()),
+        };
+        // No lease record at all, and one that is not a lease.
+        assert_eq!(refused(&store), said);
+        store.put(RecordClass::Lease, "cam.front", &[0xFF; 3], 1_000);
+        assert_eq!(refused(&store), said);
     }
 }

@@ -690,7 +690,7 @@ pub async fn run_until(
 pub fn run(settings: NodeSettings, unknown: &[orion_config::Warning]) -> Result<(), StartError> {
     use tokio::signal::unix::{SignalKind, signal};
     for warning in unknown {
-        warn!("{warning}");
+        tracing::error!("{warning}: it is not read, and changes nothing");
     }
     let view = &settings.config.security_view;
     if view.fault.is_some() {

@@ -285,6 +285,10 @@ pub async fn start_or_recover(
 /// Runs the comm core until it is told to stop, as [`crate::run`] does, and if it cannot
 /// start, runs the recovery way in until it is told to stop instead of ending.
 ///
+/// `unknown` is what was set and neither service reads. It is logged as an error, and the
+/// board says it where it is seen: a line in `orion/state` and a fact in its hello. It does
+/// not stop the start: a slot rolled back to an older build must come up with a newer file.
+///
 /// # Errors
 ///
 /// Only if there is no runtime or no signals to wait on: nothing a board's own state can
@@ -295,9 +299,7 @@ pub fn run_or_recover(
     with: RecoverWith,
 ) -> Result<(), StartError> {
     use tokio::signal::unix::{SignalKind, signal};
-    for warning in unknown {
-        tracing::warn!("{warning}");
-    }
+    let settings = settings.map(|settings| settings.told_unread(unknown));
     if let Ok(settings) = &settings {
         crate::say_security(&settings.config.security_view);
     }

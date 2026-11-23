@@ -311,3 +311,61 @@ fn the_state_says_whether_the_clock_is_set_and_what_was_tried() {
         );
     });
 }
+
+/// Settings that were given and that nothing reads: the board says them in `orion/state` and
+/// in its hello, where a person looking at the board sees them.
+#[test]
+fn settings_nothing_reads_are_said_in_the_state_and_the_hello() {
+    run(async {
+        let dir = temp("unread");
+        // A key of the file and a variable of the environment that nothing reads, as whoever
+        // starts the comm core finds them.
+        let view = dir.join("security");
+        std::fs::write(&view, "off\ngeneration 1\n").expect("security record");
+        let text = format!(
+            "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\ntopcis.max = 5\n",
+            dir.display()
+        );
+        let variables = [("ORION_TYPO".to_owned(), "1".to_owned())];
+        let mut source = Source::parse(&text, variables).expect("source");
+        let settings = CommSettings::from_source_with_view(&mut source, &view).expect("settings");
+        let settings = settings.told_unread(&source.warnings());
+        let core = CommCore::start(settings).await.expect("start");
+        let (fetched, _) = fetch(core.socket(), &["orion/state"]).await;
+        assert_eq!(
+            fetched[0],
+            "running\nsettings not read: topcis.max, ORION_TYPO\n"
+        );
+        let socket = core.socket().to_owned();
+        let said = tokio::task::spawn_blocking(move || {
+            let orion = orion::Orion::connect(&Address::Local(socket), "tool").expect("connect");
+            orion
+                .node()
+                .expect("node")
+                .settings_unread()
+                .map(str::to_owned)
+        })
+        .await
+        .expect("asked");
+        assert_eq!(said.as_deref(), Some("topcis.max, ORION_TYPO"));
+        drop(core);
+
+        // With none, neither says anything of it.
+        let dir = temp("all-read");
+        let core = CommCore::start(self::settings(&dir)).await.expect("start");
+        let (fetched, _) = fetch(core.socket(), &["orion/state"]).await;
+        assert_eq!(fetched[0], "running\n");
+        let socket = core.socket().to_owned();
+        let said = tokio::task::spawn_blocking(move || {
+            let orion = orion::Orion::connect(&Address::Local(socket), "tool").expect("connect");
+            orion
+                .node()
+                .expect("node")
+                .settings_unread()
+                .map(str::to_owned)
+        })
+        .await
+        .expect("asked");
+        assert_eq!(said, None);
+    });
+}

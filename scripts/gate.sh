@@ -286,6 +286,10 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
 fi
 
 main "push guard" 3:1 scripts/push.sh --self-test
+# The target directory is this worktree's own: one built from another worktree's files can
+# hold crates cargo takes as fresh for sources that are not these.
+main "target owner self-test" 3:1 scripts/target-owner.sh --self-test
+step "target owner" 20:10 scripts/target-owner.sh "$target_dir" "$PWD"
 main "step bounds self-test" 4:5 scripts/bounded.py --self-test
 # A step with no number, or a scale that is not one, refuses to run.
 bounds_refuse() {
