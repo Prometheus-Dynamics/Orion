@@ -599,6 +599,7 @@ what to change.
   (**Add**). No wire changes; level 6.
 - **I93.** The gate only. `orion-recovery` for a board is held to its size limit before a
   release, not on every change. No interface changes.
+- **I96.** A document only, `docs/from-dev.md`. No interface changes.
 - **I94.** A lint only: `clippy::unwrap_used` is denied outside tests in the comm core's and
   node logic's crates. No interface changes.
 
