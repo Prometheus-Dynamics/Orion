@@ -55,7 +55,7 @@ use args::{Args, Usage};
 pub const USAGE: &str = "\
 usage: orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <verb> ...
 
-  node      show | peers | time | sync | forgive PEER
+  node      show | peers | time | sync | forgive PEER | boards
             offer-time [--stratum N] [--for MS]   (this computer's clock, while it runs)
   resource  list [PREFIX] | show NAME
   topic     read TOPIC | watch TOPIC [--count N] [--for MS]
@@ -184,6 +184,7 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
         ("node", "offer-time") => node_offer_time,
         ("node", "sync") => node_sync,
         ("node", "forgive") => node_forgive,
+        ("node", "boards") => node_boards,
         ("resource", "list") => resource_list,
         ("resource", "show") => resource_show,
         ("topic", "read") => topic_read,
@@ -317,6 +318,19 @@ fn node_forgive(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         "{peer} is forgiven: what was deleted while it was away may come back. It has to forgive this node too."
     )?;
     sync_peers(&peers, out)
+}
+
+/// The board's own file, as it says it: a line a board, under a line that names the columns.
+fn node_boards(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
+    args.done()?;
+    let mut text = std::io::Cursor::new(Vec::new());
+    let into: &mut dyn orion::files::Target = &mut text;
+    orion
+        .files()
+        .start_fetch("orion/boards", into, 0)?
+        .finish(|_, _| {})?;
+    out.write_all(text.get_ref())?;
+    Ok(())
 }
 
 fn sync_peers(peers: &[orion::node::SyncPeer], out: &mut dyn Write) -> Done {

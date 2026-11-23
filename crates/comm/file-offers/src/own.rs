@@ -5,7 +5,8 @@
 //! **A name's bytes hold for a fetch.** Each is made when it is first fetched and kept for
 //! [`SNAPSHOT_MS`]; a fetch that broke off and goes on within that time is given the same
 //! bytes, so its digest holds. After it, the name is made again, and a fetch going on from
-//! before is told the digest does not match, and fetches from the start.
+//! before is told the digest does not match, and fetches from the start. A file that says it
+//! is live ([`OwnFiles::live`]) is made again by every fetch of it from the start.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -44,6 +45,14 @@ pub trait OwnFiles {
     /// is. A file made later, as a command's output is, says so and hands its bytes to
     /// `ready` when they are made; until then, every fetch of it waits.
     fn read(&mut self, name: &str, sessions: &Sessions, ready: Ready) -> Reading;
+
+    /// Whether `name` is read to follow something that changes: then every fetch of it from
+    /// the start makes it again, where another file's bytes hold for [`SNAPSHOT_MS`]. A
+    /// fetch that goes on from where one broke off is given the bytes that one began with,
+    /// if no fetch from the start came between.
+    fn live(&self, _name: &str) -> bool {
+        false
+    }
 }
 
 /// How a file is being made.
@@ -250,7 +259,14 @@ impl Own {
             return Err(NotGiven::Busy);
         }
         let chunk = chunk.max(1);
-        let held = match self.held(name, now_ms) {
+        // A live file fetched from the start is made again; one fetched on from where a
+        // fetch broke off is given the bytes it began with.
+        let held = if from == 0 && self.files.live(name) {
+            None
+        } else {
+            self.held(name, now_ms)
+        };
+        let held = match held {
             Some(held) => held,
             None if self.is_index(name) => {
                 let index = self.index();

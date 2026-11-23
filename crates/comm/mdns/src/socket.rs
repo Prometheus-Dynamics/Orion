@@ -49,6 +49,10 @@ pub fn interfaces(only: &[String]) -> io::Result<Vec<Interface>> {
         };
         match each.ip() {
             std::net::IpAddr::V4(ip) => seen[at].v4.push(ip),
+            // Link-local IPv6 is left out here, in every build: `if-addrs` gives it only when
+            // another crate in the build turns its `link-local` feature on (`mdns-sd` does),
+            // and what the board announces must not depend on what else is built with it.
+            std::net::IpAddr::V6(ip) if ip.is_unicast_link_local() => {}
             std::net::IpAddr::V6(ip) => seen[at].v6.push(ip),
         }
     }

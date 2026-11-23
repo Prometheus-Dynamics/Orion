@@ -113,8 +113,10 @@ tracing.workspace = true
 rustix = { version = "1", default-features = false, features = ["std", "process", "net", "fs", "stdio", "thread", "event"], optional = true }
 
 [dev-dependencies]
-orion = { path = "../../client/orion", default-features = false, features = ["shell", "topics"] }
+orion = { path = "../../client/orion", default-features = false, features = ["shell", "topics", "files"] }
 orion-connect = { path = "../../client/connect" }
+# `orion node boards`, as a person asks.
+orion-ctl = { path = "../../client/ctl" }
 orion-files = { path = "../../client/files" }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-msg-topics = { path = "../../core/msg-topics" }

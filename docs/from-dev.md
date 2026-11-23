@@ -199,7 +199,7 @@ can stop: the bridge's resources take their actions directly.
 | On `dev` | On `next` | |
 | --- | --- | --- |
 | `query_discovery()`, `DiscoverySnapshot { backend, cluster, peers }` | the node records (`records().get(RecordClass::Node, "")`): each board of the cluster with its address and labels. `node()` gives this board's name, cluster and key | changed |
-| `DiscoveredPeerRecord.state` (enrolled, discovered, revoked), `key_fingerprint` | the comm core keeps this list ([`comm.md`](comm.md), "Discovery"), with two more states. A call that gives it to a client was not found | **gap** |
+| `DiscoveredPeerRecord.state` (enrolled, discovered, revoked), `key_fingerprint` | `boards()`: the boards the board hears on its network, with name, addresses, key fingerprint, cluster, state, security, clock, and `trust` from its keys (enrolled, discovered, revoked, key mismatch, incompatible, or open with security off); `orion node boards`; the topic `orion.boards` moves when the list does ([`comm.md`](comm.md), "The boards heard"). Heard, not proven, and nothing connects | changed |
 | Finding boards from a computer | each board announces `<name>.local` and `_orion._tcp` by mDNS, with its key, cluster, state, security and clock in the record ([`comm.md`](comm.md), "Announced by name") | new |
 | Changing a board's cluster by rewriting settings and restarting the service | `cluster` is a setting of both services; they are `orion-comm.service` and `orion-node.service` | changed |
 | Relaying TCP to another board's `orion+tcp` port | the port is 9200 unless set. Reaching another board's topics and actions needs no relay: topics of other nodes are subscribed to here, and an action's `target` names the node | changed |
@@ -266,7 +266,7 @@ decided.
    newest sample.
 5. **More of the board's vital signs.** `orion.host` has one CPU figure and one temperature;
    `dev` had per-core, load averages and each sensor.
-6. **The discovery list for a client:** which boards are seen, and which are enrolled,
-   revoked or mismatched.
+6. **The discovery list for a client: closed.** `boards()` and `orion node boards`, watched
+   by `orion.boards`. It lists what is heard; enrolling a board from it is not built.
 7. **A subscription to every topic under a prefix.** A program lists the resources and
    subscribes to each topic, and must do so again when one appears.

@@ -280,6 +280,30 @@ impl SelfStatus {
     }
 }
 
+impl SelfStatus {
+    /// A topic of counts named `fields`, published when they change.
+    ///
+    /// # Errors
+    ///
+    /// If the topic can't be declared.
+    pub fn counts(&self, topic: &str, fields: &[&str]) -> Result<Counts, Error> {
+        let declared: Vec<_> = fields.iter().map(|f| (*f, FieldType::Int, "")).collect();
+        let publisher = declare(&self.topics, topic, &declared)?;
+        Ok(Counts(Values::new(publisher, fields.len())))
+    }
+}
+
+/// A topic of counts: see [`SelfStatus::counts`].
+pub struct Counts(Values);
+
+impl Counts {
+    /// Publishes those of `values` that changed, in the order of the fields.
+    pub fn publish(&mut self, values: &[u64]) {
+        let values: Vec<_> = values.iter().map(|value| int(*value)).collect();
+        self.0.publish(&values);
+    }
+}
+
 /// The number a state is published as.
 #[must_use]
 pub const fn state_code(state: State) -> u64 {

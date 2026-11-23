@@ -202,6 +202,10 @@ What a node does with a peer's summary:
   directory when it changes, and read back at start.
 - **Who to sync with** is the node records: put one for a node, with its address, on any node,
   and every node that hears of it connects. A single board has none and starts no thread.
+- **With security off, nothing syncs today.** A node dials the one its record names, but the
+  one dialled hears a session from nobody in particular, and takes sync only from a peer: the
+  dialler stays `syncing`, and no record crosses either way. Whether boards with security off
+  should sync is not decided. `orion-test-board`'s `linking::` shows it as it is.
 
 ## The open list of actions
 

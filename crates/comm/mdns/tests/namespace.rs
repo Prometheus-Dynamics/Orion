@@ -175,6 +175,7 @@ async fn scenario() {
             kind: ORION,
             txt: Box::new(move || asked.borrow_mut().take()),
         }),
+        None,
         async move {
             let _ = stopped_a.await;
         },
@@ -225,6 +226,7 @@ async fn scenario() {
         announce("bbbb"),
         only("mdb"),
         b.clone(),
+        None,
         None,
         async move {
             let _ = stopped_b.await;

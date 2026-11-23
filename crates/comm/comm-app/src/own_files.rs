@@ -11,6 +11,8 @@
 //!   were given and are not read (`settings not read: a, b`), and how many requests have
 //!   made a service panic and been contained (`panics contained: 0`);
 //! - `orion/sessions`: who is connected, as what;
+//! - `orion/boards`: the other boards heard on the local network (`boards.rs`), where the
+//!   board is announced;
 //! - `orion/version`: this build, its interface revision and level, and a digest of its wire.
 
 use std::fmt::Write as _;
@@ -21,6 +23,7 @@ use orion_server::{Comm, Sessions};
 use sha2::{Digest, Sha256};
 
 use crate::CommSettings;
+use crate::heard::Heard;
 
 const PREFIX: &str = "orion/";
 
@@ -29,6 +32,7 @@ const SETTINGS_BYTES: u64 = 64 * 1024;
 const LAST_GOOD_BYTES: u64 = 16 * 1024;
 const STATE_BYTES: u64 = 4 * 1024;
 const SESSIONS_BYTES: u64 = 64 * 1024;
+const BOARDS_BYTES: u64 = 64 * 1024;
 const VERSION_BYTES: u64 = 4 * 1024;
 
 /// The files service of a comm core running as `settings` say, with its own files and those the
@@ -41,6 +45,7 @@ pub(crate) fn running(
     comm: &Comm,
     settings: &CommSettings,
     clock: Option<Line>,
+    heard: &Heard,
 ) -> Result<FileOffersService, crate::StartError> {
     #[allow(unused_mut)]
     let mut state = format!("{}\n{}", settings.board_state.word(), unread(settings));
@@ -50,6 +55,11 @@ pub(crate) fn running(
     }
     let mut files = OrionFiles::new(Some(settings), state);
     files.clock = clock;
+    #[cfg(feature = "announce")]
+    if settings.mdns {
+        files.heard = Some(heard.clone());
+    }
+    let _ = heard;
     match files.service(comm, Some(settings)) {
         (service, None) => Ok(service),
         (_, Some(why)) => Err(crate::error::failed("offers.file", why)),
@@ -110,6 +120,8 @@ pub(crate) struct OrionFiles {
     state: String,
     /// The clock's line, after the rest.
     clock: Option<Line>,
+    /// The boards heard, where the board is announced.
+    heard: Option<Heard>,
 }
 
 impl OrionFiles {
@@ -131,6 +143,7 @@ impl OrionFiles {
             ),
             state,
             clock: None,
+            heard: None,
         }
     }
 
@@ -169,14 +182,23 @@ impl OwnFiles for OrionFiles {
             max_bytes,
             user_data,
         };
-        vec![
+        let mut names = vec![
             name("log", self.window.bytes() as u64, true),
             name("settings", SETTINGS_BYTES, false),
             name("last-good.carriers", LAST_GOOD_BYTES, false),
             name("state", STATE_BYTES, false),
             name("sessions", SESSIONS_BYTES, true),
             name("version", VERSION_BYTES, false),
-        ]
+        ];
+        if self.heard.is_some() {
+            names.push(name("boards", BOARDS_BYTES, false));
+        }
+        names
+    }
+
+    /// The boards heard are read again when `orion.boards` moves: never a minute old.
+    fn live(&self, name: &str) -> bool {
+        name.strip_prefix(PREFIX) == Some("boards")
     }
 
     fn read(&mut self, name: &str, sessions: &Sessions, _: Ready) -> Reading {
@@ -200,6 +222,11 @@ impl OwnFiles for OrionFiles {
                 )
             }
             "sessions" => sessions_text(sessions),
+            "boards" if self.heard.is_some() => {
+                let heard = self.heard.as_ref().and_then(Heard::said);
+                // Not announced after all (nothing to announce): nothing is heard either.
+                heard.unwrap_or_else(|| "# nothing is announced here, so nothing is heard\n".into())
+            }
             "version" => version_text(),
             _ => return Reading::Not(format!("{name}: no such file")),
         };

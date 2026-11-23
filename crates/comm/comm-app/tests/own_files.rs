@@ -84,6 +84,32 @@ async fn fetch(
     .expect("fetched")
 }
 
+/// With `mdns = false` the board is not announced and hears nobody: there is no
+/// `orion/boards`.
+#[cfg(feature = "announce")]
+#[test]
+fn a_board_that_is_not_announced_has_no_file_of_boards_heard() {
+    run(async {
+        let dir = temp("no-boards");
+        let view = dir.join("security");
+        std::fs::write(&view, "off\ngeneration 1\n").expect("security record");
+        let text = format!(
+            "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\nmdns = false\n",
+            dir.display()
+        );
+        let mut source = Source::parse(&text, Vec::new()).expect("source");
+        let settings = CommSettings::from_source_with_view(&mut source, &view).expect("settings");
+        let core = CommCore::start(settings).await.expect("start");
+        let (fetched, _) = fetch(core.socket(), &["orion/index"]).await;
+        let index = Index::parse(&fetched[0]).expect("an index");
+        assert!(
+            index.entries.iter().all(|e| e.name != "orion/boards"),
+            "{index:?}"
+        );
+        assert!(index.entries.iter().any(|e| e.name == "orion/state"));
+    });
+}
+
 #[test]
 fn a_running_comm_core_offers_its_own_files_with_secrets_left_out() {
     run(async {
@@ -105,17 +131,25 @@ fn a_running_comm_core_offers_its_own_files_with_secrets_left_out() {
             .iter()
             .map(|entry| entry.name.as_str())
             .collect();
-        assert_eq!(
-            listed,
-            [
-                "orion/log",
-                "orion/settings",
-                "orion/last-good.carriers",
-                "orion/state",
-                "orion/sessions",
-                "orion/version"
-            ]
-        );
+        let mut own = vec![
+            "orion/log",
+            "orion/settings",
+            "orion/last-good.carriers",
+            "orion/state",
+            "orion/sessions",
+            "orion/version",
+        ];
+        if cfg!(feature = "announce") {
+            // The board would be announced (`mdns`), with a way in to announce: here there
+            // is none, and the file says why it lists nobody.
+            own.push("orion/boards");
+            let (boards, _) = fetch(core.socket(), &["orion/boards"]).await;
+            assert_eq!(
+                boards[0],
+                "# nothing is announced here, so nothing is heard\n"
+            );
+        }
+        assert_eq!(listed, own);
         assert_eq!(index.bound("orion/log"), Some(4096), "log.window_bytes");
         assert_eq!(
             index.total,

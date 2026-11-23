@@ -84,7 +84,8 @@ pub(crate) fn fetch(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done
         .metadata()
         .map_err(|error| Failed::Usage(format!("{path}: {error}")))?
         .len();
-    let mut fetching = orion.files().start_fetch(&name, &mut file, have)?;
+    let into: &mut dyn orion::files::Target = &mut file;
+    let mut fetching = orion.files().start_fetch(&name, into, have)?;
     if let Some(bound) = bound {
         fetching = fetching.within(bound);
     }

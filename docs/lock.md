@@ -616,6 +616,15 @@ what to change.
 - **I94.** A lint only: `clippy::unwrap_used` is denied outside tests in the comm core's and
   node logic's crates. No interface changes.
 - **I101.** A test only. No interface changes.
+- **I100.** The boards heard on the local network (**Add**): the comm core's own file
+  `orion/boards` and the topic `orion.boards` (`listed`, `changes`); `Orion::boards()`,
+  `orion::heard::{HeardBoards, HeardBoard, Trust}`, `orion node boards`;
+  `orion_mdns::{Browser, Boards, Found, Known, ASK, AGAIN, KEEP, MOST, MOST_ADDRESSES,
+  MOST_TXT}`, `Responder::own`; `orion_mdns::run` takes the boards to keep (**Break** for a
+  caller of it: one more argument, `None` for none). `OwnFiles::live`, default false (**Add**);
+  `orion_files::Target` (**Add**); `SelfStatus::counts`, `Counts` (**Add**). The responder
+  asks one question on each interface it announces on. Link-local IPv6 is no longer announced in
+  a build that also has `mdns-sd` (**Change**: it was, there only). No wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

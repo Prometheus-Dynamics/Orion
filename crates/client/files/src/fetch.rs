@@ -219,6 +219,12 @@ impl Handler for Fetches {
     }
 }
 
+/// What a fetch is written into, as one type: a program that fetches into more than one kind
+/// of file (`&mut dyn Target`) carries the fetch's code once.
+pub trait Target: Read + Write + Seek {}
+
+impl<T: Read + Write + Seek> Target for T {}
+
 /// A fetch under way. [`Fetching::step`] moves it on; dropping it stops it, and what was
 /// written stays, for a fetch of the same file to go on from.
 pub struct Fetching<W> {

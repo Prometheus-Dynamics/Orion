@@ -46,12 +46,17 @@ impl OwnFiles for Fake {
             name("own/big", BIG_BOUND, true),
             name("own/broken", 10, false),
             name("own/sessions", 100, true),
+            name("own/live", 100, false),
         ]
+    }
+
+    fn live(&self, name: &str) -> bool {
+        name == "own/live"
     }
 
     fn read(&mut self, name: &str, sessions: &Sessions, _: Ready) -> Reading {
         match name {
-            "own/count" => {
+            "own/count" | "own/live" => {
                 self.made.set(self.made.get() + 1);
                 Reading::Now(format!("made {} times", self.made.get()).into_bytes())
             }
@@ -125,12 +130,13 @@ fn the_comm_core_s_own_index_is_one_a_client_reads() {
     assert_eq!(
         index,
         Index {
-            total: 100 + BIG_BOUND + 10 + 100,
+            total: 100 + BIG_BOUND + 10 + 100 + 100,
             entries: vec![
                 entry("own/count", 100, false),
                 entry("own/big", BIG_BOUND, true),
                 entry("own/broken", 10, false),
                 entry("own/sessions", 100, true),
+                entry("own/live", 100, false),
             ],
         }
     );
@@ -167,6 +173,27 @@ fn an_own_file_holds_its_bytes_for_a_fetch_that_goes_on() {
         use sha2::Digest;
         <[u8; 32]>::from(sha2::Sha256::digest(&whole))
     });
+}
+
+#[test]
+fn a_live_file_is_made_again_by_each_fetch_from_the_start_and_another_is_not() {
+    let (socket, _stop, _dir) = comm_core("live");
+    let client = files(&socket, "collector");
+    let whole = |name: &str| {
+        let (transfer, whole) = fetch(&client, name, &[]);
+        assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
+        String::from_utf8(whole).expect("text")
+    };
+    // One that is not live holds its bytes, fetched from the start too.
+    assert_eq!(whole("own/count"), "made 1 times");
+    assert_eq!(whole("own/count"), "made 1 times");
+    // A live one is made again each time.
+    assert_eq!(whole("own/live"), "made 2 times");
+    assert_eq!(whole("own/live"), "made 3 times");
+    // Broken off, it goes on in the bytes it began with: the same file.
+    let (transfer, rest) = fetch(&client, "own/live", b"made ");
+    assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
+    assert_eq!(rest, b"made 3 times");
 }
 
 #[test]

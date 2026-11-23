@@ -516,8 +516,14 @@ impl Responder {
     }
 
     /// What it heard on `interface` from `from`.
+    /// Whether a message from `from` is one this responder sent.
+    #[must_use]
+    pub fn own(&self, from: SocketAddr) -> bool {
+        from.port() == PORT && self.ours(from.ip())
+    }
+
     pub fn heard(&mut self, interface: u32, from: SocketAddr, message: &Message, now: Instant) {
-        if from.port() == PORT && self.ours(from.ip()) {
+        if self.own(from) {
             return;
         }
         let unique = self.unique();

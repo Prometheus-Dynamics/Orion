@@ -19,6 +19,8 @@ mod carriers;
 #[cfg(feature = "offers")]
 mod configured;
 mod error;
+#[cfg(any(feature = "offers", feature = "announce"))]
+mod heard;
 #[cfg(feature = "ssh")]
 mod helper;
 pub mod last_good;
@@ -216,8 +218,10 @@ impl CommCore {
         let line = clock.clone().map(own_files::Line::clock);
         #[cfg(all(feature = "offers", not(feature = "time")))]
         let line = None;
+        #[cfg(any(feature = "offers", feature = "announce"))]
+        let heard = heard::Heard::default();
         #[cfg(feature = "offers")]
-        comm.add_service(own_files::running(&comm, &settings, line)?);
+        comm.add_service(own_files::running(&comm, &settings, line, &heard)?);
         // Devices on links, each a resource with what it declared and registered.
         #[cfg(feature = "devices")]
         let devices = {
@@ -551,12 +555,7 @@ impl CommCore {
             announcing: None,
         };
         #[cfg(feature = "announce")]
-        {
-            core.announcing = announce::start(&settings, &core);
-            if core.announcing.is_some() {
-                core.parts.push("mdns");
-            }
-        }
+        announce::start(&settings, &mut core, &heard);
         last_good::write(&settings);
         info!(node = %node, security = ?security, "comm core started: {}", core.summary());
         Ok(core)

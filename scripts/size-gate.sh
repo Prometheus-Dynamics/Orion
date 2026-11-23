@@ -54,8 +54,12 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 #                                      symbol in docs/prs/C41.md)
 #   liborion_c.so           735,656
 RECOVERY_HOST=3270000
-ORION_HOST=6590000
-CAPI_HOST=740000
+ORION_HOST=6635000
+CAPI_HOST=745000
+# Raised at I100 for gap 6, the boards heard (docs/prs/I100.md has the table): orion for this
+# machine 6,616,144 measured, +33,728 over I99 after a cut of 9,008; the limit leaves room
+# for I95 and gap 5 as guessed, and a margin. liborion_c.so 736,616, +272, was 3,384 under its
+# limit, less than the 4,000 rule: raised by 5,000 with it.
 # A board's files, static musl. aarch64, the one run on a board: orion-recovery as measured at
 # I72 (docs/prs/I72.md), measured on 2026-11-22; its limit was not raised. I72 is 2,759,704,
 # +20,144 over I71's 2,739,560: a listener for each interface on the network and SSH ways in,
@@ -107,6 +111,9 @@ CAPI_HOST=740000
 # not everyone's, and with security off anyone on the network can send that request. Not to
 # be asked again without something new. I92 also has what is in orion-recovery, by section
 # and crate, and what could come out: its margin is under 5,000 bytes.
+# Orion for a board at I100, gap 6: 5,573,144 bytes, +30,440 over I99 after a cut of 6,344;
+# the limit raised from 5,550,000 to 5,590,000 for gap 6, I95 and gap 5, with a margin. Gap 4
+# brings its own raise (docs/prs/I100.md).
 # Ruled by the user, 2026-11-23: the separate orion-recovery binary is kept. It stays built and
 # its tests stay in the gate; nothing is cut from it and it is not built with abort. Its size
 # for a board is held to its limit by `--release` (I93), which a release must pass
@@ -123,7 +130,7 @@ CAPI_HOST=740000
 # change to code it shares with orion. It is still built and held to its limit here on every
 # change for this machine, its tests run in the gate, and a release measures it for a board.
 BOARDS=(
-    "aarch64-unknown-linux-musl     2770000          5550000   every     release"
+    "aarch64-unknown-linux-musl     2770000          5590000   every     release"
     "armv7-unknown-linux-musleabihf 2810000          5350000   release"
     "riscv64gc-unknown-linux-musl   3040000          5690000   release"
 )

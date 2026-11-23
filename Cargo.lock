@@ -1388,6 +1388,7 @@ dependencies = [
  "orion-check",
  "orion-config",
  "orion-connect",
+ "orion-ctl",
  "orion-device-gateway",
  "orion-discovery",
  "orion-file-offers",

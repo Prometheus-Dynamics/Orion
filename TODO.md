@@ -269,6 +269,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I80](docs/prs/I80.md) A computer gives the board its clock, and the board names whose it took (wave 19; needs I79)
 - [x] [I99](docs/prs/I99.md) A publisher is told of a listener on the network and on another node, and the sandbox test must run under the gate (wave 19; needs I98)
 - [x] [I101](docs/prs/I101.md) The USB link's allocation test counts only the link, its owner going quiet in the window (wave 19; needs I99)
+- [x] [I100](docs/prs/I100.md) The boards a board hears on its network, for a client: gap 6 (wave 19; needs I101)
 - [x] [I98](docs/prs/I98.md) Files in a root work under node logic's unit: it no longer has openat2 refused, and a sandbox that refuses it is named (wave 19; needs I97)
 - [x] [I97](docs/prs/I97.md) A write may say which version it is based on, and is refused if the record was written since (wave 19; needs I96)
 - [x] [I96](docs/prs/I96.md) A note for porting a program from dev to next (wave 19; needs I94)

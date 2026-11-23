@@ -101,7 +101,7 @@ pub mod files {
     pub use orion_files::index;
     pub use orion_files::{
         Asked, Fetching, FileState, Files, Gift, Giving, Handed, Known, Offer, Offered, OfferedBy,
-        Pull, Pushing, Sink, Step, Transfer, digest,
+        Pull, Pushing, Sink, Step, Target, Transfer, digest,
     };
 }
 
@@ -122,6 +122,7 @@ pub mod provider {
 }
 
 /// Who a board is, and what time it has.
+pub mod heard;
 pub mod node;
 #[cfg(feature = "shell")]
 pub mod shell;
@@ -738,6 +739,25 @@ impl Orion {
             command,
             terminal,
         )?)
+    }
+
+    /// The other boards this board hears on its local network, as they announce themselves,
+    /// and how far this board's keys know each: read from its file `orion/boards`. Nothing in
+    /// it is proven: a board is checked when something connects to it. The topic
+    /// `orion.boards` moves (`changes`) when this would say something else.
+    ///
+    /// # Errors
+    ///
+    /// Refused `not found` by a board that announces nothing, so hears nothing, or is too
+    /// old to say; as a fetch.
+    #[cfg(feature = "files")]
+    pub fn boards(&self) -> Result<heard::HeardBoards, Error> {
+        let mut text = std::io::Cursor::new(Vec::new());
+        let into: &mut dyn files::Target = &mut text;
+        self.files
+            .start_fetch("orion/boards", into, 0)?
+            .finish(|_, _| {})?;
+        Ok(heard::read(&String::from_utf8_lossy(text.get_ref())))
     }
 
     /// The files: push and pull.

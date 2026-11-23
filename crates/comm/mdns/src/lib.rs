@@ -15,6 +15,7 @@
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
+mod browse;
 pub mod packet;
 mod respond;
 mod socket;
@@ -29,6 +30,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use tracing::{info, warn};
 
+pub use browse::{AGAIN, ASK, Browser, Found, KEEP, Known, MOST, MOST_ADDRESSES, MOST_TXT};
 pub use respond::{
     Announce, HOST_TTL, Interface, OTHER_TTL, PORT, Reach, Responder, Send, Service,
 };
@@ -153,6 +155,74 @@ impl Named {
     }
 }
 
+/// The other boards heard on the network, kept by the responder as it runs: see [`Browser`].
+#[derive(Clone)]
+pub struct Boards(Rc<RefCell<Browser>>, Rc<RefCell<Option<Told>>>);
+
+/// Told how many boards are found and the count of changes, when that count has moved.
+pub type Told = Box<dyn FnMut(usize, u64)>;
+
+impl std::fmt::Debug for Boards {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.borrow().fmt(f)
+    }
+}
+
+impl Default for Boards {
+    fn default() -> Self {
+        let seed = u64::from(std::process::id());
+        Self(
+            Rc::new(RefCell::new(Browser::new(ORION, seed))),
+            Rc::default(),
+        )
+    }
+}
+
+impl Boards {
+    /// `told` is called by the responder that runs this, each time what is found may have
+    /// changed.
+    pub fn told(&self, told: Told) {
+        *self.1.borrow_mut() = Some(told);
+    }
+
+    /// Tells of the changes since `said`.
+    fn tell(&self, said: &mut u64) {
+        let (found, changes) = {
+            let browser = self.0.borrow();
+            (browser.found().len(), browser.changes())
+        };
+        if changes != *said
+            && let Some(told) = self.1.borrow_mut().as_mut()
+        {
+            *said = changes;
+            told(found, changes);
+        }
+    }
+
+    /// See [`Browser::known`].
+    pub fn known(&self, known: Known) {
+        self.0.borrow_mut().known(known);
+    }
+
+    /// The boards heard: see [`Browser::found`].
+    #[must_use]
+    pub fn found(&self) -> Vec<Found> {
+        self.0.borrow().found()
+    }
+
+    /// See [`Browser::refused`].
+    #[must_use]
+    pub fn refused(&self) -> u64 {
+        self.0.borrow().refused()
+    }
+
+    /// See [`Browser::changes`].
+    #[must_use]
+    pub fn changes(&self) -> u64 {
+        self.0.borrow().changes()
+    }
+}
+
 /// A service's TXT strings as they change. `txt` is asked each time the interfaces are looked
 /// at ([`FOLLOW`]), and gives the strings when they have changed: they are announced again.
 pub struct Retell {
@@ -169,11 +239,13 @@ impl std::fmt::Debug for Retell {
 
 /// Runs the responder until `stop` finishes, and says goodbye. Must be run inside a
 /// `LocalSet`. With `retell`, a service's TXT strings are announced again when they change.
+/// With `boards`, it browses for the other boards on the same sockets, and keeps them there.
 pub async fn run(
     announce: Announce,
     settings: Settings,
     named: Named,
     mut retell: Option<Retell>,
+    boards: Option<Boards>,
     stop: impl Future<Output = ()>,
 ) {
     let seed = announce
@@ -188,6 +260,7 @@ pub async fn run(
     let mut open: Vec<Open> = Vec::new();
     let mut follow = Instant::now();
     let mut told: Option<String> = None;
+    let mut said = 0;
     tokio::pin!(stop);
     loop {
         if Instant::now() >= follow {
@@ -198,8 +271,19 @@ pub async fn run(
             {
                 responder.retell(retell.kind, txt, Instant::now().into_std());
             }
+            if let Some(boards) = &boards {
+                let there: Vec<u32> = open.iter().map(|on| on.index).collect();
+                boards
+                    .0
+                    .borrow_mut()
+                    .interfaces(&there, Instant::now().into_std());
+            }
         }
-        let due = Instant::from_std(responder.due()).min(follow);
+        let mut due = Instant::from_std(responder.due()).min(follow);
+        if let Some(boards) = &boards {
+            let now = Instant::now().into_std();
+            due = due.min(Instant::from_std(boards.0.borrow().due(now)));
+        }
         tokio::select! {
             () = &mut stop => break,
             () = sleep_until(due) => {}
@@ -208,12 +292,30 @@ pub async fn run(
                 // Not mDNS, or not whole: dropped, as the network drops.
                 if let Ok(message) = packet::Message::read(&bytes) {
                     responder.heard(index, from, &message, Instant::now().into_std());
+                    if let Some(boards) = &boards
+                        // From the mDNS port, as an announcement is (RFC 6762 §6), and
+                        // not this board's own.
+                        && from.port() == PORT
+                        && !responder.own(from)
+                    {
+                        boards
+                            .0
+                            .borrow_mut()
+                            .heard(index, &message, Instant::now().into_std());
+                    }
                 }
             }
         }
         let before = named.get();
         for send in responder.poll(Instant::now().into_std()) {
             deliver(&open, &send).await;
+        }
+        if let Some(boards) = &boards {
+            let asks = boards.0.borrow_mut().poll(Instant::now().into_std());
+            for send in asks {
+                deliver(&open, &send).await;
+            }
+            boards.tell(&mut said);
         }
         let now = responder.up().then(|| responder.name().to_owned());
         if now != before {

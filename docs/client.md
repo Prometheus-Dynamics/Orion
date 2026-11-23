@@ -240,7 +240,13 @@ where its sync with other boards is. `offer_time(stratum)` gives the board this 
 the board asks for it when it polls, and the session answers whenever it is pumped, by any call or
 `pump(wait)`, for as long as it lasts (`times_asked()` counts). It needs what `docs/comm.md`,
 "Time sync", says: `operator` in the board's `time.servers`, and `clock.set` with security on.
-`node().clock()` says whether the board's clock is set, `synced` or `unset`, so a tool can offer
+`boards()` is the other boards the board hears on its local network, read from its own file
+`orion/boards` ([`comm.md`](comm.md), "The boards heard"): each one's name, addresses, port, key
+fingerprint, cluster, state, security and clock as it announces them, and `trust`, how the
+board's keys know it (`Enrolled`, `Discovered`, `Revoked`, `KeyMismatch`, `Incompatible`,
+`Open` with security off, `Unreadable`). Nothing in it is proven; nothing connects. A board that
+announces nothing has no such file and is refused `not found`. To follow it, subscribe to
+`orion.boards` and read again when `changes` moves. `node().clock()` says whether the board's clock is set, `synced` or `unset`, so a tool can offer
 the time when it is not (`orion-ctl node time` says so). `enroll(public_key, name, enrollment_key)` asks the board to
 let an operator in: from root on the board for any key, at once; from the operator itself, on a
 session signed with that key, at once with the cluster's enrollment key (only a proof made from
@@ -828,6 +834,7 @@ orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <verb> ...
 node      show                      who the board is, checked against its signature
 node      peers                     the nodes it knows
 node      time                      how its clock compares with this computer's
+node      boards                    the other boards it hears on its network, as orion/boards says
 node      offer-time [--stratum N] [--for MS]
                                     gives the board this computer's clock, while it runs
 resource  list [PREFIX]             the things that exist

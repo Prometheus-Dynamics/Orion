@@ -4,6 +4,9 @@
 #[cfg(all(feature = "announce", feature = "ssh-sftp"))]
 #[path = "announce.rs"]
 mod announce;
+#[cfg(all(feature = "announce", feature = "self-status", feature = "offers"))]
+#[path = "boards.rs"]
+mod boards;
 #[path = "comm.rs"]
 mod comm;
 #[cfg(all(feature = "offers", feature = "recovery"))]

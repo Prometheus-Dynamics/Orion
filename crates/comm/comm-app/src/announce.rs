@@ -4,11 +4,22 @@
 //!
 //! Recovery announces nothing: it is not built in.
 
-use orion_mdns::{Announce, Named, OrionTxt, Reach, Retell, Service, Settings};
+use orion_mdns::{Announce, Boards, Named, OrionTxt, Reach, Retell, Service, Settings};
 use tokio::sync::oneshot;
 use tracing::warn;
 
 use crate::CommSettings;
+use crate::heard::Heard;
+
+#[path = "boards.rs"]
+mod boards;
+
+/// The topic that says how many boards are heard, and moves when `orion/boards` would say
+/// something else: a program subscribes, and reads the file again when it does.
+#[cfg(feature = "self-status")]
+pub(crate) const BOARDS_TOPIC: &str = "orion.boards";
+#[cfg(feature = "self-status")]
+const BOARDS_FIELDS: [&str; 2] = ["listed", "changes"];
 
 /// The responder, running: dropped, it says goodbye.
 #[derive(Debug)]
@@ -106,7 +117,14 @@ pub(crate) fn withheld(settings: &CommSettings) -> Option<String> {
 /// Starts the responder for `core`, unless `mdns = false` or there is nothing to announce.
 /// Each way in is announced only on the interfaces it can be reached on: one listening on the
 /// loopback address alone is not announced at all.
-pub(crate) fn start(settings: &CommSettings, core: &crate::CommCore) -> Option<Announcing> {
+pub(crate) fn start(settings: &CommSettings, core: &mut crate::CommCore, heard: &Heard) {
+    core.announcing = started(settings, core, heard);
+    if core.announcing.is_some() {
+        core.parts.push("mdns");
+    }
+}
+
+fn started(settings: &CommSettings, core: &crate::CommCore, heard: &Heard) -> Option<Announcing> {
     if !settings.mdns {
         return None;
     }
@@ -191,6 +209,20 @@ pub(crate) fn start(settings: &CommSettings, core: &crate::CommCore) -> Option<A
         services,
     };
     let named = Named::default();
+    // The other boards, heard on the responder's sockets: `orion/boards`, and a topic that
+    // moves when the list does.
+    let boards = Boards::default();
+    let secured = settings.config.security_view.security != orion_config::Security::Off;
+    boards.known(boards::known(keys.clone(), secured));
+    let (list, pinned) = (boards.clone(), keys.clone());
+    heard.from(move || boards::text(&list, &pinned, secured, std::time::Instant::now()));
+    #[cfg(feature = "self-status")]
+    if let Ok(mut counts) = core.status().counts(BOARDS_TOPIC, &BOARDS_FIELDS) {
+        counts.publish(&[0, 0]);
+        boards.told(Box::new(move |listed, changes| {
+            counts.publish(&[listed as u64, changes]);
+        }));
+    }
     let (stop, stopped) = oneshot::channel::<()>();
     let interfaces = Settings {
         interfaces: settings.mdns_interfaces.clone(),
@@ -202,6 +234,7 @@ pub(crate) fn start(settings: &CommSettings, core: &crate::CommCore) -> Option<A
         interfaces,
         named.clone(),
         retell,
+        Some(boards.clone()),
         async move {
             let _ = stopped.await;
         },

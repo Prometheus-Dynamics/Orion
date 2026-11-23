@@ -212,10 +212,14 @@ offered by the comm core.
 | `orion/state` | 4 KiB | no | `running` or `flasher`; in recovery, `recovery` and a line `why: …` |
 | `orion/sessions` | 64 KiB | yes | one line a session: its number, name, principal, roles, level, `local` or `remote`, and since when it has been quiet |
 | `orion/version` | 4 KiB | no | the version, protocol, interface revision and level, and `kinds_sha256`, the digest of every kind's number, concept and name |
+| `orion/boards` | 64 KiB | no | the other boards heard on the local network, one line each ("The boards heard", below); only where the board is announced (`mdns`) |
 
 - **Made when asked for, held for a fetch.** A name's bytes are made at its first fetch, cut at
   its bound, and held for 60 seconds: a fetch that broke off and goes on within that time is
-  given the same bytes, so its digest holds. After it they are made again.
+  given the same bytes, so its digest holds. After it they are made again. So `orion/state`
+  and `orion/sessions` can be up to 60 seconds old when read: build no watch on them.
+  `orion/boards` is live: every fetch of it from the start makes it again, and only a fetch
+  that goes on from where one broke off is given the bytes that one began with.
 - **The comm core gives them itself,** paced by the client as a program's are; at most 64 at
   once, one more is `busy`. A name it does not have is rejected, "<name>: no such file"; one
   that cannot be read now (no record of a last good start), "<name>: cannot be read now".
@@ -1227,7 +1231,8 @@ listens on, or every one, and the interfaces it is kept to, if any):
 
 A way in that listens on the loopback address alone is not announced, and a board with no way
 in announces nothing, not even its name. Each interface is answered with its own addresses
-(A, and AAAA where it has them).
+(A, and AAAA where it has them). Link-local IPv6 (`fe80::/10`) is not announced: an address
+without its interface cannot be dialled from another machine as it is said.
 
 **The `_orion._tcp` TXT record** is the one peers and clients browse. Its instance is the
 board's name; what to connect to is in its SRV record and the host's addresses.
@@ -1264,6 +1269,45 @@ for a name it holds at once, and says goodbye (its records with no life left) as
 **An announcement proves nothing.** Anyone on the network can announce any name, key or state.
 The record says where to connect and which key to expect; the session's handshake is what
 proves the key. Discovery treats a peer it browsed exactly as before: listed, not trusted.
+
+### The boards heard
+
+The responder also listens for the other boards' `_orion._tcp`, on the same sockets
+(`orion_mdns::Browser`), and the comm core says what it heard in `orion/boards`. No socket,
+task or thread is added. It runs wherever the board is announced, with security on or off.
+Nothing is connected to and nothing is trusted because of it.
+
+- **What it sends.** One question, `_orion._tcp.local PTR`, to the group on each interface it
+  announces on: when the interface comes, once more a second later (a board that announced
+  itself in that second does not say it again so soon, RFC 6762 §6), then every 60 seconds and
+  up to 2 seconds more. The answers go to the group, so one question serves every board that
+  browses, and a board that hears another ask the same of everyone puts its own question off by
+  a full interval. A quiet network of three boards carries about one question and three answers
+  a minute, and the browse wakes the responder for nothing else.
+- **What it keeps.** Each board's SRV, TXT and its host's addresses, from what comes from port
+  5353 and not from this board. A board is dropped at its goodbye, and 150 seconds after it was
+  last heard (two questions may go unanswered); an address 150 seconds after it was.
+- **Bounded.** 64 boards, 8 addresses each and a TXT record of 1,024 bytes. One more board is not
+  kept, and is counted. With security on, a board whose announcement names the key pinned for
+  its name always has a place: it takes the place of the board the keys do not know that was
+  heard longest ago, so names nobody knows cannot keep a pinned board off the list. Pinned
+  boards do not take each other's places. An announcement can copy a pinned board's name and
+  key, so this keeps pinned boards listed; it does not make the list true.
+- **`orion/boards`**, made when it is read, one line a board, by name, under a line naming the
+  columns: `name addresses port key cluster state security clock trust heard_ms_ago`. A value
+  the board does not say is `-`; addresses are `,` between; a value with a space or a control
+  character has `_` for it. `key` is the fingerprint of the announced key. Last, when boards
+  were not kept: `not listed: N announcements of boards past the 64 kept`.
+- **`trust`**, how this board's keys know the board, asked each time the file is made: with
+  security on, `enrolled` (the key pinned for its name), `key-mismatch` (another key is
+  pinned for it), `revoked`, or `discovered` (not known); with security off the keys are not
+  asked: `open`. Before any of those, `incompatible` for another wire, and `unreadable` for an
+  announcement with no name or key that can be read. Boards of other clusters are listed, with
+  their cluster.
+- **Watched by the topic `orion.boards`**, fields `listed` (how many) and `changes` (a count
+  that moves when the file would say something else, a board heard again aside). It is
+  published only when they change. A program subscribes, and reads `orion/boards` again when
+  `changes` moves.
 
 ## Passing requests to node logic
 

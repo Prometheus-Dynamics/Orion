@@ -5,6 +5,8 @@
 mod based_on;
 #[path = "board.rs"]
 mod board;
+#[path = "linking.rs"]
+mod linking;
 #[path = "modes.rs"]
 mod modes;
 #[path = "receivers.rs"]
