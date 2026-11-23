@@ -615,6 +615,7 @@ what to change.
 - **I96.** A document only, `docs/from-dev.md`. No interface changes.
 - **I94.** A lint only: `clippy::unwrap_used` is denied outside tests in the comm core's and
   node logic's crates. No interface changes.
+- **I101.** A test only. No interface changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

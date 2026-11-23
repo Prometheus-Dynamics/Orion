@@ -45,11 +45,15 @@ struct Board {
 }
 
 fn board() -> Board {
+    board_with(Limits::default())
+}
+
+fn board_with(limits: Limits) -> Board {
     let comm = Comm::new(
         "board".parse().expect("name"),
         Security::On,
         Some(Rc::new(NoGrants)),
-        Limits::default(),
+        limits,
     );
     let links = UsbLinks::new();
     comm.add_service(links.service());
@@ -91,6 +95,26 @@ impl Owner {
         };
         assert_eq!(owner.ask(&hello, Vec::new()).await, Ok(kind::WELCOME));
         owner
+    }
+
+    /// Pings, and waits for the pong: the board has heard from it now.
+    async fn ping(&mut self) {
+        self.seq += 1;
+        let mut out = [0_u8; 64];
+        let len = encode_body(&Ping { now_ms: 0 }, self.seq, &mut out).expect("encode");
+        self.connection.send(&out[..len], &[]).await.expect("send");
+        let mut buf = [0_u8; 4096];
+        loop {
+            let len = self
+                .connection
+                .recv(&mut buf, &mut FdSet::default())
+                .await
+                .expect("recv")
+                .expect("open");
+            if frame::decode(&buf[..len]).expect("frame").kind() == kind::PONG {
+                return;
+            }
+        }
     }
 
     /// Sends `body` with `fds` and returns the kind of the answer, or why it was refused.
@@ -281,6 +305,16 @@ async fn until(what: &str, mut done: impl FnMut() -> bool) {
     panic!("never happened: {what}");
 }
 
+/// Since when the hardware owner's session has been quiet, if it is.
+fn owner_quiet(board: &Board) -> Option<u64> {
+    board.comm.with(|sessions, _| {
+        sessions
+            .iter()
+            .find(|session| session.name == "hardware")
+            .and_then(|session| session.quiet_since)
+    })
+}
+
 fn device_sessions(board: &Board) -> usize {
     board.comm.with(|sessions, _| {
         sessions
@@ -329,8 +363,17 @@ fn a_device_of_another_wire_revision_on_a_handed_over_link_is_told_both_numbers(
 #[test]
 fn a_link_runs_over_whatever_the_hardware_owner_hands_over() {
     run(async {
-        let board = board();
-        let mut owner = Owner::open(board.connector.connect(ROOT)).await;
+        // A heartbeat of 200 ms, so the idle time is its floor of 1 s, and the owner, which
+        // says nothing while the device pings, goes quiet inside a window counted below: in
+        // every run, not only when a slow machine stretches the window past the 6 s default.
+        let board = board_with(Limits {
+            heartbeat_ms: 200,
+            ..Limits::default()
+        });
+        // The program that owns the hardware is a program on the board, as it is on a real
+        // one: a quiet session of its own is kept, not dropped. Taken as one from elsewhere, it
+        // was dropped when it went quiet, and the drop's record was counted here.
+        let mut owner = Owner::open(board.connector.connect_local(ROOT)).await;
         // Nothing has been handed over: the link has opened nothing and is not trying to.
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!((board.stats)().opens, 0);
@@ -376,14 +419,26 @@ fn a_link_runs_over_whatever_the_hardware_owner_hands_over() {
             again.ping(round).await;
         }
         assert_eq!(device_sessions(&board), 1);
+        // The owner says something now, so its idle time runs out inside the window.
+        owner.ping().await;
+        assert_eq!(owner_quiet(&board), None, "not quiet yet");
         let before = thread_counts();
+        // Slowly for 1.5 s first, past the owner's idle time, so it is seen as quiet in here.
+        for round in 0..15 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            again.ping(round).await;
+        }
         for round in 0..2000 {
             again.ping(round).await;
         }
         let allocated = thread_counts().since(before);
         assert_eq!(
             allocated.allocs, 0,
-            "{allocated:?} in 2000 heartbeats over endpoints"
+            "{allocated:?} in 2000 heartbeats over endpoints, the owner going quiet meanwhile"
+        );
+        assert!(
+            owner_quiet(&board).is_some(),
+            "the owner went quiet in the window"
         );
 
         // The device goes away with nothing to replace it: the session ends, and the link
