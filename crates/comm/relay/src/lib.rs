@@ -18,6 +18,8 @@
 //! the policy in it. That keeps the one check at the door for actions too, though the list of
 //! actions is node logic's.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Write as _;
 

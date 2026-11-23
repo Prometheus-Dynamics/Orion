@@ -22,6 +22,8 @@
 //! the workload is gone or the session is. Putting a workload again as it is changes nothing
 //! and is how to ask where it is.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod place;
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -18,6 +18,7 @@
 //! One thread. The store and the lists are plain data owned by it. The one slow thing,
 //! writing the snapshot, is done by a helper thread that exists only while it writes.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod clock;

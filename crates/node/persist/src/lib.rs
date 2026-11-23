@@ -18,6 +18,8 @@
 //! front, so a newer build's extra fields are passed over by an older one. A snapshot of
 //! another format version has another name, and is neither read nor touched.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod disk;
 
 use std::io;

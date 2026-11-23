@@ -20,6 +20,7 @@
 //! offered for a link that has one, the device was unplugged and is back, so the old stream
 //! ends and the link goes on over the new.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod blocking;

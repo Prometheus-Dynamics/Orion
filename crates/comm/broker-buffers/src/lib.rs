@@ -19,6 +19,7 @@
 //! pool and the marks all belong to the publisher and its subscribers; when they reconnect
 //! they offer the same things again.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::cell::RefCell;

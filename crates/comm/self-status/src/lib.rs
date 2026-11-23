@@ -18,6 +18,7 @@
 //! a peer that cannot be reached and when it will be tried next. That is the failure rule's
 //! "backoff state is visible", and it costs nothing while nothing changes.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod host;

@@ -21,6 +21,7 @@
 //! other's. Only a key that is under one of node logic's own names and was not read is
 //! reported: that one is a typo.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::path::Path;

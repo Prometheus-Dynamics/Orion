@@ -20,6 +20,7 @@
 //!   clients which board this is. Someone who took a child over could pretend to be the
 //!   board to a client later. They could not get into the board.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 pub mod child;

@@ -14,6 +14,8 @@
 //! What the rest of the comm core gets is an event when an enrolled peer is there, or has moved
 //! to another address, and when it has gone: enough to keep a connection to it.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod advert;
 mod backend;
 mod enroll;

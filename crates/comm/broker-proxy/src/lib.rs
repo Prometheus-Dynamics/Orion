@@ -16,6 +16,7 @@
 //! A sample takes no answer. A sample that cannot be written (a field or a size outside the
 //! declaration) is refused, so a publisher with a mistake hears about it.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::cell::RefCell;

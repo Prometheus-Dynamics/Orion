@@ -13,6 +13,8 @@
 //! The bus is opened again a short, fixed time after it fails, for as long as the program
 //! runs. A bus where nobody says anything is one task waiting on the socket.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod carrier;
 #[cfg(all(feature = "socketcan", target_os = "linux"))]
 mod socket;

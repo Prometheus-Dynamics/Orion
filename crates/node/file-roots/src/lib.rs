@@ -16,6 +16,8 @@
 //! Every path is opened beneath the root's directory (`path`), and a root marked `ro` refuses
 //! every change, whoever asks.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 pub mod actions;
 pub mod give;
 mod path;

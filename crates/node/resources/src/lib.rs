@@ -16,6 +16,8 @@
 //!   ends. A resource has one holder at a time. A lease that has ended holds nothing.
 //! - **A lease with no end can be contested** when its holder is quiet: see [`Contest`].
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod contest;
 
 use std::collections::BTreeMap;

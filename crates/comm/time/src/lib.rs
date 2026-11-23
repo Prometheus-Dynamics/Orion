@@ -19,6 +19,7 @@
 //! The rules for what to do with an offset are in `discipline`; `docs/comm.md` has the whole
 //! account.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod config;

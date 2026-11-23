@@ -15,6 +15,7 @@
 //! [`StreamCarrier`] is the carrier, over anything that implements [`Open`]. [`Serial`] opens a
 //! serial port.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod carrier;

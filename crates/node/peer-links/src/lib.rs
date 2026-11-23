@@ -13,6 +13,8 @@
 //!
 //! What is sent on the session is node logic's business; this crate carries frames.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::collections::BTreeMap;
 use std::io;
 use std::os::unix::net::UnixDatagram;

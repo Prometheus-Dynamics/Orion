@@ -29,6 +29,8 @@
 //! This is plain data and a function of what it is told. Who a peer is, and the connection to
 //! it, are the comm core's.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod peer;
 
 use std::collections::BTreeMap;

@@ -34,6 +34,8 @@
 //! again. Without that, a file that arrives before its receiver would be stored here and
 //! answered as committed, while the receiver never saw it.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::collections::{BTreeMap, VecDeque};
 
 use orion_msg_files::{

@@ -25,6 +25,7 @@
 //! A program that cannot map shared memory is answered with `shared_memory: false`. What
 //! carries its samples is `orion-broker-proxy`.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod local;

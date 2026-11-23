@@ -6,6 +6,8 @@
 //! key pinned for it. The trust file is read on each connect, so a peer trusted or revoked
 //! since is seen.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;

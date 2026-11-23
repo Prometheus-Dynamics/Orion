@@ -12,6 +12,8 @@
 //! reads the whole file and may take seconds, so it is done by a helper thread that is
 //! started for that commit and ends with it. [`Files::poll`] collects what the helpers found.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod verify;
 
 use std::collections::BTreeMap;

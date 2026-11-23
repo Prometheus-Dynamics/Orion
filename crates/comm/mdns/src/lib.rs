@@ -13,6 +13,8 @@
 //! **An announcement proves nothing.** Anyone on the network can announce any name and any
 //! key; a client checks the key it is given when it connects, as it would with no mDNS.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 pub mod packet;
 mod respond;
 mod socket;

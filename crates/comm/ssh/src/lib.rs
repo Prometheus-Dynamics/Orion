@@ -21,6 +21,7 @@
 //!   aside and replaced, one that cannot be kept is used for the run: nothing about the disk
 //!   closes the way in ([`hostkey`]).
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod door;

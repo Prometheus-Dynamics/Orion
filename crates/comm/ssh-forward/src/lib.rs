@@ -14,6 +14,8 @@
 //! - **Bounded.** A connection that is not made in [`CONNECT`] is given up, and a channel
 //!   is closed when either end is.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::net::SocketAddr;
 use std::time::Duration;
 

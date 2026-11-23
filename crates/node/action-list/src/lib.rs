@@ -35,6 +35,8 @@
 //!
 //! Everything that happens to a run is also an [`Event`], for whoever shows runs to people.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::collections::VecDeque;
 
 use orion_msg_actions::{

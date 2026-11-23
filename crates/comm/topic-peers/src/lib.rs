@@ -25,6 +25,7 @@
 //! How the other node limits what it sends, and what it drops for a slow link, is its own
 //! outbound part's business: to it this comm core is one more subscriber.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod link;

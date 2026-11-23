@@ -18,6 +18,7 @@
 //! **Ends.** `ShellExit` comes after the last of the output, with the exit code (255 if there
 //! was none). `ShellClose`, or the session ending, ends the shell, whatever it was doing.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::cell::{Cell, RefCell};

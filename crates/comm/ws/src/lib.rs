@@ -17,6 +17,7 @@
 //! - **Bounded.** The request must come within the handshake time and fit 8 KiB. A message
 //!   longer than the largest frame is refused without being read.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod sha1;

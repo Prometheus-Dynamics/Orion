@@ -12,6 +12,7 @@
 //! - **Protocol version 3**, the one OpenSSH speaks, with its `posix-rename`, `fsync` and
 //!   `hardlink` extensions.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(unix)]
 
 use std::collections::HashMap;

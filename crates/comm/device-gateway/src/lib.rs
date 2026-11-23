@@ -14,6 +14,8 @@
 //! - A record is written when it changed, never on a timer. One that node logic could not
 //!   take (it is restarting) is written again a second later, until it is.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod provider;
 mod watch;
 

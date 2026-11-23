@@ -28,6 +28,7 @@
 //! The comm core rather than node logic routes, so that a board in recovery, where no node
 //! logic runs, can still hand over its own files.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 mod own;

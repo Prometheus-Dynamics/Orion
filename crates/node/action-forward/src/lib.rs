@@ -14,6 +14,8 @@
 //! Connecting and waiting on a network session would hold node logic up, so each other node
 //! has a helper thread, started when the first run for it comes and kept while runs go there.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod link;
 
 use std::collections::BTreeMap;

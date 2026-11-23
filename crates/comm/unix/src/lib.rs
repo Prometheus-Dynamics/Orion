@@ -11,6 +11,7 @@
 //! and is replaced. A socket somebody answers means another comm core is running, and this one
 //! does not take its place. Anything that is not a socket is never touched.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::io;

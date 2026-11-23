@@ -26,6 +26,7 @@
 //! **Always push.** Nothing polls. A session stays open and the node sends what the session
 //! asked to be sent, when it happens.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::io;

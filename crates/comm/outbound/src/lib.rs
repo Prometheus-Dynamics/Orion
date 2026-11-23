@@ -30,6 +30,7 @@
 //! that was carried already, and is carried again because the publisher came back, is not
 //! sent them again.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::cell::RefCell;

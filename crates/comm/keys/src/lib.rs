@@ -24,6 +24,8 @@
 //! with no key is answered as an operator that may do everything, and nothing is recorded.
 //! That is how a board on a closed network works today.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod enroll_impl;
 mod service;
 mod store;

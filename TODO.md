@@ -267,6 +267,8 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I78](docs/prs/I78.md) Several receivers of files on one session, each handed its own (wave 19; needs I77)
 - [x] [I79](docs/prs/I79.md) Any file's name carried, escaped, and names up to 255 bytes (wave 19; needs I78)
 - [x] [I80](docs/prs/I80.md) A computer gives the board its clock, and the board names whose it took (wave 19; needs I79)
+- [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I94)
+- [x] [I94](docs/prs/I94.md) No unwrap in the comm core or node logic, by lint (wave 19; needs I93)
 - [x] [I93](docs/prs/I93.md) orion-recovery's size for a board is checked before a release, not on every change (wave 19; needs I92)
 - [x] [I92](docs/prs/I92.md) A board says how many panics it has contained, and the size questions are written down (wave 19; needs I91)
 - [x] [I91](docs/prs/I91.md) Settings nothing reads are said on the board, a lease that cannot be read is held in words, and a target directory is one worktree's (wave 19; needs I84)

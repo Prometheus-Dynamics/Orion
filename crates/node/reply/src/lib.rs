@@ -5,6 +5,8 @@
 //! session that asked. Every part of node logic sees a request as an [`Asked`] and answers
 //! through an [`Out`], and knows nothing else of how either travels.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use orion_msg_session::{NodeRequest, Refusal};
 use orion_types::Error;
 use orion_wire::body::encode_fields;

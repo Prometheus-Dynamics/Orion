@@ -20,6 +20,7 @@
 //!   for ever, at the same pace. The way in to a broken board does not get slower the
 //!   longer the board has been broken.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::net::SocketAddr;

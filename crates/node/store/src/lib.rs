@@ -25,6 +25,8 @@
 //! The store is plain data with no lock and no I/O. Node logic owns it from one task, so
 //! nothing is held across an `await`.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::collections::{BTreeMap, VecDeque};
 
 use orion_msg_records::{RecordClass, RecordEntry};

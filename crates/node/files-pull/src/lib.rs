@@ -16,6 +16,8 @@
 //! This is the one place in Orion that speaks HTTP, and with feature `https` the one place
 //! that uses rustls.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};

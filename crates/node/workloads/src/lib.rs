@@ -32,6 +32,8 @@
 //! - Putting a workload that is already here with the same content changes nothing. With
 //!   other content, the run is stopped and started again with the new.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod workload;
 
 use std::collections::{BTreeMap, BTreeSet};

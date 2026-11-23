@@ -28,6 +28,7 @@
 //! **Always answers.** This lives in the comm core and needs nothing else to be running, and
 //! in recovery too.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 use std::cell::{Ref, RefCell};

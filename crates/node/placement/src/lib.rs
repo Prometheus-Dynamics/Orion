@@ -22,6 +22,8 @@
 //! Resources across nodes use the same hash: a workload that needs "a camera" is given the
 //! free, ready one with the highest score of (workload, resource), on whatever live node.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use orion_types::{NodeName, WorkloadKind, WorkloadName};

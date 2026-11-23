@@ -10,6 +10,7 @@
 //! only what it uses. [`run`] is the whole program: it starts the comm core, tells systemd it
 //! is ready, keeps saying it is alive, and stops when asked.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg(target_os = "linux")]
 
 #[cfg(feature = "announce")]

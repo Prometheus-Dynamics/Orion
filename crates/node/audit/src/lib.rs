@@ -13,6 +13,8 @@
 //!   written as a line of its own when there is room again.
 //! - **Whole lines.** A file is rotated between lines and never in one.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};

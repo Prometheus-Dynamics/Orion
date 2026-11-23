@@ -21,6 +21,8 @@
 //! Nothing allocates per request once a session is open: the read buffer, the outbox and the
 //! timers belong to the session.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod carrier;
 mod driver;
 mod limits;
