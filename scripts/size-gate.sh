@@ -74,7 +74,11 @@ CAPI_HOST=740000
 # Recovery decodes file names from the wire, so the check is in it; no second, smaller check of
 # the same rule was written. This limit is a ratchet, set at measurements, not a physical bound:
 # it is replaced by the space recovery has in the flasher's initramfs, less a margin, once that
-# is known. Until then each raise needs a table like this one.
+# is known. Until then each raise needs a table like this one. Since then (I80): no image
+# carries orion-recovery (the flasher took the full orion for its pushes and actions, and
+# where it could live the bound is RAM, hundreds of MB), so the figure only keeps a binary
+# nothing ships lean. A change that grows it for a real reason brings its table and a raise;
+# no byte hunts for it.
 # Orion as measured at I76 (the files service, roots/<name>/: +54,976 over I75's 5,353,368,
 # after a cut of 10,112; docs/prs/I76.md), its limit raised from 5,360,000. By crate: node logic
 # +15.8 KB (the roots' actions, fetches and pushes, inlined where node logic handles frames),

@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use orion_check::{Check, Grants, Refused, Security};
+use orion_check::{Check, Grants, Refused, Security, What};
 use orion_msg_session::{Hello, Ping, Pong, Refusal, Reject, RejectReason, Welcome};
 use orion_supervise::contain;
 use orion_types::{Error, NodeName};
@@ -167,15 +167,25 @@ impl Server {
     }
 
     fn refuse(&mut self, session: SessionId, request_seq: u16, error: Error) {
+        self.refuse_saying(session, request_seq, error, "");
+    }
+
+    /// As [`Self::refuse`], with `more` after the error's own words.
+    fn refuse_saying(&mut self, session: SessionId, request_seq: u16, error: Error, more: &str) {
         self.stats.refused += 1;
         let level = self.sessions.get(session).map_or(0, |info| info.level);
         let error = crate::spoken(error, level);
+        let detail = if more.is_empty() {
+            std::borrow::Cow::Borrowed(error.as_str())
+        } else {
+            std::borrow::Cow::Owned(format!("{}: {more}", error.as_str()))
+        };
         self.send(
             session,
             &Refusal {
                 request_seq,
                 code: error.code(),
-                detail: error.as_str(),
+                detail: &detail,
             },
         );
     }
@@ -327,8 +337,14 @@ impl Server {
         };
         let checked = match decided {
             Ok(checked) => checked,
-            Err(Refused::NotAdmitted | Refused::NotGranted) => {
+            Err(Refused::NotAdmitted) => {
                 self.refuse(session, seq, Error::Denied);
+                return Flow::Continue;
+            }
+            Err(Refused::NotGranted) => {
+                // An operator, not granted this: told which grant it needs.
+                let needs = format!("needs the grant {}", grant(what));
+                self.refuse_saying(session, seq, Error::Denied, &needs);
                 return Flow::Continue;
             }
         };
@@ -354,5 +370,17 @@ impl Server {
                 Flow::Close
             }
         }
+    }
+}
+
+/// The grant an operator needs for `what`, as the trust store names it.
+fn grant(what: What<'_>) -> String {
+    match what {
+        What::Read(_) | What::Open(_) => "read".to_owned(),
+        What::Run(name) => name.to_owned(),
+        What::Login => "login".to_owned(),
+        What::Shell(account) => format!("login or shell:{account}"),
+        // Changing what the board should be: only an operator trusted with every action.
+        What::Write(_) => "*".to_owned(),
     }
 }

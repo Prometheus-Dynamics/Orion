@@ -228,7 +228,10 @@ after a request that needed a longer ceiling.
 
 **Who the board is, and being let in.** `node()` is who the board says it is, signed by its key
 and made for the question, `clock()` how its clock compares, `sync_peers()` and `forgive(peer)`
-where its sync with other boards is. `enroll(public_key, name, enrollment_key)` asks the board to
+where its sync with other boards is. `offer_time(stratum)` gives the board this program's clock:
+the board asks for it when it polls, and the session answers whenever it is pumped, by any call or
+`pump(wait)`, for as long as it lasts (`times_asked()` counts). It needs what `docs/comm.md`,
+"Time sync", says: `operator` in the board's `time.servers`, and `clock.set` with security on. `enroll(public_key, name, enrollment_key)` asks the board to
 let an operator in: from root on the board for any key, at once; from the operator itself, on a
 session signed with that key, at once with the cluster's enrollment key (only a proof made from
 it is sent) and `Pending` until approved without. The answer (`node::Enrollment`) has the state,
@@ -783,6 +786,8 @@ orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <verb> ...
 node      show                      who the board is, checked against its signature
 node      peers                     the nodes it knows
 node      time                      how its clock compares with this computer's
+node      offer-time [--stratum N] [--for MS]
+                                    gives the board this computer's clock, while it runs
 resource  list [PREFIX]             the things that exist
 resource  show NAME                 one of them: its topics, its actions, its labels
 topic     read TOPIC                the newest value of each field

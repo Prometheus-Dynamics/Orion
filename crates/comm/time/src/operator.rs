@@ -14,8 +14,8 @@ use orion_msg_peers::{
     CLOCK_MONOTONIC, CLOCK_REALTIME, TimeOffer, TimeReply, TimeRequest, TimeTurn,
 };
 use orion_server::{
-    Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Policy, Service, SessionId, Sessions,
-    What,
+    Admits, Checked, Comm, Cx, Delivery, Error, Incoming, Policy, Principal, Service, SessionId,
+    SessionInfo, Sessions, What,
 };
 use orion_types::SampleTime;
 use orion_wire::{FrameView, kind};
@@ -30,8 +30,8 @@ pub const CLOCK_SET: &str = "clock.set";
 
 #[derive(Debug, Default)]
 struct Exchange {
-    /// Who offers, and at what stratum.
-    offer: Option<(SessionId, u8)>,
+    /// Who offers, at what stratum, and as whom: its name, and its key if it has one.
+    offer: Option<(SessionId, u8, String)>,
     /// The request waiting for its answer: its token, and the wall clock when it was sent.
     asked: Option<(u64, i128)>,
     answer: Option<Sample>,
@@ -80,15 +80,19 @@ impl OperatorTime {
             .max(1)
     }
 
-    /// Asks the offering operator for the time and waits for the answer.
-    pub(crate) async fn ask(&self, comm: &Comm) -> Result<Sample, &'static str> {
-        let (session, token) = {
+    /// Asks the offering operator for the time and waits for the answer: the time, and whose
+    /// it is.
+    pub(crate) async fn ask(&self, comm: &Comm) -> Result<(Sample, String), &'static str> {
+        let (session, token, who) = {
             let mut exchange = self.exchange.borrow_mut();
-            let (session, _) = exchange.offer.ok_or("no operator is offering its clock")?;
+            let (session, _, who) = exchange
+                .offer
+                .clone()
+                .ok_or("no operator is offering its clock")?;
             let token = self.token();
             exchange.asked = Some((token, sntp::unix_now_ns()));
             exchange.answer = None;
-            (session, token)
+            (session, token, who)
         };
         let request = TimeRequest {
             sent_ns: token,
@@ -111,24 +115,27 @@ impl OperatorTime {
         })
         .await;
         self.exchange.borrow_mut().asked = None;
-        answer.map_err(|_| "the operator offering its clock did not answer")
+        answer
+            .map(|sample| (sample, who))
+            .map_err(|_| "the operator offering its clock did not answer")
     }
 
-    fn offer(&self, session: SessionId, stratum: u8) -> Result<u32, Error> {
+    fn offer(&self, session: SessionId, stratum: u8, who: String) -> Result<u32, Error> {
         if !self.listening.get() {
             // This board does not take its time from operators.
             return Err(Error::Unsupported);
         }
-        self.exchange.borrow_mut().offer = Some((session, stratum.clamp(1, 15)));
+        self.exchange.borrow_mut().offer = Some((session, stratum.clamp(1, 15), who));
         self.offered.notify_one();
         Ok(self.poll_ms.get())
     }
 
     fn reply(&self, session: SessionId, reply: &TimeReply) -> Result<(), Error> {
         let mut exchange = self.exchange.borrow_mut();
-        let (Some((offering, stratum)), Some((token, sent_wall_ns))) =
-            (exchange.offer, exchange.asked)
-        else {
+        let (Some((offering, stratum, _)), Some((token, sent_wall_ns))) = (
+            exchange.offer.as_ref().map(|(s, st, w)| (*s, *st, w)),
+            exchange.asked,
+        ) else {
             return Err(Error::OutOfOrder);
         };
         if offering != session || reply.sent_ns != token {
@@ -157,10 +164,23 @@ impl OperatorTime {
         let mut exchange = self.exchange.borrow_mut();
         if exchange
             .offer
-            .is_some_and(|(offering, _)| offering == session)
+            .as_ref()
+            .is_some_and(|(offering, _, _)| *offering == session)
         {
             exchange.offer = None;
         }
+    }
+}
+
+/// Whose clock an offer is, as `orion.time` names its source: `operator <name>`, and the start
+/// of its key when it proved one.
+fn whose(caller: &SessionInfo) -> String {
+    match &caller.principal {
+        Principal::Operator(key) => {
+            let start: String = key.0[..4].iter().map(|b| format!("{b:02x}")).collect();
+            format!("{OPERATOR_SOURCE} {} (key {start}…)", caller.name)
+        }
+        _ => format!("{OPERATOR_SOURCE} {}", caller.name),
     }
 }
 
@@ -212,7 +232,7 @@ impl Service for TimeService {
             }
             kind::TIME_OFFER => {
                 let offer: TimeOffer = incoming.body()?;
-                let poll_ms = self.0.offer(cx.from(), offer.stratum)?;
+                let poll_ms = self.0.offer(cx.from(), offer.stratum, whose(cx.caller()))?;
                 cx.reply(&TimeTurn {
                     request_seq: cx.request_seq(),
                     poll_ms,

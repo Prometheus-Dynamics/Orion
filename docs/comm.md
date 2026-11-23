@@ -470,7 +470,8 @@ operator, and nobody at all if the key is revoked.
 everything. The one check asks the trust store for every operator request. An operator trusted
 with everything may also write and log in. The grant `login` lets an operator log in and open
 a shell over a session as any account; `shell:ACCOUNT` (`shell:svc-*`) a shell as those
-accounts only.
+accounts only. An operator refused for want of a grant is told which: `denied: needs the grant
+clock.set` (`read` for a read, `*` for a write, `login or shell:ACCOUNT` for a shell).
 
 **How a key becomes trusted:**
 
@@ -954,11 +955,17 @@ when another daemon did, stratum 10 with `time.serve_authority`, and "unsynchron
 which clients ignore. Over a session anyone may send `TimeRequest` and gets the board's clock
 back in `TimeReply`.
 
-**An operator's clock.** The operator sends `TimeOffer` with its stratum. Offering the time is
-the same power as setting it, so this needs the grant `clock.set`. The board answers `TimeTurn`
+**An operator's clock.** The operator sends `TimeOffer` with its stratum (`orion.offer_time`,
+`orion node offer-time`). Offering the time is the same power as setting it, so with security on
+this needs an operator granted `clock.set`; any other session is refused `denied: needs the
+grant clock.set`, and a program on the board is refused `denied`. With security off, any
+session's offer is taken: that is what off means, here as everywhere. A board that does not
+list `operator` in `time.servers` refuses an offer as `unsupported`. The board answers `TimeTurn`
 and from then on sends `TimeRequest` on that session when it polls; the operator answers
-`TimeReply`. The board measures the round trip on its own monotonic clock. When the operator's
-session ends, the next source in rank is used.
+`TimeReply`. The board measures the round trip on its own monotonic clock. An offered time is
+held to the build's date as every source is (a computer's clock can be wrong), and
+`orion.time`'s `source` names whose it is: `operator <name>`, with `(key <first 8 hex>…)` for an
+operator that proved its key. When the operator's session ends, the next source in rank is used.
 
 **State** is the topic `orion.time`, published when it changes: `mode`, `synced`, `source`,
 `offset_ms`, `delay_ms`, `stratum`, `last_action`, `error`, and `monotonic_to_wall_ns`: added to

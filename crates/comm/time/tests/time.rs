@@ -373,9 +373,11 @@ fn an_operator_with_the_grant_gives_the_board_its_clock() {
         assert_eq!(steps.len(), 1, "{:?}", board.sync.status());
         assert!((steps[0] - 7 * S).abs() < S, "stepped {} ns", steps[0]);
         let status = board.sync.status();
+        // Named as whose clock it is: its name, and the start of its key.
+        let key: String = TRUSTED.0[..4].iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
-            (status.source.as_deref(), status.stratum),
-            (Some("operator"), Some(3))
+            (status.source, status.stratum),
+            (Some(format!("operator tool (key {key}…)")), Some(3))
         );
         assert!(status.synced);
 

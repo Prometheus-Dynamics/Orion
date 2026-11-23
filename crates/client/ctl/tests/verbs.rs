@@ -304,6 +304,14 @@ fn node_show_peers_and_time() {
     assert!(out.contains("this computer's (round trip "), "{out}");
     assert!(ms("the board's clock is ") <= ms("(round trip "), "{out}");
 
+    // This board takes no time from operators: an offer is turned down, and said so.
+    let (code, out, err) = ctl(&board, "node offer-time --for 200");
+    assert_ne!(code, 0, "{out}");
+    assert!(err.contains("not supported"), "{err}");
+    let (code, _, err) = ctl(&board, "node offer-time --stratum 16");
+    assert_ne!(code, 0);
+    assert!(err.contains("--stratum is 1 to 15"), "{err}");
+
     // The same tool reaches a board across the network.
     let network = format!("--address orion+tcp://{} node show", board.network());
     let (code, out, err) = run(&network

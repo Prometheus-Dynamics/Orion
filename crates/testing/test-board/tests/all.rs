@@ -7,3 +7,5 @@ mod board;
 mod roots;
 #[path = "sinks.rs"]
 mod sinks;
+#[path = "time.rs"]
+mod time;

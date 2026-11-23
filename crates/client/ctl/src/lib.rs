@@ -10,6 +10,8 @@
 //! node      show                      who the board is, checked against its signature
 //! node      peers                     the nodes it knows
 //! node      time                      how its clock compares with this computer's
+//! node      offer-time [--stratum N] [--for MS]
+//!                                     gives the board this computer's clock, while it runs
 //! node      sync                      where its sync with each other node is
 //! node      forgive PEER              lets a stale peer sync again
 //! resource  list [PREFIX]             the things that exist
@@ -54,6 +56,7 @@ pub const USAGE: &str = "\
 usage: orion [--address A] [--name N] [--timeout MS] [--key FILE] <concept> <verb> ...
 
   node      show | peers | time | sync | forgive PEER
+            offer-time [--stratum N] [--for MS]   (this computer's clock, while it runs)
   resource  list [PREFIX] | show NAME
   topic     read TOPIC | watch TOPIC [--count N] [--for MS]
             publish TOPIC NAME:TYPE=VALUE... [--hold MS]
@@ -178,6 +181,7 @@ fn command(words: &[String], out: &mut dyn Write) -> Done {
         ("node", "show") => node_show,
         ("node", "peers") => node_peers,
         ("node", "time") => node_time,
+        ("node", "offer-time") => node_offer_time,
         ("node", "sync") => node_sync,
         ("node", "forgive") => node_forgive,
         ("resource", "list") => resource_list,
@@ -259,6 +263,36 @@ fn node_time(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
         "the board's clock is {:.3} ms {which} this computer's (round trip {delay_ms:.3} ms)",
         offset_ms.abs()
     )?;
+    Ok(())
+}
+
+/// Offers this computer's clock and answers the board for `--for` (or until stopped), saying
+/// each time it is asked.
+fn node_offer_time(orion: &Orion, args: &mut Args, out: &mut dyn Write) -> Done {
+    let stratum = args.number("--stratum")?.unwrap_or(2);
+    let stratum = u8::try_from(stratum)
+        .ok()
+        .filter(|s| (1..=15).contains(s))
+        .ok_or_else(|| Usage("--stratum is 1 to 15".to_owned()))?;
+    let for_ms = args.number("--for")?;
+    args.done()?;
+    let poll = orion.offer_time(stratum)?;
+    writeln!(
+        out,
+        "the board takes this computer's clock, and asks for it every {} s",
+        poll.as_secs_f64()
+    )?;
+    out.flush()?;
+    let until = for_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
+    let mut told = 0;
+    while until.is_none_or(|until| Instant::now() < until) {
+        orion.pump(Duration::from_millis(200))?;
+        if orion.times_asked() != told {
+            told = orion.times_asked();
+            writeln!(out, "asked for the time ({told})")?;
+            out.flush()?;
+        }
+    }
     Ok(())
 }
 

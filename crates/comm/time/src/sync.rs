@@ -95,9 +95,10 @@ pub(crate) async fn best_sample(
                 None => Err("no operator is offering its clock"),
             };
             match asked {
-                Ok(sample) => match implausible(sample_time_ms(&sample), saved_ms, false) {
-                    Some(why) => last_error = format!("{server}: {why}"),
-                    None => return Ok((server.clone(), sample)),
+                // Held to the build's date as every source is: a computer's clock can be wrong.
+                Ok((sample, who)) => match implausible(sample_time_ms(&sample), saved_ms, false) {
+                    Some(why) => last_error = format!("{who}: {why}"),
+                    None => return Ok((who, sample)),
                 },
                 Err(why) => last_error = format!("{server}: {why}"),
             }

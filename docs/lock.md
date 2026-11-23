@@ -543,6 +543,11 @@ what to change.
   `orion_executors::Board::has` takes the name as text, and `Workload::files` holds it as
   `Box<str>` (**Change**). No wire kinds change; level 6. An older board refuses an escaped or
   longer name as `InvalidName`.
+- **I80.** `Orion::offer_time` and `Orion::times_asked`, `orion node offer-time` (**Add**):
+  the client answers the board's `TimeRequest` after an offer. `orion.time`'s `source` for an
+  operator is `operator <name>`, and `(key <8 hex>…)` (**Change**: was `operator`). An
+  operator refused for want of a grant is told `denied: needs the grant <grant>` (**Change**:
+  was `denied`; the code is the same). No wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

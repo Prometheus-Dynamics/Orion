@@ -266,6 +266,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I77](docs/prs/I77.md) The board announced by name on the local network, over mDNS (wave 19; needs I76)
 - [x] [I78](docs/prs/I78.md) Several receivers of files on one session, each handed its own (wave 19; needs I77)
 - [x] [I79](docs/prs/I79.md) Any file's name carried, escaped, and names up to 255 bytes (wave 19; needs I78)
+- [x] [I80](docs/prs/I80.md) A computer gives the board its clock, and the board names whose it took (wave 19; needs I79)
 
 ## J. The stack around Orion
 

@@ -3,13 +3,13 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use orion_connect::{Client, ClientError, Cx, Handler, Incoming};
 use orion_identity::{fingerprint, hello, proof, random};
 use orion_msg_peers::{
     CLOCK_REALTIME, OperatorEnroll, OperatorWelcome, PeerForgive, PeerStates, PeerStatus,
-    SecurityPrecheck, SecurityPrechecked, TimeReply, TimeRequest,
+    SecurityPrecheck, SecurityPrechecked, TimeOffer, TimeReply, TimeRequest, TimeTurn,
 };
 pub use orion_msg_peers::{OperatorState, SecurityTo, SyncState};
 use orion_msg_session::Identify;
@@ -152,6 +152,12 @@ pub(crate) struct State {
     peers: Option<(u16, Vec<SyncPeer>)>,
     welcome: Option<Enrollment>,
     prechecked: Option<(u16, Vec<String>)>,
+    /// Whether this program offers its clock: it answers the board's `TimeRequest`.
+    offering: bool,
+    /// The board's answer to the offer: its `seq`, and how often it will ask.
+    turned: Option<(u16, u32)>,
+    /// How many times the board has asked for this program's clock.
+    asked: u64,
 }
 
 impl Handler for State {
@@ -162,11 +168,30 @@ impl Handler for State {
             kind::PEER_STATES,
             kind::OPERATOR_WELCOME,
             kind::SECURITY_PRECHECKED,
+            kind::TIME_REQUEST,
+            kind::TIME_TURN,
         ]
     }
 
-    fn handle(&mut self, frame: &Incoming<'_>, _cx: &mut Cx<'_>) -> Result<(), ClientError> {
-        if frame.kind() == kind::SECURITY_PRECHECKED {
+    fn handle(&mut self, frame: &Incoming<'_>, cx: &mut Cx<'_>) -> Result<(), ClientError> {
+        if frame.kind() == kind::TIME_REQUEST {
+            // Read as near the arrival as can be. Only an offer is asked, and only for the
+            // wall clock: anything else is left unanswered, as a board's own question is.
+            let received_ns = wall_ns();
+            let asked: TimeRequest = frame.body()?;
+            if self.offering && asked.clock == CLOCK_REALTIME {
+                self.asked += 1;
+                let as_u64 = |ns: i128| u64::try_from(ns).unwrap_or(0);
+                cx.send(&TimeReply {
+                    sent_ns: asked.sent_ns,
+                    received_ns: as_u64(received_ns),
+                    replied_ns: as_u64(wall_ns()),
+                })?;
+            }
+        } else if frame.kind() == kind::TIME_TURN {
+            let turn: TimeTurn = frame.body()?;
+            self.turned = Some((turn.request_seq, turn.poll_ms));
+        } else if frame.kind() == kind::SECURITY_PRECHECKED {
             let answer: SecurityPrechecked<'_> = frame.body()?;
             let lines = answer.lines.iter().flatten();
             let lines = lines.map(|line| line.line.to_owned()).collect();
@@ -286,6 +311,34 @@ pub(crate) fn clock(client: &Client, state: &Rc<RefCell<State>>) -> Result<Clock
         offset_ns: offset.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
         delay_ns: (round - held).max(0) as u64,
     })
+}
+
+/// Offers this program's clock to the board at `stratum`: how often the board will ask.
+pub(crate) fn offer_time(
+    client: &Client,
+    state: &Rc<RefCell<State>>,
+    stratum: u8,
+) -> Result<Duration, ClientError> {
+    {
+        let mut state = state.borrow_mut();
+        state.offering = true;
+        state.turned = None;
+    }
+    let seq = client.send(&TimeOffer { stratum })?;
+    let turned = client.answered(seq, || {
+        state.borrow().turned.is_some_and(|(asked, _)| asked == seq)
+    });
+    if turned.is_err() {
+        state.borrow_mut().offering = false;
+    }
+    turned?;
+    let poll_ms = state.borrow().turned.map_or(0, |(_, poll_ms)| poll_ms);
+    Ok(Duration::from_millis(u64::from(poll_ms)))
+}
+
+/// How many times the board has asked for this program's clock.
+pub(crate) fn times_asked(state: &Rc<RefCell<State>>) -> u64 {
+    state.borrow().asked
 }
 
 /// Where sync is with each peer, after forgiving `forgive` if it is given.

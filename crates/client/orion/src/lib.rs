@@ -385,6 +385,30 @@ impl Orion {
         Ok(node::clock(&self.client, &self.node)?)
     }
 
+    /// Offers this program's clock to the board, at its NTP `stratum` (1 to 15; a computer
+    /// kept by NTP is its server's plus one). From then on the board asks for it when it
+    /// polls, and this session answers whenever it is pumped: by any call on it, or by
+    /// [`Orion::pump`]. Gives how often the board will ask. It lasts as long as the session.
+    ///
+    /// The board takes it only if it disciplines its clock with `operator` among
+    /// `time.servers`, and only if the time is plausible (not before the board's image was
+    /// built); `orion.time` then names this program as its source. With security on it needs
+    /// the grant `clock.set`.
+    ///
+    /// # Errors
+    ///
+    /// Refused `unsupported` by a board that takes no time from operators; refused, with the
+    /// grant named, without `clock.set`; as [`Orion::clock`].
+    pub fn offer_time(&self, stratum: u8) -> Result<Duration, Error> {
+        Ok(node::offer_time(&self.client, &self.node, stratum)?)
+    }
+
+    /// How many times the board has asked for this program's clock since it was offered.
+    #[must_use]
+    pub fn times_asked(&self) -> u64 {
+        node::times_asked(&self.node)
+    }
+
     /// Where the board's sync with each other board is.
     ///
     /// # Errors
