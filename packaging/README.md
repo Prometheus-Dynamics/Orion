@@ -57,7 +57,12 @@ rights it needs:
   (`socket.node_uids = 901`); without that line the comm core refuses it. Its state is in
   `/var/lib/orion/node` (`ORION_STATE_DIR`), apart from the comm core's keys, which it reads in
   `/var/lib/orion` (`ORION_KEYS_DIR`) to act as the node toward other nodes. It is hardened
-  fully: `systemd-analyze security` rates it 1.8, and the check fails it above 2.5.
+  but for one setting: `systemd-analyze security` rates it 2.0, and the check fails it above
+  2.5. It does not set `RestrictSUIDSGID=yes`: under that systemd refuses `openat2`, which is
+  how node logic opens everything under a root or the store, and every push, fetch and listing
+  in a root then fails. Do not add it back in a drop-in; `scripts/packaging-check.sh` fails
+  the unit if it is there. A root outside the state directory needs `ReadWritePaths=` for it
+  in a drop-in, since the unit's file system is otherwise read-only.
 
 Change a unit with a drop-in (`/etc/systemd/system/orion-comm.service.d/*.conf`), not an
 edited copy.

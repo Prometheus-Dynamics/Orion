@@ -5,6 +5,7 @@
 #
 # - the systemd units load (`systemd-analyze verify`), and node logic's unit and the comm core's
 #   stay hardened (`systemd-analyze security`, at most their limits);
+# - node logic's unit does not set RestrictSUIDSGID, under which systemd refuses openat2;
 # - the sysusers entry parses (`systemd-sysusers --dry-run`).
 # - the BusyBox init scripts parse (`sh -n`), and the supervisor's failure rule holds: it starts
 #   a service that ends again, after a growing wait, and a TERM stops it;
@@ -59,6 +60,17 @@ if command -v systemd-analyze > /dev/null; then
     done
 else
     echo "    units not checked: no systemd-analyze"
+fi
+
+# Node logic opens everything under a root or the store with openat2, and systemd answers
+# that call with "not implemented" for a unit with RestrictSUIDSGID=yes: every push, fetch and
+# listing in a root then fails (I98, seen on a board). No tool is needed to look.
+if grep -Eq '^[[:space:]]*RestrictSUIDSGID[[:space:]]*=[[:space:]]*(yes|true|on|1)[[:space:]]*$' \
+    packaging/systemd/orion-node.service; then
+    echo "    FAIL: orion-node.service sets RestrictSUIDSGID: systemd then refuses openat2, and no file under a root can be opened"
+    failures=$((failures + 1))
+else
+    echo "    orion-node.service: openat2 is not refused"
 fi
 
 if command -v systemd-sysusers > /dev/null; then

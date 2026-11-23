@@ -440,6 +440,16 @@ reached the same way with security on or off: the switch decides who, the roots 
   the root". A link that stays inside is followed. The root's directory itself is the image's
   to make, with the ownership it wants: readable by node logic's account, and writable for
   `rw`.
+- **A sandbox that refuses `openat2` closes every root.** There is no other way in: a walk by
+  hand would be where a path gets out. systemd refuses the call, with "not implemented", for
+  a unit with `RestrictSUIDSGID=yes` (it cannot look at the call's flags), so node logic's unit
+  does not set it. Node logic looks once at start, at the store and each root. Where the call
+  is refused it logs an error, every push, fetch and listing in a root says `openat2 is
+  refused here (a unit with RestrictSUIDSGID=yes does that): nothing under a root or the store
+  can be opened`, and the board's hello carries it as the fact `files`. What the setting
+  guarded is not left open: node logic never sets a mode from what a client sends, and has no
+  chmod. A file it makes is `0666` less the umask and a directory `0777` less the umask; a
+  directory in a setgid root gets its setgid bit from the root, by the kernel.
 - **Whose what Orion makes is.** A directory Orion makes (`files.mkdir`, or on the way to a
   pushed file) is made as a file is: with every permission the process's umask leaves. So one
   rule, the unit's umask, decides both. In a root an application shares with Orion by group

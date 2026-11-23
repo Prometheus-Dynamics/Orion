@@ -11,6 +11,8 @@ mod modes;
 mod receivers;
 #[path = "roots.rs"]
 mod roots;
+#[path = "sandbox.rs"]
+mod sandbox;
 #[path = "sinks.rs"]
 mod sinks;
 #[path = "time.rs"]

@@ -75,6 +75,7 @@ pub(crate) fn find<'a>(roots: &'a [Root], name: &'a str) -> Result<At<'a>, Strin
 pub(crate) fn words(error: Errno) -> String {
     match error {
         Errno::NOENT => "not found".to_owned(),
+        Errno::NOSYS => orion_file_store::NO_OPENAT2.to_owned(),
         Errno::XDEV | Errno::LOOP => "outside the root".to_owned(),
         Errno::NOTDIR => "not a directory".to_owned(),
         Errno::ISDIR => "a directory".to_owned(),

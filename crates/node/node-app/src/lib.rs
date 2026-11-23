@@ -204,6 +204,9 @@ pub struct Node {
     served_writing: Option<tokio::task::JoinHandle<()>>,
     /// When the oldest change not yet saved was made.
     unsaved_since: Option<Instant>,
+    /// Why no file under a root or the store can be opened here, if that is so: said as the
+    /// hello fact `files`.
+    files_refused: Option<&'static str>,
     scratch: Vec<u8>,
 }
 
@@ -288,6 +291,15 @@ impl Node {
         logic.sinks = orion_files_sink::Sinks::new(settings.outbox_bytes)
             .with_receivers(settings.files_receivers.clone());
         logic.roots = orion_file_roots::Roots::new(settings.roots.clone(), settings.files_max_size);
+        // Looked at once, here: where the sandbox refuses the call everything under a root or
+        // the store is opened with, it is said by name, not found out one file at a time.
+        let places = settings.roots.iter().map(|root| root.path.as_path());
+        let files_refused = std::iter::once(settings.files_dir.as_path())
+            .chain(places)
+            .find_map(|dir| orion_file_store::probe(dir).err());
+        if let Some(why) = files_refused {
+            tracing::error!("files: {why}");
+        }
         let (served, said) = served::Served::load(&settings.config.state_dir);
         info!("{said}");
         logic.served = served;
@@ -308,6 +320,7 @@ impl Node {
             saving: None,
             served_writing: None,
             unsaved_since: None,
+            files_refused,
             scratch: vec![0; 64 * 1024],
         })
     }
@@ -513,7 +526,9 @@ impl Node {
             }
         }
         let mut offered = offered;
-        let mut progress = match Topics::new(&client).declare(&TopicDecl {
+        // One handle on the session for every topic node logic declares.
+        let topics = Topics::new(&client);
+        let mut progress = match topics.declare(&TopicDecl {
             name: ACTIONS_TOPIC,
             fields: &logic::ACTION_FIELDS,
             history: 256,
@@ -527,6 +542,34 @@ impl Node {
                 None
             }
         };
+        // Where files cannot be opened, the board says so in its hello: a fact, for as long
+        // as node logic is here.
+        let _files_fact = self.files_refused.and_then(|why| {
+            let declared = topics.declare(&TopicDecl {
+                name: "hello.files",
+                fields: &[orion_msg_topics::Field {
+                    name: "files",
+                    ty: orion_msg_topics::FieldType::Text,
+                    unit: "",
+                    type_name: "",
+                }],
+                history: 2,
+                expiry_ms: 0,
+                max_payload: 256,
+                on_subscribe: Default::default(),
+            });
+            let published = declared.and_then(|mut fact| {
+                fact.publish(
+                    shm_ring::FieldId(0),
+                    orion_types::SampleTime::now(),
+                    why.as_bytes(),
+                )?;
+                Ok(fact)
+            });
+            published
+                .inspect_err(|error| warn!("the hello does not say why files fail: {error}"))
+                .ok()
+        });
         // Set once `stop` is done: the runs' programs were told to stop, and this goes on
         // until each run has ended, which its bound caps. A comm core lost meanwhile ends it.
         let mut stopping = false;

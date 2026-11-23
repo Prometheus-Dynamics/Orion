@@ -16,6 +16,8 @@
 
 mod verify;
 
+pub use verify::{NO_OPENAT2, probe};
+
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};

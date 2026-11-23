@@ -82,6 +82,33 @@ fn check(job: &Job) -> Result<(), String> {
     place(&job.part, &job.root, relative)
 }
 
+/// What is said where the kernel is not let answer `openat2`, which is how anything under a
+/// root or the store is opened (it is what keeps a path inside one). A service manager's
+/// sandbox does this: systemd answers `openat2` with "not implemented" for a unit with
+/// `RestrictSUIDSGID=yes`, on purpose, because it cannot look at the call's flags.
+pub const NO_OPENAT2: &str = "openat2 is refused here (a unit with RestrictSUIDSGID=yes does \
+    that): nothing under a root or the store can be opened";
+
+/// Whether a path under `dir` can be opened at all: `Err`, with [`NO_OPENAT2`], if `openat2`
+/// is refused here. A directory that is not there, or cannot be read, is not that fault.
+///
+/// # Errors
+///
+/// [`NO_OPENAT2`].
+pub fn probe(dir: &Path) -> Result<(), &'static str> {
+    let Ok(root) = rustix::fs::open(
+        dir,
+        OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    ) else {
+        return Ok(());
+    };
+    match beneath(&root, Path::new(""), false) {
+        Err(Errno::NOSYS) => Err(NO_OPENAT2),
+        _ => Ok(()),
+    }
+}
+
 /// Where a step of the way out of the store ends: refused, as outside.
 fn outside(error: Errno) -> bool {
     matches!(error, Errno::XDEV | Errno::LOOP)
@@ -116,6 +143,8 @@ pub(crate) fn place(part: &Path, root: &Path, relative: &Path) -> Result<(), Str
     let named = |error: Errno| {
         if outside(error) {
             "the destination is outside the store".to_owned()
+        } else if error == Errno::NOSYS {
+            NO_OPENAT2.to_owned()
         } else {
             format!("its directory cannot be made: {error}")
         }
