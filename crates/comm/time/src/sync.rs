@@ -92,15 +92,17 @@ fn sample_time_ms(sample: &sntp::Sample) -> i64 {
 }
 
 /// The first source, in rank order, with an answer that is not obviously wrong, and that answer.
-/// A `tcp://` source is asked over TCP.
+/// A `tcp://` source is asked over TCP. `but` is a source left out this round: the one whose
+/// word alone is not enough, so that another is heard.
 pub(crate) async fn best_sample(
     servers: &[String],
     operator: &OperatorTime,
     comm: Option<&Comm>,
     saved_ms: Option<i64>,
+    but: Option<&str>,
 ) -> Result<(String, sntp::Sample), String> {
     let mut last_error = String::from("no server answered");
-    for server in servers {
+    for server in servers.iter().filter(|server| Some(server.as_str()) != but) {
         if server == OPERATOR_SOURCE {
             let asked = match comm {
                 Some(comm) => operator.ask(comm).await,
@@ -161,6 +163,8 @@ pub(crate) struct Syncer {
     pub(crate) saved_ms: Option<i64>,
     pub(crate) status: TimeStatus,
     pub(crate) poll: Duration,
+    /// The source left out of the next round: a step waits for another's word.
+    pub(crate) but: Option<String>,
     synced_file_up: bool,
     /// Polls in a row with no answer.
     failures: u32,
@@ -193,6 +197,7 @@ impl Syncer {
             saved_ms: None,
             status,
             poll: FIRST_POLL,
+            but: None,
             synced_file_up: false,
             failures: 0,
         }
@@ -264,10 +269,19 @@ impl Syncer {
 
     /// Applies one sample (or the failure to get one) and sets the next poll.
     pub(crate) fn apply(&mut self, result: Result<(String, sntp::Sample), String>) {
+        // Every other round asks them all again: the source that was left out may have come
+        // round, and then nothing waits.
+        let left_out = self.but.take();
         let (source, sample) = match result {
             Ok(found) => found,
             Err(error) => {
-                self.status.error = Some(error);
+                self.status.error = Some(match (left_out, self.discipline.pending_from()) {
+                    (Some(but), Some(_)) => format!(
+                        "{but} says the clock is over an hour behind, and no other source \
+                         agrees ({error}): not stepped without a second source or an operator"
+                    ),
+                    _ => error,
+                });
                 self.failures = self.failures.saturating_add(1);
                 if self.status.synced && self.failures >= LOST_AFTER {
                     self.lose_sources();
@@ -287,7 +301,16 @@ impl Syncer {
         self.status.stratum = Some(sample.stratum);
         self.status.delay_ns = Some(sample.delay_ns);
         self.status.offset_ns = Some(sample.offset_ns);
-        let action = self.discipline.on_sample(sample.offset_ns, sample.delay_ns);
+        // An operator's clock is named `operator <name>`; no server's name has a space.
+        let operator = source
+            .strip_prefix(OPERATOR_SOURCE)
+            .is_some_and(|rest| rest.starts_with(' '));
+        let action =
+            self.discipline
+                .on_sample(sample.offset_ns, sample.delay_ns, &source, operator);
+        if action == Action::Second && left_out.is_none() {
+            self.but = Some(source.clone());
+        }
         let applied = if self.disciplining {
             match action {
                 Action::Step(offset) => self.clock.step(offset).map(|()| "stepped"),
@@ -296,6 +319,7 @@ impl Syncer {
                     .slew(offset, sample.delay_ns / 2)
                     .map(|()| "slewed"),
                 Action::Wait => Ok("waiting for a second sample"),
+                Action::Second => Ok("waiting for a second source"),
                 Action::Refuse(_) => Ok("refused a backward step"),
                 Action::Discard => Ok("discarded a slow answer"),
             }
@@ -304,6 +328,7 @@ impl Syncer {
                 Action::Step(_) => "would step",
                 Action::Slew(_) => "would slew",
                 Action::Wait => "waiting for a second sample",
+                Action::Second => "waiting for a second source",
                 Action::Refuse(_) => "would refuse a backward step",
                 Action::Discard => "discarded a slow answer",
             })
@@ -337,7 +362,8 @@ impl Syncer {
                 }
             }
         }
-        self.poll = if matches!(action, Action::Wait) || !self.discipline.synced() {
+        self.poll = if matches!(action, Action::Wait | Action::Second) || !self.discipline.synced()
+        {
             FIRST_POLL
         } else if sample.offset_ns.unsigned_abs() < CALM_NS.unsigned_abs() {
             self.poll

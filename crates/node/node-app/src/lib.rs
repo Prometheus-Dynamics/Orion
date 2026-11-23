@@ -20,6 +20,7 @@
 
 #![cfg(target_os = "linux")]
 
+mod clock;
 mod logic;
 mod peers;
 #[cfg(feature = "pull")]
@@ -412,6 +413,7 @@ impl Node {
         let mut direct = Direct::new(client, &mut self.scratch);
         let events = {
             let mut logic = self.logic.borrow_mut();
+            logic.clock_step();
             let now = logic.now_ms();
             logic.actions.tick(now, &mut direct);
             logic.files.poll(&mut direct);

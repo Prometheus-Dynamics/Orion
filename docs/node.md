@@ -558,6 +558,14 @@ its topics and runs its actions. The records are the store's and reach every nod
   is lost, and may renew. A lease that has ended holds nothing. A resource that is taken away
   takes its lease with it. Node logic binds with `bind` and `release`; a program binds by
   writing the lease record, under the same rules.
+- **A lease lasts as long as it was given, whatever the clock does.** A lease that ends at a
+  time ends on the wall clock, and a board with no clock battery gets the time hours after it
+  starts: the clock steps forward by years. Node logic sees the step (the wall clock less the
+  monotonic one changed by 200 ms or more, looked at before every request and every turn) and
+  moves the end of each such lease this node wrote by as much, written as a new version. A
+  lease another node wrote is that node's to move. Peer sync's times (when a peer was last
+  agreed with, when everything may be sent again) move the same way, so a step makes no peer
+  stale.
 - **With security on, a lease is its writer's.** Its holder is the principal of the caller that
   wrote it (as the audit log names it), whatever the caller put there; what it put there is kept
   as the lease's `label`, for people. With security off the holder is what the writer says.

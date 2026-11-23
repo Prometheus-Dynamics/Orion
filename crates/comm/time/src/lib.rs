@@ -381,6 +381,7 @@ impl TimeSync {
                         &operator,
                         Some(&comm),
                         syncer.saved_ms,
+                        syncer.but.as_deref(),
                     )
                     .await;
                     syncer.apply(result);

@@ -943,7 +943,12 @@ clock, so it is safe next to another daemon. `discipline` also adjusts the clock
 
 **Rules.** Offsets up to 0.4 s are slewed through the kernel, which also marks the clock
 synchronized. A larger offset is stepped, but only once two samples agree within 0.1 s. After the
-first synchronization the clock is never stepped backwards. Answers that took over 1 s are not
+first synchronization the clock is never stepped backwards. After it, a step forward of over an
+hour also needs more than one source's word: a second, different source that agrees within
+0.1 s, or an operator's clock. The source that said it is left out of the next round so that
+another is heard; if none agrees, nothing is stepped, and `orion.time`'s `error` says which
+source says the clock is over an hour behind and that no other agrees. The first step after
+start needs no second source: the board was off. Answers that took over 1 s are not
 used. Polling starts at 2 s, then runs from `time.poll_min_ms` (64 s) doubling to
 `time.poll_max_ms` (1024 s) while the offset stays under 50 ms.
 

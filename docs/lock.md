@@ -570,6 +570,12 @@ what to change.
   ends `Unavailable`, `nothing received <prefix> within <bound>` (**Change**: was handed to
   the program at once, from a board whose node logic was away). `Sinks::with_receivers`,
   `Sinks::take_said`, `NodeSettings::files_receivers` (**Add**). No wire changes; level 6.
+- **I82.** Once synchronized, a step forward of over an hour needs a second source that agrees
+  or an operator's clock (**Change**: two samples from one source were enough). `orion.time`'s
+  `last_action` may be `waiting for a second source` (**Add**). A lease with an end that this
+  node wrote is written again, its end moved, when the wall clock is stepped (**Change**).
+  `orion_resources::shift_leases`, `Sync::clock_stepped`, `Store::wrote` (**Add**). No wire
+  changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

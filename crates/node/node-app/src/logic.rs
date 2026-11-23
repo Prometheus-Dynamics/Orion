@@ -132,6 +132,7 @@ pub(crate) struct Logic {
     /// What was served at the last good run, and the window after a restart.
     pub(crate) served: Served,
     started: Instant,
+    steps: crate::clock::StepWatch,
     scratch: Vec<u8>,
     /// What the refusal being made says besides its code.
     said: Option<String>,
@@ -246,6 +247,16 @@ impl Logic {
             started: Instant::now(),
             scratch: vec![0; 64 * 1024],
             said: None,
+            steps: crate::clock::StepWatch::default(),
+        }
+    }
+
+    /// Moves what is kept on the wall clock, if that clock was stepped (`clock`).
+    pub(crate) fn clock_step(&mut self) {
+        let (wall_ms, now) = (wall().as_millis() as u64, self.now_ms());
+        if let Some(by) = self.steps.stepped(wall_ms, now) {
+            self.records.clock_stepped(by, wall_ms);
+            self.peers.clock_stepped(by);
         }
     }
 
@@ -405,6 +416,7 @@ impl Logic {
     }
 
     fn request(&mut self, asked: &Asked<'_>, out: &mut dyn Out) {
+        self.clock_step();
         // A forced remove drops a record whatever is true of the run: what it leaves behind
         // is looked at before it is gone, for the audit log.
         let mut left = (asked.kind == kind::WORKLOAD_REMOVE)

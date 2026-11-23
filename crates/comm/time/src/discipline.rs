@@ -6,7 +6,10 @@
 //! - a large offset (over [`STEP_THRESHOLD_NS`]) is stepped, but only after two samples agree, so
 //!   one bad answer cannot move the clock;
 //! - after the first synchronization, the clock is never stepped backwards: a large negative
-//!   offset is reported and left alone.
+//!   offset is reported and left alone;
+//! - after the first synchronization, a step forward of over an hour needs more than one
+//!   source's word: two different sources that agree, or an operator's clock. The first step
+//!   after start is free of this: the board was off, for nobody knows how long.
 
 use orion_measure::clock;
 
@@ -14,6 +17,8 @@ use orion_measure::clock;
 pub(crate) const STEP_THRESHOLD_NS: i64 = 400_000_000;
 /// Two large offsets agree when they differ by at most this.
 const AGREE_NS: i64 = 100_000_000;
+/// A later step forward beyond this needs a second source, or an operator.
+pub(crate) const LONE_STEP_NS: i64 = 3_600 * 1_000_000_000;
 /// Answers whose round trip took longer are not used.
 pub(crate) const MAX_DELAY_NS: i64 = 1_000_000_000;
 
@@ -83,6 +88,9 @@ pub(crate) fn implausible(
 pub(crate) enum Action {
     /// Nothing to do yet (a large offset waiting for a second, agreeing sample).
     Wait,
+    /// Nothing to do yet: a step of over an hour, after the first synchronization, waiting
+    /// for a source other than the one that said it, or an operator, to agree.
+    Second,
     Slew(i64),
     Step(i64),
     /// A large backward offset after the first synchronization: reported, not applied.
@@ -94,7 +102,8 @@ pub(crate) enum Action {
 #[derive(Debug, Default)]
 pub(crate) struct Discipline {
     synced: bool,
-    pending_step_ns: Option<i64>,
+    /// A large offset waiting for agreement, and who said it.
+    pending: Option<(i64, String)>,
 }
 
 impl Discipline {
@@ -102,27 +111,44 @@ impl Discipline {
         self.synced
     }
 
-    pub(crate) fn on_sample(&mut self, offset_ns: i64, delay_ns: i64) -> Action {
+    /// Who said the large offset that waits for agreement.
+    pub(crate) fn pending_from(&self) -> Option<&str> {
+        self.pending.as_ref().map(|(_, from)| from.as_str())
+    }
+
+    /// What to do with `source`'s sample. `operator` says it is an operator's clock, which
+    /// alone may step the clock far.
+    pub(crate) fn on_sample(
+        &mut self,
+        offset_ns: i64,
+        delay_ns: i64,
+        source: &str,
+        operator: bool,
+    ) -> Action {
         if delay_ns > MAX_DELAY_NS {
             return Action::Discard;
         }
         if offset_ns.unsigned_abs() <= STEP_THRESHOLD_NS.unsigned_abs() {
-            self.pending_step_ns = None;
+            self.pending = None;
             self.synced = true;
             return Action::Slew(offset_ns);
         }
         if self.synced && offset_ns < 0 {
-            self.pending_step_ns = None;
+            self.pending = None;
             return Action::Refuse(offset_ns);
         }
-        match self.pending_step_ns.take() {
-            Some(previous) if (previous - offset_ns).abs() <= AGREE_NS => {
+        // Once synchronized, one source alone does not move the clock far.
+        let lone = self.synced && offset_ns > LONE_STEP_NS && !operator;
+        match self.pending.take() {
+            Some((previous, from))
+                if (previous - offset_ns).abs() <= AGREE_NS && (!lone || from != source) =>
+            {
                 self.synced = true;
                 Action::Step(offset_ns)
             }
             _ => {
-                self.pending_step_ns = Some(offset_ns);
-                Action::Wait
+                self.pending = Some((offset_ns, source.to_owned()));
+                if lone { Action::Second } else { Action::Wait }
             }
         }
     }
@@ -193,15 +219,18 @@ mod tests {
         let mut discipline = Discipline::default();
         // A board with no clock battery: about 1.9 h behind.
         let behind = 6_840 * S;
-        assert_eq!(discipline.on_sample(behind, S / 100), Action::Wait);
+        assert_eq!(
+            discipline.on_sample(behind, S / 100, "a", false),
+            Action::Wait
+        );
         assert!(!discipline.synced());
         assert_eq!(
-            discipline.on_sample(behind + S / 50, S / 100),
+            discipline.on_sample(behind + S / 50, S / 100, "a", false),
             Action::Step(behind + S / 50)
         );
         assert!(discipline.synced());
         assert_eq!(
-            discipline.on_sample(S / 1000, S / 100),
+            discipline.on_sample(S / 1000, S / 100, "a", false),
             Action::Slew(S / 1000)
         );
     }
@@ -209,27 +238,45 @@ mod tests {
     #[test]
     fn disagreeing_samples_keep_waiting_and_slow_answers_are_discarded() {
         let mut discipline = Discipline::default();
-        assert_eq!(discipline.on_sample(10 * S, S / 100), Action::Wait);
-        assert_eq!(discipline.on_sample(20 * S, S / 100), Action::Wait);
-        assert_eq!(discipline.on_sample(20 * S, S / 100), Action::Step(20 * S));
-        assert_eq!(discipline.on_sample(S, 2 * S), Action::Discard);
+        assert_eq!(
+            discipline.on_sample(10 * S, S / 100, "a", false),
+            Action::Wait
+        );
+        assert_eq!(
+            discipline.on_sample(20 * S, S / 100, "a", false),
+            Action::Wait
+        );
+        assert_eq!(
+            discipline.on_sample(20 * S, S / 100, "a", false),
+            Action::Step(20 * S)
+        );
+        assert_eq!(discipline.on_sample(S, 2 * S, "a", false), Action::Discard);
     }
 
     #[test]
     fn after_the_first_sync_the_clock_never_steps_backwards() {
         let mut discipline = Discipline::default();
-        assert_eq!(discipline.on_sample(S / 10, S / 100), Action::Slew(S / 10));
         assert_eq!(
-            discipline.on_sample(-5 * S, S / 100),
+            discipline.on_sample(S / 10, S / 100, "a", false),
+            Action::Slew(S / 10)
+        );
+        assert_eq!(
+            discipline.on_sample(-5 * S, S / 100, "a", false),
             Action::Refuse(-5 * S)
         );
         assert_eq!(
-            discipline.on_sample(-5 * S, S / 100),
+            discipline.on_sample(-5 * S, S / 100, "a", false),
             Action::Refuse(-5 * S)
         );
         // Forward still steps, after agreement.
-        assert_eq!(discipline.on_sample(5 * S, S / 100), Action::Wait);
-        assert_eq!(discipline.on_sample(5 * S, S / 100), Action::Step(5 * S));
+        assert_eq!(
+            discipline.on_sample(5 * S, S / 100, "a", false),
+            Action::Wait
+        );
+        assert_eq!(
+            discipline.on_sample(5 * S, S / 100, "a", false),
+            Action::Step(5 * S)
+        );
     }
 
     #[test]
@@ -239,5 +286,59 @@ mod tests {
         assert_eq!(seconds_as_ms(Some("99999999999999999999999")), 0);
         assert_eq!(seconds_as_ms(None), 0);
         const { assert!(EARLIEST_PLAUSIBLE_MS >= NEVER_BEFORE_MS) };
+    }
+
+    #[test]
+    fn once_synchronized_a_step_of_over_an_hour_needs_a_second_source_or_an_operator() {
+        let hours = 5 * 3_600 * S;
+        // Before the first synchronization one source is enough, however far: the board was
+        // off.
+        let mut discipline = Discipline::default();
+        assert_eq!(
+            discipline.on_sample(hours, S / 100, "a", false),
+            Action::Wait
+        );
+        assert_eq!(
+            discipline.on_sample(hours, S / 100, "a", false),
+            Action::Step(hours)
+        );
+        // After it, the same source saying so twice moves nothing.
+        assert_eq!(
+            discipline.on_sample(hours, S / 100, "a", false),
+            Action::Second
+        );
+        assert_eq!(discipline.pending_from(), Some("a"));
+        assert_eq!(
+            discipline.on_sample(hours, S / 100, "a", false),
+            Action::Second
+        );
+        // Another source that disagrees does not either; one that agrees does.
+        assert_eq!(
+            discipline.on_sample(hours + 10 * S, S / 100, "b", false),
+            Action::Second
+        );
+        assert_eq!(
+            discipline.on_sample(hours + 10 * S, S / 100, "c", false),
+            Action::Step(hours + 10 * S)
+        );
+        // An operator's clock is believed as before: two samples that agree.
+        assert_eq!(
+            discipline.on_sample(hours, S / 100, "op", true),
+            Action::Wait
+        );
+        assert_eq!(
+            discipline.on_sample(hours, S / 100, "op", true),
+            Action::Step(hours)
+        );
+        // Up to an hour, one source is enough, as before.
+        let minutes = 50 * 60 * S;
+        assert_eq!(
+            discipline.on_sample(minutes, S / 100, "a", false),
+            Action::Wait
+        );
+        assert_eq!(
+            discipline.on_sample(minutes, S / 100, "a", false),
+            Action::Step(minutes)
+        );
     }
 }

@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use orion_msg_records::{
     LeaseRecord, RecordClass, RecordEntry, ResourceDescription, ResourceRecord, ResourceState,
 };
-use orion_store::Store;
+use orion_store::{Record, Store};
 use orion_types::{Error, HlcTimestamp, NodeName, ResourceName};
 use orion_wire::body::encode_fields;
 use orion_wire::{Bytes, Decode};
@@ -164,6 +164,35 @@ pub fn bind(
         &value[..len],
         wall_ms,
     ))
+}
+
+/// The wall clock was stepped by `by_ms`: every lease this node wrote that ends at a time
+/// ends as much later (or earlier), so it lasts as long as it was given. A lease another node
+/// wrote is that node's to move, and one with no end has nothing to move. How many moved.
+pub fn shift_leases(store: &mut Store, by_ms: i64, wall_ms: u64) -> usize {
+    let own: Vec<Record> = store
+        .list(RecordClass::Lease, "")
+        .filter(|record| store.wrote(&record.version.stamp))
+        .collect();
+    let mut moved = 0;
+    for record in own {
+        let Ok(lease) = LeaseRecord::decode(&record.version.value) else {
+            continue;
+        };
+        if lease.expires_ms == 0 {
+            continue;
+        }
+        let shifted = LeaseRecord {
+            expires_ms: lease.expires_ms.saturating_add_signed(by_ms).max(1),
+            ..lease
+        };
+        let mut value = vec![0_u8; record.version.value.len() + 16];
+        if let Ok(len) = encode_fields(&shifted, &mut value) {
+            store.put(RecordClass::Lease, &record.key, &value[..len], wall_ms);
+            moved += 1;
+        }
+    }
+    moved
 }
 
 /// Releases `resource` if `holder` holds it. Whether it did.

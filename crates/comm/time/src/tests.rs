@@ -80,7 +80,14 @@ fn syncer(
 }
 
 async fn poll(syncer: &mut Syncer) {
-    let result = best_sample(&syncer.config.servers, &OperatorTime::default(), None, None).await;
+    let result = best_sample(
+        &syncer.config.servers,
+        &OperatorTime::default(),
+        None,
+        None,
+        syncer.but.as_deref(),
+    )
+    .await;
     syncer.apply(result);
 }
 
@@ -220,6 +227,7 @@ fn a_tcp_source_answers_like_the_udp_one() {
             &OperatorTime::default(),
             None,
             None,
+            None,
         )
         .await
         .expect("sample");
@@ -262,7 +270,7 @@ fn a_wrong_peer_is_passed_over_for_the_next_source() {
         let right = peer_source(0).await;
         let saved = (sntp::unix_now_ns() / 1_000_000) as i64;
         let servers = vec![format!("peer://{wrong}"), right.to_string()];
-        let (source, _) = best_sample(&servers, &OperatorTime::default(), None, Some(saved))
+        let (source, _) = best_sample(&servers, &OperatorTime::default(), None, Some(saved), None)
             .await
             .expect("the second source answers");
         assert_eq!(source, right.to_string());
@@ -452,4 +460,59 @@ fn what_others_say_of_the_clock() {
         fresh.state_line()
     );
     assert_eq!(off.state_line(), "");
+}
+
+#[test]
+fn once_synchronized_a_far_step_waits_for_a_second_source_and_one_alone_never_steps() {
+    run(async {
+        let far = 5 * 3_600 * S;
+        let first = peer_source(far).await.to_string();
+        let second = peer_source(far).await.to_string();
+        let clock = Rc::new(FakeClock::default());
+        let synced = sntp::Sample {
+            offset_ns: 1_000,
+            delay_ns: 1_000,
+            stratum: 2,
+        };
+
+        // One source alone, saying the clock is five hours behind: asked again and again,
+        // it moves nothing, and the board says why.
+        let mut alone = syncer(
+            config(TimeMode::Discipline, vec![first.clone()]),
+            &clock,
+            None,
+            false,
+        );
+        alone.apply(Ok((first.clone(), synced)));
+        for _ in 0..4 {
+            poll(&mut alone).await;
+        }
+        assert!(clock.steps.borrow().is_empty(), "{:?}", alone.status);
+        let said = alone.status.error.clone().unwrap_or_default();
+        assert!(
+            said.contains("no other source agrees") && said.contains(&first),
+            "{:?}",
+            alone.status
+        );
+
+        // With a second source that agrees: the first says it, the second is asked, and the
+        // clock steps on the second's word.
+        let mut both = syncer(
+            config(TimeMode::Discipline, vec![first.clone(), second.clone()]),
+            &clock,
+            None,
+            false,
+        );
+        both.apply(Ok((first.clone(), synced)));
+        poll(&mut both).await;
+        assert_eq!(both.status.last_action, "waiting for a second source");
+        assert_eq!(both.but.as_deref(), Some(first.as_str()));
+        assert!(clock.steps.borrow().is_empty());
+        poll(&mut both).await;
+        assert_eq!(both.status.last_action, "stepped", "{:?}", both.status);
+        assert_eq!(both.status.source.as_deref(), Some(second.as_str()));
+        let steps = clock.steps.borrow().clone();
+        assert_eq!(steps.len(), 1);
+        assert!((steps[0] - far).abs() < S / 10, "{steps:?}");
+    });
 }

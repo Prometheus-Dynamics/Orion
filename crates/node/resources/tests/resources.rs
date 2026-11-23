@@ -417,3 +417,61 @@ fn a_resource_of_another_node_is_not_lost_here() {
     assert_eq!(bench.resources.lose_unprovided(&mut bench.store, NOW), 0);
     assert_eq!(bench.state("cam.far"), Some(ResourceState::Ready));
 }
+
+#[test]
+fn when_the_clock_is_stepped_a_lease_this_node_wrote_lasts_as_long_as_it_was_given() {
+    use orion_resources::shift_leases;
+    let mut bench = Bench::with_camera();
+    let camera = name("cam.front");
+    // Held for ten seconds, on a clock that has not been set: 1970.
+    let unset = 60_000;
+    bind(
+        &mut bench.store,
+        &camera,
+        "workload:detector",
+        unset + 10_000,
+        unset,
+    )
+    .expect("bind");
+    // The board gets the time: the clock steps forward by decades, a second later.
+    let by = (NOW - unset) as i64;
+    let now = NOW + 1_000;
+    // Not moved, the lease would have ended long ago.
+    assert_eq!(holder(&bench.store, "cam.front", now), None);
+    assert_eq!(shift_leases(&mut bench.store, by, now), 1);
+    assert_eq!(
+        holder(&bench.store, "cam.front", now).as_deref(),
+        Some("workload:detector")
+    );
+    // It ends when it would have: nine seconds on.
+    assert_eq!(
+        holder(&bench.store, "cam.front", now + 8_999).as_deref(),
+        Some("workload:detector")
+    );
+    assert_eq!(holder(&bench.store, "cam.front", now + 9_000), None);
+
+    // A lease with no end has nothing to move, and one another node wrote is that node's.
+    let mut bench = Bench::with_camera();
+    bind(&mut bench.store, &camera, "workload:detector", 0, NOW).expect("bind");
+    assert_eq!(shift_leases(&mut bench.store, 5_000, NOW), 0);
+    let theirs: Vec<orion_store::Record> = {
+        let mut other = Store::new("other".parse().expect("name"), StoreConfig::default());
+        let lease = LeaseRecord {
+            resource: camera.clone(),
+            holder: "workload:recorder",
+            expires_ms: NOW + 10_000,
+            label: "",
+        };
+        let mut value = vec![0_u8; 128];
+        let len = encode_fields(&lease, &mut value).expect("encode");
+        other.put(RecordClass::Lease, "cam.side", &value[..len], NOW);
+        other.all().collect()
+    };
+    let mut store = Store::restored(node(), StoreConfig::default(), theirs);
+    assert_eq!(shift_leases(&mut store, 5_000, NOW), 0);
+    assert_eq!(
+        holder(&store, "cam.side", NOW + 9_999).as_deref(),
+        Some("workload:recorder")
+    );
+    assert_eq!(holder(&store, "cam.side", NOW + 10_000), None);
+}

@@ -251,6 +251,12 @@ impl Store {
     }
 
     /// Writes a desired record, stamped by this node's clock at `wall_ms`. Returns its stamp.
+    /// Whether this node wrote the version stamped `stamp`.
+    #[must_use]
+    pub const fn wrote(&self, stamp: &HlcTimestamp) -> bool {
+        stamp.node == self.clock.node()
+    }
+
     pub fn put(
         &mut self,
         class: RecordClass,

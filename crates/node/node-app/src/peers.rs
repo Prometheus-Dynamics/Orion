@@ -238,6 +238,11 @@ impl Peers {
         }
     }
 
+    /// The wall clock was stepped by `by_ms`: sync's times move with it.
+    pub(crate) fn clock_stepped(&mut self, by_ms: i64) {
+        self.sync.clock_stepped(by_ms);
+    }
+
     /// Takes what the links heard, sends what changed here, and keeps the links to the nodes
     /// the records give an address for.
     pub(crate) fn turn(&mut self, records: &mut Records, wall_ms: u64, out: &mut dyn Out) {

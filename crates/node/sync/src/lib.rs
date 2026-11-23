@@ -523,6 +523,20 @@ impl Sync {
         }
     }
 
+    /// The wall clock was stepped by `by_ms`: the times kept on it move with it, so a step of
+    /// days makes no peer stale and holds nothing back for as long.
+    pub fn clock_stepped(&mut self, by_ms: i64) {
+        for peer in self.peers.values_mut() {
+            for at in [
+                &mut peer.agreed_ms,
+                &mut peer.full_due,
+                &mut peer.last_full_ms,
+            ] {
+                *at = at.map(|at| at.saturating_add_signed(by_ms));
+            }
+        }
+    }
+
     /// When [`Sync::tick`] next has something to do.
     #[must_use]
     pub fn next_deadline(&self) -> Option<u64> {

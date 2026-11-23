@@ -639,3 +639,46 @@ fn when_peers_last_agreed_is_kept_across_a_restart() {
     again.peer_up(&name(1), &net.stores[0], net.now + 5_000, &mut out);
     assert_eq!(again.status(&name(1)), PeerStatus::Stale);
 }
+
+#[test]
+fn a_clock_stepped_by_days_makes_no_peer_stale() {
+    let mut net = Net::meshed();
+    net.put(0, "fan", b"on");
+    net.settle();
+    let kept: Vec<(NodeName, u64)> = net.syncs[0]
+        .agreed_at()
+        .map(|(peer, at)| (peer.clone(), at))
+        .collect();
+    let config = SyncConfig {
+        stale_after_ms: 1_000,
+        ..SyncConfig::default()
+    };
+    let days = 30 * 24 * 3_600 * 1_000_i64;
+    let up = |stepped: bool| {
+        let mut again = Sync::new(name(0), config);
+        for (peer, at) in &kept {
+            again.restore_agreed(peer, *at);
+        }
+        if stepped {
+            again.clock_stepped(days);
+        }
+        let mut sink = VecDeque::new();
+        let mut out = Sending {
+            from: 0,
+            queue: &mut sink,
+        };
+        // The peer comes back half a second after they agreed, by the clock as it now is.
+        let now = net.now + days as u64 + 500;
+        again.peer_up(&name(1), &net.stores[0], now, &mut out);
+        (
+            again.status(&name(1)),
+            again.agreed_at().map(|(_, at)| at).max(),
+        )
+    };
+    // The times were moved with the clock: half a second ago, not thirty days.
+    let (status, agreed) = up(true);
+    assert_ne!(status, PeerStatus::Stale);
+    assert_eq!(agreed, kept.iter().map(|(_, at)| at + days as u64).max());
+    // Not moved, the peer would be stale for a step, not for being away.
+    assert_eq!(up(false).0, PeerStatus::Stale);
+}

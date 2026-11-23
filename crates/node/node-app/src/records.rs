@@ -143,6 +143,13 @@ impl Records {
     }
 
     /// Whether the store changed since the last call: it is to be saved.
+    /// The wall clock was stepped by `by_ms`: the leases this node wrote move with it.
+    pub(crate) fn clock_stepped(&mut self, by_ms: i64, wall_ms: u64) {
+        let moved = orion_resources::shift_leases(&mut self.store, by_ms, wall_ms);
+        tracing::info!("the clock was stepped by {by_ms} ms: {moved} leases end as much later");
+        self.dirty |= moved != 0;
+    }
+
     pub const fn take_dirty(&mut self) -> bool {
         std::mem::replace(&mut self.dirty, false)
     }
