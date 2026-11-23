@@ -73,15 +73,24 @@ CAPI_HOST=740000
 # callers), orion_file_roots +6.6 KB, std +2.7 KB, rustix +2.3 KB (openat2, reading
 # directories). Cut first: the index in the order it is read, not sorted (a sort of its own),
 # and the helpers that read a file for its digest polled by their threads, not over a channel
-# (-10,112 together). The others as at C41, until they run on one; armv7 and riscv64 were not
-# measured at I76 and will be about as much larger at the next release's measurement:
+# (-10,112 together). Orion as measured at I77 (the board announced by name over mDNS: +78,680
+# over I76's 5,408,344, after a cut of 17,008; docs/prs/I77.md), its limit raised from
+# 5,430,000. By section: .text +54,144, unwinding +22,288 (.eh_frame +11,216,
+# .gcc_except_table +7,792, .eh_frame_hdr +3,280), .data.rel.ro +1,760. By crate (.text):
+# orion_mdns +35.1 KB (the responder: 18.4 KB of it its task with the responder inlined),
+# orion_comm_app +7.4 KB (the TXT record, the settings, the wiring), std +7.2 KB, [Unknown]
+# +4.1 KB (musl's getifaddrs), tracing_core +1.9 KB, tokio -2.2 KB. Cut first: linear lists
+# for its sockets, announcement times and once-a-second record times, not hash and B-tree maps;
+# no sort of an interface's addresses; three debug lines with fields (-17,008 together).
+# The others as at C41, until they run on one; armv7 and riscv64 were not measured at I76 or
+# I77 and will be about as much larger at the next release's measurement:
 #                                   orion-recovery   orion
-#   aarch64-unknown-linux-musl      2,759,704        5,408,344
+#   aarch64-unknown-linux-musl      2,759,704        5,487,024
 #   armv7-unknown-linux-musleabihf  2,782,344        5,327,160   (never run on a board)
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
 # The last column: gated on `every` change, or before a `release` only.
 BOARDS=(
-    "aarch64-unknown-linux-musl     2760000          5430000   every"
+    "aarch64-unknown-linux-musl     2760000          5510000   every"
     "armv7-unknown-linux-musleabihf 2810000          5350000   release"
     "riscv64gc-unknown-linux-musl   3040000          5690000   release"
 )

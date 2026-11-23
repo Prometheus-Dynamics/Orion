@@ -19,9 +19,10 @@ use tracing::{debug, warn};
 /// (which keeps their entries in the discovered set from expiring).
 const DEFAULT_REFRESH: Duration = Duration::from_secs(30);
 
-/// mDNS backend: advertises `_orion._tcp.local.` and browses for it.
+/// mDNS backend: advertises `_orion._tcp.local.` and browses for it, or only browses.
 pub struct MdnsDiscoveryBackend {
     interfaces: Vec<String>,
+    announce: bool,
     refresh: Duration,
     daemon: Option<ServiceDaemon>,
     fullname: Option<String>,
@@ -35,12 +36,21 @@ impl MdnsDiscoveryBackend {
     pub fn new(interfaces: Vec<String>) -> Self {
         Self {
             interfaces,
+            announce: true,
             refresh: DEFAULT_REFRESH,
             daemon: None,
             fullname: None,
             stop: Arc::new(AtomicBool::new(false)),
             thread: None,
         }
+    }
+
+    /// Browses only: the node is announced by another (the comm core's responder,
+    /// `orion-mdns`), and its announcement is left out of what is found by its `id`.
+    #[must_use]
+    pub const fn browse_only(mut self) -> Self {
+        self.announce = false;
+        self
     }
 
     /// Re-report period for live instances; keep it well below the discovery TTL.
@@ -116,7 +126,9 @@ impl DiscoveryBackend for MdnsDiscoveryBackend {
             info
         };
         let fullname = info.get_fullname().to_owned();
-        daemon.register(info).map_err(|err| err.to_string())?;
+        if self.announce {
+            daemon.register(info).map_err(|err| err.to_string())?;
+        }
         let mut receiver = daemon.browse(SERVICE_TYPE).map_err(|err| err.to_string())?;
         let stop = self.stop.clone();
         let refresh = self.refresh;
@@ -168,7 +180,7 @@ impl DiscoveryBackend for MdnsDiscoveryBackend {
             })
             .map_err(|err| err.to_string())?;
         self.daemon = Some(daemon);
-        self.fullname = Some(fullname);
+        self.fullname = self.announce.then_some(fullname);
         self.thread = Some(thread);
         Ok(())
     }

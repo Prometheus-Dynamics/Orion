@@ -1398,6 +1398,7 @@ dependencies = [
  "orion-link-serial",
  "orion-link-usb",
  "orion-log",
+ "orion-mdns",
  "orion-msg-peers",
  "orion-msg-session",
  "orion-msg-topics",
@@ -1845,6 +1846,18 @@ dependencies = [
 name = "orion-log"
 version = "1.0.1-dev"
 dependencies = [
+ "tracing",
+]
+
+[[package]]
+name = "orion-mdns"
+version = "1.0.1-dev"
+dependencies = [
+ "if-addrs",
+ "orion-discovery",
+ "orion-identity",
+ "rustix",
+ "tokio",
  "tracing",
 ]
 

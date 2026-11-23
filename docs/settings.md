@@ -85,13 +85,15 @@ The name in brackets is the cargo feature that carries the part.
 | `nt4.accept` | none | the NT4 topics whose values are published here, in the same form |
 | `nt4.max_payload` | 1024 | the longest text, bytes or array taken from NT4 |
 | `peer.nodes` | none | where other nodes are, `name=address:port`, for subscribing to their topics (`topic-peers`) |
-| `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts |
+| `cluster`, `enrollment.key`, `operators.*` | | whom the node trusts; a `cluster` longer than 252 bytes is more than the mDNS announcement carries, and `_orion._tcp` is then not announced (the log and `orion/state` say so) |
 | `status.interval_ms` | 1000 | how often vital signs are read while watched (`self-status`) |
 | `log.window_bytes` | 262144 | how many bytes of the newest log lines are kept in memory, whole lines, for `orion/log` (`offers`); 0 keeps none |
 | `offers.file` | `/etc/orion/offers.conf` | files the comm core serves while no program offers their prefix: paths and commands (`offers`; format in `docs/comm.md`). Must be root's and written by no one else; none is none |
 | `offers.user` | the comm core's own | whom those commands run as; another user needs a comm core that is root |
 | `time.*` | off | time sync (`time`) |
-| `discovery`, `discovery.ttl_ms`, `discovery.interfaces` | off | finding peers (`discovery`, `mdns`) |
+| `mdns` | on | the board announced by name on the local network, `<name>.local` with `_orion._tcp`, `_ssh._tcp` and `_sftp-ssh._tcp` where they can be reached; `false` announces nothing (`announce`; `docs/comm.md`) |
+| `mdns.interface` | every one that is up | the interfaces it is announced on, by name, comma separated |
+| `discovery`, `discovery.ttl_ms`, `discovery.interfaces` | off | finding peers (`discovery`, `mdns`); with the responder built in, discovery only browses |
 | `links.serial` | none | `name=path@baud`, comma separated (`link-serial`) |
 | `links.sealed` | none | `name=address:port` (`link-sealed`) |
 | `links.can` | none | `name=interface:device-to-host:host-to-device:addresses[:fd][:extended]` (`link-can`) |

@@ -45,6 +45,13 @@ pub struct CommSettings {
     /// How long a way in that listens on an address of its own (network, WebSocket, SSH,
     /// NT4) waits before it tries again when it cannot open.
     pub listen_retry: orion_server::Retry,
+    /// `mdns`: whether the board is announced by name on the local network. On unless set
+    /// `false`.
+    #[cfg(feature = "announce")]
+    pub mdns: bool,
+    /// `mdns.interface`: the interfaces it is announced on. Empty for every one that is up.
+    #[cfg(feature = "announce")]
+    pub mdns_interfaces: Vec<String>,
     /// `discovery`: `off` or `mdns`.
     #[cfg(feature = "discovery")]
     pub discovery: bool,
@@ -252,6 +259,10 @@ impl CommSettings {
             listen_retry: orion_server::Retry::default(),
             #[cfg(feature = "time")]
             time: orion_time::TimeConfig::from_source(source)?,
+            #[cfg(feature = "announce")]
+            mdns: source.get("mdns", true)?,
+            #[cfg(feature = "announce")]
+            mdns_interfaces: source.interfaces("mdns.interface")?,
             #[cfg(feature = "discovery")]
             discovery,
             #[cfg(feature = "discovery")]

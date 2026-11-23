@@ -38,7 +38,12 @@ pub(crate) fn running(
     comm: &Comm,
     settings: &CommSettings,
 ) -> Result<FileOffersService, crate::StartError> {
-    let state = format!("{}\n", settings.board_state.word());
+    #[allow(unused_mut)]
+    let mut state = format!("{}\n", settings.board_state.word());
+    #[cfg(feature = "announce")]
+    if let Some(why) = crate::announce::withheld(settings) {
+        state.push_str(&format!("mdns: {why}\n"));
+    }
     match OrionFiles::new(Some(settings), state).service(comm, Some(settings)) {
         (service, None) => Ok(service),
         (_, Some(why)) => Err(crate::error::failed("offers.file", why)),

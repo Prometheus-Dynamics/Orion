@@ -1060,17 +1060,9 @@ A client finds it, reads it and drives it like any other resource.
 ## Discovery
 
 A node can find the others of its cluster on the local network (`orion-discovery`, mDNS/DNS-SD
-behind feature `mdns`). It announces the service `_orion._tcp` with this TXT record:
-
-| Key | Value |
-| --- | --- |
-| `v` | TXT layout version, `2` |
-| `id` | the node's name (the instance name is only a label) |
-| `pk` | its ed25519 public key, 64 hex characters |
-| `wv` | wire protocol version |
-| `rev` | highest interface revision |
-| `cl` | cluster name |
-| `tcp` | where it takes `orion+tcp` connections |
+behind feature `mdns`). It browses the service `_orion._tcp`, which the comm core's responder
+announces ([Announced by name](#announced-by-name-mdns)); a build without the responder
+announces it from discovery itself, with the same record less `level`, `state` and `security`.
 
 Addresses come from the announcement; IPv4 is tried before IPv6, and link-local IPv6 addresses
 are left out because they need a scope.
@@ -1125,6 +1117,62 @@ one, the device was unplugged and is back: the old stream ends and the link goes
   lets go of all three and waits for the next offer. The holder needs this to take the function
   down or mount it again, which the kernel refuses (`EBUSY`) while the comm core has copies.
   Without an end descriptor the comm core keeps them until the link ends some other way.
+
+## Announced by name (mDNS)
+
+The comm core announces the board on the local network (`orion-mdns`, an mDNS responder,
+RFC 6762 and 6763), so it is found by name: `<name>.local`, the node's name with any `.`, `_`
+or `:` made `-`. It is built into the image's `orion`, not into recovery, and runs unless
+`mdns = false`; `mdns.interface` names the interfaces it is announced on (every one that is up
+otherwise). It is the same with security on or off: the record says which.
+
+It announces, each only on the interfaces where its way in can be reached (the address it
+listens on, or every one, and the interfaces it is kept to, if any):
+
+| Service | Port | TXT |
+| --- | --- | --- |
+| `_orion._tcp` | the network way in (`peer.listen`) | below |
+| `_ssh._tcp` | the SSH way in (`ssh.listen`) | none |
+| `_sftp-ssh._tcp` | the SSH way in, which serves SFTP | none |
+
+A way in that listens on the loopback address alone is not announced, and a board with no way
+in announces nothing, not even its name. Each interface is answered with its own addresses
+(A, and AAAA where it has them).
+
+**The `_orion._tcp` TXT record** is the one peers and clients browse. Its instance is the
+board's name; what to connect to is in its SRV record and the host's addresses.
+
+| Key | Value |
+| --- | --- |
+| `v` | TXT layout version, `2` |
+| `id` | the node's name |
+| `pk` | its ed25519 public key, 64 hex characters: the key the session's handshake proves |
+| `wv` | wire protocol version |
+| `rev` | highest interface revision |
+| `cl` | cluster name |
+| `tcp` | where it takes `orion+tcp` connections |
+| `level` | the additive level it speaks (`Welcomed::level`) |
+| `state` | `running` or `flasher` (recovery announces nothing) |
+| `security` | `on`, `off` or `damaged`, as the hello document says |
+
+- **Keys are read by name, in any case, and a key a reader does not know is left.** A key added
+  keeps `v`; `v` changes only when a key changes meaning. A reader of layout 2 that predates
+  `level`, `state` and `security` reads the record whole and leaves those three.
+- **At most 465 bytes**: a 63-byte name, a 252-byte cluster and the longest values. The whole
+  answer for `_orion._tcp` is about 800 bytes, in one packet.
+- **A cluster name longer than 252 bytes** is more than a TXT string carries. `_orion._tcp` is
+  then not announced; the board's name and SSH still are. The log says so at start, naming
+  the setting, and `orion/state` says it under `mdns:`.
+
+**A name is claimed before it is used.** The responder probes for its names three times, a
+quarter second apart, then announces twice, a second apart. If another answers for one, it
+takes `<name>-<4 hex>`, the first four hex digits of its key's fingerprint as `orion keys`
+shows it, and probes for that; the log says which name it announces under. It answers a probe
+for a name it holds at once, and says goodbye (its records with no life left) as it stops.
+
+**An announcement proves nothing.** Anyone on the network can announce any name, key or state.
+The record says where to connect and which key to expect; the session's handshake is what
+proves the key. Discovery treats a peer it browsed exactly as before: listed, not trusted.
 
 ## Passing requests to node logic
 

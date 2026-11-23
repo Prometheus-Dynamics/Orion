@@ -523,6 +523,13 @@ what to change.
   `orion_test_board::Options::granted` and `Granted` (**Add**). The store places a file beneath
   itself with `openat2` (**Change**: a link with an absolute target back inside is now refused
   too). No new wire kinds; level 6.
+- **I77.** `mdns` and `mdns.interface` (**Add**): the comm core announces the board by name over
+  mDNS, `orion-mdns` (new, feature `announce` in the default set, not in recovery), with
+  `_orion._tcp`, `_ssh._tcp` and `_sftp-ssh._tcp`. The `_orion._tcp` TXT record keeps layout 2
+  and adds `level`, `state` and `security` by name (**Add**; a layout-2 reader reads it).
+  `CommCore::mdns_name` and `MdnsDiscoveryBackend::browse_only` (**Add**); with the responder
+  built in, discovery browses only. `orion/state` gains an `mdns:` line when `_orion._tcp` is
+  withheld. No wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

@@ -229,3 +229,56 @@ fn recovery_offers_the_comm_core_s_own_files_and_says_why() {
         drop(recovery);
     });
 }
+
+/// A cluster name no announcement can carry: `orion/state` says `_orion._tcp` is not
+/// announced, and why, naming the setting. (No way in is open: nothing is announced here.)
+#[cfg(feature = "announce")]
+#[test]
+fn a_cluster_too_long_to_announce_is_said_in_the_state() {
+    run(async {
+        let dir = temp("long-cluster");
+        let view = dir.join("security");
+        std::fs::write(&view, "off\ngeneration 1\n").expect("security record");
+        let text = format!(
+            "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\ncluster = {1}\n",
+            dir.display(),
+            "c".repeat(253)
+        );
+        let mut source = Source::parse(&text, Vec::new()).expect("source");
+        let settings = CommSettings::from_source_with_view(&mut source, &view).expect("settings");
+        let core = CommCore::start(settings).await.expect("start");
+        let (fetched, _) = fetch(core.socket(), &["orion/state"]).await;
+        assert_eq!(
+            fetched[0],
+            "running\nmdns: setting `cluster` is 253 bytes, and an announcement carries 252 at \
+             most: `_orion._tcp` is not announced; the board's name and SSH still are\n"
+        );
+        // A responder would have claimed its name by now: none was started.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(core.mdns_name(), None, "nothing to announce");
+    });
+}
+
+/// Ways in on the loopback address alone: nothing to announce, so nothing is.
+#[cfg(feature = "announce")]
+#[test]
+fn ways_in_on_loopback_alone_are_not_announced() {
+    run(async {
+        let dir = temp("loopback-only");
+        let view = dir.join("security");
+        std::fs::write(&view, "off\ngeneration 1\n").expect("security record");
+        let text = format!(
+            "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n\
+             peer.listen = 127.0.0.1:0\nssh.listen = 127.0.0.1:0\nssh.sandbox = false\n\
+             ssh.host_key = {0}/host_key\n",
+            dir.display()
+        );
+        let mut source = Source::parse(&text, Vec::new()).expect("source");
+        let settings = CommSettings::from_source_with_view(&mut source, &view).expect("settings");
+        let core = CommCore::start(settings).await.expect("start");
+        // A responder would have claimed its name by now: none was started.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(core.mdns_name(), None);
+        assert!(!core.summary().contains("mdns"), "{}", core.summary());
+    });
+}

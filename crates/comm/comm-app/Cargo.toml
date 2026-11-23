@@ -9,7 +9,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery", "devices", "shell", "login-helper", "offers"]
+default = ["tcp", "time", "self-status", "proxy", "buffers", "systemd", "node", "outbound", "topic-peers", "ws", "nt4", "nt4-client", "ssh", "ssh-sftp", "ssh-forward", "ssh-sandbox", "recovery", "devices", "shell", "login-helper", "offers", "announce"]
 # The network way in, `orion+tcp`.
 tcp = ["dep:orion-tcp"]
 # Time sync.
@@ -54,6 +54,8 @@ nt4 = ["dep:orion-nt4-gateway"]
 nt4-client = ["dep:orion-nt4-client-gateway"]
 # Tells systemd when the comm core is ready and that it is alive.
 systemd = []
+# The board announced by name on the local network: an mDNS responder.
+announce = ["dep:orion-mdns"]
 # Finding the other nodes of the cluster.
 discovery = ["tcp", "dep:orion-discovery"]
 # Discovery over mDNS on the local network.
@@ -78,6 +80,7 @@ orion-check = { path = "../../core/check", optional = true }
 orion-config = { path = "../../core/config" }
 orion-device-gateway = { path = "../device-gateway", optional = true }
 orion-discovery = { path = "../discovery", optional = true }
+orion-mdns = { path = "../mdns", optional = true }
 orion-hello = { path = "../hello" }
 orion-keys = { path = "../keys" }
 orion-msg-peers = { path = "../../core/msg-peers" }
@@ -118,7 +121,7 @@ orion-msg-topics = { path = "../../core/msg-topics" }
 orion-scratch = { path = "../../testing/scratch" }
 shm-ring = { workspace = true }
 shm-ring-doorbell = { workspace = true }
-rustix = { version = "1", default-features = false, features = ["std", "process"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "net"] }
 tokio = { workspace = true, features = ["test-util", "net"] }
 
 [[bin]]

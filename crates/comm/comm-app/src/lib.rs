@@ -12,6 +12,8 @@
 
 #![cfg(target_os = "linux")]
 
+#[cfg(feature = "announce")]
+mod announce;
 mod carriers;
 #[cfg(feature = "offers")]
 mod configured;
@@ -101,6 +103,8 @@ pub struct CommCore {
     time: Option<orion_time::TimeSync>,
     #[cfg(feature = "discovery")]
     discovery: Option<orion_discovery::Discovery>,
+    #[cfg(feature = "announce")]
+    announcing: Option<announce::Announcing>,
 }
 
 /// The SSH way in, as it was asked for.
@@ -501,7 +505,8 @@ impl CommCore {
             _ => None,
         };
 
-        let core = Self {
+        #[allow(unused_mut)]
+        let mut core = Self {
             comm,
             keys,
             topics,
@@ -527,7 +532,16 @@ impl CommCore {
             time,
             #[cfg(feature = "discovery")]
             discovery,
+            #[cfg(feature = "announce")]
+            announcing: None,
         };
+        #[cfg(feature = "announce")]
+        {
+            core.announcing = announce::start(&settings, &core);
+            if core.announcing.is_some() {
+                core.parts.push("mdns");
+            }
+        }
         last_good::write(&settings);
         info!(node = %node, security = ?security, "comm core started: {}", core.summary());
         Ok(core)
@@ -579,6 +593,13 @@ impl CommCore {
             #[cfg(feature = "ssh-sandbox")]
             SshServer::Sandboxed(server) => server.local_addr(),
         })
+    }
+
+    /// The name the board is announced by on the local network, once it is its own.
+    #[cfg(feature = "announce")]
+    #[must_use]
+    pub fn mdns_name(&self) -> Option<String> {
+        self.announcing.as_ref().and_then(|a| a.named.get())
     }
 
     /// The NT4 gateway, if it runs.
@@ -665,9 +686,15 @@ fn discovery_backend(
     settings: &CommSettings,
 ) -> Result<Box<dyn orion_discovery::DiscoveryBackend>, StartError> {
     #[cfg(feature = "mdns")]
-    return Ok(Box::new(orion_discovery::MdnsDiscoveryBackend::new(
-        settings.discovery_interfaces.clone(),
-    )));
+    {
+        let backend =
+            orion_discovery::MdnsDiscoveryBackend::new(settings.discovery_interfaces.clone());
+        // With the responder built in, it is the one announcing the node, `mdns = false`
+        // silencing it; discovery only browses.
+        #[cfg(feature = "announce")]
+        let backend = backend.browse_only();
+        Ok(Box::new(backend))
+    }
     #[cfg(not(feature = "mdns"))]
     {
         let _ = settings;

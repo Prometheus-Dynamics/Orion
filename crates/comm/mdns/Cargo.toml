@@ -1,0 +1,30 @@
+[package]
+autotests = false
+name = "orion-mdns"
+description = "The board on the local network by name: an mDNS responder announcing the node's services."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+if-addrs = { version = "0.15.0", default-features = false }
+orion-identity = { path = "../../core/identity" }
+rustix = { version = "1", default-features = false, features = ["std", "net"] }
+tokio = { workspace = true, features = ["net", "time", "sync", "rt", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+# The layout-2 reader of released nodes: what it reads of this TXT record.
+orion-discovery = { path = "../discovery" }
+orion-identity = { path = "../../core/identity" }
+tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
+
+# The integration tests, in one binary (tests/all.rs).
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
+[lints]
+workspace = true
