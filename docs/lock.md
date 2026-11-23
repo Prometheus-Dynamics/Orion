@@ -557,6 +557,10 @@ what to change.
   Disciplining, the kernel is told unsynchronized at start, after 8 unanswered polls, and on
   stopping (**Change**). No wire kinds change; level 6.
 - **I85.** A test only. No interface changes.
+- **I86.** A directory Orion makes in a root or the store has every permission the umask
+  leaves (**Change**: was `0755` less the umask). `ClientError::is_held`, `orion::Error::is_held`
+  (**Add**). `is_busy` is true only for a `Busy` refusal with no words of its own, and both are
+  no longer `const` (**Change**: was true for every `Busy`). No wire changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

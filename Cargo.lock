@@ -2405,6 +2405,7 @@ dependencies = [
  "orion-node-app",
  "orion-scratch",
  "orion-wire",
+ "rustix",
  "tokio",
 ]
 

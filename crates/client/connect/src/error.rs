@@ -256,15 +256,23 @@ impl ClientError {
     /// Whether the board turned the request away only for now: it had no room for it yet, and
     /// the same request asked again later may be taken. Never a final no, and never
     /// [`ClientError::is_lost`]: the session is fine, and is kept.
+    ///
+    /// A refusal for want of room has no words of its own. One with words is
+    /// [`ClientError::is_held`], which waiting does not clear.
     #[must_use]
-    pub const fn is_busy(&self) -> bool {
-        matches!(
-            self,
-            Self::Refused {
-                error: orion_types::Error::Busy,
-                ..
-            }
-        )
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Refused { error: orion_types::Error::Busy, detail }
+            if detail == orion_types::Error::Busy.as_str())
+    }
+
+    /// Whether the board turned the request away because another holds what it asked for: a
+    /// resource under another's lease, a file prefix another offers. Asking again soon gets the
+    /// same answer; the words, which name the holder, are for whoever decides what to do.
+    /// Never [`ClientError::is_busy`].
+    #[must_use]
+    pub fn is_held(&self) -> bool {
+        matches!(self, Self::Refused { error: orion_types::Error::Busy, detail }
+            if detail != orion_types::Error::Busy.as_str())
     }
 }
 
@@ -297,7 +305,18 @@ mod tests {
     #[test]
     fn busy_is_never_lost_and_lost_is_never_busy() {
         let busy = ClientError::refused(Error::Busy, "");
-        assert!(busy.is_busy() && !busy.is_lost());
+        assert!(busy.is_busy() && !busy.is_lost() && !busy.is_held());
+        // Held by another, in the board's words: not for want of room, so not asked again.
+        for words in [
+            "cam.front is held by workload:a since 5 ms: its holder is answering",
+            "logs/ is offered by bridge (local:1000)",
+        ] {
+            let held = ClientError::refused(Error::Busy, words);
+            assert!(
+                held.is_held() && !held.is_busy() && !held.is_lost(),
+                "{held}"
+            );
+        }
         let lost = [
             ClientError::Lost,
             ClientError::Io(std::io::ErrorKind::TimedOut.into()),
@@ -308,7 +327,7 @@ mod tests {
         }
         // A final refusal is neither.
         let denied = ClientError::refused(Error::Denied, "");
-        assert!(!denied.is_busy() && !denied.is_lost());
+        assert!(!denied.is_busy() && !denied.is_lost() && !denied.is_held());
     }
 
     #[test]

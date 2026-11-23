@@ -3,6 +3,8 @@
 
 #[path = "board.rs"]
 mod board;
+#[path = "modes.rs"]
+mod modes;
 #[path = "roots.rs"]
 mod roots;
 #[path = "sinks.rs"]

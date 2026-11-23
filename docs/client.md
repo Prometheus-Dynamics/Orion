@@ -93,6 +93,14 @@ it can come back for, and what this client does with it:
 | `ActionRun`, `ActionAttach` | `orion.run`, `attach`, `attach_handle` | the run's first read (`poll`, `wait`, `finish`) hands it to the program; the run never started |
 | `PeerStatus`, `PeerForgive` | `node().peers`, `orion.forgive` | handed to the program |
 
+**Busy for want of room, and held by another, are told apart.** Both are refused with the code
+`Busy`. A refusal for want of room has no words of its own (its detail is `busy`), and
+`is_busy()` is true for it alone. One with words says another holds what was asked for, and
+`is_held()` is true: a resource under another's lease (`cam.front is held by workload:a since
+... ms: its holder is answering`), a file prefix another offers (`logs/ is offered by bridge
+(...)`), or an enrollment waiting behind others for an administrator. Asking again soon gets the
+same answer, so a program does not: it shows the words, which name the holder.
+
 A program that is handed busy waits a moment and makes the call again, on the same session: an
 error for which `is_busy()` is true never has `is_lost()` true, so a program that reconnects on
 `is_lost()` keeps its session through busy. A run that got busy was never started, and must be

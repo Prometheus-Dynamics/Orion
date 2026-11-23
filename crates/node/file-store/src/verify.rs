@@ -141,7 +141,8 @@ pub(crate) fn place(part: &Path, root: &Path, relative: &Path) -> Result<(), Str
                 directory = match beneath(&store, &at, false) {
                     Ok(next) => next,
                     Err(Errno::NOENT) => {
-                        match mkdirat(&directory, step.as_os_str(), Mode::from_raw_mode(0o755)) {
+                        // As the file is made: what the process's umask leaves.
+                        match mkdirat(&directory, step.as_os_str(), Mode::from_raw_mode(0o777)) {
                             Ok(()) | Err(Errno::EXIST) => {}
                             Err(error) => return Err(named(error)),
                         }

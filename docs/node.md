@@ -425,6 +425,12 @@ reached the same way with security on or off: the switch decides who, the roots 
   the root". A link that stays inside is followed. The root's directory itself is the image's
   to make, with the ownership it wants: readable by node logic's account, and writable for
   `rw`.
+- **Whose what Orion makes is.** A directory Orion makes (`files.mkdir`, or on the way to a
+  pushed file) is made as a file is: with every permission the process's umask leaves. So one
+  rule, the unit's umask, decides both. In a root an application shares with Orion by group
+  (the root setgid and `2770`, the unit's `UMask=0007`), a pushed file is `0660` and a
+  directory `2770`, the group's: the application can make files in a directory Orion made, and
+  Orion in one the application made the same way.
 - **Fetch.** Node logic offers `roots/` as a program offers a prefix (`FileOffer`), and gives
   each file as a program does. A helper thread reads the file once for its digest; then up to
   8 chunks of up to 32 KiB are on their way, paced by the client's `FileTaken`. A slow client,

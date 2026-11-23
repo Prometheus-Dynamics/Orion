@@ -463,7 +463,7 @@ struct Busy {
 
 /// Whether the board turned a request away only for now: its comm core, or the program that
 /// receives the file, had no room for it yet.
-const fn busy(error: &ClientError) -> bool {
+fn busy(error: &ClientError) -> bool {
     error.is_busy()
 }
 

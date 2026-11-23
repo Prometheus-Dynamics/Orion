@@ -129,8 +129,10 @@ impl Roots {
                             done => done,
                         }
                     }),
+                    // As a file is made: what the process's umask leaves, so a root shared by
+                    // a group is shared in what is made there too.
                     MKDIR => self.change(&words, |dir, name| {
-                        mkdirat(dir, path::raw(name), Mode::from_raw_mode(0o755))
+                        mkdirat(dir, path::raw(name), Mode::from_raw_mode(0o777))
                     }),
                     RENAME => self.rename(&words),
                     _ => rejected("not an action on the roots"),

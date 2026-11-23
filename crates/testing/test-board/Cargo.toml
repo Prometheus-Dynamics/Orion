@@ -26,6 +26,7 @@ workspace = true
 orion-node-app = { path = "../../node/node-app", features = ["slow"] }
 orion-msg-records = { path = "../../core/msg-records" }
 orion-wire = { path = "../../core/wire" }
+rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
 
 # The integration tests, in one binary (tests/all.rs).
 [[test]]

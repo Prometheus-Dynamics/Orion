@@ -155,17 +155,30 @@ impl Error {
         }
     }
 
+    /// The client's error under this one, if there is one.
+    const fn client(&self) -> Option<&ClientError> {
+        match self {
+            Self::Client(error) => Some(error),
+            #[cfg(feature = "topics")]
+            Self::Topic(orion_topics::TopicError::Client(error)) => Some(error),
+            #[cfg(feature = "topics")]
+            Self::Topic(_) => None,
+        }
+    }
+
     /// Whether the board turned the call away only for now, having no room for it yet: the
     /// same call made again later may be taken. Never a final no.
     #[must_use]
-    pub const fn is_busy(&self) -> bool {
-        match self {
-            Self::Client(error) => error.is_busy(),
-            #[cfg(feature = "topics")]
-            Self::Topic(orion_topics::TopicError::Client(error)) => error.is_busy(),
-            #[cfg(feature = "topics")]
-            Self::Topic(_) => false,
-        }
+    pub fn is_busy(&self) -> bool {
+        self.client().is_some_and(ClientError::is_busy)
+    }
+
+    /// Whether the board turned the call away because another holds what it asked for (a
+    /// leased resource, an offered file prefix): asking again soon gets the same answer, and
+    /// the words name the holder.
+    #[must_use]
+    pub fn is_held(&self) -> bool {
+        self.client().is_some_and(ClientError::is_held)
     }
 }
 

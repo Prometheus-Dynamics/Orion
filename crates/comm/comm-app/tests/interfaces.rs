@@ -1,7 +1,8 @@
 //! The network and SSH ways in kept to several interfaces (`peer.interface`, `ssh.interface`):
 //! one listener on each, nothing on an interface not named, an interface that is not there
-//! holding up nothing and said once by its name, and one that is taken away and made again
-//! under the same name listened on again, with no restart.
+//! holding up nothing and said once by its name, one that is there with no address yet
+//! listened on from the start, and one that is taken away and made again under the same name
+//! listened on again, with no restart.
 //!
 //! Interfaces are made and taken away, so the test runs itself again in a network namespace
 //! of its own, as that namespace's root, and makes dummy interfaces there. Where that cannot
@@ -89,8 +90,9 @@ async fn banner(addr: SocketAddr) -> String {
 fn settings(dir: &Path) -> CommSettings {
     let text = format!(
         "node.name = board\nsocket = {0}/orion.sock\nstate.dir = {0}/state\n\
-         peer.listen = 0.0.0.0:{PEER}\npeer.interface = orion0, orion1, onever\n\
-         ssh.listen = 0.0.0.0:{SSH}\nssh.interface = orion0, orion1, onever\nssh.sandbox = false\n",
+         peer.listen = 0.0.0.0:{PEER}\npeer.interface = orion0, orion1, onever, obare\n\
+         ssh.listen = 0.0.0.0:{SSH}\nssh.interface = orion0, orion1, onever, obare\n\
+         ssh.sandbox = false\n",
         dir.display()
     );
     let mut source = Source::parse(&text, Vec::new()).expect("source");
@@ -120,6 +122,9 @@ fn inside() {
     make("orion1", 1);
     // Up, and not named: nothing listens on it.
     make("orion2", 2);
+    // Named, there and up, with no address yet: a link whose address comes later.
+    ip("link add obare type dummy");
+    ip("link set obare up");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -147,6 +152,17 @@ fn inside() {
         tokio::time::sleep(Duration::from_millis(2500)).await;
         let said = naming(&log, "onever");
         assert_eq!(said.len(), 2, "once for each way in: {said:#?}");
+
+        // The one with no address was listened on from the start, with nothing tried again
+        // (a try that failed would be said, by its name): its address comes, and the listener already there takes the connection.
+        let said = naming(&log, "obare");
+        assert!(
+            said.iter().all(|line| line.contains("obare: open on ")),
+            "opened at once, and nothing else said: {said:#?}"
+        );
+        ip("addr add 10.77.4.1/24 dev obare");
+        taken_within(at(4, PEER), Duration::from_millis(500)).await;
+        taken_within(at(4, SSH), Duration::from_millis(500)).await;
 
         // Taken away and made again under the same name: a new interface to the kernel.
         ip("link del orion0");
