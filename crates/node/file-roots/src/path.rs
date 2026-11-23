@@ -4,8 +4,10 @@
 //! root's directory: a `..`, an absolute link or a magic link that leads out of the root is
 //! refused by the kernel. The names are checked as well, so that what is refused says why.
 
+use std::ffi::OsString;
 use std::os::fd::OwnedFd;
-use std::path::Path;
+use std::os::unix::ffi::OsStringExt as _;
+use std::path::PathBuf;
 
 use rustix::fs::{Mode, OFlags, ResolveFlags, openat2};
 use rustix::io::Errno;
@@ -94,12 +96,17 @@ pub(crate) fn open_root(root: &Root) -> Result<OwnedFd, Errno> {
     )
 }
 
-/// Opens `path` under `root` with `flags`, beneath it.
+/// The bytes a name, or part of one, as it is carried stands for: what the kernel is given.
+pub(crate) fn raw(name: &str) -> PathBuf {
+    PathBuf::from(OsString::from_vec(orion_types::unescape(name).collect()))
+}
+
+/// Opens `path` (as it is carried) under `root` with `flags`, beneath it.
 pub(crate) fn beneath(root: &OwnedFd, path: &str, flags: OFlags) -> Result<OwnedFd, Errno> {
     let path = if path.is_empty() { "." } else { path };
     openat2(
         root,
-        Path::new(path),
+        raw(path),
         flags | OFlags::CLOEXEC,
         Mode::empty(),
         ResolveFlags::BENEATH | ResolveFlags::NO_MAGICLINKS,

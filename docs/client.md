@@ -630,6 +630,17 @@ logic's. The names, grants, words and what the actions give are in `docs/node.md
 roots". A file manager on a PC builds its tree from `files.list`, and a backup fetches each file
 of a root's index.
 
+**Names are carried escaped.** A file on a board may have any name. A client sends and is given
+it in one form, `orion::types::Escaped` of its bytes: letters, digits, `. _ - : /` and text
+outside ASCII as they are, `%XX` for anything else (`My Report.txt` is `My%20Report.txt`, `100%`
+is `100%25`). A listing line's fourth field is that form, the one to ask for, and when it is not
+how the name shows, the rest of the line is what it shows as. `orion::types::unescape` gives the
+bytes back. A name is at most 255 bytes in this form, its directories and `roots/<root>/`
+with it. A path longer than that cannot be reached through Orion: its listing line begins
+`long`, by name, so a file manager can show it greyed and say why. It can be reached, or renamed
+shorter, over SSH or SFTP. A board before this change refuses an escaped or longer name as
+`InvalidName`.
+
 ## The executor role
 
 `orion-executor`. An executor is any program that connects and says "I run this kind of

@@ -96,7 +96,8 @@ struct Run {
     call: u64,
     transfer: u64,
     file: File,
-    to: FileName,
+    /// Where to, as it is carried, at its own length: made once when the run starts.
+    to: Box<str>,
     size: u64,
     digest: [u8; 32],
     chunk: usize,
@@ -231,7 +232,7 @@ impl Sends {
             call,
             transfer,
             file,
-            to: args.to,
+            to: args.to.as_str().into(),
             size,
             digest,
             chunk,
@@ -367,9 +368,13 @@ impl Sends {
 /// Begins the transfer, or begins it again: the receiver answers with where to go on from.
 fn begin(run: &mut Run, via: &mut Via<'_, '_>) -> Result<(), ClientError> {
     run.committing = false;
+    // Made from a `FileName` when the run started, so it is one: held inline here, no
+    // allocation.
+    let destination = FileName::new(&run.to)
+        .map_err(|_| ClientError::Protocol("a run's destination is not a file name"))?;
     run.seq = via.send(&FileBegin {
         transfer: run.transfer,
-        destination: run.to.clone(),
+        destination,
         size: run.size,
         digest: run.digest,
     })?;

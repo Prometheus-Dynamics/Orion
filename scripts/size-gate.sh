@@ -66,6 +66,15 @@ CAPI_HOST=740000
 # message instead (-1,696). Look at structured fields first: that one field cost 1,696 bytes
 # here. The known next cut: one listener type in orion-tcp that accepts and listens again by
 # itself, for both ways in (about 1.4 KB). The limit is not raised without a table like this.
+# orion-recovery as measured at I79 (any file's name carried, escaped, FileName at 255 bytes;
+# docs/prs/I79.md): 2,761,360, +1,592 over I78, its limit raised from 2,760,000 to 2,770,000 once,
+# with room for a fix or a dependency patch and not for a feature. By crate (.text): orion_types
+# +1,023 (FileName::new's check of the one form: +824), orion_ssh +614 and orion_broker -512
+# (code moved between them), orion_file_offers +307 (a FileName of 256 bytes copied), ring -307.
+# Recovery decodes file names from the wire, so the check is in it; no second, smaller check of
+# the same rule was written. This limit is a ratchet, set at measurements, not a physical bound:
+# it is replaced by the space recovery has in the flasher's initramfs, less a margin, once that
+# is known. Until then each raise needs a table like this one.
 # Orion as measured at I76 (the files service, roots/<name>/: +54,976 over I75's 5,353,368,
 # after a cut of 10,112; docs/prs/I76.md), its limit raised from 5,360,000. By crate: node logic
 # +15.8 KB (the roots' actions, fetches and pushes, inlined where node logic handles frames),
@@ -90,7 +99,7 @@ CAPI_HOST=740000
 #   riscv64gc-unknown-linux-musl    3,017,416        5,668,376   (never run on a board)
 # The last column: gated on `every` change, or before a `release` only.
 BOARDS=(
-    "aarch64-unknown-linux-musl     2760000          5510000   every"
+    "aarch64-unknown-linux-musl     2770000          5510000   every"
     "armv7-unknown-linux-musleabihf 2810000          5350000   release"
     "riscv64gc-unknown-linux-musl   3040000          5690000   release"
 )

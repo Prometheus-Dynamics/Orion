@@ -463,10 +463,10 @@ fn what_should_run_is_known_again_after_a_restart() {
 struct Shelf(Vec<(&'static str, [u8; 32])>);
 
 impl Board for Shelf {
-    fn has(&self, name: &orion_types::FileName, digest: &[u8; 32]) -> bool {
+    fn has(&self, name: &str, digest: &[u8; 32]) -> bool {
         self.0
             .iter()
-            .any(|(has, sum)| *has == name.as_str() && sum == digest)
+            .any(|(has, sum)| *has == name && sum == digest)
     }
 }
 

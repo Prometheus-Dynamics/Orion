@@ -13,9 +13,13 @@ const fn name_byte_ok(byte: u8, slash: bool) -> bool {
 
 macro_rules! name {
     ($(#[$doc:meta])* $name:ident, $max:literal, slash = $slash:literal) => {
+        name!($(#[$doc])* $name, $max, slash = $slash, file = false);
+    };
+    ($(#[$doc:meta])* $name:ident, $max:literal, slash = $slash:literal, file = $file:literal) => {
         $(#[$doc])*
         ///
-        /// Held inline, so it needs no allocator. Letters, digits and `. _ - :` are allowed.
+        /// Held inline, so it needs no allocator. Letters, digits and `. _ - :` are allowed, unless
+        /// said otherwise above.
         #[derive(Clone)]
         pub struct $name {
             len: u8,
@@ -39,7 +43,12 @@ macro_rules! name {
                 if source.len() > $max {
                     return Err(Error::NameTooLong);
                 }
-                if !source.iter().all(|&byte| name_byte_ok(byte, $slash)) {
+                let carried = if $file {
+                    crate::escape::canonical::<$max>(value)
+                } else {
+                    source.iter().all(|&byte| name_byte_ok(byte, $slash))
+                };
+                if !carried {
                     return Err(Error::InvalidName);
                 }
                 if $slash && value.split('/').any(|part| part == ".." || part.is_empty()) {
@@ -60,7 +69,7 @@ macro_rules! name {
             /// The name as text.
             #[must_use]
             pub fn as_str(&self) -> &str {
-                // Only ASCII is ever stored, so this always succeeds.
+                // Only text is ever stored, so this always succeeds.
                 core::str::from_utf8(self.as_bytes()).unwrap_or_default()
             }
         }
@@ -168,8 +177,11 @@ name!(
     DeviceName, 63, slash = false
 );
 name!(
-    /// A destination for a file, which the receiver resolves. May be a `/` path, never with `..`.
-    FileName, 127, slash = true
+    /// A file's name, or a destination for one, which the receiver resolves. May be a `/`
+    /// path, never with `..`. A name's bytes are carried escaped ([`crate::Escaped`]): text
+    /// outside ASCII as it is, `%XX` for what else is not letters, digits or `. _ - : /`. Only
+    /// that one form is a `FileName`, and the limit is on it.
+    FileName, 255, slash = true, file = true
 );
 
 /// A topic, optionally on another node: `<topic>` or `<node>/<topic>`.

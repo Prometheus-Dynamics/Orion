@@ -506,3 +506,148 @@ fn a_fetch_goes_on_from_what_the_client_has() {
     assert_eq!(transfer.state, FileState::Committed, "{}", transfer.detail);
     assert_eq!(into.into_inner(), data);
 }
+
+#[test]
+fn any_name_on_the_board_is_listed_fetched_pushed_and_changed_by_its_escaped_form() {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let rooted = rooted("names", Options::default());
+    let orion = rooted.board.connect("tool").expect("connect");
+    let node = "names";
+    let app = &rooted.app;
+    std::fs::write(app.join("My Report.txt"), b"spaced").expect("file");
+    std::fs::write(app.join("Отчёт.txt"), b"cyrillic").expect("file");
+    std::fs::write(app.join("100%"), b"percent").expect("file");
+    std::fs::write(app.join(std::ffi::OsStr::from_bytes(b"bad\xff")), b"bytes").expect("file");
+    // 200 bytes of name, 600 escaped: on the board, out of any request's reach.
+    std::fs::write(app.join("\t".repeat(200)), b"far").expect("file");
+
+    // Listed by the form each is carried in, and what it shows as after, when that differs.
+    let (outcome, listed, detail) = run(&orion, node, "files.list", "roots/app");
+    assert_eq!(outcome, Outcome::Succeeded, "{detail}");
+    let lines: Vec<&str> = listed.lines().collect();
+    let line = |name: &str| {
+        lines
+            .iter()
+            .find(|line| {
+                line.split(' ').nth(3) == Some(name) || line.split(' ').nth(4) == Some(name)
+            })
+            .unwrap_or_else(|| panic!("{name} not in {listed}"))
+            .to_owned()
+    };
+    assert!(
+        line("My%20Report.txt").ends_with(" My%20Report.txt My Report.txt"),
+        "{listed}"
+    );
+    // Carried as it shows: nothing after.
+    let cyrillic = line("Отчёт.txt");
+    assert!(
+        cyrillic.starts_with("file 8 ") && cyrillic.split(' ').count() == 4,
+        "{listed}"
+    );
+    assert!(line("100%25").ends_with(" 100%25 100%"), "{listed}");
+    assert!(line("bad%FF").ends_with(" bad%FF bad\u{fffd}"), "{listed}");
+    let far = "%09".repeat(200);
+    let far_line = line(&far);
+    assert!(far_line.starts_with("long file 3 "), "{far_line}");
+    assert!(
+        far_line.contains(&format!(" {far} ")) && far_line.ends_with(&"\u{fffd}".repeat(200)),
+        "{far_line}"
+    );
+    assert!(!listed.contains("unnamed"), "{listed}");
+    // A page goes on after an escaped name.
+    let (_, after, _) = run(&orion, node, "files.list", "roots/app 100%25");
+    assert!(!after.contains(" 100%25"), "{after}");
+    assert!(after.contains(" bad%FF"), "{after}");
+
+    // Fetched by the escaped form; a spelling that is not its one form is refused.
+    for (name, bytes) in [
+        ("roots/app/My%20Report.txt", &b"spaced"[..]),
+        ("roots/app/Отчёт.txt", b"cyrillic"),
+        ("roots/app/100%25", b"percent"),
+        ("roots/app/bad%FF", b"bytes"),
+    ] {
+        let (given, got) = fetch(&orion, name);
+        assert_eq!(
+            given.state,
+            FileState::Committed,
+            "{name}: {}",
+            given.detail
+        );
+        assert_eq!(got, bytes, "{name}");
+    }
+    assert!(!not_given(&orion, "roots/app/My Report.txt").is_empty());
+    assert!(!not_given(&orion, "roots/app/%D0%9E%D1%82%D1%87%D1%91%D1%82.txt").is_empty());
+
+    // Pushed to an escaped name, and made in a directory with one: the bytes it stands for.
+    assert_eq!(
+        run(&orion, node, "files.mkdir", "roots/app/New%20Folder").0,
+        Outcome::Succeeded
+    );
+    let put = push(&orion, "roots/app/New%20Folder/写真%231.jpg", b"photo");
+    assert_eq!(put.state, FileState::Committed, "{}", put.detail);
+    assert_eq!(
+        std::fs::read(app.join("New Folder/写真#1.jpg")).expect("there"),
+        b"photo"
+    );
+    assert_eq!(
+        run(
+            &orion,
+            node,
+            "files.rename",
+            "roots/app/bad%FF roots/app/fine%0A"
+        )
+        .0,
+        Outcome::Succeeded
+    );
+    assert_eq!(
+        std::fs::read(app.join("fine\n")).expect("renamed"),
+        b"bytes"
+    );
+    assert_eq!(
+        run(&orion, node, "files.remove", "roots/app/100%25").0,
+        Outcome::Succeeded
+    );
+    assert!(!app.join("100%").exists());
+
+    // The longest name a request carries is 255 bytes, `roots/app/` with it.
+    let longest = format!("roots/app/{}", "é".repeat(122));
+    assert_eq!(longest.len(), 254);
+    let put = push(&orion, &longest, b"long");
+    assert_eq!(put.state, FileState::Committed, "{}", put.detail);
+    assert_eq!(fetch(&orion, &longest).1, b"long");
+}
+
+#[test]
+fn a_page_of_long_names_is_cut_by_its_bytes_and_goes_on_after() {
+    let rooted = rooted("pages", Options::default());
+    let orion = rooted.board.connect("tool").expect("connect");
+    // 40 names of 200 tabs and a digit: 600 bytes carried, and as much again shown, each.
+    for i in 0..40 {
+        std::fs::write(rooted.app.join(format!("{i:02}{}", "\t".repeat(200))), b"x").expect("file");
+    }
+    let (mut seen, mut after) = (Vec::new(), String::new());
+    loop {
+        let args = format!("roots/app {after}");
+        let (outcome, listed, detail) = run(&orion, "pages", "files.list", args.trim_end());
+        assert_eq!(outcome, Outcome::Succeeded, "{detail}");
+        let lines: Vec<&str> = listed
+            .lines()
+            .filter(|line| line.starts_with("long "))
+            .collect();
+        let bytes: usize = lines.iter().map(|line| line.len() + 1).sum();
+        assert!(bytes <= 16 * 1024, "a page of {bytes} bytes");
+        assert!(!lines.is_empty(), "{listed}");
+        for line in &lines {
+            seen.push(line.split(' ').nth(4).expect("a name").to_owned());
+        }
+        after.clone_from(seen.last().expect("one"));
+        if !listed.ends_with("more\n") {
+            break;
+        }
+    }
+    let want: Vec<String> = (0..40)
+        .map(|i| format!("{i:02}{}", "%09".repeat(200)))
+        .collect();
+    assert_eq!(seen, want);
+}

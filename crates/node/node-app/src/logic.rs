@@ -100,8 +100,9 @@ pub(crate) fn publish(topic: &mut Publisher, events: &[Event], running: usize) {
 struct OnBoard<'a>(&'a Files);
 
 impl orion_executors::Board for OnBoard<'_> {
-    fn has(&self, name: &orion_types::FileName, digest: &[u8; 32]) -> bool {
-        self.0.has(name, digest)
+    fn has(&self, name: &str, digest: &[u8; 32]) -> bool {
+        // Held inline: no allocation for the look.
+        orion_types::FileName::new(name).is_ok_and(|name| self.0.has(&name, digest))
     }
 }
 

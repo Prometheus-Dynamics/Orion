@@ -534,6 +534,15 @@ what to change.
   prefix (**Change**: before, the first was handed the files of all of them). `Client::add` says
   once on standard error when a part is added for kinds another already has. No API change, no
   wire changes; level 6.
+- **I79.** `FileName` (**Change**): any file's name is carried, escaped
+  (`orion_types::Escaped`, `orion_types::unescape`, **Add**): text outside ASCII as it is, `%XX`
+  for an ASCII byte outside `A-Z a-z 0-9 . _ - : /`, `%`, a control or a byte that is not
+  UTF-8; only that one form is a `FileName`; at most 255 bytes, was 127. `files.list` lines give
+  the escaped name, then what it shows as when that differs; `long` begins a line out of reach;
+  `unnamed` is no longer given; a page is at most 16 KB (**Change**).
+  `orion_executors::Board::has` takes the name as text, and `Workload::files` holds it as
+  `Box<str>` (**Change**). No wire kinds change; level 6. An older board refuses an escaped or
+  longer name as `InvalidName`.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

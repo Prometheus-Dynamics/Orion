@@ -454,7 +454,7 @@ reached the same way with security on or off: the switch decides who, the roots 
   | Action | Arguments | Does |
   |---|---|---|
   | `files.list` | none | the roots: `root rw <name>` a line |
-  | `files.list` | `roots/<root>/<dir> [<after>]` | up to 128 entries of `<dir>`, by name, after `<after>` if given: `<kind> <size> <mtime> <name>` a line, `kind` one of `file`, `dir`, `link`, `other`, the size of a file only, `mtime` in seconds since 1970. Then `more` if there are more, and `unnamed <n>` for entries whose names Orion does not carry |
+  | `files.list` | `roots/<root>/<dir> [<after>]` | up to 128 entries of `<dir>` in at most 16 KB, by name, after `<after>` if given: `<kind> <size> <mtime> <name>` a line, `kind` one of `file`, `dir`, `link`, `other`, the size of a file only, `mtime` in seconds since 1970, `name` as it is carried (escaped) and, when that is not how it shows, the rest of the line what it shows as. A line begins `long` for an entry whose name, with its directory's, is over 255 bytes carried. Then `more` if there are more |
   | `files.remove` | `roots/<root>/<path>` | removes a file, a link (not what it leads to) or an empty directory |
   | `files.mkdir` | `roots/<root>/<path>` | makes one directory, in one that is there |
   | `files.rename` | `roots/<root>/<from> roots/<root>/<to> [replace]` | renames within one root; what is at `<to>` is replaced only with `replace` |
@@ -465,10 +465,15 @@ reached the same way with security on or off: the switch decides who, the roots 
   (`What::Write("files")`); each action needs its own grant (`files.list`, or `files.*` for
   all four). The actions admit programs on the board and operators. With security off,
   everyone may do everything. A run on a root is audited with its arguments.
-- **Names.** A name is one Orion carries: at most 127 bytes in all (`roots/<root>/` counts),
-  of `A-Z a-z 0-9 . _ - :` and `/`, with no empty part, `.` or `..`. A file whose name has a
-  space or anything outside these can be listed (as `unnamed`) but not fetched, pushed or
-  changed. The root's own `.orion` is never listed, and no name may be under it.
+- **Names.** Any file's name is carried, escaped: letters, digits, `. _ - : /` and text
+  outside ASCII as they are, and `%XX` (its byte, in uppercase hex) for anything else: a
+  space, a quote, `%` itself, a control, a byte that is not UTF-8. `My Report.txt` is
+  `My%20Report.txt`, `Отчёт.txt` is itself, `100%` is `100%25`. Only that one form names a
+  file: a name escaped where it need not be, or in lowercase hex, is `not a name Orion
+  carries`. The limit is 255 bytes of the escaped name in all (`roots/<root>/` counts), with
+  no empty part, `.` or `..`. An entry over it is listed as `long` and cannot be fetched,
+  pushed or changed through Orion: over SSH or SFTP it can be reached, or renamed shorter. The
+  root's own `.orion` is never listed, and no name may be under it.
 
 **The words**, as a client is told them: `no such root: <name>`, `the root is read-only`,
 `not found`, `outside the root`, `not a file`, `not a directory`, `there already`, `the

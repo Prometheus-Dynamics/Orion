@@ -1,7 +1,7 @@
 //! What should run, as it is kept.
 
 use orion_msg_workloads::{RestartPolicy, WorkloadPut};
-use orion_types::{Error, FileName, NodeName, WorkloadKind, WorkloadName};
+use orion_types::{Error, NodeName, WorkloadKind, WorkloadName};
 
 /// A workload: what the wire's `WorkloadPut` says, owned.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12,8 +12,9 @@ pub struct Workload {
     pub kind: WorkloadKind,
     /// What to run, which only the executor reads.
     pub spec: Vec<u8>,
-    /// The files it needs before it starts: where, and the digest.
-    pub files: Vec<(FileName, [u8; 32])>,
+    /// The files it needs before it starts: where, as it is carried and at its own length,
+    /// and the digest.
+    pub files: Vec<(Box<str>, [u8; 32])>,
     /// A specific node to run on, if it must be that one.
     pub node: Option<NodeName>,
     /// Labels a node must have.
@@ -49,7 +50,7 @@ impl Workload {
         let mut files = Vec::new();
         for file in put.files.iter() {
             let file = file?;
-            files.push((file.name, file.digest));
+            files.push((file.name.as_str().into(), file.digest));
         }
         let mut labels = Vec::new();
         for label in put.labels.iter() {

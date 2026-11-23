@@ -67,7 +67,9 @@ impl FilesConfig {
 /// What is kept beside a part file, to find the transfer again after a restart.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Meta {
-    destination: FileName,
+    /// Its destination as it is carried, at its own length: a `FileName` would hold 255 bytes
+    /// for every transfer, whatever its name.
+    destination: Box<str>,
     size: u64,
     digest: [u8; 32],
 }
@@ -87,7 +89,7 @@ impl Meta {
         let mut lines = text.lines();
         let size = lines.next()?.parse().ok()?;
         let hex = lines.next()?;
-        let destination = lines.next()?.parse().ok()?;
+        let destination = lines.next()?.parse::<FileName>().ok()?.as_str().into();
         if hex.len() != 64 {
             return None;
         }
@@ -138,8 +140,8 @@ pub struct Files {
 const PLACED: &str = ".placed";
 
 /// Whether a destination is one of the store's own names, which no file may take.
-fn own(config: &FilesConfig, destination: &FileName) -> bool {
-    let first = destination.as_str().split('/').next();
+fn own(config: &FilesConfig, destination: &str) -> bool {
+    let first = destination.split('/').next();
     match config.own {
         Some(own) => first == Some(own),
         None => matches!(first, Some(".incoming" | PLACED)),
@@ -223,7 +225,15 @@ impl Files {
     /// Where the file for `destination` is, or will be.
     #[must_use]
     pub fn path(&self, destination: &FileName) -> PathBuf {
-        self.config.root.join(destination.as_str())
+        self.place(destination.as_str())
+    }
+
+    /// Where the file for `destination`, as it is carried, is: the bytes it stands for.
+    fn place(&self, destination: &str) -> PathBuf {
+        let raw: Vec<u8> = orion_types::unescape(destination).collect();
+        self.config
+            .root
+            .join(<std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(raw))
     }
 
     /// Whether the file at `destination` is one this store put there with that digest, and is
@@ -256,9 +266,8 @@ impl Files {
         self.commits
     }
 
-    fn note_placed(&mut self, destination: &FileName, digest: [u8; 32], size: u64) {
-        self.placed
-            .insert(destination.as_str().to_owned(), (digest, size));
+    fn note_placed(&mut self, destination: &str, digest: [u8; 32], size: u64) {
+        self.placed.insert(destination.to_owned(), (digest, size));
         self.commits += 1;
         let mut text = String::new();
         for (name, (digest, size)) in &self.placed {
@@ -342,7 +351,7 @@ impl Files {
     ) -> Result<(), Error> {
         let transfer = begin.transfer;
         let meta = Meta {
-            destination: begin.destination,
+            destination: begin.destination.as_str().into(),
             size: begin.size,
             digest: begin.digest,
         };
@@ -450,7 +459,7 @@ impl Files {
             self.part_path(transfer),
             self.transfers
                 .get(&transfer)
-                .map(|receiving| self.path(&receiving.meta.destination)),
+                .map(|receiving| self.place(&receiving.meta.destination)),
         );
         let Some(receiving) = self.transfers.get_mut(&transfer) else {
             return out.send(
@@ -509,7 +518,7 @@ impl Files {
         digest: [u8; 32],
     ) -> Result<(PathBuf, u64), String> {
         let meta = Meta {
-            destination,
+            destination: destination.as_str().into(),
             size,
             digest,
         };
@@ -579,7 +588,7 @@ impl Files {
         let Some(destination) = self
             .transfers
             .get(&transfer)
-            .map(|receiving| self.path(&receiving.meta.destination))
+            .map(|receiving| self.place(&receiving.meta.destination))
         else {
             return false;
         };

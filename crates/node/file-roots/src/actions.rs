@@ -6,7 +6,7 @@
 //! | Action | Arguments | Does |
 //! |---|---|---|
 //! | `files.list` | none | the roots: `root rw app` a line |
-//! | `files.list` | `roots/<root>/<dir> [<after>]` | up to [`PAGE`] entries of `<dir>` by name, after `<after>` if given: `<kind> <size> <mtime> <name>` a line, `kind` one of `file`, `dir`, `link`, `other`, `mtime` in seconds since 1970; then `more` if there are more, and `unnamed <n>` for entries whose names Orion does not carry |
+//! | `files.list` | `roots/<root>/<dir> [<after>]` | up to [`PAGE`] entries of `<dir>` by name, in at most [`PAGE_BYTES`], after `<after>` if given: `<kind> <size> <mtime> <name>` a line, `kind` one of `file`, `dir`, `link`, `other`, `mtime` in seconds since 1970, `name` as it is carried (escaped: [`orion_types::Escaped`]) and, when that is not how it shows, the rest of the line what it shows as; a line begins `long` for an entry whose name, with its directory's, is too long to be asked for; then `more` if there are more |
 //! | `files.remove` | `roots/<root>/<path>` | removes a file, a link or an empty directory |
 //! | `files.mkdir` | `roots/<root>/<path>` | makes one directory, in one that is there |
 //! | `files.rename` | `roots/<root>/<from> roots/<root>/<to> [replace]` | renames within a root; what is at `<to>` is replaced only if `replace` is said |
@@ -21,7 +21,7 @@ use std::fmt::Write as _;
 use orion_check::{Admits, Policy};
 use orion_connect::ClientError;
 use orion_msg_actions::{ActionResult, Claim, Outcome, Register, Target};
-use orion_types::NodeName;
+use orion_types::{Escaped, FileName, NodeName};
 use orion_wire::Bytes;
 use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, mkdirat, renameat_with, unlinkat};
 use rustix::io::Errno;
@@ -41,6 +41,10 @@ pub const RENAME: &str = "files.rename";
 
 /// The most entries `files.list` gives at once.
 pub const PAGE: usize = 128;
+
+/// The most bytes of lines `files.list` gives at once: a page of long names is shorter, so it
+/// fits a client's frame and is all node logic holds for it.
+pub const PAGE_BYTES: usize = 16 * 1024;
 
 /// Whether `name` is one of these actions.
 #[must_use]
@@ -105,13 +109,6 @@ impl Ord for Listed {
     }
 }
 
-/// Whether `name`, one part of a path, is one Orion carries.
-fn carried(name: &str) -> bool {
-    name.len() < orion_types::FileName::MAX
-        && orion_types::FileName::new(name).is_ok()
-        && !name.contains('/')
-}
-
 impl Roots {
     /// Runs one of the actions on the roots that the action list handed over.
     ///
@@ -126,13 +123,14 @@ impl Roots {
                 match claim.name.as_str() {
                     LIST => self.list(&words),
                     REMOVE => self.change(&words, |dir, name| {
-                        match unlinkat(dir, name, AtFlags::empty()) {
-                            Err(Errno::ISDIR) => unlinkat(dir, name, AtFlags::REMOVEDIR),
+                        let name = path::raw(name);
+                        match unlinkat(dir, &name, AtFlags::empty()) {
+                            Err(Errno::ISDIR) => unlinkat(dir, &name, AtFlags::REMOVEDIR),
                             done => done,
                         }
                     }),
                     MKDIR => self.change(&words, |dir, name| {
-                        mkdirat(dir, name, Mode::from_raw_mode(0o755))
+                        mkdirat(dir, path::raw(name), Mode::from_raw_mode(0o755))
                     }),
                     RENAME => self.rename(&words),
                     _ => rejected("not an action on the roots"),
@@ -173,18 +171,18 @@ impl Roots {
             path::beneath(&root, at.path, OFlags::RDONLY | OFlags::DIRECTORY).map_err(failed)?;
         // The first entries by name after `after`, and no more than a page of them held.
         let mut page: BinaryHeap<Listed> = BinaryHeap::new();
-        let (mut more, mut unnamed) = (false, 0_usize);
-        walk::read(&dir, |_, name, kind, stat| {
-            let Some(name) = name.filter(|name| carried(name)) else {
-                unnamed += 1;
-                return;
-            };
-            if (at.path.is_empty() && name == OWN) || after.is_some_and(|after| name <= after) {
+        let (mut more, mut bytes) = (false, 0_usize);
+        let dir_name = name.trim_end_matches('/');
+        walk::read(&dir, |_, raw, kind, stat| {
+            let name = Escaped(raw).to_string();
+            if (at.path.is_empty() && name == OWN) || after.is_some_and(|after| *name <= *after) {
                 return;
             }
             if page.len() == PAGE {
-                if page.peek().is_some_and(|last| name < last.name.as_str()) {
-                    page.pop();
+                if page.peek().is_some_and(|last| name < last.name) {
+                    if let Some(last) = page.pop() {
+                        bytes -= last.line.len();
+                    }
                 } else {
                     more = true;
                     return;
@@ -192,10 +190,35 @@ impl Roots {
                 more = true;
             }
             let size = if kind == Kind::File { stat.st_size } else { 0 };
-            page.push(Listed {
-                name: name.to_owned(),
-                line: format!("{} {size} {} {name}\n", kind.word(), stat.st_mtime),
-            });
+            // Too long a name, with its directory's, for any request to carry: listed, and
+            // said to be out of reach.
+            let reached = FileName::new(&format!("{dir_name}/{name}")).is_ok();
+            let mut line = String::new();
+            if !reached {
+                line.push_str("long ");
+            }
+            let _ = write!(line, "{} {size} {} {name}", kind.word(), stat.st_mtime);
+            if name.as_bytes() != raw {
+                // What it shows as, when that is not how it is carried.
+                line.push(' ');
+                line.extend(String::from_utf8_lossy(raw).chars().map(|c| {
+                    if c.is_control() {
+                        char::REPLACEMENT_CHARACTER
+                    } else {
+                        c
+                    }
+                }));
+            }
+            line.push('\n');
+            bytes += line.len();
+            page.push(Listed { name, line });
+            // Over its bytes, the page gives up its last names by order, until it fits.
+            while bytes > PAGE_BYTES && page.len() > 1 {
+                if let Some(last) = page.pop() {
+                    bytes -= last.line.len();
+                }
+                more = true;
+            }
         })
         .map_err(failed)?;
         let mut text = String::new();
@@ -204,9 +227,6 @@ impl Roots {
         }
         if more {
             text.push_str("more\n");
-        }
-        if unnamed != 0 {
-            let _ = writeln!(text, "unnamed {unnamed}");
         }
         Ok(text)
     }
@@ -272,7 +292,8 @@ impl Roots {
         } else {
             RenameFlags::NOREPLACE
         };
-        renameat_with(&old, from_last, &new, to_last, flags).map_err(failed)?;
+        renameat_with(&old, path::raw(from_last), &new, path::raw(to_last), flags)
+            .map_err(failed)?;
         Ok(String::new())
     }
 }

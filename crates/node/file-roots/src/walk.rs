@@ -7,6 +7,7 @@
 use std::fmt::Write as _;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 
+use orion_types::Escaped;
 use rustix::fs::{AtFlags, Dir, FileType, OFlags, Stat, statat};
 use rustix::io::Errno;
 use tracing::warn;
@@ -40,11 +41,11 @@ impl Kind {
     }
 }
 
-/// Calls `each` for every entry of `dir` but `.` and `..`, with its name if it is text, and
-/// what it is.
+/// Calls `each` for every entry of `dir` but `.` and `..`, with its name's bytes and what it
+/// is.
 pub(crate) fn read(
     fd: &OwnedFd,
-    mut each: impl FnMut(BorrowedFd<'_>, Option<&str>, Kind, &Stat),
+    mut each: impl FnMut(BorrowedFd<'_>, &[u8], Kind, &Stat),
 ) -> Result<(), Errno> {
     let mut entries = Dir::read_from(fd)?;
     while let Some(entry) = entries.read() {
@@ -63,13 +64,13 @@ pub(crate) fn read(
             FileType::Symlink => Kind::Link,
             _ => Kind::Other,
         };
-        each(fd.as_fd(), raw.to_str().ok(), kind, &stat);
+        each(fd.as_fd(), raw.to_bytes(), kind, &stat);
     }
     Ok(())
 }
 
-/// Opens the directory `name` in `dir` to read, following no link.
-pub(crate) fn open_dir(dir: BorrowedFd<'_>, name: &str) -> Result<OwnedFd, Errno> {
+/// Opens the directory `name` (its bytes) in `dir` to read, following no link.
+pub(crate) fn open_dir(dir: BorrowedFd<'_>, name: &[u8]) -> Result<OwnedFd, Errno> {
     rustix::fs::openat2(
         dir,
         name,
@@ -92,14 +93,11 @@ impl Walk<'_> {
         // The directories under it, by name: each is opened when it is walked, so no more
         // are open at once than the walk is deep.
         let mut under = Vec::new();
-        let result = read(dir, |_, name, kind, stat| {
-            let Some(name) = name else {
-                self.left_out += usize::from(kind == Kind::File);
-                return;
-            };
-            if at.is_empty() && name == OWN {
+        let result = read(dir, |_, raw, kind, stat| {
+            if at.is_empty() && raw == OWN.as_bytes() {
                 return;
             }
+            let name = Escaped(raw);
             let whole = format!("{PREFIX}{}/{at}{name}", self.root.name);
             match kind {
                 Kind::File if orion_types::FileName::new(&whole).is_ok() => {
@@ -110,7 +108,7 @@ impl Walk<'_> {
                     }
                 }
                 Kind::File => self.left_out += 1,
-                Kind::Dir if depth < MAX_DEPTH => under.push(name.to_owned()),
+                Kind::Dir if depth < MAX_DEPTH => under.push(raw.to_owned()),
                 Kind::Dir => self.left_out += 1,
                 // A link, a pipe, a device: not a file to fetch.
                 Kind::Link | Kind::Other => {}
@@ -127,7 +125,7 @@ impl Walk<'_> {
                 return;
             }
             if let Ok(opened) = open_dir(dir.as_fd(), &name) {
-                self.dir(&opened, &format!("{at}{name}/"), depth + 1);
+                self.dir(&opened, &format!("{at}{}/", Escaped(&name)), depth + 1);
             }
         }
     }

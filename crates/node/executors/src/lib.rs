@@ -33,7 +33,7 @@ use orion_msg_workloads::{
 };
 use orion_reply::{Asked, Out};
 use orion_store::Store;
-use orion_types::{Error, FileName, NodeName, WorkloadKind, WorkloadName};
+use orion_types::{Error, NodeName, WorkloadKind, WorkloadName};
 use orion_wire::{Bytes, Decode, kind};
 use orion_workloads::{Command, Put, Reported, Tracker, Workload};
 
@@ -46,8 +46,9 @@ pub const MAX_ASKERS: usize = 16;
 
 /// What is on the board, as far as starting a workload goes.
 pub trait Board {
-    /// Whether the file `name` is in place with that digest.
-    fn has(&self, name: &FileName, digest: &[u8; 32]) -> bool;
+    /// Whether the file `name` (as it is carried: an [`orion_types::FileName`]'s text) is in
+    /// place with that digest.
+    fn has(&self, name: &str, digest: &[u8; 32]) -> bool;
 }
 
 /// A board on which every file is there: for a node that keeps no files.
@@ -55,7 +56,7 @@ pub trait Board {
 pub struct Everything;
 
 impl Board for Everything {
-    fn has(&self, _name: &FileName, _digest: &[u8; 32]) -> bool {
+    fn has(&self, _name: &str, _digest: &[u8; 32]) -> bool {
         true
     }
 }
@@ -73,7 +74,7 @@ fn missing(workload: &Workload, board: &dyn Board) -> Option<String> {
         .files
         .iter()
         .filter(|(name, digest)| !board.has(name, digest))
-        .map(|(name, _)| name.as_str())
+        .map(|(name, _)| &**name)
         .collect();
     match absent.as_slice() {
         [] => None,

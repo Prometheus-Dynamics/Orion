@@ -6,11 +6,13 @@
 #![no_std]
 
 mod error;
+mod escape;
 mod hlc;
 mod names;
 mod time;
 
 pub use error::Error;
+pub use escape::{Escaped, unescape};
 pub use hlc::{HlcClockSkew, HlcTimestamp, HybridLogicalClock, hlc_node_tag};
 pub use names::{
     ActionName, DeviceName, FileName, KeyId, NodeName, ResourceName, TopicName, TopicRef,
