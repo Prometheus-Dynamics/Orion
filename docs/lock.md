@@ -580,6 +580,8 @@ what to change.
   `TimeConfig::serve_interfaces`, `serve_retry` and `nt4_host`; `GATEWAY_SOURCE`, `NT4_SOURCE`
   (**Add**). A host named `gateway` or `nt4` can no longer be written bare in `time.servers`
   (**Change**: write it with its port). No wire changes; level 6.
+- **I89.** The seven `shm-*` crates are pinned to the device library's `16a5c7d1`. No other
+  package changes, and no shared-memory code changes. Nothing a program calls changes; level 6.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
