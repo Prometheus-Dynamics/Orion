@@ -88,8 +88,11 @@ fn a_quiet_program_is_said_to_be_stalled_and_the_fetch_waits_it_out() {
     let mut stalls = Vec::new();
     let mut resumed_at = None;
     let ended = loop {
-        // Quiet for three times the session's timeout, then the program goes on.
-        if resumed_at.is_none() && start.elapsed() >= TIMEOUT * 3 {
+        // Quiet for three times the session's timeout, and until the client has said so three
+        // times, then the program goes on. Not for a time alone: the chunks already on their
+        // way go on arriving while the program is quiet, so the client's quiet begins only
+        // when the last of them is in.
+        if resumed_at.is_none() && start.elapsed() >= TIMEOUT * 3 && stalls.len() >= 3 {
             resume.send(()).expect("resume");
             resumed_at = Some(stalls.len());
         }
@@ -144,15 +147,18 @@ fn a_fetch_given_a_limit_gives_up_on_a_quiet_program_saying_so() {
     // program's start too, which a loaded machine can stretch past it (docs/flakes.md).
     let mut fetching = fetching.give_up_after(limit);
     quiet.recv().expect("quiet");
-    let start = Instant::now();
+    // Counted from the client's last progress, not the program's quiet: what was on its way
+    // goes on arriving after the program goes quiet.
+    let mut last = Instant::now();
     let mut stalls = 0;
     let ended = loop {
         match fetching.step(Duration::from_millis(20)).expect("step") {
             Step::Done(ended) => break ended,
             Step::Stalled { .. } => stalls += 1,
-            _ => {}
+            Step::Progress { .. } => last = Instant::now(),
+            Step::Waiting => {}
         }
-        assert!(start.elapsed() < Duration::from_secs(3), "never gave up");
+        assert!(last.elapsed() < Duration::from_secs(3), "never gave up");
     };
     assert_eq!(ended.state, FileState::Rejected);
     assert_eq!(

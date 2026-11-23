@@ -509,6 +509,9 @@ what to change.
   `RecoveryConfig::interface` are `interfaces: Vec<String>`; `TcpCarrier::listen` takes a
   `Retry`; `orion_ssh::Listeners` is new and `listen_when_there` is gone. Settings only on the
   wire's side: no frame changes, and the level stays 6.
+- **I74.** A test of a program that goes quiet mid-fetch lets it go on once the client has said
+  it is quiet, not after a time counted from the program's first sight of progress. Tests only;
+  nothing built changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

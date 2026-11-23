@@ -79,14 +79,43 @@ fn file_offers_and_fetch() {
     assert_eq!(program.join().expect("program"), [50_000, 0]);
 }
 
+/// What the tool prints, kept, and the program told to go on once the tool has said it is
+/// quiet: the program's quiet then lasts until the client has seen it, however long what was
+/// already on its way took to arrive.
+struct Watch {
+    out: Vec<u8>,
+    go_on: Option<std::sync::mpsc::Sender<()>>,
+}
+
+impl std::io::Write for Watch {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.out.extend_from_slice(bytes);
+        if String::from_utf8_lossy(&self.out).contains("still waiting")
+            && let Some(go_on) = self.go_on.take()
+        {
+            let _ = go_on.send(());
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 #[test]
 fn file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked() {
     let board = Board::start("ctl-stall");
     let size = 4 << 20;
     let socket = board.socket().to_owned();
     let (ready, offered) = std::sync::mpsc::channel();
-    // How long the program is quiet in each fetch, once the client has some of the file.
-    let pauses = [Duration::from_millis(1500), Duration::from_millis(5600)];
+    // When the program, quiet in each fetch once the client has some of the file, goes on. Not
+    // after a time of its own: the chunks already on their way go on arriving at the client
+    // while the program is quiet, so the client's quiet begins only when the last of them is
+    // in, and a time counted from the program's first sight of progress can end before the
+    // client has been quiet long enough to say so.
+    let (first_over, first) = std::sync::mpsc::channel::<()>();
+    let (stall_said, second) = std::sync::mpsc::channel::<()>();
     let program = std::thread::spawn(move || {
         // Its session's timeout is the default, 5 s, shorter than its quiet: its own pause is
         // not the client's silence.
@@ -94,7 +123,7 @@ fn file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked() {
         let mut offer = orion.files().offer("logs/").expect("offer");
         ready.send(()).expect("ready");
         let mut ended = Vec::new();
-        for pause in pauses {
+        for go_on in [first, second] {
             let asked = offer
                 .next(Duration::from_secs(10))
                 .expect("next")
@@ -114,7 +143,9 @@ fn file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked() {
                 ended.push(done);
                 continue;
             }
-            std::thread::sleep(pause);
+            go_on
+                .recv_timeout(Duration::from_secs(60))
+                .expect("told to go on");
             ended.push(gift.finish().expect("over"));
         }
         ended
@@ -127,6 +158,7 @@ fn file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked() {
         &board,
         &format!("file fetch logs/big {} --give-up 300", path.display()),
     );
+    let _ = first_over.send(());
     assert_eq!(
         (code, out.as_str(), err.as_str()),
         (
@@ -137,7 +169,22 @@ fn file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked() {
     );
 
     // Without one, which is the default, it says the program is quiet, and waits it out.
-    let (code, out, err) = ctl(&board, &format!("file fetch logs/big {}", path.display()));
+    let mut watch = Watch {
+        out: Vec::new(),
+        go_on: Some(stall_said),
+    };
+    let mut err = Vec::new();
+    let mut words = vec!["--address".to_owned(), board.socket().display().to_string()];
+    words.extend(
+        format!("file fetch logs/big {}", path.display())
+            .split_whitespace()
+            .map(str::to_owned),
+    );
+    let code = orion_ctl::run(&words, &mut watch, &mut err);
+    let (out, err) = (
+        String::from_utf8(watch.out).expect("text"),
+        String::from_utf8(err).expect("text"),
+    );
     assert_eq!((code, err.as_str()), (0, ""), "{out}");
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 2, "{out}");

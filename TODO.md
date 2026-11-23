@@ -260,6 +260,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I71](docs/prs/I71.md) A provider's publish or withdraw that fails gives its description or resource back to try again (wave 19; needs I70)
 - [x] [I73](docs/prs/I73.md) The shared-memory ring crates come from the device library at bbb3c420 (wave 19; needs I71)
 - [x] [I72](docs/prs/I72.md) The network and SSH ways in take a list of interfaces, and follow each when it is made again (wave 19; needs I73)
+- [x] [I74](docs/prs/I74.md) A test of a quiet program lets it go on once the client has said it is quiet (wave 19; needs I72)
 
 ## J. The stack around Orion
 
