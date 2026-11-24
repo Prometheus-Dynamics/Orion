@@ -159,8 +159,7 @@ fn play(websocket: SocketAddr, throttle: bool) -> Option<String> {
         return None;
     };
     let result = reported.recv_timeout(Duration::from_secs(120));
-    let _ = browser.kill();
-    let _ = browser.wait();
+    assert!(browser.end(), "a process of the browser outlived it");
     let result = result.expect("the page reported within two minutes");
     println!("the page reported: {result}");
     Some(result)

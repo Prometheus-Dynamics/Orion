@@ -9,7 +9,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 line="$(git log -1 --format=%B "$1" | grep '^Gate-Lanes:' | tail -1 || true)"
 [ -n "$line" ] || { echo "refused: $1 has no Gate-Lanes line" >&2; exit 1; }
 short=0
-for lane in main clippy shipped matrix other-systems size devices; do
+for lane in main tests clippy shipped matrix other-systems size devices fuzz; do
   value="$(sed -n "s/.* $lane=\([^ ]*\).*/\1/p" <<< "$line")"
   if [ "$value" != passed ]; then
     echo "refused: $lane at $1 is ${value:-missing}, not passed in full" >&2

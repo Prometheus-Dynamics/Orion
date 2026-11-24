@@ -7,23 +7,12 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # One line for each build: the crate, then the flags.
-mapfile -t builds < <(cargo metadata --locked --no-deps --format-version 1 | python3 -c '
-import json, sys
-only = set(sys.argv[1:])
-for package in json.load(sys.stdin)["packages"]:
-    name = package["name"]
-    features = sorted(f for f in package["features"] if f != "default")
-    if not features or (only and name not in only):
-        continue
-    print(name, "--no-default-features")
-    for feature in features:
-        print(name, "--no-default-features", "--features", feature)
-    print(name, "--all-features")
-' "$@")
+listing="$(scripts/workspace.py matrix "$@")"
+mapfile -t builds <<< "$listing"
 
-# A selection that matches nothing is a failure, never a pass: a listing that failed (the
-# process substitution above hides its status) or a crate name that matches no crate with
-# features would otherwise check nothing and say so as passed.
+# A selection that matches nothing is a failure, never a pass: a listing that failed, or a crate
+# name that matches no crate with features, would otherwise check nothing and say so as passed.
+# scripts/workspace.py fails on both itself; this says so again, here, if it ever did not.
 if [ "${#builds[@]}" -eq 0 ]; then
   echo "feature matrix: no build selected${*:+ for $*}: nothing was checked" >&2
   exit 1

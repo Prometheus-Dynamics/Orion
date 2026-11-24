@@ -28,48 +28,8 @@ else
 fi
 
 # The crates named, or owning a changed path, and every workspace crate depending on them.
-mapfile -t crates < <(cargo metadata --locked --format-version 1 | python3 -c '
-import json, os, sys
-meta = json.load(sys.stdin)
-members = set(meta["workspace_members"])
-packages = {p["id"]: p for p in meta["packages"] if p["id"] in members}
-root = meta["workspace_root"]
-mode, args = sys.argv[1], sys.argv[2:]
-start = set()
-if mode == "--crates":
-    names = {p["name"]: i for i, p in packages.items()}
-    for name in args:
-        if name not in names:
-            sys.exit(f"no workspace crate {name}")
-        start.add(names[name])
-else:
-    dirs = sorted(((os.path.dirname(p["manifest_path"]), i) for i, p in packages.items()),
-                  key=lambda d: -len(d[0]))
-    for path in args:
-        full = os.path.join(root, path)
-        owner = next((i for d, i in dirs if full == d or full.startswith(d + os.sep)), None)
-        if owner is None:
-            # Outside every crate (the manifests, scripts, docs): only the whole gate says.
-            print("!" + path)
-        else:
-            start.add(owner)
-users = {i: set() for i in packages}
-for node in meta["resolve"]["nodes"]:
-    if node["id"] in packages:
-        for dep in node["deps"]:
-            if dep["pkg"] in packages:
-                users[dep["pkg"]].add(node["id"])
-seen, todo = set(start), list(start)
-while todo:
-    for user in users[todo.pop()]:
-        if user not in seen:
-            seen.add(user)
-            todo.append(user)
-for i in sorted(seen, key=lambda i: packages[i]["name"]):
-    lib = any(k in ("lib", "rlib", "staticlib", "cdylib", "dylib", "proc-macro")
-              for t in packages[i]["targets"] for k in t["kind"])
-    print(packages[i]["name"] + (" lib" if lib else ""))
-' "$@")
+listing="$(scripts/workspace.py affected "$@")"
+mapfile -t crates <<< "$listing"
 
 outside=()
 selected=()
@@ -100,7 +60,15 @@ step format cargo fmt --check "${packages[@]}"
 matrix_log=$(mktemp)
 trap 'rm -f "$matrix_log"' EXIT
 start_matrix=$SECONDS
-scripts/feature-matrix.sh "${selected[@]}" > "$matrix_log" 2>&1 &
+# Only the crates with features have a matrix; with none among them, there is nothing to build.
+featured="$(scripts/workspace.py featured "${selected[@]}")"
+if [ "$featured" = none ]; then
+  echo "no crate with features among them" > "$matrix_log"
+  true &
+else
+  mapfile -t with_features <<< "$featured"
+  scripts/feature-matrix.sh "${with_features[@]}" > "$matrix_log" 2>&1 &
+fi
 matrix=$!
 step clippy cargo clippy "${packages[@]}" --all-targets --all-features -- -D warnings
 if cargo nextest --version > /dev/null 2>&1; then

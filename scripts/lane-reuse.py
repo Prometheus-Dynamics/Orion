@@ -12,6 +12,9 @@
     lane-reuse.py --explain LANE ITEM        each input of ITEM's key
     lane-reuse.py own-vars                   fails if a Rust source (a build script, a test)
                                              reads one of the gate's own variables
+    lane-reuse.py --self-test                in a copy of this tree, changes each kind of input
+                                             and checks a key moves (or, for a note or a crate
+                                             not built, that it does not)
 
 Only lanes whose result is a function of their inputs are here: checks and builds (the feature
 matrix, the no_std crates and the client on other systems, the device sizes). A lane that runs
@@ -41,12 +44,14 @@ so is never read as a pass.
 A lane that selects no item fails (`plan` and `status`), never passes: only `--drop LANE:WHY`
 leaves a lane out, and the gate's line says `not-run(WHY)`.
 
-A lane is never reused for longer than this: one whose last full run is 10 or more commits
-behind HEAD, or 3 days old, runs in full, every item, and so does one that has never run in full
-here, and every lane when GATE_LANE_REUSE=0. An item with no key (a kind this script does not
+A lane reuses for as long as its inputs are the same: no lane runs in full here for having gone
+some commits or days without one. Every run here must end within a minute at any load (the
+one-minute rule, 2026-11-24), and a run in full is minutes of work whose result is already known.
+What a key could miss is found elsewhere: CI runs every lane in full, with nothing reused, on every
+push, and scripts/release-check.sh refuses a release that any lane did not pass in full at that
+commit. GATE_LANE_REUSE=0 runs everything here. An item with no key (a kind this script does not
 know) runs every time and is named; each lane says how many of its items had no key or were not
-reused. CI runs everything. scripts/release-check.sh refuses a release that
-any lane did not pass, in full, at that commit.
+reused. `behind` still says when each lane last ran in full here.
 """
 
 import hashlib
@@ -60,14 +65,30 @@ import sys
 import time
 
 FORMAT = "orion-lane-record 1"
-BEHIND_COMMITS = 10
-BEHIND_SECONDS = 3 * 24 * 3600
-LANES = ("matrix", "other-systems", "devices")
+LANES = ("matrix", "other-systems", "devices", "tests", "shipped", "clippy", "fuzz")
 LANE_SCRIPTS = {
     "matrix": ["scripts/feature-matrix.sh"],
     "other-systems": ["scripts/same-features.py"],
     "devices": ["scripts/device-size.sh"],
+    "tests": [".config/nextest.toml"],
+    "shipped": [".config/nextest.toml", "scripts/shipped-features.py"],
+    "clippy": [],
+    "fuzz": ["scripts/fuzz-short.sh"],
 }
+# What a test may run that the machine has, not the repository: a test's key holds each one's
+# content, so a new version runs the tests again.
+PROGRAMS = (
+    "sh", "bash", "unshare", "setpriv", "ip", "id", "kill", "ssh", "ssh-keygen", "scp", "sftp",
+    "sshd", "bwrap", "readelf", "nm", "cc", "firefox", "chromium", "chromium-browser",
+    "google-chrome",
+)
+# The notes: what scripts/code-key.sh leaves out. No build or test reads one.
+NOTE = re.compile(r"(\.md$|^docs/|^LICENSE-[^/]*$)")
+# The variables a test reads that the build does not: the settings of the programs tests start
+# (ORION_..., and the markers a test sets for itself when it runs itself again), whether the
+# namespace tests must run, and the rest named below. A test run's key holds their values;
+# `reads` fails on a variable a crate reads that neither this nor the build's own list covers.
+TEST_ENV = re.compile(r"^(ORION_|NAMESPACE_TESTS$|UPDATE_VECTORS$|DRILL_|WATCHDOG_|NOTIFY_SOCKET$)")
 # The gate's own variables: where it keeps its state, how it scales its bounds, whether it reuses.
 # None changes what a build makes, and each gate sets some afresh, so none is in a key.
 GATE_OWN = ("GATE_", "SIZE_GATE_")
@@ -238,9 +259,67 @@ class Keys(size_key.Workspace):
             for tool in ("rust-lld", "llvm-size"):
                 path = os.path.join(tools, "lib", "rustlib", "x86_64-unknown-linux-gnu", "bin", tool)
                 inputs.append((tool, file_digest(path)))
+        elif lane == "fuzz":
+            # fuzz-short SECONDS: every target, for that budget each. The fuzz crate (its own
+            # workspace), every workspace crate it builds, the nightly that builds it and
+            # cargo-fuzz.
+            inputs += self.files("testing/fuzz")
+            with open(os.path.join(ROOT, "testing", "fuzz", "Cargo.toml")) as file:
+                named = re.findall(r'^([a-z0-9_-]+)\s*=\s*\{[^}]*path\s*=', file.read(), re.M)
+            inputs += self.built(self.packages_built(named))
+            inputs.append(("nightly rustc -vV", digest(run(["rustc", "+nightly", "-vV"], ROOT).encode())))
+            inputs.append(("cargo fuzz --version", run(["cargo", "fuzz", "--version"], ROOT).strip()))
+        elif lane in ("tests", "shipped", "clippy"):
+            # PACKAGE [FLAGS...]: its tests run, or it is linted with its tests. Every crate its
+            # tests build; every file outside the crates (pages, examples, the programs' own
+            # files a test reads); the crates a package says its tests read
+            # (`[package.metadata.orion] test-reads`, which `reads` checks); and, for a test
+            # run, the programs on this machine it may start.
+            package = words[0]
+            inputs += self.built(self.packages_built([package], dev=True))
+            inputs.append(("outside the crates", self.outside()))
+            for directory in self.test_reads(package):
+                inputs.extend(self.files(directory))
+            if lane == "clippy":
+                if not hasattr(self, "clippy"):
+                    self.clippy = run(["cargo", "clippy", "-V"], ROOT).strip()
+                inputs.append(("clippy -V", self.clippy))
+            else:
+                inputs.append(("programs", self.programs()))
+                inputs.append(("what the tests read of the environment", sorted(
+                    (name, value) for name, value in os.environ.items() if TEST_ENV.match(name)
+                )))
         else:
             raise NoKey(f"no key for {lane} item {item!r}")
         return inputs
+
+    def outside(self):
+        """One digest of every file outside the crates but the notes and CI's own."""
+        if not hasattr(self, "outside_cache"):
+            names = [
+                name
+                for name in self.listed
+                if not name.startswith(("crates/", ".github/")) and not NOTE.search(name)
+            ]
+            self.outside_cache = digest(
+                "".join(f"{name}\0{file_digest(os.path.join(ROOT, name))}\0" for name in names).encode()
+            )
+        return self.outside_cache
+
+    def test_reads(self, package):
+        """The directories a package's tests read beyond what they build."""
+        meta = (self.packages[self.by_name[package]].get("metadata") or {}).get("orion") or {}
+        return list(meta.get("test-reads", []))
+
+    def programs(self):
+        if not hasattr(self, "programs_cache"):
+            found = []
+            for name in PROGRAMS:
+                path = shutil.which(name) or ""
+                found.append((name, path, file_digest(os.path.realpath(path)) if path else ""))
+            found.append(("kernel", os.uname().release))
+            self.programs_cache = digest(json.dumps(found).encode())
+        return self.programs_cache
 
     def key(self, lane, item):
         try:
@@ -318,18 +397,6 @@ def behind(lane):
         return "on CI"
     if os.environ.get("GATE_LANE_REUSE") == "0":
         return "GATE_LANE_REUSE=0"
-    ran = last_full_run(lane)
-    if ran is None:
-        return "never run in full here"
-    commit, age = ran
-    try:
-        count = int(git("rev-list", "--first-parent", "--count", f"{commit}..HEAD"))
-    except subprocess.CalledProcessError:
-        return f"its last full run, at {commit[:12]}, is not in this history"
-    if count >= BEHIND_COMMITS:
-        return f"{count} commits since its last full run"
-    if age >= BEHIND_SECONDS:
-        return f"{age / 86400:.1f} days since its last full run"
     return None
 
 
@@ -399,13 +466,272 @@ def status(lane, state):
     return 0
 
 
+def listing(state, fresh, out):
+    """Every test of the tests lane: those that ran from FRESH (`cargo nextest list` of them),
+    kept by their key; those reused from what was kept when they last ran."""
+    suites = {}
+    ran = {}
+    if fresh:
+        with open(fresh) as file:
+            ran = json.load(file)["rust-suites"]
+    kept = os.path.join(records(), "tests-list")
+    os.makedirs(kept, exist_ok=True)
+    for name, key, how in read_state(state):
+        if how == "run":
+            mine = {binary: suite for binary, suite in ran.items() if suite["package-name"] == name}
+            suites.update(mine)
+            if key != "-":
+                with open(os.path.join(kept, key + ".tmp"), "w") as file:
+                    json.dump(mine, file)
+                os.replace(os.path.join(kept, key + ".tmp"), os.path.join(kept, key))
+        else:
+            try:
+                with open(os.path.join(kept, key)) as file:
+                    suites.update(json.load(file))
+            except OSError:
+                sys.exit(f"lane-reuse.py: {name} was reused, but its tests were never listed: run with GATE_LANE_REUSE=0")
+    with open(out, "w") as file:
+        json.dump({"rust-suites": suites}, file)
+    return 0
+
+
+READS = re.compile(
+    r'#\[path\s*=\s*"([^"]+)"\]|include_(?:str|bytes)!\(\s*"([^"]+)"|CARGO_MANIFEST_DIR"\)\)?\s*\.join\(\s*"([^"]+)"|concat!\(env!\("CARGO_MANIFEST_DIR"\),\s*"([^"]+)"'
+)
+
+
+ENV_READ = re.compile(r'(?:env::var(?:_os)?|env!|option_env!)\(\s*(?:"([A-Z_0-9]+)"|([A-Z_][A-Z_0-9]*)\s*\))')
+ENV_CONST = re.compile(r'const ([A-Z_][A-Z_0-9]*): &str = "([^"]*)";')
+
+
+def env_reads(text):
+    """The variables a source reads by name: a literal, or a constant of the same file."""
+    consts = dict(ENV_CONST.findall(text))
+    for match in ENV_READ.finditer(text):
+        yield match.group(1) or consts.get(match.group(2), match.group(2))
+
+
+def reads():
+    """Fails if a package's sources name a file outside what its key holds: another crate's
+    directory that is not one it builds, and not one it says its tests read; or read a variable
+    of the environment no key holds (TEST_ENV, and the build's own)."""
+    keys = Keys()
+    crates = os.path.join(ROOT, "crates")
+    problems = []
+    for package_id in sorted(keys.members):
+        package = keys.packages[package_id]
+        home = os.path.dirname(package["manifest_path"])
+        allowed = [
+            os.path.dirname(keys.packages[built]["manifest_path"])
+            for built in keys.packages_built([package["name"]], dev=True)
+            if built in keys.members
+        ]
+        allowed += [os.path.join(ROOT, directory) for directory in keys.test_reads(package["name"])]
+        for name in keys.files(os.path.relpath(home, ROOT)):
+            if not name[0].endswith(".rs"):
+                continue
+            path = os.path.join(ROOT, name[0])
+            with open(path, errors="replace") as file:
+                text = file.read()
+            for variable in env_reads(text):
+                if not (TEST_ENV.match(variable) or size_key.ENV.match(variable)):
+                    problems.append(f"{name[0]}: reads ${variable}, which no key holds: add it to TEST_ENV")
+            for match in READS.finditer(text):
+                said = next(group for group in match.groups() if group)
+                base = home if match.group(3) or match.group(4) else os.path.dirname(path)
+                target = os.path.normpath(os.path.join(base, said.lstrip("/") if match.group(4) else said))
+                if os.path.commonpath([target, crates]) != crates and target != os.path.dirname(crates) and not crates.startswith(target + os.sep):
+                    continue  # outside the crates: in every test key
+                if any(os.path.commonpath([target, where]) == where for where in allowed):
+                    continue
+                # The root itself: a walk of the crates, which `test-reads = ["crates"]` holds.
+                if target == ROOT and "crates" in keys.test_reads(package["name"]):
+                    continue
+                problems.append(f"{name[0]}: {said!r} is {os.path.relpath(target, ROOT) or '.'}, which its key does not hold")
+    if problems:
+        print("a package reads what its tests' key does not hold; add it to its manifest's", file=sys.stderr)
+        print("[package.metadata.orion] test-reads, or build what it reads:", file=sys.stderr)
+        print("\n".join(problems), file=sys.stderr)
+        return 1
+    print("every package's tests read only what their key holds")
+    return 0
+
+
+def depinfo(state, fresh):
+    """Fails if a test binary that ran was built from a file its package's key does not hold:
+    every file in rustc's dep-info for it (BINARY.d, beside it) is in a crate its tests build,
+    outside the crates, in what it says its tests read, or outside the repository (the
+    registry's and the toolchain's, which Cargo.lock and the toolchain in the key pin)."""
+    keys = Keys()
+    with open(fresh) as file:
+        suites = json.load(file)["rust-suites"]
+    ran = {name for name, _, how in read_state(state) if how == "run"}
+    crates = os.path.join(ROOT, "crates") + os.sep
+    problems, read = [], 0
+    for suite in suites.values():
+        name = suite["package-name"]
+        if name not in ran:
+            continue
+        allowed = [
+            os.path.dirname(keys.packages[built]["manifest_path"]) + os.sep
+            for built in keys.packages_built([name], dev=True)
+            if built in keys.members
+        ]
+        allowed += [os.path.join(ROOT, directory) + os.sep for directory in keys.test_reads(name)]
+        binary = suite["binary-path"]
+        base = os.path.join(os.path.dirname(binary), os.path.basename(binary).split(".")[0] + ".d")
+        try:
+            with open(base) as file:
+                text = file.read()
+        except OSError:
+            problems.append(f"{name}: no dep-info at {base}")
+            continue
+        read += 1
+        for line in text.splitlines():
+            if ":" not in line or line.startswith(" "):
+                continue
+            path = os.path.realpath(line.split(":", 1)[0].replace("\\ ", " "))
+            if not path.startswith(crates):
+                continue  # outside the crates: in every key, or not the repository's
+            if not any(path.startswith(where) for where in allowed):
+                problems.append(f"{name}: built from {os.path.relpath(path, ROOT)}, which its key does not hold")
+    if problems:
+        print("a test binary was built from what its key does not hold; declare it in its", file=sys.stderr)
+        print("manifest's [package.metadata.orion] test-reads:", file=sys.stderr)
+        print("\n".join(sorted(set(problems))), file=sys.stderr)
+        return 1
+    print(f"every test binary that ran was built from what its key holds ({read} read)")
+    return 0
+
+
+def self_test():
+    """Each kind of input a test's key holds, changed in a copy of this tree: the key moves; a
+    note, or a crate the package does not build, leaves it where it was."""
+    import tempfile
+
+    work = tempfile.mkdtemp(prefix="orion-keys.")
+    copy = os.path.join(work, "tree")
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=ROOT, capture_output=True, check=True,
+        ).stdout.split(b"\0")
+        for name in (n.decode() for n in listed if n):
+            if os.path.isfile(os.path.join(ROOT, name)):
+                os.makedirs(os.path.dirname(os.path.join(copy, name)), exist_ok=True)
+                shutil.copy2(os.path.join(ROOT, name), os.path.join(copy, name))
+        subprocess.run(["git", "init", "-q"], cwd=copy, check=True)
+        script = os.path.join(copy, "scripts", "lane-reuse.py")
+        shims = os.path.join(work, "bin")
+        os.makedirs(shims)
+        env = {k: v for k, v in os.environ.items() if k != "CI" and not k.startswith("GATE_")}
+        # One target for every listing: the copy's own would be made, empty, for each.
+        env["CARGO_TARGET_DIR"] = os.path.join(work, "target")
+
+        def key(lane, item, extra=None):
+            out = subprocess.run(
+                [sys.executable, script, "--explain", lane, item],
+                cwd=copy, capture_output=True, text=True, env=dict(env, **(extra or {})),
+            )
+            if out.returncode != 0:
+                sys.exit(f"self-test: --explain {lane} {item} failed:\n{out.stderr}")
+            return out.stdout.strip().splitlines()[-1].split()[-1]
+
+        def touch(name, text="\n// changed by the keys' self-test\n"):
+            path = os.path.join(copy, name)
+            with open(path) as file:
+                before = file.read()
+            with open(path, "a") as file:
+                file.write(text)
+            return lambda: open(path, "w").write(before)
+
+        def replace(name, old, new):
+            path = os.path.join(copy, name)
+            with open(path) as file:
+                before = file.read()
+            assert old in before, f"{name} lacks {old!r}"
+            with open(path, "w") as file:
+                file.write(before.replace(old, new, 1))
+            return lambda: open(path, "w").write(before)
+
+        keys = Keys.__new__(Keys)  # only for the closure, read from this tree
+        Keys.__init__(keys)
+        built = {
+            os.path.relpath(os.path.dirname(keys.packages[i]["manifest_path"]), ROOT)
+            for i in keys.packages_built(["orion-ctl"], dev=True) if i in keys.members
+        }
+        apart = sorted(
+            os.path.relpath(os.path.dirname(keys.packages[i]["manifest_path"]), ROOT)
+            for i in keys.members
+        )
+        apart = next(d for d in apart if d not in built)
+        lock = re.search(r'name = "zeroize"\nversion = "[^"]+"\nsource = "[^"]+"\nchecksum = "([0-9a-f]+)"', open(os.path.join(copy, "Cargo.lock")).read())
+        with open(os.path.join(shims, "ssh"), "w") as file:
+            file.write("#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(shims, "ssh"), 0o755)
+        base = key("tests", "orion-ctl")
+        cases = [
+            ("a file of the crate itself", True, lambda: touch("crates/client/ctl/src/lib.rs"), None),
+            ("a file of a crate it builds", True, lambda: touch("crates/client/orion/src/lib.rs"), None),
+            ("a file of a crate only its tests build", True, lambda: touch("crates/testing/stubs/src/lib.rs"), None),
+            ("a file outside the crates", True, lambda: touch("web/video-example/video.js"), None),
+            ("the tests' own settings", True, lambda: touch(".config/nextest.toml", "\n# changed\n"), None),
+            ("the gate", True, lambda: touch("scripts/gate.sh", "\n# changed\n"), None),
+            ("the root manifest", True, lambda: touch("Cargo.toml", "\n# changed\n"), None),
+            ("the toolchain file", True, lambda: touch("rust-toolchain.toml", "\n# changed\n"), None),
+            # Its entry in the lockfile as written: a line added to it, which cargo reads past.
+            ("a locked dependency it builds", lock is not None,
+             lambda: replace("Cargo.lock", lock.group(0), lock.group(0) + "\n# changed"), None),
+            ("the build's environment", True, lambda: (lambda: None), {"RUSTFLAGS": "-Cdebuginfo=0"}),
+            ("the environment a test reads", True, lambda: (lambda: None), {"NAMESPACE_TESTS": "changed"}),
+            ("a program a test starts", True, lambda: (lambda: None),
+             {"PATH": shims + os.pathsep + os.environ.get("PATH", "")}),
+            ("a note", False, lambda: touch("docs/design.md", "\nchanged\n"), None),
+            (f"a crate it does not build ({apart})", False,
+             lambda: touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"), None),
+        ]
+        failures = []
+        for label, moves, change, extra in cases:
+            undo = change()
+            try:
+                now = key("tests", "orion-ctl", extra)
+            finally:
+                undo()
+            if (now != base) != moves:
+                failures.append(f"{label}: the key {'did not move' if moves else 'moved'}")
+            else:
+                print(f"    {label}: {'moved' if moves else 'stayed'}")
+        # What a package says its tests read: any crate, for one that reads them all.
+        base = key("tests", "orion-stubs")
+        undo = touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n")
+        try:
+            if key("tests", "orion-stubs") == base:
+                failures.append("a crate a package says its tests read: the key did not move")
+            else:
+                print("    a crate a package says its tests read: moved")
+        finally:
+            undo()
+        if key("tests", "orion-ctl") != key("tests", "orion-ctl"):
+            failures.append("the same inputs gave two keys")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    if failures:
+        print("keys self-test FAILED:", *failures, sep="\n  ")
+        return 1
+    print("keys self-test passed")
+    return 0
+
+
 def main(argv):
     if len(argv) >= 3 and argv[0] == "plan":
         with open(argv[2] + ".lane", "w") as file:
             file.write(argv[1] + "\n")
         return plan(argv[1], argv[2], argv[3:])
-    if len(argv) == 3 and argv[0] == "record":
-        return record(argv[1], argv[2])
+    if len(argv) >= 3 and argv[0] == "record":
+        # One or more items, read from one state file.
+        for item in argv[2:]:
+            record(argv[1], item)
+        return 0
     if len(argv) == 3 and argv[0] == "status":
         return status(argv[1], argv[2])
     if argv and argv[0] == "behind":
@@ -416,6 +742,14 @@ def main(argv):
         return 0
     if argv == ["own-vars"]:
         return own_vars()
+    if argv == ["reads"]:
+        return reads()
+    if argv == ["--self-test"]:
+        return self_test()
+    if len(argv) == 3 and argv[0] == "depinfo":
+        return depinfo(argv[1], argv[2])
+    if len(argv) in (3, 4) and argv[0] == "listing":
+        return listing(argv[1], argv[2] if len(argv) == 4 else "", argv[-1])
     if len(argv) == 3 and argv[0] == "--explain":
         keys = Keys()
         for label, value in keys.inputs(argv[1], argv[2]):

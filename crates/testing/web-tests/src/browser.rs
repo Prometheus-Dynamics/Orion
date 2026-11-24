@@ -2,9 +2,11 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 /// Firefox's settings for a profile that leaves the GPU alone.
 const SOFTWARE_ONLY: &str = "\
@@ -16,11 +18,58 @@ user_pref(\"media.hardware-video-decoding.enabled\", false);
 user_pref(\"media.ffmpeg.vaapi.enabled\", false);
 ";
 
+/// A running browser, in a process group of its own: ended whole, with every process it started,
+/// when it is dropped or [`Browser::end`] is called. Ending only the process started would
+/// leave its others (Firefox's content processes) running after the test.
+pub struct Browser {
+    child: Child,
+}
+
+impl Browser {
+    /// Ends the browser and every process in its group, and waits until none is left.
+    /// Whether none was.
+    #[must_use]
+    pub fn end(&mut self) -> bool {
+        end_group(&mut self.child)
+    }
+}
+
+impl Drop for Browser {
+    fn drop(&mut self) {
+        let _ = self.end();
+    }
+}
+
+/// Ends `child`'s process group, which `child` leads, and waits until it is empty: the
+/// group's other processes are not `child`'s to wait for, so their going is watched for, for
+/// up to ten seconds. Whether it emptied.
+#[must_use]
+fn end_group(child: &mut Child) -> bool {
+    let group = format!("-{}", child.id());
+    let signal = |name: &str| {
+        Command::new("kill")
+            .args([name, "--", &group])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    signal("-KILL");
+    let _ = child.wait();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while signal("-0") {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    true
+}
+
 /// A headless browser on `url`, if one is installed. `profile` is an empty directory for it.
 /// The browser's temporary files go in `profile/tmp`, not the shared temporary directory: a
 /// profile that is removed takes them with it.
 #[must_use]
-pub fn browse(url: &str, profile: &Path) -> Option<Child> {
+pub fn browse(url: &str, profile: &Path) -> Option<Browser> {
     let temporary = profile.join("tmp");
     std::fs::create_dir_all(&temporary).expect("the browser's temporary directory");
     // Nothing here runs on this machine's GPU: drawing, video and GL are all in software.
@@ -34,6 +83,7 @@ pub fn browse(url: &str, profile: &Path) -> Option<Child> {
             .arg(url)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .process_group(0)
             .spawn()
             .ok()
     };
@@ -54,6 +104,7 @@ pub fn browse(url: &str, profile: &Path) -> Option<Child> {
             .arg(url)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .process_group(0)
             .spawn()
             .ok()
     };
@@ -61,6 +112,7 @@ pub fn browse(url: &str, profile: &Path) -> Option<Child> {
         .or_else(|| chrome("chromium"))
         .or_else(|| chrome("chromium-browser"))
         .or_else(|| chrome("google-chrome"))
+        .map(|child| Browser { child })
 }
 
 /// The repository's `web` directory.
@@ -128,4 +180,48 @@ pub fn outside_address() -> Option<std::net::IpAddr> {
     socket.connect(SocketAddr::from(([192, 0, 2, 1], 9))).ok()?;
     let address = socket.local_addr().ok()?.ip();
     (!address.is_loopback() && !address.is_unspecified()).then_some(address)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Browser;
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    /// Whether process `pid` is still running: not gone, and not ended but unreaped.
+    fn running(pid: &str) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            stat.rsplit_once(") ")
+                .is_some_and(|(_, rest)| !rest.starts_with('Z'))
+        })
+    }
+
+    /// A browser's other processes outlive a kill of the one started (Firefox's content
+    /// processes did, on CI). A stand-in that leaves one of its own: ending it ends that too.
+    #[test]
+    fn ending_a_browser_ends_every_process_it_started() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 600 & echo $!; exec sleep 600"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .expect("sh");
+        let mut left = String::new();
+        BufReader::new(child.stdout.take().expect("its output"))
+            .read_line(&mut left)
+            .expect("the process it left");
+        let left = left.trim().to_owned();
+        assert!(
+            running(&left),
+            "the stand-in did not leave a process running"
+        );
+        let mut browser = Browser { child };
+        assert!(browser.end(), "a process of the browser outlived it");
+        assert!(
+            !running(&left),
+            "process {left}, which the browser started, is still running"
+        );
+    }
 }

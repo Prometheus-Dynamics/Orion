@@ -329,8 +329,7 @@ fn the_web_client_subscribes_publishes_and_runs_actions_in_a_browser() {
         }
     }
     let result = reported.recv_timeout(Duration::from_secs(90));
-    let _ = browser.kill();
-    let _ = browser.wait();
+    assert!(browser.end(), "a process of the browser outlived it");
     let result = result.expect("the page reported within ninety seconds");
     println!("the page reported: {result}");
 

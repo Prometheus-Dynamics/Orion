@@ -9,6 +9,11 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
+# `one_list.rs` reads every crate's and example's sources: its tests' key holds them
+# (scripts/lane-reuse.py). Examples are outside the crates, in every key already.
+[package.metadata.orion]
+test-reads = ["crates"]
+
 [dependencies]
 orion-broker = { path = "../../comm/broker" }
 orion-broker-buffers = { path = "../../comm/broker-buffers" }

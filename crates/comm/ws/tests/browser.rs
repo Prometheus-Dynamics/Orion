@@ -4,11 +4,12 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener};
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use orion_broker::{Broker, BrokerConfig};
 use orion_hello::Hello as HelloService;
@@ -114,6 +115,33 @@ fn serve(listener: TcpListener, page: String, report: mpsc::Sender<String>) {
 
 /// A headless browser on `url`, if one is installed. Its temporary files go to `temp`: a
 /// new Firefox profile unpacks its built-in add-on there as `tmp-*.xpi`.
+/// Ends `child`'s process group, which `child` leads, and waits until it is empty. Ending only
+/// the process started would leave its others (Firefox's content processes) running after the
+/// test; they are not `child`'s to wait for, so their going is watched for, up to ten seconds.
+/// Whether it emptied.
+#[must_use]
+fn end_group(child: &mut Child) -> bool {
+    let group = format!("-{}", child.id());
+    let signal = |name: &str| {
+        Command::new("kill")
+            .args([name, "--", &group])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    signal("-KILL");
+    let _ = child.wait();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while signal("-0") {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    true
+}
+
+/// A headless browser on `url`, in a process group of its own, if one is installed.
 fn browse(url: &str, profile: &Path, temp: &Path) -> Option<Child> {
     let firefox = |program: &str| {
         Command::new(program)
@@ -123,6 +151,7 @@ fn browse(url: &str, profile: &Path, temp: &Path) -> Option<Child> {
             .env("TMPDIR", temp)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .process_group(0)
             .spawn()
             .ok()
     };
@@ -139,6 +168,7 @@ fn browse(url: &str, profile: &Path, temp: &Path) -> Option<Child> {
             .env("TMPDIR", temp)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .process_group(0)
             .spawn()
             .ok()
     };
@@ -205,8 +235,10 @@ fn a_browser_connects_and_exchanges_frames() {
         return;
     };
     let result = reported.recv_timeout(Duration::from_secs(90));
-    let _ = browser.kill();
-    let _ = browser.wait();
+    assert!(
+        end_group(&mut browser),
+        "a process of the browser outlived it"
+    );
     let result = result.expect("the page reported within ninety seconds");
     println!("the page reported: {result}");
     // Welcomed, then answered who the board is, over the subprotocol it asked for.

@@ -5,14 +5,14 @@
 #   scripts/gate.sh --part <part>   one part, and no stamp: `main` (every step not in a lane), or
 #                                   a lane: `clippy`, `shipped`, `matrix`, `other-systems`,
 #                                   `size`, `devices`
-#   scripts/gate.sh --drop LANE:WHY a lane not run, recorded so (`not-run(WHY)`); a lane behind
-#                                   (scripts/lane-reuse.py behind) cannot be dropped
+#   scripts/gate.sh --drop LANE:WHY a lane not run, recorded so (`not-run(WHY)`)
 #
 # The parts together are the whole gate. CI runs each on a machine of its own, at once.
 #
 # In the build lanes, an item that passed before on exactly these inputs is not run again
 # (scripts/lane-reuse.py: the feature matrix's builds, the no_std and other-system checks, the
-# device sizes); a lane behind runs in full. The tree's stamp holds what each lane did, the
+# device sizes, and each package's tests, lints and fuzzing); a lane is never run in full here for
+# having gone without one (CI runs everything, on every push). The tree's stamp holds what each lane did, the
 # `Gate-Lanes:` line the commit carries (scripts/push.sh checks it).
 #
 # Nothing whose result is known runs again. A tree whose code key (scripts/code-key.sh: every
@@ -38,12 +38,6 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
   shift 2
-done
-for name in "${!dropped[@]}"; do
-  if [ "$name" != size ] && why="$(scripts/lane-reuse.py behind "$name")" && [[ "$why" != *"may reuse" ]]; then
-    echo "--drop $name: it cannot be dropped: $why" >&2
-    exit 2
-  fi
 done
 # Debug and test builds are incremental (cargo's default): a change rebuilds only what it
 # touched. The steps whose output is measured pin it off themselves.
@@ -127,7 +121,7 @@ main() {
 # gate's machines can, so here one that could not run fails, saying why. Not ORION_: every
 # ORION_ variable is a setting to the programs the tests start. Not GATE_: those are kept out of
 # the lanes' keys, and nothing built may read them (lane-reuse.py own-vars); this one is read by
-# tests alone, which run in the main part, never reused.
+# tests alone, and a test run's key holds it (lane-reuse.py TEST_ENV).
 export NAMESPACE_TESTS=required
 
 # Steps that build in target directories of their own run beside the rest, each in a lane: a
@@ -227,46 +221,104 @@ lockfile() {
 # test runs them all. The same cases run either way, ignored ones skipped by both. The doctests
 # are mostly rustdoc passes over crates that have none, about 15 s warm, which the slowest test
 # outlasts; one after the other, they were on the gate's critical path.
+#
+# A package whose tests passed before on exactly these inputs (scripts/lane-reuse.py, lane
+# `tests`: every crate they build, every file outside the crates, what they say they read, the
+# programs on this machine they start) is not tested again: its result is known. The rest run
+# together, built with every feature, as `--workspace` built them.
+members() {
+  local listing
+  listing="$(scripts/workspace.py members)"
+  echo "$listing"
+}
 tests() {
-  if cargo nextest --version > /dev/null 2>&1; then
+  local state="$GATE_LANE_STATE_DIR/tests" listing names=() run=() selected=() docs=() name
+  listing="$(members)"
+  mapfile -t names < <(cut -d' ' -f1 <<< "$listing")
+  scripts/lane-reuse.py plan tests "$state" "${names[@]}"
+  mapfile -t selected < <(awk -F'\t' '$3 == "run" {print $1}' "$state")
+  for name in "${selected[@]}"; do
+    run+=(-p "$name")
+  done
+  # The doctests of those that have any (scripts/workspace.py doctested): a crate with none
+  # has a known result, no test, and its rustdoc pass is not made.
+  if [ "${#selected[@]}" -gt 0 ]; then
+    listing="$(scripts/workspace.py doctested "${selected[@]}")"
+    if [ "$listing" != none ]; then
+      while read -r name; do
+        docs+=(-p "$name")
+      done <<< "$listing"
+    fi
+  fi
+  if [ "${#run[@]}" -eq 0 ]; then
+    echo "    every package's tests passed before on these inputs"
+  elif cargo nextest --version > /dev/null 2>&1; then
     local doc_log doc_pid doc_status=0 status=0
     doc_log="$(mktemp)"
-    cargo test --workspace --all-features --doc > "$doc_log" 2>&1 &
-    doc_pid=$!
-    cargo nextest run --workspace --all-features --no-tests=fail || status=$?
-    wait "$doc_pid" || doc_status=$?
+    if [ "${#docs[@]}" -gt 0 ]; then
+      cargo test "${docs[@]}" --all-features --doc > "$doc_log" 2>&1 &
+      doc_pid=$!
+    fi
+    cargo nextest run "${run[@]}" --all-features --no-tests=warn || status=$?
+    [ -z "${doc_pid:-}" ] || wait "$doc_pid" || doc_status=$?
     cat "$doc_log"
     rm -f "$doc_log"
     [ "$doc_status" -eq 0 ] || echo "    the doctests failed" >&2
-    [ "$status" -eq 0 ] && [ "$doc_status" -eq 0 ]
+    [ "$status" -eq 0 ] && [ "$doc_status" -eq 0 ] || return 1
   else
-    cargo test --workspace --all-features
+    cargo test "${run[@]}" --all-features
   fi
+  scripts/lane-reuse.py record "$state" "${names[@]}"
+  scripts/lane-reuse.py status tests "$state" > "$state.status"
 }
 
 # Every crate linted, tests included. A function: a lane takes `--` between its steps, so the
 # lint's own `--` cannot be written in one.
+#
+# A package linted before on exactly these inputs is not linted again (scripts/lane-reuse.py,
+# lane `clippy`).
 clippy_all() {
-  cargo clippy --workspace --all-targets --all-features -- -D warnings
+  local state="$GATE_LANE_STATE_DIR/clippy" listing names=() run=()
+  listing="$(members)"
+  mapfile -t names < <(cut -d' ' -f1 <<< "$listing")
+  scripts/lane-reuse.py plan clippy "$state" "${names[@]}"
+  mapfile -t run < <(awk -F'\t' '$3 == "run" {print "-p"; print $1}' "$state")
+  if [ "${#run[@]}" -eq 0 ]; then
+    echo "    every package was linted before on these inputs"
+  else
+    cargo clippy "${run[@]}" --all-targets --all-features -- -D warnings
+  fi
+  scripts/lane-reuse.py record "$state" "${names[@]}"
+  scripts/lane-reuse.py status clippy "$state" > "$state.status"
 }
 
 # The comm core's tests again, built as each shipped binary builds it, and those binaries' own
 # tests alone, so with only what they ship. `--all-features` above is no build that ships: a
 # test that holds only with every feature on, or a part that needs one the binary leaves out,
 # shows only here. scripts/shipped-features.py reads the sets from the binaries' manifests.
+#
+# Each item passed before on exactly these inputs is not run again (scripts/lane-reuse.py, lane
+# `shipped`).
 shipped_tests() {
-  local binary line args run=(cargo test)
+  local binary line run=(cargo test) state="$GATE_LANE_STATE_DIR/shipped" items=()
+  declare -A features=()
   if cargo nextest --version > /dev/null 2>&1; then
     run=(cargo nextest run --no-tests=fail)
   fi
   for binary in orion-bin orion-recovery-bin; do
     line="$(scripts/shipped-features.py "$binary" orion-comm-app)" || return 1
-    read -ra args <<< "$line"
-    echo "    orion-comm-app as $binary builds it: ${args[*]}"
-    "${run[@]}" -p orion-comm-app "${args[@]}" || return 1
-    echo "    $binary alone"
-    "${run[@]}" -p "$binary" || return 1
+    features[$binary]="$line"
+    items+=("orion-comm-app $line" "$binary")
   done
+  scripts/lane-reuse.py plan shipped "$state" "${items[@]}"
+  for binary in orion-bin orion-recovery-bin; do
+    local args=()
+    read -ra args <<< "${features[$binary]}"
+    lane_item "$state" "orion-comm-app ${features[$binary]}" "orion-comm-app as $binary builds it: ${args[*]}" \
+      "${run[@]}" -p orion-comm-app "${args[@]}"
+    lane_item "$state" "$binary" "$binary alone" "${run[@]}" -p "$binary"
+  done
+  scripts/lane-reuse.py status shipped "$state" > "$state.status"
 }
 
 # Every filter in .config/nextest.toml (a priority, a test group) matches a test: a test renamed
@@ -274,11 +326,19 @@ shipped_tests() {
 # gives for the binaries the tests just ran; nothing to check without nextest.
 test_filters() {
   if cargo nextest --version > /dev/null 2>&1; then
-    local listing
+    local state="$GATE_LANE_STATE_DIR/tests" fresh="" listing run=()
     listing="$(mktemp)"
-    cargo nextest list --workspace --all-features --message-format json > "$listing"
+    mapfile -t run < <(awk -F'\t' '$3 == "run" {print "-p"; print $1}' "$state")
+    if [ "${#run[@]}" -gt 0 ]; then
+      fresh="$(mktemp)"
+      cargo nextest list "${run[@]}" --all-features --message-format json > "$fresh"
+    fi
+    # Those that ran, as listed now; those reused, as listed when they last ran.
+    scripts/lane-reuse.py listing "$state" ${fresh:+"$fresh"} "$listing"
     scripts/check-test-filters.py "$listing"
-    rm -f "$listing"
+    # What ran was built only from what its key holds.
+    [ -z "$fresh" ] || scripts/lane-reuse.py depinfo "$state" "$fresh"
+    rm -f "$listing" ${fresh:+"$fresh"}
   fi
 }
 
@@ -302,7 +362,7 @@ fi
 
 # The code passed before: only what reads the notes runs, and the tree is stamped. Not a pass
 # 3 days old or more: what the machine has (its compilers, the programs tests run) is no part
-# of a code key, so a pass stands for as long as a lane's reuse does (scripts/lane-reuse.py).
+# of a code key. The gate then runs, and each lane's keys, which hold those, say what to redo.
 if [ -z "$part" ] && [ -n "$checked_tree" ] && [ -n "$(find "$code_stamp" -mmin -4320 2> /dev/null)" ]; then
   if [ -e "$tree_stamp" ]; then
     echo "this tree passed before: nothing changed, nothing to run"
@@ -442,13 +502,39 @@ device_size() {
   scripts/lane-reuse.py status devices "$state" > "$state.status"
 }
 
+# The keys' self-test (scripts/lane-reuse.py --self-test): each kind of input changed in a copy
+# of the tree moves a key. Its result is known while the scripts that make keys are the same, so
+# it runs when one of them changed since it last passed here.
+keys_self_test() {
+  local proved
+  proved="$(git rev-parse --path-format=absolute --git-common-dir)/orion-lane-records/self-test-$(cat scripts/lane-reuse.py scripts/size-key.py scripts/gate.sh | sha256sum | cut -c1-16)"
+  if [ -f "$proved" ]; then
+    echo "    passed before on these scripts"
+    return 0
+  fi
+  scripts/lane-reuse.py --self-test
+  mkdir -p "$(dirname "$proved")"
+  touch "$proved"
+}
+
+# Every fuzz target for its short budget, unless that ran before on exactly these inputs
+# (scripts/lane-reuse.py, lane `fuzz`): the same targets, built from the same code, given the
+# same seconds.
+fuzz_short() {
+  local state="$GATE_LANE_STATE_DIR/fuzz"
+  scripts/lane-reuse.py plan fuzz "$state" "fuzz-short 3"
+  lane_item "$state" "fuzz-short 3" "every target, 3 s each" scripts/fuzz-short.sh 3
+  scripts/lane-reuse.py status fuzz "$state" > "$state.status"
+}
+
 # The functions a step runs in a shell of its own (`bounded`), and what they call.
-export -f lockfile tests clippy_all shipped_tests test_filters other_systems timed lane_item device_size
+export -f lockfile members keys_self_test tests clippy_all shipped_tests fuzz_short test_filters other_systems timed lane_item device_size
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   main lockfile 8:2 lockfile
   main format 12:3 cargo fmt --all --check
+  main "the lane keys' self-test" 25:12 keys_self_test
 
   # Beside the rest, each in target directories of its own. The size gate goes last of all
   # when a crate the shipped files hold changes: each of its builds ends in a fat-LTO link of one
@@ -484,6 +570,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   main tests 630:647 tests
   main "test filters" 8:6 test_filters
   main "nothing built reads the gate's own variables" 5:1 scripts/lane-reuse.py own-vars
+  main "tests read only what their key holds" 10:5 scripts/lane-reuse.py reads
   main "the check compiled out" 17:17 cargo test -q -p orion-check --no-default-features --lib
   # In this shell, where the lanes are its children: each step in them has its own bound.
   if [ -z "$part" ] || [ "$part" = main ]; then
@@ -493,7 +580,10 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   # installed. Alone, last: a target's budget is time, so what runs beside it would cut how
   # much it tries.
   if [ -d testing/fuzz ] && command -v cargo-fuzz > /dev/null && rustup toolchain list | grep -q '^nightly'; then
-    main "fuzz, short budget" 148:264 scripts/fuzz-short.sh
+    main "fuzz, short budget" 148:264 fuzz_short
+  elif [ -z "${dropped[fuzz]:-}" ]; then
+    # Not passed, if it could not run: the line says so, and a release refuses it.
+    dropped[fuzz]="no cargo-fuzz or nightly here"
   fi
 else
   echo "no crates yet"
@@ -506,7 +596,7 @@ fi
 # What each lane did: passed, passed with some items reused (`passed(K-of-N-reused)`), or not
 # run, and why. The commit carries this line; the stamp holds it, for scripts/push.sh to check.
 lanes_line="Gate-Lanes: main=passed"
-for name in clippy shipped matrix other-systems size devices; do
+for name in tests clippy shipped matrix other-systems size devices fuzz; do
   if [ -n "${dropped[$name]:-}" ]; then
     lanes_line+=" $name=not-run(${dropped[$name]// /-})"
   elif [ -f "$GATE_LANE_STATE_DIR/$name.status" ]; then

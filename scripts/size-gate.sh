@@ -37,10 +37,12 @@
 # SHA-256 are held to today's limit, and the output says it was reused and from which key. The
 # bytes do not depend on the worktree's path, so a key measured in one worktree holds in
 # another (a seeded target directory carries the records). A key that misses an input cannot
-# hide for long: at least once a day, with --measure, or with SIZE_GATE_MEASURE=1 (CI, every
-# run), everything is built and measured, each result is checked against its record (a
+# hide for long: with --measure, or with SIZE_GATE_MEASURE=1 (CI, every run, on every push),
+# everything is built and measured, each result is checked against its record (a
 # difference fails: the key missed an input), and liborion_c.so is built a second time from a
-# copy of the source at another path and must come out byte for byte the same.
+# copy of the source at another path and must come out byte for byte the same. The gate here
+# makes no full measurement of its own for a day gone by: it must end within a minute at any
+# load (the one-minute rule, 2026-11-24), and CI makes one on every push.
 set -euo pipefail
 # Never incremental, whatever the caller set: the bytes measured are of a build made whole, as it ships.
 export CARGO_INCREMENTAL=0
@@ -134,8 +136,6 @@ BOARDS=(
     "armv7-unknown-linux-musleabihf 2810000          5350000   release"
     "riscv64gc-unknown-linux-musl   3040000          5690000   release"
 )
-# How long a full measurement holds before the gate makes another, in seconds.
-MEASURE_EVERY=86400
 
 # judge <label> <size> <limit> <static> <how>: holds a size to its limit, and a board's file
 # (static: yes or no; `-` for this machine) to being static. Prints the line; fails if either fails.
@@ -278,12 +278,6 @@ lanes="$target_dir/size-gate"
 store="$lanes/store"
 mkdir -p "$store"
 last="$store/last-measure"
-if [ "$measure" = 0 ]; then
-    if [ ! -f "$last" ] || [ $(($(date +%s) - $(cat "$last"))) -ge "$MEASURE_EVERY" ]; then
-        echo "    no full measurement in the last $((MEASURE_EVERY / 3600)) h: measuring everything"
-        measure=1
-    fi
-fi
 results=$(mktemp -d)
 trap 'rm -rf "$results"' EXIT
 # The self-test, beside the builds: when measuring, and whenever this script or the key's has

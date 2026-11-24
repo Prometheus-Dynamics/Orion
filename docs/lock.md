@@ -632,6 +632,8 @@ what to change.
 - **I109.** The gate and the push guard compare code keys (every file but the notes); new gate
   parts `clippy` and `shipped`; `Gate-Lanes:` names both. No interface changes; no wire changes;
   level 7.
+- **I110.** The tests, clippy, the shipped builds and the short fuzz run are reused by content
+  key; `Gate-Lanes:` names `tests` and `fuzz`. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
