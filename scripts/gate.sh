@@ -96,21 +96,34 @@ bounded() {
 
 # step <label> <slowest seconds>:<slowest CPU seconds> <command...>
 step() {
-  local label="$1" start
+  local label="$1" start status
   echo "==> $label"
   start=$SECONDS
+  # Run plainly, then its status kept by hand: under `set -e` a failure ends the gate here; where
+  # a caller has `-e` ignored, the time printed after must not stand for the step's status.
   bounded "$@"
+  status=$?
   echo "    $label: $((SECONDS - start)) s"
+  return "$status"
 }
 
 # A part of a bounded step, timed: its bound is the step's.
 timed() {
-  local label="$1" start
+  local label="$1" start status
   shift
   echo "==> $label"
   start=$SECONDS
-  "$@"
+  # A function in a shell of its own with `-e` on, as `bounded` runs one: where a caller has
+  # `-e` ignored, it would be ignored inside the function too, and its last command alone
+  # would say how it went.
+  if declare -F "$1" > /dev/null; then
+    bash -c 'set -euo pipefail; "$@"' "$label" "$@"
+  else
+    "$@"
+  fi
+  status=$?
   echo "    $label: $((SECONDS - start)) s"
+  return "$status"
 }
 
 # A step of the main part: run unless the gate was asked for a lane alone.
@@ -136,8 +149,17 @@ once() {
     echo "    passed before on these files: not run again"
     return 0
   fi
-  # Only a pass is kept: a failure returns its status, and nothing is written.
-  "$@" || return
+  # Only a pass is kept: a failure returns its status, and nothing is written. Run plainly, not
+  # as `"$@" || return`, which would have `-e` ignored inside a function run so.
+  # A function in a shell of its own with `-e` on, as `timed` runs one.
+  local status
+  if declare -F "$1" > /dev/null; then
+    bash -c 'set -euo pipefail; "$@"' once "$@"
+  else
+    "$@"
+  fi
+  status=$?
+  [ "$status" -eq 0 ] || return "$status"
   mkdir -p "${stamp%/*}"
   touch "$stamp"
 }
@@ -218,21 +240,28 @@ lane_steps() {
       done
       [ "$#" -gt 0 ] && shift
       echo "==> $label (beside the rest)"
-      local start=$SECONDS
+      local start=$SECONDS status
       bounded "$label" "$slowest" "${command[@]}"
+      status=$?
+      # A red step ends its lane with its status, `-e` or not: no later step runs, and the
+      # lane's status is never the last step's alone.
+      [ "$status" -eq 0 ] || exit "$status"
       echo "    $label: $((SECONDS - start)) s"
     done
   )
 }
 
 # Waits for every lane, prints what each said, and fails if one did.
+# Timed here, not by `timed`: it waits for this shell's children, so it runs in this shell.
 join_lanes() {
-  local failed=0 i
+  local failed=0 i start=$SECONDS
+  echo "==> the steps beside"
   for i in "${!lane_pids[@]}"; do
     wait "${lane_pids[$i]}" || failed=1
     cat "$lane_logs/${lane_names[$i]}"
   done
   lane_pids=()
+  echo "    the steps beside: $((SECONDS - start)) s"
   return "$failed"
 }
 
@@ -407,6 +436,9 @@ if [ -z "$part" ] && [ -n "$checked_tree" ] && [ -n "$(find "$code_stamp" -mmin 
   exit 0
 fi
 
+# The gate's own wrappers, on planted failures: a red command anywhere fails its lane or step,
+# and nothing is recorded as passed after one (scripts/gate-self-test.sh).
+main "the gate's wrappers' self-test" 6:3 once scripts/gate.sh scripts/gate-self-test.sh -- scripts/gate-self-test.sh
 main "push guard" 3:1 once scripts/push.sh scripts/code-key.sh -- scripts/push.sh --self-test
 # The target directory is this worktree's own: one built from another worktree's files can
 # hold crates cargo takes as fresh for sources that are not these.
@@ -428,6 +460,9 @@ bounds_refuse() {
       { echo "a scale of '$scale': exit $status" >&2; return 1; }
   done
 }
+# Exported: `timed` runs a function in a shell of its own.
+export STALL_SECONDS
+export -f bounded bounds_refuse
 if [ -z "$part" ] || [ "$part" = main ]; then
   timed "steps without a bound refuse" bounds_refuse
 fi
@@ -501,7 +536,11 @@ lane_item() {
     echo "    $label: reused"
     return 0
   fi
+  local status
   timed "$label" "$@"
+  status=$?
+  # Recorded only once it passed.
+  [ "$status" -eq 0 ] || return "$status"
   scripts/lane-reuse.py record "$state" "$item"
 }
 
@@ -603,7 +642,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   main "the check compiled out" 17:17 cargo test -q -p orion-check --no-default-features --lib
   # In this shell, where the lanes are its children: each step in them has its own bound.
   if [ -z "$part" ] || [ "$part" = main ]; then
-    timed "the steps beside" join_lanes
+    join_lanes
   fi
   # The stable-toolchain garbage test always runs. These go deeper where the tools are
   # installed. Alone, last: a target's budget is time, so what runs beside it would cut how

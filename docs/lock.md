@@ -644,6 +644,11 @@ what to change.
   no wire changes; level 7.
 - **I115.** The tests' keys hold the files outside the crates only for packages that may reach
   them. No interface changes; no wire changes; level 7.
+- **I116.** Each gate wrapper keeps its command's status by hand, not by `set -e`: a red
+  command fails its step and its lane wherever it is called, a red lane step ends its lane, and
+  nothing is recorded or stamped as passed after one. `scripts/gate-self-test.sh` proves it
+  on planted failures, called as the gate calls them and where `-e` is ignored.
+  No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

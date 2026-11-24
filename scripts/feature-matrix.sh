@@ -62,7 +62,7 @@ for ((shard = 0; shard < shards; shard++)); do
 done
 failed=0
 for ((shard = 0; shard < shards; shard++)); do
-  wait "${pids[$shard]}" || true
+  wait "${pids[$shard]}" || failed=$((failed + 1))
   cat "$logs/$shard.out"
   failed=$((failed + $(cat "$logs/$shard.failed" 2> /dev/null || echo 1)))
 done
