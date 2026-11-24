@@ -321,8 +321,17 @@ def run(bound, label, command, cpu=None, stall=None):
                 return 127
             group = child.pid
             started = time.monotonic()
-            copier.start()
-            watcher.start()
+            # A bound or a stop raised while a thread starts leaves Python's thread table broken
+            # and this script dead with the step still running: on a starved machine a short
+            # bound can land there. Held until both have started, then raised here. Not before
+            # the step starts: it would inherit them held.
+            held = {signal.SIGALRM, signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
+            signal.pthread_sigmask(signal.SIG_BLOCK, held)
+            try:
+                copier.start()
+                watcher.start()
+            finally:
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, held)
             status = None
             while status is None:
                 ended, raw = os.waitpid(-1, 0)
@@ -482,6 +491,28 @@ def self_test():
                 pass
         return False
 
+    def tree(root):
+        """ROOT and every process under it, now."""
+        todo, seen = [root], []
+        while todo:
+            pid = todo.pop()
+            seen.append(pid)
+            try:
+                for task in os.listdir(f"/proc/{pid}/task"):
+                    with open(f"/proc/{pid}/task/{task}/children") as file:
+                        todo.extend(int(child) for child in file.read().split())
+            except OSError:
+                pass
+        return seen
+
+    def waited_runnable(pid):
+        """Seconds PID has spent ready to run but not running (its schedstat's second field)."""
+        try:
+            with open(f"/proc/{pid}/schedstat") as file:
+                return int(file.read().split()[1]) / 1e9
+        except (OSError, IndexError, ValueError):
+            return 0.0
+
     def one(name, bound, script, stopped=False):
         start = time.monotonic()
         process = subprocess.Popen(
@@ -504,10 +535,30 @@ def self_test():
             # before, while a loaded machine still starts it, would find no handler there
             # (docs/flakes.md).
             process.send_signal(signal.SIGTERM)
+        # How long the case's processes were kept waiting by a busy machine: a case is held to
+        # its seconds of the machine it was given, not of the clock, so the self-test says the
+        # same thing at any load (docs/flakes.md). Each process's wait, the longest of them.
+        # Counted from the case's start: a process's first reading is its wait before then.
+        first, waits = {}, {}
+        done = threading.Event()
+
+        def sample():
+            while not done.is_set():
+                for pid in tree(process.pid):
+                    now = waited_runnable(pid)
+                    first.setdefault(pid, now)
+                    waits[pid] = max(waits.get(pid, 0.0), now - first[pid])
+                done.wait(0.01)
+
+        sampler = threading.Thread(target=sample)
+        sampler.start()
         # Read to the end of the output: this is what blocks if an orphan holds it.
         output = process.stdout.read().decode(errors="replace")
         status = process.wait()
-        results[name] = (status, time.monotonic() - start, output)
+        took = time.monotonic() - start
+        done.set()
+        sampler.join()
+        results[name] = (status, took, max(waits.values(), default=0.0), output)
 
     threads = [
         threading.Thread(target=one, args=(name, bound, script))
@@ -525,11 +576,11 @@ def self_test():
     for name, (_, _, want, most, holds) in cases.items():
         if name not in results:
             continue
-        status, took, output = results[name]
+        status, took, kept, output = results[name]
         if status != want:
             failures.append(f"{name}: exit {status}, not {want}: {output!r}")
-        if took > most:
-            failures.append(f"{name}: took {took:.1f} s, more than {most} s")
+        if took - kept > most:
+            failures.append(f"{name}: took {took:.1f} s, {kept:.1f} s of it kept waiting, more than {most} s")
         if holds not in output:
             failures.append(f"{name}: output lacks {holds!r}: {output!r}")
     def says(pid):

@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [main, matrix, other-systems, size, devices]
+        part: [main, clippy, shipped, matrix, other-systems, size, devices]
     name: gate (${{ matrix.part }})
     runs-on: ubuntu-latest
     steps:

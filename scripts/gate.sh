@@ -3,7 +3,8 @@
 #
 #   scripts/gate.sh                 everything; stamps the tree for scripts/push.sh if it passes
 #   scripts/gate.sh --part <part>   one part, and no stamp: `main` (every step not in a lane), or
-#                                   a lane: `matrix`, `other-systems`, `size`, `devices`
+#                                   a lane: `clippy`, `shipped`, `matrix`, `other-systems`,
+#                                   `size`, `devices`
 #   scripts/gate.sh --drop LANE:WHY a lane not run, recorded so (`not-run(WHY)`); a lane behind
 #                                   (scripts/lane-reuse.py behind) cannot be dropped
 #
@@ -13,14 +14,19 @@
 # (scripts/lane-reuse.py: the feature matrix's builds, the no_std and other-system checks, the
 # device sizes); a lane behind runs in full. The tree's stamp holds what each lane did, the
 # `Gate-Lanes:` line the commit carries (scripts/push.sh checks it).
+#
+# Nothing whose result is known runs again. A tree whose code key (scripts/code-key.sh: every
+# file but the notes) passed before builds and tests the same, so on one the gate checks only
+# what reads notes (boundaries, links, the PR list) and stamps the tree; on a tree that passed
+# whole, it says so and runs nothing.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 part=""
 declare -A dropped=()
-usage="usage: scripts/gate.sh [--part main|matrix|other-systems|size|devices] [--drop LANE:WHY]..."
+usage="usage: scripts/gate.sh [--part main|clippy|shipped|matrix|other-systems|size|devices] [--drop LANE:WHY]..."
 while [ "$#" -gt 0 ]; do
   case "$1 ${2:-}" in
-    "--part main" | "--part matrix" | "--part other-systems" | "--part size" | "--part devices")
+    "--part main" | "--part clippy" | "--part shipped" | "--part matrix" | "--part other-systems" | "--part size" | "--part devices")
       part="$2"
       ;;
     --drop\ matrix:?* | --drop\ other-systems:?* | --drop\ size:?* | --drop\ devices:?*)
@@ -238,6 +244,12 @@ tests() {
   fi
 }
 
+# Every crate linted, tests included. A function: a lane takes `--` between its steps, so the
+# lint's own `--` cannot be written in one.
+clippy_all() {
+  cargo clippy --workspace --all-targets --all-features -- -D warnings
+}
+
 # The comm core's tests again, built as each shipped binary builds it, and those binaries' own
 # tests alone, so with only what they ship. `--all-features` above is no build that ships: a
 # test that holds only with every feature on, or a part that needs one the binary leaves out,
@@ -283,6 +295,28 @@ tree_now() {
 checked_tree=""
 if git rev-parse --git-dir > /dev/null 2>&1; then
   checked_tree="$(tree_now)"
+  stamps="$(git rev-parse --git-dir)/orion-gate-passed"
+  code_stamp="$stamps/code-$(scripts/code-key.sh "$checked_tree")"
+  tree_stamp="$stamps/tree-$checked_tree"
+fi
+
+# The code passed before: only what reads the notes runs, and the tree is stamped. Not a pass
+# 3 days old or more: what the machine has (its compilers, the programs tests run) is no part
+# of a code key, so a pass stands for as long as a lane's reuse does (scripts/lane-reuse.py).
+if [ -z "$part" ] && [ -n "$checked_tree" ] && [ -n "$(find "$code_stamp" -mmin -4320 2> /dev/null)" ]; then
+  if [ -e "$tree_stamp" ]; then
+    echo "this tree passed before: nothing changed, nothing to run"
+  else
+    echo "the code passed before (key ${code_stamp##*/code-}): only what reads the notes runs"
+    for check in scripts/check-boundaries.sh scripts/check-links.sh "scripts/pr-status.py --offline" "scripts/code-key.sh --check"; do
+      timed "$check" $check
+    done
+    [ "$(tree_now)" = "$checked_tree" ] || { echo "the tree changed while the gate ran: not stamped" >&2; exit 1; }
+    : > "$tree_stamp"
+  fi
+  cat "$code_stamp"
+  echo "gate passed"
+  exit 0
 fi
 
 main "push guard" 3:1 scripts/push.sh --self-test
@@ -315,6 +349,7 @@ if [ -x scripts/check-boundaries.sh ]; then
   main boundaries 6:2 scripts/check-boundaries.sh
   main boundaries-self-test 12:2 scripts/check-boundaries.sh --self-test
 fi
+main "notes are read by no build" 1:1 scripts/code-key.sh --check
 main "test filters self-test" 1:1 scripts/check-test-filters.py --self-test
 main "test files" 1:1 scripts/check-test-filters.py --files
 # Every PR brief reads: an id for a name, a status, and needs that name briefs. AGENTS.md sends
@@ -408,7 +443,7 @@ device_size() {
 }
 
 # The functions a step runs in a shell of its own (`bounded`), and what they call.
-export -f lockfile tests shipped_tests test_filters other_systems timed lane_item device_size
+export -f lockfile tests clippy_all shipped_tests test_filters other_systems timed lane_item device_size
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
@@ -422,6 +457,12 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   # gates after a change to the comm core, at load 29-83: 125 s, 91 s with this (I21).
   behind=10
   export behind
+  # Not behind: these were the main part's slowest steps after the tests, one after another. Each
+  # builds in a target directory of its own, as the other lanes do, so none waits on another's
+  # lock on it.
+  lane clippy clippy 163:371 env CARGO_TARGET_DIR="$target_dir/clippy" bash -c 'set -euo pipefail; clippy_all' --
+  lane shipped "the shipped builds' tests" 300:349 env CARGO_TARGET_DIR="$target_dir/shipped" \
+    bash -c 'set -euo pipefail; shipped_tests' --
   # Every crate with optional features: none, each alone, all.
   lane matrix "feature matrix" 605:1535 nice -n "$behind" scripts/feature-matrix.sh
   lane other-systems "no_std and the client on other systems" 416:157 other_systems
@@ -440,9 +481,7 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   fi
   [ "${#devices[@]}" -gt 0 ] && lane devices "${devices[@]}"
 
-  main clippy 163:371 cargo clippy --workspace --all-targets --all-features -- -D warnings
   main tests 630:647 tests
-  main "the shipped builds' tests" 300:349 shipped_tests
   main "test filters" 8:6 test_filters
   main "nothing built reads the gate's own variables" 5:1 scripts/lane-reuse.py own-vars
   main "the check compiled out" 17:17 cargo test -q -p orion-check --no-default-features --lib
@@ -467,7 +506,7 @@ fi
 # What each lane did: passed, passed with some items reused (`passed(K-of-N-reused)`), or not
 # run, and why. The commit carries this line; the stamp holds it, for scripts/push.sh to check.
 lanes_line="Gate-Lanes: main=passed"
-for name in matrix other-systems size devices; do
+for name in clippy shipped matrix other-systems size devices; do
   if [ -n "${dropped[$name]:-}" ]; then
     lanes_line+=" $name=not-run(${dropped[$name]// /-})"
   elif [ -f "$GATE_LANE_STATE_DIR/$name.status" ]; then
@@ -478,9 +517,9 @@ for name in matrix other-systems size devices; do
 done
 if [ -n "$checked_tree" ]; then
   if [ "$(tree_now)" = "$checked_tree" ]; then
-    stamps="$(git rev-parse --git-dir)/orion-gate-passed"
     mkdir -p "$stamps"
-    echo "$lanes_line" > "$stamps/$checked_tree"
+    echo "$lanes_line" > "$code_stamp"
+    : > "$tree_stamp"
   else
     echo "the tree changed while the gate ran: not stamped, so it cannot be pushed" >&2
     exit 1

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Pushes only what the gate passed on. scripts/gate.sh, when it passes, stamps the exact tree it
+# Pushes only what the gate passed on. scripts/gate.sh, when it passes, stamps the tree it
 # checked (tracked and new files, as `git add -A` would commit them, and only if nothing changed
-# while it ran). This refuses unless every commit to be pushed has a stamped tree.
+# while it ran) twice: by its code key (scripts/code-key.sh: the tree without the notes) and by
+# the whole tree. This refuses unless every commit to be pushed has a stamped code key, and the
+# tip's whole tree is stamped: a commit that changed only notes needs no gate of its own, but
+# the notes at the tip were checked (the gate, on a code key that already passed, checks only
+# the notes, in seconds).
 #
 # A working branch `pr/<id>` is not landed, so it pushes without stamps: the landing gate, run on
 # the merged tree before the push to `next`, is the proof, and a worker does not repeat it. Every
@@ -32,12 +36,17 @@ if [ "${1:-}" = "--self-test" ]; then
   [ -z "$(git --git-dir="$work/remote.git" rev-parse -q --verify refs/heads/next || true)" ] \
     || { echo "self-test FAILED: the remote got the branch"; exit 1; }
   # Stamped: pushed.
-  mkdir -p "$(stamps)" && touch "$(stamps)/$(git rev-parse 'HEAD^{tree}')"
+  stamp() {
+    mkdir -p "$(stamps)"
+    printf '%s' "${1:-}" > "$(stamps)/code-$("$here/code-key.sh" HEAD)"
+    : > "$(stamps)/tree-$(git rev-parse 'HEAD^{tree}')"
+  }
+  stamp
   "$here/push.sh" origin next > "$work/out" 2>&1 || { echo "self-test FAILED: a stamped commit was refused"; cat "$work/out"; exit 1; }
   # Two new commits, only the last stamped: refused, since the first did not pass.
   echo two > file && git commit -qam two
   echo three > file && git commit -qam three
-  touch "$(stamps)/$(git rev-parse 'HEAD^{tree}')"
+  stamp
   if "$here/push.sh" origin next > "$work/out" 2>&1; then
     echo "self-test FAILED: a commit the gate never passed went with a later one"; exit 1
   fi
@@ -50,13 +59,28 @@ if [ "${1:-}" = "--self-test" ]; then
   # A stamp that holds the gate's line: the commit must carry it.
   git fetch -q origin next && git reset -q --hard FETCH_HEAD
   echo five > file && git commit -qam five
-  echo "Gate-Lanes: main=passed matrix=passed(3-of-4-reused)" > "$(stamps)/$(git rev-parse 'HEAD^{tree}')"
+  stamp "Gate-Lanes: main=passed matrix=passed(3-of-4-reused)"
   if "$here/push.sh" origin next > "$work/out" 2>&1; then
     echo "self-test FAILED: a commit without the gate's line was pushed"; exit 1
   fi
   grep -q "lacks the gate's line" "$work/out" || { echo "self-test FAILED: wrong refusal"; cat "$work/out"; exit 1; }
   git commit -q --amend -m "five" -m "Gate-Lanes: main=passed matrix=passed(3-of-4-reused)"
+  stamp "Gate-Lanes: main=passed matrix=passed(3-of-4-reused)"
   "$here/push.sh" origin next > "$work/out" 2>&1 || { echo "self-test FAILED: a commit with the gate's line was refused"; cat "$work/out"; exit 1; }
+  # A commit of notes alone: no gate of its own and no line, but the tip's notes must be checked.
+  mkdir -p docs && echo note > docs/note.md && git add -A && git commit -qm notes
+  if "$here/push.sh" origin next > "$work/out" 2>&1; then
+    echo "self-test FAILED: notes never checked were pushed"; exit 1
+  fi
+  grep -q "the notes at the tip were not checked" "$work/out" || { echo "self-test FAILED: wrong refusal"; cat "$work/out"; exit 1; }
+  : > "$(stamps)/tree-$(git rev-parse 'HEAD^{tree}')"
+  "$here/push.sh" origin next > "$work/out" 2>&1 || { echo "self-test FAILED: a commit of notes alone was refused"; cat "$work/out"; exit 1; }
+  # A change to code beside the notes is code: refused without its own gate.
+  echo six > file && echo again > docs/note.md && git commit -qam six
+  : > "$(stamps)/tree-$(git rev-parse 'HEAD^{tree}')"
+  if "$here/push.sh" origin next > "$work/out" 2>&1; then
+    echo "self-test FAILED: a code change went with notes, ungated"; exit 1
+  fi
   echo "push guard self-test passed"
   exit 0
 fi
@@ -74,15 +98,20 @@ else
 fi
 missing=0
 for commit in $(git rev-list "$range"); do
-  tree="$(git rev-parse "$commit^{tree}")"
-  if [ ! -e "$(stamps)/$tree" ]; then
+  code="$(stamps)/code-$("$here/code-key.sh" "$commit")"
+  if [ ! -e "$code" ]; then
     echo "refused: the gate has not passed on $(git log -1 --format='%h %s' "$commit")" >&2
     missing=1
-  elif [ -s "$(stamps)/$tree" ] && ! git log -1 --format=%B "$commit" | grep -qxF "$(cat "$(stamps)/$tree")"; then
-    # What the lanes did goes with the commit, as the gate said it.
-    echo "refused: $(git log -1 --format='%h' "$commit") lacks the gate's line: $(cat "$(stamps)/$tree")" >&2
+  elif [ -s "$code" ] && [ "$("$here/code-key.sh" "$commit")" != "$("$here/code-key.sh" "$commit^" 2> /dev/null || true)" ] &&
+    ! git log -1 --format=%B "$commit" | grep -qxF "$(cat "$code")"; then
+    # What the lanes did goes with the commit that changed the code, as the gate said it.
+    echo "refused: $(git log -1 --format='%h' "$commit") lacks the gate's line: $(cat "$code")" >&2
     missing=1
   fi
 done
+if [ "$missing" -eq 0 ] && [ ! -e "$(stamps)/tree-$(git rev-parse 'HEAD^{tree}')" ]; then
+  echo "refused: the notes at the tip were not checked" >&2
+  missing=1
+fi
 [ "$missing" -eq 0 ] || { echo "run scripts/gate.sh on exactly that tree, then commit it" >&2; exit 1; }
 exec git push "$remote" "HEAD:refs/heads/$branch"

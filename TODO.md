@@ -272,6 +272,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I100](docs/prs/I100.md) The boards a board hears on its network, for a client: gap 6 (wave 19; needs I101)
 - [x] [I102](docs/prs/I102.md) The shared-memory ring crates come from the device library at 214c0ca7 (wave 19; needs I100)
 - [x] [I104](docs/prs/I104.md) A lease is never taken before its holder was quiet long enough (wave 19; needs I102)
+- [x] [I109](docs/prs/I109.md) Nothing known runs again; clippy and the shipped builds beside the tests; the gate's tools in git (wave 19; needs I104)
 - [ ] [I103](docs/prs/I103.md) Each network listener says what it is doing; a root set wrong is refused alone; a shell with security off over the network; the `mut` warning (wave 19; needs I104)
 - [ ] [I105](docs/prs/I105.md) V6-LINK-LOCAL-WAY-IN: a board is found and reached over link-local IPv6 (wave 19; needs I103)
 - [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I105)

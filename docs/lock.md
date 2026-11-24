@@ -629,6 +629,9 @@ what to change.
 - **I104.** A lease with no end is never taken before its holder was quiet `leases.quiet_ms`; it
   could be up to about 2 ms early (**Change**). The `quiet_ms` a service is told is rounded down
   (**Change**: it could read 1 ms long). No interface changes; no wire changes; level 7.
+- **I109.** The gate and the push guard compare code keys (every file but the notes); new gate
+  parts `clippy` and `shipped`; `Gate-Lanes:` names both. No interface changes; no wire changes;
+  level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

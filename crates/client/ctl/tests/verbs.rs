@@ -660,8 +660,9 @@ fn what_is_not_understood_is_said_before_any_board_is_asked() {
     let (code, out, err) = run(&["help".to_owned()]);
     assert_eq!((code, err.as_str()), (0, ""));
     assert_eq!(out.trim_end(), orion_ctl::USAGE);
-    // Understood, and nothing answers there: not done, and why.
-    let words: Vec<String> = format!("{nowhere} node show")
+    // Understood, and nothing answers there: not done, and why. The patience is short: what is
+    // said when it runs out does not depend on how long it was.
+    let words: Vec<String> = format!("{nowhere} --timeout 200 node show")
         .split_whitespace()
         .map(str::to_owned)
         .collect();

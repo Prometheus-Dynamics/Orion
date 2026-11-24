@@ -1,7 +1,8 @@
 # The tests that take longest start first. The run takes as long as its slowest test, or longer
 # when that test starts last. Measured in a gate at I18: the first two took 15-22 s, the next six
-# 5-12 s. A test's priority changes only when it starts, never what it checks. A filter names a
-# test by its whole name in its binary (`<file>::<test>` where a crate's test files share one), and
+# 5-12 s; the list taken again from the medians of 117 gates at I109. A test's priority changes
+# only when it starts, never what it checks. A filter names a test by its whole name in its
+# binary (`<file>::<test>` where a crate's test files share one), and
 # scripts/check-test-filters.py, in the gate, fails a filter that matches no test.
 [[profile.default.overrides]]
 filter = '''
@@ -13,7 +14,10 @@ priority = 100
 [[profile.default.overrides]]
 filter = '''
   test(=comm_core::roles_started_before_orion_wait_for_it_and_flow_when_it_comes)
-  | test(=verbs::workload_put_and_remove)
+  | test(=board::pushes_at_once_past_a_full_outbox_are_paced_not_lost)
+  | test(=board::pushes_through_node_logic_to_a_receiver_all_commit)
+  | test(=namespace::it_answers_defends_follows_its_interface_and_says_goodbye)
+  | test(=announce::the_board_says_what_it_is_keeps_quiet_when_told_and_withholds_what_it_cannot_carry)
   | test(=fetch::file_fetch_says_a_stall_waits_it_out_and_gives_up_only_when_asked)
   | test(=a_file_that_takes_long_to_hash_does_not_cost_the_session)
   | test(=pty::a_link_is_opened_again_for_as_long_as_it_takes)
