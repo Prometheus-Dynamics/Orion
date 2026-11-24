@@ -625,6 +625,7 @@ what to change.
   `orion_files::Target` (**Add**); `SelfStatus::counts`, `Counts` (**Add**). The responder
   asks one question on each interface it announces on. Link-local IPv6 is no longer announced in
   a build that also has `mdns-sd` (**Change**: it was, there only). No wire changes; level 7.
+- **I102.** The `shm-*` pins move to `214c0ca7`. Nothing a program calls changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
