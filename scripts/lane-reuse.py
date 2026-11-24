@@ -277,7 +277,13 @@ class Keys(size_key.Workspace):
             # run, the programs on this machine it may start.
             package = words[0]
             inputs += self.built(self.packages_built([package], dev=True))
-            inputs.append(("outside the crates", self.outside()))
+            # Every file outside the crates, for a package whose sources may reach one; for one
+            # that names none, nothing outside its crates is read, and a script or a page
+            # changed does not run its tests again (reaches_outside).
+            if self.reaches_outside(package):
+                inputs.append(("outside the crates", self.outside()))
+            else:
+                inputs.append(("outside the crates", "never reached"))
             for directory in self.test_reads(package):
                 inputs.extend(self.files(directory))
             if lane == "clippy":
@@ -305,6 +311,34 @@ class Keys(size_key.Workspace):
                 "".join(f"{name}\0{file_digest(os.path.join(ROOT, name))}\0" for name in names).encode()
             )
         return self.outside_cache
+
+    def reaches_outside(self, package):
+        """Whether any Rust source of PACKAGE (library, tests, examples, build script) may reach
+        a file outside the crates at run time: names a path outside them (a top-level entry
+        other than crates/, or `..`), walks up (`.parent()`), finds its own binary or the
+        target (`current_exe`, `CARGO_TARGET_TMPDIR`), or runs cargo. Broad on purpose: a
+        package flagged wrongly only runs its tests more often. What it reads when compiled is
+        held by its `.d` files (`depinfo`)."""
+        if not hasattr(self, "reaching"):
+            self.reaching = {}
+            tops = sorted({
+                name.split("/")[0] for name in self.listed
+                if not name.startswith("crates/") and not NOTE.search(name)
+            })
+            self.reach_tops = tops
+        if package not in self.reaching:
+            home = os.path.relpath(os.path.dirname(self.packages[self.by_name[package]]["manifest_path"]), ROOT)
+            found = False
+            for name, _ in self.files(home):
+                if not name.endswith(".rs"):
+                    continue
+                with open(os.path.join(ROOT, name), errors="replace") as file:
+                    text = file.read()
+                if REACH.search(text) or any(reaches(literal, self.reach_tops) for literal in LITERAL.findall(text)):
+                    found = True
+                    break
+            self.reaching[package] = found
+        return self.reaching[package]
 
     def test_reads(self, package):
         """The directories a package's tests read beyond what they build."""
@@ -495,6 +529,17 @@ def listing(state, fresh, out):
     return 0
 
 
+REACH = re.compile(r'\.parent\(\)|current_exe|CARGO_TARGET_TMPDIR|Command::new\(\s*"cargo"|env!\(\s*"CARGO"\s*\)')
+LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def reaches(literal, tops):
+    """Whether a string in a source names a path outside the crates."""
+    if literal == ".." or "../" in literal or "/.." in literal:
+        return True
+    return any(literal == top or literal.startswith(top + "/") or ("/" + top + "/") in literal for top in tops)
+
+
 READS = re.compile(
     r'#\[path\s*=\s*"([^"]+)"\]|include_(?:str|bytes)!\(\s*"([^"]+)"|CARGO_MANIFEST_DIR"\)\)?\s*\.join\(\s*"([^"]+)"|concat!\(env!\("CARGO_MANIFEST_DIR"\),\s*"([^"]+)"'
 )
@@ -674,7 +719,8 @@ def self_test():
             ("a file of the crate itself", True, lambda: touch("crates/client/ctl/src/lib.rs"), None),
             ("a file of a crate it builds", True, lambda: touch("crates/client/orion/src/lib.rs"), None),
             ("a file of a crate only its tests build", True, lambda: touch("crates/testing/stubs/src/lib.rs"), None),
-            ("a file outside the crates", True, lambda: touch("web/video-example/video.js"), None),
+            # orion-ctl's sources name no path outside its crates: a page changed is not its.
+            ("a file outside the crates, which it never reaches", False, lambda: touch("web/video-example/video.js"), None),
             ("the tests' own settings", True, lambda: touch(".config/nextest.toml", "\n# changed\n"), None),
             ("the gate", True, lambda: touch("scripts/gate.sh", "\n# changed\n"), None),
             ("the root manifest", True, lambda: touch("Cargo.toml", "\n# changed\n"), None),
@@ -701,6 +747,16 @@ def self_test():
                 failures.append(f"{label}: the key {'did not move' if moves else 'moved'}")
             else:
                 print(f"    {label}: {'moved' if moves else 'stayed'}")
+        # A package whose sources reach outside the crates (the browser tests load web/).
+        base = key("tests", "orion-web-tests")
+        undo = touch("web/video-example/video.js")
+        try:
+            if key("tests", "orion-web-tests") == base:
+                failures.append("a file outside the crates, for a package that reaches it: the key did not move")
+            else:
+                print("    a file outside the crates, for a package that reaches it: moved")
+        finally:
+            undo()
         # What a package says its tests read: any crate, for one that reads them all.
         base = key("tests", "orion-stubs")
         undo = touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n")

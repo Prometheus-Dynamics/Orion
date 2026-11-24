@@ -642,6 +642,8 @@ what to change.
   no wire changes; level 7.
 - **I114.** The gate runs at nice 10 throughout (`scripts/work-env.sh`). No interface changes;
   no wire changes; level 7.
+- **I115.** The tests' keys hold the files outside the crates only for packages that may reach
+  them. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

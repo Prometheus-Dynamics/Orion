@@ -278,6 +278,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I112](docs/prs/I112.md) A microcontroller's size builds run beside the others' (wave 19; needs I111)
 - [x] [I113](docs/prs/I113.md) The lanes start with the gate; a self-test of a tool runs when the tool changes (wave 19; needs I112)
 - [x] [I114](docs/prs/I114.md) One nice level for all heavy work (wave 19; needs I113)
+- [x] [I115](docs/prs/I115.md) A script changed runs again only the tests that may read it (wave 19; needs I114)
 - [ ] [I103](docs/prs/I103.md) Each network listener says what it is doing; a root set wrong is refused alone; a shell with security off over the network; the `mut` warning (wave 19; needs I104)
 - [ ] [I105](docs/prs/I105.md) V6-LINK-LOCAL-WAY-IN: a board is found and reached over link-local IPv6 (wave 19; needs I103)
 - [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I105)
