@@ -638,6 +638,8 @@ what to change.
   before). No interface changes; no wire changes; level 7.
 - **I112.** The gate's device size builds run in parallel. No interface changes; no wire
   changes; level 7.
+- **I113.** The gate's lanes start before its checks that build nothing. No interface changes;
+  no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

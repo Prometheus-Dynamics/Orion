@@ -116,6 +116,30 @@ main() {
   fi
 }
 
+# once FILE... -- COMMAND...: COMMAND, unless it passed before on exactly these files, this git
+# and this Python. For the gate's own tools' self-tests: what they test is the files, so with
+# the files the same, the result is known (the one-minute rule: nothing known runs again).
+once() {
+  local files=() hash stamp
+  while [ "$1" != -- ]; do
+    files+=("$1")
+    shift
+  done
+  shift
+  hash="$({ printf '%s\0' "$@" "$(git --version)" "$(python3 --version)"; cat "${files[@]}"; } | sha256sum | cut -c1-16)"
+  stamp="$(git rev-parse --path-format=absolute --git-common-dir)/orion-lane-records/once-$hash"
+  if [ -f "$stamp" ]; then
+    echo "    passed before on these files: not run again"
+    return 0
+  fi
+  # Only a pass is kept: a failure returns its status, and nothing is written.
+  "$@" || return
+  mkdir -p "${stamp%/*}"
+  touch "$stamp"
+}
+# Here, not with the rest below: the first steps run it.
+export -f once
+
 # The tests that make namespaces of their own (interfaces made and taken away; accounts that
 # hold what they should and no more) say so and pass on a machine that cannot make one. The
 # gate's machines can, so here one that could not run fails, saying why. Not ORION_: every
@@ -379,12 +403,12 @@ if [ -z "$part" ] && [ -n "$checked_tree" ] && [ -n "$(find "$code_stamp" -mmin 
   exit 0
 fi
 
-main "push guard" 3:1 scripts/push.sh --self-test
+main "push guard" 3:1 once scripts/push.sh scripts/code-key.sh -- scripts/push.sh --self-test
 # The target directory is this worktree's own: one built from another worktree's files can
 # hold crates cargo takes as fresh for sources that are not these.
 main "target owner self-test" 3:1 scripts/target-owner.sh --self-test
 step "target owner" 20:10 scripts/target-owner.sh "$target_dir" "$PWD"
-main "step bounds self-test" 4:5 scripts/bounded.py --self-test
+main "step bounds self-test" 4:5 once scripts/bounded.py -- scripts/bounded.py --self-test
 # A step with no number, or a scale that is not one, refuses to run.
 bounds_refuse() {
   local number scale status
@@ -402,25 +426,6 @@ bounds_refuse() {
 }
 if [ -z "$part" ] || [ "$part" = main ]; then
   timed "steps without a bound refuse" bounds_refuse
-fi
-
-# Checks that build nothing come first: they fail fastest.
-if [ -x scripts/check-boundaries.sh ]; then
-  main boundaries 6:2 scripts/check-boundaries.sh
-  main boundaries-self-test 12:2 scripts/check-boundaries.sh --self-test
-fi
-main "notes are read by no build" 1:1 scripts/code-key.sh --check
-main "test filters self-test" 1:1 scripts/check-test-filters.py --self-test
-main "test files" 1:1 scripts/check-test-filters.py --files
-# A library is built for its unit tests exactly when it has some: none compiled to run nothing,
-# none marked `test = false` with a test that would never run.
-main "libraries built for their unit tests" 3:2 scripts/workspace.py lib-tests
-# Every PR brief reads: an id for a name, a status, and needs that name briefs. AGENTS.md sends
-# whoever picks up a PR to this list, so it must not rot unseen.
-main "pr list" 1:1 scripts/pr-status.py --offline
-
-if [ -x scripts/check-links.sh ]; then
-  main links 2:1 scripts/check-links.sh
 fi
 
 # The client builds on Windows and macOS as well as Linux. Clippy for each, tests included:
@@ -538,9 +543,8 @@ export -f lockfile members keys_self_test tests clippy_all shipped_tests fuzz_sh
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
+  # Before anything builds: a build not held to the lockfile could write it.
   main lockfile 8:2 lockfile
-  main format 12:3 cargo fmt --all --check
-  main "the lane keys' self-test" 25:12 keys_self_test
 
   # Beside the rest, each in target directories of its own. The size gate goes last of all
   # when a crate the shipped files hold changes: each of its builds ends in a fat-LTO link of one
@@ -572,6 +576,28 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
     devices+=(packaging 6:1 scripts/packaging-check.sh --)
   fi
   [ "${#devices[@]}" -gt 0 ] && lane devices "${devices[@]}"
+
+  # Checks that build nothing: the main part's first steps, while the lanes build. One that
+  # fails ends the gate and its lanes at once, so they still fail first.
+  if [ -x scripts/check-boundaries.sh ]; then
+    main boundaries 6:2 scripts/check-boundaries.sh
+    main boundaries-self-test 12:2 once scripts/check-boundaries.sh -- scripts/check-boundaries.sh --self-test
+  fi
+  main "notes are read by no build" 1:1 scripts/code-key.sh --check
+  main "test filters self-test" 1:1 scripts/check-test-filters.py --self-test
+  main "test files" 1:1 scripts/check-test-filters.py --files
+  # A library is built for its unit tests exactly when it has some: none compiled to run nothing,
+  # none marked `test = false` with a test that would never run.
+  main "libraries built for their unit tests" 3:2 scripts/workspace.py lib-tests
+  # Every PR brief reads: an id for a name, a status, and needs that name briefs. AGENTS.md sends
+  # whoever picks up a PR to this list, so it must not rot unseen.
+  main "pr list" 1:1 scripts/pr-status.py --offline
+
+  if [ -x scripts/check-links.sh ]; then
+    main links 2:1 scripts/check-links.sh
+  fi
+  main format 12:3 cargo fmt --all --check
+  main "the lane keys' self-test" 25:12 keys_self_test
 
   main tests 630:647 tests
   main "test filters" 8:6 test_filters
