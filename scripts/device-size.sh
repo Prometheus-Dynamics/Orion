@@ -63,20 +63,22 @@ mkdir -p "$work"
 failures=0
 measured=0
 
-for target in "${targets[@]}"; do
-    if ! grep -qx "$target" <<<"$installed"; then
-        echo "    $target: not installed here, not measured"
-        continue
-    fi
+# Each target's builds run beside the others' and the firmware's below: each is a string of small
+# builds, every one a single-threaded fat-LTO link, and cargo holds a target directory for one
+# build at a time, so each target has a directory of its own. One after another, the twenty
+# took 78 s on 17.5 CPU-s, waiting (I111). Each prints its lines to a file of its own, read
+# back in order, and its counts on a last line.
+measure_target() {
+    local target="$1" dir="$target_dir/device-$target" failures=0 measured=0
     for variant in "${variants[@]}"; do
         features=()
         [ "$variant" = stream ] || features=(--features "$variant")
-        cargo build --quiet --profile device -p orion-device-probe --target "$target" "${features[@]}"
+        CARGO_TARGET_DIR="$dir" cargo build --quiet --profile device -p orion-device-probe --target "$target" "${features[@]}"
         elf="$work/$target-$variant.elf"
         # Only what the entry points reach is kept, as a firmware's own link keeps it.
         "$tools/rust-lld" -flavor gnu --gc-sections -e orion_probe_poll \
             -u orion_probe_poll -u orion_probe_receive -u orion_probe_transmit -u orion_probe_publish -u orion_probe_boot \
-            -o "$elf" "$target_dir/$target/device/liborion_device_probe.a"
+            -o "$elf" "$dir/$target/device/liborion_device_probe.a"
         read -r text data bss < <("$tools/llvm-size" -B "$elf" | awk 'NR==2 {print $1, $2, $3}')
         flash=$((text + data))
         ram=$((data + bss))
@@ -89,9 +91,40 @@ for target in "${targets[@]}"; do
             echo "    $target $variant: flash $flash (budget $flash_limit), RAM $ram (budget $ram_limit)"
         fi
     done
+    echo "counts $measured $failures"
+}
+probe_out="$(mktemp -d)"
+trap 'rm -rf "$probe_out"' EXIT
+probe_pids=()
+probe_targets=()
+for target in "${targets[@]}"; do
+    if ! grep -qx "$target" <<<"$installed"; then
+        echo "    $target: not installed here, not measured"
+        continue
+    fi
+    measure_target "$target" >"$probe_out/$target" 2>&1 &
+    probe_pids+=("$!")
+    probe_targets+=("$target")
 done
+# The firmware's builds below run while these do; their lines are printed first.
+probe_results() {
+    local i line status
+    for i in "${!probe_pids[@]}"; do
+        status=0
+        wait "${probe_pids[$i]}" || status=$?
+        while IFS= read -r line; do
+            case "$line" in
+                "counts "*) read -r _ m f <<<"$line"; measured=$((measured + m)); failures=$((failures + f)) ;;
+                *) echo "$line" ;;
+            esac
+        done <"$probe_out/${probe_targets[$i]}"
+        if [ "$status" -ne 0 ]; then
+            echo "    FAIL: ${probe_targets[$i]}: its builds failed (status $status)"
+            failures=$((failures + 1))
+        fi
+    done
+}
 
-[ "$measured" -gt 0 ] || echo "    no microcontroller target is installed here: nothing was measured"
 
 # A whole firmware: examples/stm32g4-device, held to its committed baseline
 # (examples/stm32g4-device/size-baseline.txt) per variant.
@@ -123,6 +156,8 @@ g4_variants=(can uart can-hw-crc can-builtin-mem)
 
 if ! grep -qx "$g4" <<<"$installed"; then
     echo "    stm32g4 firmware: $g4 not installed here, not measured"
+    probe_results
+    [ "$measured" -gt 0 ] || echo "    no microcontroller target is installed here: nothing was measured"
     [ "$failures" -eq 0 ]
     exit
 fi
@@ -185,6 +220,9 @@ for v in "${g4_variants[@]}"; do
     fi
     echo "$line"
 done
+
+probe_results
+[ "$measured" -gt 0 ] || echo "    no microcontroller target is installed here: nothing was measured"
 
 if [ -n "${DEVICE_SIZE_UPDATE:-}" ]; then
     {

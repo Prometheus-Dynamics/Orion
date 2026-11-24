@@ -21,9 +21,9 @@
 #
 # An existing target is never moved into a subvolume (a move keeps the files in the old tree):
 # a target is built fresh in one, or copied in with `cp --reflink=always`, which shares the
-# data and costs no space. Removing a subvolume is `rm -rf` of its files; the empty subvolume
-# itself may need root to remove (`btrfs subvolume delete`), unless the filesystem allows its
-# owner to.
+# data and costs no space. Removing a subvolume is `rm -rf` of its files, then `rmdir` of the
+# empty subvolume, which its owner may do (`btrfs subvolume delete` needs root, or the
+# filesystem's user_subvol_rm_allowed, and is refused otherwise).
 set -euo pipefail
 check=no
 if [ "${1:-}" = --check ]; then

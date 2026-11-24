@@ -636,6 +636,8 @@ what to change.
   key; `Gate-Lanes:` names `tests` and `fuzz`. No interface changes; no wire changes; level 7.
 - **I111.** 49 libraries are `[lib] test = false` (no unit tests; their doctests run as
   before). No interface changes; no wire changes; level 7.
+- **I112.** The gate's device size builds run in parallel. No interface changes; no wire
+  changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
