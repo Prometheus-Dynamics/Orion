@@ -640,6 +640,8 @@ what to change.
   changes; level 7.
 - **I113.** The gate's lanes start before its checks that build nothing. No interface changes;
   no wire changes; level 7.
+- **I114.** The gate runs at nice 10 throughout (`scripts/work-env.sh`). No interface changes;
+  no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

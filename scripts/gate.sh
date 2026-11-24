@@ -21,6 +21,10 @@
 # whole, it says so and runs nothing.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# The one nice level for all heavy work (scripts/work-env.sh): everything the gate starts runs
+# at it, nothing lower.
+. scripts/work-env.sh
+at_gate_nice
 part=""
 declare -A dropped=()
 usage="usage: scripts/gate.sh [--part main|clippy|shipped|matrix|other-systems|size|devices] [--drop LANE:WHY]..."
@@ -435,7 +439,6 @@ fi
 # [package.metadata.orion]
 # no_std = true
 other_systems() {
-  renice -n "$behind" -p "$BASHPID" > /dev/null
   export CARGO_TARGET_DIR="$target_dir/other-systems"
   local target crate group client=() packages=() targets=(thumbv7em-none-eabihf riscv32imac-unknown-none-elf)
   mapfile -t no_std_crates < <(grep -l '^no_std = true' crates/*/*/Cargo.toml | xargs -r sed -n 's/^name = "\(.*\)"$/\1/p')
@@ -546,28 +549,22 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   # Before anything builds: a build not held to the lockfile could write it.
   main lockfile 8:2 lockfile
 
-  # Beside the rest, each in target directories of its own. The size gate goes last of all
-  # when a crate the shipped files hold changes: each of its builds ends in a fat-LTO link of one
-  # thread. The other lanes and the main steps finish well before it, so the other lanes run at a
-  # lower priority (`nice`) and leave those links the processors first. Mean of six interleaved
-  # gates after a change to the comm core, at load 29-83: 125 s, 91 s with this (I21).
-  behind=10
-  export behind
-  # Not behind: these were the main part's slowest steps after the tests, one after another. Each
-  # builds in a target directory of its own, as the other lanes do, so none waits on another's
-  # lock on it.
+  # Beside the rest, each in target directories of its own, so none waits on another's lock on
+  # it. All at the gate's one nice level (scripts/work-env.sh): none lower. Lanes once ran a
+  # level lower, to leave the size gate's links the processors (I21); on a machine the projects
+  # share, a level lower is a sliver of a processor, and its minute cannot be kept.
   lane clippy clippy 163:371 env CARGO_TARGET_DIR="$target_dir/clippy" bash -c 'set -euo pipefail; clippy_all' --
   lane shipped "the shipped builds' tests" 300:349 env CARGO_TARGET_DIR="$target_dir/shipped" \
     bash -c 'set -euo pipefail; shipped_tests' --
   # Every crate with optional features: none, each alone, all.
-  lane matrix "feature matrix" 605:1535 nice -n "$behind" scripts/feature-matrix.sh
+  lane matrix "feature matrix" 605:1535 scripts/feature-matrix.sh
   lane other-systems "no_std and the client on other systems" 416:157 other_systems
   if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
     lane size "size gate" 610:1812 scripts/size-gate.sh
   fi
   devices=()
   if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then
-    devices+=("device size" 422:110 nice -n "$behind" env CARGO_TARGET_DIR="$target_dir/device-lane" bash -c 'set -euo pipefail; device_size' --)
+    devices+=("device size" 422:110 env CARGO_TARGET_DIR="$target_dir/device-lane" bash -c 'set -euo pipefail; device_size' --)
   fi
   if [ -x scripts/mcu-template.sh ] && [ -d examples/mcu-template ]; then
     devices+=("mcu template" 140:144 env CARGO_TARGET_DIR="$target_dir" scripts/mcu-template.sh --)

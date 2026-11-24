@@ -12,6 +12,8 @@
 # builds, never runs a test, and leaves the file as it found it.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+. scripts/work-env.sh
+at_gate_nice
 rounds="${1:?usage: scripts/ab-target.sh ROUNDS TARGET...}"
 shift
 [ "$#" -ge 2 ] || { echo "ab-target: give two or more targets" >&2; exit 2; }
@@ -37,14 +39,14 @@ build() {
   read -r m1 _ <<< "$(stall /proc/pressure/io)"
   read -r c1 _ <<< "$(stall "$cgroup/io.pressure")"
   CARGO_TARGET_DIR="$target" /usr/bin/time -o "$times" -f '%e %U %S' \
-    taskset -c "${AB_CPUS:-6-31}" nice -n 10 scripts/wait-states.py --every 1 -- \
+    taskset -c "${AB_CPUS:-6-31}" scripts/wait-states.py --every 1 -- \
     cargo build --workspace --all-features --tests -j "${AB_JOBS:-13}" > "$log" 2>&1 ||
     { cat "$log" >&2; exit 1; }
   read -r m2 _ <<< "$(stall /proc/pressure/io)"
   read -r c2 _ <<< "$(stall "$cgroup/io.pressure")"
   read -r wall user sys < "$times"
-  printf '%s %-6s wall %6.1f s  CPU %6.1f s  load %6s  io-stall machine %5.1f s  cgroup %5.1f s  %s\n' \
-    "$label" "$what" "$wall" "$(echo "$user + $sys" | bc -l)" "$load" \
+  printf '%s %-6s wall %6.1f s  CPU %6.1f s  nice %s load %6s  io-stall machine %5.1f s  cgroup %5.1f s  %s\n' \
+    "$label" "$what" "$wall" "$(echo "$user + $sys" | bc -l)" "$GATE_NICE" "$load" \
     "$(echo "($m2 - $m1) / 1000000" | bc -l)" "$(echo "($c2 - $c1) / 1000000" | bc -l)" "$target"
   sed -n '/^wait-states:/,$p' "$log" | sed 's/^/    /'
   rm -f "$times" "$log"

@@ -11,6 +11,8 @@
 set -euo pipefail
 [ $# -eq 2 ] || { echo "usage: scripts/run-gate.sh TARGET_DIR LOG" >&2; exit 2; }
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$root/scripts/work-env.sh"
+at_gate_nice
 export CARGO_TARGET_DIR="$1"
 log="$2"
 [ -z "${GATE_JOBS:-}" ] || export CARGO_BUILD_JOBS="$GATE_JOBS"
@@ -18,9 +20,9 @@ pin=()
 [ -z "${GATE_CPUS:-}" ] || pin=(taskset -c "$GATE_CPUS")
 load() { cut -d' ' -f1-3 /proc/loadavg; }
 before="$(load)"
-echo "gate-start: $(date -Is), load $before" > "$log"
+echo "gate-start: $(date -Is), load $before, nice $GATE_NICE" > "$log"
 status=0
 /usr/bin/time -f "%e s wall %U user %S sys" -o "$log.time" "${pin[@]}" "$root/scripts/gate.sh" >> "$log" 2>&1 || status=$?
-echo "exit $status load-before $before load-after $(load) time $(cat "$log.time")" >> "$log"
+echo "exit $status nice $GATE_NICE load-before $before load-after $(load) time $(cat "$log.time")" >> "$log"
 rm -f "$log.time"
 exit "$status"
