@@ -9,6 +9,10 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+# No unit tests in the library: not compiled again to run none (scripts/workspace.py lib-tests).
+test = false
+
 [dependencies]
 orion = { path = "../../client/orion", features = ["files", "actions", "workloads", "provider"] }
 orion-comm-app = { path = "../../comm/comm-app" }

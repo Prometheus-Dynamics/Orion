@@ -634,6 +634,8 @@ what to change.
   level 7.
 - **I110.** The tests, clippy, the shipped builds and the short fuzz run are reused by content
   key; `Gate-Lanes:` names `tests` and `fuzz`. No interface changes; no wire changes; level 7.
+- **I111.** 49 libraries are `[lib] test = false` (no unit tests; their doctests run as
+  before). No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

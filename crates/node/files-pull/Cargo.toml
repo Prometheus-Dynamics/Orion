@@ -7,6 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[lib]
+# No unit tests in the library: not compiled again to run none (scripts/workspace.py lib-tests).
+test = false
+
 [features]
 default = ["https"]
 # Fetching over TLS. This is the one place in Orion that uses rustls.

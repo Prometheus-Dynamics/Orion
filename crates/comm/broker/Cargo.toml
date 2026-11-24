@@ -8,6 +8,10 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[lib]
+# No unit tests in the library: not compiled again to run none (scripts/workspace.py lib-tests).
+test = false
+
 [dependencies]
 orion-config = { path = "../../core/config" }
 orion-msg-topics = { path = "../../core/msg-topics" }

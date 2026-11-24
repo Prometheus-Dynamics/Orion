@@ -274,6 +274,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I104](docs/prs/I104.md) A lease is never taken before its holder was quiet long enough (wave 19; needs I102)
 - [x] [I109](docs/prs/I109.md) Nothing known runs again; clippy and the shipped builds beside the tests; the gate's tools in git (wave 19; needs I104)
 - [x] [I110](docs/prs/I110.md) Only what changed is tested; no lane runs in full for being behind (wave 19; needs I109)
+- [x] [I111](docs/prs/I111.md) Build targets in subvolumes of their own; no library compiled to run no tests (wave 19; needs I110)
 - [ ] [I103](docs/prs/I103.md) Each network listener says what it is doing; a root set wrong is refused alone; a shell with security off over the network; the `mut` warning (wave 19; needs I104)
 - [ ] [I105](docs/prs/I105.md) V6-LINK-LOCAL-WAY-IN: a board is found and reached over link-local IPv6 (wave 19; needs I103)
 - [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I105)

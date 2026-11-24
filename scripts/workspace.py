@@ -14,6 +14,14 @@ saying so, when what it finds is empty.
     workspace.py doctested [CRATE...]    of the crates with a library (all, or those named),
                                          those whose documentation holds Rust that rustdoc
                                          runs as a test; prints `none` when there is none
+    workspace.py lib-tests               fails unless each library is built for its unit
+                                         tests exactly when it has some: `[lib] test = false`
+                                         on one with none, and never on one with any
+
+A library's unit tests are those in its own sources (`#[test]`, `#[tokio::test]` and the like,
+or `cfg(test)`). Built for them, a library with none is compiled again, in test mode, to run
+nothing: 49 crates were, 7% of a core change's compile time. Marked `test = false`, one that
+gains a test would never run it; so this fails both ways.
 
 A crate's doctests are the code blocks in its library's doc comments that rustdoc compiles: a
 fence with no language, or one rustdoc takes for Rust (`rust`, `no_run`, `should_panic`,
@@ -173,7 +181,48 @@ def featured(only):
     return out or ["none"]
 
 
+UNIT_TEST = re.compile(r"#\[[\w:]*test\b|cfg(_attr)?\(\s*test\b")
+
+
+def has_unit_tests(source):
+    """Whether any .rs file in the library's directory (its src_path's) holds a unit test."""
+    for base, _, files in os.walk(os.path.dirname(source)):
+        for name in files:
+            if name.endswith(".rs"):
+                with open(os.path.join(base, name), errors="replace") as file:
+                    if UNIT_TEST.search(file.read()):
+                        return True
+    return False
+
+
+def lib_tests():
+    meta = metadata(deps=False)
+    wrong = []
+    checked = 0
+    for package in sorted(meta["packages"], key=lambda p: p["name"]):
+        for target in package["targets"]:
+            if not any(kind in LIBRARY for kind in target["kind"]):
+                continue
+            checked += 1
+            tested = target.get("test", True)
+            has = has_unit_tests(target["src_path"])
+            if tested and not has:
+                wrong.append(f"{package['name']}: no unit test, but built for them: add `[lib] test = false`")
+            elif has and not tested:
+                wrong.append(f"{package['name']}: has unit tests, never run (`[lib] test = false`): remove it")
+    if checked == 0:
+        print("workspace.py: no library: nothing would be checked", file=sys.stderr)
+        return 1
+    if wrong:
+        print("\n".join(wrong), file=sys.stderr)
+        return 1
+    print(f"each of {checked} libraries is built for unit tests exactly when it has some")
+    return 0
+
+
 def main(argv):
+    if argv == ["lib-tests"]:
+        return lib_tests()
     if argv == ["members"]:
         out, what = members(), "no workspace crate"
     elif argv[:1] == ["matrix"]:

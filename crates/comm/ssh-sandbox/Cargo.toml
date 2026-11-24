@@ -8,6 +8,10 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+# No unit tests in the library: not compiled again to run none (scripts/workspace.py lib-tests).
+test = false
+
 [features]
 # Local forwarding, as in orion-ssh.
 forward = ["orion-ssh/forward"]

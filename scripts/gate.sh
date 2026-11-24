@@ -412,6 +412,9 @@ fi
 main "notes are read by no build" 1:1 scripts/code-key.sh --check
 main "test filters self-test" 1:1 scripts/check-test-filters.py --self-test
 main "test files" 1:1 scripts/check-test-filters.py --files
+# A library is built for its unit tests exactly when it has some: none compiled to run nothing,
+# none marked `test = false` with a test that would never run.
+main "libraries built for their unit tests" 3:2 scripts/workspace.py lib-tests
 # Every PR brief reads: an id for a name, a status, and needs that name briefs. AGENTS.md sends
 # whoever picks up a PR to this list, so it must not rot unseen.
 main "pr list" 1:1 scripts/pr-status.py --offline
@@ -523,7 +526,10 @@ keys_self_test() {
 fuzz_short() {
   local state="$GATE_LANE_STATE_DIR/fuzz"
   scripts/lane-reuse.py plan fuzz "$state" "fuzz-short 3"
-  lane_item "$state" "fuzz-short 3" "every target, 3 s each" scripts/fuzz-short.sh 3
+  # A target directory of its own (a subvolume, scripts/work-area.sh): its builds are
+  # nightly's, with sanitizers, and share nothing with the rest.
+  lane_item "$state" "fuzz-short 3" "every target, 3 s each" \
+    env CARGO_TARGET_DIR="$target_dir/fuzz" scripts/fuzz-short.sh 3
   scripts/lane-reuse.py status fuzz "$state" > "$state.status"
 }
 

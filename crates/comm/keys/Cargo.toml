@@ -8,6 +8,10 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[lib]
+# No unit tests in the library: not compiled again to run none (scripts/workspace.py lib-tests).
+test = false
+
 [dependencies]
 ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast", "zeroize"] }
 getrandom = "0.4"
