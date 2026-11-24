@@ -93,6 +93,7 @@ pub trait Service {
 
     /// A program on the board's own socket has gone quiet past its idle time, `quiet_ms` ago
     /// it was last heard, and is kept; or, with `quiet_ms` zero, it is heard again.
+    /// `quiet_ms` is rounded down: it was quiet that long at least.
     ///
     /// No default: a service that wraps another passes this on, and the compiler is what
     /// makes sure it does. A service with nothing to do about it says so in an empty body.

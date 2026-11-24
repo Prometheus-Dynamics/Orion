@@ -90,7 +90,12 @@ impl Comm {
     /// Milliseconds on the server's clock: since it was made.
     #[must_use]
     pub fn now_ms(&self) -> u64 {
-        self.started.elapsed().as_millis() as u64
+        self.now().as_millis() as u64
+    }
+
+    /// The server's clock, finer than [`Comm::now_ms`].
+    fn now(&self) -> Duration {
+        self.started.elapsed()
     }
 
     /// A handle that does not keep the server alive: for a service's own tasks, since the
@@ -178,7 +183,7 @@ impl Comm {
         let mut fds = FdSet::default();
         // `None` while a local session is quiet past the idle time: it is waited for.
         let mut deadline = Some(Instant::now() + Duration::from_millis(u64::from(limits.hello_ms)));
-        let mut heard_ms = self.now_ms();
+        let mut heard = self.now();
         let mut turn = 0;
         loop {
             let received = tokio::select! {
@@ -201,16 +206,17 @@ impl Comm {
                     break;
                 }
                 Err(_) => {
-                    if self.quiet(session, heard_ms) {
+                    if self.quiet(session, heard) {
                         deadline = None;
                         continue;
                     }
                     break;
                 }
             };
-            let now_ms = self.now_ms();
+            let now = self.now();
+            let now_ms = now.as_millis() as u64;
             self.heard(session, now_ms);
-            heard_ms = now_ms;
+            heard = now;
             let flow = self
                 .core
                 .borrow_mut()
@@ -237,11 +243,12 @@ impl Comm {
         self.core.borrow_mut().close(session);
     }
 
-    /// The deadline passed with nothing heard from `session` since `heard_ms`. Whether it is
+    /// The deadline passed with nothing heard from `session` since `heard`. Whether it is
     /// kept: a local session that has said hello is, and is now seen as quiet. Any other is
     /// dropped, and why is noted.
-    fn quiet(&self, session: SessionId, heard_ms: u64) -> bool {
-        let quiet_ms = self.now_ms().saturating_sub(heard_ms);
+    fn quiet(&self, session: SessionId, heard: Duration) -> bool {
+        let quiet_ms = quiet_for(heard, self.now());
+        let heard_ms = heard.as_millis() as u64;
         let mut core = self.core.borrow_mut();
         let limits = core.sessions.limits;
         let Some(entry) = core.sessions.entry_mut(session) else {
@@ -398,6 +405,14 @@ impl Comm {
     }
 }
 
+/// How long a session heard last at `heard` has been quiet at `now`, both on the server's
+/// clock, in the whole milliseconds the services are told: rounded down, so none is told it
+/// was quiet longer than it was. Each rounded first, the two could make it up to 1 ms more,
+/// and a lease taken from a quiet holder ([`crate::Service::quiet`]) would be taken early.
+fn quiet_for(heard: Duration, now: Duration) -> u64 {
+    now.saturating_sub(heard).as_millis() as u64
+}
+
 /// The kind of an encoded frame, for saying which one was not taken.
 fn frame_kind(frame: &[u8]) -> u8 {
     orion_wire::frame::decode(frame).map_or(0, |view| view.kind())
@@ -411,5 +426,35 @@ async fn receive<T>(
     match deadline {
         Some(deadline) => timeout_at(deadline, read).await,
         None => Ok(read.await),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::quiet_for;
+
+    /// A service is never told a session was quiet for longer than it was, even when the
+    /// times sit either side of a millisecond's edge: what a lease taken from a quiet holder
+    /// counts on.
+    #[test]
+    fn quiet_is_never_said_longer_than_it_was() {
+        let ms = |micros: u64| Duration::from_micros(micros);
+        for (heard, now) in [
+            (ms(10_900), ms(1_510_000)),
+            (ms(999), ms(1_000)),
+            (ms(10_000), ms(1_510_000)),
+            (ms(10_100), ms(1_510_099)),
+        ] {
+            let said = quiet_for(heard, now);
+            assert!(
+                Duration::from_millis(said) <= now - heard,
+                "{said} ms said for {:?}",
+                now - heard
+            );
+        }
+        // And no shorter than the whole milliseconds that passed.
+        assert_eq!(quiet_for(ms(10_900), ms(1_510_000)), 1_499);
     }
 }

@@ -81,10 +81,27 @@ pub struct Contest {
     quiet_ms: u64,
     /// Resource to the session that wrote its lease.
     writers: BTreeMap<String, u32>,
-    /// Session to when it went quiet, on node logic's clock.
-    quiet: BTreeMap<u32, u64>,
+    /// Session to when it was said quiet, and for how long it had been then.
+    quiet: BTreeMap<u32, Told>,
     /// Session to the leases it lost.
     lost: BTreeMap<u32, Vec<Lost>>,
+}
+
+/// That a session was quiet: when node logic was told, on its clock, and how long the session
+/// had been quiet then, at least (the comm core rounds down).
+#[derive(Clone, Copy, Debug)]
+struct Told {
+    at_ms: u64,
+    quiet_ms: u64,
+}
+
+impl Told {
+    /// How long the session has been quiet at `now_ms`, at least. Node logic's clock counts
+    /// whole milliseconds, so `now_ms` one past `at_ms` may be only a hair after the telling:
+    /// the milliseconds since count from the one after it, never more than passed.
+    const fn quiet_at(self, now_ms: u64) -> u64 {
+        self.quiet_ms + now_ms.saturating_sub(self.at_ms).saturating_sub(1)
+    }
 }
 
 /// The words for a lease lost to `taker`.
@@ -110,11 +127,17 @@ impl Contest {
     }
 
     /// `session` went quiet `quiet_ms` before `now_ms`, or with `quiet_ms` zero is heard again.
+    /// `quiet_ms` is a floor, as the comm core says it, and is kept with `now_ms` rather than
+    /// as one instant: a lease is never taken before its holder was quiet long enough.
     pub fn quiet(&mut self, session: u32, quiet_ms: u64, now_ms: u64) {
         if quiet_ms == 0 {
             self.quiet.remove(&session);
         } else {
-            self.quiet.insert(session, now_ms.saturating_sub(quiet_ms));
+            let told = Told {
+                at_ms: now_ms,
+                quiet_ms,
+            };
+            self.quiet.insert(session, told);
         }
     }
 
@@ -235,10 +258,10 @@ impl Contest {
         else {
             return Err(busy("its holder is not a session here", words));
         };
-        let Some(&since) = self.quiet.get(&holder) else {
+        let Some(&told) = self.quiet.get(&holder) else {
             return Err(busy("its holder is answering", words));
         };
-        let quiet = now_ms.saturating_sub(since);
+        let quiet = told.quiet_at(now_ms);
         if quiet < self.quiet_ms {
             let _ = write!(words, ", quiet {quiet} ms");
             return Err(busy(
@@ -282,5 +305,42 @@ mod tests {
         assert_eq!(refused(&store), said);
         store.put(RecordClass::Lease, "cam.front", &[0xFF; 3], 1_000);
         assert_eq!(refused(&store), said);
+    }
+
+    /// Node logic's clock counts whole milliseconds, so a report and a claim one apart may be
+    /// as little as a hair apart. The lease is never taken before the holder has been quiet
+    /// `quiet_ms`, however the two sit about a millisecond's edge.
+    #[test]
+    fn a_lease_is_never_taken_before_its_holder_was_quiet_long_enough() {
+        let mut store = Store::new("board".parse().expect("name"), StoreConfig::default());
+        let mut value = vec![0_u8; 128];
+        let len = orion_wire::body::encode_fields(
+            &LeaseRecord {
+                resource: "cam.front".parse().expect("name"),
+                holder: "workload:a",
+                expires_ms: 0,
+                label: "",
+            },
+            &mut value,
+        )
+        .expect("encode");
+        store.put(RecordClass::Lease, "cam.front", &value[..len], 1_000);
+        let mut contest = Contest::new(1_500);
+        contest.wrote("cam.front", 1, false);
+        let claim = |contest: &Contest, now_ms| {
+            contest.contest(&store, 2, "cam.front", "workload:b", now_ms, &|_, _| false)
+        };
+        // Told at 1000 ms (1000.999 by the hair) that the holder had been quiet 1000 ms: it
+        // went quiet no earlier than 0.999 ms. At 1500 ms (1500.000) that is 1499.001 ms.
+        contest.quiet(1, 1_000, 1_000);
+        let refused = claim(&contest, 1_500).expect_err("too soon");
+        assert_eq!(refused.error, Error::Busy, "{refused:?}");
+        // A millisecond on, it has been 1500 ms however the edges sat.
+        let taken = claim(&contest, 1_501).expect("quiet long enough");
+        assert_eq!((taken.from, taken.by.as_str()), (1, "workload:b"));
+        // Told it had been quiet as long as it must, it is taken at once: the claim comes
+        // after the telling.
+        contest.quiet(1, 1_500, 2_000);
+        assert!(claim(&contest, 2_000).is_ok());
     }
 }

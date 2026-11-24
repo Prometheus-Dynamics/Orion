@@ -626,6 +626,9 @@ what to change.
   asks one question on each interface it announces on. Link-local IPv6 is no longer announced in
   a build that also has `mdns-sd` (**Change**: it was, there only). No wire changes; level 7.
 - **I102.** The `shm-*` pins move to `214c0ca7`. Nothing a program calls changes; level 7.
+- **I104.** A lease with no end is never taken before its holder was quiet `leases.quiet_ms`; it
+  could be up to about 2 ms early (**Change**). The `quiet_ms` a service is told is rounded down
+  (**Change**: it could read 1 ms long). No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

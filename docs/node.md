@@ -603,7 +603,9 @@ its topics and runs its actions. The records are the store's and reach every nod
 - **A lease with no end can be contested.** It is never freed by time alone. But when the
   program holding it is quiet (on the board's socket, past the idle time, so the comm core
   keeps its session and tells node logic: `NodeQuiet`) for `leases.quiet_ms` (ten seconds unless
-  said), another claimant's claim succeeds. Work in flight is not quiet: while a run of one of
+  said), another claimant's claim succeeds, and never before: the comm core rounds the time
+  quiet down, and node logic counts its own milliseconds since so that one about a
+  millisecond's edge is not counted whole. Work in flight is not quiet: while a run of one of
   the resource's actions that the holder's session asked for is under way, the lease is not
   taken. With no claimant nothing is lost, however long the holder is quiet. When the old holder
   speaks again, whatever it asks under the lease while the new holder keeps it (writing or
