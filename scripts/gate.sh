@@ -439,6 +439,8 @@ fi
 # The gate's own wrappers, on planted failures: a red command anywhere fails its lane or step,
 # and nothing is recorded as passed after one (scripts/gate-self-test.sh).
 main "the gate's wrappers' self-test" 6:3 once scripts/gate.sh scripts/gate-self-test.sh -- scripts/gate-self-test.sh
+# A release takes a lane left to CI only where CI passed it at that commit.
+main "release check self-test" 3:1 once scripts/release-check.sh -- scripts/release-check.sh --self-test
 main "push guard" 3:1 once scripts/push.sh scripts/code-key.sh -- scripts/push.sh --self-test
 # The target directory is this worktree's own: one built from another worktree's files can
 # hold crates cargo takes as fresh for sources that are not these.
@@ -599,7 +601,9 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   lane matrix "feature matrix" 605:1535 scripts/feature-matrix.sh
   lane other-systems "no_std and the client on other systems" 416:157 other_systems
   if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
-    lane size "size gate" 610:1812 scripts/size-gate.sh
+    # The whole gate here leaves a new key's builds to CI (scripts/size-gate.sh, CI only);
+    # asked for the lane alone, or on CI, it builds.
+    lane size "size gate" 610:1812 env SIZE_GATE_CI_ONLY="$([ -z "$part" ] && echo 1 || echo 0)" scripts/size-gate.sh
   fi
   devices=()
   if [ -x scripts/device-size.sh ] && [ -d crates/device/probe ]; then

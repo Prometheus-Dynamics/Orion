@@ -43,6 +43,14 @@
 # copy of the source at another path and must come out byte for byte the same. The gate here
 # makes no full measurement of its own for a day gone by: it must end within a minute at any
 # load (the one-minute rule, 2026-11-24), and CI makes one on every push.
+#
+# CI only, where a key is new. With SIZE_GATE_CI_ONLY=1 (the whole gate on a worker's machine)
+# and any build's key unmeasured, nothing is built here: a core change or a cold target means
+# shipped-profile fat-LTO links, 360 to 420 CPU-s, over the minute at any load. The lane says
+# `not-run(ci-only:N-of-M-size-keys-new)`; CI, which builds every one on every push, measures
+# them, and scripts/release-check.sh takes that not-run only where CI's size gate passed on
+# that commit. With every key measured, the gate runs here as ever: each record held to
+# today's limit, in seconds.
 set -euo pipefail
 # Never incremental, whatever the caller set: the bytes measured are of a build made whole, as it ships.
 export CARGO_INCREMENTAL=0
@@ -170,6 +178,16 @@ against() {
     fi
 }
 
+# new_keys <store> <key>...: how many of the keys have no record in the store.
+new_keys() {
+    local store="$1" key count=0
+    shift
+    for key in "$@"; do
+        [ -f "$store/$key" ] || count=$((count + 1))
+    done
+    echo "$count"
+}
+
 # reused <entry> <label> <limit>: a recorded measurement held to today's limit.
 reused() {
     local entry="$1" label="$2" limit="$3" key="${1##*/}"
@@ -235,6 +253,21 @@ if [ "${1:-}" = "--self-test" ]; then
     changed "a board's C compiler" rocav CC_aarch64_unknown_linux_musl=/usr/bin/false
     changed "the toolchain" rocav RUSTUP_TOOLCHAIN=stable
     changed "CARGO_TARGET_DIR" "" CARGO_TARGET_DIR=/elsewhere
+    # Where the whole gate builds: a core change makes keys new, and goes to CI; a change to
+    # the notes makes none, and runs here.
+    where="$work/where" && mkdir -p "$where"
+    for b in r o c a v; do : > "$where/$(key_of "$base" "$b")"; done
+    values() { local b; for b in r o c a v; do key_of "$1" "$b"; done; }
+    # shellcheck disable=SC2046
+    [ "$(new_keys "$where" $(values "$base"))" = 0 ] || fail "keys all measured count as new"
+    plant crates/core/check/src/lib.rs "// planted"
+    # shellcheck disable=SC2046
+    [ "$(new_keys "$where" $(values "$(keys)"))" = 5 ] || fail "a core change does not make every key new (CI only)"
+    unplant crates/core/check/src/lib.rs
+    plant docs/lock.md "planted"
+    # shellcheck disable=SC2046
+    [ "$(new_keys "$where" $(values "$(keys)"))" = 0 ] || fail "a change to the notes makes a key new (it must run here)"
+    unplant docs/lock.md
     # The reuse: a record held to today's limit, a planted size regression red, a key that
     # made other bytes red.
     store="$work/store" && mkdir -p "$store"
@@ -412,6 +445,26 @@ for p in "${plans[@]}"; do
         exit 1
     fi
 done
+
+if [ "${SIZE_GATE_CI_ONLY:-0}" = 1 ] && [ "$measure" = 0 ]; then
+    plan_keys=()
+    for p in "${plans[@]}"; do
+        plan_keys+=("${keys[${p%%|*}]}")
+    done
+    new=$(new_keys "$store" "${plan_keys[@]}")
+    if [ "$new" -gt 0 ]; then
+        why="ci-only:$new-of-${#plans[@]}-size-keys-new"
+        echo "    not built here: $new of ${#plans[@]} size keys new; CI builds and measures them ($why)"
+        if [ -n "${GATE_LANE_STATE_DIR:-}" ]; then
+            echo "not-run($why)" > "$GATE_LANE_STATE_DIR/size.status"
+        fi
+        if [ -n "$self_test" ]; then
+            wait "$self_test" || failures=$((failures + 1))
+            sed 's/^/    /' "$results/self-test"
+        fi
+        exit $((failures > 0))
+    fi
+fi
 
 for p in "${plans[@]}"; do
     IFS='|' read -r name package file label limit target <<< "$p"

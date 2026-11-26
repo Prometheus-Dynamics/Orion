@@ -649,6 +649,11 @@ what to change.
   nothing is recorded or stamped as passed after one. `scripts/gate-self-test.sh` proves it
   on planted failures, called as the gate calls them and where `-e` is ignored.
   No interface changes; no wire changes; level 7.
+- **I117.** The whole gate leaves the size gate's builds to CI when a size key is new
+  (`not-run(ci-only:N-of-M-size-keys-new)`), and runs it here when every key is measured.
+  `scripts/release-check.sh` takes that not-run only where CI's size gate passed at that
+  commit. Heavy work refuses a cgroup whose CPU weight is not 100, or that is idle. No interface
+  changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
