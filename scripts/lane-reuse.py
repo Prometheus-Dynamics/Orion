@@ -931,9 +931,19 @@ def plan_self_test():
 _SELF_TEST_JOBS = []
 
 
+def _cpu_seconds():
+    """CPU seconds this process and the children it has waited for used."""
+    import resource
+
+    own, children = resource.getrusage(resource.RUSAGE_SELF), resource.getrusage(resource.RUSAGE_CHILDREN)
+    return own.ru_utime + own.ru_stime + children.ru_utime + children.ru_stime
+
+
 def _self_test_job(number):
-    """One of the self-test's cases, in a worker forked from it."""
-    return _SELF_TEST_JOBS[number]()
+    """One of the self-test's cases, in a worker forked from it: its result, and its CPU seconds."""
+    start = _cpu_seconds()
+    result = _SELF_TEST_JOBS[number]()
+    return result, _cpu_seconds() - start
 
 
 def explain_binary(package, executables):
@@ -954,6 +964,7 @@ def self_test():
 
     global ROOT
     home = ROOT
+    started = _cpu_seconds()
     work = tempfile.mkdtemp(prefix="orion-keys.")
     copy = os.path.join(work, "tree")
     environ = dict(os.environ)
@@ -1118,8 +1129,14 @@ def self_test():
         _SELF_TEST_JOBS = [lambda job=job: in_copy(*job) for job in _SELF_TEST_JOBS]
         import multiprocessing
 
+        setup = _cpu_seconds() - started
         with multiprocessing.get_context("fork").Pool(4) as pool:
-            got = dict(zip((job[0] for job in jobs), pool.map(_self_test_job, range(len(jobs)), chunksize=1)))
+            done = pool.map(_self_test_job, range(len(jobs)), chunksize=1)
+        got = {job[0]: result for job, (result, _) in zip(jobs, done)}
+        # Where the CPU went: CI's runner is the one that matters, and only its log shows it.
+        costs = sorted(((cpu, job[0]) for job, (_, cpu) in zip(jobs, done)), reverse=True)
+        print(f"    CPU: setup {setup:.1f} s, {len(jobs)} cases {sum(c for c, _ in costs):.1f} s; the most:",
+              "; ".join(f"{tag} {cpu:.1f}" for cpu, tag in costs[:8]))
 
         def check(label, moves, now, base):
             if (now != base) != moves:
