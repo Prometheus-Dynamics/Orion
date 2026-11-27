@@ -291,6 +291,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I125](docs/prs/I125.md) Tests reused by their binaries keep their test listing (wave 19; needs I124)
 - [x] [I126](docs/prs/I126.md) A package with no test executable is keyed over none (wave 19; needs I125)
 - [x] [I127](docs/prs/I127.md) measure-change.sh measures a batch of files (wave 19; needs I126)
+- [x] [I128](docs/prs/I128.md) A module by #[path] from a crate is not a read outside the crates (wave 19; needs I127)
 - [ ] [I103](docs/prs/I103.md) Each network listener says what it is doing; a root set wrong is refused alone; a shell with security off over the network; the `mut` warning (wave 19; needs I104)
 - [ ] [I105](docs/prs/I105.md) V6-LINK-LOCAL-WAY-IN: a board is found and reached over link-local IPv6 (wave 19; needs I103)
 - [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I105)

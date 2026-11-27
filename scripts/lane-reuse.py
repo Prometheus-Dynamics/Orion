@@ -426,7 +426,7 @@ class Keys(size_key.Workspace):
                 if not name.endswith(".rs"):
                     continue
                 with open(os.path.join(ROOT, name), errors="replace") as file:
-                    text = file.read()
+                    text = without_crate_modules(name, file.read())
                 if REACH.search(text) or any(reaches(literal, self.reach_tops) for literal in LITERAL.findall(text)):
                     found = True
                     break
@@ -722,6 +722,31 @@ def listing(state, fresh, out, lister=nextest_list):
 
 REACH = re.compile(r'\.parent\(\)|current_exe|CARGO_TARGET_TMPDIR|Command::new\(\s*"cargo"|env!\(\s*"CARGO"\s*\)')
 LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+PATH_MODULE = re.compile(r'#\s*\[\s*path\s*=\s*"((?:[^"\\]|\\.)*)"\s*\]')
+
+
+def without_crate_modules(name, text):
+    """TEXT, a Rust source at NAME, without each `#[path = "..."]` that names a file in the
+    crates. That file is a module, compiled in: it is in the test binaries, and the dep-info
+    check (`depinfo`) fails a test binary built from a crate its key does not hold. A path that
+    leaves the crates stays, and is judged as any other: that check does not look there. A
+    module's path is taken from the source's directory or from the directory named for the
+    source (a module inside a file module); both must be in the crates."""
+    crates = os.path.join(ROOT, "crates") + os.sep
+    here = os.path.join(ROOT, os.path.dirname(name))
+    bases = (here, os.path.join(here, os.path.splitext(os.path.basename(name))[0]))
+
+    def kept(match):
+        literal = match.group(1)
+        if os.path.isabs(literal) or "\\" in literal:
+            return match.group(0)
+        if all(os.path.normpath(os.path.join(base, literal)).startswith(crates) for base in bases):
+            return ""
+        return match.group(0)
+
+    return PATH_MODULE.sub(kept, text)
 
 
 def reaches(literal, tops):
@@ -1232,12 +1257,28 @@ def self_test():
         jobs += [(label, binary("orion-ctl", executable), change, None) for label, _, change, executable in binary_cases]
         # Every crate that reads a file by CARGO_MANIFEST_DIR today also reaches outside, so that
         # check is planted: in a crate that is otherwise keyed so.
+        tests_rs = "crates/client/ctl/tests/all.rs"
         unkeyed = [
             ("orion-web-tests", "reaches outside the crates", None),
             ("orion-ctl", "reads a file by CARGO_MANIFEST_DIR",
-             touch("crates/client/ctl/tests/all.rs", '\nconst _PLANTED: &str = env!("CARGO_MANIFEST_DIR");\n')),
+             touch(tests_rs, '\nconst _PLANTED: &str = env!("CARGO_MANIFEST_DIR");\n')),
+            # A module by #[path] from outside the crates: no key holds it, nor does the
+            # dep-info check look there.
+            ("orion-ctl", "has a module by #[path] from outside the crates",
+             touch(tests_rs, '\n#[path = "../../../../scripts/planted.rs"]\nmod planted;\n')),
+            # The same path as a module below, read at run time: not a module.
+            ("orion-ctl", "reads a file in the crates by a path that walks up",
+             touch(tests_rs, '\nfn _planted() { let _ = std::fs::read("../../../comm/broker/tests/common/mod.rs"); }\n')),
         ]
-        jobs += [(f"unkeyed {package}", binary(package, one), change, None) for package, _, change in unkeyed]
+        jobs += [(f"unkeyed {number}", binary(package, one), change, None) for number, (package, _, change) in enumerate(unkeyed)]
+        # What a package names, and still keyed by its binaries.
+        keyed = [
+            # A module by #[path] from a crate: compiled in, so in its binaries, and the dep-info
+            # check fails a crate its key does not hold.
+            ("orion-ctl", "has a module by #[path] from a crate",
+             touch(tests_rs, '\n#[path = "../../../comm/broker/tests/common/mod.rs"]\nmod planted;\n')),
+        ]
+        jobs += [(f"keyed {number}", binary(package, one), change, None) for number, (package, _, change) in enumerate(keyed)]
         jobs += [("plan", plan, None, None)]
 
         # A few workers, forked: each starts from this process, all it has read already. A
@@ -1281,11 +1322,16 @@ def self_test():
         check("a crate a package says its tests read", True, got["stubs"], got["stubs base"])
         for label, moves, _, _ in binary_cases:
             check(label, moves, got[label], got["binary base"])
-        for package, why, _ in unkeyed:
-            if got[f"unkeyed {package}"] != "not keyed by its binaries":
+        for number, (package, why, _) in enumerate(unkeyed):
+            if got[f"unkeyed {number}"] != "not keyed by its binaries":
                 failures.append(f"{package} {why}, and was keyed by its binaries")
             else:
                 print(f"    by its binaries: {package} ({why}): not keyed so")
+        for number, (package, why, _) in enumerate(keyed):
+            if got[f"keyed {number}"] == "not keyed by its binaries":
+                failures.append(f"{package} {why}, and was not keyed by its binaries")
+            else:
+                print(f"    by its binaries: {package} ({why}): keyed so")
         status, text = got["plan"]
         print(text, end="")
         if status != 0:

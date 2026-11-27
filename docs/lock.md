@@ -686,6 +686,9 @@ what to change.
   of still runs. No interface changes; no wire changes; level 7.
 - **I127.** `scripts/measure-change.sh` takes several files as one change, with a comment each
   file's language reads as one. No interface changes; no wire changes; level 7.
+- **I128.** A `#[path]` module that names a file in the crates no longer marks its package as
+  reading outside the crates; the dep-info check holds what it compiles in. No interface
+  changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
