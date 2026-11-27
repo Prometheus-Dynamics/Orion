@@ -426,7 +426,7 @@ class Keys(size_key.Workspace):
                 if not name.endswith(".rs"):
                     continue
                 with open(os.path.join(ROOT, name), errors="replace") as file:
-                    text = without_crate_modules(name, file.read())
+                    text = RESPAWN.sub("", without_crate_modules(name, file.read()))
                 if REACH.search(text) or any(reaches(literal, self.reach_tops) for literal in LITERAL.findall(text)):
                     found = True
                     break
@@ -724,6 +724,10 @@ REACH = re.compile(r'\.parent\(\)|current_exe|CARGO_TARGET_TMPDIR|Command::new\(
 LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
 
+# A test that starts its own binary again, and nothing else of current_exe: the child is the
+# same bytes the binary key holds, and its sources are these. Its path handed to another
+# program, or a file found beside it, is judged as any other.
+RESPAWN = re.compile(r'Command::new\(\s*std::env::current_exe\(\)\s*\.expect\(\s*"(?:[^"\\]|\\.)*"\s*\)\s*\)')
 PATH_MODULE = re.compile(r'#\s*\[\s*path\s*=\s*"((?:[^"\\]|\\.)*)"\s*\]')
 
 
@@ -1269,6 +1273,11 @@ def self_test():
             # The same path as a module below, read at run time: not a module.
             ("orion-ctl", "reads a file in the crates by a path that walks up",
              touch(tests_rs, '\nfn _planted() { let _ = std::fs::read("../../../comm/broker/tests/common/mod.rs"); }\n')),
+            # Its own path handed to another program, or a file found beside it: not itself.
+            ("orion-ctl", "hands its own path to another program",
+             touch(tests_rs, '\nfn _planted() { let _ = std::process::Command::new("unshare").arg(std::env::current_exe().expect("this test")); }\n')),
+            ("orion-ctl", "finds a file beside its own binary",
+             touch(tests_rs, '\nfn _planted() { let _ = std::env::current_exe().map(|exe| exe.with_file_name("helper")); }\n')),
         ]
         jobs += [(f"unkeyed {number}", binary(package, one), change, None) for number, (package, _, change) in enumerate(unkeyed)]
         # What a package names, and still keyed by its binaries.
@@ -1277,6 +1286,9 @@ def self_test():
             # check fails a crate its key does not hold.
             ("orion-ctl", "has a module by #[path] from a crate",
              touch(tests_rs, '\n#[path = "../../../comm/broker/tests/common/mod.rs"]\nmod planted;\n')),
+            # Its own binary started again: the same bytes its key holds.
+            ("orion-ctl", "starts its own binary again",
+             touch(tests_rs, '\nfn _planted() { let _ = std::process::Command::new(std::env::current_exe().expect("this test")); }\n')),
         ]
         jobs += [(f"keyed {number}", binary(package, one), change, None) for number, (package, _, change) in enumerate(keyed)]
         jobs += [("plan", plan, None, None)]

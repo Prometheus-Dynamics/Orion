@@ -689,6 +689,8 @@ what to change.
 - **I128.** A `#[path]` module that names a file in the crates no longer marks its package as
   reading outside the crates; the dep-info check holds what it compiles in. No interface
   changes; no wire changes; level 7.
+- **I129.** A test that only starts its own binary again with `current_exe` no longer marks its
+  package as reading outside the crates. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
