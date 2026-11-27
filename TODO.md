@@ -286,6 +286,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I120](docs/prs/I120.md) I119 taken back: no gain on CI (wave 19; needs I119)
 - [x] [I121](docs/prs/I121.md) Tests and fuzz keyed by what their binaries run (wave 19; needs I120)
 - [x] [I122](docs/prs/I122.md) measure-change.sh measures more than a comment (wave 19; needs I121)
+- [x] [I123](docs/prs/I123.md) The lane keys' self-test within CI's CPU bound (wave 19; needs I122)
 - [ ] [I103](docs/prs/I103.md) Each network listener says what it is doing; a root set wrong is refused alone; a shell with security off over the network; the `mut` warning (wave 19; needs I104)
 - [ ] [I105](docs/prs/I105.md) V6-LINK-LOCAL-WAY-IN: a board is found and reached over link-local IPv6 (wave 19; needs I103)
 - [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I105)

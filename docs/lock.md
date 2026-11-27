@@ -670,6 +670,9 @@ what to change.
 - **I122.** `scripts/measure-change.sh` takes `MEASURE_CHANGE=comment|unused-fn|used=TEXT`,
   so that a gate's cost is measured for code that is built and never runs, and for code that
   runs. No interface changes; no wire changes; level 7.
+- **I123.** The lane keys' self-test runs its cases in four forked workers, each case in a
+  hard-linked copy, not a process each. It takes 11 CPU-s, from 16 to 17, and stays within CI's
+  60 CPU-s bound (I121 went past it there). No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
