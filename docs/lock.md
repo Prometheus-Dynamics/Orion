@@ -691,6 +691,9 @@ what to change.
   changes; no wire changes; level 7.
 - **I129.** A test that only starts its own binary again with `current_exe` no longer marks its
   package as reading outside the crates. No interface changes; no wire changes; level 7.
+- **I130.** `GATE_LANE_SCHEDULE` (`parallel`, the default; `matrix-after-tests`; `shared-jobs`)
+  and `GATE_TRACE_LANES`, for measuring lane schedules; unset, the gate is as before. No
+  interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

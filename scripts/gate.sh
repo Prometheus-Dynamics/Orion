@@ -187,6 +187,32 @@ mkdir -p "$GATE_LANE_STATE_DIR"
 export GATE_LANE_STATE_DIR
 lane_pids=()
 lane_names=()
+# GATE_LANE_SCHEDULE: how the lanes share the machine, for measuring which is faster. Unset or
+# `parallel`, as always: every lane starts at once, each with cargo's -j of its own.
+# `matrix-after-tests`: the feature matrix starts when the tests step ends, passed or failed;
+# a failed tests step still waits for every lane and prints what each said, so a red matrix is
+# never hidden behind it. `shared-jobs`: every cargo and rustc of the gate takes its jobs from
+# one jobserver, as many as the processors the gate has, beside each one's own -j.
+# GATE_TRACE_LANES=FILE writes each lane's command line there as it starts, and when.
+schedule="${GATE_LANE_SCHEDULE:-parallel}"
+case "$schedule" in
+  parallel | matrix-after-tests | shared-jobs) ;;
+  *) echo "gate: GATE_LANE_SCHEDULE is parallel, matrix-after-tests or shared-jobs, not '$schedule'" >&2; exit 2 ;;
+esac
+deferred=()
+if [ "$schedule" = shared-jobs ]; then
+  jobs_fifo="$lane_logs/jobserver"
+  mkfifo "$jobs_fifo"
+  exec {jobs_fd}<> "$jobs_fifo"
+  # One token fewer than the processors: each process that takes jobs holds one of its own.
+  jobs_tokens=$(($(nproc) - 1))
+  [ "$jobs_tokens" -ge 1 ] || jobs_tokens=1
+  printf '%*s' "$jobs_tokens" '' | tr ' ' '+' >&"$jobs_fd"
+  export CARGO_MAKEFLAGS="-j$((jobs_tokens + 1)) --jobserver-auth=fifo:$jobs_fifo"
+  echo "lane schedule: shared-jobs, $jobs_tokens tokens beside each process's own"
+elif [ "$schedule" != parallel ]; then
+  echo "lane schedule: $schedule"
+fi
 set -m
 end_lanes() {
   local pid waited
@@ -216,10 +242,37 @@ lane() {
   fi
   if [ "$part" = "$name" ]; then
     lane_steps "$@"
+  elif [ -z "$part" ] && [ "$schedule" = matrix-after-tests ] && [ "$name" = matrix ]; then
+    deferred=("$name" "$@")
   elif [ -z "$part" ]; then
-    lane_steps "$@" > "$lane_logs/$name" 2>&1 &
-    lane_pids+=("$!")
-    lane_names+=("$name")
+    lane_start "$name" now "$@"
+  fi
+}
+lane_start() {
+  local name="$1" when="$2"
+  shift 2
+  if [ -n "${GATE_TRACE_LANES:-}" ]; then
+    { printf 'lane %s %s:' "$name" "$when"; printf ' %q' "$@"; echo; } >> "$GATE_TRACE_LANES"
+  fi
+  lane_steps "$@" > "$lane_logs/$name" 2>&1 &
+  lane_pids+=("$!")
+  lane_names+=("$name")
+}
+# The lanes held for after the tests step (GATE_LANE_SCHEDULE=matrix-after-tests), started.
+start_deferred() {
+  [ "${#deferred[@]}" -eq 0 ] || lane_start "${deferred[0]}" "after-tests" "${deferred[@]:1}"
+  deferred=()
+}
+# tests_step <label> <WALL:CPU> <command...>: a step, then the lanes held for after it started,
+# passed or failed. Failed, every lane runs to its end and what each said is printed before
+# the step's status is returned: a red lane is never hidden behind it.
+tests_step() {
+  local status=0
+  step "$@" || status=$?
+  start_deferred
+  if [ "$status" -ne 0 ]; then
+    join_lanes || true
+    return "$status"
   fi
 }
 lane_steps() {
@@ -665,7 +718,11 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   main format 12:3 cargo fmt --all --check
   main "the lane keys' self-test" 25:12 keys_self_test
 
-  main tests 630:647 tests
+  if [ "$schedule" = matrix-after-tests ] && [ -z "$part" ]; then
+    tests_step tests 630:647 tests
+  else
+    main tests 630:647 tests
+  fi
   main "test filters" 8:6 test_filters
   main "nothing built reads the gate's own variables" 5:1 scripts/lane-reuse.py own-vars
   main "tests read only what their key holds" 10:5 scripts/lane-reuse.py reads

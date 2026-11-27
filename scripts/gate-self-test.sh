@@ -17,8 +17,8 @@ gate="${1:-scripts/gate.sh}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 {
-  echo 'part=""; declare -A dropped=(); STALL_SECONDS=60'
-  for name in bounded step timed once lane lane_steps join_lanes lane_item; do
+  echo 'part=""; declare -A dropped=(); STALL_SECONDS=60; schedule=parallel; deferred=(); unset GATE_TRACE_LANES'
+  for name in bounded step timed once lane lane_start start_deferred tests_step lane_steps join_lanes lane_item; do
     sed -n "/^$name() {/,/^}/p" "$gate" | grep -q . || { echo "gate-self-test: no $name() in $gate" >&2; exit 2; }
     sed -n "/^$name() {/,/^}/p" "$gate"
   done
@@ -70,6 +70,14 @@ run red "a timed function, its first command red, its last green" 'timed one two
 run green "a lane of two green steps" 'lane t one 1:1 true -- two 1:1 true; join_lanes' \
   'one: [0-9]+ s' 'two: [0-9]+ s'
 run green "a step" 'step one 1:1 true' 'one: [0-9]+ s'
+# GATE_LANE_SCHEDULE=matrix-after-tests: the matrix held, started when the tests step ends. A
+# red tests step still lets it run to its end, and its red is printed.
+run red "a lane held for after a red tests step, red itself" \
+  'schedule=matrix-after-tests; lane matrix late 1:1 false; tests_step t 1:1 false' '^==> t' 'FAILED: late'
+run red "a lane held for after a green tests step, red itself" \
+  'schedule=matrix-after-tests; lane matrix late 1:1 false; tests_step t 1:1 true; join_lanes' 't: [0-9]+ s' 'FAILED: late'
+run green "a lane held for after a green tests step" \
+  'schedule=matrix-after-tests; lane matrix late 1:1 true; tests_step t 1:1 true; join_lanes' 'late: [0-9]+ s'
 
 # A pass record only after a pass: a red lane item writes none, a green one does.
 printf 'red\tplanted-red\trun\ngreen\tplanted-green\trun\n' > "$work/lanes/state"
