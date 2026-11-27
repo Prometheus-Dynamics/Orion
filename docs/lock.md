@@ -697,6 +697,9 @@ what to change.
 - **I131.** `CARGO_MAKEFLAGS` (cargo's jobserver) is left out of the lane keys, as
   `CARGO_TARGET_DIR` is: it changes how many jobs run, not what is built. No interface changes;
   no wire changes; level 7.
+- **I132.** The test stubs hold each port a board chooses for the life of its test process, so
+  a board stopped to start again on its port finds it free. Test code only. No interface
+  changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

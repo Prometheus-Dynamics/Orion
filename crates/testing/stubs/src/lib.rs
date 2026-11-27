@@ -118,6 +118,33 @@ enum Control {
 ///
 /// If no port there is free, or listening fails for another reason.
 pub async fn listen_outside_the_ephemeral_range(options: TcpOptions) -> TcpCarrier {
+    choose_below_the_ephemeral_range(None, |listen| TcpCarrier::bind(listen, options.clone())).await
+}
+
+/// For the stubs' own tests: another board, anywhere on the machine, choosing its port as
+/// [`listen_outside_the_ephemeral_range`] does, with `first` its first choice. The port is held
+/// until the listener returned is dropped.
+///
+/// # Panics
+///
+/// As [`listen_outside_the_ephemeral_range`].
+#[doc(hidden)]
+#[must_use]
+pub fn another_board_chooses_its_port_from(first: u16) -> std::net::TcpListener {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("a runtime");
+    runtime.block_on(choose_below_the_ephemeral_range(
+        Some(first),
+        |listen| async move { std::net::TcpListener::bind(listen) },
+    ))
+}
+
+async fn choose_below_the_ephemeral_range<T, F, Bound>(first: Option<u16>, mut bind: F) -> T
+where
+    F: FnMut(SocketAddr) -> Bound,
+    Bound: std::future::Future<Output = std::io::Result<T>>,
+{
     let ephemeral = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")
         .ok()
         .and_then(|range| range.split_whitespace().next()?.parse::<u16>().ok())
@@ -128,18 +155,52 @@ pub async fn listen_outside_the_ephemeral_range(options: TcpOptions) -> TcpCarri
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.subsec_nanos())
         ^ std::process::id().rotate_left(16);
+    let first = first.map(|port| u32::from(port.clamp(low, high - 1) - low));
     for step in 0..span {
-        let port = low
-            + u16::try_from((seed.wrapping_add(step.wrapping_mul(7919))) % span)
-                .expect("under the span");
+        let offset = match first {
+            Some(first) => first.wrapping_add(step) % span,
+            None => seed.wrapping_add(step.wrapping_mul(7919)) % span,
+        };
+        let port = low + u16::try_from(offset).expect("under the span");
+        // Held first: a port another board holds, here or in any process, is not taken even
+        // while that board is away.
+        let Some(held) = hold(port) else {
+            continue;
+        };
         let listen = SocketAddr::from(([127, 0, 0, 1], port));
-        match TcpCarrier::bind(listen, options.clone()).await {
-            Ok(tcp) => return tcp,
+        match bind(listen).await {
+            Ok(bound) => {
+                HELD.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(held);
+                return bound;
+            }
             Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
             Err(error) => panic!("listen: {error}"),
         }
     }
     panic!("listen: no free port in {low}..{high}");
+}
+
+/// The ports this process's boards chose, each held for as long as the process runs: a board
+/// stopped to start again on its port finds it free, for no other board takes it meanwhile.
+static HELD: std::sync::Mutex<Vec<std::os::unix::net::UnixListener>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// `port`, held against every other board on the machine: a socket in the abstract namespace
+/// named for it, which no other process can make while this one has it, and which goes with
+/// the process, leaving no file. `None` if another board holds it.
+fn hold(port: u16) -> Option<std::os::unix::net::UnixListener> {
+    use std::os::linux::net::SocketAddrExt;
+    let name = std::os::unix::net::SocketAddr::from_abstract_name(format!(
+        "orion-stubs-board-port-{port}"
+    ))
+    .expect("an abstract name");
+    match std::os::unix::net::UnixListener::bind_addr(&name) {
+        Ok(held) => Some(held),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
+        Err(error) => panic!("holding port {port}: {error}"),
+    }
 }
 
 impl Board {
