@@ -660,6 +660,9 @@ what to change.
 - **I119.** The lane keys' self-test runs beside the tests (`beside` in `scripts/gate.sh`), on
   CI's main runner too, where it ran alone for 58 s on every push. No interface changes; no wire
   changes; level 7.
+- **I120.** I119 taken back: beside the tests on CI's 4-core runner, the lane keys' self-test
+  only shared its cores (main step 185 s against 187 to 198). The self-test runs before the
+  tests again. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
