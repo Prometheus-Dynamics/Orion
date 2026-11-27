@@ -663,6 +663,10 @@ what to change.
 - **I120.** I119 taken back: beside the tests on CI's 4-core runner, the lane keys' self-test
   only shared its cores (main step 185 s against 187 to 198). The self-test runs before the
   tests again. No interface changes; no wire changes; level 7.
+- **I121.** The tests and fuzz steps are keyed after their build, by their binaries' allocated
+  sections (`scripts/elf-alloc-key.py`) and the files they read. A comment appended to a core
+  crate runs no test binary. Crates that reach outside, or mention `CARGO_MANIFEST_DIR`, keep
+  the source key. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

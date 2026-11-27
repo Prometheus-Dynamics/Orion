@@ -289,16 +289,14 @@ members() {
   echo "$listing"
 }
 tests() {
-  local state="$GATE_LANE_STATE_DIR/tests" listing names=() run=() selected=() docs=() name
+  local state="$GATE_LANE_STATE_DIR/tests" listing names=() run=() selected=() docs=() keyed=() name
   listing="$(members)"
   mapfile -t names < <(cut -d' ' -f1 <<< "$listing")
   scripts/lane-reuse.py plan tests "$state" "${names[@]}"
   mapfile -t selected < <(awk -F'\t' '$3 == "run" {print $1}' "$state")
-  for name in "${selected[@]}"; do
-    run+=(-p "$name")
-  done
   # The doctests of those that have any (scripts/workspace.py doctested): a crate with none
-  # has a known result, no test, and its rustdoc pass is not made.
+  # has a known result, no test, and its rustdoc pass is not made. Chosen by the sources' key
+  # alone: rustdoc builds and runs a doctest in one pass, so it has no binary to key before.
   if [ "${#selected[@]}" -gt 0 ]; then
     listing="$(scripts/workspace.py doctested "${selected[@]}")"
     if [ "$listing" != none ]; then
@@ -307,8 +305,25 @@ tests() {
       done <<< "$listing"
     fi
   fi
-  if [ "${#run[@]}" -eq 0 ]; then
-    echo "    every package's tests passed before on these inputs"
+  # Those to run are built first, and each whose test binaries passed before, the same in all
+  # they run, is reused (scripts/lane-reuse.py binary-plan): a comment, or code no test of a
+  # package links, runs none of its tests. The run after builds nothing again.
+  if [ "${#selected[@]}" -gt 0 ]; then
+    for name in "${selected[@]}"; do
+      run+=(-p "$name")
+    done
+    cargo test "${run[@]}" --all-features --no-run --message-format=json-render-diagnostics > "$state.artifacts"
+    scripts/lane-reuse.py binary-plan "$state" "$state.artifacts"
+    mapfile -t selected < <(awk -F'\t' '$3 == "run" {print $1}' "$state")
+    run=()
+    for name in "${selected[@]}"; do
+      run+=(-p "$name")
+    done
+  fi
+  if [ "${#run[@]}" -eq 0 ] && [ "${#docs[@]}" -eq 0 ]; then
+    echo "    every package's tests passed before, on these inputs or these binaries"
+  elif [ "${#run[@]}" -eq 0 ]; then
+    cargo test "${docs[@]}" --all-features --doc
   elif cargo nextest --version > /dev/null 2>&1; then
     local doc_log doc_pid doc_status=0 status=0
     doc_log="$(mktemp)"
@@ -326,6 +341,11 @@ tests() {
     cargo test "${run[@]}" --all-features
   fi
   scripts/lane-reuse.py record "$state" "${names[@]}"
+  # And each by its binaries, those keyed so.
+  if [ -s "$state.bin" ]; then
+    mapfile -t keyed < <(cut -f1 "$state.bin")
+    scripts/lane-reuse.py record "$state.bin" "${keyed[@]}"
+  fi
   scripts/lane-reuse.py status tests "$state" > "$state.status"
 }
 
@@ -447,6 +467,8 @@ main "push guard" 3:1 once scripts/push.sh scripts/code-key.sh -- scripts/push.s
 main "target owner self-test" 3:1 scripts/target-owner.sh --self-test
 step "target owner" 20:10 scripts/target-owner.sh "$target_dir" "$PWD"
 main "step bounds self-test" 4:5 once scripts/bounded.py -- scripts/bounded.py --self-test
+# A test binary's key moves with what it maps to run, and with all of a file it cannot read as ELF.
+main "binary key self-test" 6:3 once scripts/elf-alloc-key.py -- scripts/elf-alloc-key.py --self-test
 # A step with no number, or a scale that is not one, refuses to run.
 bounds_refuse() {
   local number scale status
@@ -559,7 +581,7 @@ device_size() {
 # it runs when one of them changed since it last passed here.
 keys_self_test() {
   local proved
-  proved="$(git rev-parse --path-format=absolute --git-common-dir)/orion-lane-records/self-test-$(cat scripts/lane-reuse.py scripts/size-key.py scripts/gate.sh | sha256sum | cut -c1-16)"
+  proved="$(git rev-parse --path-format=absolute --git-common-dir)/orion-lane-records/self-test-$(cat scripts/lane-reuse.py scripts/size-key.py scripts/elf-alloc-key.py scripts/gate.sh | sha256sum | cut -c1-16)"
   if [ -f "$proved" ]; then
     echo "    passed before on these scripts"
     return 0
@@ -579,6 +601,10 @@ fuzz_short() {
   # nightly's, with sanitizers, and share nothing with the rest.
   lane_item "$state" "fuzz-short 3" "every target, 3 s each" \
     env CARGO_TARGET_DIR="$target_dir/fuzz" scripts/fuzz-short.sh 3
+  # Its runs reused by its binaries (scripts/fuzz-short.sh): said so on the gate's line.
+  if [ -f "$state.bin" ] && awk -F'\t' '$3 == "reused" {f = 1} END {exit !f}' "$state.bin"; then
+    awk -F'\t' -v OFS='\t' '{$3 = "reused"; print}' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+  fi
   scripts/lane-reuse.py status fuzz "$state" > "$state.status"
 }
 

@@ -10,6 +10,13 @@
     lane-reuse.py behind [LANE...]           per lane, the commit it last ran in full at, and
                                              how far this checkout is past it
     lane-reuse.py --explain LANE ITEM        each input of ITEM's key
+    lane-reuse.py binary-plan STATE ARTIFACTS
+                                             the tests lane: of the items STATE has to run,
+                                             those whose test binaries (ARTIFACTS: cargo's JSON
+                                             of their build) passed before are reused; their
+                                             binary keys go to STATE.bin
+    lane-reuse.py binary-plan-item LANE STATE ITEM -- EXE...
+                                             one item keyed by its binaries (the fuzz targets)
     lane-reuse.py own-vars                   fails if a Rust source (a build script, a test)
                                              reads one of the gate's own variables
     lane-reuse.py --self-test                in a copy of this tree, changes each kind of input
@@ -108,6 +115,26 @@ size_key = load_size_key()
 digest, file_digest, run = size_key.digest, size_key.file_digest, size_key.run
 
 
+def load_elf_key():
+    spec = importlib.util.spec_from_file_location("elf_key", os.path.join(ROOT, "scripts", "elf-alloc-key.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Keys by what runs. A test binary's allocated sections (scripts/elf-alloc-key.py) are the code
+# and data it runs with: a change that moves none of them (a comment, a doc line, code no test
+# binary links) cannot change what its tests do. So a lane item whose source key moved is keyed
+# again by its binaries, once built, and reused if those passed before. What a binary reads when
+# it runs is in that key too: every file of each crate it builds that is not Rust source (a
+# fixture, a page, a manifest), what its package says its tests read, the programs it may start,
+# and the environment it reads. A package whose sources may reach outside the crates, or name a
+# file by CARGO_MANIFEST_DIR at run time (its own sources among what it may read), is never
+# keyed so: only its sources' key reuses it. Kept apart from the source keys: LANE-bin.
+BINARY_LANES = {"tests": "tests-bin", "fuzz": "fuzz-bin"}
+RUNTIME_SOURCE = re.compile(r"CARGO_MANIFEST_DIR")
+
+
 def git(*args):
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
 
@@ -137,15 +164,23 @@ def lock_entries():
 class Keys(size_key.Workspace):
     def __init__(self):
         # size_key.Workspace's state, from one listing: a listing takes seconds.
-        listing = subprocess.run(
-            ["cargo", "metadata", "--locked", "--format-version", "1"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
-        if listing.returncode != 0:
-            sys.exit(f"lane-reuse.py: cargo metadata failed:\n{listing.stderr}")
-        meta = json.loads(listing.stdout)
+        listed_before = os.environ.get("LANE_REUSE_METADATA")
+        if listed_before:
+            # The self-test only: the listing of a tree whose manifests, lockfile and toolchain
+            # file are these, its root written as @ROOT@. Concurrent listings wait on cargo's
+            # package-cache lock, one after another (30 at once: 23 s).
+            with open(listed_before) as file:
+                meta = json.loads(file.read().replace("@ROOT@", ROOT))
+        else:
+            listing = subprocess.run(
+                ["cargo", "metadata", "--locked", "--format-version", "1"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            if listing.returncode != 0:
+                sys.exit(f"lane-reuse.py: cargo metadata failed:\n{listing.stderr}")
+            meta = json.loads(listing.stdout)
         self.root = ROOT
         self.packages = {p["id"]: p for p in meta["packages"]}
         self.members = set(meta["workspace_members"])
@@ -298,6 +333,45 @@ class Keys(size_key.Workspace):
         else:
             raise NoKey(f"no key for {lane} item {item!r}")
         return inputs
+
+    def binary_keyable(self, package):
+        """Whether PACKAGE's tests can be keyed by their binaries: nothing they read at run time
+        is left out of that key."""
+        if self.reaches_outside(package):
+            return False
+        home = os.path.relpath(os.path.dirname(self.packages[self.by_name[package]]["manifest_path"]), ROOT)
+        for name, _ in self.files(home):
+            if name.endswith(".rs"):
+                with open(os.path.join(ROOT, name), errors="replace") as file:
+                    if RUNTIME_SOURCE.search(file.read()):
+                        return False
+        return True
+
+    def binary_inputs(self, lane, item, executables, read):
+        """ITEM's key by its EXECUTABLES (paths) and the files READ at run time (name, digest)."""
+        if not hasattr(self, "elf_key"):
+            self.elf_key = load_elf_key()
+        inputs = self.common()
+        inputs.append(("lane", BINARY_LANES[lane]))
+        inputs.append(("item", item))
+        for script in LANE_SCRIPTS[lane] + ["scripts/elf-alloc-key.py"]:
+            inputs.append((script, file_digest(os.path.join(ROOT, script))))
+        for path in sorted(executables, key=os.path.basename):
+            with open(path, "rb") as file:
+                inputs.append((f"binary {os.path.basename(path)}", self.elf_key.alloc_key(file.read())))
+        inputs += read
+        return inputs
+
+    def test_binary_inputs(self, package, executables):
+        built = self.built(self.packages_built([package], dev=True))
+        read = [(name, value) for name, value in built if not name.endswith(".rs")]
+        for directory in self.test_reads(package):
+            read.extend(self.files(directory))
+        read.append(("programs", self.programs()))
+        read.append(("what the tests read of the environment", sorted(
+            (name, value) for name, value in os.environ.items() if TEST_ENV.match(name)
+        )))
+        return self.binary_inputs("tests", package, executables, read)
 
     def outside(self):
         """One digest of every file outside the crates but the notes and CI's own."""
@@ -459,6 +533,63 @@ def plan(lane, state, items):
     if why:
         print(f"    {lane} runs in full: {why}")
     print(f"    {lane}: {reused} of {len(items)} reused; {len(items) - reused} of {len(items)} items had no key or were not reused")
+    return 0
+
+
+def binary_plan(state, artifacts):
+    """The tests lane, after its build: each item to run whose binaries passed before is reused."""
+    keys = Keys()
+    executables = {}
+    with open(artifacts) as file:
+        for line in file:
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if message.get("reason") == "compiler-artifact" and message.get("executable"):
+                package = keys.packages.get(message["package_id"])
+                if package:
+                    executables.setdefault(package["name"], set()).add(message["executable"])
+    why = behind("tests")
+    rows = read_state(state)
+    reused = 0
+    with open(state + ".bin", "w") as binary:
+        for row in rows:
+            name, key, how = row
+            package = name.split()[0]
+            if how != "run" or key == "-" or package not in executables or not keys.binary_keyable(package):
+                continue
+            inputs = keys.test_binary_inputs(package, executables[package])
+            binary_key = digest(json.dumps(inputs).encode())
+            use = why is None and passed_before(BINARY_LANES["tests"], binary_key)
+            binary.write(f"{name}\t{binary_key}\t{'reused' if use else 'run'}\n")
+            if use:
+                row[2] = "reused"
+                reused += 1
+                print(f"    reused: {name} (its test binaries passed before, the same in all they run)")
+    with open(state + ".bin.lane", "w") as file:
+        file.write(BINARY_LANES["tests"] + "\n")
+    with open(state, "w") as file:
+        for row in rows:
+            file.write("\t".join(row) + "\n")
+    print(f"    tests: {reused} more reused by their binaries")
+    return 0
+
+
+def binary_plan_item(lane, state, item, executables):
+    """One item keyed by its binaries, and the files beside them it reads (the fuzz targets and
+    their corpora: every file under testing/fuzz that is not Rust source)."""
+    keys = Keys()
+    read = [(name, value) for name, value in keys.files("testing/fuzz") if not name.endswith(".rs")]
+    inputs = keys.binary_inputs(lane, item, executables, read)
+    key = digest(json.dumps(inputs).encode())
+    use = behind(lane) is None and passed_before(BINARY_LANES[lane], key)
+    with open(state, "w") as file:
+        file.write(f"{item}\t{key}\t{'reused' if use else 'run'}\n")
+    with open(state + ".lane", "w") as file:
+        file.write(BINARY_LANES[lane] + "\n")
+    if use:
+        print(f"    reused: {item} (its binaries passed before, the same in all they run)")
     return 0
 
 
@@ -649,13 +780,160 @@ def depinfo(state, fresh):
     return 0
 
 
+def manifest_dir_packages(keys):
+    """The workspace packages any of whose Rust sources mention CARGO_MANIFEST_DIR."""
+    found = []
+    for package_id in keys.members:
+        package = keys.packages[package_id]
+        home = os.path.relpath(os.path.dirname(package["manifest_path"]), ROOT)
+        for name, _ in keys.files(home):
+            if name.endswith(".rs"):
+                with open(os.path.join(ROOT, name), errors="replace") as file:
+                    if RUNTIME_SOURCE.search(file.read()):
+                        found.append(package["name"])
+                        break
+    return sorted(found)
+
+
+def plan_self_test():
+    """binary-plan end to end, in a copy of the tree that --self-test made: planted cargo
+    artifacts and test state, records in the copy's own git directory, and what runs again
+    after each change. Prints one line per case, then `plan self-test passed` or the failures."""
+    import contextlib
+    import io
+    import tempfile
+
+    work = tempfile.mkdtemp(prefix="orion-plan.")
+    failures = []
+    try:
+        keys = Keys()
+        leaf, other = "orion-device-probe", "orion-ctl"
+        builds_leaf = [keys.packages[i]["name"] for i in keys.members
+                       if keys.by_name[leaf] in keys.packages_built([keys.packages[i]["name"]], dev=True)
+                       and keys.packages[i]["name"] != leaf]
+        if builds_leaf:
+            sys.exit(f"plan self-test: {leaf} is built by {builds_leaf}: pick a package nothing builds")
+        six = manifest_dir_packages(keys)
+        if not six:
+            sys.exit("plan self-test: no package mentions CARGO_MANIFEST_DIR: plant one")
+        # Each package's executables: a test binary, and for the leaf a binary of its own its
+        # tests run (named to sort after the test, so a key of the first alone would miss it).
+        exes = {}
+        for package in [leaf, other] + six:
+            directory = os.path.join(work, "exe", package)
+            os.makedirs(directory)
+            exes[package] = [os.path.join(directory, "a-test")]
+            shutil.copyfile(shutil.which("true"), exes[package][0])
+        exes[leaf].append(os.path.join(work, "exe", leaf, "b-bin"))
+        shutil.copyfile(shutil.which("true"), exes[leaf][1])
+        artifacts = os.path.join(work, "artifacts")
+        with open(artifacts, "w") as file:
+            file.write("not json: cargo's other output\n")
+            for package, paths in exes.items():
+                package_id = keys.by_name[package]
+                file.write(json.dumps({"reason": "compiler-artifact", "package_id": package_id, "executable": None}) + "\n")
+                for path in paths:
+                    file.write(json.dumps({"reason": "compiler-artifact", "package_id": package_id, "executable": path}) + "\n")
+        state = os.path.join(work, "state")
+
+        def plan():
+            with open(state, "w") as file:
+                for package in [leaf, other] + six:
+                    file.write(f"{package}\tsource-{package}\trun\n")
+            with contextlib.redirect_stdout(io.StringIO()):
+                binary_plan(state, artifacts)
+            keyed = {name for name, _, _ in read_state(state + ".bin")}
+            return {name: how for name, _, how in read_state(state)}, keyed
+
+        def expect(label, runs, also=lambda got, keyed: None):
+            got, keyed = plan()
+            for package in [leaf, other] + six:
+                want = "run" if package in runs or package in six else "reused"
+                if got[package] != want:
+                    failures.append(f"{label}: {package} {got[package]}, not {want}")
+            for package in six:
+                if package in keyed:
+                    failures.append(f"{label}: {package} mentions CARGO_MANIFEST_DIR, and was keyed by its binaries")
+            also(got, keyed)
+            if not any(f.startswith(label + ":") for f in failures):
+                print(f"    plan: {label}: {', '.join(sorted(p for p in (leaf, other) if p in runs)) or 'nothing'} ran")
+
+        def record_all():
+            for name, _, _ in read_state(state + ".bin"):
+                record(state + ".bin", name)
+
+        expect("nothing passed before", {leaf, other})
+        record_all()
+        expect("the same binaries, passed before", set())
+        fixture = os.path.join(ROOT, os.path.relpath(os.path.dirname(keys.packages[keys.by_name[leaf]]["manifest_path"]), ROOT), "tests", "planted-fixture.txt")
+        made = not os.path.isdir(os.path.dirname(fixture))
+        os.makedirs(os.path.dirname(fixture), exist_ok=True)
+        with open(fixture, "w") as file:
+            file.write("a fixture its tests read\n")
+        try:
+            expect(f"a fixture of {leaf}, which nothing else builds", {leaf})
+        finally:
+            os.remove(fixture)
+            if made:
+                os.rmdir(os.path.dirname(fixture))
+        expect("the fixture taken away again", set())
+        shutil.copyfile(shutil.which("false"), exes[leaf][1])
+        try:
+            expect(f"only the code of a binary {leaf}'s tests run", {leaf})
+        finally:
+            shutil.copyfile(shutil.which("true"), exes[leaf][1])
+        os.environ["ORION_PLANTED"] = "changed"
+        try:
+            expect("a value of the environment the tests read", {leaf, other})
+        finally:
+            del os.environ["ORION_PLANTED"]
+        os.environ["CI"] = "1"
+        try:
+            expect("on CI, where a lane runs in full", {leaf, other})
+        finally:
+            del os.environ["CI"]
+        planted = os.path.join(ROOT, "crates/client/ctl/tests/all.rs")
+        with open(planted) as file:
+            before = file.read()
+        with open(planted, "a") as file:
+            file.write('\nconst _PLANTED: &str = env!("CARGO_MANIFEST_DIR");\n')
+        try:
+            expect(f"a seventh package, {other}, made to mention CARGO_MANIFEST_DIR", {other},
+                   lambda got, keyed: other in keyed and failures.append(
+                       f"{other} mentions CARGO_MANIFEST_DIR, and was keyed by its binaries"))
+        finally:
+            with open(planted, "w") as file:
+                file.write(before)
+        # A test binary that is not ELF: keyed by all of its bytes, so one byte changed runs it.
+        with open(exes[leaf][0], "w") as file:
+            file.write("#!/bin/sh\nexit 0\n")
+        if load_elf_key().alloc_key(open(exes[leaf][0], "rb").read()) != "file-" + hashlib.sha256(b"#!/bin/sh\nexit 0\n").hexdigest():
+            failures.append("a test binary not ELF was not keyed by all of its content")
+        expect("a test binary that is not ELF, new", {leaf})
+        record_all()
+        expect("that binary, passed before", set())
+        with open(exes[leaf][0], "w") as file:
+            file.write("#!/bin/sh\nexit 1\n")
+        expect("that binary, one byte changed", {leaf})
+        print(f"    plan: on the source key alone: {', '.join(six)}")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    if failures:
+        print("plan self-test FAILED:", *failures, sep="\n  ")
+        return 1
+    print("plan self-test passed")
+    return 0
+
+
 def self_test():
     """Each kind of input a test's key holds, changed in a copy of this tree: the key moves; a
-    note, or a crate the package does not build, leaves it where it was."""
+    note, or a crate the package does not build, leaves it where it was. Every case runs in a
+    copy of its own, all at once: none waits on another."""
     import tempfile
 
     work = tempfile.mkdtemp(prefix="orion-keys.")
     copy = os.path.join(work, "tree")
+    runs = {}
     try:
         listed = subprocess.run(
             ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
@@ -666,38 +944,60 @@ def self_test():
                 os.makedirs(os.path.dirname(os.path.join(copy, name)), exist_ok=True)
                 shutil.copy2(os.path.join(ROOT, name), os.path.join(copy, name))
         subprocess.run(["git", "init", "-q"], cwd=copy, check=True)
-        script = os.path.join(copy, "scripts", "lane-reuse.py")
         shims = os.path.join(work, "bin")
         os.makedirs(shims)
         env = {k: v for k, v in os.environ.items() if k != "CI" and not k.startswith("GATE_")}
         # One target for every listing: the copy's own would be made, empty, for each.
         env["CARGO_TARGET_DIR"] = os.path.join(work, "target")
 
-        def key(lane, item, extra=None):
-            out = subprocess.run(
-                [sys.executable, script, "--explain", lane, item],
-                cwd=copy, capture_output=True, text=True, env=dict(env, **(extra or {})),
+        # One listing for every case that leaves the manifests, the lockfile and the toolchain
+        # file as they are; a case that changes one lists its own tree.
+        listing = subprocess.run(
+            ["cargo", "metadata", "--locked", "--format-version", "1"],
+            cwd=copy, capture_output=True, text=True, env=env, check=True,
+        ).stdout
+        metadata = os.path.join(work, "metadata.json")
+        with open(metadata, "w") as file:
+            file.write(listing.replace(copy, "@ROOT@"))
+        own_listing = re.compile(r"(^|/)(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml)$")
+
+        def start(tag, argv, change=None, extra=None):
+            """Run lane-reuse.py ARGV in a copy of its own, CHANGE made to it first."""
+            root = os.path.join(work, f"case-{len(runs)}")
+            subprocess.run(["cp", "-a", copy, root], check=True)
+            run_env = dict(env, **(extra or {}))
+            if change:
+                change(root)
+            if not (change and own_listing.search(change.name)):
+                run_env["LANE_REUSE_METADATA"] = metadata
+            runs[tag] = subprocess.Popen(
+                [sys.executable, os.path.join(root, "scripts", "lane-reuse.py"), *argv],
+                cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=run_env,
             )
-            if out.returncode != 0:
-                sys.exit(f"self-test: --explain {lane} {item} failed:\n{out.stderr}")
-            return out.stdout.strip().splitlines()[-1].split()[-1]
+
+        def result(tag):
+            out, err = runs[tag].communicate()
+            if runs[tag].returncode not in (0, 1) or not out.strip():
+                sys.exit(f"self-test: {tag} failed:\n{out}{err}")
+            return out.rstrip().splitlines()
 
         def touch(name, text="\n// changed by the keys' self-test\n"):
-            path = os.path.join(copy, name)
-            with open(path) as file:
-                before = file.read()
-            with open(path, "a") as file:
-                file.write(text)
-            return lambda: open(path, "w").write(before)
+            def change(root):
+                with open(os.path.join(root, name), "a") as file:
+                    file.write(text)
+            change.name = name
+            return change
 
         def replace(name, old, new):
-            path = os.path.join(copy, name)
-            with open(path) as file:
-                before = file.read()
-            assert old in before, f"{name} lacks {old!r}"
-            with open(path, "w") as file:
-                file.write(before.replace(old, new, 1))
-            return lambda: open(path, "w").write(before)
+            def change(root):
+                path = os.path.join(root, name)
+                with open(path) as file:
+                    before = file.read()
+                assert old in before, f"{name} lacks {old!r}"
+                with open(path, "w") as file:
+                    file.write(before.replace(old, new, 1))
+            change.name = name
+            return change
 
         keys = Keys.__new__(Keys)  # only for the closure, read from this tree
         Keys.__init__(keys)
@@ -714,62 +1014,101 @@ def self_test():
         with open(os.path.join(shims, "ssh"), "w") as file:
             file.write("#!/bin/sh\nexit 0\n")
         os.chmod(os.path.join(shims, "ssh"), 0o755)
-        base = key("tests", "orion-ctl")
+        # Two binaries of one name, other bytes: the key must move by what is in them, not the name.
+        one, other = os.path.join(work, "one", "tests"), os.path.join(work, "other", "tests")
+        for path, source in ((one, "true"), (other, "false")):
+            os.makedirs(os.path.dirname(path))
+            shutil.copyfile(shutil.which(source), path)
+
         cases = [
-            ("a file of the crate itself", True, lambda: touch("crates/client/ctl/src/lib.rs"), None),
-            ("a file of a crate it builds", True, lambda: touch("crates/client/orion/src/lib.rs"), None),
-            ("a file of a crate only its tests build", True, lambda: touch("crates/testing/stubs/src/lib.rs"), None),
+            ("a file of the crate itself", True, touch("crates/client/ctl/src/lib.rs"), None),
+            ("a file of a crate it builds", True, touch("crates/client/orion/src/lib.rs"), None),
+            ("a file of a crate only its tests build", True, touch("crates/testing/stubs/src/lib.rs"), None),
             # orion-ctl's sources name no path outside its crates: a page changed is not its.
-            ("a file outside the crates, which it never reaches", False, lambda: touch("web/video-example/video.js"), None),
-            ("the tests' own settings", True, lambda: touch(".config/nextest.toml", "\n# changed\n"), None),
-            ("the gate", True, lambda: touch("scripts/gate.sh", "\n# changed\n"), None),
-            ("the root manifest", True, lambda: touch("Cargo.toml", "\n# changed\n"), None),
-            ("the toolchain file", True, lambda: touch("rust-toolchain.toml", "\n# changed\n"), None),
+            ("a file outside the crates, which it never reaches", False, touch("web/video-example/video.js"), None),
+            ("the tests' own settings", True, touch(".config/nextest.toml", "\n# changed\n"), None),
+            ("the gate", True, touch("scripts/gate.sh", "\n# changed\n"), None),
+            ("the root manifest", True, touch("Cargo.toml", "\n# changed\n"), None),
+            ("the toolchain file", True, touch("rust-toolchain.toml", "\n# changed\n"), None),
             # Its entry in the lockfile as written: a line added to it, which cargo reads past.
             ("a locked dependency it builds", lock is not None,
-             lambda: replace("Cargo.lock", lock.group(0), lock.group(0) + "\n# changed"), None),
-            ("the build's environment", True, lambda: (lambda: None), {"RUSTFLAGS": "-Cdebuginfo=0"}),
-            ("the environment a test reads", True, lambda: (lambda: None), {"NAMESPACE_TESTS": "changed"}),
-            ("a program a test starts", True, lambda: (lambda: None),
-             {"PATH": shims + os.pathsep + os.environ.get("PATH", "")}),
-            ("a note", False, lambda: touch("docs/design.md", "\nchanged\n"), None),
-            (f"a crate it does not build ({apart})", False,
-             lambda: touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"), None),
+             lock and replace("Cargo.lock", lock.group(0), lock.group(0) + "\n# changed"), None),
+            ("the build's environment", True, None, {"RUSTFLAGS": "-Cdebuginfo=0"}),
+            ("the environment a test reads", True, None, {"NAMESPACE_TESTS": "changed"}),
+            ("a program a test starts", True, None, {"PATH": shims + os.pathsep + os.environ.get("PATH", "")}),
+            ("a note", False, touch("docs/design.md", "\nchanged\n"), None),
+            (f"a crate it does not build ({apart})", False, touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"), None),
         ]
+        binary_cases = [
+            ("by its binaries: a Rust source of the crate itself", False, touch("crates/client/ctl/src/lib.rs"), one),
+            ("by its binaries: a Rust source of a crate it builds", False, touch("crates/client/orion/src/lib.rs"), one),
+            ("by its binaries: another binary of the same name", True, None, other),
+            ("by its binaries: a manifest of a crate it builds", True,
+             touch("crates/client/orion/Cargo.toml", "\n# changed\n"), one),
+            ("by its binaries: the tests' own settings", True, touch(".config/nextest.toml", "\n# changed\n"), one),
+            ("by its binaries: a note", False, touch("docs/design.md", "\nchanged\n"), one),
+        ]
+        # Every crate that reads a file by CARGO_MANIFEST_DIR today also reaches outside, so that
+        # check is planted: in a crate that is otherwise keyed so.
+        unkeyed = [
+            ("orion-web-tests", "reaches outside the crates", None),
+            ("orion-ctl", "reads a file by CARGO_MANIFEST_DIR",
+             touch("crates/client/ctl/tests/all.rs", '\nconst _PLANTED: &str = env!("CARGO_MANIFEST_DIR");\n')),
+        ]
+        start("plan", ["--self-test-plan"])
+        start("base", ["--explain", "tests", "orion-ctl"])
+        # The same inputs in another copy, elsewhere: one key, wherever the tree is.
+        start("base elsewhere", ["--explain", "tests", "orion-ctl"])
+        for label, _, change, extra in cases:
+            start(label, ["--explain", "tests", "orion-ctl"], change, extra)
+        # A package whose sources reach outside the crates (the browser tests load web/).
+        start("web base", ["--explain", "tests", "orion-web-tests"])
+        start("web", ["--explain", "tests", "orion-web-tests"], touch("web/video-example/video.js"))
+        # What a package says its tests read: any crate, for one that reads them all.
+        start("stubs base", ["--explain", "tests", "orion-stubs"])
+        start("stubs", ["--explain", "tests", "orion-stubs"], touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"))
+        start("binary base", ["--explain-binary", "orion-ctl", one])
+        for label, _, change, executable in binary_cases:
+            start(label, ["--explain-binary", "orion-ctl", executable], change)
+        for package, why, change in unkeyed:
+            start(f"unkeyed {package}", ["--explain-binary", package, one], change)
+
+        key = lambda tag: result(tag)[-1].split()[-1]
         failures = []
-        for label, moves, change, extra in cases:
-            undo = change()
-            try:
-                now = key("tests", "orion-ctl", extra)
-            finally:
-                undo()
-            if (now != base) != moves:
+        base = key("base")
+        if key("base elsewhere") != base:
+            failures.append("the same inputs gave two keys")
+        for label, moves, _, _ in cases:
+            if (key(label) != base) != moves:
                 failures.append(f"{label}: the key {'did not move' if moves else 'moved'}")
             else:
                 print(f"    {label}: {'moved' if moves else 'stayed'}")
-        # A package whose sources reach outside the crates (the browser tests load web/).
-        base = key("tests", "orion-web-tests")
-        undo = touch("web/video-example/video.js")
-        try:
-            if key("tests", "orion-web-tests") == base:
-                failures.append("a file outside the crates, for a package that reaches it: the key did not move")
+        for tag, label in (("web", "a file outside the crates, for a package that reaches it"),
+                           ("stubs", "a crate a package says its tests read")):
+            if key(tag) == key(f"{tag} base"):
+                failures.append(f"{label}: the key did not move")
             else:
-                print("    a file outside the crates, for a package that reaches it: moved")
-        finally:
-            undo()
-        # What a package says its tests read: any crate, for one that reads them all.
-        base = key("tests", "orion-stubs")
-        undo = touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n")
-        try:
-            if key("tests", "orion-stubs") == base:
-                failures.append("a crate a package says its tests read: the key did not move")
+                print(f"    {label}: moved")
+        base = result("binary base")[-1]
+        for label, moves, _, _ in binary_cases:
+            if (result(label)[-1] != base) != moves:
+                failures.append(f"{label}: the key {'did not move' if moves else 'moved'}")
             else:
-                print("    a crate a package says its tests read: moved")
-        finally:
-            undo()
-        if key("tests", "orion-ctl") != key("tests", "orion-ctl"):
-            failures.append("the same inputs gave two keys")
+                print(f"    {label}: {'moved' if moves else 'stayed'}")
+        for package, why, _ in unkeyed:
+            if result(f"unkeyed {package}")[-1] != "not keyed by its binaries":
+                failures.append(f"{package} {why}, and was keyed by its binaries")
+            else:
+                print(f"    by its binaries: {package} ({why}): not keyed so")
+        lines = result("plan")
+        print(*(line for line in lines if line.startswith("    ")), sep="\n")
+        if lines[-1] != "plan self-test passed":
+            failures += [line.strip() for line in lines if not line.startswith("    plan:")]
     finally:
+        for process in runs.values():
+            if process.poll() is None:
+                process.kill()
+                process.wait()
         shutil.rmtree(work, ignore_errors=True)
     if failures:
         print("keys self-test FAILED:", *failures, sep="\n  ")
@@ -788,6 +1127,10 @@ def main(argv):
         for item in argv[2:]:
             record(argv[1], item)
         return 0
+    if len(argv) == 3 and argv[0] == "binary-plan":
+        return binary_plan(argv[1], argv[2])
+    if len(argv) >= 6 and argv[0] == "binary-plan-item" and argv[4] == "--":
+        return binary_plan_item(argv[1], argv[2], argv[3], argv[5:])
     if len(argv) == 3 and argv[0] == "status":
         return status(argv[1], argv[2])
     if argv and argv[0] == "behind":
@@ -806,6 +1149,16 @@ def main(argv):
         return depinfo(argv[1], argv[2])
     if len(argv) in (3, 4) and argv[0] == "listing":
         return listing(argv[1], argv[2] if len(argv) == 4 else "", argv[-1])
+    if argv == ["--self-test-plan"]:
+        return plan_self_test()
+    if len(argv) >= 3 and argv[0] == "--explain-binary":
+        # PACKAGE EXE...: its tests' key by those binaries, or why it has none.
+        keys = Keys()
+        if not keys.binary_keyable(argv[1]):
+            print("not keyed by its binaries")
+            return 0
+        print("key", digest(json.dumps(keys.test_binary_inputs(argv[1], argv[2:])).encode()))
+        return 0
     if len(argv) == 3 and argv[0] == "--explain":
         keys = Keys()
         for label, value in keys.inputs(argv[1], argv[2]):
