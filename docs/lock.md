@@ -681,6 +681,9 @@ what to change.
 - **I125.** The test filters' listing is kept under a package's source key and its binary key,
   so a package reused by its binaries after the source key moved still has its tests listed;
   one with neither kept is listed then. No interface changes; no wire changes; level 7.
+- **I126.** A package whose build makes no test executable is keyed by its binaries over none,
+  so a comment in a crate it builds no longer runs its zero tests. One the build made nothing
+  of still runs. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

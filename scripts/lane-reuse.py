@@ -558,6 +558,9 @@ def plan(lane, state, items):
 def binary_plan(state, artifacts):
     """The tests lane, after its build: each item to run whose binaries passed before is reused."""
     keys = Keys()
+    # Each package the build made something of, and its executables: none, for a library with
+    # no tests of its own. Keyed over none, it is reused while all else its key holds stays; a
+    # package the build made nothing of is not keyed, and runs.
     executables = {}
     with open(artifacts) as file:
         for line in file:
@@ -565,10 +568,12 @@ def binary_plan(state, artifacts):
                 message = json.loads(line)
             except ValueError:
                 continue
-            if message.get("reason") == "compiler-artifact" and message.get("executable"):
+            if message.get("reason") == "compiler-artifact":
                 package = keys.packages.get(message["package_id"])
                 if package:
-                    executables.setdefault(package["name"], set()).add(message["executable"])
+                    made = executables.setdefault(package["name"], set())
+                    if message.get("executable"):
+                        made.add(message["executable"])
     why = behind("tests")
     rows = read_state(state)
     reused = 0
@@ -871,6 +876,13 @@ def plan_self_test():
         six = manifest_dir_packages(keys)
         if not six:
             sys.exit("plan self-test: no package mentions CARGO_MANIFEST_DIR: plant one")
+        # A package whose build makes no test executable (a library with no tests of its own).
+        empty = "orion-msg-topics"
+        # And one the build made nothing of, in the artifacts: not keyed by binaries it may have.
+        unbuilt = "orion-msg-peers"
+        for one in (empty, unbuilt):
+            if not keys.binary_keyable(one):
+                sys.exit(f"plan self-test: {one} is not keyed by its binaries: pick another with no tests")
         # Each package's executables: a test binary, and for the leaf a binary of its own its
         # tests run (named to sort after the test, so a key of the first alone would miss it).
         exes = {}
@@ -889,11 +901,12 @@ def plan_self_test():
                 file.write(json.dumps({"reason": "compiler-artifact", "package_id": package_id, "executable": None}) + "\n")
                 for path in paths:
                     file.write(json.dumps({"reason": "compiler-artifact", "package_id": package_id, "executable": path}) + "\n")
+            file.write(json.dumps({"reason": "compiler-artifact", "package_id": keys.by_name[empty], "executable": None}) + "\n")
         state = os.path.join(work, "state")
 
         def plan(source="source"):
             with open(state, "w") as file:
-                for package in [leaf, other] + six:
+                for package in [leaf, other, empty, unbuilt] + six:
                     file.write(f"{package}\t{source}-{package}\trun\n")
             with contextlib.redirect_stdout(io.StringIO()):
                 binary_plan(state, artifacts)
@@ -941,9 +954,20 @@ def plan_self_test():
                 return {suite["package-name"] for suite in json.load(file)["rust-suites"].values()}
 
         expect("nothing passed before", {leaf, other})
-        list_after([leaf, other] + six)
+        list_after([leaf, other, empty] + six)
         record_all()
         expect("the same binaries, passed before", set())
+        # No test executable: keyed over none, so it passed before and is reused, its tests
+        # (none) not run again.
+        got, keyed = plan()
+        if got[empty] != "reused" or empty not in keyed:
+            failures.append(f"a package with no test executable, passed before: {got[empty]}, keyed by its binaries: {empty in keyed}")
+        else:
+            print(f"    plan: no test executable, passed before: {empty} reused")
+        if got[unbuilt] != "run" or unbuilt in keyed:
+            failures.append(f"a package the build made nothing of: {got[unbuilt]}, keyed by its binaries: {unbuilt in keyed}")
+        else:
+            print(f"    plan: nothing built of it, in the artifacts: {unbuilt} ran")
         # A change that moves the source key and leaves the binaries (a comment): those reused
         # by their binaries alone never ran on this source key, and still have their tests listed.
         expect("the same binaries, the source key moved", set(), source="moved")
