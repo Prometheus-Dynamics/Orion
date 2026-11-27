@@ -148,6 +148,25 @@ def scripts_hash():
     return digest("".join(f"{name}\0{file_digest(os.path.join(ROOT, name))}\0" for name in names).encode())
 
 
+_PROGRAM_DIGESTS = {}
+
+
+def program_digest(path):
+    """The digest of the program PATH names, read once in this process for each file as it
+    stands: by its real path, device, inode, size, and change and modify times. A program can
+    be large (CI's runner has a Chromium of 533 MB, under two names), and every key a process
+    makes holds them all."""
+    real = os.path.realpath(path)
+    try:
+        status = os.stat(real)
+    except FileNotFoundError:
+        return "absent"
+    stands = (real, status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns, status.st_ctime_ns)
+    if stands not in _PROGRAM_DIGESTS:
+        _PROGRAM_DIGESTS[stands] = file_digest(real)
+    return _PROGRAM_DIGESTS[stands]
+
+
 def lock_entries():
     """(name, version) -> that package's entry in Cargo.lock, as written."""
     entries = {}
@@ -424,7 +443,7 @@ class Keys(size_key.Workspace):
             found = []
             for name in PROGRAMS:
                 path = shutil.which(name) or ""
-                found.append((name, path, file_digest(os.path.realpath(path)) if path else ""))
+                found.append((name, path, program_digest(path) if path else ""))
             found.append(("kernel", os.uname().release))
             self.programs_cache = digest(json.dumps(found).encode())
         return self.programs_cache
@@ -1129,6 +1148,22 @@ def self_test():
         _SELF_TEST_JOBS = [lambda job=job: in_copy(*job) for job in _SELF_TEST_JOBS]
         import multiprocessing
 
+        # A program rewritten where it stands, same inode and size, is read again.
+        program = os.path.join(shims, "planted-program")
+        with open(program, "w") as file:
+            file.write("#!/bin/sh\nexit 0\n")
+        first = program_digest(program)
+        with open(program, "w") as file:
+            file.write("#!/bin/sh\nexit 1\n")
+        later = os.stat(program).st_mtime_ns + 1_000_000_000
+        os.utime(program, ns=(later, later))
+        if program_digest(program) == first:
+            failures.append("a program rewritten where it stands kept its digest")
+        else:
+            print("    a program rewritten where it stands: read again")
+        os.remove(program)
+        # Every program a key holds, read here once: each forked worker starts with them read.
+        keys.programs()
         setup = _cpu_seconds() - started
         with multiprocessing.get_context("fork").Pool(4) as pool:
             done = pool.map(_self_test_job, range(len(jobs)), chunksize=1)
