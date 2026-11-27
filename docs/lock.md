@@ -678,6 +678,9 @@ what to change.
   (now 11.7 of 60). The video test records what its throttled link carried, and the page
   reports more, for the open intermittent stall. No interface changes; no wire changes;
   level 7.
+- **I125.** The test filters' listing is kept under a package's source key and its binary key,
+  so a package reused by its binaries after the source key moved still has its tests listed;
+  one with neither kept is listed then. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

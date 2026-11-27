@@ -650,30 +650,66 @@ def status(lane, state):
     return 0
 
 
-def listing(state, fresh, out):
-    """Every test of the tests lane: those that ran from FRESH (`cargo nextest list` of them),
-    kept by their key; those reused from what was kept when they last ran."""
+def nextest_list(packages):
+    """The tests of PACKAGES, as nextest lists them now (their binaries built if they are not)."""
+    command = ["cargo", "nextest", "list", "--all-features", "--message-format", "json"]
+    for package in packages:
+        command += ["-p", package]
+    listed = subprocess.run(command, cwd=ROOT, stdout=subprocess.PIPE, text=True, check=True).stdout
+    return json.loads(listed)["rust-suites"]
+
+
+def listing(state, fresh, out, lister=nextest_list):
+    """Every test of the tests lane: those that ran from FRESH (`cargo nextest list` of them);
+    those reused, from what was kept when the same binaries or the same inputs last ran. Each
+    listing is kept under the package's source key and, if it has one, its binary key: the same
+    binary bytes hold the same tests. A package reused with neither kept is listed now, by
+    LISTER: never skipped, and never filled from a listing of other binaries."""
     suites = {}
     ran = {}
     if fresh:
         with open(fresh) as file:
             ran = json.load(file)["rust-suites"]
+    binary = {}
+    if os.path.exists(state + ".bin"):
+        binary = {name: key for name, key, _ in read_state(state + ".bin")}
     kept = os.path.join(records(), "tests-list")
     os.makedirs(kept, exist_ok=True)
+
+    def keep(name, key, mine):
+        for one in (key, binary.get(name)):
+            if one and one != "-":
+                with open(os.path.join(kept, one + ".tmp"), "w") as file:
+                    json.dump(mine, file)
+                os.replace(os.path.join(kept, one + ".tmp"), os.path.join(kept, one))
+
+    def of(listed, name):
+        return {binary_id: suite for binary_id, suite in listed.items() if suite["package-name"] == name}
+
+    unlisted = []
     for name, key, how in read_state(state):
         if how == "run":
-            mine = {binary: suite for binary, suite in ran.items() if suite["package-name"] == name}
+            mine = of(ran, name)
             suites.update(mine)
-            if key != "-":
-                with open(os.path.join(kept, key + ".tmp"), "w") as file:
-                    json.dump(mine, file)
-                os.replace(os.path.join(kept, key + ".tmp"), os.path.join(kept, key))
+            keep(name, key, mine)
+            continue
+        for one in (binary.get(name), key):
+            if one and one != "-":
+                try:
+                    with open(os.path.join(kept, one)) as file:
+                        suites.update(json.load(file))
+                    break
+                except OSError:
+                    pass
         else:
-            try:
-                with open(os.path.join(kept, key)) as file:
-                    suites.update(json.load(file))
-            except OSError:
-                sys.exit(f"lane-reuse.py: {name} was reused, but its tests were never listed: run with GATE_LANE_REUSE=0")
+            unlisted.append((name, key))
+    if unlisted:
+        print(f"    listed now, reused with no listing kept: {', '.join(name for name, _ in unlisted)}")
+        now = lister([name for name, _ in unlisted])
+        for name, key in unlisted:
+            mine = of(now, name)
+            suites.update(mine)
+            keep(name, key, mine)
     with open(out, "w") as file:
         json.dump({"rust-suites": suites}, file)
     return 0
@@ -855,17 +891,17 @@ def plan_self_test():
                     file.write(json.dumps({"reason": "compiler-artifact", "package_id": package_id, "executable": path}) + "\n")
         state = os.path.join(work, "state")
 
-        def plan():
+        def plan(source="source"):
             with open(state, "w") as file:
                 for package in [leaf, other] + six:
-                    file.write(f"{package}\tsource-{package}\trun\n")
+                    file.write(f"{package}\t{source}-{package}\trun\n")
             with contextlib.redirect_stdout(io.StringIO()):
                 binary_plan(state, artifacts)
             keyed = {name for name, _, _ in read_state(state + ".bin")}
             return {name: how for name, _, how in read_state(state)}, keyed
 
-        def expect(label, runs, also=lambda got, keyed: None):
-            got, keyed = plan()
+        def expect(label, runs, also=lambda got, keyed: None, source="source"):
+            got, keyed = plan(source)
             for package in [leaf, other] + six:
                 want = "run" if package in runs or package in six else "reused"
                 if got[package] != want:
@@ -881,9 +917,60 @@ def plan_self_test():
             for name, _, _ in read_state(state + ".bin"):
                 record(state + ".bin", name)
 
+        # What the test filters' step does after the tests: the tests of those that ran, as
+        # nextest lists them, kept for when they are reused.
+        fresh = os.path.join(work, "fresh.json")
+        listed = os.path.join(work, "listed.json")
+
+        def suites_of(packages):
+            return {f"{p}::all": {"package-name": p, "binary-id": f"{p}::all"} for p in packages}
+
+        asked = []
+
+        def lister(packages):
+            asked.append(sorted(packages))
+            return suites_of(packages)
+
+        def list_after(ran):
+            asked.clear()
+            with open(fresh, "w") as file:
+                json.dump({"rust-suites": suites_of(ran)}, file)
+            with contextlib.redirect_stdout(io.StringIO()):
+                listing(state, fresh, listed, lister)
+            with open(listed) as file:
+                return {suite["package-name"] for suite in json.load(file)["rust-suites"].values()}
+
         expect("nothing passed before", {leaf, other})
+        list_after([leaf, other] + six)
         record_all()
         expect("the same binaries, passed before", set())
+        # A change that moves the source key and leaves the binaries (a comment): those reused
+        # by their binaries alone never ran on this source key, and still have their tests listed.
+        expect("the same binaries, the source key moved", set(), source="moved")
+        try:
+            got = list_after(six)
+        except SystemExit as stop:
+            failures.append(f"a package reused only by its binaries must yield a listing: {stop}")
+        else:
+            if {leaf, other} - got:
+                failures.append(f"a package reused only by its binaries must yield a listing: {sorted({leaf, other} - got)} missing")
+            elif asked:
+                failures.append(f"reused by binaries with a listing kept under them, and listed again: {asked}")
+            else:
+                print("    plan: reused only by their binaries, still listed: " + ", ".join(sorted((leaf, other))))
+        # Neither key with a listing kept (records lost): listed now, never skipped.
+        kept = os.path.join(records(), "tests-list")
+        binary_keys = {name: key for name, key, _ in read_state(state + ".bin")}
+        for one in (binary_keys[leaf], f"moved-{leaf}", f"source-{leaf}"):
+            if os.path.exists(os.path.join(kept, one)):
+                os.remove(os.path.join(kept, one))
+        got = list_after(six)
+        if asked != [[leaf]] or leaf not in got:
+            failures.append(f"reused with no listing kept: asked {asked}, listed {leaf}: {leaf in got}")
+        elif not os.path.exists(os.path.join(kept, binary_keys[leaf])):
+            failures.append("a listing made now was not kept under the binary key")
+        else:
+            print(f"    plan: reused with no listing kept, listed now: {leaf}")
         fixture = os.path.join(ROOT, os.path.relpath(os.path.dirname(keys.packages[keys.by_name[leaf]]["manifest_path"]), ROOT), "tests", "planted-fixture.txt")
         made = not os.path.isdir(os.path.dirname(fixture))
         os.makedirs(os.path.dirname(fixture), exist_ok=True)
