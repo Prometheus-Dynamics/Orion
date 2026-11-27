@@ -35,6 +35,11 @@ try {
     note("h264-note", cannot);
   }
   const began = performance.now();
+  // For the report: when a sample last came, and whether the connection closed.
+  let closedAt = -1;
+  orion.onclose = () => (closedAt = (performance.now() - began) / 1000);
+  let seen = -1;
+  let lastSampleAt = began;
   let told = false;
   let framesAtLoss = -1;
   setInterval(() => {
@@ -46,6 +51,11 @@ try {
     const report = asked.get("report");
     const enough = Number(asked.get("enough") ?? 40);
     const seconds = (performance.now() - began) / 1000;
+    const samples = jpeg.samples + (h264 === null ? 0 : h264.samples);
+    if (samples !== seen) {
+      seen = samples;
+      lastSampleAt = performance.now();
+    }
     // A browser without the decoder says so on the element, not when asked.
     const broken = video.error !== null;
     const played = h264 === null || broken || (frames >= enough && video.currentTime > 1);
@@ -70,6 +80,11 @@ try {
         secure: window.isSecureContext,
         protocol: location.protocol,
         codecs: "VideoDecoder" in window,
+        jpegSamples: jpeg.samples,
+        h264Samples: h264 === null ? 0 : h264.samples,
+        sinceLastSample: ((performance.now() - lastSampleAt) / 1000).toFixed(1),
+        closedAt: closedAt < 0 ? "open" : closedAt.toFixed(1),
+        seconds: seconds.toFixed(1),
       }));
     }
   }, 100);

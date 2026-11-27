@@ -673,6 +673,11 @@ what to change.
 - **I123.** The lane keys' self-test runs its cases in four forked workers, each case in a
   hard-linked copy, not a process each. It takes 11 CPU-s, from 16 to 17, and stays within CI's
   60 CPU-s bound (I121 went past it there). No interface changes; no wire changes; level 7.
+- **I124.** The lane keys read each program once per process, keyed by the file as it stands,
+  so CI's two names for one 533 MB Chromium no longer cost 64 CPU-s in the keys' self-test
+  (now 11.7 of 60). The video test records what its throttled link carried, and the page
+  reports more, for the open intermittent stall. No interface changes; no wire changes;
+  level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
