@@ -205,16 +205,58 @@ if [ "${1:-}" = "--self-test" ]; then
     git ls-files -z --cached --others --exclude-standard | tar -c --null -T - -f - | tar -x -C "$work/src" -f -
     git -C "$work/src" init -q
     builds=(r:orion-recovery-bin:host o:orion-bin:host c:orion-capi:host a:orion-bin:aarch64-unknown-linux-musl v:orion-bin:armv7-unknown-linux-musleabihf)
-    keys() { env "$@" scripts/size-key.py "$work/src" "${builds[@]}" | tr '\n' ' '; }
-    here=$(scripts/size-key.py . "${builds[@]}" | tr '\n' ' ')
-    base=$(keys)
+    # Each case on a copy of its own, all at once: a key is a second or more of cargo metadata
+    # and hashing, one after another they were most of this test's minute, and a key does not
+    # depend on where the source is (the first check below).
+    # case <name> <what> <expected: which of r o c a v change> <file|-> <text|-> [env...]:
+    # <file> gets <text> appended (made, if new), then the keys are taken with [env...].
+    cases=()
+    case_() {
+        local name="$1" file="$4" text="$5" dir="$work/case-$1"
+        cases+=("$1|$2|$3")
+        shift 5
+        cp -a "$work/src" "$dir"
+        [ "$file" = - ] || echo "$text" >> "$dir/$file"
+        (env "$@" scripts/size-key.py "$dir" "${builds[@]}" | tr '\n' ' ' > "$work/$name.keys") &
+        pids+=("$!")
+    }
+    pids=()
+    (scripts/size-key.py . "${builds[@]}" | tr '\n' ' ' > "$work/here.keys") &
+    pids+=("$!")
+    (scripts/size-key.py "$work/src" "${builds[@]}" | tr '\n' ' ' > "$work/base.keys") &
+    pids+=("$!")
+    case_ core "crates/core/check/src/lib.rs" rocav crates/core/check/src/lib.rs "// planted"
+    case_ node "crates/node/node-app/src/lib.rs" oav crates/node/node-app/src/lib.rs "// planted"
+    case_ recovery "crates/bins/orion-recovery/Cargo.toml" r crates/bins/orion-recovery/Cargo.toml "# planted"
+    case_ capi "crates/client/capi/src/lib.rs" c crates/client/capi/src/lib.rs "// planted"
+    case_ lock "Cargo.lock" rocav Cargo.lock "# planted"
+    case_ manifest "Cargo.toml" rocav Cargo.toml "# planted"
+    case_ config ".cargo/config.toml" rocav .cargo/config.toml "# planted"
+    case_ toolchain-file "rust-toolchain.toml" rocav rust-toolchain.toml "# planted"
+    case_ key-script "scripts/size-key.py" rocav scripts/size-key.py "# planted"
+    case_ gate-script "scripts/size-gate.sh" rocav scripts/size-gate.sh "# planted"
+    case_ zigcc "scripts/zigcc/aarch64-unknown-linux-musl" a scripts/zigcc/aarch64-unknown-linux-musl "# planted"
+    case_ notes "docs/lock.md" "" docs/lock.md "planted"
+    case_ todo "TODO.md" "" TODO.md "planted"
+    # An untracked new file in a crate counts; one in docs does not.
+    case_ new-file "a new file in a crate" rocav crates/core/wire/src/planted.rs "// new"
+    case_ new-doc "a new file in the notes" "" docs/planted.md "new"
+    case_ rustflags "RUSTFLAGS" rocav - - RUSTFLAGS=-Cdebuginfo=1
+    case_ profile "a profile set from the environment" rocav - - CARGO_PROFILE_SERVICE_OPT_LEVEL=s
+    case_ board-cc "a board's C compiler" rocav - - CC_aarch64_unknown_linux_musl=/usr/bin/false
+    case_ toolchain "the toolchain" rocav - - RUSTUP_TOOLCHAIN=stable
+    case_ target-dir "CARGO_TARGET_DIR" "" - - CARGO_TARGET_DIR=/elsewhere
+    for pid in "${pids[@]}"; do
+        wait "$pid" || fail "a key could not be taken (scripts/size-key.py failed)"
+    done
+    here=$(cat "$work/here.keys")
+    base=$(cat "$work/base.keys")
+    [ -n "$base" ] || fail "no keys at all"
     [ "$here" = "$base" ] || fail "a copy at another path has other keys"
     key_of() { echo "$1" | tr ' ' '\n' | grep -A1 -x "$2" | tail -1; }
-    # changed <what> <expected: which of r o c a v change> [env...]: a planted change to one input.
-    changed() {
-        local what="$1" expect="$2" now b
-        shift 2
-        now=$(keys "$@")
+    for entry in "${cases[@]}"; do
+        IFS='|' read -r name what expect <<< "$entry"
+        now=$(cat "$work/$name.keys")
         for b in r o c a v; do
             if [ "$(key_of "$base" "$b")" != "$(key_of "$now" "$b")" ]; then
                 [[ "$expect" == *"$b"* ]] || fail "$what changed the key of $b"
@@ -222,37 +264,7 @@ if [ "${1:-}" = "--self-test" ]; then
                 [[ "$expect" != *"$b"* ]] || fail "$what left the key of $b as it was"
             fi
         done
-    }
-    plant() { command cp -f "$work/src/$1" "$work/kept" && echo "$2" >> "$work/src/$1"; }
-    unplant() { command cp -f "$work/kept" "$work/src/$1"; }
-    for planted in \
-        "crates/core/check/src/lib.rs|// planted|rocav" \
-        "crates/node/node-app/src/lib.rs|// planted|oav" \
-        "crates/bins/orion-recovery/Cargo.toml|# planted|r" \
-        "crates/client/capi/src/lib.rs|// planted|c" \
-        "Cargo.lock|# planted|rocav" \
-        "Cargo.toml|# planted|rocav" \
-        ".cargo/config.toml|# planted|rocav" \
-        "rust-toolchain.toml|# planted|rocav" \
-        "scripts/size-key.py|# planted|rocav" \
-        "scripts/size-gate.sh|# planted|rocav" \
-        "scripts/zigcc/aarch64-unknown-linux-musl|# planted|a" \
-        "docs/lock.md|planted|" \
-        "TODO.md|planted|"; do
-        IFS='|' read -r file text expect <<< "$planted"
-        plant "$file" "$text"
-        changed "$file" "$expect"
-        unplant "$file"
     done
-    # An untracked new file in a crate counts; one in docs does not.
-    echo "// new" > "$work/src/crates/core/wire/src/planted.rs"
-    changed "a new file in a crate" rocav
-    rm "$work/src/crates/core/wire/src/planted.rs"
-    changed "RUSTFLAGS" rocav RUSTFLAGS=-Cdebuginfo=1
-    changed "a profile set from the environment" rocav CARGO_PROFILE_SERVICE_OPT_LEVEL=s
-    changed "a board's C compiler" rocav CC_aarch64_unknown_linux_musl=/usr/bin/false
-    changed "the toolchain" rocav RUSTUP_TOOLCHAIN=stable
-    changed "CARGO_TARGET_DIR" "" CARGO_TARGET_DIR=/elsewhere
     # Where the whole gate builds: a core change makes keys new, and goes to CI; a change to
     # the notes makes none, and runs here.
     where="$work/where" && mkdir -p "$where"
@@ -260,14 +272,10 @@ if [ "${1:-}" = "--self-test" ]; then
     values() { local b; for b in r o c a v; do key_of "$1" "$b"; done; }
     # shellcheck disable=SC2046
     [ "$(new_keys "$where" $(values "$base"))" = 0 ] || fail "keys all measured count as new"
-    plant crates/core/check/src/lib.rs "// planted"
     # shellcheck disable=SC2046
-    [ "$(new_keys "$where" $(values "$(keys)"))" = 5 ] || fail "a core change does not make every key new (CI only)"
-    unplant crates/core/check/src/lib.rs
-    plant docs/lock.md "planted"
+    [ "$(new_keys "$where" $(values "$(cat "$work/core.keys")"))" = 5 ] || fail "a core change does not make every key new (CI only)"
     # shellcheck disable=SC2046
-    [ "$(new_keys "$where" $(values "$(keys)"))" = 0 ] || fail "a change to the notes makes a key new (it must run here)"
-    unplant docs/lock.md
+    [ "$(new_keys "$where" $(values "$(cat "$work/notes.keys")"))" = 0 ] || fail "a change to the notes makes a key new (it must run here)"
     # The reuse: a record held to today's limit, a planted size regression red, a key that
     # made other bytes red.
     store="$work/store" && mkdir -p "$store"

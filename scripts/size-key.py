@@ -114,6 +114,7 @@ class Workspace:
             ]
         self.digests = {}
         self.shared_cache = None
+        self.listing = None
 
     def closure(self, package):
         start = self.by_name[package]
@@ -130,14 +131,23 @@ class Workspace:
             if i in self.members
         )
 
+    def listed(self):
+        """Every file git sees (tracked, or untracked and not ignored), listed once."""
+        if self.listing is None:
+            listed = subprocess.run(
+                ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                cwd=self.root,
+                capture_output=True,
+                check=True,
+            ).stdout
+            self.listing = sorted({name.decode() for name in listed.split(b"\0") if name})
+        return self.listing
+
     def files(self, directory):
-        listed = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", directory],
-            cwd=self.root,
-            capture_output=True,
-            check=True,
-        ).stdout
-        names = sorted({name.decode() for name in listed.split(b"\0") if name})
+        # One listing for every directory: a git run for each of a closure's directories was
+        # most of a key's time (298 of them for five builds, 3.9 s of 6.1).
+        prefix = directory.rstrip("/") + "/"
+        names = [name for name in self.listed() if name.startswith(prefix)]
         out = []
         for name in names:
             if name not in self.digests:

@@ -654,6 +654,9 @@ what to change.
   `scripts/release-check.sh` takes that not-run only where CI's size gate passed at that
   commit. Heavy work refuses a cgroup whose CPU weight is not 100, or that is idle. No interface
   changes; no wire changes; level 7.
+- **I118.** `scripts/size-key.py` lists the files once, and the size gate's self-test takes its
+  keys all at once: 6 to 10 s, from 40 to 180. The feature matrix keeps 6 shards, measured
+  against 3 (`scripts/matrix-ab.sh`). No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
