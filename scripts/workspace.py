@@ -72,7 +72,10 @@ def matrix(only):
         if not features or (only and name not in only):
             continue
         out.append(f"{name} --no-default-features")
-        out += [f"{name} --no-default-features --features {feature}" for feature in features]
+        # One feature and no default key: that feature alone is --all-features, the same build twice.
+        # (An empty `default = []` still builds with feature="default", so it is another build.)
+        if len(features) > 1 or "default" in package["features"]:
+            out += [f"{name} --no-default-features --features {feature}" for feature in features]
         out.append(f"{name} --all-features")
     return out
 

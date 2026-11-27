@@ -700,6 +700,9 @@ what to change.
 - **I132.** The test stubs hold each port a board chooses for the life of its test process, so
   a board stopped to start again on its port finds it free. Test code only. No interface
   changes; no wire changes; level 7.
+- **I133.** The feature matrix leaves out a crate's single-feature item when it has one feature
+  and no `default` key, since that is its `--all-features` build: 110 items to 108, the same 108
+  unit graphs. Scripts only. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
