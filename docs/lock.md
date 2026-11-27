@@ -667,6 +667,9 @@ what to change.
   sections (`scripts/elf-alloc-key.py`) and the files they read. A comment appended to a core
   crate runs no test binary. Crates that reach outside, or mention `CARGO_MANIFEST_DIR`, keep
   the source key. No interface changes; no wire changes; level 7.
+- **I122.** `scripts/measure-change.sh` takes `MEASURE_CHANGE=comment|unused-fn|used=TEXT`,
+  so that a gate's cost is measured for code that is built and never runs, and for code that
+  runs. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
