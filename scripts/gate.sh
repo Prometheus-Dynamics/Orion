@@ -251,6 +251,17 @@ lane_steps() {
   )
 }
 
+# beside <label> <WALL:CPU> <command...>: a step of the main part, run beside the rest of it
+# (on CI's main runner too, where the lanes are runners of their own), and joined with the
+# lanes: it fails the gate as a lane does.
+beside() {
+  if [ -z "$part" ] || [ "$part" = main ]; then
+    lane_steps "$@" > "$lane_logs/main: $1" 2>&1 &
+    lane_pids+=("$!")
+    lane_names+=("main: $1")
+  fi
+}
+
 # Waits for every lane, prints what each said, and fails if one did.
 # Timed here, not by `timed`: it waits for this shell's children, so it runs in this shell.
 join_lanes() {
@@ -637,7 +648,13 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
     main links 2:1 scripts/check-links.sh
   fi
   main format 12:3 cargo fmt --all --check
-  main "the lane keys' self-test" 25:12 keys_self_test
+  # Beside the tests, not before them: it takes its keys in a copy and a target of its own.
+  # Here it is stamped and seldom runs; on CI, every checkout fresh, it ran alone for 58 s.
+  # Its bounds are for running beside the tests: alone it took 27 to 47 s and 14 to 15 CPU-s
+  # here (load 130 to 144), 58 s and 27.8 CPU-s on CI; beside them, at load 82 to 139, it had
+  # 11.9 CPU-s in 75 s. A hang is still found: asleep, by its stall bound (60 s), however long
+  # its wall bound; spinning, by its CPU bound (scripts/gate-self-test.sh).
+  beside "the lane keys' self-test" 60:30 keys_self_test
 
   main tests 630:647 tests
   main "test filters" 8:6 test_filters

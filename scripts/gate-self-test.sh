@@ -18,7 +18,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 {
   echo 'part=""; declare -A dropped=(); STALL_SECONDS=60'
-  for name in bounded step timed once lane lane_steps join_lanes lane_item; do
+  for name in bounded step timed once lane lane_steps beside join_lanes lane_item; do
     sed -n "/^$name() {/,/^}/p" "$gate" | grep -q . || { echo "gate-self-test: no $name() in $gate" >&2; exit 2; }
     sed -n "/^$name() {/,/^}/p" "$gate"
   done
@@ -63,6 +63,7 @@ run red "a lane, its last step red" 'lane t one 1:1 true -- last 1:1 false; join
 run red "a lane, its only step red" 'lane t one 1:1 false; join_lanes' 'FAILED: one'
 run red "a lane started after &&, its first step red" \
   '[ 1 -gt 0 ] && lane t one 1:1 false -- two 1:1 true; join_lanes' 'FAILED: one'
+run red "a step beside the main part's others" 'beside one 1:1 false; join_lanes' 'FAILED: one'
 run red "a step" 'step one 1:1 false' '^==> one'
 run red "a function step, its first command red, its last green" 'step one 1:1 two_commands' '^==> one'
 run red "a timed part" 'timed one false' '^==> one'
@@ -70,6 +71,20 @@ run red "a timed function, its first command red, its last green" 'timed one two
 run green "a lane of two green steps" 'lane t one 1:1 true -- two 1:1 true; join_lanes' \
   'one: [0-9]+ s' 'two: [0-9]+ s'
 run green "a step" 'step one 1:1 true' 'one: [0-9]+ s'
+run green "a step beside the main part's others" 'beside one 1:1 true; join_lanes' 'one: [0-9]+ s'
+
+# The lane keys' self-test, beside the tests with bounds for that: a hang in it is still found.
+# Asleep, by the stall bound, whatever the wall bound (planted, the stall bound made 2 s);
+# spinning, by its CPU bound, kept at most 90 CPU-s (scripts/bounded.py --self-test plants a
+# spinner past a CPU bound: `a slow one`).
+keys_bounds="$(sed -n "s/^ *beside \"the lane keys' self-test\" \([0-9]*:[0-9]*\) keys_self_test$/\1/p" "$gate")"
+if [ -z "$keys_bounds" ]; then
+  fail "no bounds found for the lane keys' self-test in $gate"
+else
+  [ $((${keys_bounds#*:} * 3)) -le 90 ] || fail "the lane keys' self-test may spin for $((${keys_bounds#*:} * 3)) CPU-s, over 90"
+  run red "a sleeping hang beside, with the lane keys' self-test's bounds" \
+    "STALL_SECONDS=2; beside sleeper $keys_bounds sleep 1000; join_lanes" 'stalled' 'FAILED: sleeper'
+fi
 
 # A pass record only after a pass: a red lane item writes none, a green one does.
 printf 'red\tplanted-red\trun\ngreen\tplanted-green\trun\n' > "$work/lanes/state"
