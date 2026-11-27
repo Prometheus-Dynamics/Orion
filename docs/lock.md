@@ -684,6 +684,8 @@ what to change.
 - **I126.** A package whose build makes no test executable is keyed by its binaries over none,
   so a comment in a crate it builds no longer runs its zero tests. One the build made nothing
   of still runs. No interface changes; no wire changes; level 7.
+- **I127.** `scripts/measure-change.sh` takes several files as one change, with a comment each
+  file's language reads as one. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
