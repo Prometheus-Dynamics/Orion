@@ -1237,6 +1237,9 @@ def self_test():
             ("the build's environment", True, None, {"RUSTFLAGS": "-Cdebuginfo=0"}),
             ("the environment a test reads", True, None, {"NAMESPACE_TESTS": "changed"}),
             ("a program a test starts", True, None, {"PATH": shims + os.pathsep + os.environ.get("PATH", "")}),
+            # Cargo's jobserver (GATE_LANE_SCHEDULE=shared-jobs): how many jobs at once, never what
+            # is built; its FIFO's path is new in every gate.
+            ("cargo's jobserver", False, None, {"CARGO_MAKEFLAGS": "-j4 --jobserver-auth=fifo:/tmp/planted-jobserver"}),
             ("a note", False, touch("docs/design.md", "\nchanged\n"), None),
             (f"a crate it does not build ({apart})", False, touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"), None),
         ]

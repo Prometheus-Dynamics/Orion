@@ -41,7 +41,9 @@ KEY_VERSION = "1"
 ENV = re.compile(
     r"^(CARGO_|RUST|CC|CXX|AR(_|$)|CFLAGS|CXXFLAGS|LDFLAGS|TARGET_|HOST_|ZIG|PKG_CONFIG|SOURCE_DATE_EPOCH)"
 )
-NOT_IN_KEY = {"CARGO_TARGET_DIR"}
+# Where builds go, and how many jobs run at once (the jobserver a shared-jobs gate hands every
+# cargo): neither changes what is built.
+NOT_IN_KEY = {"CARGO_TARGET_DIR", "CARGO_MAKEFLAGS"}
 
 
 def run(args, cwd):

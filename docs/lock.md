@@ -694,6 +694,9 @@ what to change.
 - **I130.** `GATE_LANE_SCHEDULE` (`parallel`, the default; `matrix-after-tests`; `shared-jobs`)
   and `GATE_TRACE_LANES`, for measuring lane schedules; unset, the gate is as before. No
   interface changes; no wire changes; level 7.
+- **I131.** `CARGO_MAKEFLAGS` (cargo's jobserver) is left out of the lane keys, as
+  `CARGO_TARGET_DIR` is: it changes how many jobs run, not what is built. No interface changes;
+  no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
