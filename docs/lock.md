@@ -703,6 +703,9 @@ what to change.
 - **I133.** The feature matrix leaves out a crate's single-feature item when it has one feature
   and no `default` key, since that is its `--all-features` build: 110 items to 108, the same 108
   unit graphs. Scripts only. No interface changes; no wire changes; level 7.
+- **I134.** The tests lane's run and doctests name the same packages as its build, choosing
+  those to run with a nextest filter: the run builds nothing, and the tests pass on the binaries
+  their keys were taken from. Scripts only. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

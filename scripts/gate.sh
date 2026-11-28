@@ -343,13 +343,17 @@ members() {
 }
 tests() {
   local state="$GATE_LANE_STATE_DIR/tests" listing names=() run=() selected=() docs=() keyed=() name
+  local built=() filter=""
   listing="$(members)"
   mapfile -t names < <(cut -d' ' -f1 <<< "$listing")
   scripts/lane-reuse.py plan tests "$state" "${names[@]}"
   mapfile -t selected < <(awk -F'\t' '$3 == "run" {print $1}' "$state")
-  # The doctests of those that have any (scripts/workspace.py doctested): a crate with none
-  # has a known result, no test, and its rustdoc pass is not made. Chosen by the sources' key
-  # alone: rustdoc builds and runs a doctest in one pass, so it has no binary to key before.
+  # The doctests run when any package to run has some (scripts/workspace.py doctested): with
+  # none, the result is known and no rustdoc pass is made. Chosen by the sources' key alone:
+  # rustdoc builds and runs a doctest in one pass, so it has no binary to key before. They run
+  # with the build's packages named, so on the libraries it made: the same doctests as naming
+  # only those that have some, which would build 46 libraries again on a comment in
+  # orion-types (12.9 CPU-s against 8.3, though rustdoc then passes over crates with none).
   if [ "${#selected[@]}" -gt 0 ]; then
     listing="$(scripts/workspace.py doctested "${selected[@]}")"
     if [ "$listing" != none ]; then
@@ -360,31 +364,38 @@ tests() {
   fi
   # Those to run are built first, and each whose test binaries passed before, the same in all
   # they run, is reused (scripts/lane-reuse.py binary-plan): a comment, or code no test of a
-  # package links, runs none of its tests. The run after builds nothing again.
+  # package links, runs none of its tests.
+  #
+  # The run names the same packages the build did, and chooses those to run with a filter
+  # (`package(=NAME) | ...`). Cargo unifies features over the packages named, so naming fewer
+  # would build other binaries: the run would build again, and test binaries other than those
+  # keyed. Named alike, the run builds nothing, and runs the very binaries the keys were taken
+  # from. The build's names are kept in $state.built, for the listing after (test_filters).
   if [ "${#selected[@]}" -gt 0 ]; then
     for name in "${selected[@]}"; do
-      run+=(-p "$name")
+      built+=(-p "$name")
     done
-    cargo test "${run[@]}" --all-features --no-run --message-format=json-render-diagnostics > "$state.artifacts"
+    printf '%s\n' "${selected[@]}" > "$state.built"
+    cargo test "${built[@]}" --all-features --no-run --message-format=json-render-diagnostics > "$state.artifacts"
     scripts/lane-reuse.py binary-plan "$state" "$state.artifacts"
     mapfile -t selected < <(awk -F'\t' '$3 == "run" {print $1}' "$state")
-    run=()
     for name in "${selected[@]}"; do
       run+=(-p "$name")
+      filter="${filter:+$filter | }package(=$name)"
     done
   fi
   if [ "${#run[@]}" -eq 0 ] && [ "${#docs[@]}" -eq 0 ]; then
     echo "    every package's tests passed before, on these inputs or these binaries"
   elif [ "${#run[@]}" -eq 0 ]; then
-    cargo test "${docs[@]}" --all-features --doc
+    cargo test "${built[@]}" --all-features --doc
   elif cargo nextest --version > /dev/null 2>&1; then
     local doc_log doc_pid doc_status=0 status=0
     doc_log="$(mktemp)"
     if [ "${#docs[@]}" -gt 0 ]; then
-      cargo test "${docs[@]}" --all-features --doc > "$doc_log" 2>&1 &
+      cargo test "${built[@]}" --all-features --doc > "$doc_log" 2>&1 &
       doc_pid=$!
     fi
-    cargo nextest run "${run[@]}" --all-features --no-tests=warn || status=$?
+    cargo nextest run "${built[@]}" --all-features --no-tests=warn -E "$filter" || status=$?
     [ -z "${doc_pid:-}" ] || wait "$doc_pid" || doc_status=$?
     cat "$doc_log"
     rm -f "$doc_log"
@@ -456,12 +467,17 @@ shipped_tests() {
 # gives for the binaries the tests just ran; nothing to check without nextest.
 test_filters() {
   if cargo nextest --version > /dev/null 2>&1; then
-    local state="$GATE_LANE_STATE_DIR/tests" fresh="" listing run=()
+    local state="$GATE_LANE_STATE_DIR/tests" fresh="" listing run=() built=() filter="" name
     listing="$(mktemp)"
-    mapfile -t run < <(awk -F'\t' '$3 == "run" {print "-p"; print $1}' "$state")
+    mapfile -t run < <(awk -F'\t' '$3 == "run" {print $1}' "$state")
     if [ "${#run[@]}" -gt 0 ]; then
+      # Listed as they ran: the build's packages named, those that ran chosen (tests() says why).
+      mapfile -t built < <(awk '{print "-p"; print $1}' "$state.built")
+      for name in "${run[@]}"; do
+        filter="${filter:+$filter | }package(=$name)"
+      done
       fresh="$(mktemp)"
-      cargo nextest list "${run[@]}" --all-features --message-format json > "$fresh"
+      cargo nextest list "${built[@]}" --all-features -E "$filter" --message-format json > "$fresh"
     fi
     # Those that ran, as listed now; those reused, as listed when they last ran.
     scripts/lane-reuse.py listing "$state" ${fresh:+"$fresh"} "$listing"
