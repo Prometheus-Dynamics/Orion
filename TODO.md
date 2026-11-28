@@ -298,6 +298,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I132](docs/prs/I132.md) A board away keeps its port from the boards that choose one meanwhile (wave 19; needs I131)
 - [x] [I133](docs/prs/I133.md) The feature matrix builds each feature set once (wave 19; needs I132)
 - [x] [I134](docs/prs/I134.md) The tests run on the very binaries their keys were taken from (wave 19; needs I133)
+- [x] [I135](docs/prs/I135.md) Every string of a source is read as the compiler reads it (wave 19; needs I134)
 - [ ] [I103](docs/prs/I103.md) Each network listener says what it is doing; a root set wrong is refused alone; a shell with security off over the network; the `mut` warning (wave 19; needs I104)
 - [ ] [I105](docs/prs/I105.md) V6-LINK-LOCAL-WAY-IN: a board is found and reached over link-local IPv6 (wave 19; needs I103)
 - [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I105)

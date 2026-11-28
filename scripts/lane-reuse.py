@@ -427,7 +427,7 @@ class Keys(size_key.Workspace):
                     continue
                 with open(os.path.join(ROOT, name), errors="replace") as file:
                     text = RESPAWN.sub("", without_crate_modules(name, file.read()))
-                if REACH.search(text) or any(reaches(literal, self.reach_tops) for literal in LITERAL.findall(text)):
+                if REACH.search(text) or any(reaches(literal, self.reach_tops) for literal in string_literals(text)):
                     found = True
                     break
             self.reaching[package] = found
@@ -722,6 +722,71 @@ def listing(state, fresh, out, lister=nextest_list):
 
 REACH = re.compile(r'\.parent\(\)|current_exe|CARGO_TARGET_TMPDIR|Command::new\(\s*"cargo"|env!\(\s*"CARGO"\s*\)')
 LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
+RAW_STRING = re.compile(r'(?:b|c)?r(#*)"')
+
+
+def string_literals(text):
+    """The strings of Rust source TEXT, as the compiler reads them: plain, byte and C strings
+    with their escapes, and raw strings (`r#"..."#`); never a char literal (`'"'`) or a
+    lifetime. Every quote is paired with its own: one raw string with a quote in it would pair
+    each later quote of the file with the wrong one, and a path after it would go unseen. In a
+    comment, every quoted run counts (LITERAL): a doctest's paths among them."""
+    out, i, n = [], 0, len(text)
+
+    def ident(c):
+        return c.isalnum() or c == "_"
+
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            out += LITERAL.findall(text[i:end])
+            i = end
+            continue
+        if text.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif text.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            out += LITERAL.findall(text[i:j])
+            i = j
+            continue
+        raw = RAW_STRING.match(text, i)
+        if raw and (i == 0 or not ident(text[i - 1])):
+            close = '"' + raw.group(1)
+            end = text.find(close, raw.end())
+            end = n if end < 0 else end
+            out.append(text[raw.end():end])
+            i = end + len(close)
+            continue
+        if c == '"' or (c in "bc" and text.startswith('"', i + 1) and (i == 0 or not ident(text[i - 1]))):
+            j = i + (1 if c == '"' else 2)
+            start = j
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[start:j])
+            i = j + 1
+            continue
+        if c == "'":
+            if text.startswith("\\", i + 1):
+                end = text.find("'", i + 2)
+                i = end + 1 if end >= 0 else n
+            elif i + 2 < n and text[i + 2] == "'":
+                i += 3
+            else:
+                i += 1  # a lifetime
+            continue
+        if ident(c):
+            while i < n and ident(text[i]):
+                i += 1
+            continue
+        i += 1
+    return out
 
 
 # A test that starts its own binary again, and nothing else of current_exe: the child is the
@@ -1276,6 +1341,10 @@ def self_test():
             # The same path as a module below, read at run time: not a module.
             ("orion-ctl", "reads a file in the crates by a path that walks up",
              touch(tests_rs, '\nfn _planted() { let _ = std::fs::read("../../../comm/broker/tests/common/mod.rs"); }\n')),
+            # A path outside the crates after a raw string with a quote in it: every string
+            # read as the compiler reads them, so none is paired with the wrong quote.
+            ("orion-ctl", "names a path outside the crates after a raw string with a quote in it",
+             touch(tests_rs, '\nconst _PAGE: &str = r#"one " quote"#;\nfn _planted() { let _ = std::fs::read("../../../scripts/gate.sh"); }\n')),
             # Its own path handed to another program, or a file found beside it: not itself.
             ("orion-ctl", "hands its own path to another program",
              touch(tests_rs, '\nfn _planted() { let _ = std::process::Command::new("unshare").arg(std::env::current_exe().expect("this test")); }\n')),
@@ -1304,6 +1373,18 @@ def self_test():
         _SELF_TEST_JOBS = [lambda job=job: in_copy(*job) for job in _SELF_TEST_JOBS]
         import multiprocessing
 
+        # Strings as the compiler reads them: each source, its strings.
+        for source, strings in (
+            ("let q = '\"'; let p = \"../x\";", ["../x"]),
+            ("fn f<'a>(s: &'a str) { let p = \"../y\"; }", ["../y"]),
+            ('let r = r##"a "# b"##; let p = "../z";', ['a "# b', "../z"]),
+            ('let b = b"\\"q"; let p = "../w";', ['\\"q', "../w"]),
+            ('/// let x = std::fs::read("../../web/a");\nfn g() {}', ["../../web/a"]),
+            ('/* "../c" */ let s = "ok";', ["../c", "ok"]),
+        ):
+            if string_literals(source) != strings:
+                failures.append(f"the strings of {source!r}: {string_literals(source)!r}, not {strings!r}")
+        print("    strings as the compiler reads them: checked")
         # A program rewritten where it stands, same inode and size, is read again.
         program = os.path.join(shims, "planted-program")
         with open(program, "w") as file:

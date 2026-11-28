@@ -706,6 +706,9 @@ what to change.
 - **I134.** The tests lane's run and doctests name the same packages as its build, choosing
   those to run with a nextest filter: the run builds nothing, and the tests pass on the binaries
   their keys were taken from. Scripts only. No interface changes; no wire changes; level 7.
+- **I135.** The lane keys read a source's strings as the compiler does, so a raw string with a
+  quote in it no longer hides a path outside the crates after it. Scripts only. No interface
+  changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
