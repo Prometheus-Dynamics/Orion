@@ -233,7 +233,7 @@ impl FrameWrite for UnixWrite {
 
 async fn recv(stream: &UnixStream, buf: &mut [u8], fds: &mut FdSet) -> io::Result<Option<usize>> {
     loop {
-        stream.readable().await?;
+        let ready = stream.ready(Interest::READABLE).await?;
         // A frame that is only partly here stays queued and counts as "would block", which
         // makes tokio wait for more of it.
         let received = stream.try_io(Interest::READABLE, || {
@@ -245,6 +245,12 @@ async fn recv(stream: &UnixStream, buf: &mut [u8], fds: &mut FdSet) -> io::Resul
             }
         });
         match received {
+            // The peer has hung up with only part of a frame here: the rest can never come,
+            // and the socket stays readable, so waiting for it would spin. It is the peer
+            // closing, as a program that dies mid-send does.
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock && ready.is_read_closed() => {
+                return Ok(None);
+            }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
             Err(error) => return Err(error),
             Ok(Ok(None)) => return Ok(None),

@@ -314,11 +314,20 @@ fn a_file_whose_bytes_are_not_its_digest_is_not_taken() {
 /// A relay in front of the comm core's socket, for one program: cutting it ends that
 /// program's session as a program that dies does, with nothing of the program run after.
 fn relay(socket: &Path) -> (PathBuf, impl FnOnce()) {
+    let (path, cut, _held) = relay_holding(socket, false);
+    (path, cut)
+}
+
+/// [`relay`], and when `hold`, the program's side stops one byte short of the end of the
+/// first frame that starts past the first chunk, and says so on the receiver: cut then, the
+/// program dies inside a frame.
+fn relay_holding(socket: &Path, hold: bool) -> (PathBuf, impl FnOnce(), mpsc::Receiver<()>) {
     let path = socket.with_file_name("relay.sock");
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).expect("relay");
     let socket = socket.to_owned();
     let (cut_tx, cut_rx) = mpsc::channel::<Vec<UnixStream>>();
+    let (held_tx, held) = mpsc::channel();
     std::thread::spawn(move || {
         let (program, _) = listener.accept().expect("accept");
         let comm = UnixStream::connect(&socket).expect("comm core");
@@ -327,25 +336,62 @@ fn relay(socket: &Path) -> (PathBuf, impl FnOnce()) {
             comm.try_clone().expect("clone"),
         ];
         cut_tx.send(ends).expect("ends");
-        for (mut from, mut to) in [
-            (
-                program.try_clone().expect("clone"),
-                comm.try_clone().expect("clone"),
-            ),
-            (comm, program),
-        ] {
+        let copy = |mut from: UnixStream, mut to: UnixStream| {
             std::thread::spawn(move || {
                 let _ = std::io::copy(&mut from, &mut to);
                 let _ = to.shutdown(Shutdown::Both);
             });
+        };
+        let (from, to) = (
+            program.try_clone().expect("clone"),
+            comm.try_clone().expect("clone"),
+        );
+        if hold {
+            std::thread::spawn(move || hold_inside_a_frame(from, to, held_tx));
+        } else {
+            copy(from, to);
         }
+        copy(comm, program);
     });
     let cut = move || {
         for end in cut_rx.recv().expect("ends") {
             let _ = end.shutdown(Shutdown::Both);
         }
     };
-    (path, cut)
+    (path, cut, held)
+}
+
+/// Copies the program's side to the comm core's, frame by frame as the carrier frames them
+/// (`[u32 length][frame]`), up to one byte short of the end of the first frame that starts past
+/// 40,000 bytes (past the first chunk of a gift); then says so and copies nothing more.
+fn hold_inside_a_frame(mut from: UnixStream, mut to: UnixStream, held: mpsc::Sender<()>) {
+    use std::io::{Read, Write};
+    let mut stream = Vec::new();
+    let mut buf = vec![0_u8; 64 * 1024];
+    let (mut sent, mut next, mut stop) = (0, 0, None);
+    loop {
+        let n = match from.read(&mut buf) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => n,
+        };
+        stream.extend_from_slice(&buf[..n]);
+        while stop.is_none() && stream.len() >= next + 4 {
+            let len = u32::from_le_bytes(stream[next..next + 4].try_into().expect("4 bytes"));
+            let end = next + 4 + len as usize;
+            if next > 40_000 {
+                stop = Some(end - 1);
+            }
+            next = end;
+        }
+        let upto = stop.unwrap_or(stream.len()).min(stream.len());
+        if upto > sent {
+            to.write_all(&stream[sent..upto]).expect("to the comm core");
+            sent = upto;
+            if Some(sent) == stop {
+                held.send(()).expect("held");
+            }
+        }
+    }
 }
 
 #[test]
@@ -394,6 +440,71 @@ fn a_fetch_whose_program_goes_is_rejected_to_its_client() {
     };
     assert_eq!(ended.state, FileState::Rejected);
     assert_eq!(ended.detail, "the program that offers it went");
+    go.send(()).expect("go");
+    program.join().expect("program");
+}
+
+#[test]
+fn a_program_that_dies_inside_a_frame_is_gone_and_the_comm_core_serves_the_others() {
+    let (socket, _stop, _dir) = comm_core("inside-a-frame");
+    // The program dies with only part of a frame sent: the rest never comes.
+    let (socket_for, cut, held) = relay_holding(&socket, true);
+    let (ready, offered) = mpsc::channel();
+    let (asked_tx, asked_rx) = mpsc::channel();
+    let (go, gone) = mpsc::channel::<()>();
+    let program = std::thread::spawn(move || {
+        let files = files(&socket_for, "logger");
+        let mut offer = files.offer("logs/").expect("offer");
+        ready.send(()).expect("ready");
+        let asked = offer.next(WAIT).expect("next").expect("asked");
+        let mut gift = asked.give(Cursor::new(content(1 << 20))).expect("give");
+        let _ = gift.step(Duration::from_millis(10)).expect("step");
+        asked_tx.send(()).expect("asked");
+        gone.recv().expect("go");
+    });
+    offered.recv().expect("offered");
+    let client = files(&socket, "collector");
+    let mut fetching = client
+        .start_fetch("logs/kernel", Cursor::new(Vec::new()), 0)
+        .expect("fetch");
+    loop {
+        if let Step::Progress { received, .. } =
+            fetching.step(Duration::from_millis(20)).expect("step")
+            && received > 0
+        {
+            break;
+        }
+    }
+    asked_rx.recv().expect("asked");
+    held.recv_timeout(WAIT)
+        .expect("the relay holds a frame's last byte");
+    let cut_at = Instant::now();
+    cut();
+    // Another session, meanwhile: the comm core still answers it.
+    let (answered, answer) = mpsc::channel();
+    let at = socket.clone();
+    std::thread::spawn(move || {
+        let _ = answered.send(
+            files(&at, "another")
+                .offers()
+                .map(|(offers, _)| offers.len()),
+        );
+    });
+    // As soon as the comm core sees the program's link close, as in
+    // a_fetch_whose_program_goes_is_rejected_to_its_client.
+    let ended = loop {
+        if let Step::Done(transfer) = fetching.step(Duration::from_millis(50)).expect("step") {
+            break transfer;
+        }
+        let waited = cut_at.elapsed();
+        assert!(waited < Duration::from_secs(1), "not told after {waited:?}");
+    };
+    assert_eq!(ended.state, FileState::Rejected);
+    assert_eq!(ended.detail, "the program that offers it went");
+    answer
+        .recv_timeout(WAIT)
+        .expect("another session is answered")
+        .expect("offers");
     go.send(()).expect("go");
     program.join().expect("program");
 }

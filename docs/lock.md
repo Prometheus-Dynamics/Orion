@@ -713,6 +713,10 @@ what to change.
   whole-tree, and orion-web-tests declares `web`: it is keyed by `web/`'s contents and by its
   binaries. Scripts and one manifest's metadata only. No interface changes; no wire changes;
   level 7.
+- **I138.** The Unix carrier's receive takes a partial frame after the peer hung up as the
+  peer closing, where it spun on the comm core's thread waiting for the rest: a program that dies
+  inside a frame is seen gone, and the comm core goes on serving the others. Nothing on the wire
+  changes, and nothing a program calls.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
