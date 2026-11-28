@@ -717,6 +717,9 @@ what to change.
   peer closing, where it spun on the comm core's thread waiting for the rest: a program that dies
   inside a frame is seen gone, and the comm core goes on serving the others. Nothing on the wire
   changes, and nothing a program calls.
+- **I137.** For a browser whose name on PATH is a launcher script, the lane keys also hold
+  the version the browser says it is, so a browser updated behind the same launcher reruns the
+  browser tests. Scripts only. No interface changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

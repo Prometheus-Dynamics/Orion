@@ -89,6 +89,10 @@ PROGRAMS = (
     "sshd", "bwrap", "readelf", "nm", "cc", "firefox", "chromium", "chromium-browser",
     "google-chrome",
 )
+# The browsers among them. A browser's name on PATH is often a launcher script (Fedora's
+# /usr/bin/firefox) that runs the browser installed elsewhere: its digest stays when the browser
+# is updated. A launcher's key holds the version the browser says it is, too (program_version).
+BROWSERS = ("firefox", "chromium", "chromium-browser", "google-chrome")
 # The notes: what scripts/code-key.sh leaves out. No build or test reads one.
 NOTE = re.compile(r"(\.md$|^docs/|^LICENSE-[^/]*$)")
 # The variables a test reads that the build does not: the settings of the programs tests start
@@ -154,6 +158,7 @@ def scripts_hash():
 
 
 _PROGRAM_DIGESTS = {}
+_PROGRAM_VERSIONS = {}
 
 
 def program_digest(path):
@@ -170,6 +175,29 @@ def program_digest(path):
     if stands not in _PROGRAM_DIGESTS:
         _PROGRAM_DIGESTS[stands] = file_digest(real)
     return _PROGRAM_DIGESTS[stands]
+
+
+def program_version(path):
+    """For a launcher script PATH names (it starts `#!`), what `PATH --version` says, read once in
+    this process for the script as it stands; for a program that is not a script, "": its
+    digest holds it."""
+    real = os.path.realpath(path)
+    try:
+        status = os.stat(real)
+        with open(real, "rb") as file:
+            script = file.read(2) == b"#!"
+    except OSError:
+        return "absent"
+    if not script:
+        return ""
+    stands = (real, status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns, status.st_ctime_ns)
+    if stands not in _PROGRAM_VERSIONS:
+        try:
+            said = subprocess.run([real, "--version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+            _PROGRAM_VERSIONS[stands] = f"{said.returncode} {said.stdout.strip()}"
+        except (OSError, subprocess.TimeoutExpired) as error:
+            _PROGRAM_VERSIONS[stands] = f"no version: {error!r}"
+    return _PROGRAM_VERSIONS[stands]
 
 
 def lock_entries():
@@ -463,6 +491,8 @@ class Keys(size_key.Workspace):
             for name in PROGRAMS:
                 path = shutil.which(name) or ""
                 found.append((name, path, program_digest(path) if path else ""))
+                if path and name in BROWSERS:
+                    found.append((f"{name} --version", program_version(path)))
             found.append(("kernel", os.uname().release))
             self.programs_cache = digest(json.dumps(found).encode())
         return self.programs_cache
@@ -1352,7 +1382,34 @@ def self_test():
                  ("web undeclared base", key("orion-web-tests"), undeclared, None),
                  ("web undeclared", key("orion-web-tests"), both(undeclared, elsewhere), None),
                  ("web binary base", binary("orion-web-tests", one), None, None),
-                 ("web binary", binary("orion-web-tests", one), touch("web/video-example/video.js"), None)]
+                 ("web binary", binary("orion-web-tests", one), touch("web/video-example/video.js"), None),
+                 # Built output the tests read (the web client's bundle), as any file there.
+                 ("web built", binary("orion-web-tests", one), touch("web/client/dist/orion.js"), None)]
+        # The browser it starts, as a gate in a new process sees it: a launcher script on PATH (the
+        # same PATH, which is in the key) handing off to a browser updated in place behind it, and
+        # then another launcher there. One job, in order: the three keys.
+        browser = os.path.join(work, "browser")
+        os.makedirs(browser)
+        def plant(name, text):
+            path = os.path.join(browser, name)
+            with open(path + ".new", "w") as file:
+                file.write(text)
+            os.chmod(path + ".new", 0o755)
+            os.replace(path + ".new", path)
+        def browsers():
+            keyed = binary("orion-web-tests", one)
+            said = []
+            for name, text in ((None, None),
+                               ("installed", "#!/bin/sh\necho Planted Firefox 2\n"),
+                               ("firefox", '#!/bin/sh\nexec "$(dirname "$0")/installed" "$@" # another\n')):
+                if name:
+                    plant(name, text)
+                _PROGRAM_VERSIONS.clear()
+                said.append(keyed())
+            return said
+        plant("firefox", '#!/bin/sh\nexec "$(dirname "$0")/installed" "$@"\n')
+        plant("installed", "#!/bin/sh\necho Planted Firefox 1\n")
+        jobs += [("browsers", browsers, None, {"PATH": browser + os.pathsep + os.environ.get("PATH", "")})]
         # What a package says its tests read: any crate, for one that reads them all.
         jobs += [("stubs base", key("orion-stubs"), None, None),
                  ("stubs", key("orion-stubs"), touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"), None)]
@@ -1373,6 +1430,9 @@ def self_test():
         tests_rs = "crates/client/ctl/tests/all.rs"
         unkeyed = [
             ("orion-web-tests", "reads outside the crates what it does not declare", undeclared),
+            # `..` to a path, not a test of a string: no exemption.
+            ("orion-web-tests", "hands `..` to a path",
+             touch(web_rs, '\nfn _planted() -> bool { std::path::Path::new("..").exists() }\n')),
             ("orion-web-tests", "joins CARGO_MANIFEST_DIR to what it does not declare",
              touch(web_rs, '\nfn _planted() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/client.rs") }\n')),
             ("orion-ctl", "reads a file outside the crates that another package declares",
@@ -1470,6 +1530,11 @@ def self_test():
               got["web undeclared"], got["web undeclared base"])
         check("by its binaries: a file in a directory a package declares its tests read", True,
               got["web binary"], got["web binary base"])
+        check("by its binaries: built output in a directory a package declares its tests read", True,
+              got["web built"], got["web binary base"])
+        check("by its binaries: the browser it starts, updated behind the same launcher", True,
+              got["browsers"][1], got["browsers"][0])
+        check("by its binaries: another browser", True, got["browsers"][2], got["browsers"][1])
         check("a crate a package says its tests read", True, got["stubs"], got["stubs base"])
         for label, moves, _, _ in binary_cases:
             check(label, moves, got[label], got["binary base"])
