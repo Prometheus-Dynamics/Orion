@@ -724,6 +724,9 @@ what to change.
   (scripts/cargo-home.sh), fetched from every lock file before any lane, offline, a copy for each
   lane; the lane keys hold the home's config by content, not its path. Scripts only. No interface
   changes; no wire changes; level 7.
+- **I140.** The shm crates (one git repository) are pinned at 98fbe0c2. The Unix carrier takes shm-fdpass's
+  `ShortRead` (a peer hung up inside a frame) as the peer closing, and logs that a connection
+  closed inside a frame. Nothing on the wire changes, and nothing a program calls.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

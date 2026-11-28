@@ -10,8 +10,8 @@ use std::time::Duration;
 use orion_msg_session::{Hello, Ping, Pong, Reject, RejectReason, Welcome};
 use orion_scratch::Scratch;
 use orion_server::{
-    Admits, Checked, Comm, Cx, Error, FdSet, Incoming, Limits, Policy, Principal, Roles, Security,
-    Service, What,
+    Admits, Carrier, Checked, Comm, Cx, Error, FdSet, Incoming, Limits, Policy, Principal, Roles,
+    Security, Service, What,
 };
 use orion_unix::{UnixCarrier, UnixConnection};
 use orion_wire::frame::{self, FrameHeader};
@@ -383,5 +383,28 @@ fn a_program_on_the_socket_is_kept_while_it_is_quiet_and_gone_when_it_hangs_up()
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(comm.with(|sessions, _| sessions.is_empty()));
         assert_eq!(comm.drops(), vec![]);
+    });
+}
+
+#[test]
+fn a_peer_that_hangs_up_inside_a_frame_has_closed() {
+    run(async {
+        // A program that dies in the middle of a send: the rest of its frame never comes. It
+        // closed, as one that hangs up between frames does; not an error, and not a wait.
+        let dir = directory("inside-a-frame");
+        let path = dir.join("orion.sock");
+        let mut carrier = UnixCarrier::bind(&path, Some(0o600), &[]).expect("bind");
+        let mut peer = std::os::unix::net::UnixStream::connect(&path).expect("connect");
+        let connection = carrier.accept().await.expect("accept");
+        // A frame of 100 bytes, says its length; 10 of them sent.
+        peer.write_all(&100_u32.to_le_bytes()).expect("length");
+        peer.write_all(&[7; 10]).expect("part");
+        peer.shutdown(std::net::Shutdown::Write).expect("hang up");
+        let mut buf = vec![0; 1024];
+        let mut fds = FdSet::default();
+        let got = tokio::time::timeout(Duration::from_secs(5), connection.recv(&mut buf, &mut fds))
+            .await
+            .expect("not left waiting for the rest");
+        assert_eq!(got.expect("closed, not an error"), None);
     });
 }

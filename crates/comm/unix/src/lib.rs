@@ -247,9 +247,10 @@ async fn recv(stream: &UnixStream, buf: &mut [u8], fds: &mut FdSet) -> io::Resul
         match received {
             // The peer has hung up with only part of a frame here: the rest can never come,
             // and the socket stays readable, so waiting for it would spin. It is the peer
-            // closing, as a program that dies mid-send does.
+            // closing, as a program that dies mid-send does. shm-fdpass says so itself
+            // (`ShortRead`, below); before its 98fbe0c2 it said "would block" for ever.
             Err(error) if error.kind() == io::ErrorKind::WouldBlock && ready.is_read_closed() => {
-                return Ok(None);
+                return Ok(closed_inside_a_frame());
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
             Err(error) => return Err(error),
@@ -264,17 +265,24 @@ async fn recv(stream: &UnixStream, buf: &mut [u8], fds: &mut FdSet) -> io::Resul
                 return Ok(None);
             }
             Ok(Err(RecvError::Io(error))) => return Err(error),
+            Ok(Err(RecvError::ShortRead)) => return Ok(closed_inside_a_frame()),
             Ok(Err(error)) => {
                 let why = match error {
                     RecvError::TooLarge { .. } => "a frame larger than the buffer",
                     RecvError::TruncatedControl => "more descriptors than allowed",
-                    RecvError::ShortRead => "the peer closed inside a frame",
                     _ => "a malformed control message",
                 };
                 return Err(io::Error::new(io::ErrorKind::InvalidData, why));
             }
         }
     }
+}
+
+/// A peer that hung up with part of a frame sent has closed, and the part is dropped: said, so a
+/// message cut off is never lost unseen.
+fn closed_inside_a_frame() -> Option<usize> {
+    tracing::warn!("a connection closed inside a frame: the part of it sent is dropped");
+    None
 }
 
 async fn send(stream: &UnixStream, frame: &[u8], fds: &[OwnedFd]) -> io::Result<()> {

@@ -11,6 +11,7 @@ repository.workspace = true
 shm-fdpass = { workspace = true }
 orion-server = { path = "../server" }
 tokio = { workspace = true, features = ["net"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 orion-msg-session = { path = "../../core/msg-session" }

@@ -303,6 +303,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I138](docs/prs/I138.md) A program that dies inside a frame is seen gone, and the comm core goes on serving (wave 19; needs I136)
 - [x] [I137](docs/prs/I137.md) The browser tests' key holds the browser behind its launcher (wave 19; needs I136)
 - [x] [I139](docs/prs/I139.md) The gate reads its crates from a Cargo home of the repo's own, offline (wave 19; needs I137)
+- [x] [I140](docs/prs/I140.md) shm-fdpass at 98fbe0c2: a frame cut short is the peer closing, and said (wave 19; needs I139)
 - [ ] [I103](docs/prs/I103.md) Each network listener says what it is doing; a root set wrong is refused alone; a shell with security off over the network; the `mut` warning (wave 19; needs I104)
 - [ ] [I105](docs/prs/I105.md) V6-LINK-LOCAL-WAY-IN: a board is found and reached over link-local IPv6 (wave 19; needs I103)
 - [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I105)
