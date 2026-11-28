@@ -42,8 +42,12 @@ ENV = re.compile(
     r"^(CARGO_|RUST|CC|CXX|AR(_|$)|CFLAGS|CXXFLAGS|LDFLAGS|TARGET_|HOST_|ZIG|PKG_CONFIG|SOURCE_DATE_EPOCH)"
 )
 # Where builds go, and how many jobs run at once (the jobserver a shared-jobs gate hands every
-# cargo): neither changes what is built.
-NOT_IN_KEY = {"CARGO_TARGET_DIR", "CARGO_MAKEFLAGS"}
+# cargo): neither changes what is built. Nor where the crates are read from (the gate's own Cargo
+# home and each lane's copy of it, scripts/cargo-home.sh): the lockfile holds every crate's
+# checksum, and the home's config is keyed by content (shown_config). A measured size is the
+# exception: shipped binaries hold the paths of the crate sources they were built from, so the
+# size key holds the home's path as well (Workspace.shared).
+NOT_IN_KEY = {"CARGO_TARGET_DIR", "CARGO_MAKEFLAGS", "CARGO_HOME"}
 
 
 def run(args, cwd):
@@ -87,6 +91,15 @@ def cargo_configs(root):
         if os.path.isfile(path) and path not in found:
             found.append(path)
     return found
+
+
+def shown_config(path, root):
+    """A cargo config's path as a key shows it: from the root, or from the Cargo home, whichever
+    holds it, so the same config read from another copy of the home is the same input."""
+    home = os.path.join(cargo_home(), "")
+    if path.startswith(home):
+        return "<CARGO_HOME>/" + path[len(home):]
+    return path.replace(root, "<root>", 1) if path.startswith(root) else path
 
 
 class Workspace:
@@ -166,8 +179,7 @@ class Workspace:
             for name in names:
                 inputs.append((name, file_digest(os.path.join(self.root, name))))
             for path in cargo_configs(self.root):
-                shown = path.replace(self.root, "<root>", 1) if path.startswith(self.root) else path
-                inputs.append((f"cargo config {shown}", file_digest(path)))
+                inputs.append((f"cargo config {shown_config(path, self.root)}", file_digest(path)))
             inputs.append(("CARGO_HOME", cargo_home()))
             inputs.append(("rustc -vV", digest(run(["rustc", "-vV"], self.root).encode())))
             inputs.append(("cargo -V", digest(run(["cargo", "-V"], self.root).encode())))

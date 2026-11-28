@@ -291,13 +291,12 @@ class Keys(size_key.Workspace):
         inputs = [("format", FORMAT), ("scripts", scripts_hash())]
         for name in ("Cargo.toml", "rust-toolchain.toml"):
             inputs.append((name, file_digest(os.path.join(ROOT, name))))
+        # The Cargo home's config by content, not the home's path (size_key.NOT_IN_KEY).
         for path in size_key.cargo_configs(ROOT):
-            shown = path.replace(ROOT, "<root>", 1) if path.startswith(ROOT) else path
-            inputs.append((f"cargo config {shown}", file_digest(path)))
-        inputs.append(("CARGO_HOME", size_key.cargo_home()))
-        inputs.append(("rustc -vV", digest(run(["rustc", "-vV"], ROOT).encode())))
-        inputs.append(("cargo -V", digest(run(["cargo", "-V"], ROOT).encode())))
-        inputs.append(("cc --version", digest(run(["cc", "--version"], ROOT).encode())))
+            inputs.append((f"cargo config {size_key.shown_config(path, ROOT)}", file_digest(path)))
+        inputs.append(("rustc -vV", digest(version(["rustc", "-vV"]).encode())))
+        inputs.append(("cargo -V", digest(version(["cargo", "-V"]).encode())))
+        inputs.append(("cc --version", digest(version(["cc", "--version"]).encode())))
         env = sorted((name, value.replace(ROOT, "<root>"), named_file(name, value)) for name, value in key_environment())
         inputs.append(("environment", digest(json.dumps(env).encode())))
         return inputs
@@ -504,6 +503,20 @@ class Keys(size_key.Workspace):
             # A crate not in the workspace, or a line not of the lane's shape: nothing to key.
             raise NoKey(f"no key for {lane} item {item!r}: {error!r}") from error
         return digest(json.dumps(inputs).encode())
+
+
+_VERSIONS = {}
+
+
+def version(args):
+    """What a tool says it is (ARGS run in ROOT), asked once in this process for each PATH,
+    toolchain settings and toolchain file it could hear: a key holds it, and the self-test takes
+    over fifty keys."""
+    said = (tuple(args), ROOT, file_digest(os.path.join(ROOT, "rust-toolchain.toml")),
+            *(os.environ.get(name, "") for name in ("PATH", "RUSTUP_TOOLCHAIN", "RUSTUP_HOME", "CARGO_HOME", "RUSTC", "CARGO", "CC")))
+    if said not in _VERSIONS:
+        _VERSIONS[said] = run(args, ROOT)
+    return _VERSIONS[said]
 
 
 class NoKey(Exception):
@@ -774,7 +787,17 @@ LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
 RAW_STRING = re.compile(r'(?:b|c)?r(#*)"')
 
 
+_STRING_LITERALS = {}
+
+
 def string_literals(text):
+    """The strings of TEXT (string_literals_of), read once per text in this process."""
+    if text not in _STRING_LITERALS:
+        _STRING_LITERALS[text] = string_literals_of(text)
+    return list(_STRING_LITERALS[text])
+
+
+def string_literals_of(text):
     """The strings of Rust source TEXT, as the compiler reads them: plain, byte and C strings
     with their escapes, and raw strings (`r#"..."#`); never a char literal (`'"'`) or a
     lifetime. Every quote is paired with its own: one raw string with a quote in it would pair
@@ -1248,6 +1271,15 @@ def self_test():
         subprocess.run(["git", "init", "-q"], cwd=copy, check=True)
         shims = os.path.join(work, "bin")
         os.makedirs(shims)
+        # Cargo homes (scripts/cargo-home.sh): one, a copy of it at another path, and one whose
+        # config is another.
+        homes = {}
+        for tag, config in (("one", "[net]\noffline = true\n"), ("copy", "[net]\noffline = true\n"),
+                            ("changed", "[net]\noffline = true\n[build]\nrustflags = [\"-Cdebuginfo=0\"]\n")):
+            homes[tag] = os.path.join(work, f"cargo-home-{tag}")
+            os.makedirs(homes[tag])
+            with open(os.path.join(homes[tag], "config.toml"), "w") as file:
+                file.write(config)
         for name in [n for n in os.environ if n == "CI" or n.startswith("GATE_")]:
             del os.environ[name]
         # One target for every listing: the copy's own would be made, empty, for each.
@@ -1370,6 +1402,15 @@ def self_test():
             (f"a crate it does not build ({apart})", False, touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"), None),
         ]
         jobs += [(label, key("orion-ctl"), change, extra) for label, _, change, extra in cases]
+        # One job, the three keys in turn (each home's own CARGO_HOME), as a gate in a new
+        # process takes each.
+        def cargo_homes():
+            said = {}
+            for tag, path in homes.items():
+                os.environ["CARGO_HOME"] = path
+                said[tag] = key("orion-ctl")()
+            return said
+        jobs += [("cargo homes", cargo_homes, None, None)]
         # A package that reads outside the crates only what it declares (the browser tests load
         # web/): what it declares is in its key, and nothing else outside the crates. An outside
         # read it does not declare: every file outside the crates again.
@@ -1509,8 +1550,11 @@ def self_test():
         else:
             print("    a program rewritten where it stands: read again")
         os.remove(program)
-        # Every program a key holds, read here once: each forked worker starts with them read.
+        # Every program a key holds, read here once: each forked worker starts with them read. So
+        # too the base's key, taken here first: each worker starts with its sources' strings and
+        # the tools' versions read (string_literals, version).
         keys.programs()
+        _self_test_job([job[0] for job in jobs].index("base"))
         with multiprocessing.get_context("fork").Pool(4) as pool:
             got = dict(zip((job[0] for job in jobs), pool.map(_self_test_job, range(len(jobs)), chunksize=1)))
 
@@ -1524,6 +1568,9 @@ def self_test():
             failures.append("the same inputs gave two keys")
         for label, moves, _, _ in cases:
             check(label, moves, got[label], got["base"])
+        check("another copy of the Cargo home, its config the same", False,
+              got["cargo homes"]["copy"], got["cargo homes"]["one"])
+        check("the Cargo home's config", True, got["cargo homes"]["changed"], got["cargo homes"]["one"])
         check("a file in a directory a package declares its tests read", True, got["web"], got["web base"])
         check("a file outside the crates that a package does not declare", False, got["web elsewhere"], got["web base"])
         check("a file outside the crates, for a package with an outside read it does not declare", True,

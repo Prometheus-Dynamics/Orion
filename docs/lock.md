@@ -720,6 +720,10 @@ what to change.
 - **I137.** For a browser whose name on PATH is a launcher script, the lane keys also hold
   the version the browser says it is, so a browser updated behind the same launcher reruns the
   browser tests. Scripts only. No interface changes; no wire changes; level 7.
+- **I139.** With `GATE_CARGO_HOME`, the gate reads its crates from a Cargo home of the repo's own
+  (scripts/cargo-home.sh), fetched from every lock file before any lane, offline, a copy for each
+  lane; the lane keys hold the home's config by content, not its path. Scripts only. No interface
+  changes; no wire changes; level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

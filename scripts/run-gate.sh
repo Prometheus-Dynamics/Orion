@@ -7,7 +7,8 @@
 #   scripts/run-gate.sh TARGET_DIR LOG
 #
 # GATE_CPUS (a taskset list, every processor if unset) and GATE_JOBS (cargo's -j, cargo's default
-# if unset) keep it to a share of a machine others use too.
+# if unset) keep it to a share of a machine others use too. GATE_CARGO_HOME (a directory) gives the
+# gate the repo's own Cargo home there, offline, with a copy for each lane (scripts/cargo-home.sh).
 set -euo pipefail
 [ $# -eq 2 ] || { echo "usage: scripts/run-gate.sh TARGET_DIR LOG" >&2; exit 2; }
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

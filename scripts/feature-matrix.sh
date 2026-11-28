@@ -57,7 +57,17 @@ lane() {
 
 pids=()
 for ((shard = 0; shard < shards; shard++)); do
-  lane "$shard" > "$logs/$shard.out" &
+  # With the repo's own Cargo home (scripts/cargo-home.sh), a copy of it for each lane: the
+  # lanes' cargos run at once, and in one home they would wait on its package cache lock.
+  if [ -n "${GATE_CARGO_HOME:-}" ]; then
+    (
+      CARGO_HOME="$(scripts/cargo-home.sh "$GATE_CARGO_HOME" lane "matrix-$shard")"
+      export CARGO_HOME
+      lane "$shard"
+    ) > "$logs/$shard.out" &
+  else
+    lane "$shard" > "$logs/$shard.out" &
+  fi
   pids+=("$!")
 done
 failed=0

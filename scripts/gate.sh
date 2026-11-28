@@ -254,7 +254,15 @@ lane_start() {
   if [ -n "${GATE_TRACE_LANES:-}" ]; then
     { printf 'lane %s %s:' "$name" "$when"; printf ' %q' "$@"; echo; } >> "$GATE_TRACE_LANES"
   fi
-  lane_steps "$@" > "$lane_logs/$name" 2>&1 &
+  # With the repo's own Cargo home, each lane reads a copy of its own (scripts/cargo-home.sh
+  # lane): in one home, cargos beside each other wait on its package cache lock.
+  (
+    if [ -n "${GATE_CARGO_HOME:-}" ]; then
+      CARGO_HOME="$(scripts/cargo-home.sh "$GATE_CARGO_HOME" lane "$name")"
+      export CARGO_HOME
+    fi
+    lane_steps "$@"
+  ) > "$lane_logs/$name" 2>&1 &
   lane_pids+=("$!")
   lane_names+=("$name")
 }
@@ -394,6 +402,13 @@ tests() {
     if [ "${#docs[@]}" -gt 0 ]; then
       cargo test "${built[@]}" --all-features --doc > "$doc_log" 2>&1 &
       doc_pid=$!
+      # The run once the doctests' cargo has its crates (it says what it builds, or that it
+      # is done): cargo holds a Cargo home's package cache lock while it reads what to build,
+      # and the run's cargo, and a test's that builds (trybuild), would wait on it. One at a
+      # time there, none waits; these share a target directory, so they share a home.
+      while ! grep -qE '^ *(Compiling|Fresh|Finished|Doc-tests|error)' "$doc_log" && kill -0 "$doc_pid" 2> /dev/null; do
+        sleep 0.05
+      done
     fi
     cargo nextest run "${built[@]}" --all-features --no-tests=warn -E "$filter" || status=$?
     [ -z "${doc_pid:-}" ] || wait "$doc_pid" || doc_status=$?
@@ -682,6 +697,14 @@ export -f lockfile members keys_self_test tests clippy_all shipped_tests fuzz_sh
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
+  # The repo's own Cargo home (GATE_CARGO_HOME; scripts/cargo-home.sh), before any lane: every
+  # crate each lock file names, fetched once per set of lock files. Every cargo after reads it,
+  # offline, and none waits on another project's hold on ~/.cargo. Unset (CI), ~/.cargo.
+  if [ -n "${GATE_CARGO_HOME:-}" ]; then
+    step "cargo home" 50:10 scripts/cargo-home.sh "$GATE_CARGO_HOME"
+    export CARGO_HOME="$GATE_CARGO_HOME/home"
+  fi
+
   # Before anything builds: a build not held to the lockfile could write it.
   main lockfile 8:2 lockfile
 

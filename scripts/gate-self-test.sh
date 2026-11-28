@@ -17,7 +17,7 @@ gate="${1:-scripts/gate.sh}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 {
-  echo 'part=""; declare -A dropped=(); STALL_SECONDS=60; schedule=parallel; deferred=(); unset GATE_TRACE_LANES'
+  echo 'part=""; declare -A dropped=(); STALL_SECONDS=60; schedule=parallel; deferred=(); unset GATE_TRACE_LANES GATE_CARGO_HOME'
   for name in bounded step timed once lane lane_start start_deferred tests_step lane_steps join_lanes lane_item; do
     sed -n "/^$name() {/,/^}/p" "$gate" | grep -q . || { echo "gate-self-test: no $name() in $gate" >&2; exit 2; }
     sed -n "/^$name() {/,/^}/p" "$gate"
