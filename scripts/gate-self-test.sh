@@ -10,7 +10,8 @@
 # steps split on `--`); a step, a function step whose first command fails, a timed part (a
 # function too). A failing lane item writes no pass record; a failing `once` command no stamp.
 # Green is: lanes and steps of passing commands, every step run. Every case is checked by what
-# it printed too, not by its status alone. Records and stamps go to a git directory of its own.
+# it printed too, not by its status alone; a lane's line says when it started and ended, red or
+# green. Records and stamps go to a git directory of its own.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 gate="${1:-scripts/gate.sh}"
@@ -18,7 +19,8 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 {
   echo 'part=""; declare -A dropped=(); STALL_SECONDS=60; schedule=parallel; deferred=(); unset GATE_TRACE_LANES GATE_CARGO_HOME'
-  for name in bounded step timed once lane lane_start start_deferred tests_step lane_steps join_lanes lane_item; do
+  echo 'gate_began="$EPOCHREALTIME"'
+  for name in seconds_since bounded step timed once lane lane_start start_deferred tests_step lane_steps join_lanes lane_item; do
     sed -n "/^$name() {/,/^}/p" "$gate" | grep -q . || { echo "gate-self-test: no $name() in $gate" >&2; exit 2; }
     sed -n "/^$name() {/,/^}/p" "$gate"
   done
@@ -60,7 +62,8 @@ run() {
 
 run red "a lane, its first step red" 'lane t one 1:1 false -- two 1:1 true; join_lanes' 'FAILED: one'
 run red "a lane, its last step red" 'lane t one 1:1 true -- last 1:1 false; join_lanes' 'one: [0-9]+ s' 'FAILED: last'
-run red "a lane, its only step red" 'lane t one 1:1 false; join_lanes' 'FAILED: one'
+run red "a lane, its only step red" 'lane t one 1:1 false; join_lanes' 'FAILED: one' \
+  'lane t: started at [0-9.]+ s, ended at [0-9.]+ s$'
 run red "a lane started after &&, its first step red" \
   '[ 1 -gt 0 ] && lane t one 1:1 false -- two 1:1 true; join_lanes' 'FAILED: one'
 run red "a step" 'step one 1:1 false' '^==> one'
@@ -68,7 +71,8 @@ run red "a function step, its first command red, its last green" 'step one 1:1 t
 run red "a timed part" 'timed one false' '^==> one'
 run red "a timed function, its first command red, its last green" 'timed one two_commands' '^==> one'
 run green "a lane of two green steps" 'lane t one 1:1 true -- two 1:1 true; join_lanes' \
-  'one: [0-9]+ s' 'two: [0-9]+ s'
+  'one: [0-9]+ s' 'two: [0-9]+ s' 'lane t: started at [0-9.]+ s, ended at [0-9.]+ s$' \
+  'the steps beside: [0-9]+ s \(waited from [0-9.]+ s to [0-9.]+ s\)'
 run green "a step" 'step one 1:1 true' 'one: [0-9]+ s'
 # GATE_LANE_SCHEDULE=matrix-after-tests: the matrix held, started when the tests step ends. A
 # red tests step still lets it run to its end, and its red is printed.

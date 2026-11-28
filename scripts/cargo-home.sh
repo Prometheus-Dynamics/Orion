@@ -38,7 +38,11 @@ if [ $# -eq 3 ]; then
   lane="$dir/lanes/$name"
   if ! cmp -s "$home/.orion-fetch" "$lane/.orion-fetch" 2> /dev/null; then
     mkdir -p "$dir/lanes"
-    # Made beside it under a name of this process's own, then put in its place.
+    # Made beside it under a name of this process's own, then put in its place. Ended before
+    # that (a gate that stops ends its lanes), it removes what it made.
+    trap 'rm -rf "$lane.new.$$"' EXIT
+    trap 'exit 143' TERM
+    trap 'exit 130' INT
     rm -rf "$lane.new.$$"
     mkdir "$lane.new.$$"
     for part in registry git config.toml .orion-fetch; do
@@ -52,6 +56,20 @@ if [ $# -eq 3 ]; then
   fi
   echo "$lane"
   exit 0
+fi
+
+# What a copy left when it could not remove it (killed outright): each `<lane>.new.<pid>` and
+# `<lane>.old.<pid>` whose process is gone.
+if [ -d "$dir/lanes" ]; then
+  for left in "$dir/lanes"/*.new.* "$dir/lanes"/*.old.*; do
+    [ -e "$left" ] || continue
+    pid="${left##*.}"
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    if ! kill -0 "$pid" 2> /dev/null; then
+      echo "cargo-home: removed $left (its copy ended before it was done)"
+      rm -rf "$left"
+    fi
+  done
 fi
 
 # The lock files: those in git.

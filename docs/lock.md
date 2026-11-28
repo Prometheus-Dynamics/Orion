@@ -730,6 +730,11 @@ what to change.
 - **I141.** CI installs only the toolchain rust-toolchain.toml pins, and a job stops if any
   other is installed or active. The size gate's self-test plants another toolchain without the
   network. No code, wire or interface changes.
+- **I142.** Each gate lane logs when it started and ended and what its Cargo home copy took.
+  Each fuzz target runs the number of runs testing/fuzz/short-runs.tsv gives it, from a fixed
+  seed, with a 45 s cap. Too few runs, too many, or a crash fail the step, and a crash's red
+  gives its input and the command that replays it. The lane keys' self-test runs in the
+  other-systems lane. A killed Cargo home copy is removed. No code, wire or interface changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

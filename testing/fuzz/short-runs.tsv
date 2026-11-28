@@ -1,0 +1,23 @@
+# Each fuzz target's short budget (scripts/fuzz-short.sh): how many runs, and the seed they start
+# from, from an empty corpus. A gate's fuzzing is then the same every time it runs.
+#
+# The runs: the median of what each target made in 3 s of wall time in 11 gates on the machine
+# the gates share, each at a 5-minute load of 85 to 115 (the mean of the load before and after):
+# home1 109.0, home2 110.2, home3 107.2, i113-core 110.2, i113b 114.8, i114a 90.8, i118a 93.6,
+# i121b 85.8, i125a 100.5, i139b 102.1, i140c 87.0. At such a load a gate makes them in about the
+# 3 s it gave them; at a higher one it takes longer, and makes no fewer. A run that cannot make
+# them inside its cap fails, saying what each target made and the load.
+#
+# target	runs	seed
+actions	39214	1
+files	34796	2
+frame	163581	3
+packet	112838	4
+peers	40989	5
+records	54337	6
+session	32624	7
+socket	139863	8
+stream	50044	9
+time	61403	10
+topics	21912	11
+workloads	39808	12

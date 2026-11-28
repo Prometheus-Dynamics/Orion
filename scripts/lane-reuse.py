@@ -346,7 +346,7 @@ class Keys(size_key.Workspace):
                 path = os.path.join(tools, "lib", "rustlib", "x86_64-unknown-linux-gnu", "bin", tool)
                 inputs.append((tool, file_digest(path)))
         elif lane == "fuzz":
-            # fuzz-short SECONDS: every target, for that budget each. The fuzz crate (its own
+            # fuzz-short runs: every target, its runs from short-runs.tsv. The fuzz crate (its own
             # workspace), every workspace crate it builds, the nightly that builds it and
             # cargo-fuzz.
             inputs += self.files("testing/fuzz")

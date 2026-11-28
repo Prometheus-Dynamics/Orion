@@ -181,6 +181,15 @@ export NAMESPACE_TESTS=required
 target_dir="${CARGO_TARGET_DIR:-$PWD/target}"
 export target_dir
 lane_logs="$(mktemp -d)"
+# When the gate began, for the offsets each lane's line gives: when it started, how long its
+# copy of the Cargo home took, when it ended.
+gate_began="$EPOCHREALTIME"
+export gate_began
+# seconds_since <EPOCHREALTIME>: the seconds since then, to a tenth.
+seconds_since() {
+  local now="$EPOCHREALTIME"
+  awk -v a="$1" -v b="$now" 'BEGIN { printf "%.1f", b - a }'
+}
 # What each build lane reused (scripts/lane-reuse.py), outside every step's own TMPDIR.
 GATE_LANE_STATE_DIR="$lane_logs/state"
 mkdir -p "$GATE_LANE_STATE_DIR"
@@ -256,10 +265,17 @@ lane_start() {
   fi
   # With the repo's own Cargo home, each lane reads a copy of its own (scripts/cargo-home.sh
   # lane): in one home, cargos beside each other wait on its package cache lock.
+  # Its line, last in what it says, whatever its steps ended with: when it started and ended,
+  # in seconds after the gate began, and what of that its copy of the Cargo home took.
   (
+    started="$(seconds_since "$gate_began")"
+    copy=""
+    trap 'echo "    lane $name: started at $started s,$copy ended at $(seconds_since "$gate_began") s"' EXIT
     if [ -n "${GATE_CARGO_HOME:-}" ]; then
+      copying="$EPOCHREALTIME"
       CARGO_HOME="$(scripts/cargo-home.sh "$GATE_CARGO_HOME" lane "$name")"
       export CARGO_HOME
+      copy=" its Cargo home in $(seconds_since "$copying") s,"
     fi
     lane_steps "$@"
   ) > "$lane_logs/$name" 2>&1 &
@@ -315,14 +331,15 @@ lane_steps() {
 # Waits for every lane, prints what each said, and fails if one did.
 # Timed here, not by `timed`: it waits for this shell's children, so it runs in this shell.
 join_lanes() {
-  local failed=0 i start=$SECONDS
+  local failed=0 i start=$SECONDS began
+  began="$(seconds_since "$gate_began")"
   echo "==> the steps beside"
   for i in "${!lane_pids[@]}"; do
     wait "${lane_pids[$i]}" || failed=1
     cat "$lane_logs/${lane_names[$i]}"
   done
   lane_pids=()
-  echo "    the steps beside: $((SECONDS - start)) s"
+  echo "    the steps beside: $((SECONDS - start)) s (waited from $began s to $(seconds_since "$gate_began") s)"
   return "$failed"
 }
 
@@ -677,14 +694,14 @@ keys_self_test() {
 
 # Every fuzz target for its short budget, unless that ran before on exactly these inputs
 # (scripts/lane-reuse.py, lane `fuzz`): the same targets, built from the same code, given the
-# same seconds.
+# same runs (testing/fuzz/short-runs.tsv) and cap.
 fuzz_short() {
   local state="$GATE_LANE_STATE_DIR/fuzz"
-  scripts/lane-reuse.py plan fuzz "$state" "fuzz-short 3"
+  scripts/lane-reuse.py plan fuzz "$state" "fuzz-short runs cap-45"
   # A target directory of its own (a subvolume, scripts/work-area.sh): its builds are
   # nightly's, with sanitizers, and share nothing with the rest.
-  lane_item "$state" "fuzz-short 3" "every target, 3 s each" \
-    env CARGO_TARGET_DIR="$target_dir/fuzz" scripts/fuzz-short.sh 3
+  lane_item "$state" "fuzz-short runs cap-45" "every target, its runs from testing/fuzz/short-runs.tsv" \
+    env CARGO_TARGET_DIR="$target_dir/fuzz" scripts/fuzz-short.sh 45
   # Its runs reused by its binaries (scripts/fuzz-short.sh): said so on the gate's line.
   if [ -f "$state.bin" ] && awk -F'\t' '$3 == "reused" {f = 1} END {exit !f}' "$state.bin"; then
     awk -F'\t' -v OFS='\t' '{$3 = "reused"; print}' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
@@ -693,7 +710,7 @@ fuzz_short() {
 }
 
 # The functions a step runs in a shell of its own (`bounded`), and what they call.
-export -f lockfile members keys_self_test tests clippy_all shipped_tests fuzz_short test_filters other_systems timed lane_item device_size
+export -f seconds_since lockfile members keys_self_test tests clippy_all shipped_tests fuzz_short test_filters other_systems timed lane_item device_size
 
 # The workspace glob matches nothing until the first crate lands.
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
@@ -717,7 +734,9 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
     bash -c 'set -euo pipefail; shipped_tests' --
   # Every crate with optional features: none, each alone, all.
   lane matrix "feature matrix" 605:1535 scripts/feature-matrix.sh
-  lane other-systems "no_std and the client on other systems" 416:157 other_systems
+  # The lane keys' self-test builds nothing: first in a short lane, off the main part's path.
+  lane other-systems "the lane keys' self-test" 25:12 keys_self_test -- \
+    "no_std and the client on other systems" 416:157 other_systems
   if [ -x scripts/size-gate.sh ] && [ -d crates/bins/orion-recovery ]; then
     # The whole gate here leaves a new key's builds to CI (scripts/size-gate.sh, CI only);
     # asked for the lane alone, or on CI, it builds.
@@ -755,7 +774,6 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
     main links 2:1 scripts/check-links.sh
   fi
   main format 12:3 cargo fmt --all --check
-  main "the lane keys' self-test" 25:12 keys_self_test
 
   if [ "$schedule" = matrix-after-tests ] && [ -z "$part" ]; then
     tests_step tests 630:647 tests
