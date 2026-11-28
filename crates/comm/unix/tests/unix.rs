@@ -386,8 +386,42 @@ fn a_program_on_the_socket_is_kept_while_it_is_quiet_and_gone_when_it_hangs_up()
     });
 }
 
+/// What is logged on this thread while it is held: each event's level and message.
+struct Heard(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+impl tracing::Subscriber for Heard {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        struct Message<'a>(&'a mut String);
+        impl tracing::field::Visit for Message<'_> {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" {
+                    *self.0 = format!("{value:?}");
+                }
+            }
+        }
+        let mut message = String::new();
+        event.record(&mut Message(&mut message));
+        self.0
+            .lock()
+            .expect("heard")
+            .push(format!("{} {message}", event.metadata().level()));
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
 #[test]
 fn a_peer_that_hangs_up_inside_a_frame_has_closed() {
+    let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let _held = tracing::subscriber::set_default(Heard(heard.clone()));
     run(async {
         // A program that dies in the middle of a send: the rest of its frame never comes. It
         // closed, as one that hangs up between frames does; not an error, and not a wait.
@@ -407,4 +441,12 @@ fn a_peer_that_hangs_up_inside_a_frame_has_closed() {
             .expect("not left waiting for the rest");
         assert_eq!(got.expect("closed, not an error"), None);
     });
+    // And said: a message cut off is not lost unseen.
+    let heard = heard.lock().expect("heard");
+    assert!(
+        heard.contains(
+            &"WARN a connection closed inside a frame: the part of it sent is dropped".to_owned()
+        ),
+        "{heard:?}"
+    );
 }

@@ -29,8 +29,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      # rust-toolchain.toml selects the toolchain and its components.
-      - uses: dtolnay/rust-toolchain@stable
+      # The toolchain is rust-toolchain.toml's pin, with its components and targets, the default,
+      # and the only one installed. `dtolnay/rust-toolchain@stable` installed and defaulted the
+      # current stable, which no build used (the pin overrides it in the checkout), and the
+      # runner's image brings one too; rust-cache's key hashes every installed rustc, so each
+      # stable release or image update moved the key and left a cold cache with no change here.
+      - name: Rust toolchain (the pin in rust-toolchain.toml, and nothing else)
+        shell: bash
+        run: |
+          pin=$(sed -n 's/^channel = "\(.*\)"\r*$/\1/p' rust-toolchain.toml)
+          rustup set profile minimal
+          # With no name: the toolchain rust-toolchain.toml names, its components and targets.
+          rustup toolchain install
+          rustup default "$pin"
+          rustup toolchain list | tr -d '\r' | awk '{print $1}' | while read -r tc; do
+            case "$tc" in "$pin"-*) ;; *) rustup toolchain uninstall "$tc" ;; esac
+          done
+      # The active rustc is the pin, in the checkout and outside it, and no other toolchain is
+      # installed, or the job stops.
+      - name: The active rustc is the pin, and the only toolchain
+        shell: bash
+        run: |
+          pin=$(sed -n 's/^channel = "\(.*\)"\r*$/\1/p' rust-toolchain.toml)
+          here=$(rustc -vV | tr -d '\r' | sed -n 's/^release: //p')
+          default=$(cd / && rustc -vV | tr -d '\r' | sed -n 's/^release: //p')
+          rustc -vV
+          [ "$here" = "$pin" ] && [ "$default" = "$pin" ] || {
+            echo "::error::active rustc $here (default $default), rust-toolchain.toml pins $pin"; exit 1; }
+          rustup toolchain list
+          others=$(rustup toolchain list | tr -d '\r' | awk '{print $1}' | grep -v "^$pin-" || true)
+          [ -z "$others" ] || { echo "::error::toolchains beside the pin $pin: $others"; exit 1; }
       # A cache for each part: each builds in target directories of its own. rust-cache's own key
       # does not see the root manifest's profiles: a change to one matched the cache whole, so it
       # was never saved again and the builds it held no longer fit.
@@ -71,7 +99,36 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      # The toolchain is rust-toolchain.toml's pin, with its components and targets, the default,
+      # and the only one installed. `dtolnay/rust-toolchain@stable` installed and defaulted the
+      # current stable, which no build used (the pin overrides it in the checkout), and the
+      # runner's image brings one too; rust-cache's key hashes every installed rustc, so each
+      # stable release or image update moved the key and left a cold cache with no change here.
+      - name: Rust toolchain (the pin in rust-toolchain.toml, and nothing else)
+        shell: bash
+        run: |
+          pin=$(sed -n 's/^channel = "\(.*\)"\r*$/\1/p' rust-toolchain.toml)
+          rustup set profile minimal
+          # With no name: the toolchain rust-toolchain.toml names, its components and targets.
+          rustup toolchain install
+          rustup default "$pin"
+          rustup toolchain list | tr -d '\r' | awk '{print $1}' | while read -r tc; do
+            case "$tc" in "$pin"-*) ;; *) rustup toolchain uninstall "$tc" ;; esac
+          done
+      # The active rustc is the pin, in the checkout and outside it, and no other toolchain is
+      # installed, or the job stops.
+      - name: The active rustc is the pin, and the only toolchain
+        shell: bash
+        run: |
+          pin=$(sed -n 's/^channel = "\(.*\)"\r*$/\1/p' rust-toolchain.toml)
+          here=$(rustc -vV | tr -d '\r' | sed -n 's/^release: //p')
+          default=$(cd / && rustc -vV | tr -d '\r' | sed -n 's/^release: //p')
+          rustc -vV
+          [ "$here" = "$pin" ] && [ "$default" = "$pin" ] || {
+            echo "::error::active rustc $here (default $default), rust-toolchain.toml pins $pin"; exit 1; }
+          rustup toolchain list
+          others=$(rustup toolchain list | tr -d '\r' | awk '{print $1}' | grep -v "^$pin-" || true)
+          [ -z "$others" ] || { echo "::error::toolchains beside the pin $pin: $others"; exit 1; }
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ hashFiles('Cargo.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}

@@ -727,6 +727,9 @@ what to change.
 - **I140.** The shm crates (one git repository) are pinned at 98fbe0c2. The Unix carrier takes shm-fdpass's
   `ShortRead` (a peer hung up inside a frame) as the peer closing, and logs that a connection
   closed inside a frame. Nothing on the wire changes, and nothing a program calls.
+- **I141.** CI installs only the toolchain rust-toolchain.toml pins, and a job stops if any
+  other is installed or active. The size gate's self-test plants another toolchain without the
+  network. No code, wire or interface changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

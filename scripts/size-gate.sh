@@ -244,7 +244,12 @@ if [ "${1:-}" = "--self-test" ]; then
     case_ rustflags "RUSTFLAGS" rocav - - RUSTFLAGS=-Cdebuginfo=1
     case_ profile "a profile set from the environment" rocav - - CARGO_PROFILE_SERVICE_OPT_LEVEL=s
     case_ board-cc "a board's C compiler" rocav - - CC_aarch64_unknown_linux_musl=/usr/bin/false
-    case_ toolchain "the toolchain" rocav - - RUSTUP_TOOLCHAIN=stable
+    # Another toolchain: a rustc first on PATH that runs the pin's but says another version, so
+    # the case needs no toolchain but the pin (CI installs no other) and no network.
+    mkdir "$work/other-rustc"
+    printf '#!/bin/sh\nPATH="%s"\nif [ "$1" = -vV ]; then rustc -vV; echo "planted: another toolchain"; exit; fi\nexec rustc "$@"\n' "$PATH" > "$work/other-rustc/rustc"
+    chmod +x "$work/other-rustc/rustc"
+    case_ toolchain "the toolchain" rocav - - PATH="$work/other-rustc:$PATH"
     case_ target-dir "CARGO_TARGET_DIR" "" - - CARGO_TARGET_DIR=/elsewhere
     for pid in "${pids[@]}"; do
         wait "$pid" || fail "a key could not be taken (scripts/size-key.py failed)"

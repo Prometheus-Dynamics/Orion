@@ -17,6 +17,7 @@ tracing = { workspace = true }
 orion-msg-session = { path = "../../core/msg-session" }
 orion-scratch = { path = "../../testing/scratch" }
 orion-wire = { path = "../../core/wire" }
+tracing = { workspace = true }
 tokio = { workspace = true, features = ["rt", "time", "macros"] }
 
 [lints]
