@@ -9,7 +9,8 @@ A build's key is a hash of everything that can change the bytes it makes:
 - `Cargo.lock` (every registry and git dependency, by version and checksum or revision), the
   root `Cargo.toml` (profiles, features, patches, workspace dependencies), `rust-toolchain.toml`,
   every cargo config file cargo reads (`.cargo/config.toml` here and in each directory above it,
-  and in CARGO_HOME), and where CARGO_HOME is (a dependency's paths are in its panic messages);
+  and in CARGO_HOME); not where CARGO_HOME is: a shipped build writes it out of what it makes
+  (scripts/shipped-remap.sh), so the same crates in another home build the same bytes;
 - this script and scripts/size-gate.sh (what it builds, and how), so a change to either
   measures everything again;
 - the toolchain (`rustc -vV`, `cargo -V`), the package, the target, and the C compiler and
@@ -180,7 +181,6 @@ class Workspace:
                 inputs.append((name, file_digest(os.path.join(self.root, name))))
             for path in cargo_configs(self.root):
                 inputs.append((f"cargo config {shown_config(path, self.root)}", file_digest(path)))
-            inputs.append(("CARGO_HOME", cargo_home()))
             inputs.append(("rustc -vV", digest(run(["rustc", "-vV"], self.root).encode())))
             inputs.append(("cargo -V", digest(run(["cargo", "-V"], self.root).encode())))
             env = sorted(

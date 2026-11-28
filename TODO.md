@@ -306,6 +306,7 @@ One binary, packaging, the graph bridge (dropped), failure drills and the hardwa
 - [x] [I140](docs/prs/I140.md) shm-fdpass at 98fbe0c2: a frame cut short is the peer closing, and said (wave 19; needs I139)
 - [x] [I141](docs/prs/I141.md) CI builds with the pinned toolchain only, and the carrier's close is asserted in the log (wave 19; needs I140)
 - [x] [I142](docs/prs/I142.md) the gate's lanes say when they ran, fuzzing has a budget of runs, and a killed copy cleans up (wave 19; needs I141)
+- [x] [I143](docs/prs/I143.md) shipped binaries hold no Cargo home path, and the size key drops it (wave 19; needs I142)
 - [ ] [I103](docs/prs/I103.md) Each network listener says what it is doing; a root set wrong is refused alone; a shell with security off over the network; the `mut` warning (wave 19; needs I104)
 - [ ] [I105](docs/prs/I105.md) V6-LINK-LOCAL-WAY-IN: a board is found and reached over link-local IPv6 (wave 19; needs I103)
 - [ ] [I95](docs/prs/I95.md) HANDLER-INDEXING: indexing and slicing on what a peer sends, read through (wave 19; needs I105)

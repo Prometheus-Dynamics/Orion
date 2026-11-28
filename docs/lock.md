@@ -735,6 +735,9 @@ what to change.
   seed, with a 45 s cap. Too few runs, too many, or a crash fail the step, and a crash's red
   gives its input and the command that replays it. The lane keys' self-test runs in the
   other-systems lane. A killed Cargo home copy is removed. No code, wire or interface changes.
+- **I143.** Shipped binaries are built with the Cargo home's path remapped to /cargo-home
+  (scripts/shipped-remap.sh), so the same crates in any home build the same bytes. The size key
+  no longer holds the home's path. No code, wire or interface changes.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 

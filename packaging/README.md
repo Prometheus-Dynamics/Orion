@@ -94,8 +94,13 @@ directory it may write for its socket, or it cannot listen and goes into recover
 stripped):
 
 ```bash
-cargo build --profile service --target aarch64-unknown-linux-gnu -p orion-bin
+cargo build --profile service --target aarch64-unknown-linux-gnu \
+  "$(scripts/shipped-remap.sh aarch64-unknown-linux-gnu)" -p orion-bin
 ```
+
+`scripts/shipped-remap.sh` writes the Cargo home's path out of the binary (as `/cargo-home`), so
+it is the same bytes whichever home built it. It adds to the target's flags in
+`.cargo/config.toml`; RUSTFLAGS would replace them.
 
 Install `target/aarch64-unknown-linux-gnu/service/orion` as `/usr/bin/orion`; started as
 `orionctl` (a link or a two-line script running `orion ctl`) it is the command line. The
@@ -170,8 +175,10 @@ Board files are static musl builds, one package per invocation (built together, 
 the features of both):
 
 ```bash
-cargo build --locked --profile service --target aarch64-unknown-linux-musl -p orion-bin
-cargo build --locked --profile service --target aarch64-unknown-linux-musl -p orion-recovery-bin
+cargo build --locked --profile service --target aarch64-unknown-linux-musl \
+  "$(scripts/shipped-remap.sh aarch64-unknown-linux-musl)" -p orion-bin
+cargo build --locked --profile service --target aarch64-unknown-linux-musl \
+  "$(scripts/shipped-remap.sh aarch64-unknown-linux-musl)" -p orion-recovery-bin
 ```
 
 The same for `armv7-unknown-linux-musleabihf` and `riscv64gc-unknown-linux-musl`, which build and

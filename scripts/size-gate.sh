@@ -251,6 +251,9 @@ if [ "${1:-}" = "--self-test" ]; then
     chmod +x "$work/other-rustc/rustc"
     case_ toolchain "the toolchain" rocav - - PATH="$work/other-rustc:$PATH"
     case_ target-dir "CARGO_TARGET_DIR" "" - - CARGO_TARGET_DIR=/elsewhere
+    # The same Cargo home at another path: a shipped build writes its path out.
+    ln -s "${CARGO_HOME:-$HOME/.cargo}" "$work/other-home"
+    case_ cargo-home "the Cargo home at another path" "" - - CARGO_HOME="$work/other-home"
     for pid in "${pids[@]}"; do
         wait "$pid" || fail "a key could not be taken (scripts/size-key.py failed)"
     done
@@ -352,10 +355,11 @@ build() {
         fi
         if [ -n "$target" ]; then
             CARGO_TARGET_DIR="$dir" cargo build --quiet --locked --profile service \
-                --target "$target" -p "$package" || exit 1
+                --target "$target" "$(scripts/shipped-remap.sh "$target")" -p "$package" || exit 1
             file="$dir/$target/service/$file"
         else
-            CARGO_TARGET_DIR="$dir" cargo build --quiet --profile service -p "$package" || exit 1
+            CARGO_TARGET_DIR="$dir" cargo build --quiet --profile service \
+                "$(scripts/shipped-remap.sh)" -p "$package" || exit 1
             file="$dir/service/$file"
         fi
         size=$(stat -c %s "$file")
@@ -497,21 +501,29 @@ if [ -n "$self_test" ]; then
     sed 's/^/    /' "$results/self-test"
 fi
 
-# A full measurement: liborion_c.so again, from a copy of the source at another path, byte for
-# byte the same; then the time of this one, if all passed.
+# A full measurement: liborion_c.so again, from a copy of the source at another path and with
+# a copy of the Cargo home at another path, byte for byte the same (scripts/shipped-remap.sh
+# writes the home's path out of it); then the time of this one, if all passed.
 if [ "$measure" = 1 ]; then
     copy="$lanes/path-check"
     mkdir -p "$copy/src"
     git ls-files -z --cached --others --exclude-standard \
         | rsync -a --delete --from0 --files-from=- ./ "$copy/src/"
-    if (cd "$copy/src" && CARGO_TARGET_DIR="$copy/target" cargo build --quiet --profile service -p orion-capi); then
+    rm -rf "$copy/home"
+    mkdir "$copy/home"
+    for part in registry git config.toml; do
+        [ ! -e "${CARGO_HOME:-$HOME/.cargo}/$part" ] || cp -a --reflink=auto "${CARGO_HOME:-$HOME/.cargo}/$part" "$copy/home/"
+    done
+    if (cd "$copy/src" && export CARGO_HOME="$copy/home" CARGO_NET_OFFLINE=true &&
+        CARGO_TARGET_DIR="$copy/target" cargo build --quiet --profile service \
+            "$(scripts/shipped-remap.sh)" -p orion-capi); then
         if [ ! -f "$copy/target/service/liborion_c.so" ] || [ ! -f "$lanes/capi-host/service/liborion_c.so" ]; then
             echo "    FAIL: the path check has no liborion_c.so to compare at $copy/target/service or $lanes/capi-host/service"
             failures=$((failures + 1))
         elif cmp -s "$copy/target/service/liborion_c.so" "$lanes/capi-host/service/liborion_c.so"; then
-            echo "    liborion_c.so from a copy at another path: the same bytes"
+            echo "    liborion_c.so from a copy at another path, with a Cargo home at another path: the same bytes"
         else
-            echo "    FAIL: liborion_c.so built at another path has other bytes; a key measured in one worktree would not hold in another"
+            echo "    FAIL: liborion_c.so built at another path, with a Cargo home at another path, has other bytes; a key measured in one worktree or with one home would not hold in another"
             scripts/elf-diff.py "$lanes/capi-host/service/liborion_c.so" "$copy/target/service/liborion_c.so" || true
             failures=$((failures + 1))
         fi
