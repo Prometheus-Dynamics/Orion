@@ -131,8 +131,13 @@ def load_elf_key():
 # and the environment it reads. A package whose sources may reach outside the crates, or name a
 # file by CARGO_MANIFEST_DIR at run time (its own sources among what it may read), is never
 # keyed so: only its sources' key reuses it. Kept apart from the source keys: LANE-bin.
+#
+# CARGO_MANIFEST_DIR joined to a path inside a directory the package declares its tests read
+# (DECLARED_JOIN, `declared`) names no source of its own: that directory's every file is in the
+# key, by content.
 BINARY_LANES = {"tests": "tests-bin", "fuzz": "fuzz-bin"}
 RUNTIME_SOURCE = re.compile(r"CARGO_MANIFEST_DIR")
+DECLARED_JOIN = re.compile(r'Path::new\(\s*env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*\)\s*\.join\(\s*"((?:[^"\\]|\\.)*)"\s*\)')
 
 
 def git(*args):
@@ -356,15 +361,21 @@ class Keys(size_key.Workspace):
     def binary_keyable(self, package):
         """Whether PACKAGE's tests can be keyed by their binaries: nothing they read at run time
         is left out of that key."""
-        if self.reaches_outside(package):
-            return False
+        return not (self.reaches_outside(package) or self.names_own_sources(package))
+
+    def names_own_sources(self, package):
+        """Whether a Rust source of PACKAGE names a file by CARGO_MANIFEST_DIR at run time: its
+        own sources among what it may read. Not a join to a path inside a directory it declares
+        its tests read (DECLARED_JOIN): every file there is in its keys, by content."""
         home = os.path.relpath(os.path.dirname(self.packages[self.by_name[package]]["manifest_path"]), ROOT)
+        said = [os.path.normpath(directory) for directory in self.test_reads(package)]
+        kept = lambda match: "" if declared(match.group(1), home, said) else match.group(0)
         for name, _ in self.files(home):
             if name.endswith(".rs"):
                 with open(os.path.join(ROOT, name), errors="replace") as file:
-                    if RUNTIME_SOURCE.search(file.read()):
-                        return False
-        return True
+                    if RUNTIME_SOURCE.search(DECLARED_JOIN.sub(kept, file.read())):
+                        return True
+        return False
 
     def binary_inputs(self, lane, item, executables, read):
         """ITEM's key by its EXECUTABLES (paths) and the files READ at run time (name, digest)."""
@@ -411,7 +422,11 @@ class Keys(size_key.Workspace):
         other than crates/, or `..`), walks up (`.parent()`), finds its own binary or the
         target (`current_exe`, `CARGO_TARGET_TMPDIR`), or runs cargo. Broad on purpose: a
         package flagged wrongly only runs its tests more often. What it reads when compiled is
-        held by its `.d` files (`depinfo`)."""
+        held by its `.d` files (`depinfo`).
+
+        A path inside a directory the package declares its tests read (`[package.metadata.orion]
+        test-reads`) does not count: that directory is in its keys, by content (`declared`). A
+        test that a path holds no `..` (`.contains("..")`) reads nothing (DOTDOT_CHECK)."""
         if not hasattr(self, "reaching"):
             self.reaching = {}
             tops = sorted({
@@ -421,13 +436,17 @@ class Keys(size_key.Workspace):
             self.reach_tops = tops
         if package not in self.reaching:
             home = os.path.relpath(os.path.dirname(self.packages[self.by_name[package]]["manifest_path"]), ROOT)
+            said = [os.path.normpath(directory) for directory in self.test_reads(package)]
             found = False
             for name, _ in self.files(home):
                 if not name.endswith(".rs"):
                     continue
                 with open(os.path.join(ROOT, name), errors="replace") as file:
-                    text = RESPAWN.sub("", without_crate_modules(name, file.read()))
-                if REACH.search(text) or any(reaches(literal, self.reach_tops) for literal in string_literals(text)):
+                    text = DOTDOT_CHECK.sub("", RESPAWN.sub("", without_crate_modules(name, file.read())))
+                if REACH.search(text) or any(
+                    reaches(literal, self.reach_tops) and not declared(literal, home, said)
+                    for literal in string_literals(text)
+                ):
                     found = True
                     break
             self.reaching[package] = found
@@ -793,6 +812,9 @@ def string_literals(text):
 # same bytes the binary key holds, and its sources are these. Its path handed to another
 # program, or a file found beside it, is judged as any other.
 RESPAWN = re.compile(r'Command::new\(\s*std::env::current_exe\(\)\s*\.expect\(\s*"(?:[^"\\]|\\.)*"\s*\)\s*\)')
+# A test that a path holds no `..`, as a server of files makes before it reads one: the string
+# is no path, and names nothing.
+DOTDOT_CHECK = re.compile(r'\.contains\(\s*"\.\."\s*\)')
 PATH_MODULE = re.compile(r'#\s*\[\s*path\s*=\s*"((?:[^"\\]|\\.)*)"\s*\]')
 
 
@@ -816,6 +838,17 @@ def without_crate_modules(name, text):
         return match.group(0)
 
     return PATH_MODULE.sub(kept, text)
+
+
+def declared(literal, home, said):
+    """Whether LITERAL, a string naming a path outside the crates, names one inside a directory
+    of SAID (a package's test-reads): taken from HOME, the package's directory (where cargo runs
+    its tests and CARGO_MANIFEST_DIR points), or from the root of the repository."""
+    for base in (home, ""):
+        path = os.path.normpath(os.path.join(base, literal))
+        if any(path == directory or path.startswith(directory + os.sep) for directory in said):
+            return True
+    return False
 
 
 def reaches(literal, tops):
@@ -935,18 +968,9 @@ def depinfo(state, fresh):
 
 
 def manifest_dir_packages(keys):
-    """The workspace packages any of whose Rust sources mention CARGO_MANIFEST_DIR."""
-    found = []
-    for package_id in keys.members:
-        package = keys.packages[package_id]
-        home = os.path.relpath(os.path.dirname(package["manifest_path"]), ROOT)
-        for name, _ in keys.files(home):
-            if name.endswith(".rs"):
-                with open(os.path.join(ROOT, name), errors="replace") as file:
-                    if RUNTIME_SOURCE.search(file.read()):
-                        found.append(package["name"])
-                        break
-    return sorted(found)
+    """The workspace packages a Rust source of which names a file by CARGO_MANIFEST_DIR at run
+    time (Keys.names_own_sources)."""
+    return sorted(keys.packages[i]["name"] for i in keys.members if keys.names_own_sources(keys.packages[i]["name"]))
 
 
 def plan_self_test():
@@ -1242,6 +1266,13 @@ def self_test():
             change.name = name
             return change
 
+        def both(*changes):
+            def change(root):
+                for one in changes:
+                    one(root)
+            change.name = next((one.name for one in changes if own_listing.search(one.name)), changes[0].name)
+            return change
+
         def replace(name, old, new):
             def change(root):
                 with open(os.path.join(root, name)) as file:
@@ -1309,9 +1340,19 @@ def self_test():
             (f"a crate it does not build ({apart})", False, touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"), None),
         ]
         jobs += [(label, key("orion-ctl"), change, extra) for label, _, change, extra in cases]
-        # A package whose sources reach outside the crates (the browser tests load web/).
+        # A package that reads outside the crates only what it declares (the browser tests load
+        # web/): what it declares is in its key, and nothing else outside the crates. An outside
+        # read it does not declare: every file outside the crates again.
+        web_rs = "crates/testing/web-tests/tests/client.rs"
+        undeclared = touch(web_rs, '\nfn _planted() { let _ = std::fs::read("../../../scripts/gate.sh"); }\n')
+        elsewhere = touch("examples/mcu-template/src/lib.rs")
         jobs += [("web base", key("orion-web-tests"), None, None),
-                 ("web", key("orion-web-tests"), touch("web/video-example/video.js"), None)]
+                 ("web", key("orion-web-tests"), touch("web/video-example/video.js"), None),
+                 ("web elsewhere", key("orion-web-tests"), elsewhere, None),
+                 ("web undeclared base", key("orion-web-tests"), undeclared, None),
+                 ("web undeclared", key("orion-web-tests"), both(undeclared, elsewhere), None),
+                 ("web binary base", binary("orion-web-tests", one), None, None),
+                 ("web binary", binary("orion-web-tests", one), touch("web/video-example/video.js"), None)]
         # What a package says its tests read: any crate, for one that reads them all.
         jobs += [("stubs base", key("orion-stubs"), None, None),
                  ("stubs", key("orion-stubs"), touch(os.path.join(apart, "Cargo.toml"), "\n# changed\n"), None)]
@@ -1331,7 +1372,11 @@ def self_test():
         # check is planted: in a crate that is otherwise keyed so.
         tests_rs = "crates/client/ctl/tests/all.rs"
         unkeyed = [
-            ("orion-web-tests", "reaches outside the crates", None),
+            ("orion-web-tests", "reads outside the crates what it does not declare", undeclared),
+            ("orion-web-tests", "joins CARGO_MANIFEST_DIR to what it does not declare",
+             touch(web_rs, '\nfn _planted() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/client.rs") }\n')),
+            ("orion-ctl", "reads a file outside the crates that another package declares",
+             touch(tests_rs, '\nfn _planted() { let _ = std::fs::read("../../../web/video-example/index.html"); }\n')),
             ("orion-ctl", "reads a file by CARGO_MANIFEST_DIR",
              touch(tests_rs, '\nconst _PLANTED: &str = env!("CARGO_MANIFEST_DIR");\n')),
             # A module by #[path] from outside the crates: no key holds it, nor does the
@@ -1354,6 +1399,11 @@ def self_test():
         jobs += [(f"unkeyed {number}", binary(package, one), change, None) for number, (package, _, change) in enumerate(unkeyed)]
         # What a package names, and still keyed by its binaries.
         keyed = [
+            # It reads outside the crates only what it declares (test-reads = ["web"]).
+            ("orion-web-tests", "reads outside the crates only what it declares", None),
+            # A test that a path holds no `..`: no path.
+            ("orion-ctl", "checks a path for `..`",
+             touch(tests_rs, '\nfn _planted(path: &str) -> bool { path.contains("..") }\n')),
             # A module by #[path] from a crate: compiled in, so in its binaries, and the dep-info
             # check fails a crate its key does not hold.
             ("orion-ctl", "has a module by #[path] from a crate",
@@ -1414,7 +1464,12 @@ def self_test():
             failures.append("the same inputs gave two keys")
         for label, moves, _, _ in cases:
             check(label, moves, got[label], got["base"])
-        check("a file outside the crates, for a package that reaches it", True, got["web"], got["web base"])
+        check("a file in a directory a package declares its tests read", True, got["web"], got["web base"])
+        check("a file outside the crates that a package does not declare", False, got["web elsewhere"], got["web base"])
+        check("a file outside the crates, for a package with an outside read it does not declare", True,
+              got["web undeclared"], got["web undeclared base"])
+        check("by its binaries: a file in a directory a package declares its tests read", True,
+              got["web binary"], got["web binary base"])
         check("a crate a package says its tests read", True, got["stubs"], got["stubs base"])
         for label, moves, _, _ in binary_cases:
             check(label, moves, got[label], got["binary base"])

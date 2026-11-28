@@ -9,6 +9,11 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
+# The pages and the web client the browser loads, read from the repository's `web` directory:
+# its tests' keys hold every file there, by content (scripts/lane-reuse.py).
+[package.metadata.orion]
+test-reads = ["web"]
+
 [dependencies]
 orion = { path = "../../client/orion" }
 

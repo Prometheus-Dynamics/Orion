@@ -709,6 +709,10 @@ what to change.
 - **I135.** The lane keys read a source's strings as the compiler does, so a raw string with a
   quote in it no longer hides a path outside the crates after it. Scripts only. No interface
   changes; no wire changes; level 7.
+- **I136.** A package's paths inside a directory it declares its tests read no longer make it
+  whole-tree, and orion-web-tests declares `web`: it is keyed by `web/`'s contents and by its
+  binaries. Scripts and one manifest's metadata only. No interface changes; no wire changes;
+  level 7.
 
   A device is not a caller, so run handles are not its to use. The C library has no actions.
 
